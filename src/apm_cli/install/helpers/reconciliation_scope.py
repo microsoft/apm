@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from pathlib import PurePath
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -124,63 +123,3 @@ def _retain_dropped(
         }
     )
     return DeploymentLedger(records=records)
-
-
-def _skills_root(profile: TargetProfile) -> str | None:
-    """Return the profile's skills root, or None when it deploys no skills."""
-    if "skills" not in (getattr(profile, "primitives", None) or {}):
-        return None
-    return getattr(profile, "skills_rel_root", None)
-
-
-def report_stale_kept_skill_copies(
-    *,
-    kept: Iterable[str],
-    current_hashes: Mapping[str, str],
-    prior_hashes: Mapping[str, str],
-    active_targets: list[TargetProfile],
-    declared_targets: list[TargetProfile] | None,
-    user_scope: bool,
-    diagnostics: DiagnosticCollector,
-) -> None:
-    """Name each kept inactive-target skill copy whose bytes this install no longer renders.
-
-    A ``--target``-narrowed install preserves another target's recorded copy
-    without writing it. When the same skill was rendered into an active target
-    with different member bytes (or without a kept member), that copy is stale;
-    say so with the command that refreshes it instead of keeping it silently (#4692).
-    """
-    active_names = [target.name for target in active_targets]
-    active_roots = {root for target in active_targets if (root := _skills_root(target))}
-    rendered: dict[str, str] = {}
-    for path, digest in current_hashes.items():
-        for root in active_roots:
-            if path.startswith(f"{root}/"):
-                rendered[path[len(root) + 1 :]] = digest
-    rendered_skills = {member.split("/", 1)[0] for member in rendered}
-    inactive_roots = {
-        root: name
-        for name, profile in _scoped_known_targets_for_reconciliation(
-            user_scope=user_scope, active_targets=active_targets, declared_targets=declared_targets
-        ).items()
-        if name not in active_names and (root := _skills_root(profile)) and root not in active_roots
-    }
-    stale: dict[tuple[str, str], str] = {}
-    for path in kept:
-        for root, name in inactive_roots.items():
-            if not path.startswith(f"{root}/") or path not in prior_hashes:
-                continue
-            member = path[len(root) + 1 :]
-            skill = member.split("/", 1)[0]
-            if skill in rendered_skills and rendered.get(member) != prior_hashes[path]:
-                stale[(root, skill)] = name
-    targets = ",".join(dict.fromkeys([*active_names, *sorted(set(stale.values()))]))
-    command = f"apm install{' -g' if user_scope else ''} --target {targets}"
-    for (root, skill), name in sorted(stale.items()):
-        location = f"{root}/{skill}"
-        if user_scope and not PurePath(root).is_absolute():
-            location = f"~/{location}"
-        diagnostics.warn(
-            f"Kept stale skill copy {location}: target '{name}' is not part of this "
-            f"install, so it was not refreshed.\n    Run '{command}' to refresh it."
-        )

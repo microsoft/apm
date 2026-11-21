@@ -5,7 +5,8 @@ skill in its active targets but keeps an APM-managed copy in a target outside
 this run, it names that copy and how to refresh it (source: #4692 scope record).
 CELL: OP=install SRC=local PRIM=skill SCOPE=user UPDATE
       TGT=claude,agent-skills -> agent-skills (narrowed) -> hint (widened back)
-OWNER: target-scoped-deployed-file-contraction (install/helpers/reconciliation_scope.py)
+OWNER: unmanaged-skill-preflight (integration/skill_adoption.py renders the current
+       source for the kept destination; skill-layout recognises legacy roots)
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I7"),
     pytest.mark.promise("P-INV-I1"),
-    pytest.mark.promise("P-OWN-target-scoped-deployed-file-contraction"),
+    pytest.mark.promise("P-OWN-skill-layout"),
 ]
 
 _SKILL = "kit"
@@ -76,6 +77,18 @@ def _recorded_hashes(lock_path: Path) -> dict[str, str]:
     return hashes
 
 
+def _kept_copy_hint(result: CommandResult, kept: str, target: str) -> list[str]:
+    """Assert *kept* is named exactly once as stale and return the printed refresh command."""
+    shown = " ".join(_output(result).split())
+    assert shown.count(kept) == 1, _evidence(result)
+    assert f"Kept stale skill copy {kept}: target '{target}'" in shown, _evidence(result)
+    hint = _HINT.search(_output(result))
+    assert hint is not None, _evidence(result)
+    argv = shlex.split(hint.group(1))
+    assert argv[:2] == ["apm", "install"] and "-g" in argv, hint.group(1)
+    return argv
+
+
 class _World:
     def __init__(self, tmp_path: Path, apm_binary_path: Path) -> None:
         self.isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
@@ -111,10 +124,10 @@ class _World:
     def body(self, rel: str) -> str:
         return (self.home / rel).read_text(encoding="utf-8")
 
-    def assert_lock_matches_disk(self) -> None:
-        """I1: both APM-managed copies are recorded with their on-disk bytes."""
+    def assert_lock_matches_disk(self, *copies: str) -> None:
+        """I1: every APM-managed copy is recorded with its on-disk bytes."""
         recorded = _recorded_hashes(self.lock_path)
-        for rel in (_CLAUDE_SKILL, _AGENTS_SKILL):
+        for rel in copies or (_CLAUDE_SKILL, _AGENTS_SKILL):
             assert rel in recorded, (rel, sorted(recorded))
             assert recorded[rel] == _sha256(self.home / rel), rel
 
@@ -143,15 +156,9 @@ def test_narrowed_user_install_names_the_stale_skill_copy_it_keeps(
     assert world.body(_AGENTS_SKILL) == _V2, _evidence(narrowed)
     assert world.body(_CLAUDE_SKILL) == _V1, _evidence(narrowed)
     world.assert_lock_matches_disk()
-    shown = " ".join(_output(narrowed).split())
-    assert shown.count(_KEPT_LINE) == 1, _evidence(narrowed)
-    assert f"Kept stale skill copy {_KEPT_LINE}: target 'claude'" in shown, _evidence(narrowed)
-    hint = _HINT.search(_output(narrowed))
-    assert hint is not None, _evidence(narrowed)
+    argv = _kept_copy_hint(narrowed, _KEPT_LINE, "claude")
 
     # Every printed hint is executed: it refreshes the kept copy.
-    argv = shlex.split(hint.group(1))
-    assert argv[:2] == ["apm", "install"] and "-g" in argv, hint.group(1)
     refreshed = world.apm(*argv[1:])
     assert world.body(_CLAUDE_SKILL) == _V2, _evidence(refreshed)
     assert world.body(_AGENTS_SKILL) == _V2, _evidence(refreshed)
@@ -165,3 +172,39 @@ def test_narrowed_user_install_names_the_stale_skill_copy_it_keeps(
     assert _KEPT_LINE not in _output(quiet), _evidence(quiet)
     assert_snapshot_set_unchanged(before, world.snapshot())
     assert world.lock_path.read_bytes() == lock_before, _evidence(quiet)
+
+    # An add-only update leaves the kept copy incomplete: it is named again,
+    # and stays untouched by the narrowed run.
+    notes = world.skill_source.parent / "notes.md"
+    notes.write_text("Extra notes.\n", encoding="utf-8")
+    added = world.apm("install", "-g", "--target", "agent-skills")
+    assert (world.home / ".agents/skills/kit/notes.md").is_file(), _evidence(added)
+    assert not (world.home / ".claude/skills/kit/notes.md").exists(), _evidence(added)
+    _kept_copy_hint(added, _KEPT_LINE, "claude")
+
+
+def test_narrowed_legacy_layout_install_names_the_stale_skill_copy_it_keeps(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A copy kept in a per-client legacy skill root is recognised and refreshed in that layout."""
+    world = _World(tmp_path, apm_binary_path)
+    cursor_skill = f".cursor/skills/{_SKILL}/SKILL.md"
+    (world.home / ".cursor").mkdir()
+
+    first = world.apm("install", "-g", "--target", "claude,cursor", "--legacy-skill-paths")
+    assert world.body(cursor_skill) == _V1, _evidence(first)
+    world.assert_lock_matches_disk(_CLAUDE_SKILL, cursor_skill)
+
+    world.skill_source.write_text(_V2, encoding="utf-8")
+    narrowed = world.apm("install", "-g", "--target", "claude", "--legacy-skill-paths")
+    assert world.body(_CLAUDE_SKILL) == _V2, _evidence(narrowed)
+    assert world.body(cursor_skill) == _V1, _evidence(narrowed)
+    world.assert_lock_matches_disk(_CLAUDE_SKILL, cursor_skill)
+    argv = _kept_copy_hint(narrowed, f"~/.cursor/skills/{_SKILL}", "cursor")
+    assert "--legacy-skill-paths" in argv, argv
+
+    refreshed = world.apm(*argv[1:])
+    assert world.body(cursor_skill) == _V2, _evidence(refreshed)
+    assert world.body(_CLAUDE_SKILL) == _V2, _evidence(refreshed)
+    world.assert_lock_matches_disk(_CLAUDE_SKILL, cursor_skill)
+    assert "Kept stale skill copy" not in _output(refreshed), _evidence(refreshed)
