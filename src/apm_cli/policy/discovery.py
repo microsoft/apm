@@ -18,6 +18,7 @@ import yaml
 
 from ..cache.paths import get_cache_root
 from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..utils.file_ops import robust_replace
 from ..utils.github_host import (
     build_ado_api_url,
     is_azure_devops_hostname,
@@ -2034,7 +2035,7 @@ def _write_cache(
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
-    Uses temp file + ``os.replace()`` to prevent torn writes from parallel
+    Uses temp file + ``robust_replace()`` to prevent torn writes from parallel
     installs.  Both the policy file and metadata sidecar are written
     atomically and independently.
 
@@ -2064,7 +2065,9 @@ def _write_cache(
         tmp_policy = cache_dir / f"{key}.{uid}.yml.tmp"
         try:
             tmp_policy.write_text(serialized, encoding="utf-8")
-            os.replace(str(tmp_policy), str(policy_file))
+            # On Windows a concurrent reader's open handle blocks the replace
+            # for a moment; failing here would leave a torn pair (#4601).
+            robust_replace(tmp_policy, policy_file)
         except OSError:
             # Best-effort cleanup
             try:  # noqa: SIM105
@@ -2087,7 +2090,7 @@ def _write_cache(
         tmp_meta = cache_dir / f"{key}.{uid}.meta.json.tmp"
         try:
             tmp_meta.write_text(json.dumps(meta), encoding="utf-8")
-            os.replace(str(tmp_meta), str(meta_file))
+            robust_replace(tmp_meta, meta_file)
         except OSError:
             try:  # noqa: SIM105
                 tmp_meta.unlink(missing_ok=True)

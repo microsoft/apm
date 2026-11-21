@@ -9,6 +9,7 @@ from typing import Any, NoReturn
 
 from apm_cli.core.scope import manifest_file
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
+from apm_cli.integration import write_seam
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -655,7 +656,7 @@ def write_per_file_bundle_record(
     else:
         data.pop(records_key, None)
     if data:
-        sidecar_path.parent.mkdir(parents=True, exist_ok=True)
-        sidecar_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        write_seam.mkdir(sidecar_path.parent, parents=True, exist_ok=True)
+        write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
     elif sidecar_path.exists():
-        sidecar_path.unlink()
+        write_seam.unlink(sidecar_path)

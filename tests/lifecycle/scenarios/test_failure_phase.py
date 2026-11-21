@@ -55,16 +55,10 @@ pytestmark = [
     ),
 ]
 
-# A failed install that already deployed: the lockfile or the MCP config write
-# fails after target files were written, and the deploy is not rolled back.
+# A failed install that already committed its lockfile: the MCP config write
+# fails after the lock commit, and the deploy is not rolled back. A failure
+# before the lock commit restores every deployed file (#4282).
 _DEPLOYED_BEFORE_FAILURE = "#4164"
-_UNTRACKED_SKILL = Known(
-    _DEPLOYED_BEFORE_FAILURE, r"deployed file is not in the lock: .agents/skills/p-child/SKILL.md"
-)
-_DEPLOY_CHANGED = Known(
-    _DEPLOYED_BEFORE_FAILURE,
-    r"failed install changed deployed surfaces|failed install changed durable files",
-)
 _LOCK_CHANGED = Known(
     _DEPLOYED_BEFORE_FAILURE,
     r"failed install changed the lockfile|failed install changed deployed surfaces"
@@ -223,8 +217,6 @@ ROWS = (
         _arm_env("APM_TEST_FAIL_LOCK_REPLACE"),
         _heal_env("APM_TEST_FAIL_LOCK_REPLACE"),
         announce="Could not generate apm.lock.yaml",
-        changed=("project:.agents/skills/p-child*",),
-        known={"I1": _UNTRACKED_SKILL, "I7": _DEPLOY_CHANGED},
     ),
     FaultRow(
         "mcp-config-write",

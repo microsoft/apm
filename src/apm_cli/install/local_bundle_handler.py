@@ -315,7 +315,9 @@ def install_local_bundle(
                 deps=bundle_mcp_deps,
                 owner=_bundle_owner_key(bundle_info),
             )
-        if bundle_info.source_dir is not None:
+        # A kept user LSP entry fails the install only after the bundle's
+        # deployed files and receipts are recorded (#4628).
+        lsp_conflict = (
             _wire_bundle_lsp_servers(
                 bundle_dir=bundle_info.source_dir,
                 targets=targets,
@@ -327,6 +329,9 @@ def install_local_bundle(
                 owner=_bundle_owner_key(bundle_info),
                 force=force,
             )
+            if bundle_info.source_dir is not None
+            else None
+        )
 
         # Persist into project lockfile -- never edit an existing apm.yml.
         staged_fallbacks = result.get("staged_file_fallback_hashes", {})
@@ -401,6 +406,8 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         log_bundle_deployed(logger, msg, deployed, targets)
+        if lsp_conflict is not None:
+            raise lsp_conflict
 
         # Issue #1207 D2.b: post-install compile hint for staged instructions.
         if staged_instructions and not dry_run:
@@ -962,25 +969,33 @@ def _wire_bundle_lsp_servers(
     deps,
     owner: str,
     force: bool = False,
-) -> int:
-    """Wire bundle LSP servers through the canonical owned lifecycle."""
+):
+    """Wire bundle LSP servers through the canonical owned lifecycle.
+
+    Returns the ``LSPUserEntryConflictError`` the caller raises once the
+    bundle's other writes are recorded, or ``None``.
+    """
     from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.install.errors import LSPUserEntryConflictError
     from apm_cli.install.lsp.integration import run_owned_lsp_integration
     from apm_cli.integration.lsp_integrator import LSPIntegrator
 
     target_names = [t.name for t in targets]
     lsp_target_names = LSPIntegrator.supported_target_runtimes(target_names)
-    count = run_owned_lsp_integration(
-        dependencies=deps,
-        owner=owner,
-        lock_path=get_lockfile_path(_bundle_lock_root(user_scope)),
-        project_root=project_root,
-        user_scope=user_scope,
-        logger=logger,
-        target_runtimes=lsp_target_names,
-        fail_on_write_error=True,
-        force=force,
-    )
+    try:
+        count = run_owned_lsp_integration(
+            dependencies=deps,
+            owner=owner,
+            lock_path=get_lockfile_path(_bundle_lock_root(user_scope)),
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            target_runtimes=lsp_target_names,
+            fail_on_write_error=True,
+            force=force,
+        )
+    except LSPUserEntryConflictError as exc:
+        return exc
 
     if count:
         logger.success(
@@ -990,4 +1005,4 @@ def _wire_bundle_lsp_servers(
         logger.info(
             f"Bundle lsp.json declared {len(deps)} server(s); no new LSP config changes for target(s): {', '.join(lsp_target_names)}"
         )
-    return count
+    return None
