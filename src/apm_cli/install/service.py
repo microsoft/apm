@@ -436,6 +436,26 @@ class InstallService:
         )
 
     @staticmethod
+    def enforce_frozen_restored(failures: Iterable[tuple[str, str]]) -> None:
+        """Refuse a frozen install whose locked dependencies could not be restored.
+
+        Runs before the hydrated MCP check, so a package that failed to
+        download (for example a lockfile hash mismatch, #4013) is reported
+        with its own cause instead of the MCP drift its missing manifest
+        would imply. Nothing has been deployed at this point.
+        """
+        reasons = [f"  - {message}" for _, message in failures]
+        if not reasons:
+            return
+        from apm_cli.install.errors import FrozenInstallError
+
+        raise FrozenInstallError(
+            "--frozen: locked dependencies could not be restored.",
+            reasons=reasons,
+            tip="Tip: nothing was deployed. Fix the cause above and re-run.",
+        )
+
+    @staticmethod
     def enforce_frozen_selections(deps_to_install: Iterable[Any], lockfile: LockFile) -> None:
         """Refuse a frozen install whose resolved selections differ (req-rs-018).
 

@@ -374,19 +374,21 @@
     {
       "behavioral_tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_hash_mismatch_fails_before_any_extraction",
-        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts"
+        "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-013",
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 4,
+      "test_count": 5,
       "tests": [
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_hash_mismatch_fails_before_any_extraction",
         "tests/spec_conformance/test_lockfile_behavior_reqs.py::test_lockfile_replay_with_matching_hash_extracts",
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_dependency_carries_integrity_field_when_remote",
-        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed"
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_hash_mismatch_fails_closed",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction"
       ]
     },
     {
@@ -2292,6 +2294,8 @@
     {
       "behavioral_tests": [
         "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ],
       "conformance_class": "consumer",
@@ -2299,9 +2303,11 @@
       "keyword": "MUST",
       "section": "7.5.1",
       "status": "active",
-      "test_count": 3,
+      "test_count": 5,
       "tests": [
         "tests/integration/test_registry_mirror_lock_replay_lifecycle.py::test_lock_replay_fetches_hash_matching_bytes_from_a_declared_mirror",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches",
+        "tests/spec_conformance/test_resolution_reqs.py::test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction",
         "tests/spec_conformance/test_resolution_reqs.py::test_resolver_supports_tilde_range",
         "tests/spec_conformance/test_resolve_behavior_reqs.py::test_lock_replay_accepts_mirror_bytes_matching_the_locked_hash"
       ]

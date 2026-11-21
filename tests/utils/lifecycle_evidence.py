@@ -531,6 +531,10 @@ def _noise_violations(stream: str, text: str) -> list[OutputViolation]:
             # An indented package line ("  [+] <package>") opens that package's block.
             block += 1
             key = (0, stripped)
+        elif not top_level and stripped.startswith("[!]"):
+            # A warning means the same thing at any indentation: a notice printed
+            # top-level and again inside a package block is one repeat (#4299 shape).
+            key = (0, stripped)
         elif not top_level and stripped.startswith(_STATUS_PREFIXES + _TREE_PREFIXES):
             key = (block, stripped)
         else:
