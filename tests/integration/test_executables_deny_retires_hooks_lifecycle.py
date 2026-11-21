@@ -410,6 +410,14 @@ def test_deny_residue_is_not_a_local_edit_and_its_remedy_converges(
     converged = apm("audit", "--ci", "--no-policy")
     assert "Drift detected" not in converged, converged
 
+    def snapshot() -> dict[str, bytes]:
+        files = [*_project_files(project), project / "apm.yml", project / "apm.lock.yaml"]
+        return {path.relative_to(project).as_posix(): path.read_bytes() for path in files}
+
+    settled = snapshot()
+    apm("install", "--no-policy")
+    assert snapshot() == settled
+
 
 def test_user_edit_to_an_apm_hook_entry_stays_a_local_edit(
     tmp_path: Path, apm_binary_path: Path
