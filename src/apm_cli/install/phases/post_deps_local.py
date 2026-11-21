@@ -20,9 +20,9 @@ Two responsibilities:
    dep lockfile phase has already written dependency data; this phase
    simply augments the on-disk lockfile with the local fields.
 
-Scope guard: this phase only runs for ``InstallScope.PROJECT``.  User-
-scope installs do not track local deployed files (matching pre-refactor
-behavior).
+Both scopes persist: at user scope the root is ``~/.apm`` and the claims go
+to the user lockfile, so a later ``install -g`` can update APM's own files
+when a user-root primitive changes (#3772).
 """
 
 from __future__ import annotations
@@ -44,12 +44,6 @@ def run(ctx: InstallContext) -> None:
 
     Mutates ``ctx.local_deployed_files`` (appends failed cleanup paths).
     """
-    from apm_cli.core.scope import InstallScope
-
-    # Scope guard: only PROJECT scope tracks local deployed files.
-    if ctx.scope is not InstallScope.PROJECT:
-        return
-
     # Skip if there is no local content (current or previous). Root hooks that
     # only merge into shared configs still need a lockfile so that
     # `apm audit --ci` replays them (#4033).

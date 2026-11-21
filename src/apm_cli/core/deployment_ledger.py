@@ -24,6 +24,7 @@ from apm_cli.core.deployment_state import (
     LocatorKind,
 )
 from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.receipt_migration import LocklessRootReceiptMigration
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -165,7 +166,7 @@ def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> t
     return state_path, root / LOCAL_STATE_DIR / "installation"
 
 
-class DeploymentMaterializationSession:
+class DeploymentMaterializationSession(LocklessRootReceiptMigration):
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
     Only live install and uninstall survivor boundaries create writing sessions. The checkout holds
