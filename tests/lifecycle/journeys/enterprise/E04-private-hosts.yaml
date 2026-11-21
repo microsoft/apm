@@ -49,6 +49,12 @@ steps:
       - "host: lifecycle.ghe.com, credential tried: GITHUB_APM_PAT_LIFECYCLE"
       - "Run 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing'"
     forbidden_lines: [e04-bad-token-444, Traceback]
+    diagnose:
+      advice: apm install --verbose lifecycle.ghe.com/lifecycle/p-missing
+      # "to see each probe and credential": the credential source and the probe.
+      promises:
+        - "source=GITHUB_APM_PAT_LIFECYCLE"
+        - "Trying git ls-remote for lifecycle.ghe.com"
   - n: 5
     env:
       GH_TOKEN: e04-gh-token-555

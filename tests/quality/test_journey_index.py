@@ -1,7 +1,7 @@
 """The stable journey catalogue: tests/lifecycle/journeys/index.yaml (refs #4110).
 
 The index names all 25 consumer, producer and enterprise journeys, their
-steps and the output oracles (O1-O13) and normalizers (N1-N7) they use. The
+steps and the output oracles (O1-O13, O8 split into O8a and O8b) and normalizers (N1-N7) they use. The
 release-acceptance skill and the journey runner both read it, so its ids,
 step numbers and oracle ids are pinned here.
 """
@@ -44,6 +44,10 @@ def _load(path: Path = INDEX) -> dict:
     return yaml.safe_load(path.read_text(encoding="ascii"))
 
 
+# O8 is split (#4571): O8a remediation advice, O8b diagnostic advice.
+_ORACLE_IDS = {*(f"O{i}" for i in range(1, 14) if i != 8), "O8a", "O8b"}
+
+
 def check_index(index: dict, docs_root: Path = DOCS) -> list[str]:
     """Every schema problem of *index* (empty when it is well formed)."""
     problems: list[str] = []
@@ -51,8 +55,8 @@ def check_index(index: dict, docs_root: Path = DOCS) -> list[str]:
         problems.append(f"schema_version must be 1, got {index.get('schema_version')!r}")
     oracles = index.get("oracles") or {}
     normalizers = index.get("normalizers") or {}
-    if set(oracles) != {f"O{i}" for i in range(1, 14)}:
-        problems.append(f"oracles must be exactly O1-O13, got {sorted(oracles)}")
+    if set(oracles) != _ORACLE_IDS:
+        problems.append(f"oracles must be exactly O1-O13 with O8a/O8b, got {sorted(oracles)}")
     for oracle_id, oracle in oracles.items():
         missing = {"name", "invariant", "check", "applies"} - set(oracle or {})
         if missing:
@@ -139,6 +143,7 @@ def test_index_matches_the_pinned_schema() -> None:
         (lambda idx: idx["journeys"][0]["steps"].pop(0), "steps must number"),
         (lambda idx: idx["journeys"][0]["steps"][0].update(oracles=["O99"]), "undefined"),
         (lambda idx: idx["oracles"].pop("O13"), "exactly O1-O13"),
+        (lambda idx: idx["oracles"].pop("O8b"), "exactly O1-O13"),
         (lambda idx: idx.update(schema_version=2), "schema_version"),
         (lambda idx: idx["journeys"][0]["docs"].append("nope/missing.md"), "not found"),
         (lambda idx: idx["journeys"][0]["steps"][0].update(kind="robot"), "kind"),
@@ -206,3 +211,30 @@ def test_golden_record_mode_runs_without_the_receipt_ratchet() -> None:
     assert regen_goldens.RECEIPT_PLUGIN == lifecycle_conftest._PLUGIN_NAME
     disabled = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "-p"]
     assert f"no:{lifecycle_conftest._PLUGIN_NAME}" in disabled, command
+
+
+@pytest.mark.parametrize(
+    ("step", "laws", "problem"),
+    [
+        ({"remediate": [{"advice": "apm list"}]}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list"}}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list", "promises": ["x"]}}, {"O8a"}, "needs O8b"),
+        ({"remediate": [{"advice": "apm install"}]}, {"O5"}, "needs O8a"),
+        (
+            {
+                "remediate": [{"advice": "apm install"}],
+                "diagnose": {"advice": "a", "promises": ["b"]},
+            },
+            {"O8a", "O8b"},
+            "not both",
+        ),
+    ],
+)
+def test_advice_kind_follows_the_index(step: dict, laws: set[str], problem: str) -> None:
+    """#4571: remediation advice is O8a, diagnostic advice is O8b; the index decides."""
+    from tests.lifecycle.journeys.test_journeys import _advice_problems
+
+    problems = _advice_problems({"n": 4, **step}, {4: laws})
+    assert any(problem in p for p in problems), problems
+    sound = {"n": 4, "diagnose": {"advice": "apm list", "promises": ["x"]}}
+    assert _advice_problems(sound, {4: {"O5", "O8b"}}) == []

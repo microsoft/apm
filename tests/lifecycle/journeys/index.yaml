@@ -41,11 +41,16 @@ oracles:
     invariant: '-'
     check: every flag in docs exists on that subcommand and vice versa; help claims ([experimental], deprecated, requires --X, mutually exclusive, exit 2) are probed and must match behavior; experimental commands never appear in root Common workflows or init Next Steps; help and docs enumerations are equal
     applies: help steps plus the CLI surface truth test
-  O8:
+  O8a:
     name: REMEDIATION-TRUTH
     invariant: I3
-    check: 'parse every Run ''apm ...'' advice from a failing step, execute it in the same state, re-run the failing command: it must now pass (or reach the documented next state)'
-    applies: every red step
+    check: 'parse every Run ''apm ...'' remediation advice from a failing step, execute it in the same state, re-run the failing command: it must now pass (or reach the documented next state)'
+    applies: every red step whose advice is remediation
+  O8b:
+    name: DIAGNOSTIC-TRUTH
+    invariant: I3
+    check: 'parse the Run ''apm ...'' diagnostic advice from a failing step and execute it in the same state: it writes nothing, exits 0 or with the failing exit, prints the information it promises that the step did not, and the failing command keeps its exit'
+    applies: every red step whose advice is diagnostic
   O9:
     name: FS-DELTA
     invariant: I1,I5
@@ -413,7 +418,7 @@ journeys:
     - O1
     - O5
     - O6
-    - O8
+    - O8a
   - n: 5
     cmd: apm audit --ci (same state)
     argv:
@@ -429,7 +434,7 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8a
     - I3
   - n: 6
     cmd: execute the printed remediation verbatim; apm install --frozen; apm audit --ci
@@ -439,7 +444,7 @@ journeys:
     forbidden_lines: []
     files: []
     oracles:
-    - O8
+    - O8a
     - O5
   - n: 7
     cmd: edit apm.yml to add a dep without re-locking; apm install --frozen
@@ -454,7 +459,7 @@ journeys:
     oracles:
     - O5
     - O6
-    - O8
+    - O8a
   - n: 8
     cmd: copy docs CI workflow snippet; check pinned versions
     kind: manual
@@ -534,7 +539,7 @@ journeys:
     oracles:
     - O5
     - O6
-    - O8
+    - O8a
   - n: 4
     cmd: apm install vercel-labs/agent-skills --skill '*'
     argv:
@@ -1259,7 +1264,7 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8a
   - n: 2
     cmd: apm export-patch
     argv:
@@ -1282,7 +1287,7 @@ journeys:
     forbidden_lines: []
     files: []
     oracles:
-    - O8
+    - O8a
   - n: 4
     cmd: apm audit
     argv:
@@ -1295,7 +1300,7 @@ journeys:
     forbidden_lines: []
     files: []
     oracles:
-    - O8
+    - O8a
   - n: 5
     cmd: plant hidden Unicode; apm audit --strip --dry-run; apm audit --strip; apm audit --ci --no-drift
     kind: edit
@@ -1305,7 +1310,7 @@ journeys:
     files: []
     oracles:
     - O6
-    - O8
+    - O8a
 - id: J13
   persona: consumer
   title: Run scripts (experimental)
@@ -1374,7 +1379,7 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8b
 - id: J14
   persona: consumer
   title: Diagnose and inspect
@@ -1475,7 +1480,7 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8a
 - id: J15
   persona: consumer
   title: Adopt existing agent files and migrate
@@ -1925,7 +1930,7 @@ journeys:
     files: []
     oracles:
     - O6
-    - O8
+    - O8a
   - n: 4
     cmd: apm lifecycle trust; apm install
     argv:
@@ -1940,7 +1945,7 @@ journeys:
     forbidden_lines: []
     files: []
     oracles:
-    - O8
+    - O8a
   - n: 5
     cmd: apm lifecycle untrust; apm install
     argv:
@@ -2038,7 +2043,7 @@ journeys:
     oracles:
     - O1
     - O5
-    - O8
+    - O8a
   - n: 5
     cmd: apm install acme/evil-pkg (denied)
     argv:
@@ -2142,7 +2147,7 @@ journeys:
     files:
     - hook config written for each source shape
     oracles:
-    - O8
+    - O8a
     - O9
   - n: 4
     cmd: apm deny <pkg>; apm install --frozen
@@ -2161,7 +2166,7 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8a
   - n: 5
     cmd: apm install
     argv:
@@ -2221,7 +2226,7 @@ journeys:
     files: []
     oracles:
     - O12
-    - O8
+    - O8a
   - n: 3
     cmd: same env; apm marketplace add <catalog>
     kind: shell
@@ -2308,11 +2313,9 @@ journeys:
     - token value
     - Traceback
     files: []
-    # O8 models remediation advice; E04 step 4 prints DIAGNOSTIC advice (#4174)
-    # that cannot make a missing repo pass. Model residual #4571; Q&L ruling
-    # 2026-11-21. The key lines and O5 still pin host, credential and advice.
     oracles:
     - O5
+    - O8b
   - n: 5
     cmd: apm auth github.com
     argv:
@@ -2526,4 +2529,4 @@ journeys:
     files: []
     oracles:
     - O5
-    - O8
+    - O8a
