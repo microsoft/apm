@@ -374,12 +374,13 @@ class DeploymentMaterializationSession:
         dependency_ref = getattr(package_info, "dependency_ref", None)
         return dependency_ref.get_unique_key() if dependency_ref is not None else "."
 
-    def receipt_hashes(self) -> dict[str, str]:
-        """Map each receipted physical path to the hash APM wrote there (#3701)."""
+    def receipt_hashes(self, owner: str | None = None) -> dict[str, str]:
+        """Map each receipted physical path (of *owner*, if given) to the hash APM wrote (#3701)."""
         return {
             physical: content_hash
             for physical, key in self._physical_keys.items()
             if (content_hash := self._records[key].content_hash) is not None
+            and (owner is None or owner in self._records[key].owners)
         }
 
     def receipt_held(self, path: Path) -> bool:
@@ -597,11 +598,11 @@ class DeploymentMaterializationSession:
         committed.flush()
 
     def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
-        from apm_cli.utils.atomic_io import atomic_write_text
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         self._validate_paths()
         if self._installation is None:
-            self.identity_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            mkdir(self.identity_path.parent, mode=0o700, parents=True, exist_ok=True)
             ignore = self.identity_path.parent / ".gitignore"
             self._validate_paths()
             if ignore.exists():
@@ -617,7 +618,7 @@ class DeploymentMaterializationSession:
                 self.identity_path, installation + "\n", new_file_mode=0o600, create_only=True
             )
             self._installation = installation
-        self.state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        mkdir(self.state_path.parent, mode=0o700, parents=True, exist_ok=True)
         self._validate_paths()
         data = {
             "version": 1,

@@ -44,6 +44,7 @@ from apm_cli.core.remediation import (
     SKILL_PATH_MIGRATION_LEGACY,
     either_sentence,
 )
+from apm_cli.integration.write_seam import record_before_write
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -243,6 +244,7 @@ def execute_migration(
                 )
                 result.failed.append(plan.src_path)
                 continue
+            record_before_write(abs_path)
             if abs_path.is_file():
                 abs_path.unlink()
             else:
@@ -305,6 +307,7 @@ def _cleanup_empty_parents(deleted_path: Path, base_dir: Path) -> None:
             # H8: containment guard before rmdir.
             ensure_path_within(parent, base_dir)
             if parent.is_dir() and not any(parent.iterdir()):
+                record_before_write(parent)
                 parent.rmdir()
             else:
                 break
