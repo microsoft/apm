@@ -55,6 +55,8 @@ class _ProvenOverwrites:
 
     owner = "test"
     user_scope = False
+    session = None  # no installation-bound session: no receipt lookup (RA-012)
+    targets = ()
 
     def authorizes(self, path: Path, claim: str) -> bool:
         return True
