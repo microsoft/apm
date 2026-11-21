@@ -18,11 +18,14 @@ from apm_cli.core.remediation import (
     BIN_EXECUTABLES_UNTRUSTED,
 )
 from apm_cli.install.plan_admission import (  # noqa: F401 -- re-exported for callers
+    _declared_exec_types,
     _is_transitive,
+    _recorded_deployed_types,
     bin_deploy_denial,
     hook_file_admission,
     native_plugin_verdict,
     plugin_admission,
+    resolve_bin_skip,
 )
 
 if TYPE_CHECKING:
@@ -258,34 +261,6 @@ def current_exec_decision(
     return package_exec_decision(
         trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
     )
-
-
-def _declared_exec_types(
-    package_info: Any, package_name: str
-) -> tuple[str, Path, bool, tuple[str, ...]]:
-    """Scan one materialized package as the install gate does (native union included)."""
-    from apm_cli.security.executables import scan_package_executables
-    from apm_cli.security.trust import native_plugin_exec_types
-
-    pkg_key = resolve_package_key(package_info, package_name)
-    install = Path(package_info.install_path)
-    native = native_install(package_info)
-    if native:
-        exec_types = native_plugin_exec_types(install)
-    else:
-        exec_types = scan_package_executables(
-            install, package_name, "", approval_identity=pkg_key
-        ).exec_types
-    return pkg_key, install, native, tuple(exec_types)
-
-
-def _recorded_deployed_types(dep: Any, exec_types: tuple[str, ...]) -> tuple[str, ...]:
-    """The declared types the lock records as deployed: all, or a partial approval's (#3991)."""
-    from apm_cli.security.executables import TRUST_DEPLOYED
-
-    if dep.exec_status in (None, TRUST_DEPLOYED):
-        return exec_types
-    return tuple(exec_type for exec_type in exec_types if exec_type in dep.exec_allowed_types)
 
 
 _ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
@@ -718,18 +693,6 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
         return build_approval_key(name, version)
 
     return package_name
-
-
-def resolve_bin_skip(
-    bin_approved: bool,
-    trust_bin: bool | None,
-    *,
-    non_interactive: bool,
-) -> tuple[bool, str | None]:
-    """Combine executable approval with the ``--trust-bin`` posture (trust owner)."""
-    from apm_cli.security.executables import compose_trust_bin
-
-    return compose_trust_bin(bin_approved, trust_bin, non_interactive=non_interactive)
 
 
 def plugin_bin_deployable(
