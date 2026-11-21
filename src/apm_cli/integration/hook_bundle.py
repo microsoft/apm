@@ -284,6 +284,9 @@ def copy_deployed_hook_bundle(
             continue
         target_file = target_root / "package.json"
         target_rel = portable_relpath(target_file, project_root)
+        if target_rel in copy_plan:
+            # An enclosing root already deploys this directory's own metadata.
+            continue
         ensure_path_within(target_file, project_root)
         content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
         if target_file.exists() and _same_text(target_file, content):
