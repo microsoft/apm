@@ -174,3 +174,35 @@ def test_a_refused_declaration_with_unchanged_services_restores_the_lock_byte_fo
     rolled_back = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
     assert "mcp_target_servers" not in rolled_back
     assert rolled_back == expected.read_text(encoding="utf-8")
+
+
+def test_a_refused_declaration_restores_the_original_bytes_with_comments(tmp_path: Path) -> None:
+    """#4685: a legacy timestamp and comments survive the rollback unchanged."""
+    ctx = _ctx(tmp_path, None)
+    lock_path = get_lockfile_path(tmp_path)
+    previous = LockFile(dependencies={"owner/kept": LockedDependency(repo_url="owner/kept")})
+    previous.write(lock_path)
+    original = (
+        "# kept by the user\n"
+        + lock_path.read_text(encoding="utf-8")
+        + "generated_at: '2020-01-01T00:00:00Z'\n"
+    ).encode("utf-8")
+    lock_path.write_bytes(original)
+    ctx.existing_lockfile = LockFile.read(lock_path)
+
+    _install_tail(ctx, declare_fails=True)
+
+    assert lock_path.read_bytes() == original
+
+
+def test_a_type_only_service_change_is_kept_by_the_rollback() -> None:
+    """``1`` and ``true`` differ: the rollback carries the committed ``true``."""
+    previous = LockFile(mcp_servers=[_SERVER], mcp_configs={_SERVER: {"name": _SERVER, "flag": 1}})
+    committed = LockFile(
+        mcp_servers=[_SERVER], mcp_configs={_SERVER: {"name": _SERVER, "flag": True}}
+    )
+
+    rollback = claude_plugins._with_reconciled_services(previous, committed)
+
+    assert rollback is not previous
+    assert rollback.mcp_configs[_SERVER]["flag"] is True

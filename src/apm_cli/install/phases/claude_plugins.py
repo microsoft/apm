@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes, remove_lockfile
+from apm_cli.deps.lockfile_write_authority import (
+    flush_lockfile_writes,
+    remove_lockfile,
+    restore_lockfile_bytes,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -59,6 +63,13 @@ def run(ctx: InstallContext) -> None:
     previous_owned = (
         None if ctx.existing_lockfile is None else native_ownership(ctx.existing_lockfile)
     )
+    # The lock on disk before this command commits, restored verbatim when the
+    # rollback carries no service change (#4685).
+    original = (
+        lock_path.read_bytes()
+        if ctx.existing_lockfile is not None and lock_path.is_file()
+        else None
+    )
     if ctx.claude_native_plugins or previous_owned:
         # Claude's declarations never run ahead of the lock they follow.
         flush_lockfile_writes()
@@ -76,7 +87,9 @@ def run(ctx: InstallContext) -> None:
         )
     except ClaudeNativePluginError:
         previous = _with_reconciled_services(ctx.existing_lockfile, committed)
-        if previous is not None:
+        if previous is not None and previous is ctx.existing_lockfile and original is not None:
+            restore_lockfile_bytes(lock_path, original)
+        elif previous is not None:
             # The rollback is durable even though this install fails.
             previous.write(lock_path)
             flush_lockfile_writes()
@@ -88,8 +101,8 @@ def run(ctx: InstallContext) -> None:
 def _with_reconciled_services(previous: LockFile | None, committed: LockFile | None):
     """*previous* carrying the MCP/LSP records *committed* holds for what reached disk.
 
-    When the install changed no service record, *previous* is returned untouched,
-    so a refused declaration restores the previous lock byte for byte (#4685).
+    When the install changed no service record, *previous* itself is returned, so
+    the caller restores the previous lock's bytes (#4685).
     """
     if committed is None or (
         previous is None
@@ -120,19 +133,22 @@ def _with_reconciled_services(previous: LockFile | None, committed: LockFile | N
     return rollback
 
 
-def _service_records(lock: LockFile) -> tuple:
-    """The MCP/LSP records the rollback carries from the committed lock."""
+def _service_records(lock: LockFile) -> str:
+    """The MCP/LSP records the rollback carries, type-sensitive (``1`` is not ``true``)."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import _json_identity
 
-    return (
-        sorted(lock.mcp_servers),
-        lock.mcp_configs,
-        lock.mcp_omissions,
-        lock.mcp_config_provenance,
-        sorted(lock.lsp_servers),
-        lock.lsp_configs,
-        lock.lsp_config_provenance,
-        {target: sorted(names) for target, names in lock.mcp_target_servers.items() if names},
-        {target: sorted(names) for target, names in lock.lsp_target_servers.items() if names},
-        DeploymentLedgerCodec.mcp_native_hashes(lock),
+    return _json_identity(
+        [
+            sorted(lock.mcp_servers),
+            lock.mcp_configs,
+            lock.mcp_omissions,
+            lock.mcp_config_provenance,
+            sorted(lock.lsp_servers),
+            lock.lsp_configs,
+            lock.lsp_config_provenance,
+            {target: sorted(names) for target, names in lock.mcp_target_servers.items() if names},
+            {target: sorted(names) for target, names in lock.lsp_target_servers.items() if names},
+            DeploymentLedgerCodec.mcp_native_hashes(lock),
+        ]
     )
