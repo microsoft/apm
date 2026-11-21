@@ -352,3 +352,47 @@ def test_sync_markers_never_stamps_a_checkout_at_another_commit(tmp_path: Path) 
 
     assert sync_markers_for_lockfile(lockfile, tmp_path, apm_modules) == 0
     assert not (pkg_dir / MARKER_FILENAME).exists()
+
+
+def test_sync_drops_the_marker_of_an_unmarkable_dep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#4572: a git -> registry switch leaves no git marker; git deps keep theirs."""
+    apm_modules = tmp_path / "apm_modules"
+    registry_dir = apm_modules / "acme" / "lib"
+    git_dir = apm_modules / "acme" / "git-dep"
+    local_src = tmp_path / "local-pkg"
+    for path in (registry_dir, git_dir, local_src):
+        path.mkdir(parents=True)
+        write_marker(path, "deadbeef" * 5)
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="acme/lib",
+            source="registry",
+            resolved_url="https://r.example.com/acme/lib/1.0.0.zip",
+            resolved_hash="sha256:abc",
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(repo_url="acme/git-dep", host="github.com", resolved_commit="cafe" * 10)
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="./local-pkg", source="local", local_path="./local-pkg", resolved_commit=None
+        )
+    )
+
+    assert sync_markers_for_lockfile(lockfile, tmp_path, apm_modules) == 1
+    assert not (registry_dir / MARKER_FILENAME).exists()
+    verify_marker(git_dir, "cafe" * 10)
+    verify_marker(local_src, "deadbeef" * 5)  # outside apm_modules: never touched
+
+    write_marker(registry_dir, "deadbeef" * 5)
+
+    def _refuse(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(f"read-only: {self}")
+
+    monkeypatch.setattr(Path, "unlink", _refuse)
+    assert sync_markers_for_lockfile(lockfile, tmp_path, apm_modules) == 1
+    assert (registry_dir / MARKER_FILENAME).exists()
