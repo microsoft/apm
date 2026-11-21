@@ -39,10 +39,9 @@ from apm_cli.core.deployment_state import DeploymentLedger, DeploymentRecord
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.models.validation import PackageType, detect_package_type
 
-# Source stays printable ASCII (repo encoding rule), so Rich's box characters
-# are spelled as escapes.
-BOX_VERTICAL = "\u2502"
-RICH_TABLE_LINE_STARTS = "\u250f\u2503\u2521\u2502\u2514"  # top, header, rule, row, bottom
+# APM's Rich tables use the ASCII box on every terminal.
+BOX_VERTICAL = "|"
+RICH_TABLE_LINE_STARTS = "+|"
 ELLIPSIS = "\u2026"
 
 KNOWN, UNAVAILABLE = TargetEvidence.KNOWN, TargetEvidence.UNAVAILABLE
@@ -1234,5 +1233,7 @@ def test_a_narrow_terminal_keeps_rows_aligned_and_the_legend_intact(
         table = [ln for ln in lines if ln and ln[0] in RICH_TABLE_LINE_STARTS]
         assert len({len(ln) for ln in table}) == 1, "table rows differ in width"
         assert len(table) >= 5 and not any(ELLIPSIS in ln for ln in table)
-        # 10 columns have 11 vertical bars
-        assert all(ln.count(BOX_VERTICAL) == 11 for ln in table if ln[0] == BOX_VERTICAL)
+        # The ASCII header and three package rows each have 10 cells.
+        cells = [ln for ln in table if ln.startswith("| ")]
+        assert len(cells) == 1 + len(packages)
+        assert all(ln.count(BOX_VERTICAL) == 11 for ln in cells)

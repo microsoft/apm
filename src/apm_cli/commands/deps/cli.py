@@ -639,6 +639,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
                 else f" APM Dependencies ({scope_label})"
             ),
             show_header=True,
+            collapse_padding=True,
             header_style="bold cyan",
         )
         table.add_column("Package", style="bold white", overflow="fold")
