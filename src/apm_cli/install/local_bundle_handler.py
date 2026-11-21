@@ -202,6 +202,7 @@ def install_local_bundle(
             bundle_approval_key,
             (bundle_mcp_deps, bundle_lsp_deps),
             scope_dir=None if dry_run else _bundle_lock_root(global_),
+            create_config=create_config,
         )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
@@ -698,8 +699,12 @@ def _bundle_approval_key(bundle_info, allow_executables) -> str | None:
     )
 
 
-def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
+def _declared_bundle_exec_types(
+    bundle_info, mcp_deps: list, lsp_deps: list, *, create_config: bool
+) -> tuple[str, ...]:
     """Executable types the bundle ships, before trust filters them."""
+    from ..core.experimental import is_enabled
+    from ..integration.canvas_integrator import is_canvas_bundle_path
     from .local_bundle_paths import bundle_pack_files, is_plugin_hook_path
 
     files = list(bundle_pack_files(bundle_info))
@@ -713,6 +718,10 @@ def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> 
         declared.append("mcp")
     if lsp_deps:
         declared.append("lsp")
+    if any(is_canvas_bundle_path(path) for path in files) and is_enabled(
+        "canvas", create_config=create_config
+    ):
+        declared.append("canvas")
     return tuple(declared)
 
 
@@ -723,6 +732,7 @@ def _stage_bundle_executables(
     service_deps: tuple[list, list],
     *,
     scope_dir: Path | None,
+    create_config: bool,
 ) -> BundleRecordStage | None:
     """Stage this install's exact-content key and executable types; not on dry runs.
 
@@ -734,7 +744,7 @@ def _stage_bundle_executables(
 
     if scope_dir is None:
         return None
-    declared = _declared_bundle_exec_types(bundle_info, *service_deps)
+    declared = _declared_bundle_exec_types(bundle_info, *service_deps, create_config=create_config)
     return BundleRecordStage(scope_dir, slug, approval_key, tuple(declared) if approval_key else ())
 
 

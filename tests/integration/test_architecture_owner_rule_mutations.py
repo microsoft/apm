@@ -1248,10 +1248,10 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
         pytest.param(
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
             id="omitted-hooks-approved",
