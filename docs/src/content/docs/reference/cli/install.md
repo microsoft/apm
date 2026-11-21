@@ -436,7 +436,8 @@ apm install ./my-bundle --target opencode
 Bundle files are copied into each target's layout, except agents for Codex:
 those are rendered to TOML in `.codex/agents/` (with `-g`, `~/.codex/agents/`
 or `$CODEX_HOME/agents/`), and the lockfile records the rendered hash. An agent
-that cannot be rendered is skipped with a warning.
+that cannot be rendered, or whose name, description or body is empty (Codex
+rejects those), is skipped with a warning.
 
 :::note[Claude bundles only]
 This imperative route deploys Claude plugin bundles (the default `apm pack`
