@@ -343,13 +343,17 @@ def _prior_deployment(
     receipted = deployment_evidence(ctx).receipted_claims(dep_key)
     if not receipted:
         return None
+    # Lockfile assembly reconciles the same prior record this cleanup used.
+    stand_ins = getattr(ctx, "receipted_prior_deployments", None)
+    if isinstance(stand_ins, dict):
+        stand_ins[dep_key] = receipted
     peers = frozenset(
         path
         for key, files in ctx.package_deployed_files.items()
         if key != dep_key
         for path in files
     )
-    return receipted, {}, peers
+    return sorted(receipted), receipted, peers
 
 
 def _orphan_decision(

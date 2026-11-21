@@ -80,12 +80,8 @@ def _servers(world: World) -> set[str]:
     return set(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
-@pytest.mark.parametrize("lock", ["kept", "lost"])
-def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
-    lifecycle_world: World,  # noqa: F811
-    lock: str,
-) -> None:
-    world = lifecycle_world
+def _deploy_approved(world: World) -> str:
+    """Install, approve and deploy the package's hook and MCP server for copilot."""
     manifest = world.project / "apm.yml"
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     data["targets"] = ["copilot"]
@@ -96,6 +92,16 @@ def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
     _ok(world, "install", "--trust-transitive-mcp")
     assert (world.project / _HOOK).is_file(), "the approved hook must deploy"
     assert _SERVER in _servers(world), "the approved MCP server must deploy"
+    return spec
+
+
+@pytest.mark.parametrize("lock", ["kept", "lost"])
+def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
+    lifecycle_world: World,  # noqa: F811
+    lock: str,
+) -> None:
+    world = lifecycle_world
+    spec = _deploy_approved(world)
 
     _ok(world, "deny", spec)
     if lock == "lost":
@@ -108,3 +114,26 @@ def test_deny_retires_hook_and_mcp_with_or_without_the_lockfile(
     _ok(world, "install", "--trust-transitive-mcp")
     assert not (world.project / _HOOK).exists()
     _ok(world, "audit", "--ci")
+
+
+@pytest.mark.parametrize("lock", ["kept", "lost"])
+def test_deny_keeps_an_edited_hook_and_audit_names_it_with_or_without_the_lockfile(
+    lifecycle_world: World,  # noqa: F811
+    lock: str,
+) -> None:
+    """Edited bytes are the user's: install keeps them, and audit --ci reports the file."""
+    world = lifecycle_world
+    spec = _deploy_approved(world)
+    hook = world.project / _HOOK
+    edited = hook.read_text(encoding="utf-8").replace("echo p-gate", "echo edited")
+    hook.write_text(edited, encoding="utf-8")
+
+    _ok(world, "deny", spec)
+    if lock == "lost":
+        (world.project / "apm.lock.yaml").unlink()
+    _ok(world, "install", "--trust-transitive-mcp")
+
+    assert hook.read_text(encoding="utf-8") == edited, "install must keep edited bytes"
+    audit = _apm(world, "audit", "--ci")
+    assert audit.returncode != 0, _evidence(audit)
+    assert _HOOK.as_posix() in audit.stdout + audit.stderr, _evidence(audit)

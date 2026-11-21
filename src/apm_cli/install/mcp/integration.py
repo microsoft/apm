@@ -829,6 +829,28 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
+    if should_install and not frozen and current_view is not None and current_view.parked:
+        from apm_cli.install.mcp.parked_retirement import retire_unrecorded_parked_servers
+
+        selected = (
+            [runtime]
+            if runtime is not None
+            else (
+                target_decision.runtime_targets_for_scope(user_scope=user_scope)
+                if target_decision is not None
+                else None
+            )
+        )
+        retire_unrecorded_parked_servers(
+            current_view.parked,
+            recorded=builtins.set(old_mcp_servers) | new_mcp_servers,
+            runtimes=[name for name in selected or () if name != exclude],
+            project_root=project_root,
+            user_scope=user_scope,
+            scope=scope,
+            logger=logger,
+        )
+
     if prepared.omission_view is not None and lockfile_exists(lock_path):
         lockfile = LockFile.read(lock_path)
         omissions = prepared.omissions(lockfile) if lockfile is not None else None
