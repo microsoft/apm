@@ -53,10 +53,11 @@ from tests.lifecycle.machines._kit import (
     earned_cells,
     machine_settings,
 )
+from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import UNGATED_KINDS, ModelState
 from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
-from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED
+from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _SURFACE_GLOBS
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import (
@@ -129,6 +130,12 @@ WORLD_HOSTS = frozenset(
 INLINE_SERVER = "p-inline"
 # MCP server slots -> the server name their ``dependencies.mcp`` entry carries.
 _MCP_SERVERS = {"p-registry": REGISTRY_SERVER, INLINE_SERVER: INLINE_SERVER}
+# The exact names a configured or locked entry of each slot may carry (a registry
+# server is keyed by its full id or by its short name).
+_MCP_NAMES = {
+    "p-registry": frozenset({REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}),
+    INLINE_SERVER: frozenset({INLINE_SERVER}),
+}
 _CLOSED_PROXY = "http://127.0.0.1:9"
 _NO_DRY_RUN = frozenset({"lock"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
@@ -252,11 +259,13 @@ _COMMON = (
 _UNAPPROVED = "GATE=unapproved-exec"
 # GATE=none: the gate-off pass (no ``executables`` block, the default user path).
 _MANIFEST_CONTEXT = (*_COMMON, _UNAPPROVED, "GATE=none", "FROZEN=on")
+# A root-declared MCP server has no executable-gate level (first-party, never parked).
+_ROOT_MCP_CONTEXT = (*_COMMON, "GATE=none", "FROZEN=on")
 # (op, form) -> the context ids its real steps must earn (``context_pass`` and the
 # ordinary steps of the spine reach every one).
 X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
-    ("install", "inline-mcp"): _MANIFEST_CONTEXT,
-    ("install", "mcp-registry"): _MANIFEST_CONTEXT,
+    ("install", "inline-mcp"): _ROOT_MCP_CONTEXT,
+    ("install", "mcp-registry"): _ROOT_MCP_CONTEXT,
     ("install", "plugin-at-mkt"): _MANIFEST_CONTEXT,
     ("install", "native"): _MANIFEST_CONTEXT,
     ("install", "pkg-registry"): _MANIFEST_CONTEXT,
@@ -398,7 +407,8 @@ class SourceMachine(MachineBase):
         # with the gate on, only the executable kinds of a package have a gate level.
         if "executables" not in self.bench.manifest():
             found.add("GATE=none")
-        else:
+        elif choice.form not in _MCP_FORMS:
+            # The project's own MCP servers are first-party: the gate never parks them.
             gated = choice.kinds - UNGATED_KINDS
             found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
@@ -658,7 +668,9 @@ class SourceMachine(MachineBase):
     def gate_off_pass(self) -> None:
         """No executables gate: every declared form deploys without approval (GATE=none).
 
-        Restoring the gate then removes what is no longer approved (I4).
+        Restoring the gate then retires every package executable that is no longer
+        approved, while the project's own MCP servers (declared in its apm.yml, so
+        first-party) stay configured.
         """
         saved = self.bench.manifest()["executables"]
 
@@ -676,22 +688,53 @@ class SourceMachine(MachineBase):
         self.model = self.model.with_exec_gate(False)
         self.converged = False
         manifest = [c for c in self._choices() if c.form != "bundle"]
-        self.command("install", (), manifest, False, verify=self.mcp_deployed_without_approval)
+        self.command("install", (), manifest, False, verify=self.gate_off_deploys_everything)
         self.edit("executables-gate-on", set_gate(saved))
         self.model = self.model.with_exec_gate(True)
         self.converged = False
-        self.reconcile("install", False)
+        self.command("install", (), manifest, False, verify=self.gate_on_keeps_first_party_mcp)
 
-    def mcp_deployed_without_approval(self, step: Step) -> None:
-        """Every declared MCP server is configured and locked, and none was parked."""
-        wanted = {c.package for c in self._choices() if c.form in _MCP_FORMS}
-        configured = {package_name(server) for server in _mcp_servers(step.after)}
-        assert wanted <= configured, f"MCP servers not configured: {sorted(wanted - configured)}"
+    def deploys_what_the_model_allows(self, step: Step) -> None:
+        """A resolving step deploys exactly the observable surfaces the model allows."""
+        wanted = {
+            "/".join(cell)
+            for cell in expected_deployed(self.declared_model(), self.kinds)
+            if (cell[1], cell[2]) in _SURFACE_GLOBS
+        }
+        deployed = set(step.after.deployed)
+        assert deployed == wanted, f"deployed {sorted(deployed)}, model {sorted(wanted)}"
+
+    def root_mcp_problems(self, step: Step) -> list[str]:
+        """The project's declared MCP servers that are not configured or not locked."""
         lock = step.after.lock
-        locked = {package_name(server) for server in (lock.mcp_servers if lock else ())}
-        assert wanted <= locked, f"MCP servers not locked: {sorted(wanted - locked)}"
+        places = {
+            "configured in .mcp.json": set(_mcp_servers(step.after)),
+            "recorded in the lock": set(lock.mcp_servers if lock else ()),
+        }
+        problems = []
+        for choice in self._choices():
+            if choice.form in _MCP_FORMS:
+                names = _MCP_NAMES[choice.package]
+                problems += [
+                    f"{choice.package} not {place}"
+                    for place, found in places.items()
+                    if not names & found
+                ]
+        return problems
+
+    def gate_off_deploys_everything(self, step: Step) -> None:
+        """No gate: every allowed surface is deployed and no MCP server is parked."""
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        assert not problems, "; ".join(problems)
         output = f"{step.result.stdout}\n{step.result.stderr}"
         assert "Parked MCP server" not in output, output
+
+    def gate_on_keeps_first_party_mcp(self, step: Step) -> None:
+        """Gate restored: package executables retire; the project's own MCP servers stay."""
+        self.deploys_what_the_model_allows(step)
+        problems = self.root_mcp_problems(step)
+        assert not problems, "; ".join(problems)
 
     def context_pass(self) -> None:
         """Install every declared form under --force/--update/--target and --frozen, multi-target."""
