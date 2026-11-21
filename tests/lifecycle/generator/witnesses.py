@@ -222,6 +222,7 @@ SCENARIO_MODULES = (
     "test_failure_phase",
     "test_graph_version",
     "test_history_upgrade",
+    "test_network_offline",
     "test_ownership_siblings",
     "test_platform",
 )
