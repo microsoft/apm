@@ -27,6 +27,9 @@ class World:
         self.merged: dict[int, str] = {}
         self.merge_calls: list[tuple[int, str]] = []
         self.refuse: list[str] = []
+        self.messages: dict[int, list[str]] = {}
+        self.github_closes = True
+        self.crash_after_merge = False
         self.wrong_tree = False
         self.issues: dict[int, str] = {}
         self.prs, self.closing = prs, closing
@@ -47,6 +50,9 @@ class World:
                 "head": {"sha": _sha(str(pr % 10)), "ref": f"branch-{pr}"},
                 "base": {"ref": "main"},
             }
+            routes[f"repos/{REPO}/pulls/{pr}/commits"] = lambda q, pr=pr: [
+                {"commit": {"message": m}} for m in self.messages.get(pr, ["work"])
+            ]
             marker = " ".join(f"#{n}" for n in fixes)
             routes[f"repos/{REPO}/issues/{pr}/comments"] = [
                 {
@@ -86,8 +92,10 @@ class World:
         tree = "e" * 40 if self.wrong_tree else self.proven_tree[pr]
         self.add_commit(sha, tree, [self.main, head])
         self.main, self.merged[pr] = sha, sha
-        for issue in self.closing.get(pr, ()):
+        for issue in self.closing.get(pr, ()) if self.github_closes else ():
             self.issues[issue] = "closed"
+        if self.crash_after_merge:
+            raise RuntimeError("connection reset after the merge")
         return True, ""
 
     def train(self, train_id: int, prs: list[int], tip: str = TIP) -> state.Train:
@@ -229,32 +237,117 @@ def test_a_rule_violation_is_retried_then_pauses_without_halting() -> None:
     assert item.status == state.LANDED
 
 
-def test_the_closure_audit_reopens_a_quoted_fix_and_closes_a_missed_one() -> None:
-    """#11 declares fixes=[101] but its body only quotes "Fixes #102"."""
-    world = World({11: (101,)}, {11: (102,)})
+def test_a_closure_mismatch_ejects_the_train_before_any_merge() -> None:
+    """#11 declares fixes=[101]; a commit message also says "Fixes #102"."""
+    world = World({11: (101,), 12: ()}, {11: (101,)})
+    world.messages[11] = ["feat: thing\n\nFixes #102"]
+    item = world.train(1, [11, 12])
+    current, lander, log = state.State(trains={1: item}), landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    assert world.merge_calls == [] and item.status == state.ABORTED and not lander.halted
+    notices = log.of("ejection-notice")
+    assert [e["pr"] for e in notices] == [11, 12]
+    assert "would close [101, 102]" in notices[0]["reason"]
+
+
+def test_a_withdrawn_ticket_ejects_the_train() -> None:
+    world = World({11: ()}, {})
+    world.api.routes[f"repos/{REPO}/issues/11/comments"] = []
+    item = world.train(1, [11])
+    current, lander, log = state.State(trains={1: item}), landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    assert world.merge_calls == [] and item.status == state.ABORTED
+    assert "no valid ticket" in log.of("ejection-notice")[0]["reason"]
+
+
+def test_a_fix_github_left_open_is_closed_and_stacked_prs_retarget() -> None:
+    world = World({11: (101,)}, {11: (101,)})
     world.issue(101, "open")
-    world.issue(102, "open")
+    world.github_closes = False
     current = state.State(trains={1: world.train(1, [11])})
     lander, log = landing.LandingState(), Log()
     _run(world, current, lander, log)
-    assert log.of("closure-audit")[0] == {
-        "event": "closure-audit",
-        "pr": 11,
-        "fixes": [101],
-        "closing": [102],
-        "missing": [101],
-        "extra": [102],
-    }
-    assert world.issues == {101: "open", 102: "closed"}
+    assert lander.pending == [{"pr": 11, "fixes": [101], "head_ref": "branch-11"}]
     world.api.routes[f"repos/{REPO}/pulls"] = [{"number": 15}]
     _run(world, current, lander, log)
     patches = [(p, b) for m, p, b in world.api.calls if m == "PATCH"]
     assert patches == [
         (f"repos/{REPO}/issues/101", {"state": "closed", "state_reason": "completed"}),
-        (f"repos/{REPO}/issues/102", {"state": "open"}),
         (f"repos/{REPO}/pulls/15", {"base": "main"}),
     ]
     assert lander.pending == []
+
+
+def test_a_rejected_closure_write_stays_pending_for_the_next_tick() -> None:
+    world = World({11: (101,)}, {11: (101,)})
+    world.issue(101, "open")
+    world.github_closes = False
+    world.api.patch_handler = lambda path, body: Response(403, "Resource not accessible")
+    current = state.State(trains={1: world.train(1, [11])})
+    lander, log = landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    _run(world, current, lander, log)
+    assert [e["pr"] for e in log.of("closure-retry")] == [11] and len(lander.pending) == 1
+    world.api.patch_handler = lambda path, body: Response(200, {})
+    _run(world, current, lander, log)
+    assert lander.pending == [] and [e["pr"] for e in log.of("closure-settled")] == [11]
+
+
+def test_a_crash_after_a_merge_is_recovered_from_the_intent_journal() -> None:
+    world = World({11: (), 12: ()}, {})
+    item = world.train(1, [11, 12])
+    current, lander, log = state.State(trains={1: item}), landing.LandingState(), Log()
+    saved: list[dict] = []
+    world.crash_after_merge = True
+    with pytest.raises(RuntimeError, match="connection reset"):
+        landing.tick(
+            world.api,
+            current,
+            lander,
+            log,
+            world.merge,
+            sleep=lambda s: None,
+            save=lambda: saved.append(dict(lander.intent)),
+        )
+    assert saved[-1]["pr"] == 11 and item.members[0].merged == ""
+    world.crash_after_merge = False
+    _run(world, current, lander, log)
+    assert [e["pr"] for e in log.of("recovered")] == [11] and not lander.halted
+    assert [pr for pr, _ in world.merge_calls] == [11, 12] and item.status == state.LANDED
+    assert lander.intent == {}
+
+
+def test_a_failed_admin_probe_counts_as_a_miss() -> None:
+    def broken(query):
+        raise RuntimeError("GET repos/microsoft/apm failed (502)")
+
+    world = World({11: ()}, {})
+    world.api.routes[f"repos/{REPO}"] = broken
+    current = state.State(trains={1: world.train(1, [11])})
+    lander, log = landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    _run(world, current, lander, log)
+    assert world.merge_calls == [] and [e["lapse"] for e in log.of("needs-input")] == [1]
+
+
+def test_a_green_train_waits_behind_an_earlier_train_still_testing() -> None:
+    world = World({11: (), 13: ()}, {})
+    first = world.train(1, [11])
+    first.status = state.TESTING
+    second = world.train(2, [13], tip=first.head_sha)
+    current, lander, log = state.State(trains={1: first, 2: second}), landing.LandingState(), Log()
+    _run(world, current, lander, log)
+    assert world.merge_calls == [] and not lander.halted
+
+
+def test_ejection_notices_still_go_out_while_landing_is_halted() -> None:
+    world = World({11: ()}, {})
+    item = world.train(1, [11])
+    item.status, item.run_id = state.RED, 5
+    current = state.State(trains={1: item})
+    lander, log = landing.LandingState(halted="main moved"), Log()
+    _run(world, current, lander, log)
+    assert [e["pr"] for e in log.of("ejection-notice")] == [11] and log.of("halted")
 
 
 def test_a_red_train_posts_one_ejection_notice_per_member() -> None:
@@ -268,6 +361,8 @@ def test_a_red_train_posts_one_ejection_notice_per_member() -> None:
 
 
 def test_landing_state_round_trips(tmp_path) -> None:
-    lander = landing.LandingState(landing.Elevation(1, True, 2), "halt", "a" * 40, [{"pr": 1}], [3])
+    lander = landing.LandingState(
+        landing.Elevation(1, True, 2), "halt", "a" * 40, [{"pr": 1}], [3], {"pr": 4}
+    )
     landing.save(lander, tmp_path / "landing.json")
     assert landing.load(tmp_path / "landing.json") == lander

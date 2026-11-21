@@ -98,6 +98,7 @@ class LandingState:
     main_seen: str = ""
     pending: list[dict[str, Any]] = field(default_factory=list)
     notified: list[int] = field(default_factory=list)
+    intent: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=1, sort_keys=True)
@@ -111,6 +112,7 @@ class LandingState:
             raw.get("main_seen", ""),
             raw.get("pending", []),
             raw.get("notified", []),
+            raw.get("intent", {}),
         )
 
 
@@ -130,7 +132,11 @@ def save(current: LandingState, path: Path) -> None:
 
 
 def probe(api: Api) -> bool:
-    return bool((api.get(f"repos/{REPO}").get("permissions") or {}).get("admin"))
+    """A failed request is a failed probe; the lapse rule decides what it means."""
+    try:
+        return bool((api.get(f"repos/{REPO}").get("permissions") or {}).get("admin"))
+    except RuntimeError:
+        return False
 
 
 def lease_seconds(trains: list[state.Train]) -> int:
@@ -138,9 +144,25 @@ def lease_seconds(trains: list[state.Train]) -> int:
     return PER_MERGE_SECONDS * sum(1 for t in trains for m in t.members if not m.merged)
 
 
-def ticket_fixes(api: Api, pr: int) -> tuple[int, ...]:
-    ticket = tickets.latest_ticket(pr, get_all(api, f"repos/{REPO}/issues/{pr}/comments"))
-    return ticket.fixes if ticket is not None else ()
+def preflight(api: Api, item: state.Train) -> tuple[dict[int, closure.Audit], str | None]:
+    """Every unlanded member needs a valid ticket at its proven head and a clean closure
+    audit (GitHub will close exactly the ticket's fixes). Returns the audits, or why not."""
+    audits: dict[int, closure.Audit] = {}
+    for member in item.members:
+        if member.merged:
+            continue
+        comments = get_all(api, f"repos/{REPO}/issues/{member.pr}/comments")
+        ticket = tickets.latest_ticket(member.pr, comments)
+        if ticket is None or ticket.head != member.head:
+            return audits, f"#{member.pr} has no valid ticket at its proven head"
+        found = closure.audit(api, member.pr, ticket.fixes)
+        if not found.clean:
+            return audits, (
+                f"#{member.pr} closure mismatch: ticket fixes {list(found.fixes)},"
+                f" the merge would close {list(found.closing)}"
+            )
+        audits[member.pr] = found
+    return audits, None
 
 
 def _pre_tree(api: Api, item: state.Train, member: state.Member) -> str:
@@ -192,42 +214,54 @@ def _verify(api: Api, member: state.Member, before: str) -> str:
     return merged
 
 
+def _record(current: LandingState, member: state.Member, intent: dict[str, Any]) -> None:
+    current.main_seen = member.merged
+    current.pending.append(
+        {"pr": member.pr, "fixes": intent["fixes"], "head_ref": intent["head_ref"]}
+    )
+    current.intent = {}
+
+
 def land_member(
     api: Api,
     merge: Merger,
     item: state.Train,
     member: state.Member,
+    found: closure.Audit,
     current: LandingState,
     log: Any,
+    save: Callable[[], None],
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
-    """Land one member. Returns LANDED or PAUSED, raises Halt on drift."""
+    """Land one member. Returns LANDED or PAUSED, raises Halt on drift.
+
+    The merge intent is checkpointed before the merge and cleared after it is
+    recorded, so a crash in between is recovered on the next tick."""
     main = api.get(f"repos/{REPO}/commits/main")
     if current.main_seen and main["sha"] != current.main_seen:
         raise Halt(f"main moved outside the runner: {current.main_seen[:12]} -> {main['sha'][:12]}")
     if main["commit"]["tree"]["sha"] != _pre_tree(api, item, member):
         raise Halt(f"main's tree is not t{item.train_id} k={member.k - 1}'s proven tree")
     pull = _check_pull(api, member)
-    found = closure.audit(api, member.pr, ticket_fixes(api, member.pr))
-    log.emit(
-        "closure-audit",
-        pr=member.pr,
-        fixes=list(found.fixes),
-        closing=list(found.closing),
-        missing=found.missing,
-        extra=found.extra,
-    )
+    current.intent = {
+        "train": item.train_id,
+        "pr": member.pr,
+        "before": main["sha"],
+        "fixes": list(found.fixes),
+        "head_ref": pull["head"]["ref"],
+    }
+    save()
     ok, message = _merge(merge, member, sleep)
     if not ok:
+        current.intent = {}
+        save()
         if is_rule_violation(message):
             log.emit("merge-refused", train=item.train_id, pr=member.pr, reason=message)
             return PAUSED
         raise Halt(f"#{member.pr} merge failed: {message}")
     member.merged = _verify(api, member, main["sha"])
-    current.main_seen = member.merged
-    current.pending.append(
-        {**asdict(found), "head_ref": pull["head"]["ref"], "merged": member.merged}
-    )
+    _record(current, member, current.intent)
+    save()
     log.emit(
         "landed",
         train=item.train_id,
@@ -239,31 +273,70 @@ def land_member(
     return LANDED
 
 
+def _eject(item: state.Train, reason: str, current: LandingState, log: Any) -> None:
+    """Refuse a train before any member merged; one notice per member."""
+    item.move(state.ABORTED)
+    for member in item.members:
+        log.emit(
+            "ejection-notice",
+            train=item.train_id,
+            pr=member.pr,
+            reason=reason,
+            body=f"Merge train t{item.train_id:04d} was not landed: {reason}. Re-ticket #{member.pr} once fixed.",
+        )
+    current.notified.append(item.train_id)
+
+
 def land_train(
     api: Api,
     merge: Merger,
     item: state.Train,
     current: LandingState,
     log: Any,
+    save: Callable[[], None] = lambda: None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
+    audits, refusal = preflight(api, item)
+    if refusal is not None:
+        if any(member.merged for member in item.members):
+            raise Halt(f"t{item.train_id} is partly landed and {refusal}")
+        _eject(item, refusal, current, log)
+        return PAUSED
     for member in item.members:
         if member.merged:
             continue
-        if land_member(api, merge, item, member, current, log, sleep) == PAUSED:
+        found = audits[member.pr]
+        if land_member(api, merge, item, member, found, current, log, save, sleep) == PAUSED:
             return PAUSED
     item.move(state.LANDED)
     return LANDED
 
 
+def recover(api: Api, runner_state: state.State, current: LandingState, log: Any) -> None:
+    """Finish recording a merge the previous pass made but did not record (it crashed)."""
+    intent = current.intent
+    if not intent:
+        return
+    item = runner_state.trains.get(int(intent["train"]))
+    member = next((m for m in item.members if m.pr == intent["pr"]), None) if item else None
+    if member is None or not api.get(f"repos/{REPO}/pulls/{intent['pr']}").get("merged"):
+        current.intent = {}
+        log.emit("intent-dropped", pr=intent["pr"])
+        return
+    member.merged = _verify(api, member, intent["before"])
+    _record(current, member, intent)
+    log.emit("recovered", train=item.train_id, pr=member.pr, commit=member.merged)
+
+
 def settle_pending(api: Api, current: LandingState, log: Any) -> None:
-    """Close or reopen issues for earlier landings, once GitHub's own closing has run."""
+    """Close fixes GitHub left open and retarget stacked PRs; failed writes retry next tick."""
+    kept = []
     for entry in current.pending:
-        found = closure.Audit(entry["pr"], tuple(entry["fixes"]), tuple(entry["closing"]))
-        actions = closure.settle(api, found)
-        moved = closure.retarget_stacked(api, entry["head_ref"])
-        log.emit("closure-settled", pr=found.pr, actions=actions, retargeted=moved)
-    current.pending = []
+        actions, ok = closure.settle(api, tuple(entry["fixes"]), entry["head_ref"])
+        log.emit("closure-settled" if ok else "closure-retry", pr=entry["pr"], actions=actions)
+        if not ok:
+            kept.append(entry)
+    current.pending = kept
 
 
 def notify_ejections(runner_state: state.State, current: LandingState, log: Any) -> None:
@@ -292,12 +365,32 @@ def tick(
     log: Any,
     merge: Merger = gh_merge,
     sleep: Callable[[float], None] = time.sleep,
+    save: Callable[[], None] = lambda: None,
 ) -> None:
-    """One landing pass: settle earlier closures, then land the proven backlog in order."""
+    """One landing pass: report reds, settle earlier closures, recover an interrupted
+    merge, then land the proven backlog in launch order."""
+    notify_ejections(runner_state, current, log)
     settle_pending(api, current, log)
     if current.halted:
         log.emit("halted", reason=current.halted)
         return
+    try:
+        recover(api, runner_state, current, log)
+        _land_backlog(api, runner_state, current, log, merge, sleep, save)
+    except Halt as stop:
+        current.halted = str(stop)
+        log.emit("halt", reason=current.halted)
+
+
+def _land_backlog(
+    api: Api,
+    runner_state: state.State,
+    current: LandingState,
+    log: Any,
+    merge: Merger,
+    sleep: Callable[[float], None],
+    save: Callable[[], None],
+) -> None:
     change = current.elevation.observe(probe(api))
     if change == "lapse":
         log.emit(
@@ -307,24 +400,16 @@ def tick(
         )
     elif change == "resume":
         log.emit("resume", lapse=current.elevation.lapses)
-    notify_ejections(runner_state, current, log)
     if current.elevation.misses:
         return
     main = api.get(f"repos/{REPO}/commits/main")["sha"]
     if current.main_seen and main != current.main_seen:
-        current.halted = f"main moved outside the runner: {current.main_seen[:12]} -> {main[:12]}"
-        log.emit("halt", reason=current.halted)
-        return
+        raise Halt(f"main moved outside the runner: {current.main_seen[:12]} -> {main[:12]}")
     current.main_seen = main
     backlog = runner_state.proven()
     if not backlog:
         return
     log.emit("lease", seconds=lease_seconds(backlog), trains=[t.train_id for t in backlog])
     for item in backlog:
-        try:
-            if land_train(api, merge, item, current, log, sleep) == PAUSED:
-                return
-        except Halt as stop:
-            current.halted = str(stop)
-            log.emit("halt", train=item.train_id, reason=current.halted)
+        if land_train(api, merge, item, current, log, save, sleep) == PAUSED:
             return

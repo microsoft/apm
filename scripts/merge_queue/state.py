@@ -74,9 +74,25 @@ class State:
         )
 
     def proven(self) -> list[Train]:
-        """GREEN trains in launch order: the landing backlog."""
+        """The landing backlog: GREEN trains in launch order, up to the first one still
+        TESTING (a later train was built on it and cannot land before it)."""
+        backlog = []
+        for train in sorted(self.trains.values(), key=lambda train: train.train_id):
+            if train.status == TESTING:
+                break
+            if train.status == GREEN:
+                backlog.append(train)
+        return backlog
+
+    def chain(self) -> list[Train]:
+        """Trains a new train must stack on when landing: testing, or proven but unlanded."""
         return sorted(
-            (train for train in self.trains.values() if train.status == GREEN),
+            (
+                t
+                for t in self.trains.values()
+                if t.status == TESTING
+                or (t.status == GREEN and not all(m.merged for m in t.members))
+            ),
             key=lambda train: train.train_id,
         )
 

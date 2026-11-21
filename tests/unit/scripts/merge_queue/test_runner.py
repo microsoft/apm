@@ -264,3 +264,14 @@ def test_a_build_where_every_member_conflicts_deletes_its_build_ref() -> None:
     assert [e["reason"] for e in log.events if e["event"] == "launch-failed"] == [
         "no member merged"
     ]
+
+
+@pytest.mark.parametrize(("landing_on", "tip"), [(True, "e" * 40), (False, MAIN)])
+def test_with_landing_on_a_new_train_stacks_on_an_unlanded_green_train(landing_on, tip) -> None:
+    api, current, log = _repo(), state.State(), runner.Log(None, _clock())
+    proven = state.Train(1, MAIN, [state.Member(9, "9" * 40, 1, "e" * 40)], ["queue/t0001/p1-full"])
+    proven.status = state.GREEN
+    current.trains[1], current.max_id = proven, 1
+    runner.tick(api, current, log, depth=2, landing_on=landing_on)
+    created = [b for m, p, b in api.calls if m == "POST" and p.endswith("/git/refs")]
+    assert created[0] == {"ref": "refs/heads/queue-build/t0002", "sha": tip}

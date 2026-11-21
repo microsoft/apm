@@ -188,11 +188,16 @@ def _publish(api: Api, names: list[str], shas: list[str]) -> list[str] | None:
     return created
 
 
-def launch(api: Api, current: state.State, log: Log, main_sha: str, depth: int) -> None:
-    """Build and publish one more train while fewer than ``depth`` are in flight."""
-    flying = current.in_flight()
-    if len(flying) >= depth:
+def launch(
+    api: Api, current: state.State, log: Log, main_sha: str, depth: int, landing_on: bool = False
+) -> None:
+    """Build and publish one more train while fewer than ``depth`` are in flight.
+
+    When landing is on, a proven train that has not landed yet is still ahead of main,
+    so new trains stack on it too (``State.chain``)."""
+    if len(current.in_flight()) >= depth:
         return
+    flying = current.chain() if landing_on else current.in_flight()
     ready = ready_tickets(api, log, current.queued_prs())
     landed = satisfied_dependencies(api, ready, flying)
     members = train.compose(ready, current.window, landed=landed)
@@ -258,14 +263,19 @@ def sweep(api: Api, current: state.State, now: datetime) -> list[str]:
 
 
 def tick(
-    api: Api, current: state.State, log: Log, depth: int = 2, now: datetime | None = None
+    api: Api,
+    current: state.State,
+    log: Log,
+    depth: int = 2,
+    now: datetime | None = None,
+    landing_on: bool = False,
 ) -> state.State:
     shadow = ShadowApi(api)
     poll(shadow, current, log)
     for name in sweep(shadow, current, now or datetime.now(UTC)):
         log.emit("janitor", ref=name)
     main_sha = shadow.get(f"repos/{REPO}/commits/main")["sha"]
-    launch(shadow, current, log, main_sha, depth)
+    launch(shadow, current, log, main_sha, depth, landing_on)
     return current
 
 
@@ -302,11 +312,16 @@ def _one_tick(api: Api, state_dir: Path, depth: int, merge: landing.Merger | Non
     live = state.rebuild(api)
     current = state.reconcile(state.load(state_path), live) if state_path.is_file() else live
     log = Log(state_dir / "events.jsonl")
-    tick(api, current, log, depth)
+    tick(api, current, log, depth, landing_on=merge is not None)
     if merge is not None:
         landing_path = state_dir / "landing.json"
         lander = landing.load(landing_path)
-        landing.tick(api, current, lander, log, merge)
+
+        def checkpoint() -> None:
+            state.save(current, state_path)
+            landing.save(lander, landing_path)
+
+        landing.tick(api, current, lander, log, merge, save=checkpoint)
         landing.save(lander, landing_path)
     state.save(current, state_path)
     (state_dir / "heartbeat").write_text(_now() + "\n", encoding="utf-8")
