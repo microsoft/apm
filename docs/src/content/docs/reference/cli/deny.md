@@ -43,7 +43,9 @@ selected store. To lift a deny, run `apm approve <pkg>` against the same store
 The next `apm install` or `apm update` stops deploying the denied package's
 hooks and removes the hook entries and scripts it deployed earlier from every
 harness config. Removing an approval while the gate is on has the same effect.
-Until then, `apm audit --ci` reports the leftover hooks as drift.
+Hook files are removed this way even when `apm.lock.yaml` is missing: APM
+finds what it deployed from this machine's deployment records. Edited files
+stay, and `apm audit --ci` reports them. Until then, `apm audit --ci` reports the leftover hooks as drift.
 `apm install --frozen` also removes them, but cannot update `apm.lock.yaml`,
 so it exits `1` naming each retired file and the decision that retired it,
 or the package whose recorded decision changed. Run `apm install` without
