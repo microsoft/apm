@@ -1539,31 +1539,6 @@ def test_journey_files_agree_with_the_index() -> None:
     assert problems == []
 
 
-@pytest.mark.parametrize(
-    ("step", "laws", "problem"),
-    [
-        ({"remediate": [{"advice": "apm list"}]}, {"O8b"}, "O8b needs diagnose"),
-        ({"diagnose": {"advice": "apm list"}}, {"O8b"}, "O8b needs diagnose"),
-        ({"diagnose": {"advice": "apm list", "promises": ["x"]}}, {"O8a"}, "needs O8b"),
-        ({"remediate": [{"advice": "apm install"}]}, {"O5"}, "needs O8a"),
-        (
-            {
-                "remediate": [{"advice": "apm install"}],
-                "diagnose": {"advice": "a", "promises": ["b"]},
-            },
-            {"O8a", "O8b"},
-            "not both",
-        ),
-    ],
-)
-def test_advice_kind_follows_the_index(step: dict, laws: set[str], problem: str) -> None:
-    """#4571: remediation advice is O8a, diagnostic advice is O8b; the index decides."""
-    problems = _advice_problems({"n": 4, **step}, {4: laws})
-    assert any(problem in p for p in problems), problems
-    sound = {"n": 4, "diagnose": {"advice": "apm list", "promises": ["x"]}}
-    assert _advice_problems(sound, {4: {"O5", "O8b"}}) == []
-
-
 @pytest.mark.parametrize("path", _params())
 def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins

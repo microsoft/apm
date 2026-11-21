@@ -211,3 +211,30 @@ def test_golden_record_mode_runs_without_the_receipt_ratchet() -> None:
     assert regen_goldens.RECEIPT_PLUGIN == lifecycle_conftest._PLUGIN_NAME
     disabled = [command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "-p"]
     assert f"no:{lifecycle_conftest._PLUGIN_NAME}" in disabled, command
+
+
+@pytest.mark.parametrize(
+    ("step", "laws", "problem"),
+    [
+        ({"remediate": [{"advice": "apm list"}]}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list"}}, {"O8b"}, "O8b needs diagnose"),
+        ({"diagnose": {"advice": "apm list", "promises": ["x"]}}, {"O8a"}, "needs O8b"),
+        ({"remediate": [{"advice": "apm install"}]}, {"O5"}, "needs O8a"),
+        (
+            {
+                "remediate": [{"advice": "apm install"}],
+                "diagnose": {"advice": "a", "promises": ["b"]},
+            },
+            {"O8a", "O8b"},
+            "not both",
+        ),
+    ],
+)
+def test_advice_kind_follows_the_index(step: dict, laws: set[str], problem: str) -> None:
+    """#4571: remediation advice is O8a, diagnostic advice is O8b; the index decides."""
+    from tests.lifecycle.journeys.test_journeys import _advice_problems
+
+    problems = _advice_problems({"n": 4, **step}, {4: laws})
+    assert any(problem in p for p in problems), problems
+    sound = {"n": 4, "diagnose": {"advice": "apm list", "promises": ["x"]}}
+    assert _advice_problems(sound, {4: {"O5", "O8b"}}) == []
