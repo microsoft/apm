@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from ..core.remediation import (
+    MARKETPLACE_CREDENTIAL_REBIND,
     MARKETPLACE_FETCH_FAILED,
     MARKETPLACE_ORIGIN_RESTORE,
     MARKETPLACE_ORIGIN_SWITCH,
@@ -268,8 +270,8 @@ class MarketplaceBindingConflictError(MarketplaceError):
         super().__init__(
             f"Marketplace '{name}' is already bound to {bound_url}, and its "
             "APM_MARKETPLACE_* credential is sent only there. Nothing was changed. "
-            f"To rebind the name, run 'apm marketplace remove {name}' first, "
-            "or choose a different --name."
+            f"{MARKETPLACE_CREDENTIAL_REBIND.bind(name=shlex.quote(name)).sentence()} "
+            "Or choose a different --name."
         )
 
 

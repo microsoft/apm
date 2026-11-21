@@ -20,6 +20,7 @@ This module owns three marketplace-side steps:
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Iterable
 
 from ..core.auth import AuthResolver
@@ -30,6 +31,7 @@ from ..core.catalog_credentials import (
     anonymous_catalog_credential,
     require_unambiguous_name,
 )
+from ..core.remediation import MARKETPLACE_CREDENTIAL_BIND
 from .errors import (
     MarketplaceAccessDeniedError,
     MarketplaceBindingConflictError,
@@ -88,10 +90,19 @@ def _denied_message(credential: CatalogCredential, detail: str) -> str:
     head = f"Access to marketplace '{name}' was denied ({detail})"
     hint = credential.variables.setup_hint()
     if not credential.bound:
+        # Braces would read as unbound placeholders; %7B/%7D name the same URL.
+        url = credential.binding_url.replace("{", "%7B").replace("}", "%7D")
+        variables = credential.variables
+        remedy = MARKETPLACE_CREDENTIAL_BIND.bind(
+            url=shlex.quote(url),
+            name=shlex.quote(name),
+            token=variables.token,
+            user=variables.user,
+            password=variables.password,
+        )
         return (
             f"{head}. APM sends catalog credentials only to a catalog you "
-            f"registered by name: run 'apm marketplace add {credential.binding_url} "
-            f"--name {name}', then {hint[0].lower()}{hint[1:]}"
+            f"registered by name: {remedy.clause()}."
         )
     if credential.presented:
         return (
