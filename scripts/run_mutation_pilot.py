@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Run the bounded mutation-testing pilot and enforce its survivor baseline."""
+"""Mutation-test canonical owner modules and enforce their recorded baseline.
+
+Each owner names one source file, the functions to mutate and the test seams
+expected to kill them (#4121). ``tests/mutation/baseline.json`` records, per
+owner, a kill-rate floor and every surviving mutant: equivalent survivors carry
+a reason, and only the five original pilot owners keep an unexplained legacy
+allowlist. A run fails on a new survivor, a kill rate below its floor, or an
+incomplete outcome. ``--owner`` runs one owner (the scheduled job shards on it)
+and ``--negative-control`` proves that losing one killed mutant fails the floor.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +33,7 @@ DEFAULT_BASELINE = REPO_ROOT / "tests" / "mutation" / "baseline.json"
 DEFAULT_OUTPUT = REPO_ROOT / "build" / "mutation-pilot" / "report.json"
 MUTMUT_VERSION = "3.6.0"
 CLASS_NAME_SEPARATOR = chr(0x01C1)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 STATUS_BY_EXIT_CODE = {
     None: "not_checked",
@@ -131,9 +140,9 @@ OWNERS = (
         source="src/apm_cli/policy/discovery.py",
         functions=("_policy_to_dict",),
         test_seams=(
-            "tests/unit/policy/test_cache_merged_effective.py"
+            "tests/unit/policy/test_cache_merged_effective_logic.py"
             "::test_policy_serializer_covers_every_dataclass_leaf",
-            "tests/unit/policy/test_cache_merged_effective.py"
+            "tests/unit/policy/test_cache_merged_effective_logic.py"
             "::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
             "tests/unit/policy/test_cache_merged_effective.py"
             "::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip",
@@ -145,7 +154,6 @@ OWNERS = (
         functions=("UnifiedLinkResolver._resolve_in_package_asset_link",),
         test_seams=(
             "tests/unit/compilation/test_link_resolver.py",
-            "tests/unit/compilation/test_link_resolver_phase3.py",
             "tests/unit/compilation/test_link_resolver_resolution.py",
         ),
     ),
@@ -179,6 +187,135 @@ OWNERS = (
             "_normalize_exec_status",
         ),
         test_seams=("tests/unit/deps/test_lockfile_field_properties.py",),
+    ),
+)
+
+
+# The five original pilot owners keep their unexplained survivor allowlist;
+# every later owner kills each survivor or records why it is equivalent.
+LEGACY_OWNER_KEYS = frozenset(
+    {
+        "subset-selection",
+        "update-plan",
+        "policy-serialization",
+        "link-projection",
+        "lockfile-normalization",
+    }
+)
+
+# Owners from the 0.37 owner moves (#4121 wave A), by blast radius.
+OWNERS += (
+    Owner(
+        key="policy-outcome-routing",
+        source="src/apm_cli/policy/outcome_routing.py",
+        functions=(
+            "classify_discovery_outcome",
+            "outcome_cause",
+            "route_discovery_outcome",
+            "classify_project_policy",
+            "resolve_trust_policy",
+            "discover_trust_policy",
+            "_report_miss_neutrally",
+            "_TrustReaderLog.flush",
+            "_TrustReaderLog.policy_discovery_miss",
+        ),
+        test_seams=("tests/unit/policy/test_outcome_routing.py",),
+    ),
+    Owner(
+        key="executable-trust-context",
+        source="src/apm_cli/security/executables.py",
+        functions=(
+            "resolve_exec_decision",
+            "authorized_exec_map",
+            "package_type_approved",
+            "compose_trust_bin",
+            "exec_trust_context_for_project",
+            "effective_exec_map_for_project",
+            "resolve_project_exec_allow_map",
+        ),
+        test_seams=(
+            "tests/unit/security/test_resolve_exec_decision.py",
+            "tests/unit/security/test_exec_trust_context.py",
+        ),
+    ),
+    Owner(
+        key="install-entry-routing",
+        source="src/apm_cli/install/pipeline_entry.py",
+        functions=("record_preview_resolution", "pipeline_preview", "install_pipeline_options"),
+        test_seams=("tests/unit/install/test_pipeline_entry.py",),
+    ),
+    Owner(
+        key="install-commit-order",
+        source="src/apm_cli/install/commit_gate.py",
+        functions=(
+            "policy_subject_mcp_deps",
+            "enforce_mcp_policy",
+            "refuse_blocked_mcp",
+            "_resolved_rows",
+            "prospective_lockfile",
+            "_check_merged_mcp_policy",
+            "check_before_resolve",
+            "check_before_deploy",
+            "check_before_lockfile",
+        ),
+        test_seams=("tests/unit/install/test_commit_gate.py",),
+    ),
+    Owner(
+        # lockfile_write_scope is a @contextmanager: mutmut 3.6.0 skips every
+        # function with a decorator other than staticmethod/classmethod, so
+        # the scope's commit/discard choice is covered through _commits and
+        # _commit, which it calls.
+        key="lockfile-write-authority",
+        source="src/apm_cli/deps/lockfile_write_authority.py",
+        functions=(
+            "_scope",
+            "_refused",
+            "_commits",
+            "stage_lockfile",
+            "staged_lockfile_text",
+            "has_staged_lockfile",
+            "lockfile_exists",
+            "remove_lockfile",
+            "restore_lockfile_bytes",
+            "after_lockfile_commit",
+            "flush_lockfile_writes",
+            "_commit",
+        ),
+        test_seams=("tests/unit/deps/test_lockfile_write_authority.py",),
+    ),
+    Owner(
+        key="apm-home-resolution",
+        source="src/apm_cli/core/scope.py",
+        functions=(
+            "get_apm_home",
+            "is_user_scope",
+            "set_source_root_override",
+            "get_source_root",
+            "get_deploy_root",
+            "get_workspace_deploy_root",
+            "get_apm_dir",
+            "manifest_file",
+            "manifest_root",
+            "scope_manifest_path",
+            "is_user_scope_root",
+            "policy_discovery_uses_git_remote",
+            "get_modules_dir",
+            "get_manifest_path",
+            "get_lockfile_dir",
+        ),
+        test_seams=("tests/unit/core/test_apm_home_resolution.py",),
+    ),
+    Owner(
+        key="egress-route-policy",
+        source="src/apm_cli/deps/egress_route.py",
+        functions=("route_for", "is_direct_exception", "is_refused", "is_proxy_only"),
+        test_seams=("tests/unit/deps/test_egress_route.py",),
+    ),
+    Owner(
+        key="remediation-advice",
+        source="src/apm_cli/core/remediation.py",
+        functions=("_sentence", "either", "either_sentence", "kept_note", "kept_file_message"),
+        test_seams=("tests/unit/core/test_remediation.py",),
     ),
 )
 
@@ -266,28 +403,63 @@ def _owner_report(owner: Owner, repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _baseline_payload(owner_reports: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Create an explicit survivor allowlist from current outcomes."""
+def kill_rate(report: dict[str, Any]) -> float:
+    """Return killed / (killed + survived) for one owner report (1.0 when nothing ran)."""
+    killed = len(report["outcomes"].get("killed", []))
+    survived = len(report["outcomes"].get("survived", []))
+    return 1.0 if killed + survived == 0 else killed / (killed + survived)
+
+
+def _floor(rate: float) -> float:
+    """Round a measured kill rate down to the four decimals the baseline records."""
+    return int(rate * 10_000) / 10_000
+
+
+def _fatal_outcomes(report: dict[str, Any]) -> dict[str, list[str]]:
+    return {
+        status: report["outcomes"].get(status, [])
+        for status in sorted(FATAL_STATUSES)
+        if report["outcomes"].get(status)
+    }
+
+
+def _baseline_payload(
+    owner_reports: dict[str, dict[str, Any]],
+    previous_owners: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Record each owner's survivors and kill-rate floor from clean outcomes.
+
+    Recorded ``equivalent_survivors`` reasons are kept for every owner.
+    Legacy pilot owners put their remaining survivors in the unexplained
+    ``accepted_survivors`` allowlist. Every other owner may only carry
+    survivors already recorded with a reason; a new survivor needs a test or
+    a reason before the baseline can be written.
+    """
     owners: dict[str, Any] = {}
     for owner in OWNERS:
         report = owner_reports[owner.key]
-        fatal = sorted(
-            mutant_name
-            for status in FATAL_STATUSES
-            for mutant_name in report["outcomes"].get(status, [])
-        )
+        fatal = _fatal_outcomes(report)
         if fatal:
-            fatal_counts = {
-                status: len(report["outcomes"].get(status, []))
-                for status in sorted(FATAL_STATUSES)
-                if report["outcomes"].get(status)
-            }
+            fatal_counts = {status: len(names) for status, names in fatal.items()}
             raise PilotError(
                 f"cannot baseline {owner.key}: non-survivor failures present: {fatal_counts}"
             )
+        survivors = report["outcomes"].get("survived", [])
+        previous = (previous_owners or {}).get(owner.key, {})
+        reasons = previous.get("equivalent_survivors", {})
+        equivalent = {name: reasons[name] for name in sorted(survivors) if name in reasons}
+        unexplained = sorted(name for name in survivors if name not in reasons)
+        if unexplained and owner.key not in LEGACY_OWNER_KEYS:
+            raise PilotError(
+                f"cannot baseline {owner.key}: {len(unexplained)} survivor(s) have no test "
+                f"and no equivalent reason: {unexplained}"
+            )
+        accepted = unexplained
         owners[owner.key] = {
-            "accepted_survivors": report["outcomes"].get("survived", []),
+            "accepted_survivors": accepted,
+            "equivalent_survivors": equivalent,
             "functions": report["functions"],
+            "kill_rate_floor": _floor(kill_rate(report)),
             "source": report["source"],
             "test_seams": report["test_seams"],
         }
@@ -296,6 +468,50 @@ def _baseline_payload(owner_reports: dict[str, dict[str, Any]]) -> dict[str, Any
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
     }
+
+
+def _validate_owner_entry(owner: Owner, entry: object) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        raise BaselineError(f"invalid mutation baseline: malformed owner {owner.key}")
+    expected_contract = {
+        "functions": list(owner.functions),
+        "source": owner.source,
+        "test_seams": list(owner.test_seams),
+    }
+    for key, expected in expected_contract.items():
+        if entry.get(key) != expected:
+            raise BaselineError(
+                f"invalid mutation baseline: {owner.key} {key} does not match allowlist"
+            )
+    accepted = entry.get("accepted_survivors")
+    if not isinstance(accepted, list) or not all(isinstance(name, str) for name in accepted):
+        raise BaselineError(
+            f"invalid mutation baseline: {owner.key} accepted_survivors must be strings"
+        )
+    if accepted != sorted(set(accepted)):
+        raise BaselineError(
+            f"invalid mutation baseline: {owner.key} accepted_survivors must be sorted and unique"
+        )
+    if accepted and owner.key not in LEGACY_OWNER_KEYS:
+        raise BaselineError(
+            f"invalid mutation baseline: {owner.key} may not accept unexplained survivors; "
+            "kill them or record equivalent_survivors with a reason"
+        )
+    equivalent = entry.get("equivalent_survivors")
+    if not isinstance(equivalent, dict) or not all(
+        isinstance(name, str) and isinstance(reason, str) and reason.strip()
+        for name, reason in equivalent.items()
+    ):
+        raise BaselineError(
+            f"invalid mutation baseline: {owner.key} equivalent_survivors must map each "
+            "mutant to a non-empty reason"
+        )
+    floor = entry.get("kill_rate_floor")
+    if not isinstance(floor, int | float) or isinstance(floor, bool) or not 0 <= floor <= 1:
+        raise BaselineError(
+            f"invalid mutation baseline: {owner.key} kill_rate_floor must be between 0 and 1"
+        )
+    return entry
 
 
 def _validate_baseline(payload: dict[str, object]) -> dict[str, dict[str, Any]]:
@@ -307,62 +523,61 @@ def _validate_baseline(payload: dict[str, object]) -> dict[str, dict[str, Any]]:
     owners = payload.get("owners")
     if not isinstance(owners, dict) or set(owners) != {owner.key for owner in OWNERS}:
         raise BaselineError("invalid mutation baseline: owner set mismatch")
+    return {owner.key: _validate_owner_entry(owner, owners.get(owner.key)) for owner in OWNERS}
 
-    validated: dict[str, dict[str, Any]] = {}
-    for owner in OWNERS:
-        entry = owners.get(owner.key)
-        if not isinstance(entry, dict):
-            raise BaselineError(f"invalid mutation baseline: malformed owner {owner.key}")
-        expected_contract = {
-            "functions": list(owner.functions),
-            "source": owner.source,
-            "test_seams": list(owner.test_seams),
-        }
-        for key, expected in expected_contract.items():
-            if entry.get(key) != expected:
-                raise BaselineError(
-                    f"invalid mutation baseline: {owner.key} {key} does not match allowlist"
-                )
-        accepted = entry.get("accepted_survivors")
-        if not isinstance(accepted, list) or not all(isinstance(name, str) for name in accepted):
-            raise BaselineError(
-                f"invalid mutation baseline: {owner.key} accepted_survivors must be strings"
-            )
-        if accepted != sorted(set(accepted)):
-            raise BaselineError(
-                f"invalid mutation baseline: {owner.key} accepted_survivors must be sorted and unique"
-            )
-        validated[owner.key] = entry
-    return validated
+
+def _compare_owner(report: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    """Compare one owner's outcomes with its survivor allowlist and kill-rate floor."""
+    allowed = set(entry["accepted_survivors"]) | set(entry["equivalent_survivors"])
+    survivors = set(report["outcomes"].get("survived", []))
+    unexpected_survivors = sorted(survivors - allowed)
+    fatal_outcomes = _fatal_outcomes(report)
+    rate = kill_rate(report)
+    below_floor = rate < entry["kill_rate_floor"]
+    failed = bool(unexpected_survivors or fatal_outcomes or below_floor)
+    return {
+        "fatal_outcomes": fatal_outcomes,
+        "kill_rate": round(rate, 4),
+        "kill_rate_floor": entry["kill_rate_floor"],
+        "resolved_survivors": sorted(allowed - survivors),
+        "status": "regression" if failed else "accepted",
+        "unexpected_survivors": unexpected_survivors,
+    }
 
 
 def _compare_with_baseline(
     owner_reports: dict[str, dict[str, Any]],
     baseline_owners: dict[str, dict[str, Any]],
 ) -> tuple[dict[str, Any], bool]:
-    """Compare current outcomes with the explicit survivor allowlist."""
-    comparisons: dict[str, Any] = {}
-    failed = False
-    for owner in OWNERS:
-        report = owner_reports[owner.key]
-        accepted = set(baseline_owners[owner.key]["accepted_survivors"])
-        survivors = set(report["outcomes"].get("survived", []))
-        unexpected_survivors = sorted(survivors - accepted)
-        resolved_survivors = sorted(accepted - survivors)
-        fatal_outcomes = {
-            status: report["outcomes"].get(status, [])
-            for status in sorted(FATAL_STATUSES)
-            if report["outcomes"].get(status)
-        }
-        owner_failed = bool(unexpected_survivors or fatal_outcomes)
-        failed |= owner_failed
-        comparisons[owner.key] = {
-            "fatal_outcomes": fatal_outcomes,
-            "resolved_survivors": resolved_survivors,
-            "status": "regression" if owner_failed else "accepted",
-            "unexpected_survivors": unexpected_survivors,
-        }
-    return comparisons, failed
+    """Compare every reported owner with the explicit survivor allowlist and floor."""
+    comparisons = {
+        key: _compare_owner(report, baseline_owners[key]) for key, report in owner_reports.items()
+    }
+    return comparisons, any(c["status"] == "regression" for c in comparisons.values())
+
+
+def negative_control(report: dict[str, Any], entry: dict[str, Any]) -> bool:
+    """Return True when losing one killed mutant would fail this owner's floor check.
+
+    The flipped mutant is also allowed as a survivor, so only the kill-rate
+    floor can flag the weakened run: this proves the floor itself enforces.
+    """
+    killed = report["outcomes"].get("killed", [])
+    if not killed:
+        return entry["kill_rate_floor"] > 0
+    weakened = {
+        **report,
+        "outcomes": {
+            **report["outcomes"],
+            "killed": killed[1:],
+            "survived": [*report["outcomes"].get("survived", []), killed[0]],
+        },
+    }
+    allowing = {
+        **entry,
+        "equivalent_survivors": {**entry["equivalent_survivors"], killed[0]: "negative control"},
+    }
+    return _compare_owner(weakened, allowing)["status"] == "regression"
 
 
 def _sanitized_environment() -> dict[str, str]:
@@ -373,14 +588,20 @@ def _sanitized_environment() -> dict[str, str]:
     return environment
 
 
-def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> float:
-    """Execute exactly the allowlisted mutmut patterns."""
+def _run_mutmut(
+    *,
+    max_children: int,
+    reuse_cache: bool,
+    repo_root: Path,
+    owners: tuple[Owner, ...] = OWNERS,
+) -> float:
+    """Execute exactly the allowlisted mutmut patterns of *owners*."""
     if not reuse_cache:
         shutil.rmtree(repo_root / "mutants", ignore_errors=True)
     executable = shutil.which("mutmut")
     if executable is None:
         raise PilotError("mutmut is not installed; run uv sync --extra dev")
-    patterns = [pattern for owner in OWNERS for pattern in owner.patterns]
+    patterns = [pattern for owner in owners for pattern in owner.patterns]
     command = [executable, "run", "--max-children", str(max_children), *patterns]
     started = time.monotonic()
     result = subprocess.run(  # noqa: S603 - fixed executable and owner patterns
@@ -400,6 +621,34 @@ def _run_mutmut(*, max_children: int, reuse_cache: bool, repo_root: Path) -> flo
             f"mutmut failed with exit code {result.returncode}\n{_ascii(output).strip()}"
         )
     return elapsed
+
+
+def run_owners(
+    owners: tuple[Owner, ...],
+    *,
+    max_children: int = 2,
+    reuse_cache: bool = False,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, dict[str, Any]]:
+    """Mutate registered *owners* and return each one's outcome report.
+
+    The reusable entry point for other fault-injection harnesses (#4514): an
+    ``Owner`` names a source file, the functions to mutate and the test seams
+    expected to kill them; the report lists every mutant by outcome. mutmut
+    reads its sources and test selection from ``[tool.mutmut]`` in
+    ``pyproject.toml``, which lists exactly the registered owners, so an
+    unregistered owner is refused rather than measured against other tests.
+    """
+    unregistered = sorted(owner.key for owner in owners if owner not in OWNERS)
+    if unregistered:
+        raise PilotError(
+            f"unregistered owner(s): {unregistered}; add them to OWNERS and to "
+            "[tool.mutmut] in pyproject.toml first"
+        )
+    _run_mutmut(
+        max_children=max_children, reuse_cache=reuse_cache, repo_root=repo_root, owners=owners
+    )
+    return {owner.key: _owner_report(owner, repo_root) for owner in owners}
 
 
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
@@ -427,6 +676,23 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-children", type=int, default=2)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
+        "--owner",
+        action="append",
+        default=[],
+        metavar="KEY",
+        help="Mutate only this owner (repeatable); default: every owner.",
+    )
+    parser.add_argument(
+        "--list-owners",
+        action="store_true",
+        help="Print the owner keys as a JSON array and exit.",
+    )
+    parser.add_argument(
+        "--negative-control",
+        action="store_true",
+        help="Also prove that losing one killed mutant fails each owner's floor.",
+    )
+    parser.add_argument(
         "--report-only",
         action="store_true",
         help="Read existing mutmut metadata without executing mutants.",
@@ -439,76 +705,118 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--update-baseline",
         action="store_true",
-        help="Replace the survivor allowlist with the current clean outcomes.",
+        help="Rewrite survivors and kill-rate floors from the current clean outcomes.",
     )
     return parser.parse_args()
 
 
+def select_owners(keys: list[str]) -> tuple[Owner, ...]:
+    """Return the owners named by *keys*, or every owner when none is named."""
+    if not keys:
+        return OWNERS
+    by_key = {owner.key: owner for owner in OWNERS}
+    unknown = sorted(set(keys) - set(by_key))
+    if unknown:
+        raise PilotError(f"unknown owner(s): {unknown}; known: {sorted(by_key)}")
+    return tuple(owner for owner in OWNERS if owner.key in keys)
+
+
+def _print_summary(
+    owner_reports: dict[str, dict[str, Any]], comparisons: dict[str, Any], elapsed: float
+) -> None:
+    total = sum(report["counts"]["total"] for report in owner_reports.values())
+    survivors = sum(report["counts"].get("survived", 0) for report in owner_reports.values())
+    runtime = "metadata only" if elapsed < 0 else f"{elapsed:.1f}s runtime"
+    print(f"[+] Mutation report: {total} mutants, {survivors} survivors, {runtime}")
+    for key, report in owner_reports.items():
+        counts = report["counts"]
+        comparison = comparisons[key]
+        print(
+            f"[i] {key}: total={counts['total']} killed={counts.get('killed', 0)} "
+            f"survived={counts.get('survived', 0)} kill_rate={comparison['kill_rate']:.4f} "
+            f"floor={comparison['kill_rate_floor']:.4f}"
+        )
+        if comparison["resolved_survivors"]:
+            print(
+                f"[i] {key}: {len(comparison['resolved_survivors'])} recorded survivor(s) are "
+                "now killed; review and rerun with --update-baseline."
+            )
+
+
 def main() -> int:
-    """Run the pilot, write its report, and enforce the checked-in baseline."""
+    """Run the mutation owners, write the report, and enforce the checked-in baseline."""
     args = _parse_args()
+    if args.list_owners:
+        print(json.dumps([owner.key for owner in OWNERS]))
+        return 0
     if args.max_children < 1:
         print("[x] --max-children must be at least 1", file=sys.stderr)
         return 2
 
     try:
-        elapsed = 0.0
+        owners = select_owners(args.owner)
+        if args.update_baseline and owners != OWNERS:
+            raise PilotError("--update-baseline needs every owner; drop --owner")
+        elapsed = -1.0
         if args.report_only:
             print("[!] Report-only mode reuses existing mutmut metadata without executing tests.")
+            owner_reports = {owner.key: _owner_report(owner, REPO_ROOT) for owner in owners}
         else:
             mode = "cached" if args.reuse_cache else "fresh"
-            print(f"[i] Starting {mode} mutation execution.")
-            elapsed = _run_mutmut(
-                max_children=args.max_children,
-                reuse_cache=args.reuse_cache,
-                repo_root=REPO_ROOT,
+            print(f"[i] Starting {mode} mutation execution for {len(owners)} owner(s).")
+            started = time.monotonic()
+            owner_reports = run_owners(
+                owners, max_children=args.max_children, reuse_cache=args.reuse_cache
             )
-        owner_reports = {owner.key: _owner_report(owner, REPO_ROOT) for owner in OWNERS}
+            elapsed = time.monotonic() - started
 
         if args.update_baseline:
-            baseline_payload = _baseline_payload(owner_reports)
+            previous = None
+            if args.baseline.exists():
+                previous = load_baseline(args.baseline, label="mutation").get("owners")
             args.baseline.parent.mkdir(parents=True, exist_ok=True)
-            write_baseline(args.baseline, baseline_payload, label="mutation")
+            write_baseline(
+                args.baseline, _baseline_payload(owner_reports, previous), label="mutation"
+            )
 
-        baseline_payload = load_baseline(args.baseline, label="mutation")
-        baseline_owners = _validate_baseline(baseline_payload)
+        baseline_owners = _validate_baseline(load_baseline(args.baseline, label="mutation"))
         comparisons, failed = _compare_with_baseline(owner_reports, baseline_owners)
-        report = {
+        uncontrolled = [
+            key
+            for key, report in owner_reports.items()
+            if args.negative_control and not negative_control(report, baseline_owners[key])
+        ]
+        payload: dict[str, Any] = {
             "comparisons": comparisons,
             "owners": owner_reports,
             "schema_version": SCHEMA_VERSION,
-            "status": "regression" if failed else "accepted",
+            "status": "regression" if failed or uncontrolled else "accepted",
             "tool": {"name": "mutmut", "version": MUTMUT_VERSION},
         }
-        _write_report(args.output, report)
+        if args.negative_control:
+            payload["negative_control"] = {"uncontrolled_owners": uncontrolled}
+        _write_report(args.output, payload)
     except (BaselineError, PilotError) as error:
-        print(f"[x] Mutation pilot failed: {_ascii(str(error))}", file=sys.stderr)
+        print(f"[x] Mutation run failed: {_ascii(str(error))}", file=sys.stderr)
         return 1
 
-    total = sum(report["counts"]["total"] for report in owner_reports.values())
-    survivors = sum(report["counts"].get("survived", 0) for report in owner_reports.values())
-    runtime = "metadata only" if args.report_only else f"{elapsed:.1f}s runtime"
-    print(f"[+] Mutation pilot report: {total} mutants, {survivors} survivors, {runtime}")
+    _print_summary(owner_reports, comparisons, elapsed)
     print(f"[i] Report written to {_ascii(str(args.output))}")
-    for owner in OWNERS:
-        counts = owner_reports[owner.key]["counts"]
-        print(
-            f"[i] {owner.key}: total={counts['total']} "
-            f"killed={counts.get('killed', 0)} survived={counts.get('survived', 0)} "
-            f"timeout={counts.get('timeout', 0)} suspicious={counts.get('suspicious', 0)}"
-        )
-        resolved_count = len(comparisons[owner.key]["resolved_survivors"])
-        if resolved_count:
+    if args.negative_control:
+        if uncontrolled:
             print(
-                f"[i] {owner.key}: {resolved_count} accepted survivor(s) are now killed; "
-                "review and rerun with --update-baseline."
+                f"[x] Negative control: losing one killed mutant would not fail {uncontrolled}; "
+                "the floor check is not enforcing.",
+                file=sys.stderr,
             )
+            return 1
+        print(f"[+] Negative control: losing one killed mutant fails every owner ({len(owners)}).")
     if failed:
         print(
-            "[x] Unexpected mutation outcomes are not allowlisted. "
-            "Inspect the JSON report, use 'mutmut results' to find each survivor, "
-            "then run 'mutmut show <name>'; "
-            "add a behavioral test before updating the baseline.",
+            "[x] Mutation outcomes regressed: a new survivor, a kill rate below its floor, or "
+            "an incomplete run. Inspect the JSON report, use 'mutmut results' to find each "
+            "survivor, then run 'mutmut show <name>'; add a behavioral test, or record an "
+            "equivalent mutant with its reason, before updating the baseline.",
             file=sys.stderr,
         )
         return 1
