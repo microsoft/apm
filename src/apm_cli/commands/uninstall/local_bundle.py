@@ -178,9 +178,13 @@ def uninstall_local_bundles(
         logger.success(f"Removed hooks from local bundle '{slug}'", symbol="check")
     _names, kept = installed_local_bundles(scope, bundle_scope.apm_package)
     if kept:
+        from ...core.remediation import kept_note
+
         logger.warning(
-            f"Kept {kept} other file(s) from local bundles: 'apm uninstall' removes a "
-            "local bundle's hooks only."
+            kept_note(
+                f"{kept} other file(s) from local bundles",
+                "'apm uninstall' removes a local bundle's hooks only",
+            )
         )
 
 

@@ -77,6 +77,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "hooks-skipped-unapproved": "install reports skipped hooks through exec_gate.log_hooks_skip; "
     "target_warnings.log_hooks_skip has no install caller",
     "local-bundle-update": "full sentence, both scopes, asserted by test_remediation_gate9_call_sites (#4318)",
+    "local-bundle-uninstall-apart": "printed command run by the bundle-only uninstall in "
+    "tests/integration/test_local_bundle_hooks_lifecycle.py (#3700)",
 }
 
 
