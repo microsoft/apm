@@ -1474,6 +1474,30 @@ class LockFile:
         """Whether this lock's version is one only APM 0.37+ writes (#4228)."""
         return self.lockfile_version == FRAMED_CONTENT_HASH_VERSION
 
+    def without_author_local_state(self) -> LockFile:
+        """Return a shallow copy without the packager's own local install state.
+
+        ``to_yaml`` derives ``lockfile_version`` from content, and local
+        deployed-file hashes alone promote it (RA-018). A bundle lock ships no
+        author-local receipts, so its version must follow the shipped
+        dependencies only, or packing before and after ``apm install`` differs
+        (RA-031). This lockfile is not mutated.
+        """
+        import copy
+
+        shipped = copy.copy(self)
+        # Own containers: to_yaml normalizes these in place.
+        shipped.dependencies = {
+            key: dep for key, dep in self.dependencies.items() if key != _SELF_KEY
+        }
+        shipped.local_deployed_files = []
+        shipped.local_deployed_file_hashes = {}
+        shipped.local_staged_files = []
+        shipped.local_staged_file_hashes = {}
+        # Rebuilt from the shipped dependencies, so no author receipt re-projects.
+        shipped.deployment_ledger = DeploymentLedger(records={})
+        return shipped
+
     def sync_lockfile_version(self) -> None:
         """Re-derive ``lockfile_version`` from current content.
 
