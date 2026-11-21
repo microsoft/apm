@@ -388,18 +388,19 @@ class DeploymentMaterializationSession:
         record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
         return record is not None and self._holds(path, record)
 
-    def adopt_lockless_root_receipts(self) -> list[str]:
+    def adopt_lockless_root_receipts(self, prior: Sequence[str]) -> list[str]:
         """Bind user-root receipts a pre-0.38 ``install -g`` wrote without a lock (#3772).
 
         Those installs receipted root-local writes but recorded no claim. A
         receipt qualifies only at user scope, for the root owner, for a path
         the lock does not claim, while the file still holds its bytes; it is
-        bound to the self-entry claim this install then commits. Returns the
-        adopted lock values.
+        bound to the self-entry claim this install then commits. Returns
+        *prior* (the old root-local claims) plus the adopted lock values; a
+        frozen replay verifies and adopts nothing.
         """
-        if self.scope.value != "user":
-            return []
-        adopted: list[str] = []
+        adopted = list(prior)
+        if self.scope.value != "user" or self.verify_only:
+            return sorted(set(adopted))
         for key, record in self._records.items():
             value, physical = record.locator.value, self._destinations.get(key)
             if record.active_owner != "." or self._claims.get(value) or physical is None:
@@ -409,7 +410,7 @@ class DeploymentMaterializationSession:
                 self._bindings[key] = [".", self._claim_signature(value)]
                 self._dirty = True
                 adopted.append(value)
-        return sorted(adopted)
+        return sorted(set(adopted))
 
     def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
         """Record a declared member this run deliberately left on disk unwritten."""

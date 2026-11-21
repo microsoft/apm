@@ -141,9 +141,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     if session is not None:
         session.locked_sources = locked
         session.verify_only = InstallService.frozen_disposition(ctx).replay
-        # User-root files a pre-0.38 install -g receipted without a lock (#3772).
-        migrated = [] if session.verify_only else session.adopt_lockless_root_receipts()
-        ctx.old_local_deployed = sorted({*ctx.old_local_deployed, *migrated})
+        ctx.old_local_deployed = session.adopt_lockless_root_receipts(ctx.old_local_deployed)
         retire_receipts_of_missing_projects()
     try:
         with (
