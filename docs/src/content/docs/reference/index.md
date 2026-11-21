@@ -43,7 +43,7 @@ Deprecated surfaces still work. Each row names the replacement, the release that
 | `apm update` outside an `apm.yml` project | `apm self-update` | v0.13.0 | not scheduled | Warning |
 | `apm update --check` | `apm update --dry-run` or `apm self-update --check` | unknown | not scheduled | Warning |
 | Standalone `marketplace.yml` | `marketplace:` block in `apm.yml` (`apm marketplace migrate`) | v0.11.0 | not scheduled | Warning |
-| List or string form of `marketplace.outputs` | Map form (`outputs: {claude: {}}`) | v0.14.0 | v0.15 | Collected, not printed |
+| List or string form of `marketplace.outputs` | Map form (`outputs: {claude: {}}`) | v0.14.0 | not scheduled | Warning |
 | `--target agents` | `--target copilot` or `--target agent-skills` | v0.12.0 | v1.0 | Warning |
 | `<VAR>` placeholders in MCP server config | `${VAR}` | unknown | v1.0 | Warning |
 | Python API `SimpleRegistryClient.get_server_info()` | `SimpleRegistryClient.get_server()` | v0.14.0 | not scheduled | Python `DeprecationWarning` (hidden by default) |
