@@ -230,12 +230,15 @@ def execute_migration(
             # B1: containment guard before any disk mutation.
             ensure_path_within(abs_path, project_root)
             if not evidence.authorizes(plan.src_path, abs_path, rendered_as=plan.dst_path):
+                from apm_cli.core.remediation import (
+                    KEPT_DELETE_MANUALLY,
+                    KEPT_UNPROVEN_REASON,
+                    kept_note,
+                )
                 from apm_cli.utils.console import _rich_warning
 
                 _rich_warning(
-                    f"Kept {plan.src_path}: no local deployment receipt or render of the "
-                    "locked package version proves APM deployed it. Delete it manually "
-                    "if you no longer need it.",
+                    kept_note(plan.src_path, KEPT_UNPROVEN_REASON, KEPT_DELETE_MANUALLY),
                     symbol="warning",
                 )
                 result.failed.append(plan.src_path)

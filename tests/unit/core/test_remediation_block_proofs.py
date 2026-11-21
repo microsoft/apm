@@ -148,3 +148,52 @@ def test_no_remediation_advertises_a_policy_bypass(remediation_id: str) -> None:
     text = _remedy_text(catalog()[remediation_id])
     for token in ("--no-policy", "APM_POLICY_DISABLE"):
         assert token not in text, (remediation_id, text)
+
+
+# G8: every "Kept ..." line about a file APM left in place renders through
+# remediation.kept_note / kept_file_message. These modules format kept lines
+# that are not about a file; the set may only shrink.
+_KEPT_LINE_ALLOWED = {
+    "adapters/client/opencode.py": "an OpenCode config entry, not a file",
+    "core/command_logger.py": "kept packages under --frozen, not a file",
+    "install/mcp/retired_destinations.py": "an MCP server entry, not a file",
+    "marketplace/reconcile.py": "kept marketplaces, not a file",
+}
+
+
+def _formats_kept_line(node) -> bool:
+    import ast
+
+    if isinstance(node, ast.JoinedStr) and node.values:
+        node = node.values[0]
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("Kept ")
+    )
+
+
+def test_only_the_remediation_owner_formats_kept_lines() -> None:
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[3] / "src" / "apm_cli"
+    owners = set()
+    for path in sorted(src.rglob("*.py")):
+        relative = path.relative_to(src).as_posix()
+        if relative == "core/remediation.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        nested = {
+            id(value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.JoinedStr)
+            for value in node.values
+        }
+        if any(
+            _formats_kept_line(node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.JoinedStr | ast.Constant) and id(node) not in nested
+        ):
+            owners.add(relative)
+    assert owners == set(_KEPT_LINE_ALLOWED)

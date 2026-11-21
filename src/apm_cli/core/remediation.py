@@ -107,11 +107,29 @@ def either_sentence(first: Remediation, *alternatives: Remediation) -> str:
     return _sentence(either(first, *alternatives))
 
 
+def kept_note(subject: str, reason: str, next_step: str | None = None) -> str:
+    """Render the one kept shape: ``Kept <subject>: <reason>.`` plus an optional next step.
+
+    The single owner of every "Kept ..." line about a file APM left in place;
+    *next_step* is a manual step (a full sentence), never an apm command
+    (:func:`kept_file_message` renders those).
+    """
+    text = f"Kept {subject}: {reason}."
+    return f"{text} {next_step}" if next_step else text
+
+
 def kept_file_message(
     path: str, reason: str, remedy: Remediation, *alternatives: Remediation
 ) -> str:
     """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
-    return f"Kept {path}: {reason}. {either_sentence(remedy, *alternatives)}"
+    return kept_note(path, reason, either_sentence(remedy, *alternatives))
+
+
+# A file whose deployment no receipt or locked render proves (#4360).
+KEPT_UNPROVEN_REASON = (
+    "no local deployment receipt or render of the locked package version proves APM deployed it"
+)
+KEPT_DELETE_MANUALLY = "Delete it manually if you no longer need it."
 
 
 _CATALOG: dict[str, Remediation] = {}
