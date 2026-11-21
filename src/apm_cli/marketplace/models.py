@@ -25,7 +25,11 @@ logger = logging.getLogger(__name__)
 # ``MarketplaceSource.origin``).
 ORIGIN_MANUAL = "manual"
 ORIGIN_MANIFEST = "manifest"
-MARKETPLACE_ORIGINS = (ORIGIN_MANUAL, ORIGIN_MANIFEST)
+# A root project ``apm.yml`` ``marketplaces:`` entry (#2903). Lives only in
+# memory for one command; never persisted to ``marketplaces.json``.
+ORIGIN_PROJECT = "project"
+PERSISTED_ORIGINS = (ORIGIN_MANUAL, ORIGIN_MANIFEST)
+MARKETPLACE_ORIGINS = (*PERSISTED_ORIGINS, ORIGIN_PROJECT)
 
 
 # SCP-like git URL: e.g. git@host:org/repo.git -- reused canonical regex
@@ -181,10 +185,15 @@ class MarketplaceSource:
     repo: str = ""
     host: str = "github.com"
     branch: str = ""  # Legacy alias for ref; if both given, ref wins
-    # Who owns the registration: ``manual`` (``apm marketplace add``) or
+    # Who owns the registration: ``manual`` (``apm marketplace add``),
     # ``manifest`` (the user manifest ``marketplaces:`` list, reconciled by
-    # ``apm install -g``). Ownership metadata, not part of source identity.
+    # ``apm install -g``) or ``project`` (the root project's ``marketplaces:``
+    # map, in memory only). Ownership metadata, not part of source identity.
     origin: str = field(default=ORIGIN_MANUAL, compare=False)
+    # True only when the user bound this name to a hosted catalog URL with
+    # ``apm marketplace add URL --name NAME``: the ``APM_MARKETPLACE_*_<NAME>``
+    # credential may then be sent to that URL (see marketplace/catalog_binding.py).
+    credential_bound: bool = field(default=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.origin not in MARKETPLACE_ORIGINS:
@@ -192,6 +201,9 @@ class MarketplaceSource:
                 f"Invalid marketplace origin {self.origin!r}; "
                 f"expected one of: {', '.join(MARKETPLACE_ORIGINS)}"
             )
+        if self.credential_bound is not True or self.origin == ORIGIN_PROJECT:
+            # A committed apm.yml map never earns a user's name-bound credential.
+            object.__setattr__(self, "credential_bound", False)
         # Reconcile ref / branch: ref is canonical. If only branch was set, copy it onto ref.
         if self.branch and self.branch != "main" and (not self.ref or self.ref == "main"):
             object.__setattr__(self, "ref", self.branch)
@@ -232,6 +244,9 @@ class MarketplaceSource:
                 object.__setattr__(self, "repo", r)
         if identity is not None and self.path != "" and self.host == "github.com" and identity.host:
             object.__setattr__(self, "host", identity.host)
+        # Only a hosted catalog URL can carry a credential binding.
+        if self.credential_bound and not self.is_remote_manifest_url:
+            object.__setattr__(self, "credential_bound", False)
 
     # -- derived properties --------------------------------------------------
 
@@ -329,6 +344,8 @@ class MarketplaceSource:
         # Absent means manual so pre-existing registries stay byte-identical.
         if self.origin != ORIGIN_MANUAL:
             result["origin"] = self.origin
+        if self.credential_bound:
+            result["credential_bound"] = True
         return result
 
     @classmethod
@@ -344,7 +361,7 @@ class MarketplaceSource:
         ref = data.get("ref") or data.get("branch") or "main"
         # Unknown origins degrade to manual so reconcile never removes them.
         origin = data.get("origin", ORIGIN_MANUAL)
-        if origin not in MARKETPLACE_ORIGINS:
+        if origin not in PERSISTED_ORIGINS:
             origin = ORIGIN_MANUAL
         return cls(
             name=data["name"],
@@ -356,6 +373,7 @@ class MarketplaceSource:
             host=data.get("host", "github.com"),
             branch=data.get("branch", ""),
             origin=origin,
+            credential_bound=data.get("credential_bound") is True,
         )
 
 

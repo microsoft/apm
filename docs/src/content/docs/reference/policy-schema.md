@@ -69,6 +69,7 @@ possible.
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `security`         | object              | see section      | no       | Rules over APM's security checks: install-time audit and external scanners (require the `external-scanners` flag), lockfile hashes and drift. |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `marketplace`      | object              | see section      | no       | Restrict the marketplace catalogs a project `apm.yml` may declare. See [marketplace](#marketplace). |
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, LSP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
@@ -162,7 +163,7 @@ dependencies:
 
 `required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names that host and the policy entry that would match it, so you can either move the dependency or, for a trusted host, change the entry.
 
-A dependency written as an explicit registry-proxy path (`host/artifactory/...`) is identified by the proxy host; set `PROXY_REGISTRY_URL` and keep plain shorthand so default-host entries keep matching.
+A dependency written as an explicit registry-proxy path (`art.example.com/artifactory/github/acme/tools`) is identified by the proxy host: require it as `art.example.com/acme/tools`. Both checks pass, because `apm.lock.yaml` records that package under the same host. To keep default-host entries matching instead, set `PROXY_REGISTRY_URL` and keep plain shorthand.
 
 A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
 
@@ -452,6 +453,28 @@ registry_source:
   require:
     - jf-skills
   allow_non_registry: false
+```
+
+## marketplace
+
+Restrict the marketplace catalogs a root project `apm.yml` may declare under
+[`marketplaces:`](../manifest-schema/#314-marketplaces), and the catalogs its
+marketplace packages are installed from: the catalog origin `apm.lock.yaml`
+records (`source_url`) and that of each fresh resolution, whether it came
+through the map or a registration. A locked package with no recorded origin
+is refused. Checked by the install policy gate and `apm audit --ci`. To clear
+a refused package, remove its `apm.yml` entry and run `apm install`, then add
+it back from an allowed catalog (`apm update` keeps the recorded catalog).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `allow` | `list<string>` or null | `null` | Catalog origins every declared marketplace and every locked or resolved marketplace package must match, as `host/path` globs (`*` = one segment, `**` = any depth). A scheme, userinfo, `.git` and host case are ignored. `null` = no opinion; `[]` = no project may declare or install from a marketplace. A local-path catalog never matches. |
+
+```yaml
+marketplace:
+  allow:
+    - github.com/contoso/*
+    - gitlab.example.com/platform/agent-marketplace
 ```
 
 ## executables

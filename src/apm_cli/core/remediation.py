@@ -432,17 +432,6 @@ MARKETPLACE_HOST_CONFLICT = _entry(
     "register it from the host embedded in SOURCE",
     before="drop --host",
 )
-MARKETPLACES_OUTSIDE_USER_MANIFEST = _entry(
-    "marketplaces-outside-user-manifest",
-    "apm install -g",
-    "register them from the user manifest",
-    before="move the entries to the user manifest ({path})",
-)
-MARKETPLACE_REGISTER_MANUAL = _entry(
-    "marketplace-register-manual",
-    "apm marketplace add <source> --name <name>",
-    "register one manually",
-)
 MARKETPLACE_ORIGIN_READD = _entry(
     "marketplace-origin-readd", "apm marketplace add <source>", "re-add the marketplace"
 )
@@ -454,6 +443,31 @@ MARKETPLACE_REF_SWAP_ACCEPT = _entry(
     "apm update",
     "accept the new ref (pin '{key}')",
     before="if the publisher moved this version on purpose",
+)
+MARKETPLACE_PROJECT_ORIGIN_RELOCK = _entry(
+    "marketplace-project-origin-relock",
+    "apm install",
+    "re-resolve it through the apm.yml marketplaces: map",
+    before="drop --frozen",
+    then="commit apm.lock.yaml",
+)
+MARKETPLACE_ALLOW_READD = _entry(
+    "marketplace-allow-readd",
+    "apm install",
+    "release the package locked from that catalog",
+    before="remove its entry from apm.yml",
+    then="add it back from an allowed catalog",
+)
+MARKETPLACE_CREDENTIAL_BIND = _entry(
+    "marketplace-credential-bind",
+    "apm marketplace add {url} --name {name}",
+    "bind that name to this catalog",
+    then="set {token} (Bearer), or {user} and {password} (Basic)",
+)
+MARKETPLACE_CREDENTIAL_REBIND = _entry(
+    "marketplace-credential-rebind",
+    "apm marketplace remove {name}",
+    "free the name for a new binding",
 )
 # -- end W2 marketplace --
 # -- W2 bundle --
