@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests.lifecycle import obligation_space, oracles, receipts
+from tests.lifecycle.machines._gate_matrix import mcp_install_problems
 from tests.lifecycle.obligations import (
     GENERATED_PATH,
     Obligation,
@@ -295,3 +296,43 @@ def test_a_real_witness_without_its_oracle_call_fails_the_ratchet(tmp_path: Path
     assert dropped.returncode != 0, dropped.stdout
     assert "no oracle receipt covered" in dropped.stdout, dropped.stdout
     assert owner_rows[0] in dropped.stdout, dropped.stdout
+
+
+# -- negative control of the M-GATE matrix U7 oracle (tests/lifecycle/machines) ----
+
+
+@pytest.mark.parametrize(
+    ("after", "declared", "locked", "message"),
+    [
+        # A successful no-op: nothing declared, locked or configured.
+        (frozenset({"p-exec-mcp"}), [], [], r"p-registry is not declared"),
+        # Collateral removal of a server the gate still allows.
+        (frozenset({"p-registry"}), ["io.github.lifecycle/p-registry"], ["p-registry"], "removed"),
+        # A server nobody requested.
+        (
+            frozenset({"p-exec-mcp", "p-registry", "rogue"}),
+            ["io.github.lifecycle/p-registry"],
+            ["p-registry"],
+            "configured other servers",
+        ),
+    ],
+)
+def test_mcp_install_oracle_rejects_no_ops_and_collateral(
+    after: frozenset[str], declared: list[str], locked: list[str], message: str
+) -> None:
+    """Negative control of the U7 oracle: each defect fails; the faithful outcome passes."""
+    from apm_cli.deps.lockfile import LockFile
+
+    before = frozenset({"p-exec-mcp"})
+    lock = LockFile(mcp_servers=list(locked))
+    manifest = {"dependencies": {"mcp": declared}}
+    problems = mcp_install_problems(before, after, manifest, lock, before)
+    assert any(re.search(message, problem) for problem in problems), problems
+    faithful = mcp_install_problems(
+        before,
+        before | {"p-registry"},
+        {"dependencies": {"mcp": ["io.github.lifecycle/p-registry"]}},
+        LockFile(mcp_servers=["io.github.lifecycle/p-registry"]),
+        before,
+    )
+    assert faithful == []

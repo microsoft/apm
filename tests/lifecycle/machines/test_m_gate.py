@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -26,12 +25,7 @@ from tests.lifecycle.machines._gate_kit import (
     GateMachine,
     GateWorld,
 )
-from tests.lifecycle.machines._gate_matrix import (
-    GateMatrix,
-    matrix_cells,
-    mcp_install_problems,
-    replay_matrix,
-)
+from tests.lifecycle.machines._gate_matrix import GateMatrix, matrix_cells, replay_matrix
 from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
 from tests.lifecycle.receipts import current_node
@@ -198,43 +192,6 @@ def test_gate_matrix_credits_op_prim_gate_cells(
         and any((machine.bench.deploy_root / p).iterdir())
     ]
     assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
-
-
-@pytest.mark.parametrize(
-    ("after", "declared", "locked", "message"),
-    [
-        # A successful no-op: nothing declared, locked or configured.
-        (frozenset({"p-exec-mcp"}), [], [], r"p-registry is not declared"),
-        # Collateral removal of a server the gate still allows.
-        (frozenset({"p-registry"}), ["io.github.lifecycle/p-registry"], ["p-registry"], "removed"),
-        # A server nobody requested.
-        (
-            frozenset({"p-exec-mcp", "p-registry", "rogue"}),
-            ["io.github.lifecycle/p-registry"],
-            ["p-registry"],
-            "configured other servers",
-        ),
-    ],
-)
-def test_mcp_install_oracle_rejects_no_ops_and_collateral(
-    after: frozenset[str], declared: list[str], locked: list[str], message: str
-) -> None:
-    """Negative control of the U7 oracle: each defect fails; the faithful outcome passes."""
-    from apm_cli.deps.lockfile import LockFile
-
-    before = frozenset({"p-exec-mcp"})
-    lock = LockFile(mcp_servers=list(locked))
-    manifest = {"dependencies": {"mcp": declared}}
-    problems = mcp_install_problems(before, after, manifest, lock, before)
-    assert any(re.search(message, problem) for problem in problems), problems
-    faithful = mcp_install_problems(
-        before,
-        before | {"p-registry"},
-        {"dependencies": {"mcp": ["io.github.lifecycle/p-registry"]}},
-        LockFile(mcp_servers=["io.github.lifecycle/p-registry"]),
-        before,
-    )
-    assert faithful == []
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:
