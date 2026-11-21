@@ -217,6 +217,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Package target narrowing.** A package `targets:` list narrows the active targets. Packages declaring `agent-skills` are also accepted by the `grok-bot` target. With an explicit `--target`, the install fails only when no dependency has a compatible target, or when a package named on the command line and its whole subtree have none; other filtered dependencies warn. For targets from `apm.yml`, config, or auto-detect, filtering only warns.
 - **Grok Bot installs.** For a live Grok Bot, use `apm install --target grok-bot --global`. Grok Bot reads skills from `~/agent-data/workflows/`; a project-scope install only lands in `./agent-data/workflows/` under the current folder.
 - **One effective target.** Package primitives, MCP servers, and LSP servers consume one target decision per invocation: `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. A saved target therefore applies to `apm install`, `apm install --mcp`, and later `apm update` runs without another flag.
+- **Narrowed MCP cleanup.** An install narrowed with `--target` adds, updates and removes MCP entries only for the runtimes it names; still-declared servers on other runtimes stay untouched.
 - **Claude LSP discovery.** Project installs write the APM-managed plugin at
   `.claude/skills/apm-lsp/.claude-plugin/plugin.json`; global installs write
   `~/.claude.json`. Existing project-root `.lsp.json` files are preserved for

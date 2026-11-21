@@ -675,6 +675,11 @@ def run_mcp_integration(  # noqa: PLR0913
             if runtime is None and target_decision is not None and target_decision.from_manifest
             else None
         )
+        # A run narrowed by --target leaves every other runtime's entries alone
+        # while they stay declared and admitted there (#4562).
+        flag_narrowed = (
+            runtime is None and target_decision is not None and target_decision.from_flag
+        )
         retired_by_target: builtins.dict[str, builtins.set] = {}
         retained_names: builtins.set = builtins.set()
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
@@ -689,9 +694,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 continue
             # A runtime this run does not select keeps the servers that name it,
             # and the servers a local bundle wired there (#3955).
-            kept = builtins.set(owned) & (
-                mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned
-            )
+            admitted = mcp_servers_for_runtime(mcp_deps, owned_target, named_only=not flag_narrowed)
+            kept = builtins.set(owned) & (admitted | bundle_owned)
             if manifest_runtimes is not None and owned_target not in manifest_runtimes:
                 kept = builtins.set()
             if kept:
