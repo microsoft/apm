@@ -182,6 +182,7 @@ def _assert_worker_v(deployed: Path, marker: str) -> None:
     )
 
 
+@pytest.mark.lifecycle_smoke
 def test_gemini_agent_project_lifecycle(tmp_path: Path, apm_binary_path: Path) -> None:
     world = _world(tmp_path, apm_binary_path, "fixture-gemini-agent-project")
     project = LocalPackageFactory(world.isolated.work_root).create(
