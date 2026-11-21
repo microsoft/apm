@@ -7,37 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-23
+
+### Highlights
+
+- Root `apm.yml` `marketplaces:` map, guarded by the new `marketplace.allow` policy. (#4006)
+- `apm install <bundle>` renders bundle agents for Codex. (#4007)
+- Private hosted marketplace catalogs authenticate by name, and opt-in `APM_STRICT_HOST_CREDENTIALS` pins GitHub tokens to their host. (#4020, #4615)
+- Upgrade note: non-dotted IPv4 `http://` registry hosts no longer count as private. (#4521)
+
+### Breaking changes and upgrade notes
+
+- `http://` registry URLs with an integer, hex or leading-zero IPv4 host (`http://167772161/apm`) are no longer private; use `http://10.0.0.1/apm` or set `insecure: true`. (#4521)
+
 ### Added
 
 - `APM_STRICT_HOST_CREDENTIALS=1` keeps GitHub token variables on the configured host; other `github.com` and `*.ghe.com` hosts need their own sign-in. (closes #4324, #4615)
 - Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
-
-### Added
-
-- The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, now verified end to end against the Registry HTTP API on every PR. (#4015)
-- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/` instead of skipping them; agents Codex cannot load (empty description or body) are skipped with a warning, and other targets still copy bundle files. (closes #3714, #4007)
-- The CLI reference lists every deprecation with its replacement, the version that deprecated it and its removal horizon; warning text is unchanged. (closes #4019, #4035)
-- Private hosted `marketplace.json` catalogs registered with `--name` authenticate with `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_`/`PASS_<NAME>` (Basic). (closes #3300, #4020)
+- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/`; agents with an empty description or body are skipped with a warning. (closes #3714, #4007)
+- Private hosted `marketplace.json` catalogs added with `--name` authenticate via `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_<NAME>` and `APM_MARKETPLACE_PASS_<NAME>` (Basic). (closes #3300, #4020)
+- The CLI reference lists every deprecation with its replacement, deprecating version and removal horizon; warning text is unchanged. (closes #4019, #4035)
+- The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, verified end to end on every PR. (#4015)
 
 ### Changed
 
-- OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
-- An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
+- OpenAPM native plugin activation profile Part C records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 
 ### Fixed
 
-- `apm outdated` keys its per-run ref listing on the host type and resolved provider, so dependencies on one host and path with different providers each resolve their own listing. (closes #4560, #4622)
-- A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
-- `apm install` (including `--frozen`) replays a registry package after its registry moves, fetching from the configured registry when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
+- `apm install` (including `--frozen`) replays a registry package from its new registry URL when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
+- The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs change no bytes. (closes #4572, #4597)
+- `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4620)
+- `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content. (closes #4556, #4580)
+- `apm audit --ci` and `apm install` accept required packages declared as explicit registry-proxy URLs (`<proxy-host>/owner/repo`) under `required-packages-deployed`. (closes #4037, #4067)
+- `apm outdated` lists refs separately for dependencies that share a host and path but use different providers. (closes #4560, #4622)
 - Git credential-helper tokens up to 16384 characters, such as enterprise IdP tokens from Git Credential Manager, now authenticate instead of failing as "no credential". (closes #4391, #4587)
-- `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
-- `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content, so restores keep tracked files clean. (closes #4556, #4580)
-- The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
-- `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
+- A rebound marketplace refusal under `apm install -g` prints runnable re-record steps instead of telling you to restore `~/.apm/apm.lock.yaml` from version control. (#4555)
+- `apm runtime setup codex` retries transient GitHub API failures instead of failing on the first one. (#4573)
 
 ### Security
 
-- A dispatched nightly lifecycle run tests only a commit on `main` or a `release/*` branch and refuses any other `ref` before checkout. (closes #4551, #4563)
 - Release CI refuses to publish a `v*` tag whose commit is not on `main` or a `release/*` branch, and fails closed when it cannot check. (closes #3778, #4568)
 
 ## [0.37.0] - 2026-11-21
