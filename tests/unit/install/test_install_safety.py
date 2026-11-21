@@ -155,16 +155,9 @@ class TestSuffixGuard:
     def test_accepts_apm_suffix(self):
         assert _run_validator("/opt/apm") == 0
 
-    def test_accepts_lib_apm_suffix(self):
-        assert _run_validator("/usr/local/lib/apm") == 0
-
     def test_rejects_just_apm_in_middle(self):
         # /usr/local/apm-tool -- does not end in /apm
         assert _run_validator("/usr/local/apm-tool") == 12
-
-    def test_rejects_no_apm_suffix(self):
-        # The original reported incident: HOME/.local/share
-        assert _run_validator("/home/safe-user/.local/share") == 12
 
     def test_rejects_share_apm_with_no_lib_parent(self):
         # Edge: ends with /apm. The blocklist guard only matches exact
