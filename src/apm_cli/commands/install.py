@@ -1841,21 +1841,13 @@ def _install_apm_packages(ctx, outcome):
             ctx.allow_insecure,
             logger,
         )
+        from apm_cli.install.phases.codex_plugins import report_codex_split_dry_run
         from apm_cli.install.template import preflight_agent_plugin_dry_run
 
         if should_install_apm:
-            preflight_agent_plugin_dry_run(
-                ctx,
-                list(prospective_plan.selected_apm_dependencies),
-                apm_package=apm_package,
-            )
-            from apm_cli.install.phases.codex_plugins import report_codex_split_dry_run
-
-            report_codex_split_dry_run(
-                ctx,
-                list(prospective_plan.selected_apm_dependencies),
-                apm_package=apm_package,
-            )
+            selected = list(prospective_plan.selected_apm_dependencies)
+            preflight_agent_plugin_dry_run(ctx, selected, apm_package=apm_package)
+            report_codex_split_dry_run(ctx, selected, apm_package=apm_package)
         if preview is None:
             from apm_cli.install.pipeline_entry import preview_declared_policy
 
