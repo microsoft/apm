@@ -1,0 +1,16 @@
+{
+  "issue": 3035,
+  "summary": "Dry-run and transitive preview assertions are outside supported replay steps.",
+  "failure_modes": [
+    "observation",
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_cached_remote_preview_preserves_resolution_intent",
+    "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_cold_transitive_native_preview_does_not_create_configuration",
+    "tests/integration/test_install_dry_run_transitive_lifecycle.py::test_transitive_preview_matches_install_without_mutation"
+  ]
+}

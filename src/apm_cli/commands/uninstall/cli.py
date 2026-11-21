@@ -54,12 +54,17 @@ from .engine import (
     _project_transitive_orphans,
     _remove_packages_from_disk,
     _removed_lock_key,
-    _shrink_surviving_selections,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
     _validate_uninstall_packages,
     gate_retired_hook_survivors,
     manifest_dependency_entries,
+    project_shrunk_selections,
+)
+from .selection_shrink import (
+    _shrink_surviving_selections,
+    shrink_path_split,
+    shrink_retired_paths,
 )
 
 
@@ -531,9 +536,12 @@ def _abort_if_retained_target_cleanup_paths(
 
 
 def _uninstall_deletion_evidence(
-    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool
+    lockfile, lockfile_path, deploy_root, cleanup_keys, logger, *, user_scope: bool, shrunk=None
 ):
-    """Collect deletion evidence and render it before package sources go (#3701)."""
+    """Collect deletion evidence and render it before package sources go (#3701).
+
+    Files a shrinking survivor selection retires are prepared too (#4313).
+    """
     from ...integration.cleanup import DeploymentEvidence
 
     evidence = DeploymentEvidence.collect(
@@ -547,10 +555,15 @@ def _uninstall_deletion_evidence(
     )
     if lockfile:
         evidence.prepare(
-            path
-            for key in cleanup_keys
-            if key in lockfile.dependencies
-            for path in lockfile.dependencies[key].deployed_files
+            [
+                *(
+                    path
+                    for key in cleanup_keys
+                    if key in lockfile.dependencies
+                    for path in lockfile.dependencies[key].deployed_files
+                ),
+                *sorted(shrink_retired_paths(lockfile, shrunk or {})),
+            ]
         )
     return evidence
 
@@ -565,14 +578,17 @@ def _refuse_uninstall_without_evidence(
     logger: CommandLogger,
     *,
     user_scope: bool,
+    shrunk=None,
 ) -> None:
     """Refuse before any change when a file uninstall would delete lacks evidence.
 
     A lockfile hash alone never authorizes deleting a deployed file
     (req-lk-024, #3701). Checked before package sources, apm.yml or
     apm.lock.yaml change, so a refusal leaves all of them as they were.
+    Files a shrinking survivor selection (*shrunk*) retires count too (#4313).
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
     if not lockfile or not cleanup_keys:
@@ -584,7 +600,20 @@ def _refuse_uninstall_without_evidence(
         DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
     )
     candidates = (selected | builtins.set(selected_hashes)) - survivors
-    candidates -= builtins.set(survivor_hashes) | builtins.set(lockfile.local_deployed_files)
+    candidates -= builtins.set(survivor_hashes)
+    if shrunk:
+        others, other_hashes = _collect_deployed_cleanup_state(
+            lockfile,
+            DeploymentLedgerCodec.valid_owner_keys(
+                lockfile, excluded_dependency_keys=cleanup_keys | builtins.set(shrunk)
+            ),
+        )
+        retired, retained = shrink_path_split(lockfile, shrunk)
+        retired = BaseIntegrator.normalize_managed_files(retired) or builtins.set()
+        # A path another shrinking survivor keeps deploying is not deleted.
+        retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
+        candidates |= retired - others - builtins.set(other_hashes) - retained
+    candidates -= builtins.set(lockfile.local_deployed_files)
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
     if not refused:
@@ -600,6 +629,48 @@ def _refuse_uninstall_without_evidence(
     for remedy in uninstall_evidence_remedies(user_scope=user_scope):
         logger.error(remedy)
     sys.exit(1)
+
+
+def _uninstall_evidence_preflight(
+    lockfile,
+    lockfile_path,
+    deploy_root,
+    cleanup_keys,
+    preserved_values,
+    staged_refreshes,
+    removal,
+    logger: CommandLogger,
+    *,
+    user_scope: bool,
+):
+    """Collect deletion evidence, then refuse before any change when it is missing.
+
+    *removal* is ``(packages_to_remove, modules_dir, apm_yml_path)``; survivor
+    selections the uninstall shrinks retire files too (#4313).
+    """
+    packages_to_remove, modules_dir, apm_yml_path = removal
+    shrunk = project_shrunk_selections(lockfile, packages_to_remove, modules_dir, apm_yml_path)
+    evidence = _uninstall_deletion_evidence(
+        lockfile,
+        lockfile_path,
+        deploy_root,
+        cleanup_keys,
+        logger,
+        user_scope=user_scope,
+        shrunk=shrunk,
+    )
+    _refuse_uninstall_without_evidence(
+        evidence,
+        lockfile,
+        cleanup_keys,
+        preserved_values,
+        staged_refreshes,
+        modules_dir,
+        logger,
+        user_scope=user_scope,
+        shrunk=shrunk,
+    )
+    return evidence
 
 
 def _report_package_removal_failure(
@@ -1042,21 +1113,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Deletion evidence (#3701): receipts, or the locked render, which is
         # materialized here while the removed packages' sources still exist.
-        deletion_evidence = _uninstall_deletion_evidence(
+        deletion_evidence = _uninstall_evidence_preflight(
             lockfile,
             lockfile_path,
             deploy_root,
             removed_keys | builtins.set(projected_orphans) | profile_keys,
-            logger,
-            user_scope=scope is InstallScope.USER,
-        )
-        _refuse_uninstall_without_evidence(
-            deletion_evidence,
-            lockfile,
-            removed_keys | builtins.set(projected_orphans) | profile_keys,
             profile_survivors,
             staged_local_refreshes,
-            modules_dir,
+            (packages_to_remove, modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
         )

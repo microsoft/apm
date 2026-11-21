@@ -1,7 +1,7 @@
 """An org policy discovered by the installed CLI decides what install writes.
 
 PROMISE: transaction.failed_command_preserves_state and
-outcome.status_matches_state (tests/fixtures/lifecycle_bug_ledger.json) for
+outcome.status_matches_state (tests/fixtures/lifecycle_bug_ledger/) for
 install-time org policy enforcement (#827, #4081); owners
 policy-remote-origin-reader and policy-violation-subjects
 (.apm/architecture/owners/install-deployment.json).

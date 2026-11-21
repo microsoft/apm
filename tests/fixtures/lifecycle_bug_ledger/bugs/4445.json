@@ -1,0 +1,15 @@
+{
+  "issue": 4445,
+  "fixed_in": "Unreleased",
+  "summary": "apm update and apm update --yes exit 1 and name the denied dependency and the policy reason when org policy denies an installed native Claude plugin, matching apm install, instead of exiting 0.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_plugin_retirement_lifecycle.py::test_update_refuses_a_native_plugin_the_org_policy_denies",
+    "tests/lifecycle/security/test_gate_removal.py::test_gate_change_removes_on_the_next_mutating_command"
+  ]
+}

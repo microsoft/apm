@@ -4,7 +4,7 @@ PROMISE: P-OWN-locked-copy-validity -- an existing apm_modules copy is reused
 only when it holds its locked content; a stale copy is replaced, never
 deployed (source: drift.py locked_copy_proof, install/cache_pin.py).
 PROMISE: P-LAW-source.ref_cache_coherent -- what a cache serves equals what
-the lock pins (source: tests/fixtures/lifecycle_bug_ledger.json).
+the lock pins (source: tests/fixtures/lifecycle_bug_ledger/).
 PROMISE: P-OWN-ci-audit-scratch-materialization -- ``audit --ci`` decides
 from the lock and the deployed files without writing the workspace
 (source: install/audit_replay.py).

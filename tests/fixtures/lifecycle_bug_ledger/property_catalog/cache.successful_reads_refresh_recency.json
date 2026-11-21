@@ -1,0 +1,6 @@
+{
+  "id": "cache.successful_reads_refresh_recency",
+  "phase": 0,
+  "oracle_tier": "outcome",
+  "law": "Successful fresh HTTP cache reads protect entries from eviction without extending response TTL or causing a refetch."
+}

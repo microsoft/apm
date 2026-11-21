@@ -47,6 +47,7 @@ _INSTALL = "src/apm_cli/commands/install.py"
 _APPROVE = "src/apm_cli/commands/approve.py"
 _COMPILE = "src/apm_cli/commands/compile/cli.py"
 _PACK = "src/apm_cli/commands/pack.py"
+_MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 
 # -- U1: the modifiers each command accepts -----------------------------------
 
@@ -58,7 +59,8 @@ ACCEPTS: Mapping[str, frozenset[str]] = {
     "compile": frozenset({"DRYRUN", "SELECT"}),
     "lock": frozenset({"SELECT", "UPDATE", "NOPOLICY"}),
     "pack": frozenset({"DRYRUN", "FORCE", "SELECT"}),
-    "bundle-install": frozenset({"DRYRUN", "FORCE", "SELECT", "UPDATE", "NOPOLICY"}),
+    # --update is rejected with a local bundle (install.py rejected_flags; exit 2).
+    "bundle-install": frozenset({"DRYRUN", "FORCE", "SELECT", "NOPOLICY"}),
     # install --mcp accepts --target: mcp-install x SELECT is a success cell
     # (tests/integration/test_copilot_root_mcp_json_lifecycle.py).
     "mcp-install": frozenset({"DRYRUN", "FORCE", "SELECT", "NOPOLICY"}),
@@ -83,8 +85,8 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 710, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 791, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 853, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 855, '"--dry-run"'),
     ),
     "prune": (
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
@@ -128,8 +130,13 @@ REFUSAL_EVIDENCE: Mapping[tuple[str, ...], Ev] = {
     ("mcp-install", "UPDATE"): Ev(
         "src/apm_cli/install/mcp/conflicts.py", 91, "--update does not apply to --mcp"
     ),
+    ("bundle-install", "UPDATE"): Ev(_INSTALL, 1299, '"--update": update'),
     # Verified on the real CLI: exit 2 at project and user scope, lock unchanged.
     ("install", "FROZEN", "UPDATE"): Ev(_INSTALL, 1210, "--frozen and --update are mutually"),
+}
+# Refusal cells whose message the covering replay pins (a regex over the output).
+REFUSAL_MESSAGES: Mapping[tuple[str, ...], str] = {
+    ("bundle-install", "UPDATE"): r"not valid with a local bundle install",
 }
 # Commands with a user-scope form; any other command refuses -g (U5 for pack).
 USER_SCOPE_OPS = frozenset(
@@ -147,7 +154,7 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 861, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
@@ -240,6 +247,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
         (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
+    "U-FIRST-PARTY-MCP": (
+        "an MCP server the project declares in its own apm.yml is first-party: the "
+        "executables gate governs servers from dependencies and never parks it, so every "
+        "executable-gate level of an MCP source is one must-cover cell that witnesses it "
+        "(an org policy dependency deny still applies)",
+        (
+            Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
+            Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
+            Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
+            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -324,8 +343,12 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
 # the fixed output matches). The cell is known-failing until that output appears.
 RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
+# U-FIRST-PARTY-MCP: the one cell every executable-gate level of an MCP source maps to.
+FIRST_PARTY_MCP_CELL = "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated"
+
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
+    FIRST_PARTY_MCP_CELL: "U-FIRST-PARTY-MCP",
     "rule|U9|approve-list-read-only": "U9",
     "rule|U9|approve-pending-read-only": "U9",
     "rule|U10|compile-validate-reads-mcp": "U10",
@@ -335,6 +358,7 @@ RULE_CELLS: Mapping[str, str] = {
 # Rule cells whose evidence is a state fact (nothing written).
 STATE_FACT_RULE_CELLS = frozenset(
     {
+        FIRST_PARTY_MCP_CELL,
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
         "rule|U10|compile-render-only-non-mutation",
@@ -393,6 +417,9 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
     return None
 
 
+_BUNDLE = "bundle-install"
+
+
 def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
     """Where U8 sends a source the command parses: the same command, or its refusal."""
     op, src = cell.get("OP"), cell.get("SRC")
@@ -404,6 +431,20 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
         return UNINSTALL_MCP_REFUSALS[src]
     if src == "local-bundle" and op in LOCAL_BUNDLE_REFUSALS:
         return LOCAL_BUNDLE_REFUSALS[op]
+    if src == "local-bundle" and op is None:
+        # Only an install states a local bundle; a modifier it refuses names that refusal.
+        if any(name in cell and name not in ACCEPTS[_BUNDLE] for name in MODIFIERS):
+            return {**cell, "OP": _BUNDLE}
+    return None
+
+
+def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
+    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP."""
+    target = _u8_target(cell)
+    if target is not None:
+        return target, "U8"
+    if cell.get("SRC") in MCP_SOURCES and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+        return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
     return None
 
 
@@ -417,9 +458,9 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if any(name in cell for name in EXCEPTION_FACTORS):
         return None
     op, prim, gate = cell.get("OP"), cell.get("PRIM"), cell.get("GATE")
-    source_target = _u8_target(cell)
-    if source_target is not None:
-        return source_target, "U8"
+    source = _source_mapping(cell)
+    if source is not None:
+        return source
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None
