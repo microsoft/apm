@@ -237,9 +237,14 @@ def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
 
 # Rows whose step is a strict known cell (none: #4636 is fixed).
 KNOWN_ROWS: dict[tuple[str, str], dict[str, Known]] = {}
-# pack refuses local-path dependencies (both exporters), so a pack row is a
-# refusal, never a success witness: its rows credit nothing.
-UNCREDITED_ROWS = {*KNOWN_ROWS, *(("pack", tgt) for tgt in TARGET_HISTORIES)}
+# Refusals, never success witnesses, so their rows credit nothing: pack refuses
+# local-path dependencies (both exporters), and audit --ci fails while the lock
+# still records the targets declared before the change.
+_REFUSING_ROWS = ("pack", "audit")
+UNCREDITED_ROWS = {
+    *KNOWN_ROWS,
+    *((row, tgt) for row in _REFUSING_ROWS for tgt in TARGET_HISTORIES),
+}
 
 
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
