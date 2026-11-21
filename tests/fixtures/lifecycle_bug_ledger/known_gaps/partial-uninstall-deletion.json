@@ -1,0 +1,9 @@
+{
+  "id": "partial-uninstall-deletion",
+  "summary": "A recursive deletion failure can leave earlier packages or some files removed; declarations and lock ownership remain available for retry.",
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "bounded_by": "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
+  "next_decision": "Filesystem rollback is not guaranteed; retry uninstall after resolving the error or reinstall declared packages."
+}

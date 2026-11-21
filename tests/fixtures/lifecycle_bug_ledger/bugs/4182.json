@@ -1,0 +1,15 @@
+{
+  "issue": 4182,
+  "fixed_in": "0.37.0",
+  "summary": "A command frontmatter key the target format cannot carry (for example mode: for Claude commands) is a verbose note on install and install --frozen, never a [!] warning.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_command_frontmatter_note_lifecycle.py::test_dropped_command_key_is_a_verbose_note"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 3753,
+  "fixed_in": "0.36.1",
+  "summary": "When the Azure CLI failed to issue a token, the error claimed Azure DevOps rejected a bearer token and dropped the Azure CLI's own reason.",
+  "failure_modes": [
+    "auth",
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_azure_cli_failure_diagnostic_lifecycle.py::test_azure_cli_token_failure_reports_aadsts_cause_not_a_rejected_token",
+    "tests/integration/test_azure_cli_failure_diagnostic_lifecycle.py::test_azure_cli_failure_verbose_keeps_bearer_token_phrase_readable"
+  ]
+}

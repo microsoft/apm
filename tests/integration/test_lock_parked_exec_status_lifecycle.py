@@ -3,7 +3,7 @@
 PROMISE: idempotency.byte_stable (I2) -- on a converged project ``apm lock``
 and ``apm install`` repeat as byte no-ops; the ``exec_status`` that install
 records for a package whose executables are parked pending approval survives
-``apm lock`` (source: tests/fixtures/lifecycle_bug_ledger.json
+``apm lock`` (source: tests/fixtures/lifecycle_bug_ledger/
 property_catalog; issue #4213).
 CELL: OP=lock SRC=local PRIM={hook,lsp,mcp} SCOPE=project TGT=copilot
 GATE=pending-approval LOCK=converged

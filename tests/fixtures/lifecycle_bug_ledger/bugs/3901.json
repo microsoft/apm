@@ -1,0 +1,14 @@
+{
+  "issue": 3901,
+  "summary": "External APM_HOME and global audit exercise user scope.",
+  "failure_modes": [
+    "ownership",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_global_audit_external_apm_home_lifecycle.py::test_global_install_then_audit_passes_with_apm_home_location"
+  ]
+}

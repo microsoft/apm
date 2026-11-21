@@ -1,0 +1,22 @@
+{
+  "issue": 4229,
+  "fixed_in": "Unreleased",
+  "summary": "After a checkout or worktree switch, install refused or kept a deployed skill whose bytes equal its link-rewritten render, because a receipt written under another checkout's lock still decided the baseline.",
+  "failure_modes": [
+    "ownership",
+    "outcome",
+    "idempotency"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_back_adopts_committed_link_rewritten_skill",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_new_worktree_adopts_committed_link_rewritten_skill",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_pulled_lock_over_gitignored_output_installs",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_restored_member_adopts_its_render",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs"
+  ]
+}

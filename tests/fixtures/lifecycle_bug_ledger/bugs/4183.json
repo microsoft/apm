@@ -1,0 +1,17 @@
+{
+  "issue": 4183,
+  "fixed_in": "0.37.0",
+  "summary": "apm install warns about unpinned dependencies the user's apm.yml declares, with the exact pin; a transitive one is a verbose note naming the declaring package, and a converged run repeats no notice.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_unpinned_hint_lifecycle.py::test_unpinned_transitive_hint_names_a_working_pin",
+    "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_transitive_unpinned_is_verbose_only_and_names_its_parent",
+    "tests/unit/install/test_finalize_phase.py::TestFinalizeUnpinnedWarning::test_converged_run_repeats_no_unpinned_notice"
+  ]
+}

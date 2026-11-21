@@ -1,0 +1,16 @@
+{
+  "issue": 4600,
+  "fixed_in": "Unreleased",
+  "summary": "apm marketplace list on a HOME with no registered marketplace created ~/.apm/marketplaces.json; reads of the marketplace registry now treat a missing file as empty and only a registration change (add, remove, manifest sync) creates it, and listing an existing registry leaves its bytes unchanged.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/test_marketplace_registry_reads.py::test_marketplace_list_never_creates_or_rewrites_the_registry",
+    "tests/unit/marketplace/test_marketplace_registry.py::TestRegistryBasicOps::test_reads_never_create_the_registry"
+  ]
+}

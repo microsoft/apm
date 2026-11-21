@@ -535,9 +535,9 @@ other user-facing strings. The CLI accepts both forms on input. Persist flag
 state only in `~/.apm/config.json` through `update_config`.
 
 When a flag graduates to the default, remove its gate and `FLAGS` entry in the
-same PR. Add one `CHANGELOG.md` line: under `Changed`, or, if users must act
-because the previous default differed, only under `Breaking changes and upgrade
-notes` with the migration.
+same PR. Add one changelog fragment: `changelog.d/<pr>.changed.md`, or, if users
+must act because the previous default differed, only
+`changelog.d/<pr>.breaking-changes-and-upgrade-notes.md` with the migration.
 
 ## Adding or changing a normative requirement (OpenAPM v0.1)
 

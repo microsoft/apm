@@ -1,0 +1,15 @@
+{
+  "issue": 4210,
+  "fixed_in": "0.37.0",
+  "summary": "apm targets reported a blank or folder-signal source for targets declared in apm.yml although resolution took them from the manifest.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_init_reinit_targets_lifecycle.py::test_targets_reports_apm_yml_as_source_of_declared_targets"
+  ]
+}
