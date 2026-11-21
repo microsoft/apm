@@ -2,18 +2,21 @@
 #
 # ci.yml (Tier 1: Lint, unit shards, Coverage Combine, the Windows gate,
 # APM Self-Check, every Lifecycle Smoke shard, the ratchets) triggers only on
-# pull_request and merge_group, so a red that reaches main outside the queue
-# went unseen. This workflow calls ci.yml unchanged through workflow_call on
-# main's head, and `main-push-gate` fails the run when any Tier 1 job fails,
-# so main is visibly red. It is NOT a required check; the ruleset still
-# requires only `gate`.
+# pull_request and merge_group, and ci-integration.yml (Tier 2: every
+# Integration Tests shard, network, release validation) only on merge_group
+# and dispatch, so a red that reaches main outside the queue went unseen.
+# This workflow calls both unchanged through workflow_call on main's head
+# (Tier 2 with `secrets: inherit`), and `main-push-gate` fails the run when
+# any tier job fails, so main is visibly red. It is NOT a required check;
+# the ruleset still requires only `gate`.
 #
 # Base: the push's `before` SHA, else HEAD^1 (first push, dispatch).
 #
-# Caches: ci.yml's setup-uv steps are restore-only outside pull_request and
-# merge_group, so this workflow adds no cache save to the default-branch
-# scope. tests/quality/test_ci_topology.py pins triggers, coverage, the
-# aggregate, concurrency and the no-cache-save rule.
+# Caches: the called setup-uv steps are restore-only outside pull_request
+# and merge_group, and ci-integration.yml saves its APM fetch cache on no
+# push, so this workflow adds no cache save to the default-branch scope.
+# tests/quality/test_ci_topology.py pins triggers, coverage, the aggregate,
+# concurrency and the no-cache-save rule.
 name: Main Push Gate
 
 on:
@@ -72,21 +75,33 @@ jobs:
     with:
       base_sha: ${{ needs.base.outputs.base_sha }}
 
+  tier2:
+    name: tier2
+    needs: [base]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci-integration.yml
+    with:
+      base_sha: ${{ needs.base.outputs.base_sha }}
+    secrets: inherit
+
   main-push-gate:
     name: main-push-gate
-    needs: [base, tier1]
+    needs: [base, tier1, tier2]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
-    - name: Require every Tier 1 job
+    - name: Require every Tier 1 and Tier 2 job
       env:
         BASE_RESULT: ${{ needs.base.result }}
         TIER1_RESULT: ${{ needs.tier1.result }}
+        TIER2_RESULT: ${{ needs.tier2.result }}
       run: |
-        if [ "$BASE_RESULT" != success ] || [ "$TIER1_RESULT" != success ]; then
-          echo "::error::Main is red: base=$BASE_RESULT tier1=$TIER1_RESULT. Open the tier1 jobs of this run."
+        if [ "$BASE_RESULT" != success ] || [ "$TIER1_RESULT" != success ] || [ "$TIER2_RESULT" != success ]; then
+          echo "::error::Main is red: base=$BASE_RESULT tier1=$TIER1_RESULT tier2=$TIER2_RESULT. Open the failed tier jobs of this run."
           exit 1
         fi
-        echo "Tier 1 is green on main."
+        echo "Tier 1 and Tier 2 are green on main."

@@ -3950,15 +3950,18 @@ def test_lint_chain_owner_drift_fails(mutation: str) -> None:
         _assert_lint_chain_single_owner(ci, train)
 
 
-# Main push gate (S28): every push to main runs ci.yml's Tier 1 suite through
-# workflow_call, and one aggregate fails the run when any Tier 1 job fails. It
-# must add no cache save to the default-branch scope.
+# Main push gate (S28): every push to main runs ci.yml (Tier 1) and
+# ci-integration.yml (Tier 2) through workflow_call, and one aggregate fails the
+# run when any tier job fails. It must add no cache save to the default-branch
+# scope.
 MAIN_PUSH_GATE_WORKFLOW = "main-push-gate.yml"
 MAIN_PUSH_GATE_JOB = "main-push-gate"
-MAIN_PUSH_GATE_STEP = "Require every Tier 1 job"
-MAIN_PUSH_CALLEES = {"tier1": "ci.yml"}
+MAIN_PUSH_GATE_STEP = "Require every Tier 1 and Tier 2 job"
+MAIN_PUSH_CALLEES = {"tier1": "ci.yml", "tier2": "ci-integration.yml"}
 MAIN_PUSH_BASE = "${{ needs.base.outputs.base_sha }}"
 _NO_SAVE_VALUES = (False, "false", UV_SAVE_ON_PR_ONLY)
+# A cache save step that never runs on push (main-push-gate and merge-train).
+CACHE_SAVE_OFF_PUSH = "github.event_name != 'push'"
 
 
 def _main_push_workflows() -> dict[str, WorkflowNode]:
@@ -3966,7 +3969,7 @@ def _main_push_workflows() -> dict[str, WorkflowNode]:
 
 
 def _assert_main_push_gate(workflows: dict[str, WorkflowNode]) -> None:
-    """Every push to main runs every ci.yml job and one aggregate turns main red."""
+    """Every push to main runs every Tier 1 and Tier 2 job and one aggregate turns main red."""
     caller = workflows[MAIN_PUSH_GATE_WORKFLOW]
     triggers = caller["on"]
     assert set(triggers) == {"push", "workflow_dispatch"}, sorted(triggers)
@@ -4000,6 +4003,7 @@ def _assert_main_push_gate(workflows: dict[str, WorkflowNode]) -> None:
         if job_id.startswith("lifecycle-smoke-shard-")
     ]
     assert lifecycle_shards, "the main push gate must cover the Lifecycle Smoke shards"
+    assert MERGE_GROUP_INTEGRATION_JOB in workflows["ci-integration.yml"]["jobs"]
     gate = workflow_job(caller, MAIN_PUSH_GATE_JOB)
     assert gate["name"] == MAIN_PUSH_GATE_JOB and gate["if"] == "always()"
     assert "continue-on-error" not in gate
@@ -4035,8 +4039,11 @@ def _saves_cache(step: WorkflowNode) -> bool:
     """Would this step save a cache on a push? Restore-only and disabled steps do not."""
     uses = str(step.get("uses", "")).partition("@")[0]
     with_block = step.get("with") or {}
-    if uses in ("actions/cache", "actions/cache/save"):
+    if uses == "actions/cache":
         return True
+    if uses == "actions/cache/save":
+        condition = _job_condition(step)
+        return CACHE_SAVE_OFF_PUSH not in condition or "||" in condition
     if uses == "astral-sh/setup-uv":
         return with_block.get("enable-cache") is not False and (
             with_block.get("save-cache") not in _NO_SAVE_VALUES
@@ -4070,6 +4077,7 @@ def test_main_push_gate_runs_every_tier1_job() -> None:
         "skip-lifecycle-shard",
         "gate-tier1",
         "dispatch-input",
+        "drop-tier2",
     ],
 )
 def test_main_push_gate_drift_fails(mutation: str) -> None:
@@ -4092,6 +4100,9 @@ def test_main_push_gate_drift_fails(mutation: str) -> None:
         )
     elif mutation == "gate-tier1":
         caller["jobs"]["tier1"]["if"] = "github.event_name == 'workflow_dispatch'"
+    elif mutation == "drop-tier2":
+        del caller["jobs"]["tier2"]
+        gate["needs"].remove("tier2")
     else:
         caller["on"]["workflow_dispatch"] = {"inputs": {"ref": {"type": "string"}}}
     with pytest.raises(AssertionError):
@@ -4101,14 +4112,31 @@ def test_main_push_gate_drift_fails(mutation: str) -> None:
 def test_main_push_adds_no_default_branch_cache_save() -> None:
     steps = _main_push_reachable_steps(_main_push_workflows())
     assert any(owner.startswith("ci.yml:lifecycle-smoke-shard-") for owner in steps)
+    assert f"ci-integration.yml:{MERGE_GROUP_INTEGRATION_JOB}" in steps
     assert _cache_saving_steps(steps) == []
 
 
-@pytest.mark.parametrize("mutation", ["uv-save", "actions-cache", "python-cache", "node-cache"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "uv-save",
+        "actions-cache",
+        "python-cache",
+        "node-cache",
+        "integration-save-on-push",
+        "integration-uv-save",
+    ],
+)
 def test_main_push_cache_save_fails(mutation: str) -> None:
     workflows = _main_push_workflows()
     shard = workflows["ci.yml"]["jobs"]["lifecycle-smoke-shard-4"]
-    if mutation == "uv-save":
+    integration = workflows["ci-integration.yml"]["jobs"][MERGE_GROUP_INTEGRATION_JOB]
+    if mutation == "integration-save-on-push":
+        save = workflow_step(integration, "Save APM resolved git/HTTP fetches")
+        save["if"] = "success() && steps.apm-cache.outputs.cache-hit != 'true'"
+    elif mutation == "integration-uv-save":
+        del workflow_step(integration, "Install uv")["with"]["save-cache"]
+    elif mutation == "uv-save":
         del workflow_step(shard, "Install uv")["with"]["save-cache"]
     elif mutation == "actions-cache":
         shard["steps"] = [
