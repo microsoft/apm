@@ -38,8 +38,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import os
-import shutil
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +48,7 @@ from apm_cli.core.remediation import (
     UNINSTALL_EVIDENCE_REINSTALL,
     UNINSTALL_EVIDENCE_REMOVE,
 )
+from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -439,7 +438,7 @@ def _render_locked(
         include_recorded_targets=True,
     )
     try:
-        snapshot.parent.mkdir()
+        snapshot.parent.mkdir()  # write-seam-exempt: private scratch tree
         from apm_cli.deps.lockfile_write_authority import lockfile_scratch_writes
 
         with lockfile_scratch_writes():
@@ -610,7 +609,7 @@ def _safe_remove_skill_directory(
 
     if not remaining:
         try:
-            skill_dir.rmdir()
+            write_seam.rmdir(skill_dir)
             result.deleted.append(rel_path)
             result.deleted_targets.append(skill_dir)
             result.deleted_directories.append(rel_path)
@@ -678,7 +677,7 @@ def _safe_remove_skill_directory(
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
     try:
-        shutil.rmtree(skill_dir)
+        write_seam.rmtree(skill_dir)
         result.deleted.append(rel_path)
         result.deleted_targets.append(skill_dir)
         result.deleted_directories.append(rel_path)
@@ -931,7 +930,7 @@ def remove_stale_deployed_files(
         live_alias = live_index.alias(stale_path, project_root)
         if live_alias is not None:
             try:
-                os.rename(stale_target, project_root / live_alias)
+                write_seam.rename(stale_target, project_root / live_alias)
                 result.aliased.append(stale_path)
                 absent_targets.append(stale_target)
             except OSError as exc:
@@ -991,7 +990,7 @@ def remove_stale_deployed_files(
 
         # All gates passed -- safe to delete.
         try:
-            stale_target.unlink()
+            write_seam.unlink(stale_target)
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
         except Exception as exc:

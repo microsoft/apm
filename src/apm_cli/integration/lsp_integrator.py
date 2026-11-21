@@ -18,13 +18,15 @@ from typing import TYPE_CHECKING
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, LockfileRefusal, get_lockfile_path
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
+from apm_cli.integration import write_seam
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
 )
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
+from apm_cli.utils.atomic_io import umask_file_mode
 from apm_cli.utils.path_security import PathTraversalError
 
 if TYPE_CHECKING:
@@ -806,7 +808,7 @@ class LSPIntegrator:
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
-        prepared.path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(prepared.path.parent, parents=True, exist_ok=True)
         LSPIntegrator._atomic_write_config(
             prepared.path, prepared.content, owner_only=prepared.owner_only
         )
@@ -897,10 +899,10 @@ class LSPIntegrator:
             if servers_key is not None:
                 owned_keys.add(servers_key)
             if not servers and owned_keys and set(config) <= owned_keys:
-                config_path.unlink()
+                write_seam.unlink(config_path)
                 for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
                     try:
-                        directory.rmdir()
+                        write_seam.rmdir(directory)
                     except OSError:
                         break
             else:

@@ -262,10 +262,10 @@ class LockedSkillSources:
 
     def close(self) -> None:
         """Remove the private scratch directory."""
-        from apm_cli.utils.file_ops import robust_rmtree
+        from apm_cli.utils.file_ops import robust_rmtree  # write-seam-exempt: scratch
 
         if self._scratch is not None:
-            robust_rmtree(self._scratch, ignore_errors=True)
+            robust_rmtree(self._scratch, ignore_errors=True)  # write-seam-exempt: scratch
             self._scratch = None
 
 

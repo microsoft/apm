@@ -23,7 +23,9 @@ class with ``refuses_commit = True``, such as an org-policy or install-time
 audit block, anywhere in the error's cause chain) or an interrupt (Ctrl-C,
 or SIGTERM, which the CLI raises as one) discards what was staged; any other
 failure, including a non-zero ``sys.exit`` after the first staged write,
-commits it.  Two explicit commit points
+commits it.  An install whose transaction rolls its deployed files back
+discards what it staged first (:func:`discard_staged_lockfile_writes`), so
+the lockfile keeps its pre-command bytes as well (#4282).  Two explicit commit points
 flush earlier: :func:`flush_lockfile_writes` runs before state outside APM's
 transaction must agree with the lockfile (native plugin registration, user
 lifecycle scripts, a command's own durable checkpoint).  State bound to the
@@ -229,7 +231,7 @@ def commit_point_seam_for_tests() -> None:
     process) so a test can signal the command after it changed state and
     staged its lockfile, before it commits; ``APM_TEST_LOCK_COMMIT=kill`` ends
     the process there, as a killed process would, with nothing committed.
-    Install reaches it before the transaction releases its deploy snapshot.
+    Install reaches it before the transaction releases its deploy journal.
     """
     global _seam_held
     seam = os.environ.get("APM_TEST_LOCK_COMMIT", "")
@@ -381,6 +383,21 @@ def after_lockfile_commit(action: Callable[[], None]) -> None:
         action()
         return
     scope.after_commit.append(action)
+
+
+def discard_staged_lockfile_writes() -> None:
+    """Drop everything this command staged, so its writer scope commits nothing.
+
+    The install transaction calls this when it rolls its deployed files back
+    to their pre-command bytes (#4282): the lockfile then keeps its
+    pre-command bytes too, and state bound to the staged document never binds.
+    """
+    scope = _scope()
+    if scope is None:
+        return
+    scope.pending.clear()
+    scope.after_commit.clear()
+    scope.changed_state = False
 
 
 class LockfileCommitError(OSError):
