@@ -364,6 +364,7 @@ def test_sync_drops_the_marker_of_an_unmarkable_dep(
     local_src = tmp_path / "local-pkg"
     for path in (registry_dir, git_dir, local_src):
         path.mkdir(parents=True)
+    for path in (registry_dir, local_src):
         write_marker(path, "deadbeef" * 5)
     lockfile = LockFile()
     lockfile.add_dependency(
