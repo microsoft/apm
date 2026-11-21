@@ -3184,3 +3184,52 @@ def test_lifecycle_journeys_resolve_refuses_untracked_refs(
     assert code == 1, output
     assert sha == "", output
     assert message in output and "Allowed: a commit on main or a release/* branch" in output
+
+
+_EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
+
+
+def _early_stopping_coverage_runs(workflows_dir: Path) -> list[str]:
+    """Steps whose pytest arguments both collect coverage and stop early."""
+    found: list[str] = []
+    for path in sorted(workflows_dir.glob("*.yml")):
+        if path.name.endswith(".lock.yml"):
+            continue
+        found.extend(_early_stopping_in(path.name, load_workflow(path)))
+    return found
+
+
+def _early_stopping_in(name: str, workflow: WorkflowNode) -> list[str]:
+    found: list[str] = []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        for step in (job or {}).get("steps") or []:
+            texts = [str(step.get("run", ""))]
+            texts += [str(value) for value in (step.get("env") or {}).values()]
+            for text in texts:
+                tokens = text.replace("\\\n", " ").split()
+                if not any(token.startswith("--cov") for token in tokens):
+                    continue
+                stops = [
+                    token
+                    for token in tokens
+                    if token in _EARLY_STOP_FLAGS or token.startswith("--maxfail=")
+                ]
+                if stops:
+                    found.append(f"{name}:{job_id}:{step.get('name', step.get('uses'))}:{stops}")
+    return found
+
+
+def test_coverage_runs_never_stop_early() -> None:
+    """A coverage run that stops at N failures uploads partial data or none (#4552)."""
+    assert _early_stopping_coverage_runs(REPO_ROOT / ".github" / "workflows") == []
+
+
+@pytest.mark.parametrize("flag", ["--maxfail 10", "--maxfail=1", "-x", "--exitfirst"])
+def test_coverage_run_with_early_stop_fails(flag: str) -> None:
+    workflow = load_workflow(MERGE_GROUP_INTEGRATION_WORKFLOW)
+    step = workflow_step(
+        workflow_job(workflow, MERGE_GROUP_INTEGRATION_JOB), MERGE_GROUP_INTEGRATION_STEP
+    )
+    step["env"]["PYTEST_EXTRA_ARGS"] = f"{step['env']['PYTEST_EXTRA_ARGS']} {flag}"
+
+    assert _early_stopping_in("ci-integration.yml", workflow)
