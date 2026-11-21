@@ -127,6 +127,6 @@ steps:
 known_cells:
   - id: e01-sarif-audit-prints-no-advice
     law: O8a
-    tracking: "#4224"
+    tracking: "#4570"
     step: 4
     match: "prints no 'apm ...' advice"

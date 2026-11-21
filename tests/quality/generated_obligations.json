@@ -1085,7 +1085,7 @@
     "G|native-plugin|org-deny|native": "#3703",
     "G|native-plugin|org-enables-gate|native": "#3703",
     "G|native-plugin|policy-dep-deny|native": "#3703",
-    "J|E01|4|O8a": "#4224",
+    "J|E01|4|O8a": "#4570",
     "P|approve|cache=stale>7d-or-expired": "#4178",
     "P|approve|cache_miss_fetch_fail/block": "#4178",
     "P|approve|cache_miss_fetch_fail/warn": "#4178",
