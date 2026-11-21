@@ -293,9 +293,18 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
         found.append(
             _summary(rule_id, _SERVICE, "the frozen pre-deploy check must run before the pipeline")
         )
+    if not _ordered(loaded[_PIPELINE], '_run_phase("services"', '_run_phase("claude_plugins"'):
+        found.append(
+            _summary(
+                rule_id,
+                _PIPELINE,
+                "MCP/LSP reconciliation runs before native registration commits the lockfile "
+                "(#4329)",
+            )
+        )
     if not _ordered(
         loaded[_COMMAND],
-        "service_result = run_service_integrations_or_restore(",
+        "service_result = reconcile_services.settle(",
         "install_result.post_install()",
     ):
         found.append(

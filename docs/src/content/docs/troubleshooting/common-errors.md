@@ -240,7 +240,7 @@ refused (dependency-confusion risk #1326): bare `repo: acme/tool` on enterprise 
 
 Cause: a plugin on a `*.ghe.com` marketplace declares a bare cross-repo `repo:`, which would otherwise resolve to public `github.com`. APM refuses it whenever it resolves the entry through the marketplace (CLI argument, `apm.yml` entry, transitive dependency, `apm update`), before downloading or probing the plugin repository. Rows replayed from `apm.lock.yaml` skip this check; `apm update` re-resolves them through it.
 
-Fix: the marketplace maintainer host-qualifies `repo:` in `marketplace.json` as the message shows.
+Fix: the marketplace maintainer host-qualifies `repo:` in `marketplace.json` as the message shows. Or, if the marketplace host is your GitHub host, set `GITHUB_HOST` to it: bare entries then resolve to that host and are admitted. A `default_host:` in `apm.yml` does not admit them.
 
 ### `Could not verify that marketplace '<name>' is current`
 
@@ -274,6 +274,16 @@ Fix: run `apm install` without `--frozen` once and commit `apm.lock.yaml`.
 Cause: an entry in `.mcp.json` (or another native MCP config) with the same name was not written by APM, or was edited after APM wrote it. `--force` does not take ownership of it.
 
 Fix: restore the exact value the message names (keep the `:-.` default), or rename or remove the connection, then re-run the same install. Rotate credentials only when the hint names `apm.yml` environment references.
+
+### `LSP server '<name>' conflicts with the existing <runtime> entry`
+
+```
+[x] LSP server 'pyright' conflicts with the existing copilot entry in .github/lsp.json. Preserved that entry. Rename or remove the conflicting entry yourself, then retry the same install command. --force does not take ownership of user entries.
+```
+
+Cause: an LSP config (for example `.github/lsp.json`) already has a server with that name that APM did not write. APM keeps it, configures the other servers, and exits 1. An entry that already equals the package's server is kept without an error, and APM never records it as its own.
+
+Fix: rename or remove your entry, then re-run the same install.
 
 ## Compile
 

@@ -762,12 +762,6 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
             id="commit-order-journal-never-released",
         ),
         pytest.param(
-            "src/apm_cli/commands/install.py",
-            "service_result = run_service_integrations_or_restore(",
-            "service_result = run_service_integrations(",
-            id="commit-order-services-without-restore",
-        ),
-        pytest.param(
             "src/apm_cli/install/transaction.py",
             "                    self._restore_deploy_targets()\n",
             "                    pass\n",
@@ -784,6 +778,12 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
             "                    self._remove_created_target_roots()\n",
             "                    pass\n",
             id="commit-order-rollback-keeps-created-roots",
+        ),
+        pytest.param(
+            "src/apm_cli/install/pipeline.py",
+            '            _run_phase("services", services, ctx)\n',
+            "",
+            id="commit-order-native-commit-before-services",
         ),
     ],
 )
@@ -6202,9 +6202,15 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",
-            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
-            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=not flag_narrowed)",
+            "mcp_servers_for_runtime([], owned_target, named_only=not flag_narrowed)",
             id="target-scoped-install-retires-other-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_flag",
+            'target_decision is not None and target_decision.source == "--target flag"',
+            id="narrowed-cleanup-keyed-on-display-label",
         ),
         pytest.param(
             "src/apm_cli/install/service_integration.py",
