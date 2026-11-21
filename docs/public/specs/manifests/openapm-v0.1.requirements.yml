@@ -264,7 +264,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
-    notes: "Amendment 0.1.69, adopted 2026-11-20 (issue #3701): lockfile-driven deletion needs a matching local deployment record or byte equality with the locked render; a lockfile hash alone never authorizes it; unproven or differing files are kept and named. Proposed amendment 0.1.75 (issue #4295): one per-invocation consented-uninstall exception for files with no record and no producible render whose bytes equal the single recorded lock hash"
+    notes: "Amendment 0.1.69, adopted 2026-11-20 (issue #3701): lockfile-driven deletion needs a matching local deployment record or byte equality with the locked render; a lockfile hash alone never authorizes it; unproven or differing files are kept and named. Proposed amendment 0.1.76 (issue #4295): one per-invocation consented-uninstall exception for files with no record and no producible render whose bytes equal the single recorded lock hash"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"
