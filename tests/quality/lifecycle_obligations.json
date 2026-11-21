@@ -10850,8 +10850,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|DEPLOYED=clean|NET=online": {
    "family": "pair",
@@ -10883,7 +10884,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|DEPLOYED=clean|TGT=multi-unchanged": {
    "family": "pair",
@@ -10899,7 +10900,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|DEPLOYED=clean|TGT=single-narrowed": {
    "family": "pair",
@@ -10907,7 +10908,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|DEPLOYED=clean|TGT=single-unchanged": {
    "family": "pair",
@@ -10923,7 +10924,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|DEPLOYED=clean|UPDATE=on": {
    "family": "pair",
@@ -11469,8 +11470,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|GATE=allowed|NET=online": {
    "family": "pair",
@@ -11502,7 +11504,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|GATE=allowed|TGT=multi-unchanged": {
    "family": "pair",
@@ -11518,7 +11520,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|GATE=allowed|TGT=single-narrowed": {
    "family": "pair",
@@ -11526,7 +11528,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|GATE=allowed|TGT=single-unchanged": {
    "family": "pair",
@@ -11542,7 +11544,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|GATE=allowed|UPDATE=on": {
    "family": "pair",
@@ -11719,7 +11721,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-multi-narrowed]"
   },
   "pair|GATE=denied-executable|TGT=multi-unchanged": {
    "family": "pair",
@@ -11735,7 +11737,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-multi-widened]"
   },
   "pair|GATE=denied-executable|TGT=single-narrowed": {
    "family": "pair",
@@ -11743,7 +11745,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-single-narrowed]"
   },
   "pair|GATE=denied-executable|TGT=single-unchanged": {
    "family": "pair",
@@ -11759,7 +11761,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-single-widened]"
   },
   "pair|GATE=denied-executable|UPDATE=on": {
    "family": "pair",
@@ -11797,8 +11799,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|GATE=none|NET=online": {
    "family": "pair",
@@ -11830,7 +11833,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|GATE=none|TGT=multi-unchanged": {
    "family": "pair",
@@ -11846,7 +11849,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|GATE=none|TGT=single-narrowed": {
    "family": "pair",
@@ -11854,7 +11857,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|GATE=none|TGT=single-unchanged": {
    "family": "pair",
@@ -11870,7 +11873,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|GATE=none|UPDATE=on": {
    "family": "pair",
@@ -11939,8 +11942,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-narrowed]"
   },
   "pair|GATE=revoked-after-deploy|TGT=multi-unchanged": {
    "family": "pair",
@@ -11954,15 +11958,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-widened]"
   },
   "pair|GATE=revoked-after-deploy|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-narrowed]"
   },
   "pair|GATE=revoked-after-deploy|TGT=single-unchanged": {
    "family": "pair",
@@ -11976,8 +11982,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-widened]"
   },
   "pair|GATE=revoked-after-deploy|UPDATE=on": {
    "family": "pair",
@@ -12046,8 +12053,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|GATE=unapproved-exec|TGT=multi-unchanged": {
    "family": "pair",
@@ -12061,15 +12069,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|GATE=unapproved-exec|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|GATE=unapproved-exec|TGT=single-unchanged": {
    "family": "pair",
@@ -12083,8 +12093,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|GATE=unapproved-exec|UPDATE=on": {
    "family": "pair",
@@ -13371,7 +13382,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-multi-narrowed]"
   },
   "pair|OP=approve-deny|TGT=multi-unchanged": {
    "family": "pair",
@@ -13387,7 +13398,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-multi-widened]"
   },
   "pair|OP=approve-deny|TGT=single-narrowed": {
    "family": "pair",
@@ -13395,7 +13406,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-single-narrowed]"
   },
   "pair|OP=approve-deny|TGT=single-unchanged": {
    "family": "pair",
@@ -13411,7 +13422,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-deny]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[deny-single-widened]"
   },
   "pair|OP=audit|DEPLOYED=absent": {
    "family": "pair",
@@ -13734,7 +13745,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|OP=audit|TGT=multi-unchanged": {
    "family": "pair",
@@ -13750,7 +13761,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|OP=audit|TGT=single-narrowed": {
    "family": "pair",
@@ -13758,7 +13769,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|OP=audit|TGT=single-unchanged": {
    "family": "pair",
@@ -13774,7 +13785,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|OP=bundle-install|DEPLOYED=absent": {
    "family": "pair",
@@ -14067,8 +14078,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|OP=bundle-install|TGT=multi-unchanged": {
    "credited_by": [
@@ -14085,15 +14097,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|OP=bundle-install|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|OP=bundle-install|TGT=single-unchanged": {
    "credited_by": [
@@ -14110,8 +14124,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|OP=compile|DEPLOYED=absent": {
    "family": "pair",
@@ -14453,7 +14468,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-compile]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
   },
   "pair|OP=compile|TGT=multi-unchanged": {
    "family": "pair",
@@ -14469,7 +14484,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-compile]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
   },
   "pair|OP=compile|TGT=single-narrowed": {
    "family": "pair",
@@ -14477,7 +14492,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-compile]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
   },
   "pair|OP=compile|TGT=single-unchanged": {
    "family": "pair",
@@ -14493,7 +14508,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-compile]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
   },
   "pair|OP=install|DEPLOYED=absent": {
    "family": "pair",
@@ -14735,8 +14750,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|OP=install|NET=online": {
    "family": "pair",
@@ -14995,7 +15011,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-multi-narrowed]"
   },
   "pair|OP=install|TGT=multi-unchanged": {
    "family": "pair",
@@ -15011,7 +15027,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-multi-widened]"
   },
   "pair|OP=install|TGT=single-narrowed": {
    "family": "pair",
@@ -15019,7 +15035,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-single-narrowed]"
   },
   "pair|OP=install|TGT=single-unchanged": {
    "family": "pair",
@@ -15035,7 +15051,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-single-widened]"
   },
   "pair|OP=install|UPDATE=on": {
    "family": "pair",
@@ -15418,7 +15434,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-lock]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[lock-multi-narrowed]"
   },
   "pair|OP=lock|TGT=multi-unchanged": {
    "family": "pair",
@@ -15434,7 +15450,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-lock]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[lock-multi-widened]"
   },
   "pair|OP=lock|TGT=single-narrowed": {
    "family": "pair",
@@ -15442,7 +15458,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-lock]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[lock-single-narrowed]"
   },
   "pair|OP=lock|TGT=single-unchanged": {
    "family": "pair",
@@ -15458,7 +15474,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-lock]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[lock-single-widened]"
   },
   "pair|OP=lock|UPDATE=on": {
    "family": "pair",
@@ -15725,8 +15741,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-multi-narrowed]"
   },
   "pair|OP=marketplace|TGT=multi-unchanged": {
    "credited_by": [
@@ -15743,15 +15760,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-multi-widened]"
   },
   "pair|OP=marketplace|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-single-narrowed]"
   },
   "pair|OP=marketplace|TGT=single-unchanged": {
    "credited_by": [
@@ -15768,8 +15787,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-single-widened]"
   },
   "pair|OP=mcp-install|DEPLOYED=absent": {
    "family": "pair",
@@ -16090,8 +16110,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|OP=mcp-install|TGT=multi-unchanged": {
    "family": "pair",
@@ -16105,15 +16126,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-widened]"
   },
   "pair|OP=mcp-install|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-narrowed]"
   },
   "pair|OP=mcp-install|TGT=single-unchanged": {
    "family": "pair",
@@ -16127,8 +16150,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-widened]"
   },
   "pair|OP=pack|DEPLOYED=absent": {
    "family": "pair",
@@ -16343,7 +16367,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-pack]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-multi-narrowed]"
   },
   "pair|OP=pack|TGT=multi-unchanged": {
    "family": "pair",
@@ -16359,7 +16383,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-pack]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-multi-widened]"
   },
   "pair|OP=pack|TGT=single-narrowed": {
    "family": "pair",
@@ -16367,7 +16391,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-pack]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-single-narrowed]"
   },
   "pair|OP=pack|TGT=single-unchanged": {
    "family": "pair",
@@ -16383,7 +16407,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-pack]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-single-widened]"
   },
   "pair|OP=prune|DEPLOYED=absent": {
    "family": "pair",
@@ -16742,7 +16766,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-prune]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[prune-multi-narrowed]"
   },
   "pair|OP=prune|TGT=multi-unchanged": {
    "family": "pair",
@@ -16758,7 +16782,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-prune]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[prune-multi-widened]"
   },
   "pair|OP=prune|TGT=single-narrowed": {
    "family": "pair",
@@ -16766,7 +16790,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-prune]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[prune-single-narrowed]"
   },
   "pair|OP=prune|TGT=single-unchanged": {
    "family": "pair",
@@ -16782,7 +16806,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-prune]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[prune-single-widened]"
   },
   "pair|OP=uninstall|DEPLOYED=absent": {
    "family": "pair",
@@ -17169,7 +17193,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-uninstall]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[uninstall-multi-narrowed]"
   },
   "pair|OP=uninstall|TGT=multi-unchanged": {
    "family": "pair",
@@ -17185,7 +17209,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-uninstall]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[uninstall-multi-widened]"
   },
   "pair|OP=uninstall|TGT=single-narrowed": {
    "family": "pair",
@@ -17193,7 +17217,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-uninstall]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[uninstall-single-narrowed]"
   },
   "pair|OP=uninstall|TGT=single-unchanged": {
    "family": "pair",
@@ -17209,7 +17233,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-uninstall]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[uninstall-single-widened]"
   },
   "pair|OP=update|DEPLOYED=absent": {
    "family": "pair",
@@ -17625,7 +17649,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[update-multi-narrowed]"
   },
   "pair|OP=update|TGT=multi-unchanged": {
    "family": "pair",
@@ -17641,7 +17665,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[update-multi-widened]"
   },
   "pair|OP=update|TGT=single-narrowed": {
    "family": "pair",
@@ -17649,7 +17673,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[update-single-narrowed]"
   },
   "pair|OP=update|TGT=single-unchanged": {
    "family": "pair",
@@ -17665,7 +17689,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[update-single-widened]"
   },
   "pair|PRIM=bin|DEPLOYED=absent": {
    "family": "pair",
@@ -17808,8 +17832,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=bin|NET=online": {
    "family": "pair",
@@ -17848,7 +17873,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
    "family": "pair",
@@ -17864,7 +17889,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=bin|TGT=single-narrowed": {
    "family": "pair",
@@ -17872,7 +17897,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
    "family": "pair",
@@ -17888,7 +17913,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=bin|UPDATE=on": {
    "family": "pair",
@@ -18064,8 +18089,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=canvas|NET=online": {
    "family": "pair",
@@ -18110,8 +18136,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-narrowed]"
   },
   "pair|PRIM=canvas|TGT=multi-unchanged": {
    "family": "pair",
@@ -18125,15 +18152,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-widened]"
   },
   "pair|PRIM=canvas|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-narrowed]"
   },
   "pair|PRIM=canvas|TGT=single-unchanged": {
    "family": "pair",
@@ -18147,8 +18176,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-widened]"
   },
   "pair|PRIM=canvas|UPDATE=on": {
    "family": "pair",
@@ -18372,7 +18402,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=hook|TGT=multi-unchanged": {
    "family": "pair",
@@ -18388,7 +18418,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=hook|TGT=single-narrowed": {
    "family": "pair",
@@ -18396,7 +18426,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=hook|TGT=single-unchanged": {
    "family": "pair",
@@ -18412,7 +18442,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=hook|UPDATE=on": {
    "family": "pair",
@@ -18588,8 +18618,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=lsp|NET=online": {
    "family": "pair",
@@ -18634,8 +18665,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=lsp|TGT=multi-unchanged": {
    "family": "pair",
@@ -18649,15 +18681,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|PRIM=lsp|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|PRIM=lsp|TGT=single-unchanged": {
    "family": "pair",
@@ -18671,8 +18705,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|PRIM=lsp|UPDATE=on": {
    "family": "pair",
@@ -18894,7 +18929,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=mcp|TGT=multi-unchanged": {
    "family": "pair",
@@ -18910,7 +18945,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=mcp|TGT=single-narrowed": {
    "family": "pair",
@@ -18918,7 +18953,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=mcp|TGT=single-unchanged": {
    "family": "pair",
@@ -18934,7 +18969,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=mcp|UPDATE=on": {
    "family": "pair",
@@ -19122,8 +19157,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=skill|NET=online": {
    "family": "pair",
@@ -19170,7 +19206,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=skill|TGT=multi-unchanged": {
    "family": "pair",
@@ -19186,7 +19222,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=skill|TGT=single-narrowed": {
    "family": "pair",
@@ -19194,7 +19230,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=skill|TGT=single-unchanged": {
    "family": "pair",
@@ -19210,7 +19246,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=skill|UPDATE=on": {
    "family": "pair",
@@ -19448,8 +19484,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SCOPE=project|NET=online": {
    "family": "pair",
@@ -19481,7 +19518,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SCOPE=project|TGT=multi-unchanged": {
    "family": "pair",
@@ -19497,7 +19534,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SCOPE=project|TGT=single-narrowed": {
    "family": "pair",
@@ -19505,7 +19542,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SCOPE=project|TGT=single-unchanged": {
    "family": "pair",
@@ -19521,7 +19558,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SCOPE=project|UPDATE=on": {
    "family": "pair",
@@ -20093,7 +20130,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SRC=git|TGT=multi-unchanged": {
    "family": "pair",
@@ -20109,7 +20146,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SRC=git|TGT=single-narrowed": {
    "family": "pair",
@@ -20117,7 +20154,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SRC=git|TGT=single-unchanged": {
    "family": "pair",
@@ -20133,7 +20170,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SRC=git|UPDATE=on": {
    "family": "pair",
@@ -20326,8 +20363,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|SRC=inline-mcp|TGT=multi-unchanged": {
    "credited_by": [
@@ -20344,15 +20382,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-widened]"
   },
   "pair|SRC=inline-mcp|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-narrowed]"
   },
   "pair|SRC=inline-mcp|TGT=single-unchanged": {
    "credited_by": [
@@ -20369,8 +20409,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-widened]"
   },
   "pair|SRC=inline-mcp|UPDATE=on": {
    "credited_by": [
@@ -20630,8 +20671,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|SRC=local-bundle|TGT=multi-unchanged": {
    "credited_by": [
@@ -20648,15 +20690,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|SRC=local-bundle|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|SRC=local-bundle|TGT=single-unchanged": {
    "credited_by": [
@@ -20673,8 +20717,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|SRC=local-path|DEPLOYED=absent": {
    "family": "pair",
@@ -20818,8 +20863,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=local-path|NET=online": {
    "family": "pair",
@@ -20914,7 +20960,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SRC=local-path|TGT=multi-unchanged": {
    "family": "pair",
@@ -20930,7 +20976,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SRC=local-path|TGT=single-narrowed": {
    "family": "pair",
@@ -20938,7 +20984,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SRC=local-path|TGT=single-unchanged": {
    "family": "pair",
@@ -20954,7 +21000,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SRC=local-path|UPDATE=on": {
    "family": "pair",
@@ -21178,8 +21224,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-file|TGT=multi-unchanged": {
    "family": "pair",
@@ -21192,15 +21239,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-file|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-file|TGT=single-unchanged": {
    "family": "pair",
@@ -21213,8 +21262,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-file|UPDATE=on": {
    "family": "pair",
@@ -21558,8 +21608,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-git|TGT=multi-unchanged": {
    "credited_by": [
@@ -21577,15 +21628,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-git|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-git|TGT=single-unchanged": {
    "credited_by": [
@@ -21603,8 +21656,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-git|UPDATE=on": {
    "credited_by": [
@@ -21831,8 +21885,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-local|TGT=multi-unchanged": {
    "family": "pair",
@@ -21845,15 +21900,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-local|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-local|TGT=single-unchanged": {
    "family": "pair",
@@ -21866,8 +21923,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-local|UPDATE=on": {
    "family": "pair",
@@ -22046,8 +22104,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-multi-narrowed]"
   },
   "pair|SRC=mcp-registry|TGT=multi-unchanged": {
    "family": "pair",
@@ -22061,15 +22120,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-multi-widened]"
   },
   "pair|SRC=mcp-registry|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-single-narrowed]"
   },
   "pair|SRC=mcp-registry|TGT=single-unchanged": {
    "family": "pair",
@@ -22083,8 +22144,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-single-widened]"
   },
   "pair|SRC=mcp-registry|UPDATE=on": {
    "credited_by": [
@@ -22251,8 +22313,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=native-plugin|NET=online": {
    "credited_by": [
@@ -22367,8 +22430,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -22385,15 +22449,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|SRC=native-plugin|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [
@@ -22410,8 +22476,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|SRC=native-plugin|UPDATE=on": {
    "credited_by": [
@@ -22582,8 +22649,9 @@
    "family": "pair",
    "issue": "#4104",
    "lane": "T-6e",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=pkg-registry|NET=online": {
    "credited_by": [
@@ -22714,8 +22782,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=pkg-registry|TGT=multi-unchanged": {
    "credited_by": [
@@ -22732,15 +22801,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|SRC=pkg-registry|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|SRC=pkg-registry|TGT=single-unchanged": {
    "credited_by": [
@@ -22757,8 +22828,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|SRC=pkg-registry|UPDATE=on": {
    "credited_by": [
@@ -22777,7 +22849,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|FILEROUTE=compile-staged": {
    "family": "pair",
@@ -22799,14 +22871,15 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-force]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-force-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NET=offline": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NET=online": {
    "family": "pair",
@@ -22814,7 +22887,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NOPOLICY=on": {
    "family": "pair",
@@ -22829,7 +22902,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-select]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-select-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|UPDATE=on": {
    "family": "pair",
@@ -22837,7 +22910,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-narrowed-install-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-update-multi-narrowed]"
   },
   "pair|TGT=multi-unchanged|DRYRUN=on": {
    "family": "pair",
@@ -22922,7 +22995,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-multi-widened]"
   },
   "pair|TGT=multi-widened|FILEROUTE=compile-staged": {
    "family": "pair",
@@ -22944,14 +23017,15 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-force]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-force-multi-widened]"
   },
   "pair|TGT=multi-widened|NET=offline": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|TGT=multi-widened|NET=online": {
    "family": "pair",
@@ -22959,7 +23033,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|TGT=multi-widened|NOPOLICY=on": {
    "family": "pair",
@@ -22974,7 +23048,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-select]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-select-multi-widened]"
   },
   "pair|TGT=multi-widened|UPDATE=on": {
    "family": "pair",
@@ -22982,7 +23056,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[multi-widened-install-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-update-multi-widened]"
   },
   "pair|TGT=single-narrowed|DRYRUN=on": {
    "family": "pair",
@@ -22990,7 +23064,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-single-narrowed]"
   },
   "pair|TGT=single-narrowed|FILEROUTE=compile-staged": {
    "family": "pair",
@@ -23012,14 +23086,15 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-force]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-force-single-narrowed]"
   },
   "pair|TGT=single-narrowed|NET=offline": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|TGT=single-narrowed|NET=online": {
    "family": "pair",
@@ -23027,7 +23102,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|TGT=single-narrowed|NOPOLICY=on": {
    "family": "pair",
@@ -23042,7 +23117,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-select]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-select-single-narrowed]"
   },
   "pair|TGT=single-narrowed|UPDATE=on": {
    "family": "pair",
@@ -23050,7 +23125,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-install-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-update-single-narrowed]"
   },
   "pair|TGT=single-unchanged|DRYRUN=on": {
    "family": "pair",
@@ -23135,7 +23210,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-dry-run]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-dry-run-single-widened]"
   },
   "pair|TGT=single-widened|FILEROUTE=compile-staged": {
    "family": "pair",
@@ -23157,14 +23232,15 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-force]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-force-single-widened]"
   },
   "pair|TGT=single-widened|NET=offline": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|TGT=single-widened|NET=online": {
    "family": "pair",
@@ -23172,7 +23248,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-audit]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|TGT=single-widened|NOPOLICY=on": {
    "family": "pair",
@@ -23187,7 +23263,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-select]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-select-single-widened]"
   },
   "pair|TGT=single-widened|UPDATE=on": {
    "family": "pair",
@@ -23195,7 +23271,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-install-update]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[install-update-single-widened]"
   },
   "pair|UPDATE=on|NOPOLICY=on": {
    "family": "pair",

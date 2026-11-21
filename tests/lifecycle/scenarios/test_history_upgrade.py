@@ -295,7 +295,7 @@ CREDITS = credits(
             for tgt in TARGET_HISTORIES
         },
         **{
-            f"test_command_after_a_target_change[{tgt}-{row}]": _row_assignments(row, tgt)
+            f"test_command_after_a_target_change[{row}-{tgt}]": _row_assignments(row, tgt)
             for row in HISTORY_ROWS
             for tgt in TARGET_HISTORIES
         },
