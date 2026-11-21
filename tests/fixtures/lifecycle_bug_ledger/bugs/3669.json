@@ -1,0 +1,21 @@
+{
+  "issue": 3669,
+  "summary": "Traps update re-pinning children and dev reachability surviving uninstall; needs branch-tracking git refs and is_dev lock fields.",
+  "failure_modes": [
+    "idempotency",
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_update_dev_reachability_lifecycle.py::test_frozen_install_never_reports_a_withheld_lock_write",
+    "tests/integration/test_update_dev_reachability_lifecycle.py::test_uninstall_writes_the_lock_install_would_write",
+    "tests/integration/test_update_dev_reachability_lifecycle.py::test_uninstalling_prod_parent_keeps_dev_reachable_dep",
+    "tests/integration/test_update_dev_reachability_lifecycle.py::test_update_follows_parent_repin_drop_and_add"
+  ]
+}

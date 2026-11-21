@@ -1,0 +1,20 @@
+{
+  "issue": 3214,
+  "summary": "Native Copilot Agent Plugin declarations and drift assertions exceed supported package shapes.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_audit_strictly_preserves_project_and_lockfile",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_missing_managed_content_fails_audit",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_modified_managed_content_fails_audit",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_plugin_with_accompanying_apm_yml_and_skill_audit_lifecycle",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_plugin_without_apm_yml_and_skill_audit_lifecycle",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_native_replay_does_not_bootstrap_registry_config",
+    "tests/integration/test_native_plugin_audit_lifecycle.py::test_tampered_plugin_manifest_fails_audit"
+  ]
+}

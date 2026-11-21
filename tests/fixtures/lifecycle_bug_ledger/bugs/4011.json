@@ -1,0 +1,17 @@
+{
+  "issue": 4011,
+  "summary": "Tests shared orphan-removal ownership across unsupported preview/prune command paths.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_orphan_removal_owner_lifecycle.py::test_audit_reports_the_direct_entry_projection",
+    "tests/integration/test_orphan_removal_owner_lifecycle.py::test_install_and_prune_previews_match_real_runs_and_targeted_install_is_isolated",
+    "tests/integration/test_orphan_removal_owner_lifecycle.py::test_install_preview_keeps_files_a_retained_owner_still_claims",
+    "tests/integration/test_orphan_removal_owner_lifecycle.py::test_uninstall_preview_matches_real_run_and_rescues_shared_dependency"
+  ]
+}

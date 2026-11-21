@@ -30,6 +30,7 @@ from tests.lifecycle.generator.factors import (
 from tests.lifecycle.generator.rules import (
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
+    REFUSAL_MESSAGES,
     RULE_CELL_KNOWN,
     RULE_CELL_REFUSALS,
     UNINSTALL_MCP_REFUSALS,
@@ -395,7 +396,14 @@ def context_cells(scalar: Mapping[str, str], units: Sequence[Mapping[str, str]])
 
 
 def simulate(plan: Plan, steps: Sequence[Step], targets: Sequence[str]) -> list[set[str]]:
-    """Cells each step visits, in order."""
+    """Cells each step visits, in order.
+
+    TGT is <shape>-<change>. The shape is the declared target set BEFORE the step
+    (one target is single, two or more are multi). narrowed = the step drops at
+    least one previously declared target; it may add others (a switch counts as
+    narrowed); widened = it adds at least one and drops none.
+    A covering row keeps its targets, so every step it simulates is *-unchanged.
+    """
     state = _State()
     tgt = "multi-unchanged" if len(targets) > 1 else "single-unchanged"
     visited: list[set[str]] = []
@@ -530,6 +538,9 @@ def refusal_rows(obligations: Mapping[str, Entry], start: int) -> list[Row]:
             exit=entry.exit,
             fixed=(entry.id,),
             unchanged=EVERYTHING,
+            message=REFUSAL_MESSAGES.get(
+                (entry.cell["OP"], *(name for name in ORDER if entry.cell.get(name) == ON))
+            ),
             cells=(entry.id,),
         )
         for entry in sorted(refusals, key=lambda item: item.id)

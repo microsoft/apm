@@ -234,11 +234,20 @@ def unpack_record_root(output_dir: Path) -> Path | None:
     return output_dir if manifest_file(output_dir).is_file() else None
 
 
+def _recorded_lockfile(root: Path) -> Any:
+    """Read the project's lockfile without migrating a legacy ``apm.lock``."""
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
+
+    return LockFile.read(resolve_lockfile_path_for_read(root, read_only=True))
+
+
 def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -> None:
     """Record the files ``apm unpack`` wrote, or announce that they are untracked.
 
     The record goes through the shared local-bundle lockfile owner, so audit
-    checks the files and a later install reconciles them.
+    checks the files and a later install reconciles them. A file the lockfile
+    already records with the same content hash stays with its recorded owner;
+    when no file is left to record, the lockfile is not touched (#4556).
     """
     root = unpack_record_root(output_dir)
     if root is None:
@@ -251,17 +260,23 @@ def record_unpacked_files(output_dir: Path, files: Sequence[str], logger: Any) -
         return
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..core.scope import InstallScope
-    from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
+    from ..deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from ..utils.content_hash import compute_file_hash
 
-    migrate_lockfile_if_needed(root)
-    lockfile_path = get_lockfile_path(root)
-    lockfile = LockFile.read(lockfile_path) or LockFile()
+    lockfile = _recorded_lockfile(root)
+    claimed = DeploymentLedgerCodec.deployed_file_hashes(lockfile) if lockfile else {}
+    hashes = {
+        rel: digest
+        for rel in files
+        if claimed.get(rel) != (digest := compute_file_hash(root / rel))
+    }
+    if not hashes:
+        return
+    # Only a write migrates a legacy apm.lock; a no-op restore leaves it as is.
+    lockfile_path = resolve_lockfile_path_for_read(root, read_only=False)
+    lockfile = lockfile or LockFile()
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile,
-        list(files),
-        {rel: compute_file_hash(root / rel) for rel in files},
-        scope=InstallScope.PROJECT,
+        lockfile, list(hashes), hashes, scope=InstallScope.PROJECT
     )
     lockfile.write(lockfile_path)
 

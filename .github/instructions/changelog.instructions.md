@@ -1,5 +1,5 @@
 ---
-applyTo: "CHANGELOG.md"
+applyTo: "CHANGELOG.md,changelog.d/**"
 description: "Changelog format and conventions based on Keep a Changelog"
 ---
 
@@ -17,7 +17,9 @@ Each user-visible change appears exactly once in a version: one line, in one sec
 
 ## Structure
 
-- New entries go under `## [Unreleased]`.
+- New entries are fragments, not `CHANGELOG.md` edits: each PR adds one file per section, `changelog.d/<pr>.<section>.md`, holding exactly one entry line (format in `changelog.d/README.md`). `<section>` is the lowercase, hyphenated section name, such as `fixed` or `breaking-changes-and-upgrade-notes`. Concurrent PRs then never edit the same lines.
+- Do not add lines under `## [Unreleased]`. Bullets already there stay until the next release, and editing one is fine.
+- `python .apm/skills/cut-release/scripts/changelog_fragments.py` checks this: `check` validates fragments, `render` previews the release block, and `check-unreleased --base-ref origin/main` rejects a net-new `[Unreleased]` bullet.
 - Released versions use `## [X.Y.Z] - YYYY-MM-DD`.
 - Section order: `Highlights` (release only), `Breaking changes and upgrade notes`, `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`. Omit empty sections.
 
@@ -32,11 +34,11 @@ Each user-visible change appears exactly once in a version: one line, in one sec
 
 ## Rules
 
-- Before adding a line, search `[Unreleased]` for your PR number. If a line already describes your change, edit that line; never add another.
+- Before adding a fragment, search `changelog.d/` and `[Unreleased]` for your PR number. If a line already describes your change, edit that line; never add another.
 - A PR with several user-visible fixes groups them by theme into as few lines as stay clear (for example, one line for all `apm audit` fixes).
 - Every merged PR with a user-visible effect gets an entry. Internal-only PRs (CI, tests, refactors, maintainer skills) get none.
 - Do NOT include version-bump or release-machinery PRs (e.g., "chore: bump to vX.Y.Z").
-- When releasing, move Unreleased entries into a new versioned section; never delete them. `cut-release` re-sanitizes the block into this shape.
+- When releasing, `cut-release` assembles the fragments and any `[Unreleased]` entries into a new versioned section and deletes the fragments; never drop an entry. It re-sanitizes the block into this shape.
 
 ## Examples
 

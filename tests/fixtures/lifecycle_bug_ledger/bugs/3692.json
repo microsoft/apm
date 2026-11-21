@@ -1,0 +1,13 @@
+{
+  "issue": 3692,
+  "summary": "YAML scalar quoting and lockfile field representation are excluded.",
+  "failure_modes": [
+    "portability"
+  ],
+  "properties": [
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/integration/test_unquoted_lockfile_version_lifecycle.py::test_unquoted_lockfile_version_replays_unchanged"
+  ]
+}

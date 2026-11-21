@@ -1,0 +1,16 @@
+{
+  "issue": 2329,
+  "fixed_in": "0.27.0",
+  "summary": "Cold-cache CI audit produced false failures and false-green results.",
+  "failure_modes": [
+    "cache",
+    "outcome"
+  ],
+  "properties": [
+    "source.ref_cache_coherent",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_audit_cold_cache_ci_e2e.py::test_cold_cache_audit_fails_for_tracked_stale_deployments_and_reconciles_idempotently"
+  ]
+}
