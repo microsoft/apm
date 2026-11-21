@@ -73,7 +73,7 @@ _OWNER_CONTRACT: tuple[str, ...] = (
     "def origin_bounded_request(",
     "allow_redirects=False,",
     'kwargs["auth"] = _NO_AMBIENT_CREDENTIALS',
-    "reason = origin_bound_refusal(target, base_url=base_url)",
+    "reason = origin_bound_refusal(target, base_url=base_url, bind_query=bind_query)",
     "def _remove_dot_segments(",
     "_comparable_host(parts.hostname)",
 )
