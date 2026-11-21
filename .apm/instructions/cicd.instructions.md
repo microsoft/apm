@@ -69,6 +69,9 @@ integration suite runs only at merge time via GitHub Merge Queue
 8. **`owner-surface.yml`** - `pull_request`, `merge_group` and `workflow_call` (the merge train's `owner` tier)
    - `Owner Surface Check` runs the integration slice an owner or install-path change can reach (`scripts/owner_surface.py`: owner-rule mutation cases and `test_architecture_*.py` files naming a changed file or affected owner, guard or rule, plus `test_install_*.py` for install changes), in 3 shards. No `paths:` filter, and every job runs on every event: only the slice's steps are gated on `run`, so off a pull request the slice is a fast no-op and the check passes.
    - Required: `merge-gate.yml` lists `Owner Surface Check` in every `EXPECTED_CHECKS` context, and a full merge train runs it as its `owner` tier.
+9. **`main-push-gate.yml`** - `push` to main plus `workflow_dispatch` (S28)
+   - Calls ci.yml (`tier1`: all Tier 1 jobs, every Lifecycle Smoke shard) and ci-integration.yml (`tier2`: every Integration Tests shard, `secrets: inherit`) through `workflow_call` on main's head, with the push's `before` SHA (else `HEAD^1`) as the lint base. Its `main-push-gate` aggregate (`if: always()`) fails the run when any tier job fails, so main is visibly red. Not a required check; runs are never cancelled.
+   - No new default-branch cache saves: the setup-uv steps of ci.yml and ci-integration.yml set `save-cache` to `auto` only on pull_request and merge_group (`false` otherwise), setup-node sets `package-manager-cache: false`, and ci-integration.yml saves its APM fetch cache on no `push`. `tests/quality/test_ci_topology.py` fails if any step reachable from a main push would save a cache.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.
