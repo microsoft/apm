@@ -361,14 +361,18 @@ class DeploymentEvidence:
 
         The single consent decision: receipt state was read without error and
         holds no receipt for the file, no render of its owning locked package
-        could be produced, and its bytes equal the one hash apm.lock.yaml
-        records for *claim* under its owners. Any contrary or missing evidence
-        (a differing receipt or render, a render lacking the path, no or
-        conflicting recorded hash, unreadable, symlinked) keeps the file.
+        could be produced, and its bytes equal the one distinct hash
+        apm.lock.yaml records for *claim* across its owners (bare hex reads as
+        ``sha256``, req-lk-016). Any contrary or missing evidence (a differing
+        receipt or render, a render lacking the path, no or conflicting
+        recorded hashes, unreadable, not a regular file, symlinked) keeps it.
         """
         from apm_cli.utils.content_hash import compute_file_hash
 
-        recorded = self._recorded_hashes.get(claim.replace("\\", "/"), frozenset())
+        recorded = {
+            _hash_envelope(value)
+            for value in self._recorded_hashes.get(claim.replace("\\", "/"), frozenset())
+        }
         if not self._receipts_readable or len(recorded) != 1:
             return False
         try:
@@ -460,6 +464,12 @@ class DeploymentEvidence:
             if self.verdict(f"{claim}/{member}", child, rendered_as=alias) != AUTHORIZED:
                 return False
         return True
+
+
+def _hash_envelope(value: str) -> str:
+    """Return *value* as an ``<algo>:<hex>`` envelope; bare hex reads as sha256 (req-lk-016)."""
+    value = value.strip().lower()
+    return value if ":" in value else f"sha256:{value}"
 
 
 def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
