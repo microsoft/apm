@@ -87,13 +87,18 @@ class _World:
         return {"git": self.remote, "type": "gitlab", "ref": sha, "alias": self.pkg_name}
 
 
-def _world(tmp_path: Path, apm_binary_path: Path, pkg_name: str) -> _World:
+def _world(
+    tmp_path: Path,
+    apm_binary_path: Path,
+    pkg_name: str,
+    agents: tuple[tuple[str, str], ...] = (("build-worker", _WORKER_V1), ("reviewer", _FOREIGN)),
+) -> _World:
     isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
     env = isolated.subprocess_env()
     sources = LocalPackageFactory(isolated.package_root)
     source = sources.create(pkg_name, targets=("gemini",))
-    sources.add_agent(source, "build-worker", _WORKER_V1)
-    sources.add_agent(source, "reviewer", _FOREIGN)
+    for name, content in agents:
+        sources.add_agent(source, name, content)
     repositories = LocalGitRepositoryFactory(isolated.repository_root, env=env)
     repo = repositories.create(pkg_name, source_tree=source.root)
     sha = repositories.commit(repo, message="gemini agent v1").sha
@@ -119,6 +124,24 @@ def _gemini_agent_records(lock_path: Path) -> list[str]:
     return sorted(
         str(key) for key in lock.deployment_ledger.records if ".gemini/agents/" in str(key)
     )
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    """Every file under *root* with its bytes, keyed by POSIX relative path."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _assert_only_agent_added(before: dict[str, bytes], root: Path, added: str) -> None:
+    """The only change under .gemini is *added*: no trust or acknowledgement state."""
+    after = _tree(root)
+    assert set(after) - set(before) == {added}
+    assert {k: v for k, v in after.items() if k != added} == before
+    assert "trustedFolders.json" not in after
+    assert not any(k.startswith("acknowledgments/") for k in after)
 
 
 def _seed_gemini_dir(root: Path) -> tuple[Path, Path]:
@@ -165,8 +188,11 @@ def test_gemini_agent_project_lifecycle(tmp_path: Path, apm_binary_path: Path) -
     lock_path = root / "apm.lock.yaml"
     install = ("install", "--no-policy", "--parallel-downloads", "0")
 
-    # Install: only the Gemini-valid agent is written, with schema keys only.
+    # Install: only the Gemini-valid agent is written, with schema keys only,
+    # and nothing else under .gemini changes.
+    gemini_before = _tree(root / ".gemini")
     result = world.apm(*install, scenario="install", cwd=root)
+    _assert_only_agent_added(gemini_before, root / ".gemini", "agents/build-worker.md")
     _assert_worker_v(deployed, "v1-marker")
     assert not (root / ".gemini" / "agents" / "reviewer.md").exists()
     output = result.stdout + result.stderr
@@ -234,7 +260,9 @@ def test_gemini_agent_user_scope_lifecycle(tmp_path: Path, apm_binary_path: Path
     lock_path = apm_home / "apm.lock.yaml"
     install = ("install", "-g", "--no-policy", "--parallel-downloads", "0")
 
+    gemini_before = _tree(home / ".gemini")
     world.apm(*install, scenario="user-install", cwd=home)
+    _assert_only_agent_added(gemini_before, home / ".gemini", "agents/build-worker.md")
     _assert_worker_v(deployed, "v1-marker")
     assert not (home / ".gemini" / "agents" / "reviewer.md").exists()
     # Gemini and Antigravity user agent dirs are separate (#2990 scope).
@@ -258,3 +286,30 @@ def test_gemini_agent_user_scope_lifecycle(tmp_path: Path, apm_binary_path: Path
     assert _gemini_agent_records(lock_path) == []
     assert user_agent.read_text(encoding="utf-8") == _USER_AGENT
     assert settings.read_text(encoding="utf-8") == _SETTINGS
+
+
+def test_gemini_all_invalid_agents_leave_gemini_tree_untouched(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A package whose only agent Gemini cannot load creates nothing under .gemini."""
+    world = _world(
+        tmp_path, apm_binary_path, "fixture-gemini-agent-invalid", agents=(("reviewer", _FOREIGN),)
+    )
+    project = LocalPackageFactory(world.isolated.work_root).create(
+        "consumer-gemini-invalid",
+        dependencies=(world.dependency(world.sha),),
+        targets=("gemini",),
+    )
+    root = project.root
+    (root / ".gemini").mkdir()
+    (root / ".gemini" / "settings.json").write_text(_SETTINGS, encoding="utf-8")
+    before = _tree(root / ".gemini")
+
+    result = world.apm(
+        "install", "--no-policy", "--parallel-downloads", "0", scenario="install", cwd=root
+    )
+
+    assert "Gemini agent reviewer.agent.md" in result.stdout + result.stderr
+    assert _tree(root / ".gemini") == before
+    assert not (root / ".gemini" / "agents").exists()
+    assert _gemini_agent_records(root / "apm.lock.yaml") == []
