@@ -175,9 +175,16 @@ def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
             "document": data,
             "scripts": [_digest(script) for script in referenced],
             "bundle": [bundle[key] for key in sorted(bundle)],
+            # Keyed by each script's publisher key: a root directory has no
+            # normalized spelling, so source and normalized trees would differ.
             "module_types": [
-                [hook_item_key(package_path, root), _hook_module_type(package_path, root)]
-                for root in roots
+                [
+                    hook_item_key(package_path, script),
+                    _hook_module_type(
+                        package_path, _hook_source_root(package_path, hook_file.parent, script)
+                    ),
+                ]
+                for script in referenced
             ],
         },
     )
