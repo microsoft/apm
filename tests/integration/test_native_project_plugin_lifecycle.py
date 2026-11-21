@@ -247,9 +247,7 @@ def test_uninstalling_a_sibling_keeps_a_local_native_plugin_whole(
 
     def enabled() -> dict[str, dict[str, bool]]:
         return {
-            settings: json.loads((project / settings).read_text(encoding="utf-8"))[
-                "enabledPlugins"
-            ]
+            settings: json.loads((project / settings).read_text(encoding="utf-8"))["enabledPlugins"]
             for settings in _SETTINGS
         }
 
