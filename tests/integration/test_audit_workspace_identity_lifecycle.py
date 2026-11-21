@@ -304,5 +304,7 @@ def test_genuine_global_metadata_audit_preserves_missing_materialization_refusal
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["config-consistency"]["passed"] is False
         assert checks["drift"]["passed"] is False
-        assert "apm install --global" in checks["drift"]["message"]
+        # One finding, said once: the message points to details (RA-005).
+        assert checks["drift"]["message"].startswith("drift replay failed")
+        assert "apm install --global" in " ".join(checks["drift"]["details"])
         assert not (global_root / "apm_modules").exists()
