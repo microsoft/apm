@@ -3946,7 +3946,7 @@ def test_required_failed_lock_write_restores_state_and_recovers(
         scope="project",
         owner=f"{_OWNER}/{source.package.name}",
         expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
-        bound=False,
+        bound=True,
     )
     assert receipt.read_bytes() != restored_receipt_bytes
     before_audit = ArtifactSnapshotSet.capture(
