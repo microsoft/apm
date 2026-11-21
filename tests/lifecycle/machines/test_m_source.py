@@ -405,9 +405,30 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
     return frozenset(json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {})
 
 
+def _local_catalog_frozen(machine, op, before=None, after=None, result=None) -> bool:
+    """#4639: a converged ``install --frozen`` refuses a declared local-catalog plugin."""
+    del before, after
+    return (
+        result is not None
+        and result.returncode == 1
+        and op.name == "install-frozen"
+        and bool(machine.local_catalog_slots())
+    )
+
+
+_LOCAL_FROZEN_ISSUE = "#4639"
+_FROZEN_REFUSED = frozenset({1})
 # Strict known cells this machine discharges; #4214 and #4572 are fixed (LSP-only
 # packages survive uninstall; a git -> registry switch drops the stale .apm-pin).
-KNOWN_CELLS: tuple[KnownCell, ...] = ()
+KNOWN_CELLS: tuple[KnownCell, ...] = (
+    KnownCell(
+        "local-catalog-frozen-refused",
+        "I2",
+        _LOCAL_FROZEN_ISSUE,
+        r"^converged install-frozen exited 1$",
+        _local_catalog_frozen,
+    ),
+)
 
 
 def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Path:
@@ -649,7 +670,7 @@ class SourceMachine(MachineBase):
         converged = self.converged and self.network != "offline" and op != "uninstall"
         step = self.step(
             (op, *args),
-            exits=self.exits(op),
+            exits=self.exits(op) | (_FROZEN_REFUSED if self.frozen_refused(op, args) else set()),
             cells=self.cells(op, "real", choices),
             converged=converged,
             model=allowed,
@@ -976,6 +997,29 @@ class SourceMachine(MachineBase):
             evidence=Evidence(present={"project": (".mcp.json",)}, exit=0),
         )
 
+    def frozen_refused(self, op: str, args: tuple[str, ...]) -> bool:
+        """#4639: ``install --frozen`` refuses a project that declares a local-catalog plugin."""
+        return op == "install" and "--frozen" in args and bool(self.local_catalog_slots())
+
+    def local_catalog_slots(self) -> list[Choice]:
+        return [c for c in self._choices() if c.form in LOCAL_CATALOGS]
+
+    def frozen_install(self, manifest: list[Choice]) -> None:
+        """``install --frozen`` on the converged project; while #4639 is open the local-catalog
+        plugins run in a second converged project of their own (a strict known cell)."""
+        local = self.local_catalog_slots()
+        if not local:
+            self.command("install", ("--frozen",), manifest, False)
+            return
+        for choice in local:
+            self.undeclare(choice.slot)
+        self.reconcile("install", False)
+        self.command("install", ("--frozen",), [c for c in manifest if c not in local], False)
+        for choice in local:
+            self.declare(choice, False)
+        self.reconcile("install", False)
+        self.command("install", ("--frozen",), local, False)
+
     def context_pass(self) -> None:
         """Install every declared form under --force/--update/--target and --frozen, multi-target."""
         self.retarget(TARGET_SETS[1])
@@ -983,7 +1027,7 @@ class SourceMachine(MachineBase):
         selected = ("--target", ",".join(sorted(self.model.targets)))
         manifest = [c for c in self._choices() if c.form != "bundle"]
         self.command("install", ("--force", "--update", *selected), manifest, False)
-        self.command("install", ("--frozen",), manifest, False)
+        self.frozen_install(manifest)
         bundle = next((c for c in self._choices() if c.form == "bundle"), None)
         if bundle is not None:
             # The first install under the new targets widens them; the second is unchanged.
@@ -1220,4 +1264,6 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
 
 
 # T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {}
+KNOWN_CELLS_BY_ID: dict[str, str] = {
+    f"X|install|{form}|FROZEN=on": _LOCAL_FROZEN_ISSUE for form in ("local-mkt", "file-mkt")
+}
