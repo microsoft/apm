@@ -645,6 +645,9 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_overrides_a_render_that_lacks_the_path",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
@@ -655,13 +658,17 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 5,
+      "test_count": 9,
       "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_overrides_a_render_that_lacks_the_path",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[locked-render]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_receipt_or_locked_render_authorizes_deletion[receipt]",
-        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion"
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_hash_alone_never_authorizes_deletion",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_spec_states_the_per_invocation_consent_exception"
       ]
     },
     {
