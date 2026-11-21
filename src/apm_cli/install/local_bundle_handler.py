@@ -644,12 +644,37 @@ def _filter_bundle_executables(
     if package_type_approved(allow_executables, (approval_key,), exec_type):
         return dependencies
     noun = "executable" if len(dependencies) == 1 else "executables"
-    logger.warning(
-        f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from "
-        f"{bundle_info.package_id}. "
-        + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
-    )
+    lead = f"Skipped {len(dependencies)} bundle {exec_type.upper()} {noun} from {bundle_info.package_id}"
+    if _bundle_denied(allow_executables, approval_key, exec_type):
+        logger.warning(f"{lead}: {_denied_hint(approval_key, exec_type, user_scope=user_scope)}")
+    else:
+        logger.warning(
+            f"{lead}. " + local_bundle_approval_hint(approval_key, exec_type, user_scope=user_scope)
+        )
     return []
+
+
+def _bundle_denied(allow_executables: Any, approval_key: str, exec_type: str) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds *exec_type*."""
+    from ..security.trust import package_denies_type
+
+    context = getattr(allow_executables, "trust_context", None)
+    return package_denies_type(context, (approval_key,), exec_type)
+
+
+def _denied_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
+    """Name the deny and the user's own command that lifts it (RA-041)."""
+    from ..core.remediation import LOCAL_BUNDLE_EXECUTABLES_DENIED
+    from ..security.trust import approve_command
+
+    install = "apm install -g <bundle-path>" if user_scope else "apm install <bundle-path>"
+    remedy = LOCAL_BUNDLE_EXECUTABLES_DENIED.bind(
+        key=approval_key, exec_type=exec_type, install=install
+    ).with_command(approve_command(approval_key, user_scope=user_scope))
+    return (
+        f"{exec_type} is denied for this exact bundle ({approval_key}). "
+        f"To {remedy.fixes_promise}, run:\n    {remedy.command}\nthen {remedy.then}."
+    )
 
 
 def _bundle_approval_key(bundle_info, allow_executables) -> str | None:

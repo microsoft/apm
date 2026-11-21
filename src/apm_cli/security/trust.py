@@ -1051,6 +1051,15 @@ def package_grants_type(
     return bool(package_keys) and _type_decision(ctx, package_keys, exec_type).allowed
 
 
+def package_denies_type(
+    ctx: ExecTrustContext | None, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether a deny rule, not a missing approval, withholds *exec_type* from the package."""
+    if ctx is None or not package_keys:
+        return False
+    return _type_decision(ctx, package_keys, exec_type).trust_state == TRUST_DENIED
+
+
 def package_type_verdicts(
     ctx: ExecTrustContext,
     package_keys: tuple[str, ...],

@@ -597,6 +597,10 @@ class InstallService:
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
             )
+        # A deny of a local bundle refuses before its LSP server is retired (RA-041).
+        from apm_cli.install.frozen_retirement import refuse_withdrawn_bundle_lsp
+
+        refuse_withdrawn_bundle_lsp(request, lockfile, lockfile_path.parent)
         InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
 

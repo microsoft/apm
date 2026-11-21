@@ -190,6 +190,28 @@ def _stale_exec_decisions(
     return stale
 
 
+def refuse_withdrawn_bundle_lsp(
+    request: InstallRequest, committed: LockFile, lockfile_dir: Path
+) -> None:
+    """Refuse ``--frozen`` before any write when a deny withdrew a deployed bundle LSP server.
+
+    A local bundle is not in apm.yml, so no dependency check reaches it; the
+    same rule plain ``apm install`` retires the server by (RA-041).
+    """
+    from apm_cli.core.scope import get_source_root, is_user_scope
+    from apm_cli.install.lsp.integration import withdrawn_bundle_lsp_for_scope
+
+    scope = request.scope
+    if withdrawn := withdrawn_bundle_lsp_for_scope(
+        committed,
+        lockfile_dir,
+        lockfile_dir if scope is None else get_source_root(scope),
+        user_scope=is_user_scope(scope),
+        no_policy=bool(request.no_policy),
+    ):
+        raise _stale_decisions_error(withdrawn)
+
+
 def frozen_missing_files_error(
     request: InstallRequest,
     committed: LockFile,

@@ -1366,6 +1366,12 @@ LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED = _entry(
     "approve this exact local bundle's {exec_type}",
     then="rerun '{install}'",
 )
+LOCAL_BUNDLE_EXECUTABLES_DENIED = _entry(
+    "local-bundle-executables-denied",
+    "apm approve {key}",
+    "lift your deny of this exact local bundle's {exec_type}",
+    then="rerun '{install}'",
+)
 MCP_UPDATE_FLAG = _entry("mcp-update-flag", "apm update", "update MCP entries")
 MCP_REGISTRY_URL_INVALID = _entry(
     "mcp-registry-url-invalid",
