@@ -9,6 +9,7 @@ CELL: OP=install SRC=local SCOPE=project GATE=org-policy NET=policy-unreachable
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -91,3 +92,47 @@ def test_single_non_origin_remote_is_used_for_discovery(
     flat = " ".join((result.stdout + "\n" + result.stderr).split())
     assert "Could not fetch org policy from org:acme-remote-fixture/" in flat, _evidence(result)
     assert (root / ".github/instructions/alpha.instructions.md").is_file()
+
+
+@pytest.mark.req("req-pl-012")
+def test_no_policy_install_bypasses_the_remote_ambiguity(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Only auto-discovery reads the remote: ``install --no-policy`` still installs."""
+    env, root = _project(
+        tmp_path,
+        {"fork": "https://github.com/me/app.git", "upstream": "https://github.com/acme/app.git"},
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    result = runner.run(("install", "--no-policy"), cwd=root, env=env)
+
+    assert result.returncode == 0, _evidence(result)
+    flat = " ".join((result.stdout + "\n" + result.stderr).split())
+    assert "several remotes" not in flat, _evidence(result)
+    assert (root / ".github/instructions/alpha.instructions.md").is_file(), _evidence(result)
+
+
+@pytest.mark.req("req-pl-012")
+def test_explicit_policy_source_bypasses_the_remote_ambiguity(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An explicit ``--policy-source`` file is loaded without reading the ambiguous remote."""
+    env, root = _project(
+        tmp_path,
+        {"fork": "https://github.com/me/app.git", "upstream": "https://github.com/acme/app.git"},
+    )
+    source = root / "apm-policy.yml"
+    source.write_text(
+        "name: org\nversion: 1.0.0\nenforcement: warn\ndependencies:\n  deny: [evil/*]\n",
+        encoding="ascii",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    result = runner.run(
+        ("policy", "status", "--policy-source", str(source), "--json"), cwd=root, env=env
+    )
+
+    assert result.returncode == 0, _evidence(result)
+    assert "several remotes" not in result.stdout + result.stderr, _evidence(result)
+    assert json.loads(result.stdout)["outcome"] == "found", _evidence(result)
