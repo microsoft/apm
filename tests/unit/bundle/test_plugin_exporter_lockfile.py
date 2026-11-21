@@ -275,9 +275,19 @@ class TestPluginExportWithoutProjectLockfile:
         assert any("skills/foo/SKILL.md" in err for err in errors)
 
 
-def test_plugin_pack_names_each_lsp_server_it_cannot_carry(tmp_path: Path, capsys) -> None:
-    """RA-034: a Claude plugin has no LSP surface, so pack names every server it drops (I8)."""
+def test_plugin_pack_carries_lsp_servers_in_bundle_lsp_json(tmp_path: Path, capsys) -> None:
+    """RA-034: the Claude plugin bundle's .lsp.json carries every complete LSP server.
+
+    Sources are apm.yml dependencies.lsp, the lockfile and a root .lsp.json
+    (which wins a name collision). The bundle file passes the checks plugin
+    admission and bundle install apply; only incomplete servers are named.
+    """
     import json
+
+    from apm_cli.claude_plugins.admission import _unsupported_capability
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers, lsp_servers_to_apm_deps
+    from apm_cli.install.local_bundle_handler import _parse_bundle_lsp_servers
+    from apm_cli.models.dependency.lsp import LSPDependency
 
     project = _setup_project_with_skill(tmp_path)
     _write_apm_yml(
@@ -293,10 +303,33 @@ def test_plugin_pack_names_each_lsp_server_it_cannot_carry(tmp_path: Path, capsy
         },
     )
     lock = LockFile.read(project / "apm.lock.yaml") or LockFile()
-    lock.lsp_servers = ["gopls"]
+    lock.lsp_servers = ["gopls", "orphan"]
+    lock.lsp_configs = {
+        "gopls": {
+            "name": "gopls",
+            "command": "gopls",
+            "args": ["serve"],
+            "extensionToLanguage": {".go": "go"},
+        }
+    }
     lock.write(project / "apm.lock.yaml")
     (project / ".lsp.json").write_text(
-        json.dumps({"lspServers": {"rust-analyzer": {"command": "rust-analyzer"}}}),
+        json.dumps(
+            {
+                "lspServers": {
+                    "pyright": {
+                        "command": "pyright-langserver",
+                        "args": ["--stdio"],
+                        "extensionToLanguage": {".py": "python"},
+                    },
+                    "rust-analyzer": {
+                        "command": "rust-analyzer",
+                        "fileExtensions": {".rs": "rust"},
+                    },
+                    "broken": {"command": "broken-ls"},
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -304,15 +337,39 @@ def test_plugin_pack_names_each_lsp_server_it_cannot_carry(tmp_path: Path, capsy
 
     output = " ".join(capsys.readouterr().out.split())
     assert (
-        "Claude plugin bundles do not carry LSP servers; not packed: gopls, pyright, "
-        "rust-analyzer. Configure LSP in the target client instead."
+        "LSP servers without a complete config (command and extensionToLanguage) are not "
+        "packed: broken, orphan. Declare them in apm.yml dependencies.lsp or .lsp.json, "
+        "then run 'apm install' and pack again."
     ) in output
-    assert not any("lsp" in str(path).lower() for path in result.files)
+    assert ".lsp.json" in result.files
+    bundle_lsp = json.loads((result.bundle_path / ".lsp.json").read_text(encoding="utf-8"))
+    assert bundle_lsp == {
+        "gopls": {"command": "gopls", "args": ["serve"], "extensionToLanguage": {".go": "go"}},
+        "pyright": {
+            "command": "pyright-langserver",
+            "args": ["--stdio"],
+            "extensionToLanguage": {".py": "python"},
+        },
+        "rust-analyzer": {"command": "rust-analyzer", "extensionToLanguage": {".rs": "rust"}},
+    }
+
+    manifest = json.loads((result.bundle_path / "plugin.json").read_text(encoding="utf-8"))
+    assert _unsupported_capability(result.bundle_path, manifest) is None
+    discovered = _extract_lsp_servers(result.bundle_path, manifest)
+    admitted = [
+        LSPDependency.from_dict(spec)
+        for spec in lsp_servers_to_apm_deps(discovered, result.bundle_path)
+    ]
+    assert {dep.name: dep.to_lsp_json_entry() for dep in admitted} == bundle_lsp
+    installed = _parse_bundle_lsp_servers(result.bundle_path)
+    assert {dep.name: dep.to_lsp_json_entry() for dep in installed} == bundle_lsp
 
 
 def test_plugin_pack_without_lsp_warns_nothing_about_lsp(tmp_path: Path, capsys) -> None:
     project = _setup_project_with_skill(tmp_path)
 
-    export_plugin_bundle(project, tmp_path / "out")
+    result = export_plugin_bundle(project, tmp_path / "out")
 
     assert "LSP" not in capsys.readouterr().out
+    assert ".lsp.json" not in result.files
+    assert not (result.bundle_path / ".lsp.json").exists()

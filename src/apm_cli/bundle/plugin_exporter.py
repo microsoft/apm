@@ -902,29 +902,53 @@ def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _lsp_servers_not_packed(
+def _collect_lsp_servers(
     project_root: Path, package: APMPackage, lockfile: LockFile | None
-) -> list[str]:
-    """Name the LSP servers a Claude plugin bundle leaves out (RA-034).
+) -> tuple[dict[str, dict], list[str]]:
+    """Return the ``.lsp.json`` servers a Claude plugin bundle carries (RA-034).
 
-    Declared ``dependencies.lsp``, servers the lockfile records, and a root
-    ``.lsp.json``'s ``lspServers`` all describe LSP configuration the plugin
-    format has no surface for.
+    Sources, later wins on a name collision (the root package's authored file
+    last, as for ``.mcp.json``): servers the lockfile records, declared
+    ``dependencies.lsp``, then a root ``.lsp.json``. Every entry is validated
+    by ``LSPDependency`` (``command`` and ``extensionToLanguage``), the schema
+    plugin admission applies when the bundle is installed. The second value
+    names each server with no complete config, so none is dropped silently.
     """
-    names = {dep.name for dep in package.get_lsp_dependencies()}
+    from ..deps.plugin_parser import lsp_servers_to_apm_deps
+    from ..models.dependency.lsp import LSPDependency
+
+    servers: dict[str, dict] = {}
+    names: set[str] = set()
+
+    def _admit(config: dict) -> None:
+        try:
+            dep = LSPDependency.from_dict(config)
+        except (ValueError, TypeError):
+            return
+        servers[dep.name] = dep.to_lsp_json_entry()
+
     if lockfile is not None:
         names.update(lockfile.lsp_servers or ())
-        names.update(lockfile.lsp_configs or {})
+        for name, config in sorted((lockfile.lsp_configs or {}).items()):
+            names.add(name)
+            if isinstance(config, dict):
+                _admit({**config, "name": name})
+    for dep in package.get_lsp_dependencies():
+        names.add(dep.name)
+        if dep.command is not None and dep.extension_to_language is not None:
+            _admit(dep.to_dict())
     lsp_json = project_root / ".lsp.json"
     if lsp_json.is_file() and not lsp_json.is_symlink():
         try:
             data = json.loads(lsp_json.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = None
-        servers = data.get("lspServers", data) if isinstance(data, dict) else None
-        if isinstance(servers, dict):
-            names.update(str(name) for name in servers)
-    return sorted(names)
+        authored = data.get("lspServers", data) if isinstance(data, dict) else None
+        if isinstance(authored, dict):
+            names.update(str(name) for name in authored)
+            for config in lsp_servers_to_apm_deps(authored, project_root, warn_on_invalid=False):
+                _admit(config)
+    return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
 def export_plugin_bundle(
@@ -1122,6 +1146,7 @@ def export_plugin_bundle(
             "plugin.json",
             "hooks.json",
             ".mcp.json",
+            ".lsp.json",
             "apm.lock.yaml",
             PLUGIN_ECOSYSTEM_PATHS["claude"],
         },
@@ -1134,12 +1159,14 @@ def export_plugin_bundle(
     root_mcp = _collect_mcp(project_root)
     _deep_merge(merged_mcp, root_mcp, overwrite=True)
 
-    # 6b. LSP servers have no place in a Claude plugin: name each one dropped (I8).
-    dropped_lsp = _lsp_servers_not_packed(project_root, package, lockfile)
-    if dropped_lsp:
+    # 6b. LSP -- Claude plugins carry LSP servers in a root .lsp.json; name
+    #     each server without a complete config instead of dropping it (I8).
+    merged_lsp, unpacked_lsp = _collect_lsp_servers(project_root, package, lockfile)
+    if unpacked_lsp:
         message = (
-            "Claude plugin bundles do not carry LSP servers; not packed: "
-            f"{', '.join(dropped_lsp)}. Configure LSP in the target client instead."
+            "LSP servers without a complete config (command and extensionToLanguage) "
+            f"are not packed: {', '.join(unpacked_lsp)}. Declare them in apm.yml "
+            "dependencies.lsp or .lsp.json, then run 'apm install' and pack again."
         )
         if logger:
             logger.warning(message)
@@ -1165,6 +1192,8 @@ def export_plugin_bundle(
     output_files.extend(hook_resources.generated)
     if merged_mcp:
         output_files.append(".mcp.json")
+    if merged_lsp:
+        output_files.append(".lsp.json")
     output_files.append("plugin.json")
 
     # 9. Dry run -- return file list without writing
@@ -1200,6 +1229,10 @@ def export_plugin_bundle(
             bundle_dir / ".mcp.json",
             json.dumps({"mcpServers": merged_mcp}, indent=2, sort_keys=True),
         )
+
+    # 13b. Write merged .lsp.json (flat server map, Claude plugin layout)
+    if merged_lsp:
+        write_text_lf(bundle_dir / ".lsp.json", json.dumps(merged_lsp, indent=2, sort_keys=True))
 
     # 14. Write plugin.json with updated component paths
     plugin_json = _update_plugin_json_paths(plugin_json, output_files, logger=logger)

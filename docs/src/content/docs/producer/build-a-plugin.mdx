@@ -94,7 +94,7 @@ referenced.
 
 | Command | Produces |
 |---|---|
-| `apm pack` | Claude plugin bundle; the help text labels it "Legacy Claude plugin bundle (current default)" |
+| `apm pack` | Claude plugin bundle; the help text labels it "Legacy Claude plugin bundle (current default)". LSP servers from `apm.yml`, `apm.lock.yaml` and a root `.lsp.json` are written to the bundle's `.lsp.json` |
 | `apm pack --format agent-plugin` | Portable [Agent Plugins v1](https://github.com/agentplugins/agent-plugins-spec) bundle: `plugin.json`, `skills/` and MCP servers, nothing else. Fails if the source has agents, commands, instructions, hooks or LSP servers it cannot represent |
 | `apm pack --format apm` | Legacy APM bundle layout |
 | `apm pack --archive` | Any of the above as one `.zip` (`--archive-format tar.gz` for older pipelines) |

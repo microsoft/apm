@@ -106,8 +106,8 @@ def _require_portable_agent_plugin(dropped_surfaces: set[str]) -> None:
         )
     if "lsp" in dropped_surfaces:
         message += (
-            " LSP configuration is carried by neither 'agent-plugin' nor "
-            "'claude-plugin'; configure LSP in the target client instead."
+            " LSP servers are not carried by 'agent-plugin'; pack with "
+            "'--format claude-plugin', which writes them to the bundle's .lsp.json."
         )
     raise ValueError(message)
 

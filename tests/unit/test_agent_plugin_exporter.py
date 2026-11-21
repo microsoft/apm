@@ -199,7 +199,7 @@ def test_agent_bundle_rejects_nonportable_components_before_output_commit(
         for surface in ("agents", "commands", "instructions", "extensions", "hooks", "lsp")
     )
     assert "apm pack --format claude-plugin" in message
-    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
+    assert "not carried by 'agent-plugin'; pack with '--format claude-plugin'" in message
     assert not build.exists()
 
 
@@ -342,7 +342,7 @@ def test_agent_bundle_lsp_only_failure_does_not_steer_to_claude(tmp_path: Path) 
 
     message = str(exc_info.value)
     assert "lsp" in message
-    assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in message
+    assert "not carried by 'agent-plugin'; pack with '--format claude-plugin'" in message
     assert "apm pack --format claude-plugin" not in message
     assert not build.exists()
 

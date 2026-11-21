@@ -101,6 +101,39 @@ def test_packed_bundle_installs_as_bundle_not_source(
     assert "error" not in output(second).lower()
 
 
+_CLAUDE_LSP = Path(".claude") / "skills" / "apm-lsp" / ".claude-plugin" / "plugin.json"
+
+
+def test_packed_lsp_servers_deploy_from_the_bundle_like_the_source(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-034: Claude plugin bundles carry LSP servers in .lsp.json (no silent loss, I8)."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    producer = world.isolated.work_root / "lsp-bundler"
+    write(
+        producer / "apm.yml",
+        "name: lsp-bundler\nversion: 1.0.0\ndescription: b\nlicense: MIT\ntargets: [claude]\n"
+        "dependencies:\n  apm: []\n  lsp:\n    - name: pyright\n"
+        "      command: pyright-langserver\n      args: [--stdio]\n"
+        "      extensionToLanguage: {'.py': python}\n",
+    )
+    write(producer / ".apm" / "skills" / "ls" / "SKILL.md", skill_md("ls"))
+    authored = {"command": "rust-analyzer", "extensionToLanguage": {".rs": "rust"}}
+    write(producer / ".lsp.json", json.dumps({"lspServers": {"rust-analyzer": authored}}))
+    world.apm(producer, "install", "--no-policy")
+    source = json.loads((producer / _CLAUDE_LSP).read_text())["lspServers"]
+    assert set(source) == {"pyright"}
+
+    world.apm(producer, "pack", "-o", str(tmp_path / "out"))
+    bundle = tmp_path / "out" / "lsp-bundler-1.0.0"
+    assert set(json.loads((bundle / ".lsp.json").read_text())) == {"pyright", "rust-analyzer"}
+
+    consumer = world.consumer("lsp-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    deployed = json.loads((consumer / _CLAUDE_LSP).read_text())["lspServers"]
+    assert deployed == {**source, "rust-analyzer": authored}
+
+
 def test_source_package_with_plugin_json_installs_as_local_dependency(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
