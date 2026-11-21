@@ -77,6 +77,13 @@ class _World:
         )
         return result
 
+    def apm_fails(self, *args: str, scenario: str, cwd: Path) -> CommandResult:
+        result = self.runner.run(args, scenario_id=scenario, cwd=cwd, env=self.env)
+        assert result.returncode != 0, (
+            f"{scenario} unexpectedly succeeded\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        return result
+
     def commit_worker(self, content: str, message: str) -> str:
         (self.repo.worktree / ".apm" / "agents" / "build-worker.agent.md").write_text(
             content, encoding="utf-8"
@@ -216,6 +223,17 @@ def test_gemini_agent_project_lifecycle(tmp_path: Path, apm_binary_path: Path) -
     world.apm(*install, scenario="update", cwd=root)
     _assert_worker_v(deployed, "v2-marker")
     assert _gemini_agent_records(lock_path) == ["gemini||project|.gemini/agents/build-worker.md"]
+
+    # A failed install (the ref does not exist) leaves the deployed agent and
+    # its lockfile rows exactly as they were.
+    v2_bytes = deployed.read_bytes()
+    lock_bytes = lock_path.read_bytes()
+    _set_ref(project.manifest_path, world.pkg_name, "0" * 40)
+    failed = world.apm_fails(*install, scenario="failed-update", cwd=root)
+    assert "No install transaction changes were committed" in failed.stdout + failed.stderr
+    assert deployed.read_bytes() == v2_bytes
+    assert lock_path.read_bytes() == lock_bytes
+    _set_ref(project.manifest_path, world.pkg_name, v2_sha)
 
     # The agent turns invalid: the install still succeeds with a warning,
     # nothing invalid is written, and APM removes its stale earlier copy and
