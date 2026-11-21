@@ -349,6 +349,9 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           APM_RUN_INTEGRATION_TESTS: "1"
+          # Public runtime release metadata (setup-codex.sh) uses the job token, not the
+          # private-module PAT, as build-release.yml does (INFRA-1).
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
           PYTEST_MARK_EXPR: ${{ env.HERMETIC_MARK_EXPR }}
@@ -433,6 +436,9 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           APM_RUN_INTEGRATION_TESTS: "1"
+          # Public runtime release metadata (setup-codex.sh) uses the job token, not the
+          # private-module PAT, as build-release.yml does (INFRA-1).
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
           PYTEST_MARK_EXPR: ${{ env.NETWORK_MARK_EXPR }}
@@ -587,6 +593,9 @@ jobs:
       - name: Run release validation tests
         env:
           APM_E2E_TESTS: "1"
+          # Public runtime release metadata (setup-codex.sh) uses the job token, not the
+          # private-module PAT, as build-release.yml does (INFRA-1).
+          GITHUB_API_TOKEN: ${{ github.token }}
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
         run: |
