@@ -651,6 +651,18 @@ def _legacy_lsp_owner_names(names: set[str], targets_recorded: bool) -> dict:
     return {} if targets_recorded or not names else {"legacy_server_names": set(names)}
 
 
+def _refusal(conflict):
+    """*conflict* as a refusal: it wrote no server, so the install commits nothing (#4697).
+
+    Like an MCP native conflict that wrote no connection, nothing is recorded;
+    the transaction discards the staged lockfile, so a failed install leaves
+    ``apm.lock.yaml`` byte-identical.
+    """
+    from apm_cli.install.errors import LSPUserEntryRefusal
+
+    return LSPUserEntryRefusal(str(conflict), preserved=conflict.preserved, wrote_servers=False)
+
+
 def _unowned_everywhere(kept: dict[str, set[str]], new_targets: dict[str, set[str]]) -> set[str]:
     """User entries APM owns on no target, so the lock never claims them (#4628)."""
     return set().union(*kept.values(), set()) - set().union(*new_targets.values(), set())
@@ -813,6 +825,8 @@ def run_lsp_integration(  # noqa: PLR0913
                     **_legacy_lsp_owner_names(old_lsp_servers, old_lsp_targets_present),
                 )
             except LSPUserEntryConflictError as exc:
+                if not exc.wrote_servers:
+                    raise _refusal(exc) from None
                 # The other servers were written; record them, then fail (#4628).
                 conflict = exc
 

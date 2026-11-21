@@ -301,6 +301,43 @@ class TestRunLspIntegration:
         assert "bundle:vendor/tool" in str(exc_info.value)
         assert "--force does not transfer ownership" in str(exc_info.value)
 
+    @pytest.mark.parametrize("wrote", [False, True], ids=["nothing-written", "others-written"])
+    @patch(_PATCH_TARGET)
+    def test_user_entry_conflict_commits_only_when_a_server_was_written(
+        self, mock_integrator, tmp_path, wrote
+    ):
+        """#4697: a conflict that wrote nothing refuses the commit; else it records (#4628)."""
+        from apm_cli.deps.lockfile_write_authority import commits_on_failure
+        from apm_cli.install.errors import LSPUserEntryConflictError
+
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("mine")]
+        mock_integrator.resolve_target_runtimes.return_value = ["copilot"]
+        mock_integrator.get_server_names.return_value = {"mine"}
+        mock_integrator.collect_transitive.return_value = []
+        mock_integrator.install.side_effect = LSPUserEntryConflictError(
+            "LSP installation incomplete: mine (copilot)",
+            preserved={"copilot": {"mine"}},
+            wrote_servers=wrote,
+        )
+        modules = tmp_path / "apm_modules"
+        modules.mkdir()
+
+        with pytest.raises(LSPUserEntryConflictError) as exc_info:
+            run_lsp_integration(
+                apm_package=package,
+                apm_modules_path=modules,
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+            )
+
+        assert commits_on_failure(exc_info.value) is wrote
+        assert mock_integrator.update_lockfile.called is wrote
+
     @patch(_PATCH_TARGET)
     def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):
         """An explicit executable gate blocks LSP servers until approved."""
