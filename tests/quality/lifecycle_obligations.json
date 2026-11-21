@@ -18441,8 +18441,9 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
+   "tracking": "#4685",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin"
   },
   "pair|PRIM=bin|DRYRUN=on": {

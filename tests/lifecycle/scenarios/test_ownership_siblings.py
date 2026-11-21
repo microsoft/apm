@@ -950,6 +950,7 @@ def test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin(lifecycle_world)
         credit=[_pair("unowned", PRIM="bin")],
         keep={"home": (_PLUGIN_BIN,)},
         refusal=True,
+        known={"I7": Known("#4685", r"failed install changed the lockfile")},
     )
     assert "APM never replaces content it did not deploy" in step.output, step.output
     scenario.finish()
@@ -1241,6 +1242,7 @@ CREDITS = credits(
     known={
         "test_edited_executable_files_are_kept": "#4626",
         "test_a_users_lsp_entry_is_never_taken_over": "#4628",
+        "test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin": "#4685",
         "test_a_local_bundle_never_replaces_the_users_hook[present-provenance-unknown]": "#4634",
         "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
     },

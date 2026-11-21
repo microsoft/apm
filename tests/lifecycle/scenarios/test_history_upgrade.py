@@ -43,6 +43,7 @@ import pytest
 import yaml
 
 from tests.lifecycle.generator.rules import FROZEN_TARGET_CHANGE, FROZEN_TARGET_CHANGE_MESSAGES
+from tests.lifecycle.model.expected import exit_contract
 from tests.lifecycle.oracles import Evidence, check_obligation
 from tests.lifecycle.scenarios._kit import Known, Scenario, assert_changes, credits
 from tests.lifecycle.world import use_policy
@@ -253,7 +254,9 @@ def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     scenario = _history(lifecycle_world, tgt)
     line = HISTORY_ROWS[row][0]
     credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
-    scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    step = scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
+    # I8: whatever the row decides, the exit stays inside the command's contract.
+    assert step.result.returncode in exit_contract(line.split()[0]), step.output
     scenario.finish()
 
 
