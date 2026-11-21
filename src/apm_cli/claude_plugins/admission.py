@@ -90,6 +90,7 @@ def pin_native_claude_source(root: Path) -> str:
 
 _MANIFEST_FIELDS = frozenset(
     {
+        "$schema",  # an inert JSON Schema annotation Claude ignores
         "name",
         "version",
         "description",
@@ -214,7 +215,7 @@ def _intact_source(
     name = manifest.get("name")
     if not is_safe_plugin_name(name):
         return _Ineligible(
-            f"its plugin name {name!r} is missing or unsafe (letters, digits, '-' and '_')",
+            f"its plugin name {name!r} is missing or unsafe (letters, digits, '-', '_' and inner '.')",
             f"Ask the publisher to fix 'name' in .claude-plugin/plugin.json, {_EXCLUDE_CLAUDE}",
         )
     try:
@@ -295,10 +296,15 @@ def plan_native_claude_plugin(
         and reference.is_virtual
         and has_normalized_plugin_skill_sources_receipt(root)
     )
-    # At project scope only a Claude-format plugin goes native; any other
-    # plugin (an `apm pack` bundle with a root plugin.json) deploys loose.
+    # At project scope only a complete Claude-format plugin goes native; any
+    # other plugin (an `apm pack` bundle with a root plugin.json) and a
+    # skills: selection, which a whole-plugin load cannot honor, deploy loose.
     if (package_type is not PackageType.MARKETPLACE_PLUGIN and not normalized_virtual) or (
-        not user_scope and not (root / ".claude-plugin/plugin.json").is_file()
+        not user_scope
+        and (
+            not (root / ".claude-plugin/plugin.json").is_file()
+            or skill_subset_filter_tokens(skill_subset) is not None
+        )
     ):
         return None
 
