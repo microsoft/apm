@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs change no bytes. (closes #4572, #4597)
 - `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once instead of committing it before MCP/LSP reconciliation. (closes #4329, #4579)
 - `apm install` keeps a same-name LSP server entry you wrote, configures the other servers and exits 1, as with MCP conflicts. (closes #4628, #4654)
+- `apm install` deploys an approved package that declares both hooks and LSP servers instead of failing. (closes #4658, #4680)
 - `apm install --target` narrowed to fewer runtimes keeps still-declared MCP servers on the other runtimes instead of removing them. (closes #4562, #4666)
 - `apm install` retires the hook files a denied package deployed even when `apm.lock.yaml` is missing; edited files stay and `apm audit --ci` reports them. (#4644)
 - `apm install --frozen` and `apm audit --ci` accept a plugin installed from a local marketplace directory or `marketplace.json` file. (closes #4639, #4655)
