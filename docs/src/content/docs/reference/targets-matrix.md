@@ -234,36 +234,40 @@ Gemini CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: merged into `.gemini/settings.json`
 - **Compile output.** `GEMINI.md`. Gemini CLI does not read per-file rules from `.gemini/rules/`, so `instructions` is compile-only.
-- **Agents.** Qualified against Gemini CLI v0.70.0 local subagents
-  ([docs](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md)). The Gemini agent loader rejects a file
-  with any frontmatter key outside its schema
-  ([`agentLoader.ts`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/agentLoader.ts)), so APM
-  writes only `name`, `description`, `tools`, `model`, `display_name`,
-  `temperature`, `max_turns` and `timeout_mins`, and drops other keys. `name`
-  defaults to the file stem and must be a lowercase slug; `description` is
-  required. `tools` must use Gemini tool names
-  ([tools reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md)), `mcp_<server>_<tool>`, or
-  the `*`, `mcp_*` and `mcp_<server>_*` wildcards. APM accepts `model: inherit`
-  (Gemini's documented default) or a `gemini-*` id. APM does not map other
-  providers' tool or model names. An omitted `tools` stays omitted; Gemini
-  documents that the agent then inherits all tools from the parent session.
-  An agent that declares agent-scoped MCP servers (`mcp_servers`,
-  `mcpServers`, `mcp-servers`), `disallowedTools`, `permissionMode` or
-  `kind: remote`, or that fails any of the checks above, is not deployed and
-  gets a warning; other agents in the package still deploy. APM does not
-  write Gemini's trust, acknowledgement or `agents.overrides` settings. Gemini
-  registers a project agent only after it has been acknowledged for its
-  current content; a new or changed agent file is reported for
-  acknowledgement instead. In v0.70.0 that acknowledgement is the
-  interactive "New Agents Discovered" dialog, so headless runs do not use a
-  new or updated project agent until it has been accepted once. Gemini also
-  skips project agents in an untrusted folder; folder trust
-  (`security.folderTrust.enabled`) defaults to `true`
-  ([configuration reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/configuration.md),
-  [`registry.ts`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/core/src/agents/registry.ts),
-  [`AppContainer.tsx`](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/packages/cli/src/ui/AppContainer.tsx)). Local bundle
-  installs (`apm install <bundle>`) skip agents for this target; install from
-  source instead.
+- **Agents.** Qualified against Gemini CLI v0.70.0
+  [local subagents](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/core/subagents.md).
+  - **Written keys.** Gemini rejects an agent file with any key outside its
+    schema, so APM writes only `name`, `description`, `tools`, `model`,
+    `display_name`, `temperature`, `max_turns` and `timeout_mins`. Every other
+    key is dropped with a warning naming it. An omitted `tools` stays omitted;
+    Gemini documents that the agent then inherits all tools from the parent
+    session.
+  - **Accepted values.** `name` defaults to the file stem; if set, it must equal
+    the stem and be a lowercase slug, and the file name must not start with
+    `_`. `description` is required. `tools` must be Gemini tool names
+    ([tools reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/tools.md)), `mcp_<server>_<tool>`,
+    `mcp_<server>_*`, `mcp_*`, `*` or `discovered_tool_<name>`. `model` must be
+    `inherit` or a `gemini-*` id. APM does not map other providers' tool or
+    model names.
+  - **Agents not deployed.** An agent that fails a check above, or that
+    declares any of `mcp_servers`, `mcpServers`, `mcp-servers`,
+    `disallowedTools`, `disallowed-tools`, `permissionMode`, `hooks`,
+    `isolation`, `permissions`, `permission`, `kind: remote`,
+    `agent_card_url`, `agent_card_json`, `auth`, `readonly: true`,
+    `disable-model-invocation: true`, `infer: false` or `disabled`/`disable:
+    true`, is skipped with a warning, because Gemini cannot keep that
+    restriction or agent type. Other agents in the package still deploy. Local
+    bundle installs (`apm install <bundle>`) skip agents for this target;
+    install from source instead.
+  - **Trust and acknowledgement.** APM does not write Gemini's trust,
+    acknowledgement or `agents.overrides` settings. Gemini registers a project
+    agent only after it has been acknowledged for its current content; a new
+    or changed agent file is reported for acknowledgement instead. In v0.70.0
+    that acknowledgement is the interactive "New Agents Discovered" dialog, so
+    headless runs do not use a new or updated project agent until it has been
+    accepted once. Gemini also skips project agents in an untrusted folder;
+    folder trust (`security.folderTrust.enabled`) defaults to `true`
+    ([configuration reference](https://github.com/google-gemini/gemini-cli/blob/v0.70.0/docs/reference/configuration.md)).
 
 ## antigravity
 
