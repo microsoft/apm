@@ -116,9 +116,23 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run every lifecycle journey
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 2 --durations=10 -m "not live" tests/lifecycle/journeys/test_journeys.py
+
+      # Every generated journey witness must report on Linux (#4586); the other
+      # operating systems may skip platform-bound steps, so they do not require it.
+      - name: Require a receipt from every journey witness
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
   lifecycle-full:
     name: Lifecycle Full Suite (Linux)
@@ -156,10 +170,26 @@ jobs:
       - name: Run the full lifecycle suite
         env:
           APM_E2E_TESTS: "1"
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \
             --ignore=tests/lifecycle/journeys tests/lifecycle
+
+      # This job runs every required witness under tests/lifecycle outside journeys
+      # (promise witnesses and the generated security, replay and machine rows), so
+      # each must have reported a receipt (#4586); the journeys job above requires the
+      # journey family. The PR lifecycle smoke shards (ci.yml) and
+      # gate-machine-nightly.yml run subsets and do not set
+      # APM_LIFECYCLE_RECEIPTS_REQUIRED.
+      - name: Require a receipt from every required witness
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+          APM_LIFECYCLE_RECEIPTS_SCOPE: tests/lifecycle/,!tests/lifecycle/journeys/
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
   # PR integration shards keep only the per-group sample of the linter session
   # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs

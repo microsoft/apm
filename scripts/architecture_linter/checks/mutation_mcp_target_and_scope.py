@@ -322,9 +322,10 @@ _MCP_DEPENDENCY_TARGET_CONSUMERS: tuple[tuple[str, str, tuple[str, ...]], ...] =
         "run_mcp_integration",
         (
             "admitted = mcp_servers_for_runtime(mcp_deps, owned_target)",
-            "mcp_deps, owned_target, named_only=True",
+            "mcp_deps, owned_target, named_only=not flag_narrowed",
             "deselected_mcp_claims(",
             "target_decision.from_manifest",
+            "target_decision.from_flag",
         ),
     ),
     (

@@ -108,6 +108,12 @@ plus where it was found:
   locked commit still pins the download. If the marketplace now selects another
   source or commit, install fails; run `apm update <plugin>@<marketplace>` to
   move to it.
+- A plugin from a local catalog (a directory or a `marketplace.json` file) is
+  locked by its content, not a commit. `apm install` reads the catalog again,
+  so catalog edits apply. `apm install --frozen` passes while the catalog still
+  selects the locked plugin directory and its content is unchanged, and
+  otherwise fails without writing anything; run `apm install` to lock the
+  change.
 - `apm update` and `apm install --refresh` revalidate the marketplace and fail
   rather than use stale data. `apm marketplace update` refreshes the cached
   list and nothing else.
