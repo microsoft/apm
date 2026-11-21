@@ -649,7 +649,7 @@ def _legacy_lsp_owner_names(names: set[str], targets_recorded: bool) -> dict:
 
 
 def _unowned_everywhere(kept: dict[str, set[str]], new_targets: dict[str, set[str]]) -> set[str]:
-    """Kept user entries APM owns on no target, so the lock never claims them (#4628)."""
+    """User entries APM owns on no target, so the lock never claims them (#4628)."""
     return set().union(*kept.values(), set()) - set().union(*new_targets.values(), set())
 
 
