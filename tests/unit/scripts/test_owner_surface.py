@@ -245,3 +245,44 @@ def test_a_slice_too_small_to_split_runs_whole_on_shard_one(pytester: pytest.Pyt
     shards = [owner_surface.shard_items(items, index, 3, None) for index in (1, 2, 3)]
     assert sorted(len(shard) for shard in shards) == [0, 1, 1]
     assert {item.nodeid for shard in shards for item in shard} == {item.nodeid for item in items}
+
+
+def test_a_replaced_guard_keeps_selecting_tests_that_name_the_old_guard() -> None:
+    replaced = {**LOCK_OWNER, "guards": ["contracts-tooling-lockfile-read-v2"]}
+    keys = owner_surface.selection_keys(
+        [".apm/architecture/owners/contracts-tooling.json"],
+        {**OWNERS, LOCK_OWNER["id"]: replaced},
+        OWNERS,
+        RULES,
+    )
+    assert {"contracts-tooling-lockfile-read", "contracts-tooling-lockfile-read-v2"} <= keys
+
+
+def test_a_changed_test_file_is_collected_without_a_source_change(tmp_path: Path) -> None:
+    install_test = "tests/integration/test_install_dir_source_package_lifecycle.py"
+    for path in (install_test, "tests/integration/test_architecture_x.py"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text("", encoding="utf-8")
+    targets = owner_surface.target_files([install_test, "tests/integration/gone.py"], tmp_path)
+    assert targets == ["tests/integration/test_architecture_x.py", install_test]
+
+
+RULE_CONSTANT = "hooks-merge-rule"
+
+
+def _rule_named_in_body(old: str) -> None:
+    owner_surface.run_selected_rules(ROOT, ("hooks-merge-guard",))  # type: ignore[attr-defined]
+
+
+def _rule_named_by_constant(old: str) -> None:
+    owner_surface.run_selected_rules(ROOT, (RULE_CONSTANT,))  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("function", "kept"),
+    [(_rule_named_in_body, True), (_rule_named_by_constant, True), (_rule_check, False)],
+)
+def test_parametrized_rule_tests_match_their_body_and_rule_constants(function, kept: bool) -> None:
+    item = _item(owner_surface.MUTATION_TESTS, params={"old": "x"}, function=function)
+    selection = {**SELECTION, "keys": ["hooks-merge-guard", "hooks-merge-rule"]}
+    assert owner_surface.keep_item(item, selection, {}.__getitem__) is kept

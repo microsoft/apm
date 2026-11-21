@@ -173,10 +173,12 @@ def selection_keys(
         if module:
             keys.add(module.group(1).replace("/", ".").removesuffix(".__init__"))
     owners = affected_owners(changed, current, base)
+    # Both revisions: a removed or replaced guard still selects the tests that name it.
     guards = {
         guard
         for owner_id in owners
-        for guard in {**base, **current}.get(owner_id, {}).get("guards", ())
+        for revision in (base, current)
+        for guard in revision.get(owner_id, {}).get("guards", ())
     }
     changed_set = set(changed)
     for rule_id, guard_ids, source in rules:
@@ -204,6 +206,12 @@ def target_files(changed: Sequence[str], root: Path = ROOT) -> list[str]:
         for path in root.glob(pattern)
         if path.is_file()
     }
+    # A changed test in either group always runs, even without a source change.
+    found.update(
+        path
+        for path in changed
+        if _matches(path, (ARCHITECTURE_TESTS, INSTALL_TESTS)) and (root / path).is_file()
+    )
     return sorted(found)
 
 
@@ -251,6 +259,20 @@ def _names_a_key(text: str, keys: Iterable[str]) -> bool:
     return any(key in text for key in keys)
 
 
+def _function_text(function: Any) -> str:
+    """A test's source plus the module-level string constants it references (a rule-id constant)."""
+    source = inspect.getsource(function)
+    namespace = getattr(function, "__globals__", {})
+    code = getattr(function, "__code__", None)
+    names = code.co_names if code is not None else ()
+    constants = [
+        _text(namespace[name])
+        for name in names
+        if isinstance(namespace.get(name), (str, tuple, frozenset))
+    ]
+    return "\n".join([source, *constants])
+
+
 def keep_item(item: Any, selection: Mapping[str, Any], file_text: Any) -> bool:
     """Whether one collected item is in the owner-surface slice."""
     path = Path(str(item.path)).resolve().relative_to(ROOT).as_posix()
@@ -262,15 +284,18 @@ def keep_item(item: Any, selection: Mapping[str, Any], file_text: Any) -> bool:
     if path != MUTATION_TESTS:
         return _names_a_key(file_text(path), keys)
     callspec = getattr(item, "callspec", None)
-    if callspec is not None:
-        return _names_a_key(_text(callspec.params), keys)
+    if callspec is not None and _names_a_key(_text(callspec.params), keys):
+        return True
     try:
-        source = inspect.getsource(item.function)
+        source = _function_text(item.function)
     except (OSError, TypeError):
+        # Unreadable source: a parametrized case already matched on its params.
+        return callspec is None
+    if _names_a_key(source, keys):
         return True
     # Unparametrized structural checks (coverage, ordering, a clean baseline)
-    # stay; one that runs a rule stays only when it names a key.
-    return "run_selected_rules" not in source or _names_a_key(source, keys)
+    # stay; anything else that runs a rule names no key, so it is deselected.
+    return callspec is None and "run_selected_rules" not in source
 
 
 def _tryfirst(function: Any) -> Any:
