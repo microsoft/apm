@@ -3,7 +3,8 @@
 ``expected_deployed`` is the reference model of the family::
 
     {(pkg, prim, target) | pkg declared, policy allows pkg, target effective,
-     and (prim is ungated or (gate[pkg, prim] == allowed and org does not deny prim))}
+     and (prim is ungated or (gate[pkg, prim] in {allowed, none (gate off)}
+          and org does not deny prim))}
 
 ``expected_exit`` narrows each command's documented exit contract
 (``EXIT_CONTRACTS``) with what the model knows; when the model cannot predict
@@ -43,7 +44,7 @@ def expected_deployed(
         if model.policy_allows(package)
         for kind in kinds[package]
         if kind in UNGATED_KINDS
-        or (model.gate(package, kind) == "allowed" and not model.org_denies(kind))
+        or (model.gate(package, kind) in ("allowed", "none") and not model.org_denies(kind))
         for target in model.targets
     )
 
