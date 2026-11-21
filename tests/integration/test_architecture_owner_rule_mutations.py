@@ -6780,6 +6780,27 @@ def test_every_stale_deleter_consumes_the_skip_set(
             id="pack-policy-ignores-locked-packages",
         ),
         pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "    retire_unadmitted_bundle_canvas(\n",
+            "    dict(\n",
+            id="scope-recheck-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/policy/ci_checks.py",
+            "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
+            "[]",
+            id="audit-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
+            "holding = found.setdefault((slug, False), BundleCanvas(slug, False))",
+            id="bundle-canvas-ownership-unrecorded",
+        ),
+        pytest.param(
             "install-deployment-executable-trust-context",
             "src/apm_cli/install/local_bundle_canvas.py",
             "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
@@ -6791,7 +6812,7 @@ def test_every_stale_deleter_consumes_the_skip_set(
 def test_bundle_policy_and_canvas_gate_routes_are_guarded(
     rule_id: str, path: str, old: str, new: str
 ) -> None:
-    """Local bundle identity, pack and bundle canvas each route through their owners."""
+    """Local bundle identity, pack and bundle canvas gate, record and re-check route through owners."""
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)

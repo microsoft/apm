@@ -1141,6 +1141,11 @@ def integrate_local_bundle(
                     f"[dry-run] would deploy {record}" if dry_run else f"deployed {record}"
                 )
 
+    if _canvas_ok and not dry_run:
+        from .local_bundle_canvas import record_bundle_canvas
+
+        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+
     from .local_bundle_hooks import integrate_local_bundle_hooks
 
     hook_result = integrate_local_bundle_hooks(

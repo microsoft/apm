@@ -1,4 +1,4 @@
-"""Re-check local-bundle hooks against current executable trust (#4027).
+"""Re-check local-bundle hooks (and canvas) against current executable trust (#4027).
 
 A local bundle's hooks were admitted by one exact content-bound approval key,
 recorded with their ownership marker (see
@@ -403,15 +403,25 @@ def reconcile_scope_bundle_hooks(
     logger: Any = None,
     dry_run: bool = False,
 ) -> list[UnadmittedBundleHooks]:
-    """Re-check one scope's local-bundle hooks; install, update and prune call this."""
+    """Re-check one scope's local-bundle hooks and canvas extensions.
+
+    Install, update and prune call this. Returns the unadmitted hooks.
+    """
     from apm_cli.core.scope import get_apm_dir
+
+    from .local_bundle_canvas import retire_unadmitted_bundle_canvas
 
     root, targets, allow_provider = scope_bundle_hook_inputs(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
-    return retire_unadmitted_bundle_hooks(
-        root, targets, allow_provider, lock_dir=get_apm_dir(scope), logger=logger, dry_run=dry_run
+    lock_dir = get_apm_dir(scope)
+    hooks = retire_unadmitted_bundle_hooks(
+        root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
     )
+    retire_unadmitted_bundle_canvas(
+        root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
+    )
+    return hooks
 
 
 def installed_local_bundles(scope: Any, apm_package: Any) -> tuple[list[str], int]:

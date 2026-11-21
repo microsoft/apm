@@ -373,12 +373,24 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
         "_drop_lock_rows(lock_dir, rows)",
         "            retire_bundle_hooks(",
+        # The scope re-check retires bundle canvas through the same pass.
+        "    retire_unadmitted_bundle_canvas(",
+    ),
+    "src/apm_cli/install/local_bundle_canvas.py": (
+        "package_type_approved(allow_map, (key,), EXEC_TYPE_CANVAS)",
+        "if None in holding.keys:",
+        "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
+        "retire_recorded_bundle_canvas(",
+    ),
+    "src/apm_cli/install/services.py": (
+        "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
     _CI_CHECKS: (
         "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
+        "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
     ),
     "src/apm_cli/install/local_bundle_hooks.py": (
         "package_info.local_bundle_approval = approval_key",

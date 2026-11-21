@@ -2,7 +2,10 @@
 
 Once deployed, a reinstall that the gate no longer admits (approval revoked
 or the exact bundle denied) removes the extension and its lock claim. The
-pending record lists canvas, so ``apm approve <key>`` grants it.
+pending record lists canvas, so ``apm approve <key>`` grants it. A plain
+``apm install`` re-checks every deployed bundle extension as it re-checks
+bundle hooks, and ``apm audit --ci`` reports one trust no longer admits. A
+blocked bundle never retires an extension another bundle deployed.
 """
 
 from __future__ import annotations
@@ -32,18 +35,21 @@ pytestmark = [
 _EXTENSION = ".github/extensions/board/extension.mjs"
 
 
-def _pack(world: MarketplacePackWorld, root: Path, out: Path) -> Path:
+def _pack(world: MarketplacePackWorld, root: Path, out: Path, name: str = "canvaspkg") -> Path:
     write(
         root / "apm.yml",
-        "name: canvaspkg\nversion: 1.0.0\ndescription: c\nlicense: MIT\n"
+        f"name: {name}\nversion: 1.0.0\ndescription: c\nlicense: MIT\n"
         "targets: [copilot]\ndependencies:\n  apm: []\n",
     )
-    write(root / ".apm" / "skills" / "cs" / "SKILL.md", skill_md("cs"))
-    write(root / ".apm" / "extensions" / "board" / "extension.mjs", "export default {};\n")
+    write(root / ".apm" / "skills" / f"{name}-s" / "SKILL.md", skill_md(f"{name}-s"))
+    write(
+        root / ".apm" / "extensions" / "board" / "extension.mjs",
+        f"export default {{ name: '{name}' }};\n",
+    )
     (root / ".github").mkdir(exist_ok=True)
     world.apm(root, "install", "--no-policy")
     world.apm(root, "pack", "-o", str(out))
-    return out / "canvaspkg-1.0.0"
+    return out / f"{name}-1.0.0"
 
 
 def _approval_key(bundle: Path) -> str:
@@ -100,3 +106,47 @@ def test_bundle_canvas_retires_on_revoke_and_deny(tmp_path: Path, apm_binary_pat
     assert not (consumer / _EXTENSION).exists()
     assert not _claimed(world, consumer)
     world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
+def test_plain_install_retires_denied_bundle_canvas_and_audit_reports_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    world.apm(world.isolated.work_root, "experimental", "enable", "canvas")
+    bundle = _pack(world, world.isolated.work_root / "canvaspkg", tmp_path / "out")
+    key = _approval_key(bundle)
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _set_executables(consumer, {"allow": {key: {"canvas": True}}})
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+    assert (consumer / _EXTENSION).is_file()
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+    world.apm(consumer, "deny", key)
+    stale = world.apm(consumer, "audit", "--ci", "--no-policy", expect=None)
+    assert stale.returncode != 0, output(stale)
+    assert "canvas" in output(stale) and "canvaspkg" in output(stale), output(stale)
+
+    # A plain install, with no bundle argument, retires it.
+    world.apm(consumer, "install", "--no-policy")
+    assert not (consumer / _EXTENSION).exists()
+    assert not _claimed(world, consumer)
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
+def test_blocked_bundle_keeps_another_bundles_extension(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    world.apm(world.isolated.work_root, "experimental", "enable", "canvas")
+    first = _pack(world, world.isolated.work_root / "first", tmp_path / "out-a", "first")
+    second = _pack(world, world.isolated.work_root / "second", tmp_path / "out-b", "second")
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _set_executables(consumer, {"allow": {_approval_key(first): {"canvas": True}}})
+    world.apm(consumer, "install", str(first), "--no-policy")
+    before = (consumer / _EXTENSION).read_bytes()
+
+    # The second bundle ships the same extension name and is not approved.
+    world.apm(consumer, "install", str(second), "--no-policy")
+
+    assert (consumer / _EXTENSION).read_bytes() == before
+    assert _claimed(world, consumer)
