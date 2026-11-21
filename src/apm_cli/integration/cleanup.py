@@ -88,8 +88,10 @@ class DeploymentEvidence:
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
+        owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._owned_receipts = owned_receipts
         self.user_scope = user_scope
         self._kept: frozenset[str] = frozenset()
         self._kept_parents: frozenset[str] = frozenset()
@@ -127,8 +129,11 @@ class DeploymentEvidence:
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        owned_receipts = None
         try:
-            receipts = DeploymentMaterializationSession(deploy_root, scope, None).receipt_hashes()
+            session = DeploymentMaterializationSession(deploy_root, scope, None)
+            receipts = session.receipt_hashes()
+            owned_receipts = session.receipt_hashes
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
@@ -139,6 +144,7 @@ class DeploymentEvidence:
                 render=None,
                 user_scope=user_scope,
                 kept=kept,
+                owned_receipts=owned_receipts,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -157,6 +163,24 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
             kept=kept,
+            owned_receipts=owned_receipts,
+        )
+
+    def receipted_claims(self, owner: str) -> list[str]:
+        """Return the deploy-root-relative files this installation receipted for *owner*.
+
+        Stands in for a package's prior ``deployed_files`` when the lock has no
+        record of it (for example after the lockfile was lost), so stale-file
+        cleanup still retires what the package no longer deploys. Deletion
+        stays gated by :meth:`verdict`.
+        """
+        from apm_cli.utils.paths import portable_relpath
+
+        if self._owned_receipts is None:
+            return []
+        return sorted(
+            portable_relpath(Path(physical), self._deploy_root)
+            for physical in self._owned_receipts(owner)
         )
 
     def add_rendered(self, rendered: Mapping[Path, str]) -> None:

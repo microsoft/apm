@@ -374,12 +374,13 @@ class DeploymentMaterializationSession:
         dependency_ref = getattr(package_info, "dependency_ref", None)
         return dependency_ref.get_unique_key() if dependency_ref is not None else "."
 
-    def receipt_hashes(self) -> dict[str, str]:
-        """Map each receipted physical path to the hash APM wrote there (#3701)."""
+    def receipt_hashes(self, owner: str | None = None) -> dict[str, str]:
+        """Map each receipted physical path (of *owner*, if given) to the hash APM wrote (#3701)."""
         return {
             physical: content_hash
             for physical, key in self._physical_keys.items()
             if (content_hash := self._records[key].content_hash) is not None
+            and (owner is None or owner in self._records[key].owners)
         }
 
     def receipt_held(self, path: Path) -> bool:
