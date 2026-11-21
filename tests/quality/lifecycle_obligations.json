@@ -493,11 +493,160 @@
     "U2"
    ]
   },
-  "T1|OP=marketplace|PRIM=other-file|GATE=allowed": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+  "T1|OP=marketplace|PRIM=bin|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=canvas|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=hook|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=lsp|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=denied-executable": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=mcp|GATE=unapproved-exec": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=other-file|GATE=allowed": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=denied-dependency": {
@@ -507,47 +656,57 @@
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=denied-executable": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=none": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=revoked-after-deploy": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=other-file|GATE=unapproved-exec": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2",
-    "E3"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=allowed": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=denied-executable": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=skill|GATE=none": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "T1|OP=marketplace|PRIM=skill|GATE=unapproved-exec": {
-   "maps_to": "T1|OP=marketplace|PRIM=skill|GATE=none",
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "U2"
+    "U-MKT"
    ]
   },
   "T1|OP=mcp-install|PRIM=other-file|GATE=allowed": {
@@ -2107,6 +2266,24 @@
     "U1"
    ]
   },
+  "pair|OP=bundle-install|SRC=local-bundle|FROZEN=on": {
+   "maps_to": "refusal|OP=bundle-install|FROZEN=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "pair|OP=bundle-install|SRC=local-bundle|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U1"
+   ]
+  },
+  "pair|OP=bundle-install|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U1"
+   ]
+  },
   "pair|OP=compile|FORCE=on": {
    "maps_to": "refusal|OP=compile|FORCE=on",
    "rules": [
@@ -2209,10 +2386,46 @@
     "U1"
    ]
   },
-  "pair|OP=marketplace|PRIM=other-file": {
-   "maps_to": "pair|OP=marketplace|PRIM=skill",
+  "pair|OP=marketplace|PRIM=bin": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
    "rules": [
-    "E3"
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=canvas": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=hook": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=lsp": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=mcp": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=other-file": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
+   ]
+  },
+  "pair|OP=marketplace|PRIM=skill": {
+   "maps_to": "rule|U-MKT|marketplace-never-touches-deployed",
+   "rules": [
+    "U-MKT"
    ]
   },
   "pair|OP=marketplace|SCOPE=user": {
@@ -2656,10 +2869,24 @@
     "E3"
    ]
   },
+  "pair|SRC=local-bundle|FROZEN=on": {
+   "maps_to": "refusal|OP=bundle-install|FROZEN=on",
+   "rules": [
+    "U8",
+    "U1"
+   ]
+  },
   "pair|SRC=local-bundle|PRIM=other-file": {
    "maps_to": "pair|SRC=local-bundle|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|SRC=local-bundle|UPDATE=on": {
+   "maps_to": "refusal|OP=bundle-install|UPDATE=on",
+   "rules": [
+    "U8",
+    "U1"
    ]
   },
   "pair|SRC=local-path|PRIM=other-file": {
@@ -4401,13 +4628,6 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
-  "T1|OP=marketplace|PRIM=bin|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T1|OP=marketplace|PRIM=bin|GATE=denied-dependency": {
    "family": "T1",
    "issue": "#4095",
@@ -4415,203 +4635,54 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "T1|OP=marketplace|PRIM=bin|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T1|OP=marketplace|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=canvas|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=hook|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=lsp|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=allowed": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=denied-executable": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=mcp|GATE=unapproved-exec": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4619,26 +4690,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
-  },
-  "T1|OP=marketplace|PRIM=skill|GATE=none": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T1|OP=marketplace|PRIM=skill|GATE=revoked-after-deploy": {
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "must_cover": true,
-   "rules": [
-    "U2"
-   ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -5788,11 +5842,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=allowed": {
+   "credited_by": [
+    "G1|uninstall|lsp|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=denied-dependency": {
    "credited_by": [
@@ -6300,11 +6358,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T2|SCOPE=user|GATE=allowed|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|allowed|user",
+    "G1|install-frozen|hook|allowed|user",
+    "G1|install-frozen|lsp|allowed|user",
+    "G1|install-frozen|mcp|allowed|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": {
    "family": "T2",
@@ -6314,32 +6379,62 @@
    "strength": "e2e"
   },
   "T2|SCOPE=user|GATE=denied-executable|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-executable|user",
+    "G1|install-frozen|hook|denied-executable|user",
+    "G1|install-frozen|lsp|denied-executable|user",
+    "G1|install-frozen|mcp|denied-executable|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=none|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|none|user",
+    "G1|install-frozen|hook|none|user",
+    "G1|install-frozen|lsp|none|user",
+    "G1|install-frozen|mcp|none|user",
+    "G1|install-frozen|skill|none|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=revoked-after-deploy|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|revoked-after-deploy|user",
+    "G1|install-frozen|hook|revoked-after-deploy|user",
+    "G1|install-frozen|lsp|revoked-after-deploy|user",
+    "G1|install-frozen|mcp|revoked-after-deploy|user",
+    "G1|install-frozen|skill|revoked-after-deploy|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=unapproved-exec|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|unapproved-exec|user",
+    "G1|install-frozen|hook|unapproved-exec|user",
+    "G1|install-frozen|lsp|unapproved-exec|user",
+    "G1|install-frozen|mcp|unapproved-exec|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T3|OP=approve-deny|SRC=git|PRIM=bin": {
    "family": "T3",
@@ -9355,46 +9450,76 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T4|OP=approve-deny|SCOPE=project|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|deny|project|newer",
+    "T4|deny|project|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=approve-deny|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|deny|project|stale",
+    "T4|deny|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=approve-deny|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|deny|user|absent",
+    "T4|deny|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=approve-deny|SCOPE=user|LOCK=consistent": {
+   "credited_by": [
+    "T4|deny|user|consistent",
+    "T4|deny|user|consistent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=approve-deny|SCOPE=user|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|deny|user|newer",
+    "T4|deny|user|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=approve-deny|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|deny|user|stale",
+    "T4|deny|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=audit|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9415,6 +9540,8 @@
   "T4|OP=audit|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
     "T4|audit-ci|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
     "T4|audit|project|newer"
    ],
    "family": "T4",
@@ -9425,67 +9552,112 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=audit|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|audit|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=bundle-install|SCOPE=project|LOCK=absent": {
+   "credited_by": [
+    "T4|bundle|project|absent",
+    "T4|bundle|project|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=bundle-install|SCOPE=project|LOCK=consistent": {
+   "credited_by": [
+    "T4|bundle|project|consistent",
+    "T4|bundle|project|consistent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=bundle-install|SCOPE=project|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|bundle|project|newer",
+    "T4|bundle|project|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=bundle-install|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|project|stale",
+    "T4|bundle|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=bundle-install|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|bundle|user|absent",
+    "T4|bundle|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=bundle-install|SCOPE=user|LOCK=consistent": {
+   "credited_by": [
+    "T4|bundle|user|consistent",
+    "T4|bundle|user|consistent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=bundle-install|SCOPE=user|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|bundle|user|newer",
+    "T4|bundle|user|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=bundle-install|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|user|stale",
+    "T4|bundle|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=compile|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9505,6 +9677,7 @@
   },
   "T4|OP=compile|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
+    "T4|compile|project|newer",
     "T4|compile|project|newer"
    ],
    "family": "T4",
@@ -9515,21 +9688,32 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=compile|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|compile|project|stale",
+    "T4|compile|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=compile|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|compile|user|absent",
+    "T4|compile|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=compile|SCOPE=user|LOCK=consistent": {
    "credited_by": [
+    "T4|compile|user|consistent",
     "T4|compile|user|consistent"
    ],
    "family": "T4",
@@ -9541,6 +9725,7 @@
   },
   "T4|OP=compile|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
+    "T4|compile|user|newer",
     "T4|compile|user|newer"
    ],
    "family": "T4",
@@ -9551,11 +9736,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "T4|OP=compile|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|compile|user|stale",
+    "T4|compile|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=install|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9576,7 +9766,10 @@
   "T4|OP=install|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
     "T4|add|project|newer",
+    "T4|add|project|newer",
     "T4|install-frozen|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
     "T4|install|project|newer"
    ],
    "family": "T4",
@@ -9587,23 +9780,36 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=install|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|install|project|stale",
+    "T4|install|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=install|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|install|user|absent",
+    "T4|install|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=install|SCOPE=user|LOCK=consistent": {
    "credited_by": [
     "T4|add|user|consistent",
+    "T4|add|user|consistent",
     "T4|install-frozen|user|consistent",
+    "T4|install-frozen|user|consistent",
+    "T4|install|user|consistent",
     "T4|install|user|consistent"
    ],
    "family": "T4",
@@ -9616,7 +9822,10 @@
   "T4|OP=install|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
     "T4|add|user|newer",
+    "T4|add|user|newer",
     "T4|install-frozen|user|newer",
+    "T4|install-frozen|user|newer",
+    "T4|install|user|newer",
     "T4|install|user|newer"
    ],
    "family": "T4",
@@ -9627,11 +9836,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "T4|OP=install|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|install|user|stale",
+    "T4|install|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=lock|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9651,6 +9865,7 @@
   },
   "T4|OP=lock|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
+    "T4|lock|project|newer",
     "T4|lock|project|newer"
    ],
    "family": "T4",
@@ -9661,21 +9876,32 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=lock|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|lock|project|stale",
+    "T4|lock|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=lock|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|lock|user|absent",
+    "T4|lock|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=lock|SCOPE=user|LOCK=consistent": {
    "credited_by": [
+    "T4|lock|user|consistent",
     "T4|lock|user|consistent"
    ],
    "family": "T4",
@@ -9687,6 +9913,7 @@
   },
   "T4|OP=lock|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
+    "T4|lock|user|newer",
     "T4|lock|user|newer"
    ],
    "family": "T4",
@@ -9697,39 +9924,65 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "T4|OP=lock|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|lock|user|stale",
+    "T4|lock|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=marketplace|SCOPE=project|LOCK=absent": {
+   "credited_by": [
+    "T4|marketplace|project|absent",
+    "T4|marketplace|project|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=marketplace|SCOPE=project|LOCK=consistent": {
+   "credited_by": [
+    "T4|marketplace|project|consistent",
+    "T4|marketplace|project|consistent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4600",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=marketplace|SCOPE=project|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|marketplace|project|newer",
+    "T4|marketplace|project|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=marketplace|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|marketplace|project|stale",
+    "T4|marketplace|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=mcp-install|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9748,46 +10001,76 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T4|OP=mcp-install|SCOPE=project|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|mcp-install|project|newer",
+    "T4|mcp-install|project|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=mcp-install|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|mcp-install|project|stale",
+    "T4|mcp-install|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=mcp-install|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|mcp-install|user|absent",
+    "T4|mcp-install|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=mcp-install|SCOPE=user|LOCK=consistent": {
+   "credited_by": [
+    "T4|mcp-install|user|consistent",
+    "T4|mcp-install|user|consistent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=mcp-install|SCOPE=user|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|mcp-install|user|newer",
+    "T4|mcp-install|user|newer"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=mcp-install|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|mcp-install|user|stale",
+    "T4|mcp-install|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=pack|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9837,6 +10120,7 @@
   },
   "T4|OP=prune|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
+    "T4|prune|project|newer",
     "T4|prune|project|newer"
    ],
    "family": "T4",
@@ -9847,18 +10131,28 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=prune|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|prune|project|stale",
+    "T4|prune|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=uninstall|SCOPE=project|LOCK=absent": {
+   "credited_by": [
+    "T4|remove|project|absent",
+    "T4|remove|project|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=uninstall|SCOPE=project|LOCK=consistent": {
    "family": "T4",
@@ -9870,6 +10164,7 @@
   },
   "T4|OP=uninstall|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
+    "T4|remove|project|newer",
     "T4|remove|project|newer"
    ],
    "family": "T4",
@@ -9880,21 +10175,32 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=uninstall|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|remove|project|stale",
+    "T4|remove|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=uninstall|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|remove|user|absent",
+    "T4|remove|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=uninstall|SCOPE=user|LOCK=consistent": {
    "credited_by": [
+    "T4|remove|user|consistent",
     "T4|remove|user|consistent"
    ],
    "family": "T4",
@@ -9906,6 +10212,7 @@
   },
   "T4|OP=uninstall|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
+    "T4|remove|user|newer",
     "T4|remove|user|newer"
    ],
    "family": "T4",
@@ -9916,11 +10223,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "T4|OP=uninstall|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|remove|user|stale",
+    "T4|remove|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=update|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -9940,6 +10252,7 @@
   },
   "T4|OP=update|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
+    "T4|update|project|newer",
     "T4|update|project|newer"
    ],
    "family": "T4",
@@ -9950,21 +10263,32 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "T4|OP=update|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|update|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "T4|OP=update|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|update|user|absent",
+    "T4|update|user|absent"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T4|OP=update|SCOPE=user|LOCK=consistent": {
    "credited_by": [
+    "T4|update|user|consistent",
     "T4|update|user|consistent"
    ],
    "family": "T4",
@@ -9976,6 +10300,7 @@
   },
   "T4|OP=update|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
+    "T4|update|user|newer",
     "T4|update|user|newer"
    ],
    "family": "T4",
@@ -9986,11 +10311,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "T4|OP=update|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|update|user|stale",
+    "T4|update|user|stale"
+   ],
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "T5|OP=audit|SRC=git|DRYRUN=on": {
    "family": "T5",
@@ -11967,11 +12297,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|LOCK=absent|DEPLOYED=present-provenance-unknown": {
+   "credited_by": [
+    "T4|remove|project|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=absent|DEPLOYED=unowned": {
    "family": "pair",
@@ -12406,11 +12740,24 @@
    "strength": "e2e"
   },
   "pair|LOCK=newer-generator|DEPLOYED=clean": {
+   "credited_by": [
+    "T4|add|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
+    "T4|compile|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
+    "T4|lock|project|newer",
+    "T4|prune|project|newer",
+    "T4|remove|project|newer",
+    "T4|update|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|LOCK=newer-generator|DEPLOYED=edited": {
    "family": "pair",
@@ -12442,6 +12789,7 @@
   },
   "pair|LOCK=newer-generator|FROZEN=on": {
    "credited_by": [
+    "T4|install-frozen|project|newer",
     "T4|install-frozen|project|newer"
    ],
    "family": "pair",
@@ -12473,11 +12821,24 @@
    "strength": "e2e"
   },
   "pair|LOCK=newer-generator|GATE=none": {
+   "credited_by": [
+    "T4|add|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
+    "T4|compile|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
+    "T4|lock|project|newer",
+    "T4|prune|project|newer",
+    "T4|remove|project|newer",
+    "T4|update|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|LOCK=newer-generator|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -12487,11 +12848,15 @@
    "strength": "e2e"
   },
   "pair|LOCK=newer-generator|GATE=unapproved-exec": {
+   "credited_by": [
+    "T4|bundle|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=newer-generator|HOSTID=bare-default": {
    "family": "pair",
@@ -12543,11 +12908,24 @@
    "strength": "e2e"
   },
   "pair|LOCK=newer-generator|NET=online": {
+   "credited_by": [
+    "T4|add|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
+    "T4|compile|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
+    "T4|lock|project|newer",
+    "T4|prune|project|newer",
+    "T4|remove|project|newer",
+    "T4|update|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|LOCK=newer-generator|NOPOLICY=on": {
    "family": "pair",
@@ -12559,6 +12937,8 @@
   "pair|LOCK=newer-generator|SELECT=on": {
    "credited_by": [
     "T4|add|project|newer",
+    "T4|add|project|newer",
+    "T4|remove|project|newer",
     "T4|remove|project|newer"
    ],
    "family": "pair",
@@ -12597,11 +12977,24 @@
    "strength": "e2e"
   },
   "pair|LOCK=newer-generator|TGT=single-unchanged": {
+   "credited_by": [
+    "T4|add|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
+    "T4|compile|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
+    "T4|lock|project|newer",
+    "T4|prune|project|newer",
+    "T4|remove|project|newer",
+    "T4|update|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|LOCK=newer-generator|TGT=single-widened": {
    "family": "pair",
@@ -12625,11 +13018,21 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|DEPLOYED=clean": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|DEPLOYED=edited": {
    "family": "pair",
@@ -12688,11 +13091,21 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|GATE=none": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -12702,11 +13115,15 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|GATE=unapproved-exec": {
+   "credited_by": [
+    "T4|bundle|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|HOSTID=bare-default": {
    "family": "pair",
@@ -12758,11 +13175,21 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|NET=online": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|NOPOLICY=on": {
    "family": "pair",
@@ -12772,11 +13199,16 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|SELECT=on": {
+   "credited_by": [
+    "T4|remove|project|stale",
+    "T4|remove|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|TGT=multi-narrowed": {
    "family": "pair",
@@ -12807,11 +13239,21 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|TGT=single-unchanged": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|LOCK=stale|TGT=single-widened": {
    "family": "pair",
@@ -13030,18 +13472,28 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=approve-deny|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|deny|project|newer",
+    "T4|deny|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=approve-deny|LOCK=stale": {
+   "credited_by": [
+    "T4|deny|project|stale",
+    "T4|deny|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=approve-deny|NET=offline": {
    "family": "pair",
@@ -13115,11 +13567,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=approve-deny|SCOPE=user": {
+   "credited_by": [
+    "T4|deny|user|absent",
+    "T4|deny|user|consistent",
+    "T4|deny|user|newer",
+    "T4|deny|user|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=approve-deny|SELECT=on": {
    "family": "pair",
@@ -13385,6 +13844,8 @@
   "pair|OP=audit|LOCK=newer-generator": {
    "credited_by": [
     "T4|audit-ci|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
     "T4|audit|project|newer"
    ],
    "family": "pair",
@@ -13395,11 +13856,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=audit|LOCK=stale": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|audit|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=audit|NET=offline": {
    "family": "pair",
@@ -13722,32 +14188,52 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|LOCK=absent": {
+   "credited_by": [
+    "T4|bundle|project|absent",
+    "T4|bundle|project|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=bundle-install|LOCK=consistent": {
+   "credited_by": [
+    "T4|bundle|project|consistent",
+    "T4|bundle|project|consistent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=bundle-install|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|bundle|project|newer",
+    "T4|bundle|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=bundle-install|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|project|stale",
+    "T4|bundle|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=bundle-install|NET=offline": {
    "family": "pair",
@@ -13841,21 +14327,31 @@
   },
   "pair|OP=bundle-install|SCOPE=project": {
    "credited_by": [
-    "X|install|bundle|SCOPE=project"
+    "T4|bundle|project|absent",
+    "T4|bundle|project|consistent",
+    "T4|bundle|project|newer",
+    "T4|bundle|project|stale"
    ],
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "pair|OP=bundle-install|SCOPE=user": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
+  },
+  "pair|OP=bundle-install|SCOPE=user": {
+   "credited_by": [
+    "T4|bundle|user|absent",
+    "T4|bundle|user|consistent",
+    "T4|bundle|user|newer",
+    "T4|bundle|user|stale"
+   ],
+   "family": "pair",
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=bundle-install|SELECT=on": {
    "credited_by": [
@@ -13938,13 +14434,6 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=bundle-install|UPDATE=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
@@ -14080,6 +14569,7 @@
   },
   "pair|OP=compile|LOCK=newer-generator": {
    "credited_by": [
+    "T4|compile|project|newer",
     "T4|compile|project|newer"
    ],
    "family": "pair",
@@ -14090,11 +14580,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=compile|LOCK=stale": {
+   "credited_by": [
+    "T4|compile|project|stale",
+    "T4|compile|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=compile|NET=offline": {
    "family": "pair",
@@ -14152,15 +14647,15 @@
   },
   "pair|OP=compile|SCOPE=user": {
    "credited_by": [
-    "T4|compile|user|consistent",
-    "T4|compile|user|newer"
+    "T4|compile|user|absent",
+    "T4|compile|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=compile|SELECT=on": {
    "family": "pair",
@@ -14501,7 +14996,10 @@
   "pair|OP=install|LOCK=newer-generator": {
    "credited_by": [
     "T4|add|project|newer",
+    "T4|add|project|newer",
     "T4|install-frozen|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
     "T4|install|project|newer"
    ],
    "family": "pair",
@@ -14512,11 +15010,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=install|LOCK=stale": {
+   "credited_by": [
+    "T4|install|project|stale",
+    "T4|install|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=install|MCPOWN=copilot": {
    "family": "pair",
@@ -14620,19 +15123,15 @@
   },
   "pair|OP=install|SCOPE=user": {
    "credited_by": [
-    "T4|add|user|consistent",
-    "T4|add|user|newer",
-    "T4|install-frozen|user|consistent",
-    "T4|install-frozen|user|newer",
-    "T4|install|user|consistent",
-    "T4|install|user|newer"
+    "T4|install|user|absent",
+    "T4|install|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=install|SELECT=on": {
    "family": "pair",
@@ -14657,7 +15156,7 @@
     "T5|real|install|inline-mcp",
     "X|install|inline-mcp|FORCE=on",
     "X|install|inline-mcp|FROZEN=on",
-    "X|install|inline-mcp|GATE=unapproved-exec",
+    "X|install|inline-mcp|GATE=none",
     "X|install|inline-mcp|NET=online",
     "X|install|inline-mcp|SCOPE=project",
     "X|install|inline-mcp|SELECT=on",
@@ -14699,6 +15198,7 @@
     "T5|real|install|plugin-at-mkt",
     "X|install|plugin-at-mkt|FORCE=on",
     "X|install|plugin-at-mkt|FROZEN=on",
+    "X|install|plugin-at-mkt|GATE=none",
     "X|install|plugin-at-mkt|GATE=unapproved-exec",
     "X|install|plugin-at-mkt|NET=online",
     "X|install|plugin-at-mkt|SCOPE=project",
@@ -14728,7 +15228,7 @@
     "T5|real|install|mcp-registry",
     "X|install|mcp-registry|FORCE=on",
     "X|install|mcp-registry|FROZEN=on",
-    "X|install|mcp-registry|GATE=unapproved-exec",
+    "X|install|mcp-registry|GATE=none",
     "X|install|mcp-registry|NET=online",
     "X|install|mcp-registry|SCOPE=project",
     "X|install|mcp-registry|SELECT=on",
@@ -14752,6 +15252,7 @@
     "T5|real|install|native",
     "X|install|native|FORCE=on",
     "X|install|native|FROZEN=on",
+    "X|install|native|GATE=none",
     "X|install|native|GATE=unapproved-exec",
     "X|install|native|NET=online",
     "X|install|native|SCOPE=project",
@@ -14777,6 +15278,7 @@
     "T5|real|install|pkg-registry",
     "X|install|pkg-registry|FORCE=on",
     "X|install|pkg-registry|FROZEN=on",
+    "X|install|pkg-registry|GATE=none",
     "X|install|pkg-registry|GATE=unapproved-exec",
     "X|install|pkg-registry|NET=online",
     "X|install|pkg-registry|SCOPE=project",
@@ -14975,6 +15477,7 @@
   },
   "pair|OP=lock|LOCK=newer-generator": {
    "credited_by": [
+    "T4|lock|project|newer",
     "T4|lock|project|newer"
    ],
    "family": "pair",
@@ -14985,11 +15488,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=lock|LOCK=stale": {
+   "credited_by": [
+    "T4|lock|project|stale",
+    "T4|lock|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=lock|NET=offline": {
    "family": "pair",
@@ -15072,15 +15580,15 @@
   },
   "pair|OP=lock|SCOPE=user": {
    "credited_by": [
-    "T4|lock|user|consistent",
-    "T4|lock|user|newer"
+    "T4|lock|user|absent",
+    "T4|lock|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=lock|SELECT=on": {
    "family": "pair",
@@ -15291,11 +15799,19 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|marketplace|canvas|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=marketplace|GATE=denied-executable": {
    "family": "pair",
@@ -15326,32 +15842,53 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|LOCK=absent": {
+   "credited_by": [
+    "T4|marketplace|project|absent",
+    "T4|marketplace|project|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|LOCK=consistent": {
+   "credited_by": [
+    "T4|marketplace|project|consistent",
+    "T4|marketplace|project|consistent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4600",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|marketplace|project|newer",
+    "T4|marketplace|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|LOCK=stale": {
+   "credited_by": [
+    "T4|marketplace|project|stale",
+    "T4|marketplace|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|NET=offline": {
    "family": "pair",
@@ -15367,54 +15904,18 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|OP=marketplace|PRIM=bin": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=canvas": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=hook": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=lsp": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=mcp": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=marketplace|PRIM=skill": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|OP=marketplace|SCOPE=project": {
+   "credited_by": [
+    "T4|marketplace|project|absent",
+    "T4|marketplace|project|newer",
+    "T4|marketplace|project|stale"
+   ],
    "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4097",
+   "lane": "T-3",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=marketplace|SELECT=on": {
    "family": "pair",
@@ -15637,18 +16138,28 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=mcp-install|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|mcp-install|project|newer",
+    "T4|mcp-install|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=mcp-install|LOCK=stale": {
+   "credited_by": [
+    "T4|mcp-install|project|stale",
+    "T4|mcp-install|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=mcp-install|MCPOWN=copilot": {
    "family": "pair",
@@ -15771,11 +16282,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=mcp-install|SCOPE=user": {
+   "credited_by": [
+    "T4|mcp-install|user|absent",
+    "T4|mcp-install|user|consistent",
+    "T4|mcp-install|user|newer",
+    "T4|mcp-install|user|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=mcp-install|SELECT=on": {
    "family": "pair",
@@ -16234,6 +16752,7 @@
   },
   "pair|OP=prune|LOCK=newer-generator": {
    "credited_by": [
+    "T4|prune|project|newer",
     "T4|prune|project|newer"
    ],
    "family": "pair",
@@ -16244,11 +16763,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=prune|LOCK=stale": {
+   "credited_by": [
+    "T4|prune|project|stale",
+    "T4|prune|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=prune|MCPOWN=copilot": {
    "family": "pair",
@@ -16632,11 +17156,16 @@
    "strength": "e2e"
   },
   "pair|OP=uninstall|LOCK=absent": {
+   "credited_by": [
+    "T4|remove|project|absent",
+    "T4|remove|project|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=uninstall|LOCK=consistent": {
    "family": "pair",
@@ -16648,6 +17177,7 @@
   },
   "pair|OP=uninstall|LOCK=newer-generator": {
    "credited_by": [
+    "T4|remove|project|newer",
     "T4|remove|project|newer"
    ],
    "family": "pair",
@@ -16658,11 +17188,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=uninstall|LOCK=stale": {
+   "credited_by": [
+    "T4|remove|project|stale",
+    "T4|remove|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=uninstall|MCPOWN=copilot": {
    "family": "pair",
@@ -16761,15 +17296,15 @@
   },
   "pair|OP=uninstall|SCOPE=user": {
    "credited_by": [
-    "T4|remove|user|consistent",
-    "T4|remove|user|newer"
+    "T4|remove|user|absent",
+    "T4|remove|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=uninstall|SELECT=on": {
    "family": "pair",
@@ -17063,6 +17598,7 @@
   },
   "pair|OP=update|LOCK=newer-generator": {
    "credited_by": [
+    "T4|update|project|newer",
     "T4|update|project|newer"
    ],
    "family": "pair",
@@ -17073,11 +17609,16 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=update|LOCK=stale": {
+   "credited_by": [
+    "T4|update|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|OP=update|MCPOWN=copilot": {
    "family": "pair",
@@ -17173,15 +17714,15 @@
   },
   "pair|OP=update|SCOPE=user": {
    "credited_by": [
-    "T4|update|user|consistent",
-    "T4|update|user|newer"
+    "T4|update|user|absent",
+    "T4|update|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|OP=update|SELECT=on": {
    "family": "pair",
@@ -17646,6 +18187,7 @@
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|lock|canvas|denied-dependency|project",
+    "G1|marketplace|canvas|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|prune|canvas|denied-dependency|project",
     "G1|uninstall|canvas|denied-dependency|project",
@@ -17906,6 +18448,7 @@
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|lock|hook|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|prune|hook|denied-dependency|project",
     "G1|uninstall|hook|denied-dependency|project",
@@ -18166,6 +18709,7 @@
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
     "G1|prune|lsp|denied-dependency|project",
     "G1|uninstall|lsp|denied-dependency|project",
@@ -18238,18 +18782,26 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=lsp|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|bundle|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|PRIM=lsp|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|PRIM=lsp|NET=offline": {
    "family": "pair",
@@ -18426,6 +18978,7 @@
     "G1|install-frozen|mcp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project"
@@ -18496,18 +19049,26 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=mcp|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|mcp-install|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|PRIM=mcp|LOCK=stale": {
+   "credited_by": [
+    "T4|mcp-install|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|PRIM=mcp|NET=offline": {
    "family": "pair",
@@ -18704,6 +19265,7 @@
     "G1|install-frozen|skill|denied-dependency|project",
     "G1|install|skill|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project",
     "G1|prune|skill|denied-dependency|project",
     "G1|uninstall|skill|denied-dependency|project",
@@ -18768,18 +19330,41 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=skill|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|add|project|newer",
+    "T4|audit-ci|project|newer",
+    "T4|audit|project|newer",
+    "T4|compile|project|newer",
+    "T4|install-frozen|project|newer",
+    "T4|install|project|newer",
+    "T4|lock|project|newer",
+    "T4|prune|project|newer",
+    "T4|remove|project|newer",
+    "T4|update|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|PRIM=skill|LOCK=stale": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|PRIM=skill|NET=offline": {
    "family": "pair",
@@ -18980,6 +19565,11 @@
     "G1|lock|lsp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project",
+    "G1|marketplace|canvas|denied-dependency|project",
+    "G1|marketplace|hook|denied-dependency|project",
+    "G1|marketplace|lsp|denied-dependency|project",
+    "G1|marketplace|mcp|denied-dependency|project",
+    "G1|marketplace|skill|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
@@ -19057,30 +19647,53 @@
   },
   "pair|SCOPE=project|LOCK=newer-generator": {
    "credited_by": [
-    "T4|add|project|newer",
-    "T4|audit-ci|project|newer",
-    "T4|audit|project|newer",
-    "T4|compile|project|newer",
-    "T4|install-frozen|project|newer",
-    "T4|install|project|newer",
-    "T4|lock|project|newer",
-    "T4|prune|project|newer",
-    "T4|remove|project|newer",
-    "T4|update|project|newer"
+    "T4|bundle|project|newer",
+    "T4|bundle|project|newer",
+    "T4|deny|project|newer",
+    "T4|deny|project|newer",
+    "T4|marketplace|project|newer",
+    "T4|marketplace|project|newer",
+    "T4|mcp-install|project|newer",
+    "T4|mcp-install|project|newer"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SCOPE=project|LOCK=stale": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|audit|project|stale",
+    "T4|bundle|project|stale",
+    "T4|bundle|project|stale",
+    "T4|compile|project|stale",
+    "T4|compile|project|stale",
+    "T4|deny|project|stale",
+    "T4|deny|project|stale",
+    "T4|install|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|lock|project|stale",
+    "T4|marketplace|project|stale",
+    "T4|marketplace|project|stale",
+    "T4|mcp-install|project|stale",
+    "T4|mcp-install|project|stale",
+    "T4|prune|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SCOPE=project|MCPOWN=copilot": {
    "family": "pair",
@@ -19248,11 +19861,26 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
   },
   "pair|SCOPE=user|GATE=allowed": {
+   "credited_by": [
+    "G1|deny|canvas|allowed|user",
+    "G1|deny|hook|allowed|user",
+    "G1|deny|lsp|allowed|user",
+    "G1|deny|mcp|allowed|user",
+    "G1|install-frozen|canvas|allowed|user",
+    "G1|install-frozen|hook|allowed|user",
+    "G1|install-frozen|lsp|allowed|user",
+    "G1|install-frozen|mcp|allowed|user",
+    "G1|install|canvas|allowed|user",
+    "G1|install|hook|allowed|user",
+    "G1|install|lsp|allowed|user",
+    "G1|install|mcp|allowed|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=denied-dependency": {
    "family": "pair",
@@ -19262,80 +19890,171 @@
    "strength": "e2e"
   },
   "pair|SCOPE=user|GATE=denied-executable": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-executable|user",
+    "G1|install-frozen|hook|denied-executable|user",
+    "G1|install-frozen|lsp|denied-executable|user",
+    "G1|install-frozen|mcp|denied-executable|user",
+    "G1|install|canvas|denied-executable|user",
+    "G1|install|hook|denied-executable|user",
+    "G1|install|lsp|denied-executable|user",
+    "G1|install|mcp|denied-executable|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=none": {
+   "credited_by": [
+    "G1|approve|canvas|none|user",
+    "G1|approve|hook|none|user",
+    "G1|approve|lsp|none|user",
+    "G1|approve|mcp|none|user",
+    "G1|approve|skill|none|user",
+    "G1|deny|skill|none|user",
+    "G1|install-frozen|canvas|none|user",
+    "G1|install-frozen|hook|none|user",
+    "G1|install-frozen|lsp|none|user",
+    "G1|install-frozen|mcp|none|user",
+    "G1|install-frozen|skill|none|user",
+    "G1|install|canvas|none|user",
+    "G1|install|hook|none|user",
+    "G1|install|lsp|none|user",
+    "G1|install|mcp|none|user",
+    "G1|install|skill|none|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|install-frozen|canvas|revoked-after-deploy|user",
+    "G1|install-frozen|hook|revoked-after-deploy|user",
+    "G1|install-frozen|lsp|revoked-after-deploy|user",
+    "G1|install-frozen|mcp|revoked-after-deploy|user",
+    "G1|install-frozen|skill|revoked-after-deploy|user",
+    "G1|install|canvas|revoked-after-deploy|user",
+    "G1|install|hook|revoked-after-deploy|user",
+    "G1|install|lsp|revoked-after-deploy|user",
+    "G1|install|mcp|revoked-after-deploy|user",
+    "G1|install|skill|revoked-after-deploy|user",
+    "G1|uninstall|canvas|revoked-after-deploy|user",
+    "G1|uninstall|hook|revoked-after-deploy|user",
+    "G1|uninstall|lsp|revoked-after-deploy|user",
+    "G1|uninstall|mcp|revoked-after-deploy|user",
+    "G1|uninstall|skill|revoked-after-deploy|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|install-frozen|canvas|unapproved-exec|user",
+    "G1|install-frozen|hook|unapproved-exec|user",
+    "G1|install-frozen|lsp|unapproved-exec|user",
+    "G1|install-frozen|mcp|unapproved-exec|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "pair|SCOPE=user|LOCK=absent": {
+   "credited_by": [
+    "T4|bundle|user|absent",
+    "T4|bundle|user|absent",
+    "T4|compile|user|absent",
+    "T4|compile|user|absent",
+    "T4|deny|user|absent",
+    "T4|deny|user|absent",
+    "T4|install|user|absent",
+    "T4|install|user|absent",
+    "T4|lock|user|absent",
+    "T4|lock|user|absent",
+    "T4|mcp-install|user|absent",
+    "T4|mcp-install|user|absent",
+    "T4|remove|user|absent",
+    "T4|remove|user|absent",
+    "T4|update|user|absent",
+    "T4|update|user|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|SCOPE=user|LOCK=consistent": {
    "credited_by": [
-    "T4|add|user|consistent",
-    "T4|compile|user|consistent",
-    "T4|install-frozen|user|consistent",
-    "T4|install|user|consistent",
-    "T4|lock|user|consistent",
-    "T4|remove|user|consistent",
-    "T4|update|user|consistent"
+    "T4|bundle|user|consistent",
+    "T4|bundle|user|consistent",
+    "T4|deny|user|consistent",
+    "T4|deny|user|consistent",
+    "T4|mcp-install|user|consistent",
+    "T4|mcp-install|user|consistent"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|SCOPE=user|LOCK=newer-generator": {
    "credited_by": [
-    "T4|add|user|newer",
-    "T4|compile|user|newer",
-    "T4|install-frozen|user|newer",
-    "T4|install|user|newer",
-    "T4|lock|user|newer",
-    "T4|remove|user|newer",
-    "T4|update|user|newer"
+    "T4|bundle|user|newer",
+    "T4|bundle|user|newer",
+    "T4|deny|user|newer",
+    "T4|deny|user|newer",
+    "T4|mcp-install|user|newer",
+    "T4|mcp-install|user|newer"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|SCOPE=user|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|user|stale",
+    "T4|bundle|user|stale",
+    "T4|compile|user|stale",
+    "T4|compile|user|stale",
+    "T4|deny|user|stale",
+    "T4|deny|user|stale",
+    "T4|install|user|stale",
+    "T4|install|user|stale",
+    "T4|lock|user|stale",
+    "T4|lock|user|stale",
+    "T4|mcp-install|user|stale",
+    "T4|mcp-install|user|stale",
+    "T4|remove|user|stale",
+    "T4|remove|user|stale",
+    "T4|update|user|stale",
+    "T4|update|user|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|SCOPE=user|MCPOWN=copilot": {
    "family": "pair",
@@ -19381,17 +20100,15 @@
   },
   "pair|SCOPE=user|SELECT=on": {
    "credited_by": [
-    "T4|add|user|consistent",
-    "T4|add|user|newer",
-    "T4|remove|user|consistent",
-    "T4|remove|user|newer"
+    "T4|remove|user|absent",
+    "T4|remove|user|stale"
    ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[user]"
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[user]"
   },
   "pair|SCOPE=user|TGT=multi-narrowed": {
    "family": "pair",
@@ -19854,11 +20571,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=none": {
+   "credited_by": [
+    "X|install|inline-mcp|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -19868,15 +20589,11 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=unapproved-exec": {
-   "credited_by": [
-    "X|install|inline-mcp|GATE=unapproved-exec"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=inline-mcp|LOCK=absent": {
    "family": "pair",
@@ -20086,13 +20803,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=local-bundle|FROZEN=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=local-bundle|GATE=allowed": {
    "family": "pair",
    "issue": "#4096",
@@ -20140,32 +20850,48 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|LOCK=absent": {
+   "credited_by": [
+    "T4|bundle|project|absent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-bundle|LOCK=consistent": {
+   "credited_by": [
+    "T4|bundle|project|consistent"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-bundle|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|bundle|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-bundle|LOCK=stale": {
+   "credited_by": [
+    "T4|bundle|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-bundle|NET=offline": {
    "family": "pair",
@@ -20329,13 +21055,6 @@
    "status": "baseline",
    "strength": "e2e"
   },
-  "pair|SRC=local-bundle|UPDATE=on": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=local-path|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4099",
@@ -20461,18 +21180,33 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=local-path|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|deny|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-path|LOCK=stale": {
+   "credited_by": [
+    "T4|audit|project|stale",
+    "T4|compile|project|stale",
+    "T4|deny|project|stale",
+    "T4|install|project|stale",
+    "T4|lock|project|stale",
+    "T4|prune|project|stale",
+    "T4|remove|project|stale",
+    "T4|update|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=local-path|NET=offline": {
    "family": "pair",
@@ -20982,11 +21716,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=none": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -21593,11 +22331,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=none": {
+   "credited_by": [
+    "X|install|mcp-registry|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -21607,15 +22349,11 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=unapproved-exec": {
-   "credited_by": [
-    "X|install|mcp-registry|GATE=unapproved-exec"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=mcp-registry|LOCK=absent": {
    "family": "pair",
@@ -21634,18 +22372,26 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=mcp-registry|LOCK=newer-generator": {
+   "credited_by": [
+    "T4|mcp-install|project|newer"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=mcp-registry|LOCK=stale": {
+   "credited_by": [
+    "T4|mcp-install|project|stale"
+   ],
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[project]"
   },
   "pair|SRC=mcp-registry|NET=offline": {
    "family": "pair",
@@ -21850,11 +22596,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|GATE=none": {
+   "credited_by": [
+    "X|install|native|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -22177,11 +22927,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=none": {
+   "credited_by": [
+    "X|install|pkg-registry|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -22984,6 +23738,18 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
   },
+  "refusal|OP=bundle-install|UPDATE=on": {
+   "exit": 2,
+   "family": "refusal",
+   "issue": "#4099",
+   "lane": "T-5",
+   "rules": [
+    "U1"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
+  },
   "refusal|OP=compile|FORCE=on": {
    "exit": 2,
    "family": "refusal",
@@ -23042,7 +23808,7 @@
    ],
    "status": "required",
    "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-13-refusals]"
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-14-refusals]"
   },
   "refusal|OP=lock|DRYRUN=on": {
    "exit": 2,
@@ -23222,7 +23988,7 @@
    ],
    "status": "required",
    "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-14-refusals]"
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-15-refusals]"
   },
   "refusal|OP=prune|FORCE=on": {
    "exit": 2,
@@ -23379,6 +24145,21 @@
    "status": "required",
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-15-refusals]"
+  },
+  "rule|U-MKT|marketplace-never-touches-deployed": {
+   "credited_by": [
+    "rule|U-MKT|marketplace-never-touches-deployed"
+   ],
+   "family": "rule",
+   "issue": "#4095",
+   "lane": "T-1",
+   "must_cover": true,
+   "rules": [
+    "U-MKT"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "rule|U10|compile-render-only-non-mutation": {
    "family": "rule",
@@ -24721,9 +25502,9 @@
   "generated_cover-10-skill-local-single-approve-force.yaml": "1eccd294caf512b5e994b4eae797de9a43d99e6aec49cb71799f7cacc5f5129a",
   "generated_cover-11-canvas-local-multi-approve-mcp.yaml": "eb43280f957676b4cb1ab26a466a89361ddbea4a723a24905d4d78e97acb77e8",
   "generated_cover-12-canvas-local-single-unapproved-mcp.yaml": "a7fa2d1dc5dfc640c4c25d82d1e014e4bb934c6ff69596a635175523af1a0eb4",
-  "generated_cover-13-refusals.yaml": "6eb1941cb910d494c90ae4dbd1f8ba6730df87fe8ba702ee992e5ba073cc9d77",
-  "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
-  "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
+  "generated_cover-13-refusals.yaml": "c35ed662b974894b4b82346ffcb345ed3379c230b0783dbd0dfcb72ce246a72c",
+  "generated_cover-14-refusals.yaml": "2668f5641e39462b11e3f3366c0d1681113945255df1cad9a6e65d4bc2cccba0",
+  "generated_cover-15-refusals.yaml": "bb74265dd38bb0ef66bfcf59bcc51f2a30addd6ca53890071624e80b8e439a6f",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
   "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
  },
@@ -24755,6 +25536,14 @@
     "src/apm_cli/install/exec_gate.py:717"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
+  },
+  "U-MKT": {
+   "evidence": [
+    "src/apm_cli/commands/marketplace/__init__.py:372",
+    "docs/src/content/docs/reference/cli/marketplace.md:292",
+    "docs/src/content/docs/consumer/installing-from-marketplaces.md:112"
+   ],
+   "text": "marketplace commands act on catalogs, never on deployed primitives: add, list, browse, update, remove and validate read or refresh the catalog cache, and the authoring commands edit the marketplace block; a primitive reaches a project only through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto one rule cell witnessed at the allowed and the revoked GATE level (deployed surfaces and the lock byte-identical)"
   },
   "U1": {
    "evidence": [],

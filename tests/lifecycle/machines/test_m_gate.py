@@ -170,8 +170,8 @@ def test_gate_generated_sequences_keep_cross_cutting_laws(
     )
 
 
-# Scopes the GATE matrix spine runs at (user scope joins with its own commands).
-MATRIX_SCOPES = ("project",)
+# Scopes the GATE matrix spine runs at (user scope runs its own, shorter spine).
+MATRIX_SCOPES = SCOPES
 
 
 @pytest.mark.parametrize("scope", MATRIX_SCOPES)
@@ -182,14 +182,21 @@ def test_gate_matrix_credits_op_prim_gate_cells(
     machine = GateMatrix(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), scope), scope)
     replay_matrix(machine)
     assert machine.expected_seen == set(), sorted(machine.expected_seen)
-    missing = matrix_cells(scope) - earned_cells(current_node(), "G1|")
+    earned = earned_cells(current_node(), "G1|") | earned_cells(current_node(), "rule|")
+    missing = matrix_cells(scope) - earned
     assert not missing, f"GATE matrix ids without an oracle receipt: {sorted(missing)}"
-    # The spine ends by uninstalling every package under the dependency deny.
+    bench = machine.bench
+    if scope == "user":
+        # The user spine ends with every package declared and recorded in the user lock.
+        declared = (bench.manifest().get("dependencies") or {}).get("apm") or []
+        assert bench.lock_path.exists() and len(declared) == len(machine.state.declared)
+        return
+    # The project spine ends by uninstalling every package under the dependency deny.
+    surfaces = (".agents/skills", ".github/hooks", ".github/extensions")
     leftovers = [
         p
-        for p in (".agents/skills", ".github/hooks", ".github/extensions")
-        if (machine.bench.deploy_root / p).exists()
-        and any((machine.bench.deploy_root / p).iterdir())
+        for p in surfaces
+        if (bench.deploy_root / p).exists() and any((bench.deploy_root / p).iterdir())
     ]
     assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
 

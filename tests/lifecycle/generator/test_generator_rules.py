@@ -46,7 +46,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
-from tests.lifecycle.generator.witnesses import implied, machine_cells
+from tests.lifecycle.generator.witnesses import credits, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -364,15 +364,17 @@ def test_a_refusal_that_wrote_bytes_earns_nothing(tmp_path: Path) -> None:
 
 
 def test_machine_witnessed_obligations_are_implied_by_their_credited_ids() -> None:
-    cells = {cell.id: cell for cell in machine_cells()}
+    cells: dict[str, list] = {}
+    for cell in machine_cells():
+        cells.setdefault(cell.id, []).append(cell)
     witnessed = {
         key: entry for key, entry in _document()["obligations"].items() if "credited_by" in entry
     }
     assert witnessed
     for key, entry in witnessed.items():
         for machine_id in entry["credited_by"]:
-            assert cells[machine_id].witness == entry["witness"], (key, machine_id)
-            assert key in set(implied(cells[machine_id].assignment)), (key, machine_id)
+            assert {c.witness for c in cells[machine_id]} == {entry["witness"]}, (key, machine_id)
+            assert any(key in set(credits(c)) for c in cells[machine_id]), (key, machine_id)
 
 
 @pytest.mark.usefixtures("isolated_receipts")
@@ -466,6 +468,10 @@ def _u8_mapping(cell) -> str | None:
         return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:710, 869
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
         return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
+    if src == "local-bundle" and op is None and {"FROZEN", "UPDATE"} & set(cell):
+        # Only an install states a bundle; it refuses --frozen ("positional packages")
+        # and --update (install.py rejected_flags), so the pair lands on that refusal.
+        return "a local bundle under a modifier its install refuses"
     return None
 
 
@@ -534,7 +540,11 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         family, cell = parse_cell(key)
         clause = _u8_mapping(cell)
         clauses[clause] = clauses.get(clause, 0) + 1
-        if cell["OP"] == "install":
+        if "OP" not in cell:
+            modifier = next(name for name in ("FROZEN", "UPDATE") if name in cell)
+            refusal = cell_id("refusal", {"OP": "bundle-install", modifier: "on"})
+            assert entry["maps_to"] == refusal, key
+        elif cell["OP"] == "install":
             # The bundle-install cell itself, or the refusal its own modifier lands on.
             target = cell_id(family, {**cell, "OP": "bundle-install"})
             assert entry["maps_to"] in (target, data["mapped"].get(target, {}).get("maps_to")), key
@@ -552,6 +562,7 @@ def test_u8_mappings_name_the_cell_or_refusal_each_shape_lands_on() -> None:
         "prune of a local bundle": 9,
         "uninstall of an MCP server (mcp-registry)": 3,
         "uninstall of an MCP server (inline-mcp)": 3,
+        "a local bundle under a modifier its install refuses": 2,
     }
 
 
