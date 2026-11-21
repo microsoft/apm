@@ -77,6 +77,8 @@ _POLICY_READERS = frozenset(
         "run_policy_preflight",
         "run_mcp_policy_preflight",
         "admit_bundle",
+        # update's no-change policy pass (#4458) wraps run_policy_preflight.
+        "enforce_declared_policy",
     }
 )
 _POLICY_ROOT_KEYWORDS = frozenset({"project_root", "policy_root"})
