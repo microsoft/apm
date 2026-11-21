@@ -221,6 +221,10 @@ def build_template(base: Path) -> World:
     _publish_registry(services, authored, shared / "registry-trees")
 
     env = isolated.subprocess_env()
+    # Goldens are host-independent: a CI runner's CI/GITHUB_ACTIONS must not
+    # switch on CI-only banners that a local recording never shows.
+    for host_flag in ("CI", "GITHUB_ACTIONS"):
+        env.pop(host_flag, None)
     env["APM_NON_INTERACTIVE"] = "1"
     # Wide output keeps one diagnostic per line, so I9 never sees wrap artifacts.
     env["COLUMNS"] = "400"
