@@ -151,14 +151,12 @@ def test_no_remediation_advertises_a_policy_bypass(remediation_id: str) -> None:
 
 
 # G8: every "Kept ..." line about a file APM left in place renders through
-# remediation.kept_note / kept_file_message. These modules format other kept
-# lines (not a kept file) or await a steward ruling; the set may only shrink.
+# remediation.kept_note / kept_file_message. These modules format kept lines
+# that are not about a file; the set may only shrink.
 _KEPT_LINE_ALLOWED = {
     "adapters/client/opencode.py": "an OpenCode config entry, not a file",
     "core/command_logger.py": "kept packages under --frozen, not a file",
     "install/mcp/retired_destinations.py": "an MCP server entry, not a file",
-    "install/presentation/dry_run.py": "dry-run preview line pinned by "
-    "test_orphan_removal_owner_lifecycle; pending steward ruling",
     "marketplace/reconcile.py": "kept marketplaces, not a file",
 }
 

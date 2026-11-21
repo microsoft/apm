@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE, kept_note
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
@@ -187,5 +187,5 @@ def _preview_orphan_files(lockfile: LockFile, plan: ProspectiveInstallPlan, logg
         deployment_claims=DeploymentClaims(live_files=None, retained={}),
     )
     for path in sorted({path for files in decision.claimed_files.values() for path in files}):
-        logger.verbose_detail(f"Kept {path}: still deployed by a remaining package")
+        logger.verbose_detail(kept_note(path, "still deployed by a remaining package"))
     return {path for files in decision.removed_files.values() for path in files}
