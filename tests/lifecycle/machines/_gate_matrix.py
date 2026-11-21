@@ -86,6 +86,17 @@ def author_mixed(root: Path) -> Path:
     return package.root
 
 
+# The gate levels the U-MKT rule cell must be witnessed at (Q&L ruling
+# 2026-11-21): the allowed level and the most restrictive one that still has
+# executables deployed.
+UMKT_LEVELS = frozenset({"allowed", "revoked-after-deploy"})
+
+
+def umkt_ready(levels: Collection[str]) -> bool:
+    """Whether the U-MKT witness steps cover every required gate level."""
+    return set(levels) >= UMKT_LEVELS
+
+
 @dataclass
 class GateState:
     """The user's gate inputs, as the spine has set them (pure, no filesystem)."""
@@ -152,6 +163,8 @@ class GateMatrix(StepRunner):
         self.scope = scope
         self.state = GateState()
         self.credited: set[str] = set()
+        # Gate level -> (step, evidence) of each U-MKT witness step run so far.
+        self.umkt_steps: dict[str, tuple[Step, Evidence]] = {}
 
     # -- labels ------------------------------------------------------------------
 
@@ -308,6 +321,23 @@ class GateMatrix(StepRunner):
         ):
             present["project" if self.scope == "project" else "home"] = [_MIXED_SKILL]
         evidence = Evidence(unchanged=unchanged, present=present, exit=command.exits)
+        if list(cells) == [MARKETPLACE_UNTOUCHED]:
+            # U-MKT needs its witness at both gate levels: hold this step's
+            # receipt until the other level has run too.
+            self.umkt_steps[self.state.gate("p-exec", "hook")] = (step, evidence)
+            if not umkt_ready(self.umkt_steps):
+                return
+            for held, held_evidence in self.umkt_steps.values():
+                check_obligation(
+                    MARKETPLACE_UNTOUCHED,
+                    strength="e2e-evidence",
+                    before=held.before,
+                    after=held.after,
+                    result=held.result,
+                    evidence=held_evidence,
+                    scope=self.scope,
+                )
+            return
         for cell in cells:
             check_obligation(
                 cell,
