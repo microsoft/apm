@@ -16,10 +16,12 @@
 # the slice into the 3 shards itself: scripts.ci_sharding refuses empty
 # shards, so a slice too small to split runs whole on shard 1.
 #
-# `Owner Surface Check` always reports, so it can be required: it passes when
-# no owner surface changed (the slice is skipped) and on merge_group, where
-# ci-integration.yml runs the whole suite. It is NOT required yet; making it
-# required (merge-gate.yml EXPECTED_CHECKS) is a maintainer gate.
+# `Owner Surface Check` always reports and is REQUIRED: merge-gate.yml lists it
+# in every EXPECTED_CHECKS context, and merge-train.yml calls this workflow
+# as its `owner` tier through workflow_call. Every job runs on every event;
+# only the slice's steps are gated on `run`, so off a pull request (merge
+# group, merge train) the slice is a fast no-op and the check passes, while
+# ci-integration.yml runs the whole suite there.
 name: Owner Surface
 
 # No paths: filter: a filtered-out run would never report the check.
@@ -29,6 +31,13 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # merge-train.yml calls this as its `owner` tier (a no-op slice there).
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 # Superseded pushes to a PR cancel their run; merge_group runs never cancel.
 concurrency:
@@ -71,7 +80,6 @@ jobs:
   slice:
     name: Owner Surface Slice (${{ matrix.shard }}/3)
     needs: [select]
-    if: needs.select.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -80,25 +88,30 @@ jobs:
         shard: [1, 2, 3]
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      if: needs.select.outputs.run == 'true'
       with:
         fetch-depth: 0
         persist-credentials: false
 
     - name: Set up Python
+      if: needs.select.outputs.run == 'true'
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ env.PYTHON_VERSION }}
 
     - name: Install uv
+      if: needs.select.outputs.run == 'true'
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
         save-cache: false
 
     - name: Install dependencies
+      if: needs.select.outputs.run == 'true'
       run: uv sync --frozen --extra dev
 
     - name: Run the owner-surface slice
+      if: needs.select.outputs.run == 'true'
       env:
         APM_E2E_TESTS: "1"
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -124,17 +137,10 @@ jobs:
         RUN: ${{ needs.select.outputs.run }}
         SLICE_RESULT: ${{ needs.slice.result }}
       run: |
-        if [ "$SELECT_RESULT" != success ]; then
-          echo "::error::Owner-surface selection did not succeed: $SELECT_RESULT."
-          exit 1
-        fi
-        if [ "$RUN" = true ]; then
-          expected=success
-        else
-          expected=skipped
-        fi
-        if [ "$SLICE_RESULT" != "$expected" ]; then
-          echo "::error::Owner-surface slice is $SLICE_RESULT (expected $expected, run=$RUN)."
+        # Every job runs on every event; only the slice's steps are gated, so
+        # a skipped owner surface still ends the slice job in success.
+        if [ "$SELECT_RESULT" != success ] || [ "$SLICE_RESULT" != success ]; then
+          echo "::error::Owner Surface Check failed: select=$SELECT_RESULT slice=$SLICE_RESULT (run=$RUN)."
           exit 1
         fi
         echo "Owner Surface Check passed (run=$RUN, slice=$SLICE_RESULT)."

@@ -3337,7 +3337,12 @@ TRAIN_GATE_JOB = "train-gate"
 TRAIN_GATE_STEP = "Require every train job"
 TRAIN_SCOPE_STEP = "Parse scope"
 TRAIN_RATCHET_STEP = "Run ratchet contract tests"
-TRAIN_TIERS = {"tier1": "ci.yml", "tier2": "ci-integration.yml", "spec": "spec-conformance.yml"}
+TRAIN_TIERS = {
+    "tier1": "ci.yml",
+    "tier2": "ci-integration.yml",
+    "spec": "spec-conformance.yml",
+    "owner": "owner-surface.yml",
+}
 # A branch deletion fires `push` with deleted true on the default branch SHA.
 TRAIN_NOT_DELETED = "github.event.deleted != true"
 TRAIN_FULL_SCOPE = f"{TRAIN_NOT_DELETED} && needs.scope.outputs.scope == 'full'"
@@ -3351,6 +3356,7 @@ TRAIN_GATE_RESULTS = (
     "TIER1_RESULT",
     "TIER2_RESULT",
     "SPEC_RESULT",
+    "OWNER_RESULT",
 )
 LINT_CHAIN_ACTION = "./.github/actions/lint-chain"
 LINT_CHAIN_BASE = (
@@ -3639,8 +3645,8 @@ def test_train_gate_drift_fails(mutation: str) -> None:
 @pytest.mark.parametrize(
     ("scope", "baseline"),
     [
-        ("full", ("success", "success", "success", "success", "success")),
-        ("guard", ("success", "success", "skipped", "skipped", "skipped")),
+        ("full", ("success", "success", "success", "success", "success", "success")),
+        ("guard", ("success", "success", "skipped", "skipped", "skipped", "skipped")),
     ],
 )
 def test_train_gate_passes_only_when_every_job_is_green(
