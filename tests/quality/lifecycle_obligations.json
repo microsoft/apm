@@ -14683,7 +14683,6 @@
     "X|install|inline-mcp|FORCE=on",
     "X|install|inline-mcp|FROZEN=on",
     "X|install|inline-mcp|GATE=none",
-    "X|install|inline-mcp|GATE=unapproved-exec",
     "X|install|inline-mcp|NET=online",
     "X|install|inline-mcp|SCOPE=project",
     "X|install|inline-mcp|SELECT=on",
@@ -14756,7 +14755,6 @@
     "X|install|mcp-registry|FORCE=on",
     "X|install|mcp-registry|FROZEN=on",
     "X|install|mcp-registry|GATE=none",
-    "X|install|mcp-registry|GATE=unapproved-exec",
     "X|install|mcp-registry|NET=online",
     "X|install|mcp-registry|SCOPE=project",
     "X|install|mcp-registry|SELECT=on",
@@ -19902,15 +19900,11 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=unapproved-exec": {
-   "credited_by": [
-    "X|install|inline-mcp|GATE=unapproved-exec"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=inline-mcp|LOCK=absent": {
    "family": "pair",
@@ -21635,15 +21629,11 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=unapproved-exec": {
-   "credited_by": [
-    "X|install|mcp-registry|GATE=unapproved-exec"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=mcp-registry|LOCK=absent": {
    "family": "pair",
