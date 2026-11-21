@@ -313,8 +313,10 @@ class LockfileBuilder:
         prior install recorded for OTHER targets are preserved rather than
         clobbered, so a multi-target deploy keeps every target's files in the
         committed lockfile and they stay covered by the audit gates (issue
-        #1716). See :mod:`apm_cli.install.manifest_reconcile`.
+        #1716). A preserved skill copy left stale by a narrowed install is
+        named rather than kept silently (#4692).
         """
+        from apm_cli.install.helpers.reconciliation_scope import report_stale_kept_skill_copies
         from apm_cli.install.manifest_reconcile import reconcile_deployed_block
         from apm_cli.install.phases.cleanup import deployment_evidence, kept_prior_values
         from apm_cli.install.phases.targets import declared_target_profiles
@@ -371,6 +373,7 @@ class LockfileBuilder:
         )
         canonical_records = {}
         authoritative_empty = False
+        user_scope = is_user_scope(getattr(self.ctx, "scope", None))
         ghost_count = 0
         for dep_key in lockfile.dependencies:
             claim = package_claims[dep_key]
@@ -412,10 +415,20 @@ class LockfileBuilder:
                 owner=dep_key,
                 include_ledger=True,
                 apply_disk_deletion=not lockfile_only,
-                user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
+                user_scope=user_scope,
                 completed_reintegration=completed,
                 retained_values=frozenset(kept_prior_values(self.ctx, prior_files)),
             )
+            if not lockfile_only:
+                report_stale_kept_skill_copies(
+                    kept=[path for path in files if path not in current],
+                    current_hashes=current_hashes,
+                    prior_hashes=prior_hashes,
+                    active_targets=self.ctx.targets,
+                    declared_targets=declared,
+                    user_scope=user_scope,
+                    diagnostics=diagnostics,
+                )
             if not files and completed is None:
                 # Nothing this install governs and nothing to carry forward;
                 # leave deployed_files untouched so the whole-dep
