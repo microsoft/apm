@@ -1426,7 +1426,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
+  content_hash: sha256:68fcb794799720cb8d8c082ce91505151f3ad859d92e2cfeedb007ed8ff2f7df
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/scripts/verify-lint-mirror.sh
@@ -3490,7 +3490,7 @@ local_deployed_file_hashes:
   .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/changelog_fragments.py: sha256:d6310a5a2f196e731e0b29df6e95b95be999e2b1ad4a3165694bb22d28e378c8
-  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
+  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:68fcb794799720cb8d8c082ce91505151f3ad859d92e2cfeedb007ed8ff2f7df
   .agents/skills/cut-release/scripts/verify-lint-mirror.sh: sha256:ab3f4a9ebc8f2b8c357c4cf81e0ada3be093cfc94c06703805d56c87f6fd7ecc
   .agents/skills/devx-ux/SKILL.md: sha256:e66de2f844eebbfccf641b1a6fdf0ff9bb8c476364bda87266ce47f7ebfa7e5a
   .agents/skills/docs-corpus-audit/SKILL.md: sha256:d20498ee8c1a38553303e23fc2f184c59fab624d1f701839f00dc7b291db3afb

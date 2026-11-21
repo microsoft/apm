@@ -113,11 +113,23 @@ list_prs_from_gh() {
 SELF_TEST_TMP=""
 run_self_test() {
     local tmp found rc=0
-    tmp=$(mktemp -d "${TMPDIR:-/tmp}/list-changes-self-test.XXXXXX")
+    # Abort before any git command unless we are inside a fresh temp dir:
+    # otherwise the self-test would commit into the caller's repository.
+    if ! tmp=$(mktemp -d "${TMPDIR:-/tmp}/list-changes-self-test.XXXXXX") \
+        || [[ -z "$tmp" || ! -d "$tmp" ]]; then
+        echo "[x] self-test: cannot create a temp directory" >&2
+        return 1
+    fi
+    tmp=$(cd "$tmp" && pwd -P) || { echo "[x] self-test: cannot enter $tmp" >&2; return 1; }
     SELF_TEST_TMP="$tmp"
     trap 'rm -rf "$SELF_TEST_TMP"' EXIT
-    (
-        cd "$tmp"
+    if ! (
+        set -e
+        cd "$tmp" || { echo "[x] self-test: cannot enter $tmp" >&2; exit 1; }
+        if [[ "$(pwd -P)" != "$tmp" ]]; then
+            echo "[x] self-test: cwd is not the temp dir; refusing to run git" >&2
+            exit 1
+        fi
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
         g() { git -c user.name=t -c user.email=t@example.invalid \
                   -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
@@ -129,7 +141,10 @@ run_self_test() {
         g commit -q --allow-empty -m "feat: work on branch (#99)"
         g checkout -q main
         g merge -q --no-ff -m "Merge pull request #12 from x/y" feature
-    ) >/dev/null
+    ) >/dev/null; then
+        echo "[x] self-test: cannot build the throwaway repository" >&2
+        return 1
+    fi
     found=$(cd "$tmp" && parse_prs_from_git_log "v0.0.1..HEAD" | cut -f1 | sort -n | tr '\n' ' ')
     for want in 11 12; do
         if [[ " $found" != *" $want "* ]]; then
