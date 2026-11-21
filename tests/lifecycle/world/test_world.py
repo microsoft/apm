@@ -120,11 +120,17 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         (".agents/skills/p-parent2/SKILL.md", "p-parent2"),
         (".agents/skills/p-child/SKILL.md", "p-child"),
     ),
-    ("p-native-claude", "project"): ((".claude/skills/p-native-claude/SKILL.md", "p-native"),),
+    # A Claude plugin installs whole at project scope too (#3921).
+    ("p-native-claude", "project"): (
+        (".agents/plugins/p-native-claude/skills/p-native-claude/SKILL.md", "p-native"),
+        (".claude/settings.json", "p-native-claude"),
+    ),
     ("p-native-claude", "user"): ((".claude/settings.json", "p-native-claude"),),
     ("p-native-codex", "user"): ((".codex/config.toml", "p-native-codex"),),
+    # Whole at project scope (#3921) once its bin/ is trusted (the printed step).
     ("p-native-claude-bin", "project"): (
-        (".claude/skills/p-native-claude-bin/SKILL.md", "p-native-claude-bin"),
+        (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json", "p-native-claude-bin"),
+        (".claude/settings.json", "p-native-claude-bin"),
     ),
     ("p-canvas", "project"): ((".github/extensions/p-canvas/extension.mjs", "p-canvas"),),
     # Copilot has no user-scope canvas surface (integration/targets.py "copilot").
@@ -283,6 +289,7 @@ def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
     ]
 
 
+_TRUST_BIN_CELL = ("p-native-claude-bin", "project")
 _CELLS = [
     pytest.param(
         package,
@@ -306,6 +313,10 @@ def test_each_package_installs_through_the_real_cli(
     if package in _TARGETS:
         _set_targets(world, scope, _TARGETS[package])
     _install_and_approve(world, package, scope)
+    if (package, scope) == _TRUST_BIN_CELL:
+        # An approved native plugin's bin/ waits for trust in a non-interactive
+        # run; run the step the parked warning prints.
+        _ok(world, ["install", "--trust-bin"], scope)
     assert package in _locked(world, scope)
     _assert_surfaces(world, package, scope)
     assert world.services.egress_log() == [], "a local-path install reached the network"

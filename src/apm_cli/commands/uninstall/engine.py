@@ -1875,6 +1875,9 @@ def gate_retired_hook_survivors(
     for key, why in sorted(hooks.items()):
         if key not in denied:
             logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+    for key in (set(retirements.denied_packages) - set(removed_keys)) | set(hooks):
+        # A native plugin is admitted whole: losing its record retires it (#3921).
+        lockfile.dependencies[key].native_plugin = None
     return refreshed | set(denied) | set(hooks), set(denied)
 
 

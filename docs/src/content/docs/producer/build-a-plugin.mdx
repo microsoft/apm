@@ -115,6 +115,11 @@ hashes. APM covers that in two ways:
 
 `devDependencies` stay out of the bundle.
 
+A repository with `.apm/`, or an `apm.yml` that declares dependencies, installs
+as an APM package. Otherwise APM installs a `.claude-plugin/plugin.json` plugin whole for
+Claude Code and Copilot, so consumers load the same folder you ship
+([Native plugins](../../consumer/install-plugins/#native-plugins)).
+
 <Aside type="caution" title="Bump the version, then repack with --force">
 `apm pack` keeps an existing `.claude-plugin/plugin.json`,
 `.github/plugin/plugin.json` or `.codex-plugin/plugin.json` and prints

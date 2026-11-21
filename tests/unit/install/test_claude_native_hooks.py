@@ -219,7 +219,7 @@ def test_loose_hook_refusal_names_the_package_and_both_steps(tmp_path: Path) -> 
     HookIntegrator().integrate_package_hooks_claude(info, tmp_path, user_scope=True)
     with pytest.raises(ClaudeNativePluginError) as error:
         _integrate(tmp_path, info)
-    assert "Cannot switch owner/hooks to native Claude" in str(error.value)
+    assert "Cannot switch owner/hooks to a native plugin" in str(error.value)
     from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
 
     advice = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package="owner/hooks").sentence()
@@ -306,11 +306,11 @@ def test_retained_loose_claude_files_block_native_registration(
     claude = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
     ctx = SimpleNamespace(
         targets=[claude, KNOWN_TARGETS["codex"].for_scope(user_scope=True)],
-        claude_native_plugins={"owner/hooks": object()},
+        claude_native_plugins={"owner/hooks": SimpleNamespace(harnesses=frozenset({"claude"}))},
         package_cleanup_retained={"owner/hooks": retained, "owner/other": {".claude/x.md": None}},
     )
     if refused:
-        with pytest.raises(ClaudeNativePluginError, match="loose Claude files") as error:
+        with pytest.raises(ClaudeNativePluginError, match="package-owned loose files") as error:
             _refuse_retained_loose_claude_files(ctx)
         assert next(iter(retained)) in str(error.value)
     else:

@@ -407,11 +407,16 @@ def _i1_lock_deployed(
 def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violation]]:
     """Managed paths a native_plugin record of the same lock owns, plus root mismatches.
 
-    A record owns the paths under its root only at user scope (where the root
-    lives) and only while the root's tree carries the record's fingerprint.
+    A record owns the paths under its root only while the root's tree carries
+    the record's fingerprint: the per-machine digest at user scope, the
+    portable path-and-bytes digest at project scope (#3921).
     """
-    if after.lock is None or not after.user_scope:
+    if after.lock is None:
         return set(), []
+    from apm_cli.claude_plugins.admission import (
+        ClaudeNativePluginError,
+        fingerprint_native_claude_source,
+    )
     from apm_cli.utils.content_hash import compute_native_plugin_hash
 
     owned: set[str] = set()
@@ -427,9 +432,14 @@ def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violatio
         under = {path for path in after.managed_paths if path.startswith(prefix)}
         if not under:
             continue
+        root = after.deploy_root / record.root
         try:
-            observed = compute_native_plugin_hash(after.deploy_root / record.root)
-        except (OSError, ValueError):
+            observed = (
+                compute_native_plugin_hash(root)
+                if after.user_scope
+                else fingerprint_native_claude_source(root, portable=True)
+            )
+        except (OSError, ValueError, ClaudeNativePluginError):
             observed = "unreadable"
         if observed == record.fingerprint:
             owned |= under

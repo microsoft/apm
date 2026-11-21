@@ -85,7 +85,8 @@ _SURFACES: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
-    ("project", "native", "claude"): (".mcp.json", '"{pkg}-mcp"'),
+    # A Claude plugin installs whole at both scopes (#3921).
+    ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),

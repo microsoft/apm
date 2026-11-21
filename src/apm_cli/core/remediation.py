@@ -618,8 +618,8 @@ HOOK_CONFIG_STALE = _entry("hook-config-stale", "apm install", "rebuild the hook
 COPILOT_PLUGIN_REGISTRATION_STALE = _entry(
     "copilot-plugin-registration-stale",
     "apm install",
-    "re-register the GitHub Copilot plugins",
-    before="resolve the cause above",
+    "move the GitHub Copilot plugin registration to .agents/plugins",
+    before="include copilot in the targets",
 )
 CLAUDE_PLUGIN_REGISTRATION_STALE = _entry(
     "claude-plugin-registration-stale",
@@ -958,13 +958,13 @@ CLAUDE_PLUGIN_BIN_UNTRUSTED = _entry(
 CLAUDE_PLUGIN_SOURCE_STALE = _entry(
     "claude-plugin-source-stale",
     "apm install --global",
-    "restore the native Claude plugin from apm.lock.yaml",
+    "restore the native plugin from apm.lock.yaml",
 )
 CLAUDE_PLUGIN_BINDING_MOVED = _entry(
     "claude-plugin-binding-moved",
     "apm install --global",
-    "register the native Claude plugins under this APM home",
-    before="remove the old entries from Claude settings and ~/.agents/plugins, "
+    "declare the native plugins under this scope's marketplace",
+    before="remove the old entries from the harness settings and {plugins_dir}, "
     "move apm.lock.yaml aside",
 )
 CODEX_PLUGIN_USER_SCOPE = _entry(
@@ -995,11 +995,11 @@ CODEX_NATIVE_REGISTRATION_UNVERIFIED = _entry(
     "apm install -g --target codex",
     "register the Codex plugin again from its admitted source",
 )
-COPILOT_SETTINGS_INVALID = _entry(
-    "copilot-settings-invalid",
+NATIVE_SETTINGS_INVALID = _entry(
+    "native-settings-invalid",
     "apm install",
-    "register the Agent Plugin and install the packages",
-    before="fix or delete the file",
+    "declare the native plugins and install the packages",
+    before="fix the file, or move it aside",
 )
 LLM_TLS_BOOTSTRAP_MISSING = _entry(
     "llm-tls-bootstrap-missing",
@@ -1465,6 +1465,12 @@ CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS = _entry(
     "remove the loose hook deployment",
     then="run 'apm install --global {package}' to activate it as a native Claude plugin",
 )
+CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT = _entry(
+    "claude-native-switch-loose-hooks-project",
+    "apm uninstall {package}",
+    "remove the loose hook deployment",
+    then="run 'apm install {package}' to activate it as a native plugin",
+)
 SKILL_PATH_MIGRATION_CONFLICT = _entry(
     "skill-path-migration-conflict",
     "apm install",
@@ -1523,6 +1529,9 @@ REPOSITORY_NOT_FOUND = _entry(
 )
 LOCAL_BUNDLE_UPDATE = _entry(
     "local-bundle-update", "apm install <newer-bundle-file>", "update a bundle"
+)
+NATIVE_PLUGIN_UPDATE_HELD = _entry(
+    "native-plugin-update-held", "apm install", "update it", before="drop --target"
 )
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------

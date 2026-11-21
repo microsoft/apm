@@ -43,7 +43,9 @@ def test_approved_claude_plugin_hook_deploys_on_reinstall(
     manifest = {
         "name": "consumer",
         "version": "1.0.0",
-        "targets": ["claude"],
+        # Claude installs the plugin whole (#3921); Codex still splits it, so
+        # the per-file pin on the normalized copy is the contract under test.
+        "targets": ["codex"],
         "dependencies": {"apm": [str(plugin)]},
         "executables": {"allow": {}},
     }
@@ -55,7 +57,7 @@ def test_approved_claude_plugin_hook_deploys_on_reinstall(
         assert result.returncode == 0, result.stdout + result.stderr
 
     def deployed() -> str:
-        settings = project / ".claude/settings.json"
+        settings = project / ".codex/hooks.json"
         return settings.read_text(encoding="utf-8") if settings.exists() else ""
 
     run("install")

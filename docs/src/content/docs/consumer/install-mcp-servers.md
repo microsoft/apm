@@ -156,10 +156,11 @@ revoke it.
 
 ## Servers that come from dependencies
 
-A Claude Code plugin installed whole at user scope (`apm install -g --target claude`)
-keeps its MCP and LSP servers: Claude Code loads them from the plugin under your
-organization's MCP policy, and APM writes no Claude entry for them
-([Install plugins](../install-plugins/#claude-code-plugins-at-user-scope)).
+A plugin APM installs whole to `.agents/plugins/` keeps its MCP and LSP
+servers: Claude Code and Copilot load them from the plugin under your
+organization's MCP policy, and APM writes no entry for them in those harnesses;
+other targets still get APM's copy
+([Install plugins](../install-plugins/#native-plugins)).
 
 
 A server declared by a package you depend on is code that runs on your

@@ -31,7 +31,7 @@ _BLOCK = re.compile(
 # Executed installed-CLI proofs: test_area_remediation_clears_the_reported_state.
 EXECUTED = frozenset(
     {
-        "copilot-settings-invalid",
+        "native-settings-invalid",
         "jetbrains-mcp-config-unusable",
     }
 )

@@ -1,13 +1,13 @@
 ---
 title: Give every teammate the same skills, plugins and MCP servers
-description: Install a skill, a marketplace plugin and an MCP server with one tool, commit two files, and every clone gets the same agent setup. Five minutes.
+description: Install a skill, a marketplace plugin and an MCP server with one tool, commit the result, and every clone gets the same agent setup. Five minutes.
 ---
 
 import { Steps, FileTree, Aside, LinkCard, CardGrid } from '@astrojs/starlight/components';
 
 You share a repository with teammates who use coding agents, and everyone's setup is a little
 different. In five minutes you will add a skill, a plugin from a marketplace and an MCP server,
-commit two files, and watch a fresh clone get the same setup, checked against a lockfile.
+commit the result, and watch a fresh clone get the same setup, checked against a lockfile.
 
 **You need:** APM ([install it](../getting-started/installation/)), a git repository, and GitHub
 Copilot or Claude Code.
@@ -55,14 +55,16 @@ Copilot or Claude Code.
    ```text frame="none"
    [+] anthropics/claude-plugins-official/plugins/commit-commands#main
    ...
-     |-- 3 prompts integrated -> .github/prompts/
-     |-- 3 commands integrated -> .claude/commands/
-   [*] Installed 1 APM dependency in 6.2s.
+   1 native plugin(s) deployed to .../.agents/plugins and declared
+   in Claude Code and GitHub Copilot settings. Start a new session, or run
+   /reload-plugins in Claude, to load them.
+   [*] Installed 1 APM dependency in 2.3s.
    ```
 
-   One plugin, written in each harness's own format: commands for Claude Code, prompts for
-   GitHub Copilot. `apm.yml` records where the plugin's files actually live, so the lockfile
-   can pin them.
+   APM copies the plugin whole to `.agents/plugins/commit-commands/` and declares it in
+   `.claude/settings.json` and `.github/copilot/settings.json`, so both harnesses load the
+   publisher's plugin as is ([Install plugins](../consumer/install-plugins/#native-plugins)).
+   `apm.yml` records where the plugin's files actually live, so the lockfile can pin them.
 
 4. **Add an MCP server.**
 
@@ -79,7 +81,7 @@ Copilot or Claude Code.
    One line in `apm.yml`, and APM writes the configuration each harness reads. No hand-edited
    JSON, and the same server on every machine.
 
-5. **Commit the manifest and the lockfile.**
+5. **Commit the manifest, the lockfile and the plugin.**
 
    ```yaml title="apm.yml"
    dependencies:
@@ -96,7 +98,7 @@ Copilot or Claude Code.
    ```
 
    ```bash frame="terminal"
-   git add apm.yml apm.lock.yaml .gitignore
+   git add apm.yml apm.lock.yaml .gitignore .agents/plugins .claude/settings.json .github/copilot/settings.json
    git commit -m "Add agent dependencies"
    ```
 
@@ -113,8 +115,9 @@ Copilot or Claude Code.
    ```
 
    APM added its download cache,
-   `apm_modules/`, to `.gitignore`. Committing the files it wrote is optional: any clone
-   rebuilds them from the lockfile
+   `apm_modules/`, to `.gitignore`. The plugin and the two settings files let a clone load the
+   plugin without APM. Committing the other files APM wrote is optional: any clone rebuilds
+   them from the lockfile
    ([should I commit them?](../concepts/how-apm-works/#common-questions)).
 
 6. **Be your teammate.** Clone the repository into a second folder and install from the
@@ -136,11 +139,13 @@ Copilot or Claude Code.
    it in CI. Your teammate now has:
 
    <FileTree>
-   - .agents/skills/deploy-to-vercel/SKILL.md
-   - .claude/
-     - commands/commit.md and 2 more
+   - .agents/
+     - plugins/commit-commands/ committed
      - skills/deploy-to-vercel/SKILL.md
-   - .github/prompts/commit.prompt.md and 2 more
+   - .claude/
+     - settings.json committed
+     - skills/deploy-to-vercel/SKILL.md
+   - .github/copilot/settings.json committed
    - .mcp.json
    </FileTree>
 
@@ -153,7 +158,7 @@ Copilot or Claude Code.
    ```text frame="none"
    [+] Replayed 2 package(s)
    [+] No drift detected
-   [*] 8 file(s) scanned -- no issues found
+   [*] 2 file(s) scanned -- no issues found
    ```
 
    `apm audit` rebuilds what the lockfile describes and compares it with the files on disk. It

@@ -139,7 +139,10 @@ prompts, as described above.
 project or organization turns on the executables gate, your hooks wait until
 they [approve your package](../../consumer/approve-executables/). Every
 hook file reaches every harness the consumer targets; to limit a hook to Claude
-Code, publish it in a package whose `apm.yml` sets `targets: [claude]`.
+Code, publish it in a package whose `apm.yml` sets `targets: [claude]`. A Claude
+Code plugin (`.claude-plugin/plugin.json`) is not split this way for Claude Code or
+Copilot: its hooks stay in the plugin folder, with `${CLAUDE_PLUGIN_ROOT}` intact
+([Native plugins](../../consumer/install-plugins/#native-plugins)).
 
 
 ### Migrating from filename routing

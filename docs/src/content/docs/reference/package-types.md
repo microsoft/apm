@@ -263,12 +263,14 @@ APM detects a Claude plugin collection by structure when `plugin.json` omits
 `$schema` or declares an unrecognized schema (a warning). Only the recognized
 Agent Plugins schema selects the portable Agent Plugin route.
 
-APM normally maps artifacts to runtime directories. Plugins installed globally
-for Claude use intact registration and require `.claude-plugin/plugin.json`,
-not root-only `plugin.json`. Native admission failures do not fall back to
-loose Claude files. See
-[APM-managed Claude user plugins](../../consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins)
-for client, capability and runtime qualification limits.
+APM normally maps artifacts to runtime directories. For the `claude` target
+(and `copilot` at project scope), APM deploys the plugin intact to
+`.agents/plugins/` instead, which requires `.claude-plugin/plugin.json`. A
+root-only `plugin.json` (an `apm pack` bundle) is mapped to runtime directories
+at project scope and parked with `--global`. Native admission failures park the
+plugin and do not fall back to loose files. See
+[Native plugins](../../consumer/install-plugins/#native-plugins)
+for capability and runtime qualification limits.
 
 ```
 my-plugin/
@@ -283,11 +285,10 @@ my-plugin/
 directories; `--skill` selects skills by leaf name or source-relative path
 under `skills/` (for example, `productivity/grill-me`).
 
-With `--global --target claude`, APM retains complete plugin source without
-duplicate loose Claude commands or hooks. Partial skill selections are
-refused; `--skill '*'` resets to complete selection, not a subset. Project
-installs, standalone APM content and other selected targets keep their
-existing routes.
+On the native route, APM deploys the complete plugin without duplicate loose
+commands or hooks. Partial skill selections are parked; `--skill '*'` resets to
+complete selection, not a subset. Standalone APM content and other selected
+targets keep their existing routes.
 
 A declared key is authoritative for its primitive: it replaces the default
 directory scan rather than adding to it. `"skills": ["./skills/search"]`
@@ -334,12 +335,11 @@ my-plugin/
 ```
 
 **What gets installed:** nothing is dissected. With `--target copilot`, APM
-keeps the plugin whole under `apm_modules/` and registers it with Copilot as a
-live directory marketplace. APM does not require or inspect a Copilot binary
-during install. Stable Copilot CLI 1.0.81 or newer is the supported runtime for
-loading the generated projection.
-Copilot loads the unit from APM's bytes -- it never copies it. See
-[Install Agent Plugins for Copilot](../../consumer/install-plugins/).
+deploys the plugin whole to `.agents/plugins/<plugin>/` and declares it in
+`.github/copilot/settings.json`. APM does not require or inspect a Copilot
+binary during install. Stable Copilot CLI 1.0.81 or newer is the supported
+runtime for loading it. See
+[Native plugins](../../consumer/install-plugins/#native-plugins).
 
 :::caution[Runtime compatibility and other targets]
 Any target set that excludes Copilot refuses this native install rather than

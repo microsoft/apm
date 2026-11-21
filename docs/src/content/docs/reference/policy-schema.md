@@ -511,7 +511,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 
 **Security note:** deployed executables are tightened to `0o700` on POSIX systems and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments. Additionally, the `--trust-bin` / `--no-trust-bin` flags on `apm install` provide per-invocation consent: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ deployment even if policy allows it, and the default (no flag) deploys with a warning.
 
-**Scope:** bin/ deployment only activates for a marketplace plugin installed at user scope (`-g`) with the Claude target. Project-scope installs and other targets never deploy `bin/`.
+**Scope:** for the `claude` target, `bin/` stays inside the plugin APM deploys whole to `.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`); a denied `bin/` parks the whole plugin. See [Native plugins](../../consumer/install-plugins/#native-plugins).
 
 **Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/publish-to-a-marketplace/#choose-a-repository-shape) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 

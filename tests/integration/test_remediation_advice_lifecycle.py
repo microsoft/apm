@@ -792,7 +792,7 @@ _FIXTURE_MCP = {
     "command": "printf",
     "args": ["fixture"],
 }
-_COPILOT_SETTINGS = ".github/copilot/settings.local.json"
+_COPILOT_SETTINGS = ".github/copilot/settings.json"
 # 'intellij' is not an apm.yml targets: value; only --target selects it.
 _INTELLIJ_INSTALL_ARGS = (*_INSTALL_ARGS, "--target", "intellij")
 
@@ -883,7 +883,7 @@ W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
         before=lambda world: _intellij_config(world).unlink(),
     ),
     _TextProof(
-        "copilot-settings-invalid",
+        "native-settings-invalid",
         _agent_plugin_world,
         lambda world: (world.consumer.root / _COPILOT_SETTINGS).write_text(
             "{malformed\n", encoding="ascii"
@@ -891,7 +891,7 @@ W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: _INSTALL_ARGS,
         1,
         _copilot_registered,
-        before=_unlink(_COPILOT_SETTINGS),
+        before=_move_aside(_COPILOT_SETTINGS),
     ),
 )
 
