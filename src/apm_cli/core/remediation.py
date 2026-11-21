@@ -489,6 +489,13 @@ AGENT_PLUGIN_MCP_UNPORTABLE = _entry(
     "apm pack --claude-plugin",
     "pack the MCP server in the legacy Claude plugin format",
 )
+BUNDLE_INTEGRITY_FAILED = _entry(
+    "bundle-integrity-failed",
+    "apm pack",
+    "rebuild the bundle from its source",
+    before="discard this copy",
+    then="install the rebuilt bundle",
+)
 UNPACK_CRITICAL_FINDINGS = _entry(
     "unpack-critical-findings",
     "apm audit --file <path>",

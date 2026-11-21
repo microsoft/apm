@@ -16,8 +16,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import click
-
 if TYPE_CHECKING:
     from apm_cli.bundle.unpacker import UnpackCandidate
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -247,10 +245,16 @@ def plugin_bundle_integrity(bundle_info: Any, logger: Any) -> IntegrityCheck:
             return
         errors = verify_bundle_integrity(bundle_info.source_dir, bundle_info.lockfile)
         if errors:
+            from ..core.remediation import BUNDLE_INTEGRITY_FAILED
+            from .errors import InstallFailureAlreadyRendered
+
             logger.error("Bundle integrity check failed:")
             for err in errors:
                 logger.error_detail(err)
-            raise click.Abort()
+            logger.error(
+                f"The bundle changed after it was packed. {BUNDLE_INTEGRITY_FAILED.sentence()}"
+            )
+            raise InstallFailureAlreadyRendered("Bundle integrity check failed")
         logger.verbose_detail("Bundle integrity verified")
 
     return check
