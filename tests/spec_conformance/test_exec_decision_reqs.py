@@ -71,3 +71,36 @@ def test_bin_consent_composes_after_the_gate(
     bin_approved, trust_bin, non_interactive, expected
 ) -> None:
     assert resolve_bin_skip(bin_approved, trust_bin, non_interactive=non_interactive) == expected
+
+
+@pytest.mark.req("req-sc-009")
+@pytest.mark.parametrize(
+    ("allow", "expected"),
+    [({}, {"acme/tools": ("not approved", ("lsp",))}), ({PKG: {"lsp": True}}, {})],
+    ids=["unlisted-retired-with-its-kind", "listed-kept"],
+)
+def test_gate_retirement_withholds_each_unapproved_executable_kind(
+    tmp_path: Path, allow, expected
+) -> None:
+    """#4567: a survivor deployed before the gate opted in loses each unapproved kind."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.exec_gate import locked_hooks_retired
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    modules = tmp_path / "apm_modules"
+    (modules / PKG).mkdir(parents=True)
+    server = {
+        "name": "s",
+        "command": "inert",
+        "args": ["--stdio"],
+        "extensionToLanguage": {".x": "x"},
+    }
+    dump_yaml(
+        {"name": "tools", "version": "1.0.0", "dependencies": {"lsp": [server]}},
+        modules / PKG / "apm.yml",
+    )
+    lockfile = LockFile()
+    lockfile.add_dependency(LockedDependency(repo_url=PKG, resolved_commit="a" * 40))
+    trust = build_exec_trust_context(policy=None, project_data={"executables": {"allow": allow}})
+
+    assert locked_hooks_retired(lockfile, modules, lambda: trust, pinned=set()) == expected
