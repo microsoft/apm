@@ -47,6 +47,7 @@ _INSTALL = "src/apm_cli/commands/install.py"
 _APPROVE = "src/apm_cli/commands/approve.py"
 _COMPILE = "src/apm_cli/commands/compile/cli.py"
 _PACK = "src/apm_cli/commands/pack.py"
+_MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 
 # -- U1: the modifiers each command accepts -----------------------------------
 
@@ -246,6 +247,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
         (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
+    "U-FIRST-PARTY-MCP": (
+        "an MCP server the project declares in its own apm.yml is first-party: the "
+        "executables gate governs servers from dependencies and never parks it, so every "
+        "executable-gate level of an MCP source is one must-cover cell that witnesses it "
+        "(an org policy dependency deny still applies)",
+        (
+            Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
+            Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
+            Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
+            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -330,8 +343,12 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
 # the fixed output matches). The cell is known-failing until that output appears.
 RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
 
+# U-FIRST-PARTY-MCP: the one cell every executable-gate level of an MCP source maps to.
+FIRST_PARTY_MCP_CELL = "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated"
+
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
+    FIRST_PARTY_MCP_CELL: "U-FIRST-PARTY-MCP",
     "rule|U9|approve-list-read-only": "U9",
     "rule|U9|approve-pending-read-only": "U9",
     "rule|U10|compile-validate-reads-mcp": "U10",
@@ -341,6 +358,7 @@ RULE_CELLS: Mapping[str, str] = {
 # Rule cells whose evidence is a state fact (nothing written).
 STATE_FACT_RULE_CELLS = frozenset(
     {
+        FIRST_PARTY_MCP_CELL,
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
         "rule|U10|compile-render-only-non-mutation",
@@ -420,6 +438,16 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
     return None
 
 
+def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
+    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP."""
+    target = _u8_target(cell)
+    if target is not None:
+        return target, "U8"
+    if cell.get("SRC") in MCP_SOURCES and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+        return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
+    return None
+
+
 def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
     """(target cell or rule cell id, rule) of a partial equivalence, or None.
 
@@ -430,9 +458,9 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     if any(name in cell for name in EXCEPTION_FACTORS):
         return None
     op, prim, gate = cell.get("OP"), cell.get("PRIM"), cell.get("GATE")
-    source_target = _u8_target(cell)
-    if source_target is not None:
-        return source_target, "U8"
+    source = _source_mapping(cell)
+    if source is not None:
+        return source
     policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
     if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
         return None

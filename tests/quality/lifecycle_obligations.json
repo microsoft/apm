@@ -2674,6 +2674,30 @@
     "E3"
    ]
   },
+  "pair|SRC=inline-mcp|GATE=allowed": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=inline-mcp|GATE=denied-executable": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=inline-mcp|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=inline-mcp|GATE=unapproved-exec": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
   "pair|SRC=local-bundle|FROZEN=on": {
    "maps_to": "refusal|OP=bundle-install|FROZEN=on",
    "rules": [
@@ -2716,6 +2740,30 @@
    "maps_to": "pair|SRC=marketplace-local|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|SRC=mcp-registry|GATE=allowed": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=mcp-registry|GATE=denied-executable": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=mcp-registry|GATE=revoked-after-deploy": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|SRC=mcp-registry|GATE=unapproved-exec": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
    ]
   },
   "pair|SRC=native-plugin|PRIM=other-file": {
@@ -8201,11 +8249,15 @@
    "strength": "e2e"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=bin": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=canvas": {
    "family": "T3",
@@ -8215,11 +8267,15 @@
    "strength": "e2e"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=hook": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=lsp": {
    "family": "T3",
@@ -8229,18 +8285,26 @@
    "strength": "e2e"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=mcp": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=skill": {
+   "credited_by": [
+    "T3|marketplace|marketplace-object|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=marketplace|SRC=marketplace-local|PRIM=bin": {
    "family": "T3",
@@ -12081,11 +12145,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|LOCK=absent|HOSTID=bare-default": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|HOSTID=bare-default|LOCK=absent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=absent|HOSTID=proxy-logical": {
    "family": "pair",
@@ -12306,25 +12374,37 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|LOCK=consistent|HOSTID=bare-default": {
+   "credited_by": [
+    "X|lock|git-object|HOSTID=bare-default|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=consistent|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|lock|shorthand|HOSTID=proxy-logical|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=consistent|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|lock|git-object|HOSTID=qualified-host-port|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=consistent|MCPOWN=copilot": {
    "family": "pair",
@@ -12741,25 +12821,37 @@
    "strength": "e2e"
   },
   "pair|LOCK=stale|HOSTID=bare-default": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=bare-default|LOCK=stale"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=stale|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|install|shorthand|HOSTID=proxy-logical|LOCK=stale"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=stale|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=qualified-host-port|LOCK=stale"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|LOCK=stale|MCPOWN=copilot": {
    "family": "pair",
@@ -14487,25 +14579,42 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=install|HOSTID=bare-default": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=bare-default",
+    "X|install|git-object|HOSTID=bare-default|LOCK=stale",
+    "X|install|plugin-at-mkt|HOSTID=bare-default",
+    "X|install|plugin-at-mkt|HOSTID=bare-default|LOCK=absent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=install|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|install|shorthand|HOSTID=proxy-logical",
+    "X|install|shorthand|HOSTID=proxy-logical|LOCK=stale"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=install|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=qualified-host-port",
+    "X|install|git-object|HOSTID=qualified-host-port|LOCK=stale"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=install|LOCK=absent": {
    "family": "pair",
@@ -14537,11 +14646,17 @@
    "witness": "tests/lifecycle/machines/test_m_scope_lock.py::test_scope_lock_spine_refuses_every_write_and_keeps_reads[project]"
   },
   "pair|OP=install|LOCK=stale": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=bare-default|LOCK=stale",
+    "X|install|git-object|HOSTID=qualified-host-port|LOCK=stale",
+    "X|install|shorthand|HOSTID=proxy-logical|LOCK=stale"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=install|MCPOWN=copilot": {
    "family": "pair",
@@ -14726,6 +14841,8 @@
     "X|install|plugin-at-mkt|FROZEN=on",
     "X|install|plugin-at-mkt|GATE=none",
     "X|install|plugin-at-mkt|GATE=unapproved-exec",
+    "X|install|plugin-at-mkt|HOSTID=bare-default",
+    "X|install|plugin-at-mkt|HOSTID=bare-default|LOCK=absent",
     "X|install|plugin-at-mkt|NET=online",
     "X|install|plugin-at-mkt|SCOPE=project",
     "X|install|plugin-at-mkt|SELECT=on",
@@ -14965,25 +15082,40 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=lock|HOSTID=bare-default": {
+   "credited_by": [
+    "X|lock|git-object|HOSTID=bare-default",
+    "X|lock|git-object|HOSTID=bare-default|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|lock|shorthand|HOSTID=proxy-logical",
+    "X|lock|shorthand|HOSTID=proxy-logical|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|lock|git-object|HOSTID=qualified-host-port",
+    "X|lock|git-object|HOSTID=qualified-host-port|LOCK=consistent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|LOCK=absent": {
    "family": "pair",
@@ -15284,11 +15416,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|DEPLOYED=clean": {
+   "credited_by": [
+    "X|marketplace|marketplace-object|DEPLOYED=clean"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|DEPLOYED=edited": {
    "family": "pair",
@@ -15333,11 +15469,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|GATE=none": {
+   "credited_by": [
+    "X|marketplace|plugin-at-mkt|GATE=none"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -15347,11 +15487,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|marketplace|plugin-at-mkt|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|LOCK=absent": {
    "family": "pair",
@@ -15389,18 +15533,26 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|NET=online": {
+   "credited_by": [
+    "X|marketplace|marketplace-object|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|PRIM=bin": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|bin"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|PRIM=canvas": {
    "family": "pair",
@@ -15410,11 +15562,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|PRIM=hook": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|hook"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|PRIM=lsp": {
    "family": "pair",
@@ -15424,32 +15580,48 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|PRIM=mcp": {
+   "credited_by": [
+    "T3|marketplace|plugin-at-mkt|mcp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|PRIM=skill": {
+   "credited_by": [
+    "T3|marketplace|marketplace-object|skill"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|SCOPE=project": {
+   "credited_by": [
+    "X|marketplace|marketplace-object|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|SELECT=on": {
+   "credited_by": [
+    "X|marketplace|marketplace-object|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|SRC=marketplace-file": {
    "family": "pair",
@@ -15459,11 +15631,28 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|SRC=marketplace-git": {
+   "credited_by": [
+    "T3|marketplace|marketplace-object|skill",
+    "T3|marketplace|plugin-at-mkt|bin",
+    "T3|marketplace|plugin-at-mkt|hook",
+    "T3|marketplace|plugin-at-mkt|mcp",
+    "T5|real|marketplace|marketplace-object",
+    "T5|real|marketplace|plugin-at-mkt",
+    "X|marketplace|marketplace-object|DEPLOYED=clean",
+    "X|marketplace|marketplace-object|NET=online",
+    "X|marketplace|marketplace-object|SCOPE=project",
+    "X|marketplace|marketplace-object|SELECT=on",
+    "X|marketplace|marketplace-object|TGT=single-unchanged",
+    "X|marketplace|plugin-at-mkt|GATE=none",
+    "X|marketplace|plugin-at-mkt|GATE=unapproved-exec",
+    "X|marketplace|plugin-at-mkt|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|SRC=marketplace-local": {
    "family": "pair",
@@ -15480,11 +15669,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|marketplace|plugin-at-mkt|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|TGT=multi-widened": {
    "family": "pair",
@@ -15501,11 +15694,15 @@
    "strength": "e2e"
   },
   "pair|OP=marketplace|TGT=single-unchanged": {
+   "credited_by": [
+    "X|marketplace|marketplace-object|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=marketplace|TGT=single-widened": {
    "family": "pair",
@@ -16639,25 +16836,37 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=uninstall|HOSTID=bare-default": {
+   "credited_by": [
+    "X|uninstall|git-object|HOSTID=bare-default"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=uninstall|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|uninstall|shorthand|HOSTID=proxy-logical"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=uninstall|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|uninstall|git-object|HOSTID=qualified-host-port"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=uninstall|LOCK=absent": {
    "family": "pair",
@@ -17053,25 +17262,37 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=update|HOSTID=bare-default": {
+   "credited_by": [
+    "X|update|git-object|HOSTID=bare-default"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=update|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|update|shorthand|HOSTID=proxy-logical"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=update|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|update|git-object|HOSTID=qualified-host-port"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=update|LOCK=absent": {
    "family": "pair",
@@ -19595,25 +19816,52 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=git|HOSTID=bare-default": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=bare-default",
+    "X|install|git-object|HOSTID=bare-default|LOCK=stale",
+    "X|lock|git-object|HOSTID=bare-default",
+    "X|lock|git-object|HOSTID=bare-default|LOCK=consistent",
+    "X|uninstall|git-object|HOSTID=bare-default",
+    "X|update|git-object|HOSTID=bare-default"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=git|HOSTID=proxy-logical": {
+   "credited_by": [
+    "X|install|shorthand|HOSTID=proxy-logical",
+    "X|install|shorthand|HOSTID=proxy-logical|LOCK=stale",
+    "X|lock|shorthand|HOSTID=proxy-logical",
+    "X|lock|shorthand|HOSTID=proxy-logical|LOCK=consistent",
+    "X|uninstall|shorthand|HOSTID=proxy-logical",
+    "X|update|shorthand|HOSTID=proxy-logical"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=git|HOSTID=qualified-host-port": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=qualified-host-port",
+    "X|install|git-object|HOSTID=qualified-host-port|LOCK=stale",
+    "X|lock|git-object|HOSTID=qualified-host-port",
+    "X|lock|git-object|HOSTID=qualified-host-port|LOCK=consistent",
+    "X|uninstall|git-object|HOSTID=qualified-host-port",
+    "X|update|git-object|HOSTID=qualified-host-port"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=git|LOCK=absent": {
    "family": "pair",
@@ -19639,11 +19887,17 @@
    "strength": "e2e"
   },
   "pair|SRC=git|LOCK=stale": {
+   "credited_by": [
+    "X|install|git-object|HOSTID=bare-default|LOCK=stale",
+    "X|install|git-object|HOSTID=qualified-host-port|LOCK=stale",
+    "X|install|shorthand|HOSTID=proxy-logical|LOCK=stale"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=git|NET=offline": {
    "family": "pair",
@@ -19860,24 +20114,10 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=inline-mcp|GATE=allowed": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=inline-mcp|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=inline-mcp|GATE=denied-executable": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
@@ -19891,20 +20131,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "pair|SRC=inline-mcp|GATE=revoked-after-deploy": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=inline-mcp|GATE=unapproved-exec": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|SRC=inline-mcp|LOCK=absent": {
    "family": "pair",
@@ -20902,6 +21128,7 @@
   },
   "pair|SRC=marketplace-git|DEPLOYED=clean": {
    "credited_by": [
+    "X|marketplace|marketplace-object|DEPLOYED=clean",
     "X|update|marketplace-object|DEPLOYED=clean"
    ],
    "family": "pair",
@@ -20997,7 +21224,8 @@
   },
   "pair|SRC=marketplace-git|GATE=none": {
    "credited_by": [
-    "X|install|plugin-at-mkt|GATE=none"
+    "X|install|plugin-at-mkt|GATE=none",
+    "X|marketplace|plugin-at-mkt|GATE=none"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21015,7 +21243,8 @@
   },
   "pair|SRC=marketplace-git|GATE=unapproved-exec": {
    "credited_by": [
-    "X|install|plugin-at-mkt|GATE=unapproved-exec"
+    "X|install|plugin-at-mkt|GATE=unapproved-exec",
+    "X|marketplace|plugin-at-mkt|GATE=unapproved-exec"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21025,11 +21254,16 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|HOSTID=bare-default": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|HOSTID=bare-default",
+    "X|install|plugin-at-mkt|HOSTID=bare-default|LOCK=absent"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|HOSTID=proxy-logical": {
    "family": "pair",
@@ -21046,11 +21280,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|LOCK=absent": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|HOSTID=bare-default|LOCK=absent"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4096",
+   "lane": "T-2",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|LOCK=consistent": {
    "family": "pair",
@@ -21082,7 +21320,8 @@
   },
   "pair|SRC=marketplace-git|NET=online": {
    "credited_by": [
-    "X|install|plugin-at-mkt|NET=online"
+    "X|install|plugin-at-mkt|NET=online",
+    "X|marketplace|marketplace-object|NET=online"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21103,6 +21342,7 @@
     "T3|compile|plugin-at-mkt|bin",
     "T3|install|plugin-at-mkt|bin",
     "T3|lock|plugin-at-mkt|bin",
+    "T3|marketplace|plugin-at-mkt|bin",
     "T3|prune|plugin-at-mkt|bin",
     "T3|uninstall|plugin-at-mkt|bin",
     "T3|update|plugin-at-mkt|bin"
@@ -21126,6 +21366,7 @@
     "T3|compile|plugin-at-mkt|hook",
     "T3|install|plugin-at-mkt|hook",
     "T3|lock|plugin-at-mkt|hook",
+    "T3|marketplace|plugin-at-mkt|hook",
     "T3|prune|plugin-at-mkt|hook",
     "T3|uninstall|plugin-at-mkt|hook",
     "T3|update|plugin-at-mkt|hook"
@@ -21149,6 +21390,7 @@
     "T3|compile|plugin-at-mkt|mcp",
     "T3|install|plugin-at-mkt|mcp",
     "T3|lock|plugin-at-mkt|mcp",
+    "T3|marketplace|plugin-at-mkt|mcp",
     "T3|prune|plugin-at-mkt|mcp",
     "T3|uninstall|plugin-at-mkt|mcp",
     "T3|update|plugin-at-mkt|mcp"
@@ -21165,6 +21407,7 @@
     "T3|compile|marketplace-object|skill",
     "T3|install|marketplace-object|skill",
     "T3|lock|marketplace-object|skill",
+    "T3|marketplace|marketplace-object|skill",
     "T3|prune|marketplace-object|skill",
     "T3|uninstall|marketplace-object|skill",
     "T3|update|marketplace-object|skill"
@@ -21178,7 +21421,8 @@
   },
   "pair|SRC=marketplace-git|SCOPE=project": {
    "credited_by": [
-    "X|install|plugin-at-mkt|SCOPE=project"
+    "X|install|plugin-at-mkt|SCOPE=project",
+    "X|marketplace|marketplace-object|SCOPE=project"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21196,7 +21440,8 @@
   },
   "pair|SRC=marketplace-git|SELECT=on": {
    "credited_by": [
-    "X|install|plugin-at-mkt|SELECT=on"
+    "X|install|plugin-at-mkt|SELECT=on",
+    "X|marketplace|marketplace-object|SELECT=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21214,7 +21459,8 @@
   },
   "pair|SRC=marketplace-git|TGT=multi-unchanged": {
    "credited_by": [
-    "X|install|plugin-at-mkt|TGT=multi-unchanged"
+    "X|install|plugin-at-mkt|TGT=multi-unchanged",
+    "X|marketplace|plugin-at-mkt|TGT=multi-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21239,7 +21485,8 @@
   },
   "pair|SRC=marketplace-git|TGT=single-unchanged": {
    "credited_by": [
-    "X|install|plugin-at-mkt|TGT=single-unchanged"
+    "X|install|plugin-at-mkt|TGT=single-unchanged",
+    "X|marketplace|marketplace-object|TGT=single-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -21589,24 +21836,10 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
-  "pair|SRC=mcp-registry|GATE=allowed": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|SRC=mcp-registry|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4108",
    "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=mcp-registry|GATE=denied-executable": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
    "status": "baseline",
    "strength": "e2e"
   },
@@ -21620,20 +21853,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
-  },
-  "pair|SRC=mcp-registry|GATE=revoked-after-deploy": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SRC=mcp-registry|GATE=unapproved-exec": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
   },
   "pair|SRC=mcp-registry|LOCK=absent": {
    "family": "pair",
@@ -23418,6 +23637,21 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-15-refusals]"
   },
+  "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated": {
+   "credited_by": [
+    "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated"
+   ],
+   "family": "rule",
+   "issue": "#4096",
+   "lane": "T-2",
+   "must_cover": true,
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+  },
   "rule|U10|compile-render-only-non-mutation": {
    "family": "rule",
    "issue": "#4099",
@@ -24793,6 +25027,15 @@
     "src/apm_cli/install/exec_gate.py:717"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
+  },
+  "U-FIRST-PARTY-MCP": {
+   "evidence": [
+    "src/apm_cli/integration/mcp_config_view.py:1220",
+    "src/apm_cli/integration/mcp_config_view.py:1232",
+    "docs/src/content/docs/enterprise/control-executables.mdx:19",
+    "docs/src/content/docs/consumer/install-mcp-servers.md:168"
+   ],
+   "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies)"
   },
   "U1": {
    "evidence": [],
