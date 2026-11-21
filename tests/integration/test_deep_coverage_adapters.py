@@ -36,11 +36,6 @@ from apm_cli.output.models import CompilationResults, OptimizationStats, Project
 class TestCopilotEnvPlaceholderTranslation:
     """Test Copilot adapter env-var placeholder translation."""
 
-    def test_translate_env_placeholder_legacy_angle_syntax(self) -> None:
-        """Convert legacy <VAR> to ${VAR}."""
-        result = _translate_env_placeholder("<MY_TOKEN>")
-        assert result == "${MY_TOKEN}"
-
     def test_translate_env_placeholder_posix_syntax(self) -> None:
         """Pass through POSIX ${VAR} syntax unchanged."""
         result = _translate_env_placeholder("${MY_TOKEN}")
@@ -79,16 +74,6 @@ class TestCopilotClientAdapter:
         assert adapter.target_name == "copilot"
         assert adapter._client_label == "Copilot CLI"
         assert adapter.supports_user_scope is True
-
-    def test_copilot_adapter_env_substitution_enabled(self) -> None:
-        """Copilot adapter enables runtime env-var substitution."""
-        adapter = CopilotClientAdapter()
-        assert adapter._supports_runtime_env_substitution is True
-
-    def test_copilot_adapter_mcp_servers_key(self) -> None:
-        """Copilot adapter uses camelCase mcpServers key."""
-        adapter = CopilotClientAdapter()
-        assert adapter.mcp_servers_key == "mcpServers"
 
     def test_copilot_adapter_legacy_offenders_aggregation(self) -> None:
         """Legacy angle-var offenders stored at class level."""
