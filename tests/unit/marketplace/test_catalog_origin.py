@@ -156,3 +156,83 @@ def test_origin_refusal_reads_the_scope_of_the_invoking_command(registered, argv
 
     assert isinstance(result.exception, MarketplaceOriginConflictError)
     assert str(result.exception) == expected
+
+
+_MKT_A = "https://git.example.invalid/acme/mkta"
+_MKT_B = "https://git.example.invalid/evil/mktb"
+
+
+def _marketplace_row() -> LockedDependency:
+    return LockedDependency(
+        repo_url="acme/mkta",
+        host="git.example.invalid",
+        virtual_path="plugins/x",
+        is_virtual=True,
+        resolved_ref="v1.0.0",
+        resolved_commit="a" * 40,
+        discovered_via="m",
+        marketplace_plugin_name="x",
+        source_url=_MKT_A,
+    )
+
+
+@pytest.mark.parametrize(
+    ("declared", "named"),
+    [
+        (
+            "    - git: https://git.example.invalid/acme/mkta.git\n"
+            "      path: plugins/x\n"
+            "      ref: v1.0.0\n",
+            "remove the entry 'git: https://git.example.invalid/acme/mkta.git, "
+            "path: plugins/x, ref: v1.0.0' from apm.yml",
+        ),
+        (
+            "    - git.example.invalid/acme/mkta/plugins/x#v1.0.0\n",
+            "remove 'git.example.invalid/acme/mkta/plugins/x#v1.0.0' from apm.yml",
+        ),
+        (
+            "    - {name: x, marketplace: m}\n",
+            "remove the entry 'name: x, marketplace: m' from apm.yml",
+        ),
+    ],
+    ids=["git-path", "string", "object-form"],
+)
+def test_rebound_alias_remedy_names_the_manifest_entry_as_written(
+    monkeypatch, tmp_path, declared, named
+) -> None:
+    """RA-042: the switch remedy quotes the apm.yml entry, never the bare plugin name."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: proj\nversion: 1.0.0\ndependencies:\n  apm:\n" + declared, encoding="utf-8"
+    )
+    _register_path(monkeypatch, _MKT_B, "")
+
+    with pytest.raises(MarketplaceOriginConflictError) as exc:
+        catalog_origin.require_locked_row_origin(_marketplace_row(), user_scope=False)
+
+    message = str(exc.value)
+    assert f"To switch marketplaces on purpose, {named}, then run 'apm install'" in message
+    assert "remove 'x' from" not in message
+
+
+def test_rebound_alias_remedy_reads_the_user_manifest_at_user_scope(monkeypatch, tmp_path) -> None:
+    """RA-042 at user scope: the named entry comes from ~/.apm/apm.yml."""
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    (home / "apm.yml").write_text(
+        "name: user\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - git.example.invalid/acme/mkta/plugins/x#v1.0.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APM_HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    _register_path(monkeypatch, _MKT_B, "")
+
+    with pytest.raises(MarketplaceOriginConflictError) as exc:
+        catalog_origin.require_locked_row_origin(_marketplace_row(), user_scope=True)
+
+    assert (
+        "To switch marketplaces on purpose, remove "
+        "'git.example.invalid/acme/mkta/plugins/x#v1.0.0' from ~/.apm/apm.yml, "
+        "then run 'apm install -g'"
+    ) in str(exc.value)
