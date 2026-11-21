@@ -44,15 +44,15 @@ _PLUGIN = "p-native-claude"
 _SIBLING = "p-skill"
 
 
-def _native_surface(world: World) -> bool:
+def _native_surface(world: World, plugin: str = _PLUGIN) -> bool:
     """Whether Claude would load the plugin: its deployed root, or APM's true for it."""
-    if (world.project / ".agents/plugins" / _PLUGIN).exists():
+    if (world.project / ".agents/plugins" / plugin).exists():
         return True
     settings = world.project / ".claude/settings.json"
     if not settings.is_file():
         return False
     enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins") or {}
-    return any(key.startswith(f"{_PLUGIN}@") and value is True for key, value in enabled.items())
+    return any(key.startswith(f"{plugin}@") and value is True for key, value in enabled.items())
 
 
 def _evidence(result: CommandResult) -> str:
@@ -70,21 +70,21 @@ def _spec(world: World, key: str) -> str:
     return world.packages[key].spec
 
 
-def _arrange(world: World) -> None:
+def _arrange(world: World, plugin: str = _PLUGIN, *flags: str) -> None:
     """Install the sibling and the approved native plugin for the claude target."""
     manifest = world.project / "apm.yml"
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     data["targets"] = ["claude"]
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
     for args in (
-        ("install", _spec(world, _PLUGIN)),
-        ("install", _spec(world, _SIBLING)),
-        ("approve", _spec(world, _PLUGIN)),
-        ("install",),
+        ("install", _spec(world, plugin), *flags),
+        ("install", _spec(world, _SIBLING), *flags),
+        ("approve", _spec(world, plugin)),
+        ("install", *flags),
     ):
         result = _apm(world, *args)
         assert result.returncode == 0, _evidence(result)
-    assert _native_surface(world)
+    assert _native_surface(world, plugin)
 
 
 def _redefine(world: World) -> None:

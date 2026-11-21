@@ -155,43 +155,37 @@ def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) ->
     assert not (tmp_path / ".claude/settings.json").exists()
 
 
-@pytest.mark.parametrize(
-    ("scope", "native"), [(InstallScope.PROJECT, None), (InstallScope.USER, "parked")]
-)
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
 def test_a_per_target_skill_pairing_is_never_widened_to_a_whole_plugin(
-    tmp_path: Path, scope: InstallScope, native: str | None
+    tmp_path: Path, scope: InstallScope
 ) -> None:
     """A diamond selects only `review` for Claude while the flat subset is all (req-rs-018).
 
-    A whole-plugin load cannot honor that, so the plugin keeps its loose route
-    at project scope and is parked at user scope; it never loads every skill.
+    A whole-plugin load cannot honor that: the plugin keeps its selected loose
+    route at project scope and is parked at user scope; Claude never gets `lint`.
     """
     from apm_cli.models.dependency.subsets import merge_edge_pairings
 
-    info = _fixture(tmp_path / ".apm/apm_modules/owned")
+    source = tmp_path / "apm_modules/owned"
     for name in ("review", "lint"):
-        skill = info.install_path / f"skills/{name}/SKILL.md"
+        skill = source / f"skills/{name}/SKILL.md"
         skill.parent.mkdir(parents=True)
         skill.write_text(f"---\nname: {name}\ndescription: {name}\n---\n{name}\n")
+    info = _fixture(source)
     pairing = merge_edge_pairings([(["review"], ["claude"]), (None, ["copilot"])])
-    assert pairing.skill_subset is None
-    plan = prepare_package_deployment(
-        info,
+    ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path / ".apm", scope=scope)
+    _integrate(
         tmp_path,
-        targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]],
-        diagnostics=DiagnosticCollector(),
-        package_name="owner/hooks",
+        info,
+        ctx=ctx,
         scope=scope,
-        skill_subset=None,
+        targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]],
         skill_pairing=pairing,
-        allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
     )
-    if native is None:
-        assert plan.claude_native is None
-        assert [t.name for t in plan.projection_targets] == ["claude", "copilot"]
-    else:
-        assert plan.claude_native is not None
-        assert "skills: selection" in plan.claude_native.parked
+    claude_skills = tmp_path / ".claude/skills"
+    assert not (claude_skills / "lint").exists()
+    assert (claude_skills / "review/SKILL.md").is_file() is (scope is InstallScope.PROJECT)
+    assert "owner/hooks" not in ctx.claude_native_plugins
 
 
 @pytest.mark.parametrize("native_target", ["claude", "codex"])

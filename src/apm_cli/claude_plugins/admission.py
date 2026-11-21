@@ -206,12 +206,17 @@ def locked_native_retired(
     """Return lock key -> reason for each native plugin install would now park (#3921).
 
     Judged by install's own owners: the trust owner's whole-plugin admission
-    (a deny, a revoked or changed pin, an MCP or bin/ grant now missing) and
-    the org MCP policy under ``enforcement: block``. A package that cannot be
-    read is left to install, which reports it.
+    (a deny, a revoked or changed pin, an MCP or bin/ grant now missing), the
+    org MCP policy under ``enforcement: block`` and the org ``bin_deploy`` rule
+    for a plugin that ships ``bin/``. A package that cannot be read is left to
+    install, which reports it.
     """
     from apm_cli.install.drift import _build_package_info
-    from apm_cli.install.exec_gate import ExecPolicyUnavailable, resolve_package_key
+    from apm_cli.install.exec_gate import (
+        ExecPolicyUnavailable,
+        bin_deploy_denial,
+        resolve_package_key,
+    )
     from apm_cli.security.trust import admit_native_plugin
 
     retired: dict[str, str] = {}
@@ -222,7 +227,8 @@ def locked_native_retired(
         if not install_path.is_dir():
             continue
         try:
-            pkg_key = resolve_package_key(_build_package_info(dep, install_path), key)
+            package_info = _build_package_info(dep, install_path)
+            pkg_key = resolve_package_key(package_info, key)
             verdict = admit_native_plugin(
                 trust_ctx(),
                 tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0]))),
@@ -231,8 +237,14 @@ def locked_native_retired(
             )
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
-        why = verdict.reason if not verdict.allowed else None
-        retired_why = why or native_policy_violation(install_path, policy)
+        bin_rule = (
+            bin_deploy_denial(package_info, policy) if (install_path / "bin").exists() else None
+        )
+        retired_why = (
+            (verdict.reason if not verdict.allowed else None)
+            or native_policy_violation(install_path, policy)
+            or (f"org policy {bin_rule} blocks its bin/ executables" if bin_rule else None)
+        )
         if retired_why is not None:
             retired[key] = str(retired_why)
     return retired
