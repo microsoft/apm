@@ -399,7 +399,8 @@ class TestDepsListCommand(_DepsCmdBase):
                 "    - git: https://git.example.invalid/acme/tools.git\n",
                 encoding="utf-8",
             )
-            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+            # Project scope reads the cwd, which _chdir_tmp already points at tmp.
+            with _force_rich_fallback():
                 result = self.runner.invoke(cli, ["deps", "list"])
         assert result.exit_code == 0, result.output
         rows = [line for line in result.stdout.splitlines() if "acme/tools" in line]
