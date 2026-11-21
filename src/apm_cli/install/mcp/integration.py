@@ -289,6 +289,18 @@ def run_owned_mcp_integration(
     return count
 
 
+def _declared_manifest_runtimes(apm_package, *, user_scope: bool) -> builtins.set | None:
+    """MCP runtimes the manifest's own ``targets:`` select, or None when it declares none."""
+    from apm_cli.core.target_detection import MANIFEST_TARGET_SOURCE, EffectiveTargetDecision
+    from apm_cli.models.apm_package import package_target_selection
+
+    selection = package_target_selection(apm_package)
+    if not selection:
+        return None
+    decision = EffectiveTargetDecision(selection, MANIFEST_TARGET_SOURCE)
+    return builtins.set(decision.runtime_targets_for_scope(user_scope=user_scope) or ())
+
+
 def _legacy_cleanup_runtimes(
     *,
     runtime: str | None,
@@ -676,10 +688,13 @@ def run_mcp_integration(  # noqa: PLR0913
             else None
         )
         # A run narrowed by --target leaves every other runtime's entries alone
-        # while they stay declared and admitted there (#4562).
+        # while they stay declared and admitted there and the manifest's own
+        # targets: still select that runtime (#4562).
         flag_narrowed = (
             runtime is None and target_decision is not None and target_decision.from_flag
         )
+        if flag_narrowed:
+            manifest_runtimes = _declared_manifest_runtimes(apm_package, user_scope=user_scope)
         retired_by_target: builtins.dict[str, builtins.set] = {}
         retained_names: builtins.set = builtins.set()
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
