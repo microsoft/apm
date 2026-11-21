@@ -180,6 +180,29 @@ APM downloads marketplaces from generic git hosts without prompting:
 | SSH | Your key, no tokens, 30-second connect timeout |
 | GitHub, GitLab, Azure DevOps | The host's chain above |
 
+### Private hosted marketplace catalogs
+
+A hosted `marketplace.json` that requires a login uses its own variables,
+never your git, registry or `.netrc` credentials:
+
+| Variable | Sent as |
+|---|---|
+| `APM_MARKETPLACE_TOKEN_<NAME>` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_<NAME>` + `APM_MARKETPLACE_PASS_<NAME>` | `Authorization: Basic <base64(user:pass)>` |
+
+`<NAME>` is the `--name` you registered, normalized like registry names
+(`corp-main` -> `CORP_MAIN`). Bearer wins when both are set.
+
+```bash frame="terminal"
+export APM_MARKETPLACE_TOKEN_CORP=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name corp
+```
+
+The credential stays within the registered URL's origin, directory and query
+on every redirect and never authenticates package downloads. A 401, 403 or
+sign-in redirect fails with the variable to set. See
+[Private hosted catalogs](../../reference/cli/marketplace/#private-hosted-catalogs).
+
 ### Git URL rewrite safety
 
 APM honors your `url.<base>.insteadOf` rules when they stay on the same host,

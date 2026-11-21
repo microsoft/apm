@@ -252,6 +252,16 @@
       "guards": [
         "transport-platform-archive-extraction-limits"
       ]
+    },
+    {
+      "id": "marketplace-catalog-credentials",
+      "decision": "Hosted HTTPS marketplace catalog credentials: APM_MARKETPLACE_TOKEN_/USER_/PASS_<NAME> are read only for a name the user bound with 'apm marketplace add URL --name NAME', through a marketplace-only AuthResolver entry point with no Git, host, registry or netrc fallback; ambiguous normalized names are rejected; the credential is sent only within the bound scheme, host, effective port, directory and query on every redirect hop; 401/403 or a sign-in redirect is denied access, never a cached read; package and Git requests never carry it",
+      "owner": "core/catalog_credentials.py (credential_env_suffix, resolve_catalog_credential, CatalogCredential, catalog_scope_url); core/auth.py (AuthResolver.resolve_marketplace_catalog_credential); marketplace/catalog_binding.py (catalog_credential, require_binding_available, access_denied_error); consumers: marketplace/client.py (_fetch_url_direct, fetch_marketplace), commands/marketplace add, deps/registry/auth.py (name normalization only)",
+      "selectors": [
+        "src/apm_cli/core/catalog_credentials.py",
+        "src/apm_cli/marketplace/catalog_binding.py"
+      ],
+      "guards": ["transport-platform-marketplace-catalog-credentials"]
     }
   ]
 }

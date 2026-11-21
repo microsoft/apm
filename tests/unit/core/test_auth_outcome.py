@@ -16,6 +16,7 @@ from apm_cli.core.auth_chain import (
     authorization_headers,
 )
 from apm_cli.core.auth_outcome import (
+    CATALOG_HOST_KIND,
     AuthOutcomeKind,
     classify_auth_outcome,
     is_repository_not_found,
@@ -358,3 +359,16 @@ def test_classifier_never_raises_on_foreign_error_objects(error, expected) -> No
     """Classification reads non-exception errors as text instead of raising."""
     outcome = classify_auth_outcome(host_info=MagicMock(), error=error)
     assert outcome.kind is expected
+
+
+def test_catalog_html_page_after_redirect_is_a_sign_in() -> None:
+    redirected = SimpleNamespace(
+        status_code=200,
+        headers={"Content-Type": "text/html; charset=utf-8"},
+        history=[SimpleNamespace(status_code=302)],
+    )
+    direct = SimpleNamespace(status_code=200, headers={"Content-Type": "text/html"}, history=[])
+
+    assert classify_auth_outcome(host_kind=CATALOG_HOST_KIND, response=redirected).is_auth_failure
+    assert not classify_auth_outcome(host_kind=CATALOG_HOST_KIND, response=direct).is_auth_failure
+    assert not classify_auth_outcome(host_kind="generic", response=redirected).is_auth_failure

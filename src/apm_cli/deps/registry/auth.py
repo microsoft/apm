@@ -27,6 +27,7 @@ import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Any
 
+from ...core.catalog_credentials import credential_env_suffix
 from ...models.dependency.reference import DependencyReference
 from ...utils.credential_rendering import redact_url_userinfo
 
@@ -66,7 +67,7 @@ class RegistryAuthContext:
 
 
 def _sanitized(registry_name: str) -> str:
-    return registry_name.upper().replace("-", "_").replace(".", "_")
+    return credential_env_suffix(registry_name)
 
 
 def registry_token_env_var(registry_name: str) -> str:

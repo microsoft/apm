@@ -118,11 +118,21 @@ class TestIsValidCredentialToken:
     def test_empty_string_is_invalid(self) -> None:
         assert not GitHubTokenManager._is_valid_credential_token("")
 
-    def test_token_over_1024_bytes_is_invalid(self) -> None:
-        assert not GitHubTokenManager._is_valid_credential_token("a" * 1025)
-
-    def test_token_exactly_1024_bytes_is_valid(self) -> None:
-        assert GitHubTokenManager._is_valid_credential_token("a" * 1024)
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            pytest.param("a" * 1024, True, id="accept-1024"),
+            pytest.param("a" * 2600, True, id="accept-2600-enterprise-idp"),
+            pytest.param("a" * 16384, True, id="accept-16384-cap"),
+            pytest.param("a" * 16385, False, id="reject-16385-over-cap"),
+            pytest.param("", False, id="reject-empty"),
+            pytest.param("a" * 1300 + " " + "a" * 1299, False, id="reject-embedded-space"),
+            pytest.param("a" * 1300 + "\n" + "a" * 1299, False, id="reject-embedded-newline"),
+            pytest.param("Password for 'https://dev.azure.com': ", False, id="reject-prompt"),
+        ],
+    )
+    def test_length_cap_and_garbage_table(self, token: str, expected: bool) -> None:
+        assert GitHubTokenManager._is_valid_credential_token(token) is expected
 
     def test_token_with_space_is_invalid(self) -> None:
         assert not GitHubTokenManager._is_valid_credential_token("ghp_abc def")
