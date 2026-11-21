@@ -12,7 +12,6 @@
   ],
   "regression_tests": [
     "tests/integration/test_native_mcp_collision_lifecycle.py::test_user_disabled_matching_codex_connection_installs_and_replays_frozen",
-    "tests/integration/test_native_mcp_collision_lifecycle.py::test_direct_collision_repeat_force_frozen_and_prune",
-    "tests/integration/test_codex_native_plugin_lifecycle.py::test_git_pinned_install_and_missing_apm_cache_restore"
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_direct_collision_repeat_force_frozen_and_prune"
   ]
 }

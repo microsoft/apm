@@ -23,6 +23,8 @@ from apm_cli.install.target_warnings import note_codex_split_install
 from apm_cli.models.apm_package import PackageType
 from apm_cli.utils.diagnostics import CATEGORY_INFO, DiagnosticCollector
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-codex-split-install")]
+
 
 def _target(name: str) -> SimpleNamespace:
     return SimpleNamespace(name=name)
@@ -248,10 +250,11 @@ def test_unexpected_state_is_reported_never_raised(legacy, monkeypatch, corrupt)
         legacy.config.write_text('plugins = "flat"\n', encoding="utf-8")
     else:
 
-        def refuse(self, config):
+        def refuse(*args, **kwargs):
             raise OSError("read-only file system")
 
-        monkeypatch.setattr(CodexClientAdapter, "_write_config", refuse)
+        # The I/O boundary the config writer uses, not the owner under test.
+        monkeypatch.setattr("apm_cli.adapters.client.codex.atomic_write_text", refuse)
     outcome = retire_legacy_codex_registrations(legacy.modules, InstallScope.USER)
     if corrupt == "relative-snapshot":
         assert outcome.kept == ("example",)

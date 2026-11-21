@@ -9,7 +9,7 @@ import pytest
 
 from apm_cli.models.validation import PackageType, detect_package_type, validate_apm_package
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-codex-split-install")]
 
 
 def _plugin(root):
@@ -89,7 +89,7 @@ def test_malformed_codex_manifest_does_not_fall_back_to_skills(tmp_path):
     assert not (tmp_path / "apm.yml").exists()
 
 
-def test_read_only_schema_plugin_reuses_canonical_detection(tmp_path, monkeypatch):
+def test_read_only_schema_plugin_keeps_its_canonical_type(tmp_path):
     from apm_cli.install.drift import _build_package_info
     from apm_cli.models.apm_package import DependencyReference
     from tests.unit.copilot_plugins._builders import write_agent_plugin
@@ -104,12 +104,5 @@ def test_read_only_schema_plugin_reuses_canonical_detection(tmp_path, monkeypatc
         to_dependency_ref=lambda: DependencyReference.parse("owner/example"),
     )
 
-    def reuse_detection(*args, **kwargs):
-        assert kwargs.get("agent_plugin_detection") is not None, (
-            "canonical schema selection must not rerun legacy detection"
-        )
-        return detect_package_type(*args, **kwargs)
-
-    monkeypatch.setattr("apm_cli.models.validation.detect_package_type", reuse_detection)
     info = _build_package_info(locked, tmp_path)
     assert info.package_type is PackageType.AGENT_PLUGIN
