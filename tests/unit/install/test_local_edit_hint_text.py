@@ -80,6 +80,10 @@ def test_shared_hook_config_drift_gets_local_edit_advice_only_for_user_edits(ret
     text = render_drift_text([finding])
 
     assert "Drift detected: 1 file(s)" in text
+    cause = (
+        "    - .claude/settings.json (APM-owned hook entries retired by an executables decision)\n"
+    )
+    assert (cause in text) is retired
     if retired:
         for advice in ("local edit", "export-patch", "Delete the edited files"):
             assert advice not in text

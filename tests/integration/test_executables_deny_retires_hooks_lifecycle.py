@@ -354,6 +354,7 @@ def test_frozen_fails_when_a_gated_hook_retires_but_the_lock_still_claims_it(
 
 _LOCAL_EDIT_ADVICE = ("local edit", "export-patch", "Delete the edited files")
 _RESYNC = "Run 'apm install' to re-sync deployed files with the lockfile."
+_RETIRED_CAUSE = "APM-owned hook entries retired by an executables decision"
 
 
 def _approved_hook_consumer(
@@ -403,6 +404,8 @@ def test_deny_residue_is_not_a_local_edit_and_its_remedy_converges(
     for advice in _LOCAL_EDIT_ADVICE:
         assert advice not in lingering, lingering
     assert _RESYNC in lingering, lingering
+    if target == "claude":
+        assert f".claude/settings.json ({_RETIRED_CAUSE})" in lingering, lingering
 
     apm("install", "--no-policy")
     assert _hook_residue(project) == []
@@ -432,4 +435,5 @@ def test_user_edit_to_an_apm_hook_entry_stays_a_local_edit(
 
     assert "Drift detected" in audit, audit
     assert "1 local edit(s) to managed files" in audit, audit
+    assert _RETIRED_CAUSE not in audit, audit
     assert settings.read_text(encoding="utf-8") == edited
