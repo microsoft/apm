@@ -8,8 +8,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.models.dependency.mcp import ManifestHeaderValue, TrustedEnvLiteral
+
+pytestmark = pytest.mark.unit
 
 
 class TestCopilotRemoteTransportValidation(unittest.TestCase):

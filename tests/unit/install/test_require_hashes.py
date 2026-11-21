@@ -18,8 +18,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.install.integrity import enforce_require_hashes, unhashed_dependencies
+
+pytestmark = pytest.mark.unit
 
 
 def _dep(name: str, content_hash, source=None) -> LockedDependency:

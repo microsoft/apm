@@ -23,6 +23,8 @@ from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_ex
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Config injection (mirrors tests/unit/test_external_scanners.py)
 # ---------------------------------------------------------------------------

@@ -8,8 +8,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 from scripts.architecture_linter.registry import load_registry
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).parents[3]
 STABLE_PATHS = (

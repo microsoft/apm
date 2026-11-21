@@ -19,6 +19,8 @@ from apm_cli.utils.diagnostics import (
 from apm_cli.utils.yaml_io import yaml_to_str
 from tests.utils.deployment_evidence import prove_overwrites
 
+pytestmark = pytest.mark.unit
+
 
 class TestAgentIntegrator:
     """Test agent integration logic."""

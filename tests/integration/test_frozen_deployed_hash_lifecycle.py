@@ -42,6 +42,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 # A generic host keeps `apm install -g URL` validation on `git ls-remote`

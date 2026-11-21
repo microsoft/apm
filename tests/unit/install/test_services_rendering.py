@@ -24,6 +24,8 @@ from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
+pytestmark = pytest.mark.unit
+
 
 def _to_bundle(d: dict) -> IntegratorBundle:
     """Convert a dict of old-style integrator kwargs to an IntegratorBundle."""

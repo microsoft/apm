@@ -16,7 +16,7 @@ from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
 from apm_cli.primitives.parser import parse_primitive_file
 from apm_cli.utils.yaml_io import loads_frontmatter
 
-pytestmark = pytest.mark.requires_apm_binary
+pytestmark = [pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 # ---------------------------------------------------------------------------
 # Fixtures

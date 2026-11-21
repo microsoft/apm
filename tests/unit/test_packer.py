@@ -11,6 +11,8 @@ import yaml
 from apm_cli.bundle.packer import PackResult, _filter_files_by_target, pack_bundle  # noqa: F401
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 
+pytestmark = pytest.mark.unit
+
 
 def _setup_project(tmp_path: Path, deployed_files: list[str], *, target: str | None = None) -> Path:
     """Create a minimal project with apm.yml, apm.lock.yaml, and deployed files on disk."""

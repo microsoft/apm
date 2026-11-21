@@ -8,10 +8,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+
+pytestmark = pytest.mark.unit
 
 
 class TestVSCodeClientAdapter(unittest.TestCase):

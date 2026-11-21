@@ -23,6 +23,8 @@ from apm_cli.install.skill_path_migration import (
 )
 from tests.utils.deployment_evidence import no_evidence, receipted_evidence
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Lightweight stubs -- avoid importing the real lockfile module
 # ---------------------------------------------------------------------------

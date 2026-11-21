@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
+
+pytestmark = pytest.mark.unit
 
 ENGINE_ROOT = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "install"
 

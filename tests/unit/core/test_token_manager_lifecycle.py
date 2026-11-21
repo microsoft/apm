@@ -32,6 +32,8 @@ from apm_cli.core.token_manager import (
     validate_github_tokens,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # _format_credential_host
 # ---------------------------------------------------------------------------

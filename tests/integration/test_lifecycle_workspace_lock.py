@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.windows_compat, pytest.mark.e2e]
 
 _BLOCKING_INSTALL = textwrap.dedent(
     """

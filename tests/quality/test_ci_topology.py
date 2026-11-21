@@ -38,6 +38,8 @@ from tests.workflow_contracts import (
     workflow_step,
 )
 
+pytestmark = pytest.mark.unit
+
 pytest_plugins = ["pytester"]
 
 RATCHET_TEST_SCOPE = "repository"

@@ -11,6 +11,8 @@ from click.testing import CliRunner
 
 from apm_cli.policy.discovery import PolicyFetchResult
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     "args",

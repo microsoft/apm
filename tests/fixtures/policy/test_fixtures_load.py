@@ -16,6 +16,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+import pytest
+
 from apm_cli.policy.inheritance import (
     MAX_CHAIN_DEPTH,
     PolicyInheritanceError,
@@ -24,6 +26,8 @@ from apm_cli.policy.inheritance import (
     validate_chain_depth,  # noqa: F401
 )
 from apm_cli.policy.parser import PolicyValidationError, load_policy
+
+pytestmark = pytest.mark.unit
 
 FIXTURES_DIR = Path(__file__).parent
 

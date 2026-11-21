@@ -48,6 +48,8 @@ from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Failure, FileFacts, Rule, RunReport, Violation
 from scripts.architecture_linter.registry import load_registry
 
+pytestmark = pytest.mark.unit
+
 REAL_ROOT = Path(__file__).resolve().parents[3]
 
 

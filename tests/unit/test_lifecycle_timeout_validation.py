@@ -16,6 +16,8 @@ import pytest
 
 from apm_cli.core.lifecycle_scripts import parse_apm_yml_lifecycle, parse_script_file
 
+pytestmark = pytest.mark.unit
+
 _DEFAULTS = {"command": 30, "http": 10}
 
 

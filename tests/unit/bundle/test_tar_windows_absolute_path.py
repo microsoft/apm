@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestLegacyBundleProbeRejectsWindowsAbsolutePaths:
     """Verify _looks_like_legacy_apm_bundle rejects Windows absolute paths."""

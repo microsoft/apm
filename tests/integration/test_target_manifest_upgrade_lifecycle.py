@@ -42,6 +42,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.e2e,
 ]
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t2"

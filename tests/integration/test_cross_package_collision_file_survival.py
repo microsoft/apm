@@ -3,9 +3,13 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.utils.content_hash import compute_file_hash
+
+pytestmark = pytest.mark.component
 
 
 def test_collision_loser_does_not_delete_winner_file(tmp_path: Path) -> None:

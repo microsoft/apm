@@ -32,7 +32,7 @@ from tests.utils.local_git_repository import LocalGitRepository, LocalGitReposit
 from tests.utils.local_package import LocalPackageFactory
 from tests.utils.scenario_rows import LifecycleAction, ScenarioRow
 
-pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke]
+pytestmark = [pytest.mark.integration, pytest.mark.lifecycle_smoke, pytest.mark.component]
 
 _REPO_NAME = "virtual-lifecycle"
 _SKILL_NAME = "auth"

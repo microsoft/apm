@@ -15,6 +15,8 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.factory import ClientFactory
 
+pytestmark = pytest.mark.unit
+
 
 class TestMCPClientFactory(unittest.TestCase):
     """Test cases for the MCP client factory."""

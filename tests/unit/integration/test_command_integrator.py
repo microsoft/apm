@@ -24,6 +24,8 @@ from apm_cli.integration.command_integrator import (
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.unit
+
 
 def _to_bundle(d: dict) -> IntegratorBundle:
     return IntegratorBundle(

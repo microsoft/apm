@@ -80,6 +80,7 @@ pytestmark = [
     pytest.mark.skipif(
         not PERF_ENABLED, reason="Perf scaling scenarios are opt-in (PYTEST_PERF=1)"
     ),
+    pytest.mark.unit,
 ]
 
 _SMALL_N = 300

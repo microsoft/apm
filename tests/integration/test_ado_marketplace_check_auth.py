@@ -5,10 +5,13 @@ from __future__ import annotations
 import subprocess
 from urllib.parse import urlparse
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.core.auth import AuthContext, AuthResolver
+
+pytestmark = pytest.mark.component
 
 
 def test_marketplace_check_uses_ado_url_and_bearer_auth(monkeypatch, tmp_path) -> None:

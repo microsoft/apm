@@ -30,12 +30,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from apm_cli.adapters.client.copilot import (
     CopilotClientAdapter,
     _extract_legacy_angle_vars,
     _has_env_placeholder,
     _translate_env_placeholder,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helper factory

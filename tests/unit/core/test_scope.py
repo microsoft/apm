@@ -23,6 +23,8 @@ from apm_cli.core.scope import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.policy.discovery import PolicyFetchResult
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # InstallScope enum
 # ---------------------------------------------------------------------------

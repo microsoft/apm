@@ -20,6 +20,8 @@ from apm_cli.utils.file_ops import (
     robust_rmtree,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # _is_transient_lock_error
 # ---------------------------------------------------------------------------

@@ -11,6 +11,8 @@ from apm_cli.install.exec_gate import ReplayExecAllowMap
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.security.executables import AUTHORIZED_REPLAY
 
+pytestmark = pytest.mark.unit
+
 
 def _replay_authorized(allow) -> bool:
     """Already-authorized replay is an explicit authorization, never None."""

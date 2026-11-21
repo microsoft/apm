@@ -11,6 +11,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.config import config
 
+pytestmark = pytest.mark.unit
+
 
 class TestConfigShow:
     """Tests for `apm config` (show current configuration)."""

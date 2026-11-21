@@ -33,6 +33,8 @@ from apm_cli.cli import cli
 from apm_cli.core.remediation import AGENT_PLUGIN_BUNDLE_ROUTE
 from apm_cli.deps.lockfile import LockFile
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

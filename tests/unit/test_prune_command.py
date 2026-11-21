@@ -39,6 +39,8 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------

@@ -18,6 +18,8 @@ from apm_cli.marketplace.drift_check import (
 )
 from apm_cli.marketplace.migration import load_marketplace_config
 
+pytestmark = pytest.mark.unit
+
 _APM_LOCAL_ONLY = """\
 name: my-project
 description: A project.

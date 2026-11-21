@@ -13,6 +13,8 @@ import pytest
 from scripts.test_file_inventory import is_test_module_path
 from tests.quality.repository_python_inventory import PythonModuleFacts
 
+pytestmark = pytest.mark.component
+
 RATCHET_TEST_SCOPE = "repository"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -24,6 +24,7 @@ from tests.utils.hermetic_packaged_sample import DEPENDENCY, HermeticPackagedSam
 
 pytestmark = [
     pytest.mark.requires_apm_binary,
+    pytest.mark.component,
 ]
 
 
