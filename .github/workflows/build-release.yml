@@ -1267,7 +1267,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Install and pack with apm-action
-        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
+        uses: microsoft/apm-action@64544310be26812256300543071bfbaa8bc93aad # v1.12.0
         id: pack
         with:
           dependencies: |

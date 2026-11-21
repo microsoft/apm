@@ -218,7 +218,7 @@ marketplace 'company' now points at <new-origin>, but apm.lock.yaml recorded 'ex
 
 Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded. Any command that re-resolves a locked entry through the marketplace (such as `apm update`, `apm install --refresh`, `apm install` after you change the entry in `apm.yml`, or a fresh-checkout install of a package that contributes MCP or LSP servers) refuses to switch marketplaces silently.
 
-Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists.
+Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists. At user scope (`-g`), `~/.apm/apm.lock.yaml` is usually not under version control, so the message offers those same steps (with `~/.apm/apm.yml` and `apm install -g`) if the lockfile changed by mistake.
 
 ### `<a> and <b> are different packages that would both install to apm_modules/<path>`
 

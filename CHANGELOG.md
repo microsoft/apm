@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Project installs deploy Claude-format plugins whole to the committed `.agents/plugins/` and declare them in Claude Code and GitHub Copilot settings, so `obra/superpowers` installs with its hooks approved. (closes #3896, #3921)
 
+### Fixed
+
+- A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
+
 ## [0.37.0] - 2026-11-21
 
 ### Highlights

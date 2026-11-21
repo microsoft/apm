@@ -434,8 +434,9 @@ origin, re-resolving the entry (`apm update`, `apm install <plugin>@<alias>`,
 `apm outdated`) fails and names both origins; `apm install` keeps replaying the
 locked catalog. Restore the alias with `apm marketplace add <locked-origin>
 --name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
-add it back and run `apm install` again. Only the origin is compared, not the
-catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
+add it back and run `apm install` again. At user scope (`-g`) the same steps
+use `~/.apm/apm.yml` and `apm install -g`, and also repair a mistakenly changed
+`~/.apm/apm.lock.yaml`. Only the origin is compared, not the catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
 it on the next lock write.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve

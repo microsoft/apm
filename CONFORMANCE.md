@@ -95,7 +95,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-015](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-015) | MUST | 4.2.3 | producer | active | 2 / 3 | - |
 | [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | skipped | 0 / 1 | - |
 | [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | active | 11 / 12 | - |
-| [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 4 / 5 | - |
+| [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 5 / 6 | - |
 | [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 / 2 | - |
 | [req-mf-020](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-020) | MUST | 4.1 | consumer | active | 2 / 3 | - |
 | [req-mf-021](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-021) | MUST | 4.8 | producer | active | 1 / 2 | - |
@@ -123,7 +123,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-pl-009](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-009) | MUST | 6.6 | governance | active | 2 / 3 | - |
 | [req-pl-010](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-010) | MUST | 6.2 | governance | active | 3 / 4 | - |
 | [req-pl-011](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-011) | MUST | 6.1.1 | governance | active | 1 / 2 | - |
-| [req-pl-012](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-012) | MUST | 6.1.1 | governance | active | 4 / 5 | - |
+| [req-pl-012](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-012) | MUST | 6.1.1 | governance | active | 6 / 7 | - |
 | [req-pl-013](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-013) | MUST | 6.8 | governance | active | 1 / 1 | - |
 | [req-pl-014](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-014) | MUST | 6.8 | governance | active | 8 / 8 | - |
 | [req-pl-015](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-015) | MUST | 6.3.5 | governance | active | 1 / 1 | - |

@@ -65,3 +65,32 @@ def test_prefixed_policy_hash_pin_is_verified_with_its_algorithm(
     status = json.loads(changed.stdout)
     assert status["outcome"] == "hash_mismatch", _evidence(changed)
     assert f"expected {algorithm}:{digest}" in status["error"], _evidence(changed)
+
+
+@pytest.mark.req("req-mf-018")
+def test_explicit_algorithm_refuses_a_conflicting_prefix(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An explicit hash_algorithm wins: a sha512: prefix under sha256 is refused, not verified."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    policy = project / "apm-policy.yml"
+    policy.write_text(_POLICY, encoding="ascii")
+    digest = hashlib.sha512(_POLICY.encode("ascii")).hexdigest()
+    (project / "apm.yml").write_text(
+        "name: consumer\nversion: 1.0.0\npolicy:\n"
+        f"  hash_algorithm: sha256\n  hash: sha512:{digest}\n",
+        encoding="ascii",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=60)
+
+    result = runner.run(
+        ("policy", "status", "--policy-source", str(policy), "--json"),
+        cwd=project,
+        env=isolated.subprocess_env(),
+    )
+
+    flat = " ".join((result.stdout + "\n" + result.stderr).split())
+    assert "does not match hash_algorithm 'sha256'" in flat, _evidence(result)
+    assert '"outcome": "found"' not in result.stdout, _evidence(result)
