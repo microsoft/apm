@@ -173,7 +173,7 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
-    from tests.lifecycle.machines._gate_bin import bin_cells
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
     from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
@@ -207,7 +207,8 @@ def machine_cells() -> list[MachineCell]:
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
-            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            tracking = KNOWN_DD.get(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

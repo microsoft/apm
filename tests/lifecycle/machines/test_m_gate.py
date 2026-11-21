@@ -18,7 +18,7 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
-from tests.lifecycle.machines._gate_bin import BIN_PATH, GateBin, bin_cells, replay_bin
+from tests.lifecycle.machines._gate_bin import BIN_PATH, KNOWN_DD, GateBin, bin_cells, replay_bin
 from tests.lifecycle.machines._gate_bundle import (
     GateBundles,
     GatePack,
@@ -235,8 +235,10 @@ def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_pat
     """bin/ of a Claude marketplace plugin at every user-scope gate level keeps I1-I9."""
     machine = GateBin(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "user"))
     replay_bin(machine)
-    missing = bin_cells() - earned_cells(current_node(), "G1|")
+    missing = bin_cells() - set(KNOWN_DD) - earned_cells(current_node(), "G1|")
     assert not missing, f"bin ids without an oracle receipt: {sorted(missing)}"
+    strict = {cell.label for cell in machine.known}
+    assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
     # The spine ends with the plugin uninstalled: no bin/ is left in HOME.
     assert not (machine.bench.deploy_root / BIN_PATH).exists()
 

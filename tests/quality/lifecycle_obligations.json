@@ -3016,11 +3016,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=approve-deny|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -3984,11 +3988,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=compile|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4188,11 +4196,17 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|user",
+    "G1|install|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=install|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4497,11 +4511,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4874,6 +4893,9 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4881,8 +4903,10 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "known-failing",
+   "strength": "e2e-evidence",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -5903,11 +5927,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -6231,11 +6259,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|bin|denied-dependency|user"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -6596,11 +6629,16 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
   },
   "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|user"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T2|SCOPE=user|GATE=denied-executable|FROZEN=on": {
    "credited_by": [
@@ -12434,18 +12472,15 @@
   },
   "pair|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
-    "G1|install-frozen|canvas|denied-dependency|project",
-    "G1|install-frozen|hook|denied-dependency|project",
-    "G1|install-frozen|lsp|denied-dependency|project",
-    "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|skill|denied-dependency|project"
+    "G1|install-frozen|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|GATE=denied-dependency|NET=offline": {
    "family": "pair",
@@ -14130,18 +14165,14 @@
   },
   "pair|OP=approve-deny|GATE=denied-dependency": {
    "credited_by": [
-    "G1|approve|canvas|denied-dependency|project",
-    "G1|approve|hook|denied-dependency|project",
-    "G1|approve|lsp|denied-dependency|project",
-    "G1|approve|mcp|denied-dependency|project",
-    "G1|approve|skill|denied-dependency|project"
+    "G1|approve|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=approve-deny|GATE=denied-executable": {
    "family": "pair",
@@ -15281,18 +15312,14 @@
   },
   "pair|OP=compile|GATE=denied-dependency": {
    "credited_by": [
-    "G1|compile|canvas|denied-dependency|project",
-    "G1|compile|hook|denied-dependency|project",
-    "G1|compile|lsp|denied-dependency|project",
-    "G1|compile|mcp|denied-dependency|project",
-    "G1|compile|skill|denied-dependency|project"
+    "G1|compile|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=compile|GATE=denied-executable": {
    "family": "pair",
@@ -15713,23 +15740,16 @@
   },
   "pair|OP=install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|install-frozen|canvas|denied-dependency|project",
-    "G1|install-frozen|hook|denied-dependency|project",
-    "G1|install-frozen|lsp|denied-dependency|project",
-    "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|skill|denied-dependency|project",
-    "G1|install|canvas|denied-dependency|project",
-    "G1|install|hook|denied-dependency|project",
-    "G1|install|lsp|denied-dependency|project",
-    "G1|install|mcp|denied-dependency|project",
-    "G1|install|skill|denied-dependency|project"
+    "G1|install-frozen|bin|denied-dependency|user",
+    "G1|install|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=install|GATE=denied-executable": {
    "family": "pair",
@@ -16271,18 +16291,15 @@
   },
   "pair|OP=lock|GATE=denied-dependency": {
    "credited_by": [
-    "G1|lock|canvas|denied-dependency|project",
-    "G1|lock|hook|denied-dependency|project",
-    "G1|lock|lsp|denied-dependency|project",
-    "G1|lock|mcp|denied-dependency|project",
-    "G1|lock|skill|denied-dependency|project"
+    "G1|lock|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=lock|GATE=denied-executable": {
    "family": "pair",
@@ -17043,17 +17060,15 @@
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|mcp-install|canvas|denied-dependency|project",
-    "G1|mcp-install|hook|denied-dependency|project",
-    "G1|mcp-install|lsp|denied-dependency|project",
-    "G1|mcp-install|skill|denied-dependency|project"
+    "G1|mcp-install|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=mcp-install|GATE=denied-executable": {
    "credited_by": [
@@ -18103,18 +18118,14 @@
   },
   "pair|OP=uninstall|GATE=denied-dependency": {
    "credited_by": [
-    "G1|uninstall|canvas|denied-dependency|project",
-    "G1|uninstall|hook|denied-dependency|project",
-    "G1|uninstall|lsp|denied-dependency|project",
-    "G1|uninstall|mcp|denied-dependency|project",
-    "G1|uninstall|skill|denied-dependency|project"
+    "G1|uninstall|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=uninstall|GATE=denied-executable": {
    "family": "pair",
@@ -18577,18 +18588,15 @@
   },
   "pair|OP=update|GATE=denied-dependency": {
    "credited_by": [
-    "G1|update|canvas|denied-dependency|project",
-    "G1|update|hook|denied-dependency|project",
-    "G1|update|lsp|denied-dependency|project",
-    "G1|update|mcp|denied-dependency|project",
-    "G1|update|skill|denied-dependency|project"
+    "G1|update|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=update|GATE=denied-executable": {
    "family": "pair",
@@ -19059,13 +19067,17 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|bin|denied-dependency|user",
+    "G1|compile|bin|denied-dependency|user",
+    "G1|uninstall|bin|denied-dependency|user"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "known-failing",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_plugin_with_bin_is_refused_at_user_scope"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|PRIM=bin|GATE=denied-executable": {
    "family": "pair",
@@ -21008,11 +21020,17 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|SCOPE=user|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|bin|denied-dependency|user",
+    "G1|compile|bin|denied-dependency|user",
+    "G1|uninstall|bin|denied-dependency|user"
+   ],
    "family": "pair",
-   "issue": "#4097",
-   "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|SCOPE=user|GATE=denied-executable": {
    "credited_by": [
@@ -21058,6 +21076,7 @@
   },
   "pair|SCOPE=user|GATE=unapproved-exec": {
    "credited_by": [
+    "G1|approve|bin|unapproved-exec|user",
     "G1|install|bin|unapproved-exec|user",
     "G1|mcp-install|bin|unapproved-exec|user",
     "G1|uninstall|bin|unapproved-exec|user"
