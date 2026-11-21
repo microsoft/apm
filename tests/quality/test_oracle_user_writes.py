@@ -19,6 +19,8 @@ from tests.lifecycle import oracles
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
+RATCHET_TEST_SCOPE = "repository"
+
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I1")]
 
 _SKILL = ".agents/skills/p-skill/SKILL.md"
