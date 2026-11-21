@@ -279,7 +279,9 @@ class InstallTransaction:
             self._journal_released = True
             if self._journal_held_until_commit:
                 return
-        after_lockfile_commit(self._settle_deploy_journal)
+        # Settle at the durable commit, before receipt binding or any other
+        # fallible post-commit action: the lockfile then records the deploys.
+        after_lockfile_commit(self._settle_deploy_journal, first=True)
 
     def _take_deploy_journal(self) -> DeployJournal | None:
         """Stop listening at the write seam and hand over the journal."""
@@ -303,10 +305,12 @@ class InstallTransaction:
         journal = self._take_deploy_journal()
         if journal is None:
             return
+        # Even with nothing deployed (a lockfile-only attempt) the staged
+        # lockfile of a rolled-back attempt must not be published.
+        discard_staged_lockfile_writes()
         if not journal.units:
             journal.discard()
             return
-        discard_staged_lockfile_writes()
         issues = journal.restore()
         if self._logger is None:
             return

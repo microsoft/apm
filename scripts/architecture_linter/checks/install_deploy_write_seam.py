@@ -79,6 +79,7 @@ _WRITER_HELPERS = frozenset(
 )
 _SEAM_MODULES = frozenset({"apm_cli.integration.write_seam", "write_seam"})
 _WRITE_MODE = re.compile(r"""(?:,\s*|mode\s*=\s*)["'][rbt]*[wax+][rbt+]*["']""")
+_WRITE_MODE_TEXT = re.compile(r"^[rbt]*[wax+][rbt+]*$")
 _WRITE_FLAGS = re.compile(r"\bos\.O_(?:WRONLY|RDWR|CREAT|TRUNC|APPEND)\b")
 _RECORDERS = frozenset({"record_before_write", "record_before_mkdir"})
 _SEAM_CONTROL = frozenset({"listen", "stop_listening", *_RECORDERS})
@@ -98,7 +99,7 @@ def _call_text(lines: tuple[str, ...], line: int, column: int) -> str:
     return text
 
 
-def _raw_write(qualname: str, call_text: str) -> str | None:
+def _raw_write(qualname: str, call_text: str, window: str = "") -> str | None:
     """Name the raw writer *qualname* calls, or ``None`` when it is not one."""
     receiver, _dot, method = qualname.rpartition(".")
     if receiver == _SEAM_RECEIVER:
@@ -111,9 +112,54 @@ def _raw_write(qualname: str, call_text: str) -> str | None:
         return qualname
     if qualname == "open" and _WRITE_MODE.search(call_text):
         return "open() for writing"
-    if qualname == "os.open" and _WRITE_FLAGS.search(call_text):
-        return "os.open() for writing"
+    if qualname == "os.open":
+        return "os.open() for writing" if _WRITE_FLAGS.search(call_text) else None
+    return _path_method_write(method, window) if receiver else None
+
+
+def _path_method_write(method: str, window: str) -> str | None:
+    """``Path.open`` in a writing mode, or ``Path.replace``."""
+    if method == "open" and _opens_for_writing(_method_call(window, "open")):
+        return ".open() for writing"
+    replace = _method_call(window, "replace") if method == "replace" else None
+    # Path.replace(target) takes one argument; str/bytes.replace take two.
+    one_arg = replace is not None and len(replace.args) == 1 and not replace.keywords
+    return ".replace()" if one_arg else None
+
+
+def _method_call(window: str, method: str) -> ast.Call | None:
+    """Parse the argument list of the first ``.method(...)`` call in *window*.
+
+    *window* starts at the call's receiver, so a chained call
+    (``a.group(1).replace(x, y)``) is judged by the method's own arguments.
+    """
+    start = window.find(f".{method}(")
+    if start < 0:
+        return None
+    start += len(method) + 1
+    depth = 0
+    for index in range(start, len(window)):
+        depth += {"(": 1, ")": -1}.get(window[index], 0)
+        if depth == 0:
+            try:
+                call = ast.parse("f" + window[start : index + 1], mode="eval").body
+            except SyntaxError:
+                return None
+            return call if isinstance(call, ast.Call) else None
     return None
+
+
+def _opens_for_writing(call: ast.Call | None) -> bool:
+    """Whether a ``Path.open`` call names a writing mode (positional or ``mode=``)."""
+    if call is None:
+        return False
+    modes = [*call.args[:1], *(k.value for k in call.keywords if k.arg == "mode")]
+    return any(
+        isinstance(mode, ast.Constant)
+        and isinstance(mode.value, str)
+        and _WRITE_MODE_TEXT.match(mode.value) is not None
+        for mode in modes
+    )
 
 
 def _bypass_violations(provider: FactsProvider, path: str, rule_id: str) -> list[Violation]:
@@ -125,7 +171,8 @@ def _bypass_violations(provider: FactsProvider, path: str, rule_id: str) -> list
     for call in facts.calls:
         if _EXEMPT in lines[call.line - 1]:
             continue
-        writer = _raw_write(call.qualname, _call_text(lines, call.line, call.column))
+        window = "\n".join(lines[call.line - 1 : call.line + 8])[call.column :]
+        writer = _raw_write(call.qualname, _call_text(lines, call.line, call.column), window)
         if writer is not None:
             found.append(
                 violation(

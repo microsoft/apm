@@ -47,11 +47,18 @@ def stop_listening(recorder: Recorder) -> None:
             _recorder = None
 
 
-def record_before_write(path: str | os.PathLike[str]) -> None:
-    """Record *path* before it is created, replaced or removed."""
+def record_before_write(path: str | os.PathLike[str], *, follow: bool = False) -> None:
+    """Record *path* before it is created, replaced or removed.
+
+    *follow* marks a writer that writes through a symlink (an append or an
+    in-place write): the link's destination is recorded too, since that is
+    where the bytes change. Replacing or removing writers record the link only.
+    """
     recorder = _recorder
     if recorder is not None:
         recorder(Path(path), True)
+        if follow and os.path.islink(path):
+            recorder(Path(os.path.realpath(path)), True)
 
 
 def record_before_mkdir(path: str | os.PathLike[str]) -> None:
@@ -81,7 +88,7 @@ def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
 
 def write_text(path: Path, data: str, *, encoding: str = "utf-8") -> None:
     """``Path.write_text`` through the seam."""
-    record_before_write(path)
+    record_before_write(path, follow=True)
     path.write_text(data, encoding=encoding)
 
 
@@ -95,19 +102,19 @@ def write_json_config(path: Path, data: Any, **kwargs: Any) -> bool:
 
 def open_for_write(path: Path, mode: str = "w", **kwargs: Any) -> IO[Any]:
     """``open(path, mode)`` for writing, through the seam."""
-    record_before_write(path)
+    record_before_write(path, follow=True)
     return open(path, mode, **kwargs)
 
 
 def copy2(source: Path, destination: Path, **kwargs: Any) -> Any:
     """``shutil.copy2`` through the seam."""
-    record_before_write(destination)
+    record_before_write(destination, follow=True)
     return shutil.copy2(source, destination, **kwargs)
 
 
 def copyfile(source: Path, destination: Path) -> Any:
     """``shutil.copyfile`` through the seam."""
-    record_before_write(destination)
+    record_before_write(destination, follow=True)
     return shutil.copyfile(source, destination)
 
 

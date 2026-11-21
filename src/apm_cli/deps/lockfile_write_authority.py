@@ -371,18 +371,22 @@ def lockfile_scratch_writes() -> Iterator[None]:
         _active_writer.reset(writer)
 
 
-def after_lockfile_commit(action: Callable[[], None]) -> None:
+def after_lockfile_commit(action: Callable[[], None], *, first: bool = False) -> None:
     """Run *action* once what this command staged is on disk.
 
     State bound to the committed lockfile (deployment receipt claims) waits
     for the commit; a discarded or failed commit never runs it. With nothing
-    staged, the lockfile on disk is already the committed one.
+    staged, the lockfile on disk is already the committed one. *first* runs
+    it before every other action, so a later failing action cannot skip it.
     """
     scope = _scope()
     if scope is None or not scope.pending:
         action()
         return
-    scope.after_commit.append(action)
+    if first:
+        scope.after_commit.insert(0, action)
+    else:
+        scope.after_commit.append(action)
 
 
 def discard_staged_lockfile_writes() -> None:
