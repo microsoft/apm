@@ -1058,7 +1058,7 @@ def _check_content_integrity(
 
     details: list[str] = []
     for entry in scan.incomplete:
-        details.append(f"incomplete-coverage: {entry.file}{entry.pointer}: {entry.diagnostic}")
+        details.append(f"incomplete-coverage: {entry.location}: {entry.diagnostic}")
     details.extend(
         dict.fromkeys(
             f"unicode: {finding.file}{finding.pointer or ''}" for finding in critical_findings

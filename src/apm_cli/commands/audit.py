@@ -363,16 +363,15 @@ def _render_summary(
 def _render_coverage(coverage: tuple[CoverageEntry, ...], logger: CommandLogger) -> None:
     """Keep discovery visible without inventing ownership or unsafe-content findings."""
     for entry in coverage:
-        label = printable_ascii_text(entry.file + entry.pointer)
+        label = printable_ascii_text(entry.location)
         if entry.status == "incomplete":
             logger.error(
                 f"Incomplete coverage: {label}: {printable_ascii_text(entry.diagnostic or '')}. "
                 "Review the format or file access and rerun audit."
             )
         elif entry.kind == "hooks":
-            tracking = "recorded-file" if entry.tracked else "untracked"
             logger.progress(
-                f"Discovered/{tracking}: {label} (prompt check: {entry.status}; "
+                f"Discovered/{entry.tracking}: {label} (prompt check: {entry.status}; "
                 "ownership and hash verification are separate)"
             )
 
@@ -1226,8 +1225,7 @@ def _audit_content_scan(
             for entry in coverage:
                 if entry.file in blocked and not entry.strippable:
                     logger.error_detail(
-                        "Manual review required: "
-                        + printable_ascii_text(entry.file + entry.pointer)
+                        "Manual review required: " + printable_ascii_text(entry.location)
                     )
             logger.error(
                 "Content was not modified: structured/shared or external prompt findings, or incomplete coverage, "

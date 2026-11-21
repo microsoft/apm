@@ -48,6 +48,20 @@ class CoverageEntry:
     status: Literal["checked", "not-applicable", "incomplete"]
     diagnostic: str | None = None
     strippable: bool = False
+    # An entry APM merged into a shared hook config, proven by its owner marker (RA-043).
+    owned_entry: bool = False
+
+    @property
+    def tracking(self) -> str:
+        """Name the ownership evidence: lock-recorded file, APM-marked entry, or none."""
+        if self.owned_entry:
+            return "apm-owned-entry"
+        return "recorded-file" if self.tracked else "untracked"
+
+    @property
+    def location(self) -> str:
+        """Render the file path and the JSON pointer inside it as separate parts."""
+        return f"{self.file} at {self.pointer}" if self.pointer else self.file
 
 
 @dataclass(frozen=True)
@@ -293,15 +307,14 @@ def _scan_deployed_trees(
     for surface in primitive_surfaces(project_root, scoped, user_scope=user_scope):
         try:
             for path in iter_surface_files(surface):
-                results.append(
-                    _scan_primitive(
-                        path,
-                        surface,
-                        _label(path, surface, project_root),
-                        tracked=False,
-                        cache=cache,
-                    )
+                result = _scan_primitive(
+                    path,
+                    surface,
+                    _label(path, surface, project_root),
+                    tracked=False,
+                    cache=cache,
                 )
+                results.append(_mark_owned_hook_entries(result, surface, path))
         except OSError as exc:
             label = _label(surface.path, surface, project_root)
             results.append(
@@ -322,6 +335,29 @@ def _scan_deployed_trees(
                 )
             )
     return _merge_results(results)
+
+
+def _mark_owned_hook_entries(
+    result: FileScanResult, surface: PrimitiveSurface, path: Path
+) -> FileScanResult:
+    """Mark the entries a shared hook config's APM owner marker claims (RA-043)."""
+    config = native_hook_config(surface.target)
+    if not surface.shared or surface.kind != "hooks" or config is None:
+        return result
+    from ..integration.hook_ownership import apm_owned_hook_entry_pointers
+
+    owned = apm_owned_hook_entry_pointers(path, config.event_container_key)
+    if not owned:
+        return result
+    return replace(
+        result,
+        inventory=tuple(
+            replace(entry, tracked=True, owned_entry=True)
+            if any(entry.pointer == p or entry.pointer.startswith(f"{p}/") for p in owned)
+            else entry
+            for entry in result.inventory
+        ),
+    )
 
 
 def scan_deployed_trees(project_root: Path) -> tuple[dict[str, list[ScanFinding]], int]:
