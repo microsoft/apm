@@ -228,7 +228,8 @@ def test_an_append_through_a_symlink_restores_its_destination(
     transaction.rollback()
 
     assert shared.read_bytes() == b"node_modules/\n"
-    assert os.readlink(project / ".gitignore") == str(shared)
+    assert (project / ".gitignore").is_symlink()
+    assert (project / ".gitignore").resolve() == shared.resolve()
 
 
 def test_a_rollback_with_nothing_deployed_discards_the_staged_lockfile(
