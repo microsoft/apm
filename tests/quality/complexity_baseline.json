@@ -164,7 +164,6 @@
         "PLR0915"
       ],
       "_resolve_package_references": [
-        "C901",
         "PLR0913",
         "PLR0915"
       ],
