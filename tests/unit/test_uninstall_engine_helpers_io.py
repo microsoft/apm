@@ -559,7 +559,7 @@ class TestCleanupStaleMcp:
     def test_claude_atomic_failure_retains_live_bytes_and_ownership(self, tmp_path, user_scope):
         """A failed Claude replace cannot precede lock ownership removal."""
         from apm_cli.core.scope import InstallScope
-        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+        from apm_cli.models.apm_package import APMPackage
 
         if not user_scope:
             (tmp_path / ".claude").mkdir()
@@ -585,12 +585,6 @@ class TestCleanupStaleMcp:
 
         with (
             patch(
-                "apm_cli.integration.mcp_config_view.CurrentMcpConfigView.derive",
-                return_value=CurrentMcpConfigView(
-                    dependencies=(), configs={}, provenance={}, problems=()
-                ),
-            ),
-            patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",
                 side_effect=OSError("simulated crash"),
             ) as replace_file,
@@ -598,7 +592,7 @@ class TestCleanupStaleMcp:
             pytest.raises(MCPUninstallCleanupError, match=r"MCP cleanup failed"),
         ):
             _cleanup_stale_mcp(
-                MagicMock(),
+                APMPackage(name="consumer", version="1.0.0", package_path=tmp_path),
                 lockfile,
                 tmp_path / "apm.lock.yaml",
                 {"stale"},

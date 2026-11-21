@@ -225,7 +225,7 @@ class TestPackUnified:
         assert result.exit_code == 1
         assert "non-portable primitives would be discarded" in result.output
         assert "apm pack --format claude-plugin" in result.output
-        assert "carried by neither 'agent-plugin' nor 'claude-plugin'" in result.output
+        assert "not carried by 'agent-plugin'; pack with '--format claude-plugin'" in result.output
         assert not (tmp_path / "build").exists()
 
     def test_pack_json_does_not_claim_default_flip_before_t10(self, runner, tmp_path, monkeypatch):
