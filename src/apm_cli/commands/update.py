@@ -513,6 +513,11 @@ def _handle_service_only_update(
     """Reconcile service-only manifests and return whether update is complete."""
     if apm_package.has_any_apm_dependencies():
         return False
+    from apm_cli.policy.explicit_source import explicit_source_needs_standalone_check
+
+    if explicit_source_needs_standalone_check(apm_package):
+        # No dependency gate runs here; a named --policy must still load (#1925).
+        _enforce_policy_without_changes(apm_package, scope, logger, dry_run)
 
     from apm_cli.core.scope import InstallScope, get_apm_dir, get_deploy_root
     from apm_cli.core.target_detection import resolve_package_target_decision

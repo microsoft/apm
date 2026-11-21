@@ -878,7 +878,7 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose or ((subgroup_scoped or explicit) and enforcement != "off"):
+        elif self.verbose or explicit or (subgroup_scoped and enforcement != "off"):
             # GitLab subgroup composition: show the chain even in non-verbose
             # warn mode so the dev sees which namespaces applied (#2753);
             # an ``off`` policy needs no action and stays silent.
@@ -1103,6 +1103,8 @@ class InstallLogger(CommandLogger):
         explicit source always blocks.
         """
         kind = "Explicit" if explicit else "Discovered"
+        if not self._first_policy_banner("unavailable", kind, source, error, str(blocking)):
+            return
         if blocking:
             _rich_error(
                 f"{kind} policy source {source} could not be loaded: {error}", symbol="error"

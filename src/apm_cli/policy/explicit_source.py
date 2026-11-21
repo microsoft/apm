@@ -78,6 +78,14 @@ def active_explicit_policy_source() -> str | None:
         return _active_source
 
 
+def explicit_source_needs_standalone_check(apm_package) -> bool:
+    """True when a named ``--policy`` source is active and no APM dependency
+    gate will load it (no APM dependencies): the caller must route it alone."""
+    return active_explicit_policy_source() is not None and not (
+        apm_package.has_any_apm_dependencies()
+    )
+
+
 def _as_unavailable(result: PolicyFetchResult, label: str) -> PolicyFetchResult:
     """Project a component that produced no policy into a routed failure.
 

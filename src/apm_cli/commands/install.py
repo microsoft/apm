@@ -1873,7 +1873,9 @@ def _install_apm_packages(ctx, outcome):
     _check_insecure_dependencies(
         project_manifest_dependencies(apm_package), ctx.allow_insecure, logger
     )
+    from apm_cli.install.pipeline_entry import enforce_explicit_policy_without_deps
 
+    enforce_explicit_policy_without_deps(ctx.project_root, apm_package, logger)
     apm_count = 0
 
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets

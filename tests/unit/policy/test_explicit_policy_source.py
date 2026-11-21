@@ -226,3 +226,19 @@ def test_trust_reader_fails_closed_on_an_unavailable_explicit_source(
         "Explicit policy source url:https://policy.invalid/p.yml could not be loaded"
         in captured.out + captured.err
     )
+
+
+def test_install_logger_names_an_explicit_source_once_even_when_off(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from apm_cli.core.command_logger import InstallLogger
+
+    logger = InstallLogger(verbose=False)
+    logger.policy_resolved(source="file:/p.yml", cached=False, enforcement="off", explicit=True)
+    for _ in range(2):
+        logger.policy_source_unavailable(source="org:contoso/.github", error="timed out")
+
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "Policy: file:/p.yml" in text
+    assert text.count("Discovered policy source org:contoso/.github could not be loaded") == 1

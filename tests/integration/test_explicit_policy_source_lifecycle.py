@@ -228,3 +228,26 @@ def test_discovered_failure_with_loadable_explicit_follows_the_default(
             assert _snapshot(project) == before, "blocked install wrote files"
         else:
             assert lock_repo_urls(project) == {pkg_a.slug}
+
+
+def test_unloadable_explicit_policy_fails_closed_with_no_dependencies(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """No dependency gate runs on an empty manifest; the named source must still load."""
+    world = PolicyScopeWorld(tmp_path, dict(os.environ))
+    project = world.consumer(dependencies=[])
+    _plain_git(world, project)
+    runner = ApmLifecycleRunner((str(apm_binary_path),), scenario_timeout_seconds=600)
+
+    with local_github_https_fixture(tmp_path / "certs", world.served_repositories()) as fx:
+        env = fx.child_environment(world.git_env())
+        for args in (
+            ("install", "--policy", _MISSING_FILE),
+            ("install", "--only=apm", "--policy", _MISSING_FILE),
+            ("update", "--yes", "--policy", _MISSING_FILE),
+        ):
+            before = _snapshot(project)
+            r = run_step(runner, args, cwd=project, env=env, step="-".join(args[:2]), expected=1)
+            text = r.stdout + r.stderr
+            assert "explicit policy source" in text.lower(), text
+            assert _snapshot(project) == before, "a failed --policy wrote files"
