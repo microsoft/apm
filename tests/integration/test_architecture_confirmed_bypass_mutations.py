@@ -52,6 +52,20 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         new="        dest.write_text(rendered)\n        if dry_run:\n",
     ),
     BypassMutation(
+        name="agent-loop-creates-target-dir-before-rendering",
+        rule_id="install-deployment-agent-render-then-adopt",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old=(
+            "        # skipped leaves the target tree untouched.\n"
+            "        agents_dir = self._agents_dir(target, mapping, project_root)\n"
+        ),
+        new=(
+            "        # skipped leaves the target tree untouched.\n"
+            "        agents_dir = self._agents_dir(target, mapping, project_root)\n"
+            "        agents_dir.mkdir(parents=True, exist_ok=True)\n"
+        ),
+    ),
+    BypassMutation(
         name="local-bundle-copies-unvalidated-gemini-agents",
         rule_id="install-deployment-bundle-native-layout",
         path="src/apm_cli/install/local_bundle_paths.py",
