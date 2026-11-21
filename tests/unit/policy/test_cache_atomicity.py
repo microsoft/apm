@@ -92,6 +92,7 @@ class TestCacheAtomicity(unittest.TestCase):
             self.assertTrue(final.found, "Final cache has no policy")
             self.assertTrue(final.cached, "Final cache not marked as cached")
 
+    @pytest.mark.windows_compat
     @pytest.mark.skipif(sys.platform != "win32", reason="Windows open handles block os.replace")
     def test_reader_holding_metadata_does_not_tear_the_pair(self):
         """#4601: a reader's open handle must not leave a policy/metadata mismatch.
