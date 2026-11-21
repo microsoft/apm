@@ -64,8 +64,8 @@ def test_policy_index_guard_rejects_source_prefix_bypass() -> None:
             "_check_required_packages_deployed must not skip a require entry",
         ),
         (
-            "        elif match.locked_in(lock) is None:",
-            "        elif lock.get_dependency(match.name) is None:",
+            "        elif match.locked_in(lock) is None and not installing:",
+            "        elif lock.get_dependency(match.name) is None and not installing:",
             "_check_required_packages_deployed must read lock rows only via "
             "RequiredPackageMatch.locked_in",
         ),

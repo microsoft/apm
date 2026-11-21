@@ -2820,7 +2820,10 @@ MUTATIONS: tuple[MutationCase, ...] = (
         rule_id="install-deployment-update-marketplace-provenance",
         path="src/apm_cli/commands/update.py",
         old="    _existing_lock, _restored_provenance = _reverified_lock(\n",
-        new="    _existing_lock, _restored_provenance = LockFile.read(_lock_path), {}\n    (\n",
+        new=(
+            "    _existing_lock, _restored_provenance = LockFile.read(_lock_path), {}\n"
+            "    (lambda *_args, **_kwargs: None)(\n"
+        ),
         intent="apm update carries locked marketplace provenance forward without re-verifying it.",
     ),
     MutationCase(
