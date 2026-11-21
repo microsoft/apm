@@ -262,7 +262,6 @@ def test_strict_host_credentials_withhold_env_token_from_unconfigured_ghe_host(
         _assert_output_oracles(withheld, secret=_GHE_TOKEN)
         assert withheld.returncode == 1, _evidence(withheld)
         output = _flat(withheld)
-        assert _GHE_HOST in output, _evidence(withheld)
         notice = f"withheld the environment token from {_GHE_HOST}"
         assert notice in output, _evidence(withheld)
         assert f"gh auth login --hostname {_GHE_HOST}" in output, _evidence(withheld)

@@ -126,8 +126,9 @@ def test_strict_mode_scrubs_env_tokens_from_gh_and_credential_fill(
     assert not gh_names & _SCRUBBED
     assert not helper_names & _SCRUBBED
 
-    assert "acme.ghe.com" in warning
-    assert "APM_STRICT_HOST_CREDENTIALS" in warning
+    assert "withheld the environment token from acme.ghe.com;" in warning
+    assert "gh auth login --hostname acme.ghe.com" in warning
+    assert "(APM_STRICT_HOST_CREDENTIALS)" in warning
     assert _ENV_TOKEN not in warning
 
 
