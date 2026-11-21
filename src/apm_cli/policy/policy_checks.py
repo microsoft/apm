@@ -140,6 +140,65 @@ def _with_mcp_declarers(
     ]
 
 
+def _with_allowlist_next_step(
+    checks: list[CheckResult],
+    source_deps: Sequence[DependencyReference],
+    project: AllowlistProject,
+    policy_source: str | None,
+) -> list[CheckResult]:
+    """Attach the catalog next step to a failed ``dependency-allowlist`` check (#4570).
+
+    The ``apm uninstall`` option is offered only when
+    :func:`~apm_cli.policy.allowlist_remedy.uninstall_selectors` proves it
+    clears every denied dependency; otherwise the advice is admin-only.
+    """
+    from ..core.remediation import dependency_not_allowed_advice
+    from .allowlist_remedy import uninstall_selectors
+    from .discovery import _redact_policy_ref
+    from .matcher import dependency_policy_subject
+
+    failed = next(
+        (c for c in checks if c.name == "dependency-allowlist" and not c.passed and c.subjects),
+        None,
+    )
+    if failed is None:
+        return checks
+    refs = {subject.ref for subject in failed.subjects}
+    denied = [dep for dep in source_deps if dependency_policy_subject(dep) in refs]
+    remedy, sentence = dependency_not_allowed_advice(
+        uninstall_selectors(denied, project),
+        len(failed.subjects),
+        _redact_policy_ref(policy_source) if policy_source else None,
+    )
+    advised = replace(failed, next_step=sentence, remediations=(remedy,) if remedy else ())
+    return [advised if check is failed else check for check in checks]
+
+
+def _allowlist_project(
+    project_root: Path,
+    modules_root: Path | None,
+    lock: LockFile | None,
+    raw_yml: dict | None,
+    policy: DependencyPolicy,
+) -> AllowlistProject:
+    """Collect the project state the allow-list next step is proven against."""
+    from .allowlist_remedy import AllowlistProject
+
+    def _entries(section: str) -> tuple[object, ...]:
+        block = (raw_yml or {}).get(section)
+        entries = block.get("apm") if isinstance(block, dict) else None
+        return tuple(entries) if isinstance(entries, list) else ()
+
+    return AllowlistProject(
+        project_root=project_root,
+        modules_dir=modules_root or project_root / "apm_modules",
+        lock=lock,
+        production=_entries("dependencies"),
+        development=_entries("devDependencies"),
+        policy=policy,
+    )
+
+
 def _required_policy_index(
     deps: list[DependencyReference],
     dep_names: set[str] | DependencyPolicyIndex | None,
@@ -1778,6 +1837,7 @@ def run_policy_checks(
     fail_fast: bool = True,
     modules_root: Path | None = None,
     no_policy: bool = False,
+    policy_source: str | None = None,
 ) -> CIAuditResult:
     """Run the full set of policy checks against a project on disk.
 
@@ -1789,6 +1849,8 @@ def run_policy_checks(
 
     *modules_root* and *no_policy* select the same MCP view the baseline
     config-consistency check reads (the CI scratch replay, when prepared).
+    *policy_source* (the discovered source, e.g. ``org:contoso/.github``) is
+    named in the next step of a failed ``dependency-allowlist`` check.
 
     These checks are ADDED to baseline checks -- caller runs both.
     When *fail_fast* is ``True`` (default), stops after the first
@@ -1867,7 +1929,14 @@ def run_policy_checks(
             manifest.marketplaces, marketplace_resolution_origins(lock)
         ),
     )
-    result.checks.extend(dep_result.checks)
+    result.checks.extend(
+        _with_allowlist_next_step(
+            dep_result.checks,
+            source_deps,
+            _allowlist_project(project_root, modules_root, lock, raw_yml, policy.dependencies),
+            policy_source,
+        )
+    )
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
