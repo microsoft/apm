@@ -144,18 +144,18 @@ def _row(world: _World, plugin: Path) -> dict:
 
 
 def _claude_deployed(world: _World, plugin: Path) -> bool:
-    """The plugin's MCP server is live where Claude reads it, and the lock agrees (I1)."""
-    if world.scope == "user":
-        settings = world.home / ".claude" / "settings.json"
-        enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
-        row = _row(world, plugin)
-        root = row.get("native_plugin") and world.home / row["native_plugin"]["root"]
-        assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
-        return bool(enabled)
-    config = world.project / ".mcp.json"
-    on_disk = config.is_file() and "p-claude-mcp" in config.read_text("utf-8")
-    assert on_disk == ("p-claude-mcp" in (_lock(world).get("mcp_servers") or [])), _lock(world)
-    return on_disk
+    """The plugin is declared where Claude reads it, its deployed root carries its
+    own MCP server, and the lock agrees (I1). Both scopes install it whole (#3921)."""
+    base = world.home if world.scope == "user" else world.project
+    settings = base / ".claude" / "settings.json"
+    enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
+    row = _row(world, plugin)
+    root = row.get("native_plugin") and base / row["native_plugin"]["root"]
+    assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
+    # Claude loads the server from the plugin; APM never claims it for Claude.
+    claimed = (_lock(world).get("mcp_target_servers") or {}).get("claude") or []
+    assert "p-claude-mcp" not in claimed, _lock(world)
+    return bool(enabled)
 
 
 @pytest.mark.parametrize("scope", ["user", "project"])

@@ -1426,6 +1426,7 @@ def _sync_integrations_after_uninstall(
         resolve_skill_layout,
         with_every_skill_layout,
     )
+    from ...native_plugins.scopes import native_harnesses
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
@@ -1478,8 +1479,9 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
-        if dep_ref.get_unique_key() in excluded_survivor_keys:
+        if (dep_key := dep_ref.get_unique_key()) in excluded_survivor_keys:
             continue
+        native = native_harnesses(lockfile, dep_key, pkg_info)  # route as install did (#3921)
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
             effective_dependency_selection(dep_ref).target_subset,
@@ -1489,7 +1491,8 @@ def _sync_integrations_after_uninstall(
         )
         authorized_targets = []
         for target in target_selection.targets:
-            authorized_targets.append(target)
+            if target.name not in native:
+                authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
@@ -1772,11 +1775,14 @@ def _restage_changed_local_survivors(
     Returns the restaged lock keys; their lock rows record the new content hash.
     """
     from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
+    from ...native_plugins.scopes import native_source_current
 
     restaged: set[str] = set()
     for key, dep in sorted(lockfile.dependencies.items()):
         if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
             continue
+        if dep.native_plugin is not None and native_source_current(dep, source_root):
+            continue  # an unchanged native plugin is never re-copied (#3921)
         try:
             dep_ref = dep.to_dependency_ref()
             source = (source_root / dep_ref.local_path).resolve()
@@ -1784,8 +1790,7 @@ def _restage_changed_local_survivors(
             current = compute_local_package_hash(source, framed=dep.content_hash_framed)
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
-        # Judge the source against the materialized copy, not the lock row: a
-        # native plugin's locked hash is recorded from its normalized image.
+        # Judge the source against the materialized copy, not the lock row.
         if not install_path.is_dir() or current == compute_local_package_hash(
             install_path, framed=dep.content_hash_framed
         ):
@@ -1835,6 +1840,7 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
+    from ...native_plugins.uninstall import retire_disallowed_native_survivors
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1867,7 +1873,8 @@ def gate_retired_hook_survivors(
     for key, why in sorted(hooks.items()):
         if key not in denied:
             logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
-    return refreshed | set(denied) | set(hooks), set(denied)
+    native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
+    return refreshed | set(denied) | set(hooks) | native, set(denied)
 
 
 def _remove_stale_mcp_from_recorded_targets(

@@ -85,12 +85,12 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 710, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 853, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 855, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 858, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 860, '"--dry-run"'),
     ),
     "prune": (
-        Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
-        Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
+        Ev("src/apm_cli/commands/prune.py", 84, '"--dry-run"'),
+        Ev("src/apm_cli/commands/prune.py", 91, "def prune(ctx, dry_run)"),
     ),
     "compile": (Ev(_COMPILE, 1287, '"--target"'), Ev(_COMPILE, 1297, '"--dry-run"')),
     "lock": (
@@ -154,13 +154,13 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 861, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 866, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
-    "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
+    "prune": Ev("src/apm_cli/commands/prune.py", 91, "def prune(ctx, dry_run)"),
     "audit": Ev("src/apm_cli/commands/audit.py", 1542, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
 }
@@ -234,9 +234,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 717, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 719, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 720, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 723, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -256,7 +256,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
             Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
-            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 169, "Re-declare it"),
         ),
     ),
     "E1": (
@@ -281,8 +281,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 827, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1030, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 829, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1032, '"instructions" not in target.primitives'),
         ),
     ),
 }

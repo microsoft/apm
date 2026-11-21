@@ -117,7 +117,10 @@ Their lockfile records the package's commit and where it was found:
 declare a range. Claude Code reads `.claude-plugin/marketplace.json`
 (`/plugin marketplace add contoso/agent-marketplace`), Copilot CLI reads
 `.github/plugin/marketplace.json`, and Codex reads
-`.agents/plugins/marketplace.json`. The full consumer side:
+`.agents/plugins/marketplace.json`. That Codex catalog is separate from what
+`apm install` writes in the same folder for plugins your repository itself
+uses (`.agents/plugins/<plugin>/` and `.agents/plugins/.claude-plugin/marketplace.json`).
+The full consumer side:
 [Install from a marketplace](../../consumer/installing-from-marketplaces/).
 
 ## Choose a repository shape
