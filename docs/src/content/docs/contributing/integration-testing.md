@@ -705,6 +705,16 @@ gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
 
 The run must show `"conclusion": "success"`; cite its `url` as the proof.
 
+`scripts/merge_queue/` composes these trains automatically (shadow mode: it
+builds and proves trains but never merges). It reads PRs labeled `queue:ready`
+with an `apm-queue-ticket` marker comment, builds `queue-build/t<id>` through
+the merges API, publishes the prefix refs, and logs `would-land` events:
+
+```bash
+python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
+python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
+```
+
 ### Windows unit hang diagnostics
 
 The Windows unit steps in `.github/workflows/build-release.yml` and the PR
