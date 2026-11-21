@@ -58,7 +58,7 @@ def test_update_after_case_only_rename_keeps_every_new_spelling(
     world = CornerWorld.create(tmp_path, apm_binary_path)
     source = world.isolated.package_root / "casepkg"
     write(source / "apm.yml", "name: casepkg\nversion: 1.0.0\ndescription: c\n")
-    write(source / ".apm/instructions/Guide.instructions.md", "---\napplyTo: '**'\n---\nv1\n")
+    write(source / ".apm/instructions/Guide.instructions.md", "---\napplyTo: '**/*.md'\n---\nv1\n")
     write(source / ".apm/agents/Helper.agent.md", "---\nname: helper\ndescription: h\n---\nv1\n")
     write(source / ".apm/prompts/Run.prompt.md", "---\ndescription: p\n---\nv1\n")
     world.publish("casepkg", source)
