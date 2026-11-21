@@ -23706,15 +23706,15 @@
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:954"
+    "src/apm_cli/commands/install.py:959"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1234",
-    "src/apm_cli/commands/install.py:998",
-    "src/apm_cli/commands/install.py:972",
+    "src/apm_cli/commands/install.py:1239",
+    "src/apm_cli/commands/install.py:1003",
+    "src/apm_cli/commands/install.py:977",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
     "src/apm_cli/commands/uninstall/engine.py:727",
@@ -23728,12 +23728,12 @@
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:290",
-    "src/apm_cli/commands/approve.py:294"
+    "src/apm_cli/commands/approve.py:291",
+    "src/apm_cli/commands/approve.py:295"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "bbc522ecc8e620e534783a8dc4b1a2df8e986eae1391a5e84d9c781356f7e3ab"
+ "sha256": "99e7f0a304c0dfb6afd2f253bb2ad50bab7527795de276492f192d6f5fed8953"
 }
