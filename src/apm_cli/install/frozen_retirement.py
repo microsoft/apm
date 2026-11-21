@@ -120,6 +120,22 @@ def enforce_frozen_presence(
         raise _stale_decisions_error(stale)
 
 
+def refuse_stale_exec_decisions(
+    request: InstallRequest, committed: LockFile, lockfile_dir: Path
+) -> None:
+    """Refuse ``--frozen`` before any write when a recorded executables decision changed.
+
+    The same staleness owner the post-deploy check asks (#4053), run in the
+    preflight so a deny or revoked approval keeps every deployed file until a
+    plain ``apm install`` retires it (RA-024).
+    """
+    from apm_cli.policy.ci_checks import resolve_audit_scope
+
+    deploy_root, _user_scope, targets = resolve_audit_scope(lockfile_dir, committed)
+    if stale := _stale_exec_decisions(request, committed, lockfile_dir, deploy_root, targets):
+        raise _stale_decisions_error(stale)
+
+
 def _stale_decisions_error(stale: Sequence[Any]) -> Exception:
     """The ``--frozen`` refusal for recorded executables decisions that changed."""
     from apm_cli.install.errors import FrozenInstallError
