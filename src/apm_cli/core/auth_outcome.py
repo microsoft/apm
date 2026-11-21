@@ -185,6 +185,10 @@ ADO_SIGNIN_HOSTS: frozenset[str] = frozenset(
 )
 _ADO_SIGNIN_HOST_SUFFIX = ".vssps.visualstudio.com"
 
+# Host kind for hosted ``marketplace.json`` catalogs. A catalog is a JSON
+# document, so an HTML page reached through a redirect is a sign-in page.
+CATALOG_HOST_KIND = "marketplace-catalog"
+
 
 def is_ado_signin_location(location: str | None) -> bool:
     """Return whether a redirect target is the Azure DevOps sign-in service."""
@@ -387,6 +391,26 @@ def _failure(kind_presented: bool) -> AuthOutcomeKind:
     return AuthOutcomeKind.CREDENTIAL_REJECTED if kind_presented else AuthOutcomeKind.AUTH_REQUIRED
 
 
+def _signin_page_outcome(
+    response: Any, status: int, *, host_kind: str, credential_presented: bool
+) -> AuthOutcome | None:
+    """Return the auth failure for a 2xx sign-in page, else ``None``."""
+    content_type = _header(getattr(response, "headers", None), "Content-Type").lower()
+    if host_kind == "ado" and (status == 203 or "text/html" in content_type):
+        return AuthOutcome(
+            _failure(credential_presented),
+            "Azure DevOps answered with a sign-in page",
+            status,
+        )
+    if (
+        host_kind == CATALOG_HOST_KIND
+        and "text/html" in content_type
+        and getattr(response, "history", None)
+    ):
+        return AuthOutcome(_failure(credential_presented), "redirected to a sign-in page", status)
+    return None
+
+
 def _classify_response(
     response: Any,
     *,
@@ -414,14 +438,10 @@ def _classify_response(
                     status,
                 )
     if 200 <= status < 300:
-        content_type = _header(headers, "Content-Type").lower()
-        if is_ado and (status == 203 or "text/html" in content_type):
-            return AuthOutcome(
-                _failure(credential_presented),
-                "Azure DevOps answered with a sign-in page",
-                status,
-            )
-        return AuthOutcome(AuthOutcomeKind.OK, "", status)
+        page = _signin_page_outcome(
+            response, status, host_kind=host_kind, credential_presented=credential_presented
+        )
+        return page or AuthOutcome(AuthOutcomeKind.OK, "", status)
     if status in (401, 403):
         return AuthOutcome(
             _failure(credential_presented),

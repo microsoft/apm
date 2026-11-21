@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from ..core.remediation import (
+    MARKETPLACE_CREDENTIAL_REBIND,
     MARKETPLACE_FETCH_FAILED,
     MARKETPLACE_ORIGIN_RESTORE,
     MARKETPLACE_ORIGIN_SWITCH,
@@ -232,6 +234,44 @@ class MarketplaceFreshnessError(MarketplaceFetchError):
         detail = f": {reason}" if reason else ""
         self.args = (
             f"Could not verify that marketplace '{name}' is current{detail}. {self.RETRY_HINT}",
+        )
+
+
+class MarketplaceAuthError(MarketplaceFetchError):
+    """A hosted catalog denied access, or its credential setup is unusable.
+
+    Never answered from a stale cache or another source: the caller reports
+    it and exits nonzero. The message names variables, never their values.
+    """
+
+    def __init__(self, name: str, message: str):
+        super().__init__(name, message, retry_hint="")
+        self.args = (message,)
+
+
+class MarketplaceAccessDeniedError(MarketplaceAuthError):
+    """The catalog answered HTTP 401/403 or redirected to a sign-in page."""
+
+    def __init__(self, name: str, message: str, *, status: int | None = None):
+        super().__init__(name, message)
+        self.status = status
+
+
+class MarketplaceCredentialError(MarketplaceAuthError):
+    """The ``APM_MARKETPLACE_*`` credential configuration cannot be used."""
+
+
+class MarketplaceBindingConflictError(MarketplaceError):
+    """``marketplace add`` would rebind a name whose credential is bound elsewhere."""
+
+    def __init__(self, name: str, bound_url: str):
+        self.name = name
+        self.bound_url = bound_url
+        super().__init__(
+            f"Marketplace '{name}' is already bound to {bound_url}, and its "
+            "APM_MARKETPLACE_* credential is sent only there. Nothing was changed. "
+            f"{MARKETPLACE_CREDENTIAL_REBIND.bind(name=shlex.quote(name)).sentence()} "
+            "Or choose a different --name."
         )
 
 
