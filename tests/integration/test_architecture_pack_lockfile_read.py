@@ -15,6 +15,8 @@ pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 RULE_ID = "contracts-tooling-lockfile-read"
 OWNER = "src/apm_cli/deps/lockfile.py"
+# #4067 added the lockfile-owned lookup that reads the row the writer created.
+OWNER_SELECTORS = (OWNER, "src/apm_cli/deps/lockfile_lookup.py")
 
 
 def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
@@ -28,7 +30,7 @@ def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
 
     report = run_selected_rules(ROOT, (RULE_ID,))
 
-    assert owner.selectors == (OWNER,)
+    assert owner.selectors == OWNER_SELECTORS
     assert RULE_ID in owner.guards
     assert rule.guard_ids == (RULE_ID,)
     assert report.failures == ()
