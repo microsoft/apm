@@ -93,11 +93,25 @@ _FIRST_RUN_CREATES = frozenset({".apm/config.json", "config.json", ".cache", ".c
 def _durable_changes(before, after) -> set[str]:
     """Changed paths of one root, without bookkeeping or first-run creations."""
     difference = before.diff(after)
+    bookkeeping = {
+        path for path in difference.added if path.rsplit("/", 1)[-1] in _BOOKKEEPING_NAMES
+    }
+
+    def holds_only_bookkeeping(path: str) -> bool:
+        # A directory created only to hold the operation lock is bookkeeping too.
+        inside = [added for added in difference.added if added.startswith(path + "/")]
+        return bool(inside) and all(
+            added in bookkeeping or holds_only_bookkeeping(added)
+            for added in inside
+            if added.count("/") == path.count("/") + 1
+        )
+
     return {
         path
         for path in difference.added | difference.removed | difference.changed
         if path.rsplit("/", 1)[-1] not in _BOOKKEEPING_NAMES
         and not (path in difference.added and path in _FIRST_RUN_CREATES)
+        and not (path in difference.added and holds_only_bookkeeping(path))
     }
 
 
@@ -731,6 +745,18 @@ _CHECKS: dict[str, _Check] = {
     "I9": _i9_no_noise,
 }
 _OUTPUT_LAWS = ("I6", "I8", "I9")
+
+
+def durable_changes(before: Observation, after: Observation) -> list[str]:
+    """Durable writes between two observations: files without bookkeeping, plus lock semantics.
+
+    A command may take the operation lock (``.apm-lifecycle.lock``) or refresh
+    its version check without writing durable state; those never count.
+    """
+    changed = _changed_paths(before.artifacts, after.artifacts)
+    if after.state.semantic_bytes != before.state.semantic_bytes:
+        changed.append("lock or manifest semantics")
+    return changed
 
 
 def _changed_paths(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> list[str]:
