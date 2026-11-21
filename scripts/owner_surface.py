@@ -278,6 +278,25 @@ def _tryfirst(function: Any) -> Any:
     return pytest.hookimpl(tryfirst=True)(function) if pytest is not None else function
 
 
+def shard_items(items: list[Any], index: int, count: int, durations: str | None) -> list[Any]:
+    """Shard ``index`` of ``count`` of the slice; a slice too small to split leaves shards empty.
+
+    scripts.ci_sharding refuses empty shards, so the slice is split into as many
+    nonempty, group-preserving shards as it allows (at most ``count``) and the
+    surplus shards run nothing. Every worker computes the same split.
+    """
+    from scripts.ci_sharding import load_durations, partition
+
+    seconds = load_durations(durations)
+    for usable in range(min(count, len(items)), 0, -1):
+        try:
+            chosen = partition(items, usable, seconds)
+        except pytest.UsageError:
+            continue
+        return list(chosen.shards[index - 1]) if index <= usable else []
+    return []
+
+
 @_tryfirst
 def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
     location = os.environ.get(SELECTION_ENV)
@@ -294,6 +313,11 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
     kept, dropped = [], []
     for item in items:
         (kept if keep_item(item, selection, file_text) else dropped).append(item)
+    shard = selection.get("shard")
+    if shard:
+        mine = {id(item) for item in shard_items(kept, *shard, selection.get("durations"))}
+        dropped.extend(item for item in kept if id(item) not in mine)
+        kept = [item for item in kept if id(item) in mine]
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
@@ -318,9 +342,18 @@ def plan(base: str, out: Path, root: Path = ROOT) -> bool:
     return run
 
 
-def run(base: str, changed_file: Path, extra: Sequence[str], root: Path = ROOT) -> int:
+def run(
+    base: str,
+    changed_file: Path,
+    extra: Sequence[str],
+    root: Path = ROOT,
+    shard: tuple[int, int] | None = None,
+    durations: str | None = None,
+) -> int:
     changed = [line for line in changed_file.read_text(encoding="utf-8").splitlines() if line]
     selection = build_selection(base, changed, root)
+    selection["shard"] = list(shard) if shard else None
+    selection["durations"] = durations
     location = root / "build" / "owner-surface-selection.json"
     location.parent.mkdir(parents=True, exist_ok=True)
     location.write_text(json.dumps(selection, indent=2), encoding="utf-8")
@@ -329,6 +362,13 @@ def run(base: str, changed_file: Path, extra: Sequence[str], root: Path = ROOT) 
     code = int(pytest.main([*selection["targets"], "-p", "scripts.owner_surface", *extra]))
     # Nothing selected is a pass: no reachable owner test.
     return 0 if code == int(pytest.ExitCode.NO_TESTS_COLLECTED) else code
+
+
+def _shard(value: str) -> tuple[int, int]:
+    index, _, count = value.partition("/")
+    if not (index.isdigit() and count.isdigit() and 1 <= int(index) <= int(count)):
+        raise ValueError(f"--shard must be INDEX/COUNT with 1 <= INDEX <= COUNT, got {value!r}")
+    return int(index), int(count)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -342,6 +382,8 @@ def main(argv: Sequence[str]) -> int:
     run_parser = commands.add_parser("run", help="run the owner-surface slice through pytest")
     run_parser.add_argument("--base", required=True)
     run_parser.add_argument("--changed", required=True, type=Path)
+    run_parser.add_argument("--shard", type=_shard, help="INDEX/COUNT, e.g. 1/3")
+    run_parser.add_argument("--durations", help="JSON {node_id: seconds} that balances shards")
     args, extra = parser.parse_known_args(argv)
     if extra[:1] == ["--"]:
         extra = extra[1:]
@@ -350,7 +392,7 @@ def main(argv: Sequence[str]) -> int:
             parser.error(f"unexpected arguments: {extra}")
         plan(args.base, args.out)
         return 0
-    return run(args.base, args.changed, extra)
+    return run(args.base, args.changed, extra, shard=args.shard, durations=args.durations)
 
 
 if __name__ == "__main__":

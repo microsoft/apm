@@ -12,12 +12,14 @@
 #     changed file or an affected owner, guard or rule, plus every
 #     tests/integration/test_install_*.py file for install-path changes.
 # The full integration suite still runs once per train head (merge_group,
-# merge-train refs), never per pull request.
+# merge-train refs), never per pull request. scripts/owner_surface.py splits
+# the slice into the 3 shards itself: scripts.ci_sharding refuses empty
+# shards, so a slice too small to split runs whole on shard 1.
 #
 # `Owner Surface Check` always reports, so it can be required: it passes when
 # no owner surface changed (the slice is skipped) and on merge_group, where
 # ci-integration.yml runs the whole suite. It is NOT required yet; making it
-# required is a ruleset edit (a maintainer gate).
+# required (merge-gate.yml EXPECTED_CHECKS) is a maintainer gate.
 name: Owner Surface
 
 # No paths: filter: a filtered-out run would never report the check.
@@ -104,10 +106,9 @@ jobs:
       run: |
         python3 -m scripts.owner_surface plan --base "$BASE_SHA" --out owner-surface-changed.txt
         uv run --frozen --extra dev python -m scripts.owner_surface run \
-          --base "$BASE_SHA" --changed owner-surface-changed.txt -- \
-          -p no:cacheprovider -m "$HERMETIC_MARK_EXPR" -n 4 --dist loadgroup \
-          -p scripts.ci_sharding --shard-count 3 --shard-index "$SHARD" \
-          --shard-durations .github/ci-durations/linux-x86_64.json --durations=15
+          --base "$BASE_SHA" --changed owner-surface-changed.txt \
+          --shard "$SHARD/3" --durations .github/ci-durations/linux-x86_64.json -- \
+          -p no:cacheprovider -m "$HERMETIC_MARK_EXPR" -n 4 --dist loadgroup --durations=15
 
   owner-surface:
     name: Owner Surface Check

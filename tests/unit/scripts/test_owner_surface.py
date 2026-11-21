@@ -13,6 +13,7 @@ from scripts import owner_surface
 from tests.workflow_contracts import load_workflow, run_bash, workflow_job, workflow_step
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-ci-validation-topology")]
+pytest_plugins = ["pytester"]
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/owner-surface.yml"
@@ -235,3 +236,12 @@ def test_plan_lists_changes_and_writes_the_run_output(
     assert owner_surface.plan("base", changed) is False
     assert changed.read_text(encoding="utf-8") == "docs/x.md\n"
     assert output.read_text(encoding="utf-8") == "run=false\n"
+
+
+def test_a_slice_too_small_to_split_runs_whole_on_shard_one(pytester: pytest.Pytester) -> None:
+    """scripts.ci_sharding refuses empty shards; surplus owner-surface shards run nothing."""
+    pytester.makepyfile(test_tiny="def test_a():\n    pass\n\ndef test_b():\n    pass\n")
+    items, _ = pytester.inline_genitems()
+    shards = [owner_surface.shard_items(items, index, 3, None) for index in (1, 2, 3)]
+    assert sorted(len(shard) for shard in shards) == [0, 1, 1]
+    assert {item.nodeid for shard in shards for item in shard} == {item.nodeid for item in items}
