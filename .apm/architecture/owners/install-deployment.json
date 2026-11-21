@@ -433,9 +433,12 @@
     },
     {
       "id": "bundle-admission-owner",
-      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080)",
-      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd",
-      "selectors": ["src/apm_cli/install/bundle_admission.py"],
+      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080); the package identities a local bundle presents to the org dependency deny list, and the org dependency policy apm pack applies before it ships dependency content",
+      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; bundle_policy_subjects names the bundle and the packages it records; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd, bundle/packer.py pack_bundle through bundle/pack_policy.py pack_policy_preflight",
+      "selectors": [
+        "src/apm_cli/install/bundle_admission.py",
+        "src/apm_cli/bundle/pack_policy.py"
+      ],
       "guards": ["install-deployment-bundle-admission-owner"]
     },
     {

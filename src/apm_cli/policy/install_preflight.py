@@ -99,6 +99,7 @@ def run_policy_preflight(
     effective_target: tuple[str, ...] | None = None,
     effective_target_source: str = "effective target",
     fetch_result: PolicyFetchResult | None = None,
+    bundled_deps=(),
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -122,6 +123,9 @@ def run_policy_preflight(
         Where that selection came from, named in violation details.
     fetch_result:
         A discovery the caller already holds, so one install discovers once.
+    bundled_deps:
+        Packages a local bundle or a pack ships without an apm.yml entry
+        here; checked against ``dependencies.deny`` only.
     no_policy:
         CLI ``--no-policy`` flag value.
     logger:
@@ -200,6 +204,7 @@ def run_policy_preflight(
         fail_fast=(enforcement == "block"),
         registries=registries,
         direct_dep_keys={d.get_unique_key() for d in apm_deps_list},
+        bundled_deps=bundled_deps,
     )
 
     if not audit_result.passed:

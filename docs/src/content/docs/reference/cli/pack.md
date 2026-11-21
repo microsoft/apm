@@ -309,6 +309,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 ## Behavior
 
 - **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
+- **Org dependency policy.** Before writing anything (including with `--dry-run`), `apm pack` applies the org policy to the project's declared dependencies, as `apm install` does, and checks every package in `apm.lock.yaml` against `dependencies.deny`. Under `enforcement: block`, a refused package fails the pack with `Pack blocked by org policy: <package>` and exit `1`; nothing is packed. A project with no locked packages is not checked. `APM_POLICY_DISABLE=1` skips the check.
 - **Newer lockfiles fail closed.** If `apm.lock.yaml` was written by a newer APM, `apm pack` refuses before writing, names both versions, and tells you how to upgrade.
 - **Credential files are refused.** In every bundle format, and with `--dry-run`, `apm pack` refuses to pack a file named `.env`, `.env.*`, `*.pem`, `*.key`, `id_rsa` or `id_ed25519`. It names each matching path, writes no bundle and exits `1`. Remove those files from the package sources, then pack again.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
@@ -323,7 +324,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 | Code | Meaning |
 |---|---|
 | `0` | Success. Requested artifacts written, planned with `--dry-run`, or validated without writes by `--check-clean`. |
-| `1` | Build or runtime error: invalid or unparseable `apm.yml` (including marketplace config and `target:` / `targets:` conflicts), network failure, ref not found, no tag matches a marketplace range, lockfile read error, or unhandled packer exception. |
+| `1` | Build or runtime error: invalid or unparseable `apm.yml` (including marketplace config and `target:` / `targets:` conflicts), network failure, ref not found, no tag matches a marketplace range, lockfile read error, a dependency the org policy refuses, or unhandled packer exception. |
 | `2` | Usage error: unknown option or conflicting flags (for example two bundle format selectors, or `--archive-format` without `--archive`). |
 | `3` | `--check-versions` failed: per-package versions disagree with the configured marketplace versioning strategy. |
 | `4` | `--check-clean` failed: marketplace working tree is dirty (regenerated output differs from on-disk file), or remote Claude metadata could not be fetched to certify the comparison. |

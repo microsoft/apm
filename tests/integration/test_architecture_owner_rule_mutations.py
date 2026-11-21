@@ -6753,3 +6753,51 @@ def test_every_stale_deleter_consumes_the_skip_set(
     )
     assert report.failures == ()
     assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "            bundled_deps=bundle_policy_subjects(bundle_info),\n",
+            "",
+            id="bundle-identity-skips-dependency-deny",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/packer.py",
+            "    pack_policy_preflight(Path(project_root), logger)\n",
+            "",
+            id="pack-skips-dependency-policy",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/pack_policy.py",
+            "    bundled = locked_package_refs(",
+            "    bundled = list(",
+            id="pack-policy-ignores-locked-packages",
+        ),
+        pytest.param(
+            "install-deployment-executable-trust-context",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_HOOKS)",
+            id="bundle-canvas-approved-as-hooks",
+        ),
+    ],
+)
+def test_bundle_policy_and_canvas_gate_routes_are_guarded(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Local bundle identity, pack and bundle canvas each route through their owners."""
+    source = _source(path)
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

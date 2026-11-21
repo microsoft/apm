@@ -151,7 +151,7 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
-        from .bundle_admission import admit_bundle, plugin_bundle_integrity
+        from .bundle_admission import admit_bundle, bundle_policy_subjects, plugin_bundle_integrity
 
         verify_integrity = plugin_bundle_integrity(bundle_info, logger)
         integrity_verified = False
@@ -235,6 +235,7 @@ def install_local_bundle(
             logger=logger,
             dry_run=dry_run,
             fetch_result=policy_fetch_result,
+            bundled_deps=bundle_policy_subjects(bundle_info),
         )
 
         # Warn on bundle/install target mismatch.
