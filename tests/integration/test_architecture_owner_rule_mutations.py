@@ -1265,7 +1265,7 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
             id="fail-open-hooks-approved-default",
         ),
         pytest.param(
-            "src/apm_cli/install/exec_gate.py",
+            "src/apm_cli/install/plan_admission.py",
             "    non_interactive: bool,\n",
             "    non_interactive: bool = False,\n",
             id="fail-open-trust-bin-default",
