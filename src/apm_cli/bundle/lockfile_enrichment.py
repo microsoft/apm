@@ -236,34 +236,6 @@ _AUTHOR_INSTALL_STATE_KEYS = (
 )
 
 
-def _lockfile_without_author_state(lockfile: LockFile) -> LockFile:
-    """Return a shallow copy whose serialized version ignores author-local state.
-
-    ``to_yaml`` derives ``lockfile_version`` from content, and the packager's
-    local deployed-file hashes alone promote it (RA-018). Those hashes are
-    stripped from the bundle, so the version must not depend on them either,
-    or packing before and after ``apm install`` differs (RA-031).
-    """
-    import copy
-
-    from ..core.deployment_ledger import DeploymentLedger
-    from ..deps.lockfile import _SELF_KEY
-
-    shipped = copy.copy(lockfile)
-    # Own containers: to_yaml normalizes these in place, and the caller's
-    # lockfile must stay untouched.
-    shipped.dependencies = {
-        key: dep for key, dep in lockfile.dependencies.items() if key != _SELF_KEY
-    }
-    shipped.local_deployed_files = []
-    shipped.local_deployed_file_hashes = {}
-    shipped.local_staged_files = []
-    shipped.local_staged_file_hashes = {}
-    # Rebuilt from the shipped dependencies, so no author receipt re-projects.
-    shipped.deployment_ledger = DeploymentLedger(records={})
-    return shipped
-
-
 def enrich_lockfile_for_pack(
     lockfile: LockFile,
     fmt: str | BundleFormat,
@@ -305,7 +277,7 @@ def enrich_lockfile_for_pack(
     # Build a filtered lockfile YAML: each dep's deployed_files is narrowed
     # to only the paths matching the pack target (with cross-target mapping).
     all_mappings: dict[str, str] = {}
-    data = yaml.safe_load(_lockfile_without_author_state(lockfile).to_yaml())
+    data = yaml.safe_load(lockfile.without_author_local_state().to_yaml())
     if data and "dependencies" in data:
         for dep in data["dependencies"]:
             if "deployed_files" in dep:
