@@ -281,13 +281,16 @@ CI's coverage summaries include a "Lowest-coverage files" section, rendered by
 ### Mutation testing owner modules
 
 `scripts/run_mutation_pilot.py` mutation-tests canonical owner modules. Each
-owner names one source file, the functions to mutate and the unit-test seams
+owner names one source file, the functions to mutate and the test seams
 that must kill them (`OWNERS`). The five original pilot owners (subset
 selection, update plans, policy serialization, link projection, lockfile
 normalization) are joined by the 0.37 owner moves: policy-outcome routing,
 executable trust context, install entry routing, install commit order,
 lockfile write authority, APM home resolution, egress routing and
-remediation advice (#4121). mutmut 3.6.0 cannot mutate a method of a
+remediation advice. A second wave adds credential origin scope, URL path
+containment, loopback host classification, auth outcome classification,
+atomic text writes, bounded front matter and the read-only lockfile path
+(#4121). mutmut 3.6.0 cannot mutate a method of a
 `@dataclass` or any function with a decorator other than `staticmethod` or
 `classmethod`, so those owners cover the plain functions their decorated
 entry points call.
