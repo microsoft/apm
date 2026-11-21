@@ -55,10 +55,11 @@ KINDS: Mapping[str, frozenset[str]] = {
 OBSERVED: Mapping[str, frozenset[str]] = {
     name: kinds - {"other-file"} for name, kinds in KINDS.items()
 }
+# Kinds no spine step observes an outcome for, so the matrix credits none:
 # bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
-# install/exec_gate.py plugin_bin_deployable); no spine step can observe a bin
-# gate outcome, so the matrix credits no bin cell.
-_UNOBSERVED = frozenset({"bin"})
+# install/exec_gate.py plugin_bin_deployable); the p-mixed instruction
+# (other-file) has no compile-staged output to assert for the copilot target.
+_UNOBSERVED = frozenset({"bin", "other-file"})
 _PLAIN = frozenset({"skill", "other-file"})
 _MIXED_SKILL = f".agents/skills/{MIXED}/SKILL.md"
 # Project surfaces of every primitive but MCP: install --mcp must leave them alone (U7).
@@ -155,11 +156,16 @@ class GateMatrix(StepRunner):
     # -- labels ------------------------------------------------------------------
 
     def cells(self, command: Command) -> list[str]:
+        unobserved = _UNOBSERVED
+        if command.op == "mcp-install":
+            # U7 credits the collateral primitives only: the MCP level would be
+            # the requested registry server's, which the spine never gates.
+            unobserved = unobserved | {"mcp"}
         return sorted(
             {
                 f"G1|{command.op}|{kind}|{self.state.gate(package, kind)}|{self.scope}"
                 for package in command.packages
-                for kind in KINDS[package] - _UNOBSERVED
+                for kind in KINDS[package] - unobserved
             }
         )
 
@@ -247,11 +253,16 @@ class GateMatrix(StepRunner):
     ) -> None:
         """What I1-I9 cannot see: the deployed set a step must leave behind."""
         before, after = step.before.deployed, step.after.deployed
-        if command.op == "mcp-install":
-            # The requested server is configured under its short name ("p-registry").
-            requested_names = {REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}
-            added = _mcp_servers(self.bench.deploy_root) - servers - requested_names
-            assert not added, f"install --mcp configured other servers: {sorted(added)}"
+        if command.op == "mcp-install" and step.result.returncode == 0:
+            allowed = {"p-exec-mcp"} if self._admits("p-exec", "mcp") else set()
+            problems = mcp_install_problems(
+                servers,
+                _mcp_servers(self.bench.deploy_root),
+                self.bench.manifest(),
+                step.after.lock,
+                frozenset(allowed),
+            )
+            assert not problems, "; ".join(problems)
         elif command.op == "prune" and self.state.denied_by_policy:
             # The prune ruling's floor: under a dependency deny prune never widens.
             assert after <= before, f"prune deployed {sorted(after - before)}"
@@ -264,6 +275,13 @@ class GateMatrix(StepRunner):
                 if (cell[1], cell[2]) in _SURFACE_GLOBS
             }
             assert set(after) == wanted, f"deployed {sorted(after)}, model {sorted(wanted)}"
+
+    def _admits(self, package: str, kind: str) -> bool:
+        """Whether the current gate level lets *package*'s *kind* stay deployed."""
+        return package in self.state.declared and self.state.gate(package, kind) in (
+            "none",
+            "allowed",
+        )
 
     def _credit(self, command: Command, cells: Collection[str], step: Step) -> None:
         exit_code = step.result.returncode
@@ -393,6 +411,41 @@ def matrix_cells(scope: str) -> frozenset[str]:
     machine = GateMatrix(None, scope)
     replay_matrix(machine)
     return frozenset(machine.credited)
+
+
+# The requested registry server, by id and by the short name .mcp.json keys it under.
+REQUESTED_NAMES = frozenset({REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]})
+
+
+def mcp_install_problems(
+    before: frozenset[str],
+    after: frozenset[str],
+    manifest: Mapping[str, object],
+    lock,
+    allowed: frozenset[str],
+) -> list[str]:
+    """Why an admitted ``install --mcp <registry server>`` did not do exactly that.
+
+    It must declare, lock and configure the requested server, configure no
+    other server, and keep every server it did not request unless the gate no
+    longer *allowed* it (a retirement narrows; it never widens).
+    """
+    problems = []
+    declared = {
+        str(entry.get("name") if isinstance(entry, Mapping) else entry)
+        for entry in ((manifest.get("dependencies") or {}).get("mcp") or [])
+    }
+    if not REQUESTED_NAMES & declared:
+        problems.append(f"{REGISTRY_SERVER} is not declared in apm.yml")
+    if lock is None or not REQUESTED_NAMES & set(lock.mcp_servers):
+        problems.append(f"{REGISTRY_SERVER} is not recorded in the lockfile")
+    if not REQUESTED_NAMES & after:
+        problems.append(f"{REGISTRY_SERVER} is not configured in .mcp.json")
+    if added := after - before - REQUESTED_NAMES:
+        problems.append(f"install --mcp configured other servers: {sorted(added)}")
+    if removed := (before - after) - (before - allowed - REQUESTED_NAMES):
+        problems.append(f"install --mcp removed servers it may keep: {sorted(removed)}")
+    return problems
 
 
 def _mcp_servers(deploy_root: Path) -> frozenset[str]:
