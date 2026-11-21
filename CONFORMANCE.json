@@ -3034,6 +3034,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ],
       "conformance_class": "consumer",
@@ -3041,8 +3042,9 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ]
     },
@@ -3213,6 +3215,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
@@ -3225,8 +3228,9 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 6,
+      "test_count": 7,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",

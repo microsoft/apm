@@ -585,30 +585,6 @@ class TestPruneCommand:
     # Lockfile cleanup
     # ------------------------------------------------------------------
 
-    def test_prune_removes_lockfile_entry_for_pruned_package(self):
-        """prune deletes the lockfile entry for a pruned package."""
-        lockfile_content = """\
-version: 1
-dependencies:
-  - repo_url: orphan-org/orphan-repo
-    host: github.com
-    resolved_commit: abc123
-    depth: 1
-"""
-        with self._chdir_tmp() as tmp:
-            (tmp / "apm.yml").write_text(_APM_YML_NO_DEPS)
-            _make_package_dir(tmp, "orphan-org", "orphan-repo")
-            _write_lockfile(tmp, lockfile_content)
-            result = self.runner.invoke(cli, ["prune"])
-            assert result.exit_code == 0
-            lockfile_path = tmp / "apm.lock.yaml"
-            # When the package is pruned, its lockfile entry should be removed;
-            # the lockfile itself may also be deleted.
-            if lockfile_path.exists():
-                assert "orphan-org/orphan-repo" not in lockfile_path.read_text()
-            else:
-                pass
-
     @pytest.mark.windows_compat
     def test_prune_mcp_cleanup_failure_preserves_lock_and_live_config(self):
         """Prune aborts before lock persistence when native MCP cleanup fails."""

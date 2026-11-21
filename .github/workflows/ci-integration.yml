@@ -353,7 +353,7 @@ jobs:
             -p scripts.ci_sharding
             --shard-count ${{ needs.integration-plan.outputs.count }} --shard-index ${{ matrix.shard }}
             --shard-durations shard-plan/merge-queue.json
-            -n 4 --dist loadgroup --maxfail 10 --cov --cov-fail-under=0 --durations=15
+            -n 4 --dist loadgroup --cov --cov-fail-under=0 --durations=15
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
