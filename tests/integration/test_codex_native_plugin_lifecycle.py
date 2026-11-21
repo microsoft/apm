@@ -213,10 +213,15 @@ def _audit_cache(
             assert structured.returncode != 0, structured.stdout + structured.stderr
             report = json.loads(structured.stdout)
             assert report["passed"] is False
-            assert any(
-                check["name"] == "drift" and check["passed"] is False and _DRIFT in check["message"]
-                for check in report["checks"]
-            )
+            (drift,) = [check for check in report["checks"] if check["name"] == "drift"]
+            assert drift["passed"] is False, drift
+            # A blocked replay names the drift in its message; a failed replay
+            # says it once, in details, and the message points there (RA-005).
+            if drift["message"].startswith("drift replay failed"):
+                assert drift["message"] == "drift replay failed; see details", drift
+                assert _DRIFT in " ".join(" ".join(drift["details"]).split()), drift
+            else:
+                assert _DRIFT in drift["message"], drift
         finally:
             cached.write_bytes(original)
     if os.name != "nt":

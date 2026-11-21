@@ -191,6 +191,34 @@ def test_narrowing_one_surface_keeps_another_approved_surface(
     assert "hook" in machine.world.observe().deployed
 
 
+@pytest.mark.parametrize("scope", SCOPES)
+def test_verdict_on_an_uninstalled_package_ignores_the_operation_lock(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str
+) -> None:
+    """Nightly falsifier (#4546): the operation lock file is bookkeeping, not a write."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, scope))
+    manifest = machine.world.workspace / "apm.yml"
+    manifest_before = manifest.read_bytes()
+    machine.decide("hook", "approve")
+    assert manifest.read_bytes() == manifest_before
+    assert not (machine.world.workspace / "apm.lock.yaml").exists()
+
+
+def test_uninstalling_an_undeclared_package_on_a_converged_state_is_a_refusal(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier (#4546): I2 does not demand exit 0 from a contracted refusal."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.prune()
+    machine.install("plain")
+    machine.update()
+    manifest = machine.world.workspace / "apm.yml"
+    lock = machine.world.workspace / "apm.lock.yaml"
+    before = (manifest.read_bytes(), lock.exists())
+    machine.uninstall("lsp")
+    assert (manifest.read_bytes(), lock.exists()) == before
+
+
 def test_a_known_cell_does_not_excuse_an_unrelated_surface(tmp_path: Path) -> None:
     """A known cell owns only matching violations; another surface still fails."""
     state = LifecycleStateSnapshot.capture(tmp_path)

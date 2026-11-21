@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+
 ### Fixed
 
 - Project installs deploy Claude-format plugins whole to the committed `.agents/plugins/` and declare them in Claude Code and GitHub Copilot settings, so `obra/superpowers` installs with its hooks approved. (closes #3921, #4559)

@@ -36,6 +36,7 @@ from tests.lifecycle.oracles import (
     Observation,
     Operation,
     check_cross_cutting,
+    durable_changes,
     partition_expected,
     strict_misses,
 )
@@ -614,8 +615,8 @@ class GateMachine(RuleBasedStateMachine):
             expected = 0 if locked else 1
             if result is None or result.returncode != expected:
                 return [f"{verdict} exited {getattr(result, 'returncode', None)}"]
-            if expected and before.artifacts != after.artifacts:
-                return [f"{verdict} of an uninstalled package changed durable state"]
+            if expected and (changed := durable_changes(before, after)):
+                return [f"{verdict} of an uninstalled package changed durable state: {changed}"]
             if verdict == "approve" and locked and not _store_grants(self.world.store(), path):
                 return [f"approve {surface} recorded no grant for an installed package"]
             return []
@@ -692,8 +693,10 @@ class GateMachine(RuleBasedStateMachine):
                 return [f"update {kind} exited {result.returncode}, expected {expected}"]
             return []
 
+        # A refused (undeclared) update writes nothing; I2's converged repeat
+        # law applies only to an update that runs.
         result = self._step(
-            Operation("update", (kind,), mutating=True),
+            Operation("update", (kind,), mutating=not expected),
             lambda: self.world.run(("update", *self.world.global_flag(), "--yes", path)),
             reference=reference,
         )
@@ -732,7 +735,9 @@ class GateMachine(RuleBasedStateMachine):
         if declared_before:
             self.converged = False
         result = self._step(
-            Operation("uninstall", (kind,), mutating=True),
+            # Uninstalling an undeclared package is a refusal (exit 1, #4133),
+            # not a converged mutation that I2 would require to exit 0.
+            Operation("uninstall", (kind,), mutating=declared_before),
             lambda: self.world.run(args),
             reference=reference,
         )
