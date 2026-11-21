@@ -437,20 +437,20 @@ def _with_orphans(removed_keys: builtins.set, orphans: Any) -> builtins.set:
 
 def _gate_denied_package_keys(
     apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
-) -> frozenset[str]:
-    """Survivors the org policy now denies, from the gate retirement owner (#4446)."""
+) -> dict[str, str]:
+    """Survivors the org policy now denies, with why, from the gate retirement owner (#4446)."""
     from pathlib import Path
 
     from ...install.exec_gate import gate_retirements
     from ...install.lsp.integration import has_recorded_lsp_state
 
     if apm_package is None or not has_recorded_lsp_state(lockfile):
-        return frozenset()
+        return {}
 
     retirements = gate_retirements(
         lockfile, Path(modules_dir), apm_package, Path(deploy_root), user_scope=user_scope
     )
-    return frozenset(retirements.denied_packages) if retirements is not None else frozenset()
+    return dict(retirements.denied_packages) if retirements is not None else {}
 
 
 def _cleanup_stale_lsp(

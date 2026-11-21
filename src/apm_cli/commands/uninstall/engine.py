@@ -1792,7 +1792,11 @@ def _restage_changed_local_survivors(
             current = compute_local_package_hash(source, framed=dep.content_hash_framed)
         except (OSError, ValueError, TypeError, PathTraversalError):
             continue
-        if not install_path.is_dir() or current == dep.content_hash:
+        # Judge the source against the materialized copy, not the lock row: a
+        # native plugin's locked hash is recorded from its normalized image.
+        if not install_path.is_dir() or current == compute_local_package_hash(
+            install_path, framed=dep.content_hash_framed
+        ):
             continue
         staged_path = modules_dir / "_local" / f".apm-uninstall-refresh-{uuid4().hex}"
         refresh_logger = _LocalRefreshLogger(logger, _dependency_public_label(dep_ref))
@@ -1839,6 +1843,7 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
+    from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
         return refreshed, set()
@@ -1856,8 +1861,14 @@ def gate_retired_hook_survivors(
         return refreshed, set()
     if retirements is None:
         return refreshed, set()
-    # Only survivors: the removed packages' files are already being cleaned.
-    denied = {k: why for k, why in retirements.denied_packages.items() if k not in removed_keys}
+    # Only survivors: the removed packages' files are already being cleaned. A
+    # denied survivor without hook files keeps its plain files; the MCP and
+    # LSP cleanups retire its servers.
+    denied = {
+        k: why
+        for k, why in retirements.denied_packages.items()
+        if k not in removed_keys and survivor_ships_hooks(lockfile, k, modules_dir)
+    }
     hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")

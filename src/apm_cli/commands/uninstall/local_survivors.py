@@ -1,4 +1,5 @@
-"""Surviving local declarations that share a removed package's install slot."""
+"""Surviving local declarations that share a removed package's install slot, and
+what a surviving package ships."""
 
 from __future__ import annotations
 
@@ -32,3 +33,17 @@ def _surviving_local_refs_at_install_path(
         except (ValueError, TypeError, AttributeError, KeyError, PathTraversalError):
             continue
     return survivors
+
+
+def survivor_ships_hooks(lockfile: object, key: str, modules_dir: Path) -> bool:
+    """Whether the materialized copy of the surviving locked package *key* carries hook files."""
+    from ...integration.hook_integrator import HookIntegrator
+
+    dependency = (getattr(lockfile, "dependencies", None) or {}).get(key)
+    if dependency is None:
+        return False
+    try:
+        install_path = dependency.to_dependency_ref().get_install_path(modules_dir)
+    except (ValueError, PathTraversalError):
+        return False
+    return install_path.is_dir() and bool(HookIntegrator().find_hook_files(install_path))
