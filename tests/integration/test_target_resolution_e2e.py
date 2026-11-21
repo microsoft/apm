@@ -424,17 +424,118 @@ def test_s16a_targets_inactive_shows_reasons(tmp_path):
     assert "no signal" in out_lower or "inactive" in out_lower
 
 
-@pytest.mark.xfail(
-    reason="#4545 install from a subdirectory does not discover the project root (after #888)",
-    strict=True,
-)
 def test_s16b_provenance_uses_project_root(tmp_path):
-    """S16b: Closes #888 (partial) - provenance reflects project root, not cwd."""
+    """S16b: Closes #888, #4545 - provenance reflects project root, not cwd."""
     project = _setup(tmp_path, "s16b_provenance_cwd")
     subdir = project / "subdir"
     result = _invoke(["install"], subdir)
     assert result.exit_code == 0, result.output
     assert_provenance(result.output, targets=["claude"], source="CLAUDE.md")
+
+
+def test_s16c_installed_cli_subdirectory_install(tmp_path, apm_binary_path: Path):
+    """S16c: Closes #4545 - installed CLI install from subdirectory matches root install."""
+    root_project = _setup(tmp_path / "root_run", "s16b_provenance_cwd")
+    sub_project = _setup(tmp_path / "sub_run", "s16b_provenance_cwd")
+    subdir = sub_project / "subdir"
+    env = os.environ.copy()
+
+    res_root = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=root_project,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res_root.returncode == 0, res_root.stderr
+
+    res_sub = subprocess.run(
+        [str(apm_binary_path), "install"],
+        cwd=subdir,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res_sub.returncode == 0, res_sub.stderr
+
+    combined = res_sub.stdout + res_sub.stderr
+    assert "Using apm.yml at" in combined
+    assert f"project root: {sub_project.resolve()}" in combined
+    assert_provenance(combined, targets=["claude"], source="CLAUDE.md")
+
+    # Nothing written under subdir/
+    assert [p.name for p in subdir.iterdir()] == [".gitkeep"]
+
+    # Lockfile and deployed files match root install
+    assert (sub_project / "apm.lock.yaml").read_text(encoding="utf-8") == (
+        root_project / "apm.lock.yaml"
+    ).read_text(encoding="utf-8")
+    sub_claude_files = sorted(
+        p.relative_to(sub_project) for p in sub_project.glob(".claude/**/*") if p.is_file()
+    )
+    root_claude_files = sorted(
+        p.relative_to(root_project) for p in root_project.glob(".claude/**/*") if p.is_file()
+    )
+    assert sub_claude_files == root_claude_files
+
+
+def test_s16_control_root_flag_from_subdirectory(tmp_path):
+    """Control: --root DIR from a subdirectory keeps today's sources and writes."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    deploy_dir = tmp_path / "deploy_target"
+    result = _invoke(["install", "--root", str(deploy_dir)], subdir)
+    # Today's behavior: sources stay in cwd (subdir), which has no apm.yml, so it errors.
+    assert result.exit_code == 1, result.output
+    assert "No apm.yml found" in result.output
+    assert "Using apm.yml at" not in result.output
+
+
+def test_s16_control_nested_manifest_uses_nearest(tmp_path):
+    """Control: cwd with its own apm.yml inside a parent project uses the nearest one."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    (subdir / "apm.yml").write_text("name: child-project\nversion: 1.0.0\n", encoding="utf-8")
+    result = _invoke(["install"], subdir)
+    assert result.exit_code == 0, result.output
+    # Operates on the nearest manifest in subdir, not the parent manifest.
+    assert "Using apm.yml at" not in result.output
+    assert not (subdir / ".claude").exists()
+
+
+def test_s16_control_no_ancestor_manifest_errors(tmp_path):
+    """Control: no ancestor apm.yml keeps the current error."""
+    empty_dir = tmp_path / "isolated"
+    empty_dir.mkdir()
+    res_bare = _invoke(["install"], empty_dir)
+    assert res_bare.exit_code == 1, res_bare.output
+    assert "No apm.yml found" in res_bare.output
+
+
+def test_s16_control_dry_run_from_subdirectory_previews_root(tmp_path):
+    """Control: apm install --dry-run from subdirectory previews root project."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    result = _invoke(["install", "--dry-run"], subdir)
+    assert result.exit_code == 0, result.output
+    assert "Using apm.yml at" in result.output
+    assert "Dry run mode" in result.output
+    assert not (project / "apm.lock.yaml").exists()
+    assert not (subdir / "apm.lock.yaml").exists()
+
+
+def test_s16_control_global_ignores_walk(tmp_path, monkeypatch):
+    """Control: apm install -g ignores ancestor walk."""
+    project = _setup(tmp_path, "s16b_provenance_cwd")
+    subdir = project / "subdir"
+    fakehome = tmp_path / "fakehome"
+    fakehome.mkdir()
+    monkeypatch.setenv("HOME", str(fakehome))
+    monkeypatch.setenv("USERPROFILE", str(fakehome))
+    monkeypatch.delenv("APM_HOME", raising=False)
+    result = _invoke(["install", "-g"], subdir)
+    assert result.exit_code == 1, result.output
+    assert "Using apm.yml at" not in result.output
 
 
 def test_s17_cursorrules_file_detects_cursor(tmp_path):

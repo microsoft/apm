@@ -4,9 +4,10 @@ This module must NOT import from any command module.
 """
 
 import builtins
+import contextlib
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import click
@@ -553,6 +554,44 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
         if manifest.is_file():
             return manifest
     return None
+
+
+@contextlib.contextmanager
+def discover_project_root(
+    *,
+    enabled: bool = True,
+) -> Iterator[Path | None]:
+    """Discover nearest ancestor apm.yml for project-scope install (#4545).
+
+    When *enabled*, walks parent directories from cwd looking for ``apm.yml``.
+    If cwd has no ``apm.yml`` and an ancestor does, prints the discovery notice,
+    anchors sources and deploy paths by changing working directory to that
+    project root, and restores the original working directory on exit.
+    """
+    if not enabled:
+        yield None
+        return
+
+    manifest_path = _find_apm_yml()
+    if manifest_path is None:
+        yield None
+        return
+
+    project_root = manifest_path.parent
+    original = Path.cwd()
+    if project_root != original.resolve():
+        _rich_info(
+            f"Using apm.yml at {manifest_path} (project root: {project_root})",
+            symbol="info",
+        )
+        os.chdir(project_root)
+        try:
+            yield project_root
+        finally:
+            with contextlib.suppress(OSError):
+                os.chdir(original)
+    else:
+        yield project_root
 
 
 # Shared by ``apm install`` and ``apm update`` so both commands expose the same
