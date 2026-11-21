@@ -1,0 +1,13 @@
+{
+  "issue": 3270,
+  "summary": "Asserts exact cross-platform deployed bytes under Git EOL settings.",
+  "failure_modes": [
+    "portability"
+  ],
+  "properties": [
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_text_eol_lifecycle.py::test_locked_text_auto_package_replays_across_host_eol"
+  ]
+}

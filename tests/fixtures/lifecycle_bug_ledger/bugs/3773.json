@@ -1,0 +1,22 @@
+{
+  "issue": 3773,
+  "summary": "Traps audit/uninstall ignoring the recorded legacy skill layout and moved COPILOT_HOME (#3773, #3745); needs legacy flag and user scope.",
+  "failure_modes": [
+    "cleanup",
+    "observation",
+    "routing"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_legacy_skill_layout_copilot_home_lifecycle.py::test_legacy_skills_survive_audit_and_uninstall_in_their_recorded_root",
+    "tests/integration/test_legacy_skill_layout_lifecycle.py::test_env_rooted_legacy_skill_layout_survives_audit_and_uninstall",
+    "tests/integration/test_legacy_skill_layout_lifecycle.py::test_legacy_skill_layout_still_reports_real_drift",
+    "tests/integration/test_legacy_skill_layout_lifecycle.py::test_project_skill_layout_survives_audit_and_uninstall",
+    "tests/integration/test_legacy_skill_layout_lifecycle.py::test_uninstall_of_an_unrelated_package_keeps_the_legacy_skill_layout",
+    "tests/integration/test_legacy_skill_layout_lifecycle.py::test_user_skill_layout_survives_audit_and_uninstall"
+  ]
+}

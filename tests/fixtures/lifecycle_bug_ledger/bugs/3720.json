@@ -1,0 +1,22 @@
+{
+  "issue": 3720,
+  "summary": "Traps audit failing config-consistency on deliberately parked MCP servers (#3720, #3925); needs claude MCP, omission evidence and transitive trust.",
+  "failure_modes": [
+    "observation",
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_executables_gate_parks_server_with_audit_evidence",
+    "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_failed_retirement_keeps_prior_baseline",
+    "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_frozen_install_applies_executables_gate_and_omission_evidence",
+    "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_frozen_no_policy_gate_ignores_org_policy",
+    "tests/integration/test_mcp_deliberate_omission_audit_lifecycle.py::test_retiring_trusted_transitive_server_records_audit_evidence"
+  ]
+}

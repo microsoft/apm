@@ -1,0 +1,14 @@
+{
+  "issue": 4318,
+  "fixed_in": "Unreleased",
+  "summary": "apm update with an installed local bundle said there were no APM dependencies to update without naming the bundle or how to update it.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/replay/test_covering_replay.py::test_covering_row"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "issue": 3726,
+  "fixed_in": "0.36.1",
+  "summary": "A registry behind a gateway that answers with a same-origin redirect failed install and lock replay, because every redirect was refused instead of following those that stay inside the configured registry.",
+  "failure_modes": [
+    "auth",
+    "routing"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "lockfile.frozen_preserves_bytes"
+  ],
+  "regression_tests": [
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_follows_same_origin_gateway_redirect",
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_install_refuses_redirect_outside_configured_registry",
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_registry_lock_replay_follows_same_origin_redirect_without_lock_churn",
+    "tests/integration/test_auth_upgrade_lock_replay_lifecycle.py::test_old_registry_lock_replays_resolved_url_without_churn",
+    "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_lookalike_redirect_targets",
+    "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_follows_case_only_host_difference",
+    "tests/integration/test_registry_redirect_location_hardening_lifecycle.py::test_registry_refuses_endless_same_origin_redirect_chain",
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_follows_same_origin_307_with_body",
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_is_not_downgraded_by_302",
+    "tests/integration/test_registry_redirect_origin_lifecycle.py::test_publish_upload_never_leaves_registry_origin"
+  ]
+}

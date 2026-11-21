@@ -138,9 +138,11 @@ authors to expose confidential evidence.
 
 1. Fork and create a branch for the approved issue.
 2. Keep the PR focused on one concern. Include relevant tests and update
-   documentation for changed behavior. For a user-visible change, add one
-   line in one section under `## [Unreleased]` in `CHANGELOG.md` following
-   the [changelog rules](.github/instructions/changelog.instructions.md).
+   documentation for changed behavior. For a user-visible change, add a
+   one-line fragment, `changelog.d/<pr>.<section>.md` (see
+   [changelog.d/README.md](changelog.d/README.md)), following the
+   [changelog rules](.github/instructions/changelog.instructions.md); do not
+   edit `## [Unreleased]` in `CHANGELOG.md`.
 3. Follow the [development guide](docs/src/content/docs/contributing/development-guide.md)
    for setup, local checks, and any surface-specific requirements.
 4. In the PR template, link the canonical issue and human approval comment,
