@@ -28,7 +28,7 @@ def test_bundle_lockfile_reads_have_one_registered_owner() -> None:
 
     report = run_selected_rules(ROOT, (RULE_ID,))
 
-    assert owner.selectors == (OWNER,)
+    assert owner.selectors == (OWNER, "src/apm_cli/deps/lockfile_lookup.py")
     assert RULE_ID in owner.guards
     assert rule.guard_ids == (RULE_ID,)
     assert report.failures == ()
