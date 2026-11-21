@@ -49,15 +49,42 @@ class KnownFailure:
         )
 
 
+# A lifecycle oracle failure reads "<header>:" then one line per violation, then
+# the command evidence from "args=..." on (oracles.check_obligation, _settle).
+_EVIDENCE = re.compile(r"^args=")
+
+
+def _violations(message: str) -> list[str] | None:
+    """The violation lines of a lifecycle oracle failure, or ``None`` for any other message."""
+    lines = message.splitlines()
+    end = next((i for i, line in enumerate(lines) if _EVIDENCE.match(line)), None)
+    if end is None or end < 2 or not lines[0].endswith(":"):
+        return None
+    return [line for line in lines[1:end] if line.strip()]
+
+
 def signature_mismatch(item: pytest.Item, error: BaseException) -> str | None:
-    """Why an expected failure of *item* does not count, or ``None`` when it does."""
+    """Why an expected failure of *item* does not count, or ``None`` when it does.
+
+    A lifecycle oracle failure counts only when EVERY violation line carries the
+    signature, so an unrelated violation in the same assertion stays fatal. Any
+    other failure counts when its message carries the signature.
+    """
     mark = item.get_closest_marker("xfail")
     match = mark.kwargs.get("match") if mark is not None else None
-    if not match or re.search(match, str(error)):
+    if not match:
+        return None
+    message = str(error)
+    violations = _violations(message)
+    if violations is None:
+        stray = [] if re.search(match, message) else [message.splitlines()[0] if message else ""]
+    else:
+        stray = [line for line in violations if not re.search(match, line)]
+    if not stray:
         return None
     return (
         f"strict known cell {mark.kwargs.get('reason', '')!r} failed for a different "
-        f"reason: its signature /{match}/ is not in the failure message. "
+        f"reason: these lines lack its signature /{match}/: {stray}. "
         "Fix the new cause or re-key the cell."
     )
 

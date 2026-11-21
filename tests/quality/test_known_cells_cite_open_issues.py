@@ -99,11 +99,33 @@ def test_a_known_cell_failing_for_another_reason_fails(pytester: pytest.Pytester
         @CELL.mark()
         def test_new_cause():
             assert False, "output lacks /denied by pattern/"
+
+
+        @CELL.mark()
+        def test_known_and_new_cause_in_one_oracle_failure():
+            raise AssertionError(
+                "after install:\\n"
+                "I4 (never widen): p/hook still deployed but not allowed\\n"
+                "I1 (lock matches disk): deployed file is not in the lock: x\\n"
+                "args=('apm', 'install') rc=0"
+            )
+
+
+        @CELL.mark()
+        def test_only_known_causes_in_one_oracle_failure():
+            raise AssertionError(
+                "after install:\\n"
+                "I4 (never widen): p/hook still deployed but not allowed\\n"
+                "I4 (never widen): p/mcp still deployed but not allowed\\n"
+                "args=('apm', 'install') rc=0"
+            )
         """
     )
     result = pytester.runpytest_inprocess("-q", "-o", "addopts=", "-p", "tests.lifecycle.known")
-    result.assert_outcomes(xfailed=1, failed=1)
-    result.stdout.fnmatch_lines(["*failed for a different reason*", "*test_new_cause*"])
+    result.assert_outcomes(xfailed=2, failed=2)
+    result.stdout.fnmatch_lines(["*failed for a different reason*"])
+    result.stdout.fnmatch_lines(["*test_new_cause*"])
+    result.stdout.fnmatch_lines(["*test_known_and_new_cause_in_one_oracle_failure*"])
     with pytest.raises(AssertionError):
         KnownFailure("#0", "unfiled", "x")
     with pytest.raises(AssertionError):

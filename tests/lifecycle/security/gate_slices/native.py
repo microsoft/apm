@@ -37,7 +37,8 @@ _USER_ORG = KnownFailure(
     " user-scope deployments in place",
     # I4 keeps the surface (org-deny, org-enables-gate); the dep deny row keeps
     # the plugin file and prints no deny (policy-dep-deny).
-    r"still deployed but not allowed|plugins/p-native-claude-bin/\S+ must be absent",
+    r"still deployed but not allowed|plugins/p-native-claude-bin/\S+ must be absent"
+    r"|output lacks /denied by pattern/",
 )
 _XFAIL = {
     **{
