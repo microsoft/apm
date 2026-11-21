@@ -18,7 +18,7 @@ anywhere else under ``src/apm_cli``.
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
@@ -123,6 +123,26 @@ def kept_file_message(
 ) -> str:
     """Render the one kept-file shape: ``Kept <path>: <reason>. <Remedy sentence>``."""
     return kept_note(path, reason, either_sentence(remedy, *alternatives))
+
+
+def dependency_not_allowed_advice(
+    packages: Sequence[str], denied: int, policy_source: str | None
+) -> tuple[Remediation | None, str]:
+    """Render the next step for *denied* dependencies outside the org allow list (#4570).
+
+    *packages* are the apm.yml entries whose removal drops every denied
+    dependency (a transitive one goes with the entry that brings it in).
+    Returns the bound :data:`DEPENDENCY_NOT_ALLOWED` remediation, or ``None``
+    when no entry is known, and the sentence ``apm audit --ci`` prints.
+    """
+    them = "it" if denied == 1 else "them"
+    source = f" (policy source: {policy_source})" if policy_source else ""
+    ask = f"ask your org admin to allow {them}{source}"
+    if not packages:
+        return None, _sentence(ask)
+    subject = "the dependency" if denied == 1 else f"the {denied} dependencies"
+    remedy = DEPENDENCY_NOT_ALLOWED.bind(packages=" ".join(packages), subject=subject)
+    return remedy, _sentence(f"{remedy.clause()}, or {ask}")
 
 
 # A file whose deployment no receipt or locked render proves (#4360).
@@ -1227,6 +1247,13 @@ REQUIRED_PACKAGE_UNLOCKED = _entry(
 UNMANAGED_FILE_TRACK = _entry("unmanaged-file-track", "apm install <ref>", "track a flagged file")
 CONTENT_HASHES_MISSING = _entry(
     "content-hashes-missing", "apm install", "regenerate the missing content hashes"
+)
+# {packages}: the apm.yml entries that bring in the denied dependencies;
+# {subject}: "the dependency" or "the N dependencies" (#4570).
+DEPENDENCY_NOT_ALLOWED = _entry(
+    "dependency-not-allowed",
+    "apm uninstall {packages}",
+    "remove {subject} outside the org allow list",
 )
 FROZEN_HOOK_PINS_STALE = _entry(
     "frozen-hook-pins-stale",
