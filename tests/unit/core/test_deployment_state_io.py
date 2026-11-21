@@ -154,6 +154,31 @@ def test_uninstall_handoff_requires_successful_survivor(tmp_path: Path) -> None:
     assert reconciled.owner_handoffs == ((locator.key, "removed", "survivor"),)
 
 
+def test_departing_owner_proof_keeps_the_row_with_remaining_owners(tmp_path: Path) -> None:
+    """A departing owner's proof neither fails nor erases a bundle's claim (#4703)."""
+    locator = _locator(".github/instructions/f-doc.instructions.md")
+    prior = DeploymentLedger(
+        records={
+            locator.key: _record(
+                locator, owners=("removed", ".", "local-bundle"), active="local-bundle"
+            )
+        }
+    )
+    reconciler = _reconciler(tmp_path)
+
+    reconciled = reconciler.reconcile(
+        prior,
+        [_materialization("legacy", locator, status=MaterializationStatus.UNCHANGED)],
+        _intent(owners=frozenset({".", "local-bundle"})),
+    )
+
+    record = reconciled.ledger.records[locator.key]
+    assert record.owners == (".", "local-bundle")
+    assert record.active_owner == "local-bundle"
+    assert reconciled.failed == ()
+    assert reconciler.diagnostics.error_count == 0
+
+
 def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     tmp_path: Path,
 ) -> None:

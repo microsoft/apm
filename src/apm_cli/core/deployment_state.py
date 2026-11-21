@@ -276,6 +276,11 @@ class DeploymentReconciler:
             proofs = successful.get(key)
             if proofs is None:
                 proofs = self._superseding_generic_proofs(prior, successful_by_value)
+            survivor = self._held_by_survivors(prior, proofs, intent)
+            if survivor is not None:
+                next_records[key] = survivor
+                retained.append(prior.locator)
+                continue
             if proofs:
                 next_record = self._record_from_proofs(proofs, intent)
                 if next_record is None:
@@ -488,6 +493,24 @@ class DeploymentReconciler:
             ):
                 proven.add(value)
         return frozenset(proven)
+
+    def _held_by_survivors(
+        self,
+        prior: DeploymentRecord,
+        proofs: list[MaterializationResult] | None,
+        intent: DeploymentIntent,
+    ) -> DeploymentRecord | None:
+        """Keep a row whose only current proofs come from departing owners (#4703).
+
+        A departing owner's proof neither establishes nor erases ownership: the
+        row stays with the owners that remain, such as a local bundle, instead
+        of failing as ownerless.
+        """
+        if not proofs or intent.desired_owners is None:
+            return None
+        if any(owner in intent.desired_owners for proof in proofs for owner in proof.owners):
+            return None
+        return self._filter_absent_owners(prior, intent)
 
     def _record_from_proofs(
         self,

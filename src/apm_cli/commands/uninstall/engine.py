@@ -1348,6 +1348,7 @@ class IntegrationCleanupOutcome:
     failed_paths: list[str]
     error_count: int
     materialization_session: "DeploymentMaterializationSession | None" = None
+    package_failures: int = 0
 
     @property
     def complete(self) -> bool:
@@ -1763,6 +1764,7 @@ def _sync_integrations_after_uninstall(
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
         materialization_session=materialization_session,
+        package_failures=reintegration_diagnostics.error_count,
     )
 
 

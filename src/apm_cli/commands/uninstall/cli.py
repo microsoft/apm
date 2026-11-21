@@ -93,11 +93,25 @@ def _report_uninstall_outcome(
     lsp_cleanup_error: Exception | None,
     mcp_cleanup_fatal: bool,
 ) -> bool:
-    """Render the final summary and return whether cleanup was incomplete."""
+    """Render the final summary and return whether cleanup was incomplete.
+
+    A reported package failure leaves the uninstall incomplete, so the command
+    exits non-zero instead of claiming success (#4703).
+    """
+    from ...install.outcome import diagnostic_error_count
+
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
-    if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
+    package_failures = (
+        diagnostic_error_count(logger.diagnostics) + integration_cleanup.package_failures
+    )
+    if package_failures:
+        logger.error(
+            f"Uninstall incomplete: {_count_noun(package_failures, 'package failure')} "
+            "reported above."
+        )
+    elif not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
             logger.success(f"Uninstall complete: {summary}")
         else:
@@ -105,7 +119,8 @@ def _report_uninstall_outcome(
     elif integration_incomplete:
         logger.warning("Package removal finished, but managed hook cleanup is incomplete.")
     return (
-        mcp_cleanup_fatal
+        package_failures > 0
+        or mcp_cleanup_fatal
         or lsp_cleanup_error is not None
         or integration_incomplete
         or integration_cleanup_error is not None
@@ -129,12 +144,26 @@ def _collect_deployed_cleanup_state(
     lockfile,
     dependency_keys: set[str],
 ) -> tuple[set[str], dict[str, str]]:
-    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    """Snapshot selected deployment paths and hashes before lockfile mutation.
+
+    Unless the project-local owner (``.``) is selected, paths it still holds
+    (local content and local bundles) are not cleanup claims: uninstall keeps
+    them on disk, as the lockfile keeps recording them (#4703).
+    """
     from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...deps.lockfile import _SELF_KEY
     from ...integration.base_integrator import BaseIntegrator
 
     snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
-    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+    paths = BaseIntegrator.normalize_managed_files(snapshot.paths) or set()
+    hashes = snapshot.hashes
+    if _SELF_KEY not in dependency_keys:
+        held = BaseIntegrator.normalize_managed_files(set(lockfile.local_deployed_files)) or set()
+        paths -= held
+        hashes = {
+            path: value for path, value in hashes.items() if path.replace("\\", "/") not in held
+        }
+    return paths, hashes
 
 
 @dataclass(frozen=True)
@@ -613,7 +642,6 @@ def _refuse_uninstall_without_evidence(
         # A path another shrinking survivor keeps deploying is not deleted.
         retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
         candidates |= retired - others - builtins.set(other_hashes) - retained
-    candidates -= builtins.set(lockfile.local_deployed_files)
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
     if not refused:
