@@ -444,17 +444,18 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             env=environment,
         )
     elif mutation == "deployed-file":
-        # #4360: a plain install keeps the tampered file and exits 1; the
-        # printed remedy (delete the edited file, then install) restores it.
+        # A plain install keeps the edited file APM's receipt proves it
+        # deployed, names it with the runnable remedy and succeeds (RA-012);
+        # following the remedy (move the file aside, then install) restores it.
         result, kept = runner.run_sequence(
             (negative_args, tuple(recovery_args)),
-            expected_returncodes=(1, 1),
+            expected_returncodes=(1, 0),
             scenario_id=f"{scenario_id}-tamper-kept",
             cwd=project_root,
             env=environment,
         )
-        kept_text = " ".join(kept.stderr.split())
-        assert kept_edit_message(instruction_path, user_scope=False, proven_edit=False) in kept_text
+        kept_text = " ".join((kept.stdout + kept.stderr).split())
+        assert kept_edit_message(instruction_path, user_scope=False, proven_edit=True) in kept_text
         assert (project_root / instruction_path).read_text(encoding="utf-8") == (
             "# Mutated generated deployment\n"
         )
@@ -485,10 +486,20 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         assert "Content hash mismatch" in normalized_stderr
         assert f"expected sha256:{'0' * 64}" in normalized_stderr
         assert "This may indicate a supply-chain attack." in normalized_stderr
-        dep_key = normalized_stderr.split("Content hash mismatch for ", 1)[1].split(":", 1)[0]
-        compact = "".join(result.stderr.split())
-        assert f"removethe'{dep_key}'entryfrom" in compact, result.stderr
-        assert "apm.lock.yaml,thenrun'apminstall'" in compact, result.stderr
+        # The remedy names both causes (RA-003): stale package copies, or a
+        # changed lockfile restored from version control.
+        lock_file = str(project_root / "apm.lock.yaml")
+        assert (
+            "If the package copies changed, run 'apm cache clean --yes' to discard the "
+            "cached package copies, then retry." in normalized_stderr
+        ), result.stderr
+        assert f"If {lock_file} changed, restore {lock_file} from version control" in (
+            normalized_stderr
+        ), result.stderr
+        assert (
+            "then run 'apm install' to verify the dependency against the committed lockfile."
+            in normalized_stderr
+        ), result.stderr
     else:
         payload = json.loads(result.stdout)
         failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
