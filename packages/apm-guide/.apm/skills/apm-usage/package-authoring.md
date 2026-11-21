@@ -13,7 +13,7 @@ how to install it:
 | `hooks/*.json` or `.apm/hooks/*.json` only | Harness hook package | Add hook commands to each target's configuration and copy referenced files |
 | `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Targets `claude` (or `copilot` at project scope): deploy intact to `.agents/plugins/<plugin>/` and declare in harness settings (needs `.claude-plugin/plugin.json`; without it, dissected at project scope and parked with `-g`); other targets: dissect via plugin artifact mapping |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Acquired and locked as one opaque unit; deployed to `.agents/plugins/<plugin>/` and declared in Copilot settings when effective targets include Copilot and admission gates pass. Excluded targets create no native declaration or loose primitive projection. APM does not require the runtime during lifecycle operations; loading requires supported Copilot CLI 1.0.81 or newer |
-| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native bundle through Codex CLI 0.163.0 or later, user scope only; initially disabled, no loose projection or other-target translation |
+| `.codex-plugin/plugin.json` without higher-precedence package intent | Codex plugin | Dissect via plugin artifact mapping, like a Claude plugin collection; APM never runs or registers anything with Codex |
 
 When plugin signals coexist with an eligible `apm.yml`, the APM layout wins.
 An `apm.yml` is eligible when the root also has `.apm/` or the manifest

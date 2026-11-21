@@ -182,23 +182,56 @@ this map, on a fresh clone or in CI, with no `apm marketplace add`:
 A committed marketplace is reviewed intent, like a committed Git URL:
 declaring it grants no trust beyond your org policy.
 
-## Codex compatibility bundles through APM
+## Codex plugins through APM
 
-A plugin that ships `.codex-plugin/plugin.json` can be registered with Codex
-as a whole bundle:
+APM installs plugins for Codex as a split install. It deploys each plugin's
+skills to `.agents/skills/`, which Codex reads natively, and its agents, hooks
+and MCP servers to `.codex/agents/`, `.codex/hooks.json` and
+`.codex/config.toml`, as it does for any package. This covers a
+`.codex-plugin/plugin.json` bundle and every other plugin format, at project
+and user scope:
 
 ```bash frame="terminal"
-apm install -g contoso/review-kit --target codex
+apm install contoso/review-kit --target codex
 ```
 
-This needs Codex CLI 0.163.0 or later on `PATH` and works at user scope
-(`-g`); project scope fails. Approve the package's executables before you
-install ([Approve hooks and MCP servers](../approve-executables/)). APM scans and
-copies the complete bundle, registers it through Codex's configuration
-interface disabled, and never runs plugin code or grants Codex trust. Enable
-it in Codex. APM keeps its ownership journal in `$APM_HOME/.codex-native/`;
-keep that folder. It was qualified on macOS arm64. See
-[Install plugins](../install-plugins/) for current limits.
+APM never runs the `codex` binary and does not register the plugin with Codex.
+Codex installs a plugin only through `codex plugin add`, a git marketplace
+upgrade, or its plugin browser; a settings entry alone does not install it.
+That is criterion A3 (declarative enable) of the
+[native plugin activation profile](../../specs/openapm-v01/#req-na-006), which
+Codex does not meet. Every install that split-installs a plugin for Codex says
+so once:
+
+```text
+[i] Codex: split-installed 1 plugin(s) at user scope (review-kit). Codex cannot
+enable a plugin from its settings alone (native activation criterion A3,
+declarative enable), so APM deployed each plugin's skills, agents, hooks and
+MCP servers separately and does not register it with Codex.
+```
+
+Approve hooks and MCP servers per type, as for any package
+([Approve hooks and MCP servers](../approve-executables/)).
+
+### Codex registrations from earlier APM versions
+
+Earlier APM versions registered `.codex-plugin` bundles by running
+`codex app-server`, and kept an ownership journal in `~/.apm/.codex-native/`.
+The next `apm install -g` or `apm uninstall -g` retires those registrations
+without running Codex, and reports what it did:
+
+- It removes the `[plugins."<name>@apm-..."]` and `[marketplaces.apm-...]`
+  entries from `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) while
+  they still hold what APM wrote: a disabled plugin and the recorded source.
+  Every other key is kept.
+- It leaves a registration you enabled or changed in place, warns once, and
+  stops managing it. An enabled one loads alongside the split install; remove
+  it in Codex if you do not need it.
+- It deletes its own snapshots and journal. Codex's plugin cache belongs to
+  Codex and is not touched.
+
+If the journal or `config.toml` cannot be read, nothing changes and the warning
+names the file to fix before you rerun `apm install -g`.
 
 ## Verify
 
