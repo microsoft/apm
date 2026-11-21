@@ -9,12 +9,14 @@ import pytest
 from scripts.architecture_linter.checks.marketplace_project_map import RULE_ID
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-marketplace-project-map")]
 
 _ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_project_map_routes_through_owner() -> None:
+    owner = (_ROOT / "src/apm_cli/marketplace/project_marketplaces.py").read_text(encoding="utf-8")
+    assert "def bind_project_marketplaces(" in owner
     report = run_selected_rules(_ROOT, (RULE_ID,))
     assert not report.violations
     assert not report.failures
@@ -78,4 +80,6 @@ def test_project_map_guard_rejects_bypasses(path: str, before: str, after: str) 
     report = run_selected_rules(
         _ROOT, (RULE_ID,), source_overrides={source_path: source.replace(before, after)}
     )
+    # The mutation is surgical: the linter still reads and parses every file.
+    assert report.failures == ()
     assert any(item.rule_id == RULE_ID for item in report.violations)

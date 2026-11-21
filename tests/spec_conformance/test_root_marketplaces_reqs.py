@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.marketplace import registry as registry_mod
 from apm_cli.marketplace.errors import UndeclaredMarketplaceError
 from apm_cli.marketplace.models import MarketplaceSource
 from apm_cli.marketplace.project_marketplaces import (
@@ -18,6 +19,8 @@ from apm_cli.marketplace.registry import add_marketplace, get_marketplace_by_nam
 from apm_cli.marketplace.user_manifest import DeclaredMarketplace
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from tests.spec_conformance._helpers import assert_spec_contains
+
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-marketplace-project-map")]
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -32,13 +35,14 @@ FIXTURE = (
 def user_root(tmp_path, monkeypatch):
     home = tmp_path / "home" / ".apm"
     home.mkdir(parents=True)
-    monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(home))
     monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(home / "config.json"))
     monkeypatch.setattr("apm_cli.config._config_cache", None)
+    registry_mod._invalidate_cache()
     clear_apm_yml_cache()
     yield home
     clear_apm_yml_cache()
+    registry_mod._invalidate_cache()
 
 
 def _catalog(root: Path, name: str) -> Path:

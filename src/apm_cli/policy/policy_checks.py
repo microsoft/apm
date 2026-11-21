@@ -1350,6 +1350,7 @@ def _check_marketplace_allow(origins: MarketplaceOrigins, policy: MarketplacePol
     catalog, an unparseable source and a row with no recorded origin are
     refused: an allow-list must never pass an origin it cannot name.
     """
+    from ..core.remediation import MARKETPLACE_ALLOW_READD
     from ..marketplace.project_marketplaces import declared_marketplace_origin
     from ..marketplace.source_identity import marketplace_policy_subject
     from .matcher import first_matching_pattern
@@ -1391,10 +1392,7 @@ def _check_marketplace_allow(origins: MarketplaceOrigins, policy: MarketplacePol
             else "has no recorded catalog origin, so the org policy marketplace.allow list "
             "cannot admit it"
         )
-        reason = (
-            f"{problem}; remove its entry from apm.yml and run 'apm install', then add it "
-            "back from an allowed catalog, or ask your org admin to allow the catalog"
-        )
+        reason = f"{problem}; {MARKETPLACE_ALLOW_READD.clause()}, or ask your org admin to allow the catalog"
         subjects.append(PolicySubject(label, reason, remedy=None))
     if subjects:
         return CheckResult(
@@ -1546,7 +1544,7 @@ def _check_dependency_content_hashes(
 # -- Aggregate runners ---------------------------------------------
 
 
-def run_dependency_policy_checks(
+def run_dependency_policy_checks(  # noqa: PLR0913
     deps_to_install,
     *,
     lockfile=None,

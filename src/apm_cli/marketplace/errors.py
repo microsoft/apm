@@ -354,10 +354,11 @@ class ProjectMarketplaceOriginConflictError(MarketplaceOriginConflictError):
         self.plugin_name = plugin_name
         self.locked_origin = locked
         self.current_origin = current
+        from ..core.remediation import MARKETPLACE_PROJECT_ORIGIN_RELOCK
+
         MarketplaceError.__init__(
             self,
             f"marketplace {marketplace_name!r} in apm.yml now points at {current}, but "
             f"apm.lock.yaml recorded {plugin_name!r} from {locked}. Nothing was changed. "
-            "Run 'apm install' without --frozen to re-resolve through apm.yml, then "
-            "commit apm.lock.yaml.",
+            + MARKETPLACE_PROJECT_ORIGIN_RELOCK.sentence(),
         )

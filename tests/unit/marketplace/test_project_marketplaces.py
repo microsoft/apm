@@ -40,16 +40,26 @@ from apm_cli.policy.policy_checks import (
 )
 from apm_cli.policy.schema import ApmPolicy, MarketplacePolicy
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-project-map")]
+
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path, monkeypatch):
     home = tmp_path / "home" / ".apm"
     home.mkdir(parents=True)
-    monkeypatch.setattr("apm_cli.marketplace.registry._registry_cache", None)
     monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(home))
     monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(home / "config.json"))
     monkeypatch.setattr("apm_cli.config._config_cache", None)
-    return home
+    registry_mod._invalidate_cache()
+    yield home
+    registry_mod._invalidate_cache()
+
+
+def test_absent_marketplaces_key_is_none_and_empty_key_is_empty(tmp_path):
+    from apm_cli.marketplace.user_manifest import validate_marketplaces_declaration
+
+    assert validate_marketplaces_declaration({}, tmp_path / "apm.yml") is None
+    assert validate_marketplaces_declaration({"marketplaces": None}, tmp_path / "apm.yml") == ()
 
 
 def _catalog(root: Path, name: str) -> Path:
@@ -181,7 +191,7 @@ class TestLockedOrigin:
             require_locked_catalog_origin("acme", "p", lock)
             require_locked_catalog_origin("ACME", "p", lock)
         assert isinstance(refusal, MarketplaceOriginConflictError)
-        assert "without --frozen" in str(refusal)
+        assert "Drop --frozen" in str(refusal)
         assert "github.com/old/catalog" in str(refusal)
         assert len(notices) == 1
         assert "Re-resolving through apm.yml" in notices[0]

@@ -30,6 +30,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.promise("P-OWN-marketplace-project-map", "P-OWN-marketplace-catalog-origin"),
 ]
 
 _HOST = "gitlab.example.invalid"
@@ -193,7 +194,7 @@ def test_root_map_wins_over_a_lock_written_through_a_registration(scenario, apm_
     )
     frozen_output = _output(frozen)
     assert _REMOTE_A in frozen_output and _REMOTE_B in frozen_output
-    assert "without --frozen" in frozen_output
+    assert "Drop --frozen" in frozen_output
     assert (project / "apm.lock.yaml").read_bytes() == before
     (install,) = runner.run_sequence(
         (("install", *_NO_POLICY),),

@@ -61,6 +61,11 @@ COMPONENT_ONLY: dict[str, str] = {
     "marketplace-yml-compile": _TEMPLATE,
     "marketplace-origin-readd": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
     "marketplace-origin-reinstall": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
+    "marketplace-project-origin-relock": "installed-CLI refusal asserted by "
+    "test_root_map_wins_over_a_lock_written_through_a_registration (needs a remote catalog "
+    "locked through a registration, then a committed map naming another origin)",
+    "marketplace-allow-readd": "installed-CLI remedy executed by "
+    "test_marketplace_allow_judges_locked_and_declared_origins (needs a served org policy)",
     "marketplace-ref-swap-accept": "test_marketplace_ref_swap_lifecycle asserts the printed next step; full sentence in test_remediation_gate9_call_sites",
 }
 

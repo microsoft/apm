@@ -17,7 +17,10 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-marketplace-project-map"),
+]
 
 
 def _use_user_root(monkeypatch, home: Path) -> None:

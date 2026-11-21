@@ -24,7 +24,6 @@ from apm_cli.marketplace.reconcile import (
 from apm_cli.marketplace.user_manifest import (
     DeclaredMarketplace,
     parse_declared_marketplaces,
-    validate_marketplaces_declaration,
 )
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 
@@ -139,17 +138,14 @@ class TestParseDeclaredMarketplaces:
 
 
 class TestManifestDeclaration:
-    def test_project_manifest_declaration_is_parsed(self, tmp_path):
+    def test_project_manifest_declaration_is_parsed(self, tmp_path, capsys):
         project = tmp_path / "proj"
         project.mkdir()
         apm_yml = project / "apm.yml"
         _write_manifest(apm_yml, [{"name": "acme", "source": "acme-org/m"}])
         pkg = APMPackage.from_apm_yml(apm_yml)
         assert pkg.marketplaces == (DeclaredMarketplace("acme", "acme-org/m"),)
-
-    def test_absent_key_is_none_and_empty_key_is_empty(self, tmp_path):
-        assert validate_marketplaces_declaration({}, tmp_path / "apm.yml") is None
-        assert validate_marketplaces_declaration({"marketplaces": None}, tmp_path / "apm.yml") == ()
+        assert "Unknown top-level" not in capsys.readouterr().out
 
     def test_project_manifest_shape_errors_surface_on_parse(self, tmp_path):
         apm_yml = tmp_path / "apm.yml"

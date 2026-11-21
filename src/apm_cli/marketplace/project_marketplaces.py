@@ -111,7 +111,9 @@ def read_project_marketplaces(project_root: Path) -> tuple[DeclaredMarketplace, 
     Raises:
         ValueError: The manifest or its ``marketplaces:`` map is malformed.
     """
-    manifest = project_root / "apm.yml"
+    from ..core.scope import manifest_file
+
+    manifest = manifest_file(project_root)
     if not manifest.is_file():
         return None
     from ..models.manifest_io import load_manifest

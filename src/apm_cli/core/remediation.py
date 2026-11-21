@@ -444,6 +444,20 @@ MARKETPLACE_REF_SWAP_ACCEPT = _entry(
     "accept the new ref (pin '{key}')",
     before="if the publisher moved this version on purpose",
 )
+MARKETPLACE_PROJECT_ORIGIN_RELOCK = _entry(
+    "marketplace-project-origin-relock",
+    "apm install",
+    "re-resolve it through the apm.yml marketplaces: map",
+    before="drop --frozen",
+    then="commit apm.lock.yaml",
+)
+MARKETPLACE_ALLOW_READD = _entry(
+    "marketplace-allow-readd",
+    "apm install",
+    "release the package locked from that catalog",
+    before="remove its entry from apm.yml",
+    then="add it back from an allowed catalog",
+)
 # -- end W2 marketplace --
 # -- W2 bundle --
 PACK_LOCKFILE_MISSING = _entry(
