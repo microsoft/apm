@@ -8,6 +8,11 @@ owner and then writes that same string. A raw-source comparison
 (``is_content_identical_to_source``), an inline ``read_bytes()`` compare, or a
 bare ``check_collision`` in ``agent_integrator.py`` re-derives the decision
 against the wrong bytes and reports APM's own earlier output as skipped.
+
+The per-agent loop also creates no directory: rendering may skip an agent
+(Kiro and Gemini validation), and ``_deploy_rendered_agent`` creates the
+parent only when it writes, so a package whose agents are all skipped must
+leave the target tree untouched.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ _UNGUARDED_WRITERS = frozenset({"copy_agent", "_write_codex_agent"})
 _WRITE_ALLOWED_IN = frozenset(
     {_DEPLOY, "AgentIntegrator.copy_agent", "AgentIntegrator._write_codex_agent"}
 )
+_AGENT_LOOP = "AgentIntegrator.integrate_agents_for_target"
 
 
 def _call_name(node: ast.Call) -> str:
@@ -97,6 +103,12 @@ def check_agent_render_then_adopt(provider: FactsProvider) -> tuple[Violation, .
             )
         elif name == "write_text_lf" and where not in _WRITE_ALLOWED_IN:
             _flag(node, f"agent writes must go through {_DEPLOY}")
+        elif name == "mkdir" and where == _AGENT_LOOP:
+            _flag(
+                node,
+                f"{_AGENT_LOOP} must not create directories; {_DEPLOY} creates the "
+                "parent only when it writes",
+            )
         elif name == _OWNER_METHOD:
             if where != _DEPLOY:
                 _flag(node, f"{_OWNER_METHOD} for agents is called only from {_DEPLOY}")

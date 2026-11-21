@@ -379,10 +379,10 @@ class AgentIntegrator(BaseIntegrator):
         if not agent_files:
             return IntegrationResult(0, 0, 0, [])
 
+        # No directory is created here: _deploy_rendered_agent creates the
+        # parent only when it writes, so a package whose agents are all
+        # skipped leaves the target tree untouched.
         agents_dir = target_root / mapping.subdir
-        # Lazy mkdir: only create the dir when we actually need to write.
-        # This avoids creating .kiro/agents/ when every agent is invalid-tools.
-        agents_dir_created = False
 
         files_integrated = 0
         files_skipped = 0
@@ -417,45 +417,18 @@ class AgentIntegrator(BaseIntegrator):
                 files_skipped += 1
                 continue
 
-            links_resolved = 0
-            if mapping.format_id == "kiro_agent":
-                # req-tg-009: Preflight render+validate MUST run before any
-                # content-identity adoption fast-path or filesystem mutation.
-                # If validation fails, skip without writing or creating dirs.
-                rendered, ok = self._preflight_render_kiro_agent(
-                    source_file,
-                    diagnostics=diagnostics,
-                    package_name=package_info.package.name,
-                )
-                if not ok:
-                    files_skipped += 1
-                    continue
-            elif mapping.format_id == "gemini_agent":
-                # Same preflight contract as Kiro: validate before any mutation.
-                rendered, links_resolved = self._preflight_render_gemini_agent(
-                    source_file,
-                    target_path,
-                    diagnostics=diagnostics,
-                    package_name=package_info.package.name,
-                )
-                if rendered is None:
-                    files_skipped += 1
-                    continue
-            else:
-                # Non-kiro path: eager mkdir (existing behavior preserved).
-                if not agents_dir_created:
-                    agents_dir.mkdir(parents=True, exist_ok=True)
-                    agents_dir_created = True
-                if mapping.format_id == "codex_agent":
-                    rendered, links_resolved = self._render_codex_agent(
-                        source_file,
-                        target_path,
-                        diagnostics=diagnostics,
-                        package_name=package_info.package.name,
-                        resolve_links=self.resolve_links,
-                    )
-                else:
-                    rendered, links_resolved = self._render_copy_agent(source_file, target_path)
+            # req-tg-009: render and validate before any adoption check or
+            # filesystem change; None means the agent is skipped.
+            rendered, links_resolved = self._render_agent_for_target(
+                mapping.format_id,
+                source_file,
+                target_path,
+                diagnostics=diagnostics,
+                package_name=package_info.package.name,
+            )
+            if rendered is None:
+                files_skipped += 1
+                continue
 
             outcome = self._deploy_rendered_agent(
                 target_path,
@@ -486,6 +459,41 @@ class AgentIntegrator(BaseIntegrator):
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
         )
+
+    def _render_agent_for_target(
+        self,
+        format_id: str,
+        source_file: Path,
+        target_path: Path,
+        *,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> tuple[str | None, int]:
+        """Render one agent for *format_id* without touching the filesystem.
+
+        Single dispatch point for agent renderers. Every renderer returns
+        ``(rendered, links_resolved)``; ``rendered`` is ``None`` when the
+        agent must be skipped (its renderer has already emitted the warning).
+        """
+        if format_id == "kiro_agent":
+            rendered, ok = self._preflight_render_kiro_agent(
+                source_file, diagnostics=diagnostics, package_name=package_name
+            )
+            return (rendered if ok else None), 0
+        if format_id == "gemini_agent":
+            return self._preflight_render_gemini_agent(
+                source_file, target_path, diagnostics=diagnostics, package_name=package_name
+            )
+        if format_id == "codex_agent":
+            rendered, links_resolved = self._render_codex_agent(
+                source_file,
+                target_path,
+                diagnostics=diagnostics,
+                package_name=package_name,
+                resolve_links=self.resolve_links,
+            )
+            return rendered, links_resolved
+        return self._render_copy_agent(source_file, target_path)
 
     def sync_for_target(
         self,
