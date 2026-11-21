@@ -3278,6 +3278,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_gemini_agent_tools_gate_fails_closed_before_adopt",
         "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt",
         "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings"
       ],
@@ -3286,8 +3287,9 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 2,
+      "test_count": 3,
       "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_gemini_agent_tools_gate_fails_closed_before_adopt",
         "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_fails_closed_before_adopt",
         "tests/spec_conformance/test_manifest_reqs.py::test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings"
       ]

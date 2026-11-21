@@ -2018,6 +2018,64 @@ def test_authorized_source_plan_requirement_covers_reintegration_and_symlinks() 
 
 
 @pytest.mark.req("req-tg-009")
+def test_gemini_agent_tools_gate_fails_closed_before_adopt(tmp_path: Path) -> None:
+    """req-tg-009 for Gemini: an agent with a tool outside the Gemini set is not
+    written or adopted, even over a byte-identical target, and the diagnostic
+    names the rejected value and the approved set; a conformant sibling deploys.
+    """
+    from datetime import datetime
+
+    from apm_cli.integration.agent_integrator import AgentIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import (
+        APMPackage,
+        GitReferenceType,
+        PackageInfo,
+        ResolvedReference,
+    )
+    from apm_cli.utils.diagnostics import CATEGORY_WARNING, DiagnosticCollector
+
+    apm_agents = tmp_path / "pkg" / ".apm" / "agents"
+    apm_agents.mkdir(parents=True)
+    bad_content = "---\ndescription: Bad\ntools:\n- read_file\n- execute_arbitrary_code\n---\nB\n"
+    (apm_agents / "hacked.agent.md").write_text(bad_content, encoding="utf-8")
+    (apm_agents / "ok.agent.md").write_text(
+        "---\ndescription: Ok\ntools:\n- read_file\n---\nOk\n", encoding="utf-8"
+    )
+    gemini_agents = tmp_path / ".gemini" / "agents"
+    gemini_agents.mkdir(parents=True)
+    target_path = gemini_agents / "hacked.md"
+    target_path.write_text(bad_content, encoding="utf-8")
+
+    package_info = PackageInfo(
+        package=APMPackage(name="test-pkg", version="1.0.0", package_path=tmp_path / "pkg"),
+        install_path=tmp_path / "pkg",
+        resolved_reference=ResolvedReference(
+            original_ref="main",
+            ref_type=GitReferenceType.BRANCH,
+            resolved_commit="abc123",
+            ref_name="main",
+        ),
+        installed_at=datetime.now().isoformat(),
+    )
+    diagnostics = DiagnosticCollector()
+    result = AgentIntegrator().integrate_agents_for_target(
+        KNOWN_TARGETS["gemini"],
+        package_info,
+        tmp_path,
+        managed_files={".gemini/agents/hacked.md", ".gemini/agents/ok.md"},
+        diagnostics=diagnostics,
+    )
+
+    assert result.files_adopted == 0
+    assert target_path not in result.target_paths
+    assert result.target_paths == [gemini_agents / "ok.md"]
+    [warning] = diagnostics.by_category()[CATEGORY_WARNING]
+    assert "execute_arbitrary_code" in warning.message
+    assert "Approved Gemini tool names" in warning.message
+
+
+@pytest.mark.req("req-tg-009")
 def test_kiro_agent_tools_gate_skips_one_agent_and_locks_siblings(tmp_path: Path) -> None:
     """req-tg-009: one non-conformant agent MUST NOT block a conformant sibling.
 
