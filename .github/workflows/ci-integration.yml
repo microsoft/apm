@@ -104,6 +104,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev --extra build
@@ -158,6 +159,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev
@@ -230,6 +232,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev
@@ -263,6 +266,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev
@@ -311,6 +315,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -321,6 +326,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install Unix shell startup test runtimes
         run: bash scripts/ci-apt-install.sh fish zsh
@@ -336,8 +342,12 @@ jobs:
         id: cache-bucket
         run: echo "week=$(date -u +'%Y-%U')" >> "$GITHUB_OUTPUT"
 
-      - name: Cache APM resolved git/HTTP fetches
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore here, save after the tests (as actions/cache would) except on
+      # a push: main-push-gate.yml and merge-train.yml call this workflow on
+      # push, and neither may save a cache.
+      - name: Restore APM resolved git/HTTP fetches
+        id: apm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/apm
           key: apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-${{ hashFiles('uv.lock') }}
@@ -373,6 +383,13 @@ jobs:
         # Keep an outer cap above the runtime setup and sharded integration
         # suite so runner variance does not turn into an unbounded job.
         timeout-minutes: 25
+
+      - name: Save APM resolved git/HTTP fetches
+        if: success() && github.event_name != 'push' && steps.apm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/apm
+          key: apm-cache-shard${{ matrix.shard }}-${{ steps.cache-bucket.outputs.week }}-${{ hashFiles('uv.lock') }}
 
       - name: Rename coverage data for shard
         if: always()
@@ -415,6 +432,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -425,6 +443,7 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       - name: Install Unix shell startup test runtimes
         run: bash scripts/ci-apt-install.sh fish zsh
@@ -564,6 +583,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0

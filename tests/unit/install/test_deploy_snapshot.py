@@ -1,15 +1,19 @@
-"""Audit-gated deploy snapshot: restore is byte-exact, and audit off costs nothing (#4085)."""
+"""Lazy deploy journal: only touched paths are kept, and rollback restores them (#4282)."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.install.deploy_snapshot import DeployTargetSnapshot, capture_audit_gated_snapshot
+from apm_cli.deps.lockfile_write_authority import (
+    LockfileWriter,
+    lockfile_write_scope,
+    stage_lockfile,
+)
 from apm_cli.install.transaction import InstallTransaction
+from apm_cli.integration import write_seam
 
 pytestmark = [
     pytest.mark.component,
@@ -30,41 +34,144 @@ def _tree(root: Path) -> dict[str, bytes | str]:
     return state
 
 
-def test_audit_off_takes_no_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def apm_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "apm-home"
     monkeypatch.setenv("APM_HOME", str(home))
-    ctx = SimpleNamespace(dry_run=False, lockfile_only=False, no_policy=True, audit_override=None)
-
-    assert capture_audit_gated_snapshot(ctx) is None
-    assert not (home / "install-snapshots").exists()
+    return home
 
 
-def test_restore_returns_every_path_to_its_captured_bytes(tmp_path: Path) -> None:
+def _transaction(project: Path, *, acquire_lock: bool = False) -> InstallTransaction:
+    project.mkdir(parents=True, exist_ok=True)
+    return InstallTransaction(
+        manifest_path=project / "apm.yml",
+        apm_modules_dir=project / "apm_modules",
+        validation=None,
+        logger=None,
+        acquire_lock=acquire_lock,
+    )
+
+
+def test_only_the_paths_an_install_writes_are_copied(tmp_path: Path, apm_home: Path) -> None:
+    project = tmp_path / "project"
+    agents = project / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "touched.md").write_bytes(b"v1\n")
+    (agents / "untouched.md").write_bytes(b"other\n")
+    transaction = _transaction(project)
+
+    transaction.journal_deploy_writes()
+    assert not (apm_home / "install-snapshots").exists()
+    write_seam.write_text_lf(agents / "touched.md", "v2\n")
+    write_seam.write_text_lf(agents / "touched.md", "v3\n")
+
+    [store] = (apm_home / "install-snapshots").iterdir()
+    assert [p.read_bytes() for p in store.iterdir()] == [b"v1\n"]
+    transaction.rollback()
+    assert (agents / "touched.md").read_bytes() == b"v1\n"
+    assert not (apm_home / "install-snapshots").exists()
+
+
+def test_rollback_returns_every_written_path_to_its_prior_state(
+    tmp_path: Path, apm_home: Path
+) -> None:
     project = tmp_path / "project"
     agents = project / ".kiro" / "agents"
     agents.mkdir(parents=True)
     (agents / "kept.md").write_bytes(b"v1\n")
     (agents / "link.md").symlink_to("kept.md")
     (project / ".gitignore").write_bytes(b"node_modules/\n")
+    skill = project / ".claude" / "skills" / "old"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"old skill\n")
     before = _tree(project)
-    paths = [agents, project / ".gitignore", project / ".agents" / "skills"]
-    store_parent = tmp_path / "apm-home" / "install-snapshots"
+    transaction = _transaction(project)
+    transaction.journal_deploy_writes()
 
-    snapshot = DeployTargetSnapshot.capture(paths, store_parent)
-    (agents / "kept.md").write_bytes(b"v2 \xe2\x80\xae\n")
-    (agents / "new.md").write_bytes(b"new\n")
-    (agents / "link.md").unlink()
-    (project / ".gitignore").write_bytes(b"node_modules/\napm_modules/\n")
-    (project / ".agents" / "skills" / "s").mkdir(parents=True)
-    (project / ".agents" / "skills" / "s" / "SKILL.md").write_bytes(b"skill\n")
+    write_seam.write_text_lf(agents / "kept.md", "v2 \u202e\n")
+    write_seam.write_text_lf(agents / "new.md", "new\n")
+    write_seam.unlink(agents / "link.md")
+    with write_seam.open_for_write(project / ".gitignore", "a") as handle:
+        handle.write("apm_modules/\n")
+    write_seam.rmtree(skill)
+    created = project / ".agents" / "skills" / "s"
+    write_seam.mkdir(created, parents=True)
+    write_seam.write_text(created / "SKILL.md", "skill\n")
 
-    assert snapshot.restore() == []
+    transaction.rollback()
+
     assert _tree(project) == before
-    assert not store_parent.exists()
+    assert not (apm_home / "install-snapshots").exists()
+
+
+def test_a_rollback_discards_the_staged_lockfile(tmp_path: Path, apm_home: Path) -> None:
+    project = tmp_path / "project"
+    lock = project / "apm.lock.yaml"
+    deployed = project / ".github" / "agents" / "a.md"
+    transaction = _transaction(project)
+
+    with pytest.raises(RuntimeError), lockfile_write_scope(LockfileWriter.INSTALL):
+        transaction.journal_deploy_writes()
+        write_seam.mkdir(deployed.parent, parents=True, exist_ok=True)
+        write_seam.write_text_lf(deployed, "a\n")
+        assert stage_lockfile(lock, "lockfile_version: '1'\n")
+        transaction.rollback()
+        raise RuntimeError("failed after deploy")
+
+    assert not lock.exists()
+    assert not (project / ".github").exists()
+
+
+@pytest.mark.parametrize("lock_commits", [True, False])
+def test_the_journal_settles_only_when_the_staged_lockfile_reaches_disk(
+    tmp_path: Path, apm_home: Path, lock_commits: bool
+) -> None:
+    project = tmp_path / "project"
+    lock = project / "apm.lock.yaml"
+    deployed = project / "a.md"
+    transaction = _transaction(project)
+
+    with pytest.raises(KeyboardInterrupt) if not lock_commits else _no_error():
+        with lockfile_write_scope(LockfileWriter.INSTALL):
+            transaction.journal_deploy_writes()
+            write_seam.write_text_lf(deployed, "a\n")
+            stage_lockfile(lock, "lockfile_version: '1'\n")
+            transaction.release_deploy_targets()
+            if not lock_commits:
+                raise KeyboardInterrupt
+    transaction.rollback()
+
+    assert lock.exists() is lock_commits
+    assert deployed.exists() is lock_commits
+    assert not (apm_home / "install-snapshots").exists()
+
+
+class _no_error:
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+
+def test_the_next_install_reaps_abandoned_journals(tmp_path: Path, apm_home: Path) -> None:
+    store_parent = apm_home / "install-snapshots"
+    abandoned = store_parent / "deploy-killed"
+    retained = store_parent / "retained-needed"
+    for store in (abandoned, retained):
+        store.mkdir(parents=True)
+        (store / "0").write_bytes(b"prior\n")
+    transaction = _transaction(tmp_path / "project", acquire_lock=True)
+
+    transaction.journal_deploy_writes()
+    transaction.rollback()
+
+    assert not abandoned.exists()
+    assert (retained / "0").read_bytes() == b"prior\n"
 
 
 def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: Path) -> None:
-    """#4159: audit off, no snapshot; created roots left empty still go."""
+    """#4159: created roots left empty go; anything else stays."""
     project = tmp_path / "project"
     project.mkdir()
     empty_root = project / ".github"
@@ -73,13 +180,7 @@ def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: 
     for root in (empty_root, used_root, preexisting):
         root.mkdir()
     (used_root / "user.md").write_bytes(b"mine\n")
-    transaction = InstallTransaction(
-        manifest_path=project / "apm.yml",
-        apm_modules_dir=project / "apm_modules",
-        validation=None,
-        logger=None,
-        acquire_lock=False,
-    )
+    transaction = _transaction(project)
     transaction.track_created_target_roots([empty_root, used_root])
 
     transaction.rollback()
@@ -87,3 +188,87 @@ def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: 
     assert not empty_root.exists()
     assert (used_root / "user.md").read_bytes() == b"mine\n"
     assert preexisting.is_dir()
+
+
+def test_a_marked_store_survives_the_reaper_when_its_rename_fails(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+
+    target = tmp_path / "a.md"
+    target.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots")
+    journal.record(target)
+
+    def refuse(_self: Path, _target: Path) -> None:
+        raise OSError("rename refused")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    retained = journal._retain()
+    monkeypatch.undo()
+    reap_abandoned_journals(apm_home / "install-snapshots")
+
+    assert retained.name.startswith("deploy-")
+    assert (retained / "0").read_bytes() == b"prior\n"
+
+
+def test_an_append_through_a_symlink_restores_its_destination(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    project = tmp_path / "project"
+    shared = tmp_path / "shared.gitignore"
+    shared.write_bytes(b"node_modules/\n")
+    project.mkdir()
+    (project / ".gitignore").symlink_to(shared)
+    transaction = _transaction(project)
+    transaction.journal_deploy_writes()
+
+    with write_seam.open_for_write(project / ".gitignore", "a") as handle:
+        handle.write("apm_modules/\n")
+    transaction.rollback()
+
+    assert shared.read_bytes() == b"node_modules/\n"
+    assert (project / ".gitignore").is_symlink()
+    assert (project / ".gitignore").resolve() == shared.resolve()
+
+
+def test_a_rollback_with_nothing_deployed_discards_the_staged_lockfile(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    project = tmp_path / "project"
+    lock = project / "apm.lock.yaml"
+    transaction = _transaction(project)
+
+    with pytest.raises(RuntimeError), lockfile_write_scope(LockfileWriter.INSTALL):
+        transaction.journal_deploy_writes()
+        assert stage_lockfile(lock, "lockfile_version: '1'\n")
+        transaction.rollback()
+        raise RuntimeError("failed with nothing deployed")
+
+    assert not lock.exists()
+
+
+def test_the_journal_settles_before_a_failing_post_commit_action(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+
+    project = tmp_path / "project"
+    lock = project / "apm.lock.yaml"
+    deployed = project / "a.md"
+    transaction = _transaction(project)
+
+    def bind_claims() -> None:
+        raise RuntimeError("claim binding failed")
+
+    with pytest.raises(RuntimeError), lockfile_write_scope(LockfileWriter.INSTALL):
+        transaction.journal_deploy_writes()
+        write_seam.write_text_lf(deployed, "a\n")
+        stage_lockfile(lock, "lockfile_version: '1'\n")
+        after_lockfile_commit(bind_claims)
+        transaction.release_deploy_targets()
+    transaction.rollback()
+
+    # The lockfile reached disk and records the deploy, so rollback keeps it.
+    assert lock.exists()
+    assert deployed.read_bytes() == b"a\n"
