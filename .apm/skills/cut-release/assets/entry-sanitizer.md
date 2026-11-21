@@ -1,8 +1,10 @@
 # entry-sanitizer -- one short line per user-visible change
 
-Loaded by `cut-release` at Phase 3. Re-sanitizes the whole
-[Unreleased] block into a dated version block where each change
-has one line in one section, plus release-time Highlights.
+Loaded by `cut-release` at Phase 3, after
+`scripts/changelog_fragments.py assemble` has written the
+`changelog.d/` fragments and any legacy [Unreleased] bullets into
+a dated version block. Re-sanitizes that whole block so each
+change has one line in one section, plus release-time Highlights.
 
 ## Per-entry rubric
 
@@ -84,7 +86,8 @@ hunk to write the entry; ignore the `.apm/` noise.
 
 ## Consolidation rules
 
-The existing [Unreleased] block was written PR by PR and drifts.
+The assembled block (fragments plus legacy [Unreleased] bullets)
+was written PR by PR and drifts.
 Treat every line as a draft and re-sanitize the whole block:
 
 - DEDUPE ACROSS SECTIONS. If a change appears in more than one
@@ -117,7 +120,8 @@ repeat of a change.
 
 ## Output shape
 
-The rewritten block goes in place of `[Unreleased]`:
+`assemble` writes the block below an empty `[Unreleased]`; the
+rewritten block keeps that place:
 
 ```
 ## [Unreleased]

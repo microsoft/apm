@@ -1,0 +1,15 @@
+{
+  "issue": 4209,
+  "fixed_in": "0.37.0",
+  "summary": "apm compile warned that compilation produced no output files and to check target directories after it had intentionally skipped AGENTS.md because .github/instructions/ already covered Copilot.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_compile_copilot_dedup_e2e.py::test_compile_after_full_dedup_does_not_warn_about_zero_output"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "id": "portability.byte_deterministic",
+  "phase": 0,
+  "oracle_tier": "semantic",
+  "law": "Equivalent inputs produce portable paths and deterministic bytes across supported platforms."
+}

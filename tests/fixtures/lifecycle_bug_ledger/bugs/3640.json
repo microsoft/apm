@@ -1,0 +1,14 @@
+{
+  "issue": 3640,
+  "summary": "SSH transport and cache behavior are excluded source semantics.",
+  "failure_modes": [
+    "cache",
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_ssh_cache_transport_lifecycle.py::test_ssh_non_github_dependency_never_tries_https"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "issue": 2888,
+  "fixed_in": "Unreleased",
+  "summary": "Fresh resolution rejected manifestless nested skill collections accepted by package validation.",
+  "failure_modes": [
+    "outcome",
+    "transaction",
+    "idempotency",
+    "cache"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state",
+    "idempotency.byte_stable",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_package_shape_lifecycle_contract.py::test_manifestless_skill_bundle_subset_lifecycle",
+    "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_valid_bundle_activates_and_reloads",
+    "tests/unit/deps/test_apm_resolver_edge_cases.py::TestManifestlessSkillBundleResolution::test_invalid_bundle_preserves_state",
+    "tests/integration/test_package_shape_lifecycle_contract.py::test_package_shape_lifecycle_contract",
+    "tests/integration/test_package_shape_lifecycle_contract.py::test_tampered_local_bundle_fails_before_consumer_state_writes"
+  ]
+}

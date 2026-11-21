@@ -33,7 +33,7 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
@@ -55,6 +55,7 @@ from apm_cli.core.auth_outcome import (  # noqa: F401 -- SecretRedactionFilter r
     classify_auth_outcome,
     sanitize_diagnostic_detail,
 )
+from apm_cli.core.catalog_credentials import CatalogCredential, resolve_catalog_credential
 from apm_cli.core.host_providers import (
     HOST_PROVIDERS,
     classify_host_provider,
@@ -101,6 +102,71 @@ _PORT_CREDENTIAL_DOCS_URL = (
 # must be neutralised too. GitPython already does this for every command it
 # runs; this keeps APM's own subprocess calls consistent with it.
 _GIT_MESSAGE_LOCALE_ENV: Mapping[str, str] = MappingProxyType({"LC_ALL": "C", "LANGUAGE": "C"})
+
+# #4324: opt-in strict mode scopes GitHub-class environment credentials to the
+# configured host (GITHUB_HOST, else github.com). Read once per AuthResolver.
+STRICT_HOST_CREDENTIALS_ENV = "APM_STRICT_HOST_CREDENTIALS"
+_STRICT_OFF_VALUES = frozenset({"", "0", "false", "no", "off"})
+_STRICT_ON_VALUES = frozenset({"1", "true", "yes", "on"})
+_GITHUB_CLASS_KINDS = frozenset({"github", "ghe_cloud", "ghes"})
+# Variables gh and git credential helpers can hand back for a GitHub-class
+# host (gh returns GH_TOKEN/GITHUB_TOKEN for github.com and *.ghe.com).
+_GITHUB_CLASS_ENV_TOKEN_NAMES = frozenset(
+    {"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GITHUB_APM_PAT"}
+)
+_GITHUB_CLASS_ENV_TOKEN_PREFIX = "GITHUB_APM_PAT_"  # noqa: S105 - variable-name prefix
+# One strict-mode warning per key per process (one CLI command).
+_strict_warnings_emitted: set[str] = set()
+_strict_warnings_lock = threading.Lock()
+
+
+def read_strict_host_credentials(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[bool, str | None]:
+    """Return ``(strict, unrecognised_value)`` for ``APM_STRICT_HOST_CREDENTIALS``.
+
+    Unset, empty, ``0``, ``false``, ``no`` and ``off`` keep the default
+    host-class behaviour; ``1``, ``true``, ``yes`` and ``on`` turn strict mode
+    on. Any other value fails closed: strict mode on, and the raw value is
+    returned so the caller can warn about it.
+    """
+    raw = (os.environ if environ is None else environ).get(STRICT_HOST_CREDENTIALS_ENV)
+    if raw is None:
+        return False, None
+    value = raw.strip().lower()
+    if value in _STRICT_OFF_VALUES:
+        return False, None
+    return True, (None if value in _STRICT_ON_VALUES else raw)
+
+
+def _without_github_class_env_tokens(environ: Mapping[str, str]) -> dict[str, str]:
+    """Copy *environ* without any GitHub-class environment token."""
+    return {
+        name: value
+        for name, value in environ.items()
+        if name not in _GITHUB_CLASS_ENV_TOKEN_NAMES
+        and not name.startswith(_GITHUB_CLASS_ENV_TOKEN_PREFIX)
+    }
+
+
+def _first_strict_warning(key: str) -> bool:
+    """Return True the first time *key* is seen in this process."""
+    with _strict_warnings_lock:
+        if key in _strict_warnings_emitted:
+            return False
+        _strict_warnings_emitted.add(key)
+        return True
+
+
+def _strict_configured_host() -> str:
+    """The one host strict mode lets GitHub-class environment tokens reach.
+
+    ``GITHUB_HOST`` may carry a scheme (``https://ghe.example.com``); only its
+    hostname counts. Unset or unparsable means ``github.com``.
+    """
+    raw = os.environ.get("GITHUB_HOST", "").strip()
+    host = urlsplit(raw).hostname if "://" in raw else raw.split("/")[0].split(":")[0]
+    return (host or "").lower() or "github.com"
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +263,10 @@ class AuthResolver:
         # for this resolver instance regardless of env/config.
         self._github_auth_first_cli = github_auth_first
         self._github_auth_first_warned = False
+        # #4324: the owner reads the strict-mode setting once.
+        self._strict_host_credentials, self._strict_unrecognised_value = (
+            read_strict_host_credentials()
+        )
         self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
@@ -427,6 +497,27 @@ class AuthResolver:
         if not token:
             return {}
         return {"Authorization": f"Bearer {token}"}
+
+    @staticmethod
+    def resolve_marketplace_catalog_credential(
+        *,
+        marketplace: str,
+        binding_url: str,
+        peer_names: Iterable[str],
+    ) -> CatalogCredential:
+        """Resolve the credential for a hosted catalog bound to *marketplace*.
+
+        Marketplace-only entry point: reads only the ``APM_MARKETPLACE_*``
+        variables for that name and never falls back to Git, host, package
+        registry or ``.netrc`` credentials. Every argument is required so a
+        caller cannot skip the binding or the ambiguity check.
+        """
+        return resolve_catalog_credential(
+            marketplace=marketplace,
+            binding_url=binding_url,
+            peer_names=tuple(peer_names),
+            environ=os.environ,
+        )
 
     # -- core resolution ----------------------------------------------------
 
@@ -848,7 +939,7 @@ class AuthResolver:
                 )
 
             _log(f"trying gh auth token for {host_info.display_name}")
-            gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+            gh_token = self._gh_cli_token(host_info)
             if gh_token:
                 _log(f"gh auth token resolved a credential for {host_info.display_name}")
                 self.note_credential_source_tried(host_info, "gh auth token")
@@ -859,7 +950,10 @@ class AuthResolver:
             path_suffix = f" (path={path})" if path else ""
             _log(f"trying git credential fill for {host_info.display_name}{path_suffix}")
             cred = self._token_manager.resolve_credential_from_git(
-                host_info.host, port=host_info.port, path=path
+                host_info.host,
+                port=host_info.port,
+                path=path,
+                **self._strict_fill_kwargs(host_info),
             )
             if cred:
                 _log(f"git credential fill resolved a credential for {host_info.display_name}")
@@ -1175,9 +1269,10 @@ class AuthResolver:
                     "public repository if available."
                 )
             else:
-                lines.append("Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'.")
+                lines.append(self._github_no_token_advice(host_info))
 
-        if org and host_info.kind not in ("ado", "gitlab", "generic"):
+        withheld = self._strict_scope_withholds(host_info)
+        if org and host_info.kind not in ("ado", "gitlab", "generic") and not withheld:
             lines.append(
                 f"If packages span multiple organizations, set per-org tokens: "
                 f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
@@ -1193,6 +1288,10 @@ class AuthResolver:
                 f" | git credential fill\n"
                 f"    Docs: {_PORT_CREDENTIAL_DOCS_URL}"
             )
+
+        if auth_ctx.token and withheld:
+            # A helper credential failed on a host strict mode withheld from.
+            lines.append(" ".join(self._strict_withheld_notice(host_info)))
 
         lines.append("Run with --verbose for detailed auth diagnostics.")
         return "\n".join(lines)
@@ -1232,12 +1331,20 @@ class AuthResolver:
             ]
             secondary = list(self._secondary_sources_tried.get((wanted_host, port), ()))
         sources = list(dict.fromkeys([*(ctx.source for ctx in contexts if ctx.token), *secondary]))
+        withheld = self._strict_scope_withholds(host_info)
         if sources:
             label = "credential" if len(sources) == 1 else "credentials"
-            return f"{label} tried: {', '.join(sources)}"
-        if not contexts:
+            tried = f"{label} tried: {', '.join(sources)}"
+        elif not contexts:
             return "no credential sent"
-        return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+        elif withheld:
+            tried = "no credential found"
+        else:
+            return f"no credential found in {', '.join(self._credential_sources(host_info, org))}"
+        if not withheld:
+            return tried
+        # The auth failure repeats the strict-mode notice and its remedy.
+        return f"{tried}. " + " ".join(self._strict_withheld_notice(host_info))
 
     def build_not_found_message(
         self,
@@ -1260,11 +1367,14 @@ class AuthResolver:
         """Return the credential sources ``_resolve_token`` consults, in order."""
         if host_info.kind == "ado":
             return ["ADO_APM_PAT", "az cli", "git credential helper"]
-        github_class = host_info.kind in ("github", "ghe_cloud", "ghes")
-        names = [f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"] if org and github_class else []
-        names.extend(
-            self._token_manager.TOKEN_PRECEDENCE.get(self._purpose_for_host(host_info), [])
-        )
+        github_class = host_info.kind in _GITHUB_CLASS_KINDS
+        if self._strict_scope_withholds(host_info):
+            names = [f"environment tokens (withheld by {STRICT_HOST_CREDENTIALS_ENV})"]
+        else:
+            names = [f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"] if org and github_class else []
+            names.extend(
+                self._token_manager.TOKEN_PRECEDENCE.get(self._purpose_for_host(host_info), [])
+            )
         if github_class:
             names.append("gh auth token")
         names.append("git credential helper")
@@ -1304,6 +1414,8 @@ class AuthResolver:
 
         All token-bearing requests use HTTPS.
         """
+        if self._strict_host_credentials:
+            self._warn_unrecognised_strict_value()
         if host_info.kind == "ado":
             # ADO resolve() chain: PAT env -> cloud AAD bearer -> none.
             # Path-scoped git credential fill is owned by try_with_fallback.
@@ -1334,26 +1446,17 @@ class AuthResolver:
         # ADO uses ADO_APM_PAT (single var) + AAD bearer in resolve();
         # path-scoped git credential fill is owned by try_with_fallback.
 
-        # 1. Per-org GitHub PAT (GitHub-class hosts only -- not GitLab / generic / ADO)
-        if org and host_info.kind in ("github", "ghe_cloud", "ghes"):
-            env_name = f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
-            token = os.environ.get(env_name)
-            if token:
-                return token, env_name, "basic"
-
-        # 2. Global env vars by host class
-        purpose = self._purpose_for_host(host_info)
-        token = self._token_manager.get_token_for_purpose(purpose)
-        if token:
-            source = self._identify_env_source(purpose)
-            return token, source, "basic"
+        # 1-2. Per-org GitHub PAT, then global env vars by host class
+        env_credential = self._env_credential(host_info, org)
+        if env_credential is not None:
+            return env_credential
 
         if not self._allow_external_fallback:
             return None, "none", "basic"
 
         # 3. gh CLI active account (eligibility gated inside the call;
         #    unsupported hosts return None instantly without a subprocess)
-        gh_token = self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+        gh_token = self._gh_cli_token(host_info)
         if gh_token:
             return gh_token, "gh-auth-token", "basic"
 
@@ -1368,8 +1471,9 @@ class AuthResolver:
             lookup_kwargs: dict[str, object] = {"port": host_info.port}
             if path is not None:
                 lookup_kwargs["path"] = path
-            if host_info.kind == "generic":
-                lookup_kwargs["env"] = self._generic_credential_lookup_env()
+            lookup_env = self._credential_lookup_env(host_info)
+            if lookup_env is not None:
+                lookup_kwargs["env"] = lookup_env
             credential = self._token_manager.resolve_credential_from_git(
                 host_info.host,
                 **lookup_kwargs,
@@ -1378,6 +1482,112 @@ class AuthResolver:
                 return credential, "git-credential-fill", "basic"
 
         return None, "none", "basic"
+
+    # -- #4324 strict host credentials -------------------------------------
+
+    @staticmethod
+    def _emit_strict_notice(message: str, remedy: str) -> None:
+        """Print a strict-mode notice now: a deferred one is lost when a command
+        stops early (for example when every package fails validation)."""
+        try:
+            from apm_cli.utils.console import _rich_warning
+
+            _rich_warning(f"{message} {remedy}", symbol="warning")
+        except ImportError as exc:
+            logger.debug("Console unavailable for strict-host-credentials notice: %s", exc)
+
+    def _strict_fill_kwargs(self, host_info: HostInfo) -> dict[str, object]:
+        """``env=`` for a secondary credential fill on a host strict mode withholds."""
+        if self._strict_scope_withholds(host_info):
+            return {"env": _without_github_class_env_tokens(os.environ)}
+        return {}
+
+    def _warn_unrecognised_strict_value(self) -> None:
+        """Warn once per command about an unrecognised strict-mode value."""
+        if self._strict_unrecognised_value is not None and _first_strict_warning("value"):
+            value = sanitize_diagnostic_detail(self._strict_unrecognised_value)
+            self._emit_strict_notice(
+                f"{STRICT_HOST_CREDENTIALS_ENV}={value!r} is not recognised; "
+                "strict host credentials are on.",
+                "Use 1/true/yes/on to keep it on, or 0/false/no/off to turn it off.",
+            )
+
+    def _strict_scope_withholds(self, host_info: HostInfo) -> bool:
+        """Return whether strict mode keeps environment tokens from *host_info*.
+
+        True only in strict mode, for a GitHub-class host other than the
+        configured one.
+        """
+        if not self._strict_host_credentials:
+            return False
+        self._warn_unrecognised_strict_value()
+        return (
+            host_info.kind in _GITHUB_CLASS_KINDS
+            and (host_info.host or "").lower() != _strict_configured_host()
+        )
+
+    def _strict_withheld_notice(self, host_info: HostInfo) -> tuple[str, str]:
+        """The withheld-token warning and its remedy, naming the host and mode."""
+        display = host_info.display_name
+        return (
+            f"Strict host credentials ({STRICT_HOST_CREDENTIALS_ENV}) withheld the "
+            f"environment token from {display}; it is not the configured GitHub host "
+            f"({_strict_configured_host()}).",
+            f"Check that {display} is an expected dependency host and sign in for it "
+            f"with 'gh auth login --hostname {display}' or a git credential helper; set "
+            f"GITHUB_HOST={display} only if the environment token belongs to that host.",
+        )
+
+    def _env_credential(self, host_info: HostInfo, org: str | None) -> tuple[str, str, str] | None:
+        """Steps 1-2: per-org ``GITHUB_APM_PAT_{ORG}``, then the host-class env vars."""
+        per_org = (
+            f"GITHUB_APM_PAT_{_org_to_env_suffix(org)}"
+            if org and host_info.kind in _GITHUB_CLASS_KINDS
+            else None
+        )
+        purpose = self._purpose_for_host(host_info)
+        if self._strict_scope_withholds(host_info):
+            available = bool(per_org and os.environ.get(per_org)) or bool(
+                self._token_manager.get_token_for_purpose(purpose)
+            )
+            # Background lookups (no external fallback, e.g. the update check)
+            # are not dependency hosts: withhold silently.
+            if (
+                available
+                and self._allow_external_fallback
+                and _first_strict_warning(f"host:{host_info.host.lower()}")
+            ):
+                self._emit_strict_notice(*self._strict_withheld_notice(host_info))
+            return None
+        token = os.environ.get(per_org) if per_org else None
+        if token:
+            return token, per_org, "basic"
+        token = self._token_manager.get_token_for_purpose(purpose)
+        if token:
+            return token, self._identify_env_source(purpose), "basic"
+        return None
+
+    def _credential_lookup_env(self, host_info: HostInfo) -> dict[str, str] | None:
+        """Environment for a ``git credential fill`` child, or None to inherit."""
+        if host_info.kind == "generic":
+            return self._generic_credential_lookup_env()
+        if self._strict_scope_withholds(host_info):
+            return _without_github_class_env_tokens(os.environ)
+        return None
+
+    def _gh_cli_token(self, host_info: HostInfo) -> str | None:
+        """Run ``gh auth token``; strict mode hides inherited env tokens from it."""
+        if not self._strict_scope_withholds(host_info):
+            return self._token_manager.resolve_credential_from_gh_cli(host_info.host)
+        return self._token_manager.resolve_credential_from_gh_cli(
+            host_info.host, env=_without_github_class_env_tokens(os.environ)
+        )
+
+    def _github_no_token_advice(self, host_info: HostInfo) -> str:
+        """The no-token remedy for a GitHub-class host."""
+        if self._strict_scope_withholds(host_info):
+            return " ".join(self._strict_withheld_notice(host_info))
+        return "Set GITHUB_APM_PAT or GITHUB_TOKEN, or run 'gh auth login'."
 
     @staticmethod
     def _supports_ado_bearer(host: str) -> bool:

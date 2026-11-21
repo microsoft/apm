@@ -1,0 +1,18 @@
+{
+  "issue": 2853,
+  "fixed_in": "Unreleased",
+  "summary": "Cache clean reported success despite failed Git db, checkout, or HTTP removal.",
+  "failure_modes": [
+    "cache",
+    "cleanup",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "filesystem.open_world_observation",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_cache_clean_lifecycle.py::test_cache_clean_status_matches_residual_state"
+  ]
+}

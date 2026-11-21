@@ -4,8 +4,9 @@ description: >-
   Use this skill to cut an APM release from the current worktree:
   assess whether the cycle since the last tag warrants a patch or
   minor bump (semver discipline against the merged-since-last-tag
-  diff), sanitize the [Unreleased] CHANGELOG block into a dated
-  version block where each change has one line in one section
+  diff), assemble the changelog.d/ fragments and any legacy
+  [Unreleased] CHANGELOG bullets into a dated version block and
+  sanitize it so each change has one line in one section
   (dedupe across sections, condense, add Highlights, drop
   internal-only churn), bump
   pyproject.toml + uv.lock, run the CI-mirror lint chain, and open
@@ -126,11 +127,27 @@ confirmation.
 
 Wait for the operator's confirm before continuing.
 
-### Phase 3 -- sanitize the changelog (B10 CHECKPOINT 2)
+### Phase 3 -- assemble and sanitize the changelog (B10 CHECKPOINT 2)
 
-Load `assets/entry-sanitizer.md` and the format contract it
+PRs add one-line fragments, `changelog.d/<pr>.<section>.md`,
+instead of editing `[Unreleased]` (format: `changelog.d/README.md`).
+`[Unreleased]` may still hold legacy bullets from before the
+migration. `scripts/changelog_fragments.py` assembles both:
+
+1. `python scripts/changelog_fragments.py --root <repo> check`
+   validates every fragment. Fix or ask about any `[x]` line.
+2. `python scripts/changelog_fragments.py --root <repo> render
+   --version X.Y.Z --date YYYY-MM-DD` prints the version block
+   (dry run): legacy `[Unreleased]` bullets first, then
+   fragments by PR number, in section order.
+3. `python scripts/changelog_fragments.py --root <repo> assemble
+   --version X.Y.Z --date YYYY-MM-DD` writes that block under an
+   empty `## [Unreleased]` and deletes the fragments (it keeps
+   `changelog.d/README.md`).
+
+Then load `assets/entry-sanitizer.md` and the format contract it
 points at (`.github/instructions/changelog.instructions.md`).
-Re-sanitize the WHOLE `[Unreleased]` block, not just new PRs --
+Re-sanitize the WHOLE new version block, not just new PRs --
 entries added PR by PR drift into duplicates and paragraphs:
 
 1. ONE CHANGE, ONE LINE, ONE SECTION. Breaking and must-act
@@ -155,7 +172,7 @@ entries added PR by PR drift into duplicates and paragraphs:
 7. Check that every user-facing `#NNNN` ref and `@user` credit in
    the old block survives in the new one.
 
-Rewrite the CHANGELOG.md `[Unreleased]` block in place:
+Rewrite the new version block in place; the result is:
 
 ```
 ## [Unreleased]
@@ -213,7 +230,8 @@ will claim CI is green; that claim must hold.
 
 ### Phase 6 -- commit, push, open PR
 
-1. `git add CHANGELOG.md pyproject.toml uv.lock`.
+1. `git add CHANGELOG.md changelog.d pyproject.toml uv.lock`
+   (`changelog.d` stages the deleted fragments).
 2. `git commit -m "chore: release vX.Y.Z" -m "<short body>"`.
    The body mirrors prior release commits (#1410, #1454, #1526):
    one paragraph naming what was bumped and the lint-mirror

@@ -22,6 +22,10 @@ Repository-coordinate segments are case-insensitive for `github.com`, GitHub Ent
 
 When an `apm.yml` omits `default_host:`, APM's implementation-default host is the `GITHUB_HOST` environment variable, or `github.com` when it is unset. When `default_host:` is set, shorthand `owner/repo` dependencies in that manifest resolve against it, and canonical normalisation strips only that host when writing entries into the manifest; every other host keeps its FQDN. Each manifest (the root and every dependency's own `apm.yml`) uses its own value (req-mf-009, req-mf-019).
 
+## GitHub-operated host class
+
+APM uses req-sc-005 basis (c): `github.com`, every `*.ghe.com` host, and a GitHub Enterprise Server host only when the `GITHUB_HOST` environment variable names it form one host class, so the GitHub credential chain (`GITHUB_APM_PAT_<ORG>`, `GITHUB_APM_PAT`, `GITHUB_TOKEN`, `GH_TOKEN`) serves each of them. A manifest never adds a host to the class. Setting `APM_STRICT_HOST_CREDENTIALS` to `1`, `true`, `yes` or `on` (or any unrecognised value) narrows it: those environment tokens reach only the configured host (`GITHUB_HOST`, else `github.com`), and `gh auth token` and `git credential fill` run for every other host in the class without inherited GitHub token variables (req-sc-005, req-sc-013).
+
 ## Optional deployed-prompt audit
 
 APM claims the proposed deployed-prompt-audit capability (req-pl-019, req-pl-020), subject to the pending Section 9.3 amendment process, not adopted-spec approval. APM's own Consumer deployment implementation supplies the definitions: project and user scopes follow TargetProfile deployment roots and PrimitiveMapping formats, including shared native hook settings via native_hook_config. The target-by-target locations, supported formats, prompt applicability and exclusions are published in docs/src/content/docs/reference/cli/audit.md. ContentScanner checks hidden or suspicious Unicode code points that may conceal instructions, not semantic prompt-injection detection; a clean result is not a guarantee that prompt text is safe. App SQLite state and unrelated transcripts are excluded. Detection does not grant execution, ownership or remediation authority.
@@ -41,7 +45,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |
 |-------|-------:|--------:|--------:|------:|----------:|--------:|
 | Producer | 9 | 0 | 0 | 0 | 3 | 0 |
-| Consumer | 109 | 1 | 3 | 1 | 3 | 0 |
+| Consumer | 110 | 1 | 3 | 0 | 3 | 0 |
 | Registry | 0 | 0 | 0 | 0 | 1 | 0 |
 | Governance | 21 | 0 | 0 | 0 | 0 | 0 |
 
@@ -170,7 +174,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-002](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-002) | MUST | 10.9 | consumer | active | 4 / 5 | - |
 | [req-sc-003](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-003) | MUST | 10.3 | consumer | active | 6 / 7 | - |
 | [req-sc-004](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-004) | MUST | 10.5 | consumer | text-only | 0 / 1 | - |
-| [req-sc-005](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-005) | MUST | 10.3 | consumer | xfail | 1 / 2 | - |
+| [req-sc-005](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-005) | MUST | 10.3 | consumer | active | 7 / 8 | - |
 | [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 4 / 5 | - |
 | [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 3 / 4 | - |
 | [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 3 / 4 | - |
@@ -187,7 +191,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-003](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-003) | MUST | 8.5 | consumer | active | 1 / 2 | - |
 | [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | active | 2 / 3 | - |
 | [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 13 / 14 | - |
-| [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 1 / 1 | - |
+| [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 2 / 2 | - |
 | [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 / 1 | - |
 | [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 8 / 8 | - |
 | [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 2 / 2 | - |
@@ -196,7 +200,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-012](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-012) | MUST | 8.5.6 | consumer | active | 7 / 7 | - |
 | [req-tg-013](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-013) | MUST | 8.5.7 | consumer | active | 6 / 7 | - |
 | [req-tg-014](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-014) | MUST | 8.5.8 | consumer | active | 2 / 2 | - |
-| [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 6 / 6 | - |
+| [req-tg-015](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-015) | MUST | 8.5.1 | consumer | active | 7 / 7 | - |
 | [req-tg-016](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-016) | MUST | 8.5.9 | consumer | active | 1 / 2 | - |
 | [req-tg-017](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-017) | MUST | 8.5.9 | consumer | active | 2 / 3 | - |
 | [req-tg-018](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-018) | MUST | 8.5.10 | consumer | active | 9 / 9 | - |

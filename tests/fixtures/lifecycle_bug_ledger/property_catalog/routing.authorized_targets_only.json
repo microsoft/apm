@@ -1,0 +1,6 @@
+{
+  "id": "routing.authorized_targets_only",
+  "phase": 1,
+  "oracle_tier": "open-world",
+  "law": "Only explicitly effective targets receive package primitives and service configuration."
+}

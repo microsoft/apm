@@ -2672,17 +2672,29 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-005",
       "keyword": "MUST",
       "section": "10.3",
-      "status": "xfail",
-      "test_count": 2,
+      "status": "active",
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ]
     },
     {
@@ -3034,6 +3046,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ],
       "conformance_class": "consumer",
@@ -3041,8 +3054,9 @@
       "keyword": "MUST",
       "section": "8.5",
       "status": "active",
-      "test_count": 1,
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_diagnoses_dropped_capability_restriction",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_diagnoses_lossy_agent_capability_conversion"
       ]
     },
@@ -3211,6 +3225,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
@@ -3223,8 +3238,9 @@
       "keyword": "MUST",
       "section": "8.5.1",
       "status": "active",
-      "test_count": 6,
+      "test_count": 7,
       "tests": [
+        "tests/spec_conformance/test_local_bundle_agent_reqs.py::test_bundle_codex_agent_keeps_native_model_settings",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[claude-sonnet-4-5]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[haiku]",
         "tests/spec_conformance/test_manifest_reqs.py::test_codex_claude_model_value_preserved_verbatim[inherit]",
@@ -3299,12 +3315,12 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 109,
+      "active": 110,
       "partial": 1,
       "skipped": 3,
       "text-only": 3,
       "unbound": 0,
-      "xfail": 1
+      "xfail": 0
     },
     "governance": {
       "active": 21,
