@@ -27,6 +27,7 @@ from tests.lifecycle.scenarios._kit import (
     Scenario,
     assert_changes,
     credits,
+    known_defect,
 )
 from tests.lifecycle.world import use_policy, use_registry
 from tests.lifecycle.world.packages import INERT_COMMAND
@@ -298,7 +299,10 @@ def test_a_denied_git_package_is_refused_online(lifecycle_world) -> None:
     scenario, name = _from_source(lifecycle_world, "git")
     _deny(scenario, name)
     lifecycle_world.services.reset()
-    scenario.run(f"install {name}", credit=[_pair(GATE=_DD, NET="online", SRC="git")], refusal=True)
+    step = scenario.run(
+        f"install {name}", credit=[_pair(GATE=_DD, NET="online", SRC="git")], refusal=True
+    )
+    assert step.result.returncode != 0, step.output
     assert lifecycle_world.services.egress_log(), "an online install must reach the network"
     scenario.finish()
 
@@ -309,7 +313,10 @@ def test_a_denied_package_is_refused_offline(lifecycle_world) -> None:
     scenario.run("install --dry-run", exit=0, keep=_KEEP)
     _offline(lifecycle_world)
     lifecycle_world.services.reset()
-    scenario.run("install", credit=[_pair(GATE=_DD, NET="offline")], keep=_KEEP, refusal=True)
+    step = scenario.run(
+        "install", credit=[_pair(GATE=_DD, NET="offline")], keep=_KEEP, refusal=True
+    )
+    assert step.result.returncode != 0, step.output
     assert lifecycle_world.services.egress_log() == []
     scenario.finish()
 
@@ -319,11 +326,12 @@ def test_no_policy_installs_offline(lifecycle_world) -> None:
     scenario = Scenario(lifecycle_world, ("p-skill",), policy="allow")
     _offline(lifecycle_world)
     lifecycle_world.services.reset()
-    scenario.run(
+    step = scenario.run(
         "install --no-policy p-skill",
         credit=[_pair(NET="offline", NOPOLICY="on")],
         says=[_NO_POLICY_SAYS],
     )
+    assert step.result.returncode == 0, step.output
     assert lifecycle_world.services.egress_log() == []
     scenario.finish()
 
@@ -349,11 +357,12 @@ def test_no_policy_installs_a_local_bundle(lifecycle_world) -> None:
     specs = {"p-exec-bundle": lifecycle_world.packages["p-exec:bundle"].spec}
     kinds = {"p-exec-bundle": ("hook", "mcp", "bin")}
     scenario = Scenario(lifecycle_world, specs, policy="allow", kinds=kinds)
-    scenario.run(
+    step = scenario.run(
         "install --no-policy p-exec-bundle",
         credit=[_pair(OP="bundle-install", SRC="local-bundle", NOPOLICY="on")],
         says=[_NO_POLICY_SAYS],
     )
+    assert step.result.returncode == 0, step.output
     scenario.finish()
 
 
@@ -370,6 +379,7 @@ def test_an_org_denied_mcp_server_is_refused(lifecycle_world, src) -> None:
     use_policy(lifecycle_world, "mcp-deny-all")
     scenario = Scenario(lifecycle_world, (), policy="mcp-deny-all")
     step = scenario.run(_MCP_LINES[src], exit=1, credit=[_pair(SRC=src, GATE=_DD)], refusal=True)
+    assert step.result.returncode == 1, step.output
     assert "mcp.json" not in " ".join(sorted(step.changed)), step.changed
     scenario.finish()
 
@@ -399,10 +409,12 @@ def test_a_denied_plugin_with_bin_is_refused_at_user_scope(lifecycle_world) -> N
         policy="deny-native",
     )
     scenario.model = scenario.model.with_policy("deny-native", ["p-native-claude-bin"])
-    scenario.run(
+    step = scenario.run(
         "install p-native-claude-bin --trust-bin",
         known={"R": Known("#3703", r"exited 0, expected \[1\]")},
     )
+    with known_defect("#3703", r"^a user-scope install ignored the org deny"):
+        assert step.result.returncode == 1, "a user-scope install ignored the org deny"
 
 
 CREDITS = credits(

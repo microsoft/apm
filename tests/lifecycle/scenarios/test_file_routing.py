@@ -223,6 +223,9 @@ def test_uninstall_keeps_a_bundle_owned_instruction(lifecycle_world) -> None:
     scenario.source_moved()
     scenario.run("install f-doc")
     scenario.run("uninstall f-doc", known={"I1": _BUNDLE_OWNED})
+    kept = scenario.lock_path.parent / ".github" / "instructions" / "f-doc.instructions.md"
+    with known_defect("#4703", r"^uninstall deleted the bundle-owned instruction"):
+        assert kept.is_file(), "uninstall deleted the bundle-owned instruction"
     scenario.finish()
 
 
@@ -234,6 +237,7 @@ def test_bundle_ships_root_skills_with_apm_dir(lifecycle_world) -> None:
     data["dependencies"] = {"apm": []}
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
     bundle = _pack_bundle(root, lifecycle_world.root / "skills-bundle", lifecycle_world.env)
+    assert bundle.is_file(), bundle
     names = {name.split("/", 1)[1] for name in zipfile.ZipFile(bundle).namelist()}
     assert "instructions/f-bun.instructions.md" in names, sorted(names)
     with known_defect("#4709", r"^the bundle drops the root skill"):
