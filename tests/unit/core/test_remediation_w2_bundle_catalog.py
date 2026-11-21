@@ -37,6 +37,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "not clear the agent-plugin refusal, it sidesteps it",
     "agent-plugin-surfaces-dropped": "the advised command packs a different format; it does "
     "not clear the agent-plugin refusal, it sidesteps it",
+    "bundle-integrity-failed": "the advised command runs in the producer's source, not in "
+    "the consumer that saw the refusal; test_local_bundle_hooks_lifecycle pins the rendering",
     "pack-dependency-unattested": "needs a lockfile row with no deployed files beside a "
     "populated apm_modules cache; not reachable from a consistent install",
     "pack-skill-subset-missing": "needs a skill-subset package whose recorded skills vanish "

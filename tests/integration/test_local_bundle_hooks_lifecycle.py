@@ -489,3 +489,25 @@ def test_approve_grants_the_printed_local_bundle_key(tmp_path: Path, apm_binary_
     world.apm(consumer, "install", str(changed))
     assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
     assert _run_hook(world, consumer, "Bash") == "v2\n"
+
+
+def test_tampered_bundle_refusal_names_the_reason_and_remedy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-038: an integrity refusal names its reason and catalog remedy, never an empty error."""
+    from apm_cli.core.remediation import BUNDLE_INTEGRITY_FAILED
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _, bundle, _ = _packed_bundle(world, tmp_path)
+    tampered = tmp_path / "tampered"
+    shutil.copytree(bundle, tampered)
+    (tampered / "skills" / "hs" / "SKILL.md").write_text("# altered\n", encoding="utf-8")
+    consumer = world.consumer("tamper-consumer", targets=("claude",))
+    before = tree_bytes(consumer)
+
+    text = output(world.apm(consumer, "install", str(tampered), "--no-policy", expect=1))
+    assert "Bundle integrity check failed" in text, text
+    assert "Hash mismatch for skills/hs/SKILL.md" in text, text
+    assert BUNDLE_INTEGRITY_FAILED.sentence() in text, text
+    assert "Error installing dependencies" not in text, text
+    assert tree_bytes(consumer) == before
