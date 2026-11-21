@@ -866,6 +866,12 @@ class SourceMachine(MachineBase):
             and not (plugins / c.package / ".claude-plugin").is_dir()
         ]
         assert not missing, f"native plugins not deployed whole: {missing}"
+        parked = [
+            c.package
+            for c in self._choices()
+            if c.form == "native" and "bin" in c.prims and (plugins / c.package).exists()
+        ]
+        assert not parked, f"bin/ plugins deployed without --trust-bin: {parked}"
         problems = self.root_mcp_problems(step)
         assert not problems, "; ".join(problems)
         output = f"{step.result.stdout}\n{step.result.stderr}"
