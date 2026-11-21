@@ -27,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A refused `apm install --frozen` on a widened target set no longer leaves merged hook configuration (`.claude/`, `.gemini/`) on disk. (#4682)
 - `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once: MCP/LSP reconciliation now runs before native plugin registration commits the lockfile. (#4579)
 - `apm outdated` keys its per-run ref listing on the host type and resolved provider, so dependencies on one host and path with different providers each resolve their own listing. (closes #4560, #4622)
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
