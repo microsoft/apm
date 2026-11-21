@@ -34,7 +34,8 @@ _DISPLAY_SCOPES = frozenset({("src/apm_cli/commands/config.py", "_show_all_user_
 _REGISTRY_CONFIG_READERS = frozenset({"_get_registries_section", "get_registry_config"})
 _OWNER_NEEDLES = (
     "def registry_url_error(",
-    "from ...utils.net import is_loopback_host, parse_host_address",
+    "from ...utils.net import is_local_network_host",
+    "return is_local_network_host(host)",
     'if parts.scheme == "https" or insecure is True or _is_local_host(host):',
 )
 
