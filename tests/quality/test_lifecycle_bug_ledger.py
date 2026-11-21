@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
+from scripts.lifecycle_ledger import read_ledger
+
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-_LEDGER_PATH = _REPOSITORY_ROOT / "tests/fixtures/lifecycle_bug_ledger.json"
 _FAILURE_MODES = frozenset(
     {
         "auth",
@@ -27,7 +27,7 @@ RATCHET_TEST_SCOPE = "repository"
 
 
 def _load_ledger() -> dict[str, object]:
-    payload = json.loads(_LEDGER_PATH.read_text(encoding="ascii"))
+    payload = read_ledger(_REPOSITORY_ROOT)
     assert isinstance(payload, dict)
     return payload
 

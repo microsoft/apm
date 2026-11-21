@@ -1,0 +1,22 @@
+{
+  "issue": 3386,
+  "summary": "Traps staged activation failures losing prior packages, including Windows handle denials (#3386); needs fault injection and native Windows.",
+  "failure_modes": [
+    "portability",
+    "transaction"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_resolution_failure_lifecycle.py::test_install_preserves_active_unknown_and_legacy_staging",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_invalid_download_never_replaces_prior_validated_package",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_module_first_install_and_pinned_replacement",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_native_activation_failure_reports_original_and_recovery_errors",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_native_locked_destination_preserves_prior_install_and_recovers",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_native_nested_replacement_retry_preserves_original_child_bytes",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_native_transient_activation_hold_is_retried_and_activates",
+    "tests/integration/test_resolution_failure_lifecycle.py::test_parent_obstruction_preserves_state_and_retry_uses_clean_candidate"
+  ]
+}

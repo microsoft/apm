@@ -1,0 +1,14 @@
+{
+  "issue": 4397,
+  "fixed_in": "Unreleased",
+  "summary": "apm install from a deep project path on Windows runs the Git URL-rewrite safety probe for a staged clone instead of refusing with '$GIT_DIR' too big: the probe passes a short relative Git directory from its parent, so Git's explicit GIT_DIR length limit (PATH_MAX - 40) no longer applies to the staging path.",
+  "failure_modes": [
+    "portability"
+  ],
+  "properties": [
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/integration/test_git_config_probe_path_limit.py::test_clone_config_probe_runs_for_a_git_dir_beyond_the_explicit_limit"
+  ]
+}

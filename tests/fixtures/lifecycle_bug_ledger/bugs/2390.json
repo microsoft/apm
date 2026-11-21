@@ -1,0 +1,16 @@
+{
+  "issue": 2390,
+  "fixed_in": "0.27.0",
+  "summary": "MCP-only install omitted the lockfile and could not audit cleanly.",
+  "failure_modes": [
+    "transaction",
+    "outcome"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_only_lockfile_lifecycle.py::test_mcp_only_install_audit_and_repeat_are_byte_identical"
+  ]
+}

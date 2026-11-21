@@ -1,0 +1,21 @@
+{
+  "issue": 2753,
+  "summary": "Traps GitLab namespace-ancestry policy composition and fail-closed partial chains; needs HTTPS policy proxy and policy cache.",
+  "failure_modes": [
+    "auth",
+    "cache",
+    "outcome"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "cache.successful_reads_refresh_recency",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_ancestor_failure_never_applies_a_weaker_partial_chain",
+    "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_cached_composition_enforces_offline",
+    "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_install_and_audit_enforce_the_composed_ancestry",
+    "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_no_policy_in_any_namespace_is_clean_absence",
+    "tests/integration/test_gitlab_subgroup_policy_lifecycle.py::test_pin_follows_the_nearest_policy_and_never_silently_repins"
+  ]
+}

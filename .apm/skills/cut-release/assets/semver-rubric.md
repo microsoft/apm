@@ -8,7 +8,7 @@ wins.
 
 | Signal (read top-down; first match wins) | Bump |
 |------------------------------------------|------|
-| 1. ANY PR title or [Unreleased] entry contains literal `**BREAKING:**` or `(BREAKING)` | **MINOR** (pre-1.0) / **MAJOR** (>= 1.0) |
+| 1. ANY PR title, changelog.d/ fragment or [Unreleased] entry contains literal `**BREAKING:**` or `(BREAKING)` | **MINOR** (pre-1.0) / **MAJOR** (>= 1.0) |
 | 2. ANY PR added a NEW user-visible CLI command (e.g. `apm deps why`, `apm publish`) | **MINOR** |
 | 3. ANY PR added a NEW user-facing feature flag, config field, manifest field, or schema entry | **MINOR** |
 | 4. ANY PR added a NEW normative spec, JSON Schema, or contract surface | **MINOR** |
