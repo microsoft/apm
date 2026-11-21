@@ -36,6 +36,7 @@ from ...models.dependency.selection import (
 from ...models.dependency.selection import (
     parse_dependency_entry as _parse_dependency_entry,
 )
+from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
 from .local_survivors import _surviving_local_refs_at_install_path
@@ -1433,7 +1434,6 @@ def _sync_integrations_after_uninstall(
         resolve_skill_layout,
         with_every_skill_layout,
     )
-    from ...native_plugins.scopes import native_harnesses
     from ...primitives.discovery import clear_discovery_cache
     from .recorded_targets import reconciled_targets
 
@@ -1498,7 +1498,10 @@ def _sync_integrations_after_uninstall(
             None,
             dep_ref.get_identity(),
         )
-        authorized_targets = [t for t in target_selection.targets if t.name not in native]
+        authorized_targets = []
+        for target in target_selection.targets:
+            if target.name not in native:
+                authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
@@ -1781,7 +1784,6 @@ def _restage_changed_local_survivors(
     Returns the restaged lock keys; their lock rows record the new content hash.
     """
     from ...install.phases.local_content import _copy_local_package, compute_local_package_hash
-    from ...native_plugins.scopes import native_source_current
 
     restaged: set[str] = set()
     for key, dep in sorted(lockfile.dependencies.items()):
