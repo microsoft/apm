@@ -3810,6 +3810,8 @@
         "tests/integration/test_lockfile_commit_point_lifecycle.py::test_sigterm_without_a_deploy_snapshot_keeps_the_lock_equal_to_disk",
         "tests/integration/test_lockfile_commit_point_lifecycle.py::test_sigterm_without_an_audit_restores_deploys_and_the_lock",
         "tests/integration/test_lockfile_commit_point_lifecycle.py::test_the_next_install_reaps_a_killed_installs_deploy_snapshot",
+        "tests/integration/test_required_lifecycle_state_machine.py::test_required_failed_lock_write_restores_state_and_recovers",
+        "tests/lifecycle/scenarios/test_failure_phase.py::test_failed_install_preserves_state_and_recovers",
         "tests/unit/install/test_deploy_snapshot.py::test_rollback_returns_every_written_path_to_its_prior_state"
       ]
     },
@@ -4802,13 +4804,6 @@
       "properties": ["transaction.failed_command_preserves_state"],
       "bounded_by": "tests/integration/test_uninstall_deletion_failure_lifecycle.py::test_failed_package_deletion_retains_ownership_until_retry",
       "next_decision": "Filesystem rollback is not guaranteed; retry uninstall after resolving the error or reinstall declared packages."
-    },
-    {
-      "id": "late-lock-write-atomicity",
-      "summary": "An injected lockfile replacement failure can occur after target files move to the newly declared target while the prior lockfile remains intact.",
-      "properties": ["transaction.failed_command_preserves_state"],
-      "bounded_by": "tests/integration/test_required_lifecycle_state_machine.py::test_required_failed_lock_write_bounds_partial_state_and_recovers",
-      "next_decision": "Full install transaction expansion remains deferred with phases 2-4."
     }
   ]
 }
