@@ -134,8 +134,10 @@ run_self_test() {
             exit 1
         fi
         export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+        # set -e is suppressed inside "if !", so every git call exits on failure.
         g() { git -c user.name=t -c user.email=t@example.invalid \
-                  -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
+                  -c commit.gpgsign=false -c tag.gpgsign=false "$@" \
+                  || { echo "[x] self-test: git $* failed" >&2; exit 1; }; }
         g init -q -b main .
         g commit -q --allow-empty -m "chore: before tag (#10)"
         g tag v0.0.1
