@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
-from apm_cli.policy import outcome_routing
-from apm_cli.security import executables, trust
 from apm_cli.security.executables import (
     AUTHORIZED_FIRST_PARTY,
     AUTHORIZED_GATE_DISABLED,
@@ -107,19 +107,53 @@ def test_package_approval_reads_only_literal_grants(
 
 # -- the project trust context ---------------------------------------------------------------
 
+# Collaborators replaced at their own module; the owner's own resolution chain stays real.
+TRUST_POLICY = "apm_cli.policy.outcome_routing.resolve_trust_policy"
+CONTENT_BLIND = "apm_cli.security.trust.warn_content_blind_grants_once"
 
-@pytest.fixture
-def built(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    calls: list[dict] = []
 
-    def build(**kwargs: object) -> SimpleNamespace:
-        calls.append(kwargs)
-        return SimpleNamespace(built=len(calls))
+@pytest.fixture(autouse=True)
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep the user layer (APM_HOME and its config.json) under tmp_path."""
+    apm_home = tmp_path / "apm-home"
+    apm_home.mkdir()
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    return apm_home
 
-    monkeypatch.setattr(executables, "build_exec_trust_context", build)
-    monkeypatch.setattr(executables, "_readable_lockfile", lambda root: f"<lock in {root.name}>")
-    monkeypatch.setattr(executables, "_ALIAS_DEPRECATION_WARNED", False)
-    return calls
+
+@pytest.fixture(autouse=True)
+def content_blind(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    warn = Mock()
+    monkeypatch.setattr(CONTENT_BLIND, warn)
+    return warn
+
+
+def _org(*recommended: str) -> SimpleNamespace:
+    """An org policy recommending *recommended*, which allows every executable type."""
+    executables = SimpleNamespace(
+        recommend=list(recommended), deny=(), require=(), enforce=(), deny_all=False
+    )
+    return SimpleNamespace(executables=executables, bin_deploy=None)
+
+
+def _grants(directory: Path, key: str) -> Path:
+    """Write an apm.yml in *directory* that allows hooks for *key*."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "apm.yml"
+    path.write_text(f"name: p\nexecutables:\n  allow:\n    {key}: {{hooks: true}}\n", "utf-8")
+    return path
+
+
+def _user_grant(home: Path, key: str) -> None:
+    config = {"executables": {"allow": {key: {"hooks": True}}, "deny": {}}}
+    (home / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def _legacy_grant(home: Path, key: str) -> Path:
+    legacy = home / "approvals.yml"
+    legacy.write_text(f"{key}: {{hooks: true}}\n", encoding="utf-8")
+    return legacy
 
 
 def _manifest(tmp_path: Path, body: str) -> Path:
@@ -130,89 +164,116 @@ def _manifest(tmp_path: Path, body: str) -> Path:
     return path
 
 
-def test_the_manifest_grants_feed_the_context(built: list[dict], tmp_path: Path) -> None:
-    manifest = _manifest(tmp_path, "name: p\nexecutables:\n  allow:\n    acme/x: {hooks: true}\n")
-    policy = object()
+def _fresh_executables() -> ModuleType:
+    """Import the executables module afresh: its warn-once state is a new run's."""
+    spec = importlib.util.find_spec("apm_cli.security.executables")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_manifest_grants_feed_the_context(home: Path, tmp_path: Path) -> None:
+    manifest = _grants(tmp_path / "project", "acme/x")
+    _user_grant(home, "acme/user")
     ctx = exec_trust_context_for_project(
         manifest,
-        policy=policy,
+        policy=_org("acme/org"),
         fallback_allow_executables={"ignored/fallback": {"hooks": True}},
         migrate_user_legacy=False,
         include_user=False,
     )
-    assert ctx.built == 1
-    assert built == [
-        {
-            "policy": policy,
-            "project_data": {"name": "p", "executables": {"allow": {"acme/x": {"hooks": True}}}},
-            "migrate_user_legacy": False,
-            "include_user": False,
-            "lockfile": "<lock in project>",
-        }
-    ]
+    assert ctx.project_allow == {"acme/x": {"hooks": True}}
+    assert ctx.org_recommend == frozenset({"acme/org"})
+    assert ctx.user_allow == {}
+    assert ctx.gate_enabled is True
 
 
-def test_without_a_manifest_the_fallback_grants_apply(built: list[dict], tmp_path: Path) -> None:
-    grants = {"acme/x": {"mcp": True}}
-    exec_trust_context_for_project(
-        tmp_path / "missing" / "apm.yml", policy=None, fallback_allow_executables=grants
+LOCK_WITH_MARKETPLACE_ROW = """lockfile_version: '1'
+dependencies:
+- repo_url: acme/tool
+  discovered_via: mkt
+  marketplace_plugin_name: tool
+"""
+
+
+def test_the_scope_lockfile_names_the_package_an_install_spec_grants(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path, "name: p\nexecutables:\n  allow:\n    tool@mkt: {mcp: true}\n")
+    (manifest.parent / "apm.lock.yaml").write_text(LOCK_WITH_MARKETPLACE_ROW, encoding="utf-8")
+    ctx = exec_trust_context_for_project(manifest, policy=None)
+    assert ctx.project_allow["acme/tool"] == {"mcp": True}
+
+
+def test_without_a_manifest_the_fallback_and_user_grants_apply(home: Path, tmp_path: Path) -> None:
+    legacy = _legacy_grant(home, "acme/legacy")
+    ctx = exec_trust_context_for_project(
+        tmp_path / "missing" / "apm.yml",
+        policy=None,
+        fallback_allow_executables={"acme/x": {"mcp": True}},
     )
-    assert built[0]["project_data"] == {"allowExecutables": grants}
-    assert (built[0]["migrate_user_legacy"], built[0]["include_user"]) == (True, True)
-    assert built[0]["lockfile"] == "<lock in missing>"
+    assert ctx.project_allow == {"acme/x": {"mcp": True}}
+    assert ctx.user_allow == {"acme/legacy": {"hooks": True}}
+    assert not legacy.exists()
+
+
+def test_legacy_user_grants_are_read_without_migrating_when_asked(
+    home: Path, tmp_path: Path
+) -> None:
+    legacy = _legacy_grant(home, "acme/legacy")
+    ctx = exec_trust_context_for_project(
+        tmp_path / "apm.yml", policy=None, migrate_user_legacy=False
+    )
+    assert ctx.user_allow == {"acme/legacy": {"hooks": True}}
+    assert legacy.exists()
 
 
 @pytest.mark.parametrize("fallback", [None, [("acme/x", {})]])
 def test_without_a_manifest_or_usable_fallback_there_is_no_project_data(
-    built: list[dict], tmp_path: Path, fallback: object
+    tmp_path: Path, fallback: object
 ) -> None:
-    exec_trust_context_for_project(
+    ctx = exec_trust_context_for_project(
         tmp_path / "apm.yml",
         policy=None,
         fallback_allow_executables=fallback,  # type: ignore[arg-type]
     )
-    assert built[0]["project_data"] is None
+    assert (ctx.gate_enabled, ctx.project_allow) == (False, {})
 
 
-def test_a_non_mapping_manifest_falls_back(built: list[dict], tmp_path: Path) -> None:
+def test_a_non_mapping_manifest_falls_back(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path, "- just\n- a list\n")
-    exec_trust_context_for_project(manifest, policy=None, fallback_allow_executables={"a/b": {}})
-    assert built[0]["project_data"] == {"allowExecutables": {"a/b": {}}}
+    ctx = exec_trust_context_for_project(
+        manifest, policy=None, fallback_allow_executables={"a/b": {"hooks": True}}
+    )
+    assert ctx.project_allow == {"a/b": {"hooks": True}}
 
 
-def test_the_deprecated_alias_warns_once_through_the_logger(
-    built: list[dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(trust, "warn_content_blind_grants_once", Mock())
+def test_the_deprecated_alias_warns_once_through_the_logger(tmp_path: Path) -> None:
+    fresh = _fresh_executables()
     manifest = _manifest(tmp_path, "name: p\nallowExecutables:\n  acme/x: {hooks: true}\n")
     logger = Mock()
-    exec_trust_context_for_project(manifest, policy=None, logger=logger)
-    exec_trust_context_for_project(manifest, policy=None, logger=logger)
+    fresh.exec_trust_context_for_project(manifest, policy=None, logger=logger)
+    fresh.exec_trust_context_for_project(manifest, policy=None, logger=logger)
     assert logger.warning.call_count == 1
     assert "'allowExecutables' in apm.yml is deprecated" in logger.warning.call_args.args[0]
 
 
-def test_an_empty_alias_does_not_warn(
-    built: list[dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(trust, "warn_content_blind_grants_once", Mock())
+def test_an_empty_alias_does_not_warn(tmp_path: Path) -> None:
+    fresh = _fresh_executables()
     manifest = _manifest(tmp_path, "name: p\nallowExecutables:\n")
     logger = Mock()
-    exec_trust_context_for_project(manifest, policy=None, logger=logger)
+    fresh.exec_trust_context_for_project(manifest, policy=None, logger=logger)
     logger.warning.assert_not_called()
 
 
 def test_content_blind_grants_are_reported_only_with_a_logger(
-    built: list[dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, content_blind: Mock
 ) -> None:
-    warn = Mock()
-    monkeypatch.setattr(trust, "warn_content_blind_grants_once", warn)
     manifest = _manifest(tmp_path, "name: p\n")
     exec_trust_context_for_project(manifest, policy=None)
-    warn.assert_not_called()
+    content_blind.assert_not_called()
     logger = object()
     ctx = exec_trust_context_for_project(manifest, policy=None, logger=logger)
-    warn.assert_called_once_with(ctx, logger)
+    content_blind.assert_called_once_with(ctx, logger)
 
 
 # -- the per-command allow map -------------------------------------------------------------------
@@ -222,7 +283,7 @@ def test_content_blind_grants_are_reported_only_with_a_logger(
 def test_a_map_the_caller_resolved_is_reused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, given: object
 ) -> None:
-    monkeypatch.setattr(outcome_routing, "resolve_trust_policy", Mock(side_effect=AssertionError))
+    monkeypatch.setattr(TRUST_POLICY, Mock(side_effect=AssertionError))
     assert (
         resolve_project_exec_allow_map(
             tmp_path, object(), user_scope=False, executable_context=(given, True)
@@ -233,13 +294,15 @@ def test_a_map_the_caller_resolved_is_reused(
 
 @pytest.mark.parametrize("user_scope", [False, True])
 def test_an_unresolved_map_resolves_policy_and_grants_from_the_scope_manifest(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, user_scope: bool
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    home: Path,
+    content_blind: Mock,
+    user_scope: bool,
 ) -> None:
-    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
-    trust_policy = Mock(return_value="<policy>")
-    effective = Mock(return_value="<map>")
-    monkeypatch.setattr(outcome_routing, "resolve_trust_policy", trust_policy)
-    monkeypatch.setattr(executables, "effective_exec_map_for_project", effective)
+    trust_policy = Mock(return_value=_org("acme/org"))
+    monkeypatch.setattr(TRUST_POLICY, trust_policy)
+    _grants(home, "acme/home")
     logger = object()
     package = SimpleNamespace(allow_executables={"acme/x": {"hooks": True}})
 
@@ -252,57 +315,43 @@ def test_an_unresolved_map_resolves_policy_and_grants_from_the_scope_manifest(
         logger=logger,
     )
 
-    assert result == "<map>"
     trust_policy.assert_called_once_with(
-        (tmp_path / "apm-home") if user_scope else (tmp_path / "p"), no_policy=True, logger=logger
+        home if user_scope else (tmp_path / "p"), no_policy=True, logger=logger
     )
-    effective.assert_called_once_with(
-        tmp_path / "p",
-        user_scope=user_scope,
-        policy="<policy>",
-        fallback_allow_executables={"acme/x": {"hooks": True}},
-        logger=logger,
-    )
+    # The project has no apm.yml, so the package's grants stand in for it.
+    assert set(result) == {"acme/org", "acme/home" if user_scope else "acme/x"}
+    assert content_blind.call_args.args[1] is logger
 
 
 def test_a_package_without_grants_has_no_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(outcome_routing, "resolve_trust_policy", Mock(return_value=None))
-    effective = Mock()
-    monkeypatch.setattr(executables, "effective_exec_map_for_project", effective)
-    resolve_project_exec_allow_map(tmp_path, object(), user_scope=False)
-    assert effective.call_args.kwargs["fallback_allow_executables"] is None
-    assert effective.call_args.kwargs["policy"] is None
+    monkeypatch.setattr(TRUST_POLICY, Mock(return_value=None))
+    result = resolve_project_exec_allow_map(tmp_path, object(), user_scope=False)
+    assert (dict(result), result.authorized_by) == ({}, AUTHORIZED_GATE_DISABLED)
 
 
 @pytest.mark.parametrize("user_scope", [False, True])
 def test_the_project_map_materializes_the_scope_context(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, user_scope: bool
+    tmp_path: Path, home: Path, content_blind: Mock, user_scope: bool
 ) -> None:
-    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
-    context = Mock(return_value="<ctx>")
-    monkeypatch.setattr(executables, "exec_trust_context_for_project", context)
-    monkeypatch.setattr(executables, "materialize_exec_map", lambda ctx: f"map({ctx})")
+    _grants(tmp_path / "p", "acme/proj")
+    _grants(home, "acme/home")
+    legacy = _legacy_grant(home, "acme/legacy")
     logger = object()
-    assert (
-        effective_exec_map_for_project(
-            tmp_path / "p",
-            policy="<policy>",
-            fallback_allow_executables={"a/b": {}},
-            logger=logger,
-            migrate_user_legacy=False,
-            user_scope=user_scope,
-        )
-        == "map(<ctx>)"
-    )
-    context.assert_called_once_with(
-        (tmp_path / "apm-home" / "apm.yml") if user_scope else (tmp_path / "p" / "apm.yml"),
-        policy="<policy>",
-        fallback_allow_executables={"a/b": {}},
+    allow_map = effective_exec_map_for_project(
+        tmp_path / "p",
+        policy=_org("acme/org"),
+        fallback_allow_executables={"a/b": {"hooks": True}},
         logger=logger,
         migrate_user_legacy=False,
+        user_scope=user_scope,
     )
+    scope_key = "acme/home" if user_scope else "acme/proj"
+    assert set(allow_map) == {scope_key, "acme/org", "acme/legacy"}
+    assert allow_map[scope_key] == {"hooks": True}
+    assert legacy.exists()
+    assert content_blind.call_args.args[1] is logger
 
 
 # -- the decision ladder -------------------------------------------------------------------------
@@ -404,26 +453,22 @@ def test_a_recommendation_for_another_package_does_not_hide_degraded_enforcement
 
 
 def test_the_project_map_defaults_to_project_scope_and_user_migration(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, home: Path, content_blind: Mock
 ) -> None:
-    context = Mock(return_value="<ctx>")
-    monkeypatch.setattr(executables, "exec_trust_context_for_project", context)
-    monkeypatch.setattr(executables, "materialize_exec_map", lambda ctx: ctx)
-    effective_exec_map_for_project(tmp_path, policy=None)
-    context.assert_called_once_with(
-        tmp_path / "apm.yml",
-        policy=None,
-        fallback_allow_executables=None,
-        logger=None,
-        migrate_user_legacy=True,
+    _grants(home, "acme/home")
+    legacy = _legacy_grant(home, "acme/legacy")
+    allow_map = effective_exec_map_for_project(
+        tmp_path / "p", policy=None, fallback_allow_executables={"a/b": {"hooks": True}}
     )
+    assert set(allow_map) == {"a/b", "acme/legacy"}
+    assert not legacy.exists()
+    content_blind.assert_not_called()
 
 
 def test_policy_applies_unless_disabled_by_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     trust_policy = Mock(return_value=None)
-    monkeypatch.setattr(outcome_routing, "resolve_trust_policy", trust_policy)
-    monkeypatch.setattr(executables, "effective_exec_map_for_project", Mock())
+    monkeypatch.setattr(TRUST_POLICY, trust_policy)
     resolve_project_exec_allow_map(tmp_path, object(), user_scope=False)
     assert trust_policy.call_args.kwargs == {"no_policy": False, "logger": None}
