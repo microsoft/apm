@@ -174,6 +174,33 @@ def bundle_render_format_id(
     return route[3].format_id
 
 
+def bundle_rule_format_id(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile,
+) -> str | None:
+    """Return the rule format a packed APM instruction must be converted to.
+
+    Plugin bundles carry instructions in the APM source rendering
+    (``x.instructions.md`` with ``applyTo``, #3686). A target whose rule
+    format transforms instructions (``claude_rules`` and the other
+    ``RULE_FORMATS``) gets that rendering converted, exactly as ``apm install``
+    converts it from source; any other packed file is copied as is.
+    """
+    from ..bundle.plugin_layout import PLUGIN_LAYOUT, primitive_file_suffix
+    from ..integration.targets import RULE_FORMATS
+
+    deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
+    route = _plugin_layout_route(deploy_rel, target) if deploy_rel else None
+    if route is None or route[2] is not PLUGIN_LAYOUT["instructions"]:
+        return None
+    if primitive_file_suffix(deploy_rel) != ".instructions.md":
+        return None
+    return route[3].format_id if route[3].format_id in RULE_FORMATS else None
+
+
 def _renders_from_markdown(deploy_rel: str, mapping: Any) -> bool:
     return mapping.format_id in _RENDERED_PLUGIN_FORMAT_IDS and deploy_rel.endswith(".md")
 

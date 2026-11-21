@@ -29,9 +29,10 @@ from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
+from .local_bundle_paths import bundle_rule_format_id as _bundle_rule_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
-from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
+from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
@@ -989,11 +990,8 @@ def integrate_local_bundle(
         _superseded = _superseded_renderings(
             list(pack_files), _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
         )
-        for rel, expected_hash in sorted(pack_files.items()):
-            if rel in _superseded:
-                if logger:
-                    logger.verbose_detail(f"{target.name}: kept another rendering of {rel}")
-                continue
+        for rel in sorted(pack_files.keys() - _superseded):
+            expected_hash = pack_files[rel]
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before
             # constructing any filesystem path, then assert the resolved
@@ -1121,7 +1119,18 @@ def integrate_local_bundle(
                 )
                 continue
 
-            normalized_text = _normalized_bundle_text(src)
+            normalized_text, _unrenderable = _render_bundle_rule(
+                _normalized_bundle_text(src),
+                _bundle_rule_format(
+                    _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+                ),
+                record=record,
+                diagnostics=diagnostics,
+                logger=logger,
+            )
+            if _unrenderable:
+                skipped += 1
+                continue
             if normalized_text is None:
                 desired_hash = expected_hash
             else:
@@ -1207,6 +1216,39 @@ def integrate_local_bundle(
         "prompts": 0,
         "sub_skills": 0,
     }
+
+
+def _render_bundle_rule(
+    text: str | None,
+    rule_format: str | None,
+    *,
+    record: str,
+    diagnostics: DiagnosticCollector | None,
+    logger: InstallLogger | None,
+) -> tuple[str | None, bool]:
+    """Convert a packed APM instruction to *rule_format* (#3686).
+
+    Returns ``(text, unrenderable)``; *text* passes through unchanged when no
+    rule format applies.
+    """
+    if text is None or rule_format is None:
+        return text, False
+    import yaml
+
+    from ..integration.instruction_integrator import InstructionIntegrator
+
+    try:
+        return InstructionIntegrator.convert_rule_content(text, rule_format), False
+    except yaml.YAMLError:
+        message = (
+            f"Skipped {record}: its instruction frontmatter is not valid YAML. "
+            "Fix the frontmatter in the source package and pack again."
+        )
+        if diagnostics is not None:
+            diagnostics.warn(message)
+        elif logger is not None:
+            logger.warning(message)
+        return None, True
 
 
 def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:

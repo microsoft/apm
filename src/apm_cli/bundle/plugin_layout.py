@@ -70,12 +70,15 @@ def primitive_file_suffix(name: str) -> str | None:
 
 
 # Plugin directories whose files are per-target renderings of one primitive,
-# with the rendering a plugin bundle keeps, best first (#3686). The Claude
-# plugin rendering leads because Claude Code and Copilot CLI both load it.
+# with the rendering a plugin bundle keeps, best first (#3686). Agents and
+# commands keep the Claude plugin rendering, which Claude Code and Copilot CLI
+# both load. Instructions keep the APM source rendering (``applyTo``): no
+# plugin host loads it natively, and local bundle install renders it into each
+# target's rule format.
 PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
     "agents": (".md", ".agent.md", ".toml"),
     "commands": (".md", ".prompt.md", ".toml"),
-    "instructions": (".md", ".instructions.md", ".mdc"),
+    "instructions": (".instructions.md", ".md", ".mdc"),
 }
 
 

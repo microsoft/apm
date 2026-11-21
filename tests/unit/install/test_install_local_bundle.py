@@ -1348,6 +1348,38 @@ class TestLocalBundlePathRouting:
             == superseded
         )
 
+    @pytest.mark.parametrize(
+        ("target_name", "rel", "rule_format"),
+        [
+            ("claude", "instructions/py.instructions.md", "claude_rules"),
+            ("claude", "instructions/py.md", None),
+            ("cursor", "instructions/py.instructions.md", "cursor_rules"),
+            ("copilot", "instructions/py.instructions.md", None),
+            ("claude", "agents/rv.agent.md", None),
+        ],
+    )
+    def test_packed_apm_instructions_render_to_the_target_rule_format(
+        self, target_name: str, rel: str, rule_format: str | None
+    ) -> None:
+        """#3686: bundles carry applyTo instructions; rule targets convert them."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_rule_format_id,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        assert (
+            bundle_rule_format_id(
+                rel,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            )
+            == rule_format
+        )
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError

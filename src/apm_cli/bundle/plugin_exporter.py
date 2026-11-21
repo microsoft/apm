@@ -1324,9 +1324,8 @@ def _report_dropped_renderings(dropped: list[str], logger=None) -> None:
     """Name every per-target duplicate rendering pack left out, on one line."""
     if not dropped:
         return
-    message = (
-        "Packed one rendering per primitive; dropped per-target duplicates: "
-        + ", ".join(dict.fromkeys(dropped))
+    message = "Packed one rendering per primitive; dropped per-target duplicates: " + ", ".join(
+        dict.fromkeys(dropped)
     )
     if logger:
         logger.info(message)
