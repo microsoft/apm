@@ -159,8 +159,9 @@ class Bench:
                             path.relative_to(self.deploy_root).as_posix() for path in hits
                         )
         state, lock = self._state()
-        if lock is None and (self.lock_path.exists() or self.lock_path.is_symlink()):
-            # An unreadable lockfile attributes nothing; I1 has no ledger to compare.
+        if lock is None:
+            # An absent or unreadable lockfile attributes nothing; I1 has no ledger
+            # to compare (deployed files have unknown provenance).
             managed.clear()
         return Observation(
             state=state,
