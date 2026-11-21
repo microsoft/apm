@@ -17946,8 +17946,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-narrowed-uninstall]"
   },
   "pair|OP=uninstall|TGT=single-unchanged": {
    "family": "pair",
@@ -17961,8 +17962,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[single-widened-uninstall]"
   },
   "pair|OP=update|DEPLOYED=absent": {
    "family": "pair",
