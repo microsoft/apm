@@ -1,0 +1,14 @@
+{
+  "issue": 4658,
+  "fixed_in": "Unreleased",
+  "summary": "After apm approve pinned a package that declares both a hook and an LSP server, the next apm install failed before writing anything; the trusted-LSP graph check now hands the approval owner the package's install path, so the approved hook and LSP server deploy.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/security/test_gate_removal.py::test_approved_package_with_hook_and_lsp_installs_both"
+  ]
+}

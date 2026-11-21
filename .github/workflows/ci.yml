@@ -33,6 +33,11 @@ concurrency:
 permissions:
   contents: read
 
+# Caches: setup-uv saves only on pull_request ('auto'; merge_group stays
+# restore-only). Called from main-push-gate.yml or merge-train.yml every
+# setup-uv step is restore-only, so a push to main adds no cache save to the
+# default-branch scope; setup-node automatic caching is off.
+# tests/quality/test_ci_topology.py pins this.
 jobs:
   # Fast lint gate -- runs in ~3s using Astral's ruff-action (no Python/uv setup needed).
   # Fails fast on style, import, and complexity violations before the heavier build-and-test job.
@@ -45,6 +50,8 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     # The chain has one owner, shared with merge-train.yml's guard job.
     - name: Lint chain
@@ -84,6 +91,7 @@ jobs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
+        package-manager-cache: false
 
     - name: Run contributor dashboard Node tests
       if: env.SHARD == '1'
@@ -102,6 +110,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -211,6 +220,8 @@ jobs:
 
     - name: Install uv
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -264,6 +275,8 @@ jobs:
 
     - name: Install uv
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev --python ${{ matrix.python-version }}
@@ -339,6 +352,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -383,6 +397,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
@@ -454,6 +469,7 @@ jobs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
+        package-manager-cache: false
 
     - name: Run contributor dashboard Node tests
       if: matrix.shard == 1
@@ -472,6 +488,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     # --extra build (PyInstaller + ~150MB of deps) is no longer pulled
     # into the test path. Binary packaging signal is preserved by the
@@ -610,6 +627,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev --extra build
@@ -665,6 +683,7 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+          save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
       # Full producer+consumer gate. Verifies every file in
       # lockfile.deployed_files exists, ref consistency between apm.yml and
@@ -770,11 +789,13 @@ jobs:
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: '24'
+        package-manager-cache: false
 
     - name: Install uv
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install Unix shell startup test runtimes
       run: bash scripts/ci-apt-install.sh fish zsh
@@ -863,6 +884,7 @@ jobs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         enable-cache: true
+        save-cache: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'auto' || 'false' }}
 
     - name: Install dependencies
       run: uv sync --frozen --extra dev
