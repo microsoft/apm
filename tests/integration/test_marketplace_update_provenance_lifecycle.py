@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -380,3 +381,88 @@ def test_update_restores_a_row_to_its_declared_alias_and_frozen_and_audit_agree(
     audit = run("audit", "--ci", "--no-policy")
     assert audit.returncode == 0, _output(audit)
     assert lock_path.read_bytes() == restored
+
+
+def _git(cwd: Path, environment, *args: str) -> None:
+    subprocess.run(
+        ("git", "-c", "user.name=APM Test", "-c", "user.email=apm@example.invalid", *args),
+        cwd=cwd,
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
+
+
+@pytest.mark.parametrize("global_scope", [False, True], ids=["project", "global"])
+def test_origin_conflict_remedy_converges_at_the_refused_scope(
+    tmp_path: Path, apm_binary_path: Path, global_scope: bool
+) -> None:
+    """#4554: the printed remedy for a changed locked origin runs and converges.
+
+    A project lock is restored from version control. A user lock is rarely
+    versioned, so its remedy re-records the plugin through ~/.apm/apm.yml and
+    never edits the lock.
+    """
+    consumer, runner, environment, _ = _provenance_world(tmp_path, apm_binary_path)
+    scope = ("--global",) if global_scope else ()
+    workspace = Path(environment["APM_HOME"]) if global_scope else consumer.root
+    lock_path = workspace / "apm.lock.yaml"
+    manifest_path = workspace / "apm.yml"
+    lock_name = "~/.apm/apm.lock.yaml" if global_scope else "apm.lock.yaml"
+    install = (
+        *("install", _ALIAS, *scope),
+        *("--target", "codex", "--no-policy", "--parallel-downloads", "0"),
+    )
+
+    def run(*args: str):
+        return runner.run(args, scenario_id=f"4554-{args[0]}", cwd=consumer.root, env=environment)
+
+    assert run(*install).returncode == 0
+    if not global_scope:
+        _git(consumer.root, environment, "init", "-q")
+        _git(consumer.root, environment, "add", "-A")
+        _git(consumer.root, environment, "commit", "-q", "-m", "install")
+    origin = _locked_dependency(lock_path)["source_url"]
+    lock = load_yaml(lock_path)
+    lock["dependencies"][0]["source_url"] = _TAMPERED["source_url"]
+    dump_yaml(lock, lock_path)
+    altered = lock_path.read_bytes()
+
+    refused = run(*install)
+
+    assert refused.returncode == 1, _output(refused)
+    assert lock_path.read_bytes() == altered
+    refusal = " ".join(refused.stderr.split())
+    head = (
+        f"marketplace '{_MARKETPLACE}' now points at {origin}, but {lock_name} recorded "
+        f"'{_PLUGIN}' from {_TAMPERED['source_url']}. Nothing was changed."
+    )
+    assert head in refusal, _output(refused)
+    if global_scope:
+        (entry,) = load_yaml(manifest_path)["dependencies"]["apm"]
+        assert (
+            f"If {lock_name} changed by mistake, or to switch marketplaces on purpose, "
+            f"remove the entry 'git: {_REMOTE}, path: {_SUBDIR}, ref: main' from "
+            "~/.apm/apm.yml, then run 'apm install -g' to drop the "
+            "plugin locked from the old marketplace, then add it back and run "
+            "'apm install -g' again."
+        ) in refusal, _output(refused)
+        assert "version control" not in refusal, _output(refused)
+        manifest = load_yaml(manifest_path)
+        manifest["dependencies"]["apm"] = []
+        dump_yaml(manifest, manifest_path)
+        assert run("install", "-g").returncode == 0
+        manifest["dependencies"]["apm"] = [entry]
+        dump_yaml(manifest, manifest_path)
+        assert run("install", "-g").returncode == 0
+    else:
+        assert (
+            f"If {lock_name} was not changed on purpose, restore it from version control."
+        ) in refusal, _output(refused)
+        _git(consumer.root, environment, "checkout", "--", "apm.lock.yaml")
+
+    # The switch path re-records a plain Git row; the next alias install adds the origin.
+    assert _locked_dependency(lock_path).get("source_url") in (None, origin)
+    converged = run(*install)
+    assert converged.returncode == 0, _output(converged)
+    assert _locked_dependency(lock_path)["source_url"] == origin
