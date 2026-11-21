@@ -634,11 +634,6 @@
         "PLR0911"
       ]
     },
-    "tests/integration/test_codex_native_plugin_lifecycle.py": {
-      "test_git_pinned_install_and_missing_apm_cache_restore": [
-        "PLR0915"
-      ]
-    },
     "tests/integration/test_deps_resolver_resolution.py": {
       "_make_dep_ref": [
         "PLR0913"
