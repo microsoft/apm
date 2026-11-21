@@ -18,6 +18,14 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
+from tests.lifecycle.machines._gate_bundle import (
+    GateBundles,
+    GatePack,
+    bundle_cells,
+    pack_cells,
+    replay_bundles,
+    replay_pack,
+)
 from tests.lifecycle.machines._gate_kit import (
     COMPLETED_SPINES,
     KNOWN_CELLS,
@@ -192,6 +200,27 @@ def test_gate_matrix_credits_op_prim_gate_cells(
         and any((machine.bench.deploy_root / p).iterdir())
     ]
     assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
+
+
+def test_gate_bundle_spine_credits_bundle_install_cells(lifecycle_template, tmp_path: Path) -> None:
+    """A local bundle at every gate level keeps I1-I9 and earns its OP x PRIM x GATE ids."""
+    machine = GateBundles(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project"))
+    replay_bundles(machine)
+    missing = bundle_cells() - earned_cells(current_node(), "G1|bundle|")
+    assert not missing, f"bundle ids without an oracle receipt: {sorted(missing)}"
+    # With the gate off at the end, every executable of both bundles is deployed.
+    hooks = machine.bench.deploy_root / ".github" / "hooks"
+    assert any(path.name.startswith("p-bmix") for path in hooks.iterdir())
+
+
+def test_gate_pack_spine_credits_pack_cells(lifecycle_template, tmp_path: Path) -> None:
+    """``apm pack`` ships exactly the dependency executables each gate level deploys."""
+    machine = GatePack(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project"))
+    replay_pack(machine)
+    missing = pack_cells() - earned_cells(current_node(), "G1|pack|")
+    assert not missing, f"pack ids without an oracle receipt: {sorted(missing)}"
+    # The gate is off at the end: the hook stays deployed in the project.
+    assert (machine.bench.deploy_root / ".github/hooks/p-exec-session.json").exists()
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:

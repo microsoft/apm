@@ -65,8 +65,14 @@ LOCK_STATES: Mapping[str, str] = {"consistent": "consistent", "newer": "newer-ge
 GATE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[{scope}]"
 )
-# M-GATE matrix op -> (OP, modifiers).
+GATE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
+)
+GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
+# M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "bundle": ("bundle-install", ()),
+    "pack": ("pack", ()),
     "install": ("install", ()),
     "install-frozen": ("install", ("FROZEN",)),
     "update": ("update", ()),
@@ -131,6 +137,7 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
 
     cells: list[MachineCell] = []
@@ -147,6 +154,11 @@ def machine_cells() -> list[MachineCell]:
                 witness = SCOPE_LOCK_SPINE.format(scope=scope)
                 tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
                 cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+    side_doors = ((GATE_BUNDLE_SPINE, bundle_cells()), (GATE_PACK_SPINE, pack_cells()))
+    for witness, keys in side_doors:
+        for key in sorted(keys):
+            assignment = _gate_assignment(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
