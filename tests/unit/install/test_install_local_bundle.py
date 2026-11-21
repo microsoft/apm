@@ -980,8 +980,9 @@ class TestLocalBundlePathRouting:
             ("# Lint\nCheck style.\n", "Lint"),
             ("Check style.\n", "lint"),
             ("---\nname: linter\ndescription: '  '\n---\nCheck style.\n", "linter"),
+            ("---\nname: linter\ndescription:\n---\nCheck style.\n", "linter"),
         ],
-        ids=["leading-heading", "no-heading", "blank-description"],
+        ids=["leading-heading", "no-heading", "blank-description", "null-description"],
     )
     def test_codex_bundle_agent_without_a_description_gets_a_loadable_one(
         self, tmp_path: Path, content: str, description: str

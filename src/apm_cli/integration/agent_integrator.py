@@ -826,7 +826,10 @@ class AgentIntegrator(BaseIntegrator):
         if resolve_links is not None:
             body, links_resolved = resolve_links(body, source, target)
 
-        if strict and isinstance(description, str) and not description.strip():
+        # A blank YAML ``description:`` loads as None: treat it as absent.
+        if strict and (
+            description is None or (isinstance(description, str) and not description.strip())
+        ):
             description = _derived_codex_description(name, body)
         doc = {
             "name": name,
