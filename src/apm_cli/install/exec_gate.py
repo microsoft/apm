@@ -451,10 +451,10 @@ def gate_retirements(
     ``None`` when the org policy blocks or is unresolved: install's policy
     preflight owns that outcome.
     """
-    from apm_cli.core.scope import manifest_root
+    from apm_cli.core.scope import manifest_root, scope_manifest_path
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.outcome_routing import classify_project_policy
-    from apm_cli.security.executables import effective_exec_map_for_project
+    from apm_cli.security.executables import exec_trust_context_for_project
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
@@ -479,13 +479,13 @@ def gate_retirements(
         if not trust:
             # Reuse the policy routed above: a second resolution would report
             # the same policy miss twice (I9).
-            allow = effective_exec_map_for_project(
-                project_root,
-                user_scope=user_scope,
-                policy=route.policy,
-                fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+            trust.append(
+                exec_trust_context_for_project(
+                    scope_manifest_path(project_root, user_scope=user_scope),
+                    policy=route.policy,
+                    fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+                )
             )
-            trust.append(getattr(allow, "trust_context", None))
         return trust[0]
 
     pins = locked_hook_pin_mismatches(lockfile, modules_dir, _trust_ctx)
