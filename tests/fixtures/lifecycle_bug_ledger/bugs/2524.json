@@ -1,0 +1,15 @@
+{
+  "issue": 2524,
+  "summary": "Traps pack certifying degraded marketplace metadata during outages (#2524); needs network marketplace and pack --check-clean.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_remote_marketplace_metadata_outage_lifecycle.py::test_remote_metadata_outage_never_certifies_degraded_marketplace"
+  ]
+}

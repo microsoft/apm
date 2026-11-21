@@ -1,0 +1,19 @@
+{
+  "issue": 3722,
+  "fixed_in": "0.36.1",
+  "summary": "Global reinstall compared transformed agents (Codex TOML, rewritten links) to their source and reported APM's own files as unmanaged and skipped.",
+  "failure_modes": [
+    "idempotency",
+    "ownership"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_transformed_agents_for_every_target",
+    "tests/integration/test_global_agent_adoption_lifecycle.py::test_global_reinstall_adopts_agents_whose_links_were_rewritten",
+    "tests/integration/test_global_agent_adoption_lifecycle.py::test_upgrade_adopts_agents_rendered_by_an_earlier_release"
+  ]
+}

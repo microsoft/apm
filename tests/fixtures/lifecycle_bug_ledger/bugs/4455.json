@@ -1,0 +1,15 @@
+{
+  "issue": 4455,
+  "fixed_in": "Unreleased",
+  "summary": "apm install --dry-run previews the block that org policy applies when no enforceable policy can be resolved under policy.fetch_failure_default=block, naming the reason, and writes nothing.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/security/test_policy_outcomes.py::test_site_routes_the_outcome",
+    "tests/unit/policy/test_pr_832_findings.py::TestOutcomeRoutingTable::test_dry_run_previews_the_fetch_failure_default_block"
+  ]
+}

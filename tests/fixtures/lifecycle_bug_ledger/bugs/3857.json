@@ -1,0 +1,16 @@
+{
+  "issue": 3857,
+  "summary": "Traps apm init re-init mapping singular target: to targets:; init is outside replay vocabulary.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_init_reinit_targets_lifecycle.py::test_reinit_refuses_a_target_with_no_targets_equivalent",
+    "tests/integration/test_init_reinit_targets_lifecycle.py::test_reinit_writes_targets_apm_accepts"
+  ]
+}

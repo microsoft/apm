@@ -1,0 +1,16 @@
+{
+  "issue": 3433,
+  "summary": "Resolved-tag pin stability is explicitly excluded ref behavior.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_revision_pin_update_lifecycle.py::test_unchanged_install_keeps_revision_pin_tag_lock_bytes",
+    "tests/integration/test_revision_pin_update_lifecycle.py::test_update_malformed_tag_output_exits_before_writes",
+    "tests/integration/test_revision_pin_update_lifecycle.py::test_update_rejects_annotated_noncommit_before_writes",
+    "tests/integration/test_revision_pin_update_lifecycle.py::test_update_retains_unreleased_pin_in_dry_run_and_apply"
+  ]
+}
