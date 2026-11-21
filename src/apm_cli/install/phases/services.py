@@ -50,14 +50,20 @@ def _restore_after_failed_write(ctx: InstallContext, error: Exception) -> None:
 
     Reconciliation runs while the lockfile is still staged and the install
     transaction still journals its deploys, so rolling back leaves deployed
-    files, ``apm.lock.yaml`` and ``apm.yml`` as they were. An MCP collision
+    files, ``apm.lock.yaml``, ``apm.yml`` and the MCP configuration written so
+    far (journaled at the write seam) as they were. An MCP or LSP collision
     keeps the writes that reached disk, as documented (#4268).
     """
-    from apm_cli.install.errors import MCPNativeConflictError
-
-    if isinstance(error, MCPNativeConflictError) or ctx.transaction is None:
+    if _keeps_writes(error) or ctx.transaction is None:
         return
     ctx.transaction.rollback()
+
+
+def _keeps_writes(error: BaseException | None) -> bool:
+    """A collision preserves the user's entry and keeps the other writes."""
+    from apm_cli.install.errors import LSPUserEntryConflictError, MCPNativeConflictError
+
+    return isinstance(error, MCPNativeConflictError | LSPUserEntryConflictError)
 
 
 def native_registration_allowed(ctx: InstallContext) -> bool:
@@ -68,9 +74,6 @@ def native_registration_allowed(ctx: InstallContext) -> bool:
     servers were written), so the committed native records are on disk; a
     refusal discards the staged lockfile and registers nothing.
     """
-    from apm_cli.install.errors import MCPNativeConflictError
-
     failure = ctx.service_failure
     # Any other failure rolled the install back (#4594): nothing to register.
-    collision = isinstance(failure, MCPNativeConflictError)
-    return failure is None or (collision and commits_on_failure(failure))
+    return failure is None or (_keeps_writes(failure) and commits_on_failure(failure))

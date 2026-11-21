@@ -16,7 +16,11 @@ import pytest
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
-from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
+from apm_cli.deps.lockfile_write_authority import (
+    LockfileWriter,
+    discard_staged_lockfile_writes,
+    lockfile_write_scope,
+)
 from apm_cli.install.context import InstallContext
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
@@ -125,6 +129,7 @@ def test_a_failed_mcp_write_rolls_the_install_back_and_registers_nothing(
     stage = _stage_mcp(ctx)
     failure = InstallFailureAlreadyRendered("MCP configuration failed for selected runtime(s)")
     ctx.transaction = MagicMock()
+    ctx.transaction.rollback.side_effect = discard_staged_lockfile_writes
 
     def reconcile(result) -> None:
         stage(result)
@@ -137,6 +142,7 @@ def test_a_failed_mcp_write_rolls_the_install_back_and_registers_nothing(
     assert ctx.service_failure is failure
     ctx.transaction.rollback.assert_called_once_with()
     assert declared_against == []
+    assert not get_lockfile_path(tmp_path).exists()
 
 
 def test_a_refused_reconcile_registers_and_commits_nothing(tmp_path: Path) -> None:
