@@ -1567,8 +1567,10 @@ def run_baseline_checks(
                         message=(
                             "apm.yml is missing but APM artifacts"
                             " (.apm/ or apm.lock.yaml or apm.lock) were found"
-                            " -- this may indicate a deleted manifest"
+                            " -- this may indicate a deleted manifest. "
+                            f"{remediation.PROJECT_MANIFEST_MISSING.sentence()}"
                         ),
+                        remediations=(remediation.PROJECT_MANIFEST_MISSING,),
                     )
                 )
             elif ci_mode:
