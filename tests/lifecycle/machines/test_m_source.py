@@ -257,11 +257,10 @@ X_CONTEXT: Mapping[tuple[str, str], tuple[str, ...]] = {
     ("install", "mcp-registry"): _MANIFEST_CONTEXT,
     ("install", "plugin-at-mkt"): _MANIFEST_CONTEXT,
     ("install", "native"): _MANIFEST_CONTEXT,
-    ("install", "pkg-registry"): (*_MANIFEST_CONTEXT, "GATE=none"),
+    ("install", "pkg-registry"): _MANIFEST_CONTEXT,
     # A local bundle has no manifest entry (``install --frozen`` never reads it) and
     # its install refuses ``--update`` (exit 2).
     ("install", "bundle"): (*(c for c in _COMMON if c != "UPDATE=on"), _UNAPPROVED),
-    ("install", "marketplace-object"): ("GATE=none",),
     ("update", "marketplace-object"): ("DEPLOYED=clean",),
     ("update", "pkg-registry"): ("DEPLOYED=clean",),
 }
@@ -418,10 +417,13 @@ class SourceMachine(MachineBase):
             shape = "single" if len(self.model.targets) == 1 else "multi"
             found.add(f"TGT={shape}-unchanged")
         found |= {context for flag, context in _FLAG_CONTEXT.items() if flag in args}
-        gated = choice.kinds - UNGATED_KINDS
-        found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
-        if not gated:
+        # GATE=none is "no executables gate configured" (factors.py GateLevel "none");
+        # with the gate on, only the executable kinds of a package have a gate level.
+        if "executables" not in self.bench.manifest():
             found.add("GATE=none")
+        else:
+            gated = choice.kinds - UNGATED_KINDS
+            found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
         listed = X_CONTEXT.get((op, choice.form), ())
