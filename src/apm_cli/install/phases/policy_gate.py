@@ -166,8 +166,19 @@ def run(ctx: InstallContext) -> None:
 
 
 def _with_prefetch_denials(ctx: InstallContext) -> list:
-    """The resolved dependencies plus any refused by identity before fetching."""
+    """The resolved dependencies plus any refused by identity before fetching.
+
+    A positional install keeps only the denials inside its selection, the
+    same filter its resolved dependencies got.
+    """
     denied = getattr(ctx, "prefetch_policy_denials", None) or ()
+    graph = getattr(ctx, "dependency_graph", None)
+    if denied and getattr(ctx, "only_packages", None) and graph is not None:
+        from apm_cli.install.package_selection import selected_subtree_dependencies
+
+        denied = selected_subtree_dependencies(
+            ctx.only_packages, graph.dependency_tree, list(denied)
+        )
     if not denied:
         return ctx.deps_to_install
     deps = list(ctx.deps_to_install)
