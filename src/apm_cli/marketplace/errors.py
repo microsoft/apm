@@ -110,8 +110,9 @@ class MarketplaceOriginConflictError(MarketplaceError):
     """Raised when an alias now names a different marketplace than the lock recorded.
 
     *user_scope* renders the switch remedy against the user manifest
-    (``~/.apm/apm.yml``, ``apm install -g``). The restore remedy is the same at
-    both scopes: the marketplace registry is user-global.
+    (``~/.apm/apm.yml``, ``apm install -g``) and offers it for a mistaken lock
+    change instead of a version-control restore (#4554). The re-register remedy
+    is the same at both scopes: the marketplace registry is user-global.
     """
 
     def __init__(
@@ -158,12 +159,23 @@ class MarketplaceOriginConflictError(MarketplaceError):
             plugin=_manifest_entry_label(manifest_entry, plugin_name)
         ).clause()
         lockfile = "~/.apm/apm.lock.yaml" if user_scope else "apm.lock.yaml"
-        super().__init__(
+        head = (
             f"marketplace {marketplace_name!r} now points at {shown_current}, but {lockfile} "
-            f"recorded {plugin_name!r} from {shown_locked}. Nothing was changed. "
-            f"If {lockfile} was not changed on purpose, restore it from version control. "
-            f"{keep} To switch marketplaces on purpose, {switch}."
+            f"recorded {plugin_name!r} from {shown_locked}. Nothing was changed."
         )
+        if user_scope:
+            # The user lock is rarely under version control (#4554): a mistaken
+            # change converges by re-recording the plugin, never by a lock edit.
+            message = (
+                f"{head} If {lockfile} changed by mistake, or to switch marketplaces "
+                f"on purpose, {switch}. {keep}"
+            )
+        else:
+            message = (
+                f"{head} If {lockfile} was not changed on purpose, restore it from version "
+                f"control. {keep} To switch marketplaces on purpose, {switch}."
+            )
+        super().__init__(message)
 
 
 class MarketplaceProvenanceError(MarketplaceError):

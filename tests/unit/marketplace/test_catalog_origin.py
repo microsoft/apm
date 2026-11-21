@@ -126,20 +126,20 @@ _PROJECT_CONFLICT = (
 )
 _USER_CONFLICT = (
     f"marketplace 'company' now points at {_B}, but ~/.apm/apm.lock.yaml recorded "
-    f"'plugin' from {_A}. Nothing was changed. If ~/.apm/apm.lock.yaml was not changed "
-    "on purpose, restore it from version control. Otherwise, verify that source first, "
-    f"then run 'apm marketplace add {_A} --name "
-    "company' to keep the locked marketplace (add --ref or --path if the original "
-    "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
+    f"'plugin' from {_A}. Nothing was changed. If ~/.apm/apm.lock.yaml changed by "
+    "mistake, or to switch marketplaces on purpose, remove 'plugin' from "
     "~/.apm/apm.yml, then run 'apm install -g' to drop the plugin locked from the old "
-    "marketplace, then add it back and run 'apm install -g' again."
+    "marketplace, then add it back and run 'apm install -g' again. Otherwise, verify "
+    f"that source first, then run 'apm marketplace add {_A} --name company' to keep "
+    "the locked marketplace (add --ref or --path if the original registration used them)."
 )
 
 
 def test_conflict_remedy_names_the_refused_scope() -> None:
     """RA-029: a user-scope refusal names the user manifest and ``apm install -g``.
 
-    The restore remedy keeps no ``-g``: the marketplace registry is user-global.
+    The re-register remedy keeps no ``-g``: the marketplace registry is
+    user-global. #4554: the user lock is not restored from version control.
     """
     project = MarketplaceOriginConflictError("company", "plugin", _A, _B)
     user = MarketplaceOriginConflictError("company", "plugin", _A, _B, user_scope=True)
@@ -245,7 +245,7 @@ def test_rebound_alias_remedy_reads_the_user_manifest_at_user_scope(monkeypatch,
         catalog_origin.require_locked_row_origin(_marketplace_row(), user_scope=True)
 
     assert (
-        "To switch marketplaces on purpose, remove "
+        "or to switch marketplaces on purpose, remove "
         "'git.example.invalid/acme/mkta/plugins/x#v1.0.0' from ~/.apm/apm.yml, "
         "then run 'apm install -g'"
     ) in str(exc.value)
