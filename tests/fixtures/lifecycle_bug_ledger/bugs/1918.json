@@ -1,0 +1,14 @@
+{
+  "issue": 1918,
+  "summary": "Registered marketplace refs and branch-selected artifacts are explicitly excluded.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_github_registered_branch_installs_pilot_artifacts",
+    "tests/integration/test_marketplace_registered_ref_lifecycle.py::test_gitlab_registered_branch_installs_pilot_artifacts"
+  ]
+}

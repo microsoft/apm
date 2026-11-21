@@ -1,0 +1,14 @@
+{
+  "issue": 4291,
+  "fixed_in": "Unreleased",
+  "summary": "apm pack shows each plugin-manifest note (servers left out, secrets withheld) once per command, not once per manifest it builds.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_pack_mcp_ownership_lifecycle.py::test_pack_output_is_identical_before_and_after_install"
+  ]
+}

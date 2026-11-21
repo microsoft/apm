@@ -1,0 +1,23 @@
+{
+  "issue": 3758,
+  "fixed_in": "0.36.1",
+  "summary": "Org policy hosted on Azure DevOps was reported as a fetch failure when the anonymous request was redirected to sign-in, so the credential chain never ran and lifecycle scripts were suppressed under fetch_failure_default block.",
+  "failure_modes": [
+    "auth",
+    "outcome"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_policy_status_follows_signin_redirect_into_credential_helper",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_compile_lifecycle_runs_when_ado_policy_needs_credential_helper",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_uninstall_lifecycle_runs_when_ado_policy_needs_credential_helper",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_and_install_fail_closed_when_ado_policy_unreachable_under_block",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_ado_hosted_target_policy_is_enforced_on_canonical_targets",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_audit_ci_warn_names_unreachable_ado_policy",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_policy_signin_redirect_without_helper_is_reported_as_auth_required",
+    "tests/integration/test_ado_policy_signin_redirect_lifecycle.py::test_warm_policy_cache_does_not_mask_refresh_through_helper"
+  ]
+}

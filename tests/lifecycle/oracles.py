@@ -2,7 +2,7 @@
 
 ``check_cross_cutting(before, after, result, model, op)`` runs after every
 generated step. Each law aliases the lifecycle-ledger properties it refines
-(``tests/fixtures/lifecycle_bug_ledger.json``); laws with no ledger property
+(``tests/fixtures/lifecycle_bug_ledger/``); laws with no ledger property
 are output contracts the ledger does not cover.
 
 A law violation that a model declares as a known failing cell is a STRICT
@@ -28,13 +28,14 @@ from typing import Protocol
 
 from apm_cli.deps.lockfile import LockFile
 from apm_cli.utils.content_hash import compute_file_hash
+from scripts.lifecycle_ledger import read_ledger
 from tests.lifecycle import receipts
 from tests.lifecycle.model.expected import exit_contract
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
-LEDGER_PATH = Path(__file__).parents[1] / "fixtures" / "lifecycle_bug_ledger.json"
+_REPO_ROOT = Path(__file__).parents[2]
 
 # Machine step names -> the OP factor of the obligation vocabulary.
 _OP_FAMILIES: Mapping[str, str] = {
@@ -262,7 +263,7 @@ class OracleModel(Protocol):
 
 def ledger_property_ids() -> frozenset[str]:
     """Return the property ids the oracle laws may alias."""
-    ledger = json.loads(LEDGER_PATH.read_text(encoding="ascii"))
+    ledger = read_ledger(_REPO_ROOT)
     return frozenset(row["id"] for row in ledger["property_catalog"])
 
 

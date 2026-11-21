@@ -1,0 +1,16 @@
+{
+  "issue": 2759,
+  "fixed_in": "Unreleased",
+  "summary": "Git-hook installs could mutate the invoking repository and expose transport state.",
+  "failure_modes": [
+    "transaction",
+    "auth"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state",
+    "auth.credentials_isolated"
+  ],
+  "regression_tests": [
+    "tests/integration/test_consume_source_ref_cache_matrix.py::test_cli_custom_port_negative_twins_preserve_last_good_state"
+  ]
+}

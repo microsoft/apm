@@ -1,0 +1,6 @@
+{
+  "id": "source.ref_cache_coherent",
+  "phase": 1,
+  "oracle_tier": "semantic",
+  "law": "Materialized content, resolved references, and cache identity describe the same source revision."
+}
