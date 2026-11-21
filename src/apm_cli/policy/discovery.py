@@ -1767,6 +1767,8 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
             "enforce": list(policy.executables.enforce),
         },
     }
+    if policy.marketplace.allow is not None:
+        serialized["marketplace"] = {"allow": list(policy.marketplace.allow)}
     if policy.bin_deploy.deny_all or policy.bin_deploy.deny:
         serialized["bin_deploy"] = {
             "deny_all": policy.bin_deploy.deny_all,
@@ -1816,6 +1818,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
             policy.unmanaged_files.exclude is not None,
             policy.registry_source.require,
             not policy.registry_source.allow_non_registry,
+            policy.marketplace.allow is not None,
             policy.security.audit.on_install is not None,
             policy.security.audit.external is not None,
             policy.security.audit.scanners is not None,
