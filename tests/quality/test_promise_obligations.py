@@ -20,6 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from tests.lifecycle import oracles, receipts
 from tests.lifecycle.obligations import (
@@ -328,6 +329,32 @@ def test_an_explicit_receipts_directory_keeps_every_session(
     _run_session(plugin, tmp_path, witness)
     assert stale in receipts.load(tmp_path)
     assert len(receipts.load(tmp_path)) == 2
+
+
+def test_required_receipts_fail_when_one_witness_did_not_report() -> None:
+    """A full-set run that deselected one witness fails once receipts are required (#4586)."""
+    catalog = load_catalog()
+    witnesses = sorted(set(catalog.required.values()))
+    dropped = witnesses[0]
+    earned = [_receipt(node) for node in witnesses[1:]]
+    with pytest.raises(AssertionError, match=re.escape(dropped)):
+        _hold_the_ratchet(catalog, earned, required=True)
+
+
+def test_the_full_lifecycle_run_requires_its_receipts() -> None:
+    """lifecycle-full writes receipts to one directory and then requires a receipt per witness."""
+    workflow = yaml.safe_load(
+        (_ROOT / ".github/workflows/lifecycle-journeys.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["lifecycle-full"]["steps"]
+    run = next(step for step in steps if "--ignore=tests/lifecycle/journeys" in step.get("run", ""))
+    check = next(
+        step for step in steps if "test_merged_receipts_hold_the_ratchet" in step.get("run", "")
+    )
+    assert steps.index(check) > steps.index(run)
+    assert check["env"]["APM_LIFECYCLE_RECEIPTS_REQUIRED"] == "1"
+    directory = run["env"][receipts.DIRECTORY_ENV]
+    assert directory and check["env"][receipts.DIRECTORY_ENV] == directory
 
 
 def test_required_receipts_never_pass_vacuously() -> None:

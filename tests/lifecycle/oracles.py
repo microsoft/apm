@@ -813,6 +813,19 @@ class Evidence:
     expected: object = _UNSET
     observed: object = _UNSET
 
+    def assertion_facts(self) -> bool:
+        """At least one checked fact: state, an output line, or an expected/observed pair.
+
+        A pinned exit code is the CLI result's expected/observed pair.
+        """
+        return bool(
+            self.state_facts()
+            or self.output_matches
+            or self.output_forbids
+            or self.exit is not None
+            or self.expected is not _UNSET
+        )
+
     def state_facts(self) -> bool:
         return bool(
             self.absent
@@ -865,6 +878,9 @@ def _strength_problems(strength, before, after, result, evidence: Evidence) -> l
     if strength not in ("e2e", "e2e-evidence"):
         return [f"unknown strength {strength!r}"]
     problems = [] if result is not None else [f"{strength} strength needs a CLI result"]
+    if not evidence.assertion_facts():
+        # A receipt that asserts nothing would credit a run that proved nothing (#4586).
+        problems.append(f"{strength} strength needs at least one assertion fact")
     if strength == "e2e-evidence":
         if not evidence.state_facts():
             problems.append("e2e-evidence needs a snapshot, egress or persisted-secret fact")

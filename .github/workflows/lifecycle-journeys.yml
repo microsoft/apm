@@ -163,10 +163,25 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           APM_REQUIRE_CODEX: "1"
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
         run: |
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
             -n 4 --dist loadgroup --durations=20 -m "not live" \
             --ignore=tests/lifecycle/journeys tests/lifecycle
+
+      # This job runs every required promise witness (all live under tests/lifecycle,
+      # outside journeys), so every one must have reported a receipt (#4586). The
+      # subset jobs do not set APM_LIFECYCLE_RECEIPTS_REQUIRED: the PR lifecycle
+      # smoke shards (ci.yml) run only lifecycle_smoke nodes, the journeys job above
+      # runs only tests/lifecycle/journeys, and gate-machine-nightly.yml runs only
+      # the M-GATE sequences.
+      - name: Require a receipt from every required witness
+        env:
+          APM_LIFECYCLE_RECEIPTS_DIR: ${{ runner.temp }}/lifecycle-receipts
+          APM_LIFECYCLE_RECEIPTS_REQUIRED: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
+            tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
   # PR integration shards keep only the per-group sample of the linter session
   # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs

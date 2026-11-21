@@ -340,6 +340,29 @@ class TestLedger:
             {"ledger": "abc1234", "requested": "def5678"},
         )
 
+    def test_gate_is_pending_on_an_unbound_ledger(self) -> None:
+        """No walk recorded for any SHA: never GO (#4586)."""
+        row = findings.gate_row({"sha": None, "findings": []}, "abc1234")
+        assert (row["verdict"], row["unbound_ledger"]) == ("PENDING-VERIFICATION", True)
+
+    def test_gate_is_pending_on_a_missing_ledger(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        missing = tmp_path / "findings.json"
+        assert findings.gate_row(findings.load_ledger(missing), "abc1234")["verdict"] == (
+            "PENDING-VERIFICATION"
+        )
+        assert findings.main(["gate-row", "--ledger", str(missing), "--sha", "abc1234"]) == 2
+        assert json.loads(capsys.readouterr().out)["verdict"] == "PENDING-VERIFICATION"
+
+    def test_add_with_sha_binds_a_walk_without_findings(self) -> None:
+        ledger = {"sha": None, "findings": []}
+        findings.add(ledger, [], "abc1234")
+        assert findings.gate_row(ledger, "abc1234")["verdict"] == "GO"
+        assert findings.gate_row(ledger, "def5678")["verdict"] == "PENDING-VERIFICATION"
+        with pytest.raises(findings.LedgerError, match="bound to abc1234"):
+            findings.add(ledger, [], "def5678")
+
     def test_recheck_must_cover_every_unresolved_finding(self) -> None:
         ledger = {"sha": None, "findings": []}
         findings.add(

@@ -73,7 +73,21 @@ def load_ledger(path: Path) -> dict:
     return {"sha": None, "findings": []}
 
 
-def add(ledger: dict, new: list[dict]) -> dict:
+def bind(ledger: dict, sha: str) -> None:
+    """Bind an unbound ledger to the candidate SHA; refuse one bound to another SHA."""
+    if ledger.get("sha") not in (None, sha):
+        raise LedgerError(f"ledger is bound to {ledger['sha']}, not {sha}; use recheck")
+    ledger["sha"] = sha
+
+
+def add(ledger: dict, new: list[dict], sha: str | None = None) -> dict:
+    """Merge *new* findings; with *sha*, bind the ledger to it even when nothing is new.
+
+    A walk with no findings still has to record the SHA it ran on, or the gate
+    row cannot vouch for that SHA.
+    """
+    if sha is not None:
+        bind(ledger, sha)
     index = {f["fingerprint"]: f for f in ledger["findings"]}
     added, duplicates = [], []
     for raw in new:
@@ -117,7 +131,9 @@ def gate_row(ledger: dict, sha: str) -> dict:
     still-open or changed). PENDING-VERIFICATION: no confirmed open blocker,
     but at least one blocker still awaits P4. Known issues never count.
     A ledger bound to another SHA cannot vouch for this one: the verdict is
-    PENDING-VERIFICATION until a recheck moves the ledger to the SHA.
+    PENDING-VERIFICATION until a recheck moves the ledger to the SHA. Neither
+    can an unbound ledger (a missing file, or ``add`` never given the SHA): no
+    walk is recorded for this SHA, so the verdict is never GO (#4586).
     """
     confirmed_open = {"verified", "still-open", "changed"}
     blockers = [
@@ -137,10 +153,11 @@ def gate_row(ledger: dict, sha: str) -> dict:
     for finding in ledger["findings"]:
         if finding["status"] in confirmed_open | {"open"}:
             counts[finding["severity"]] += 1
-    stale = ledger.get("sha") not in (None, sha)
+    unbound = ledger.get("sha") is None
+    stale = not unbound and ledger["sha"] != sha
     if blockers and not stale:
         verdict = "NO-GO"
-    elif unverified or stale:
+    elif unverified or stale or unbound:
         verdict = "PENDING-VERIFICATION"
     else:
         verdict = "GO"
@@ -156,6 +173,8 @@ def gate_row(ledger: dict, sha: str) -> dict:
     }
     if stale:
         row["stale_sha"] = {"ledger": ledger["sha"], "requested": sha}
+    if unbound:
+        row["unbound_ledger"] = True
     return row
 
 
@@ -282,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     p_add = sub.add_parser("add", help="merge findings from a JSONL file")
     p_add.add_argument("--ledger", required=True)
     p_add.add_argument("--findings", required=True)
+    p_add.add_argument("--sha", help="bind the ledger to the walked SHA (needed for GO)")
     p_cov = sub.add_parser("coverage", help="summarize a coverage CSV")
     p_cov.add_argument("--csv", required=True)
     p_gate = sub.add_parser("gate-row", help="compute the release-gate row")
@@ -307,10 +327,13 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path = Path(args.ledger)
         if args.command != "add" and not ledger_path.is_file():
             print(f"findings: ledger not found: {ledger_path}", file=sys.stderr)
+            if args.command == "gate-row":
+                # Still print the row a consumer reads: a missing ledger is never GO.
+                print(json.dumps(gate_row(load_ledger(ledger_path), args.sha), indent=2))
             return 2
         ledger = load_ledger(ledger_path)
         if args.command == "add":
-            result = add(ledger, _read_jsonl(Path(args.findings)))
+            result = add(ledger, _read_jsonl(Path(args.findings)), args.sha)
         elif args.command == "gate-row":
             result = gate_row(ledger, args.sha)
         elif args.command == "verify":
