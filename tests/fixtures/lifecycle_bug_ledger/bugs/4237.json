@@ -1,0 +1,14 @@
+{
+  "issue": 4237,
+  "fixed_in": "Unreleased",
+  "summary": "install names a denied package's filtered LSP server as denied, with the policy explain step, instead of 'not trusted yet' and an approve hint.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lsp_denied_package_wording_lifecycle.py::test_denied_package_lsp_filter_names_the_deny"
+  ]
+}

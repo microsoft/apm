@@ -1,0 +1,18 @@
+{
+  "issue": 4184,
+  "fixed_in": "0.37.0",
+  "summary": "A converged apm install changes no bytes, reports no integrated item, warning or installed count, and ends with 'No changes -- install state already up to date'; local packages and the project's own .apm content count only when they change; uninstall counts each package once with its manifest spelling and a relative apm.yml path.",
+  "failure_modes": [
+    "idempotency",
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_converged_install_lifecycle.py::test_converged_install_reports_no_change",
+    "tests/integration/test_uninstall_summary_lifecycle.py::test_local_uninstall_summary_counts_once_with_manifest_spelling"
+  ]
+}

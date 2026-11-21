@@ -1,0 +1,17 @@
+{
+  "issue": 3693,
+  "summary": "Traps duplicate dependencies/devDependencies moves and uninstall of every spelling; needs install --dev, is_dev lock fields, git pins.",
+  "failure_modes": [
+    "idempotency",
+    "reference"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_duplicate_declaration_lifecycle.py::test_cross_section_moves_keep_the_declared_pin",
+    "tests/integration/test_duplicate_declaration_lifecycle.py::test_install_dev_moves_and_plain_install_keeps",
+    "tests/integration/test_duplicate_declaration_lifecycle.py::test_uninstall_removes_every_declaration_of_one_package"
+  ]
+}

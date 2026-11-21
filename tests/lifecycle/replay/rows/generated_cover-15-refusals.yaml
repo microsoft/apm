@@ -27,6 +27,12 @@ world:
 given:
 - apm install p-skill
 when:
+- run: apm pack --update
+  exit: 2
+  cells:
+  - refusal|OP=pack|UPDATE=on
+  unchanged:
+  - '*'
 - run: apm prune --force
   exit: 2
   cells:

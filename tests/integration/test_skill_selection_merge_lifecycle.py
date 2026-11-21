@@ -330,6 +330,79 @@ def test_uninstalling_one_diamond_parent_shrinks_to_the_survivor_selection_then_
         assert locked(project, bundle) is None
 
 
+def _tree_bytes(*roots: Path) -> dict[str, bytes]:
+    found: dict[str, bytes] = {}
+    for root in roots:
+        candidates = [root] if root.is_file() else sorted(root.rglob("*"))
+        for path in candidates:
+            if path.is_file():
+                found[path.as_posix()] = path.read_bytes()
+    return found
+
+
+def _assert_shrink_refused(result, edited: Path) -> None:
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output[-4000:]
+    assert "Uninstall refused" in output, output[-4000:]
+    assert f"skills/{edited.parent.name}/{edited.name}" in output, output[-4000:]
+    assert "Uninstall could not remove tracked target files" not in output, output[-4000:]
+
+
+def test_uninstall_refuses_before_any_change_when_a_shrink_would_remove_an_edited_skill(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4313: files a shrinking survivor selection retires join the evidence preflight."""
+    world = _world(tmp_path, apm_binary_path)
+    _bundle, a, b = _diamond(world, {"skills": ["alpha", "beta"]}, {"skills": ["gamma", "delta"]})
+    project = world.project("consumer", dependencies=[a, b])
+    skills_root = project / _PROJECT_SKILLS
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="4313-install")
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        edited = skills_root / "alpha" / "SKILL.md"
+        edited.write_text(edited.read_text(encoding="utf-8") + "\nlocal edit\n", encoding="utf-8")
+        watched = (
+            project / "apm.yml",
+            lock_path(project),
+            project / "apm_modules",
+            skills_root,
+            project / _CLAUDE_SKILLS,
+        )
+        before = _tree_bytes(*watched)
+        result = world.run(("uninstall", a), cwd=project, env=env, expect=None, scenario_id="4313")
+        _assert_shrink_refused(result, edited)
+        assert _tree_bytes(*watched) == before
+
+
+def test_user_scope_uninstall_refuses_before_any_change_when_a_shrink_would_remove_an_edit(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4313 at user scope (-g)."""
+    world = _world(tmp_path, apm_binary_path)
+    _bundle, a, b = _diamond(world, {"skills": ["alpha", "beta"]}, {"skills": ["gamma", "delta"]})
+    _user_manifest(world, [a, b])
+    apm_home = world.isolated.config_root
+    skills_root = world.isolated.home / _PROJECT_SKILLS
+    cwd = world.isolated.work_root
+    with world.serve() as env:
+        world.run(_GLOBAL_INSTALL, cwd=cwd, env=env, scenario_id="4313-g-install")
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        edited = skills_root / "alpha" / "SKILL.md"
+        edited.write_text(edited.read_text(encoding="utf-8") + "\nlocal edit\n", encoding="utf-8")
+        watched = (
+            apm_home / "apm.yml",
+            lock_path(apm_home),
+            apm_home / "apm_modules",
+            skills_root,
+        )
+        before = _tree_bytes(*watched)
+        result = world.run(
+            ("uninstall", "-g", a), cwd=cwd, env=env, expect=None, scenario_id="4313-g"
+        )
+        _assert_shrink_refused(result, edited)
+        assert _tree_bytes(*watched) == before
+
+
 def test_uninstall_keeps_the_locked_union_when_a_survivor_manifest_is_missing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

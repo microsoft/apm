@@ -2,7 +2,7 @@
 
 PROMISE: P-LAW-ownership.preserve_unowned -- APM removes only what it
 deployed; user files and other packages' files beside a removed package
-survive byte for byte (source: tests/fixtures/lifecycle_bug_ledger.json).
+survive byte for byte (source: tests/fixtures/lifecycle_bug_ledger/).
 PROMISE: P-OWN-file-level-deploy-sync-cleanup -- a stale skill directory left
 only for user content is released, not deleted (source: integration/base_integrator.py).
 PROMISE: P-OWN-orphan-package-selection -- uninstall, prune and install

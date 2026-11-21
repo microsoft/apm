@@ -1,0 +1,17 @@
+{
+  "issue": 2380,
+  "fixed_in": "0.27.0",
+  "summary": "Audit omitted deployed files that no lockfile entry claimed.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_claim_fails_without_writes_and_install_repairs_idempotently",
+    "tests/integration/test_unrecorded_drift_lifecycle_e2e.py::test_unrecorded_hidden_unicode_payload_cannot_pass_ci_audit"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "id": "ownership.preserve_unowned",
+  "phase": 1,
+  "oracle_tier": "open-world",
+  "law": "Cleanup changes only APM-owned state and preserves user and surviving-package ownership."
+}

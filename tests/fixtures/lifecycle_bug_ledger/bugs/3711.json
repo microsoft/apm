@@ -1,0 +1,17 @@
+{
+  "issue": 3711,
+  "fixed_in": "0.36.1",
+  "summary": "Antigravity inherited the Gemini remote shape, so APM wrote httpUrl (which Antigravity rejects) and wrote SSE remotes it cannot use.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped",
+    "tests/integration/test_mcp_retired_shape_heal_lifecycle.py::test_upgrade_rewrites_apm_owned_entries_into_the_current_shape"
+  ]
+}
