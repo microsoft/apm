@@ -56,7 +56,7 @@ def _install_bundle_agent(tmp_path: Path, agent: str) -> tuple[dict, Path, Diagn
 def test_bundle_codex_agent_keeps_native_model_settings(tmp_path: Path) -> None:
     result, target, diagnostics = _install_bundle_agent(
         tmp_path,
-        "---\nname: reviewer\nmodel: gpt-5.6-sol\nmodel_reasoning_effort: high\n---\nReview.\n",
+        "---\nname: reviewer\ndescription: Review code\nmodel: gpt-5.6-sol\nmodel_reasoning_effort: high\n---\nReview.\n",
     )
 
     assert result["deployed_files"] == [".codex/agents/reviewer.toml"]
@@ -69,7 +69,7 @@ def test_bundle_codex_agent_keeps_native_model_settings(tmp_path: Path) -> None:
 @pytest.mark.req("req-tg-006")
 def test_bundle_codex_agent_diagnoses_dropped_capability_restriction(tmp_path: Path) -> None:
     result, target, diagnostics = _install_bundle_agent(
-        tmp_path, "---\nname: reviewer\ntools: [read]\n---\nReview.\n"
+        tmp_path, "---\nname: reviewer\ndescription: Review code\ntools: [read]\n---\nReview.\n"
     )
 
     assert result["deployed_files"] == [".codex/agents/reviewer.toml"]

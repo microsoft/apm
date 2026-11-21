@@ -28,19 +28,24 @@ def deploy_bundle_codex_agent(
     record: str,
     deployed_files: list[str],
     deployed_hashes: dict[str, str],
+    written_files: list[str],
     **kwargs: Any,
 ) -> int:
     """Deploy one packed agent as Codex TOML and record its rendered-hash claim.
 
     *kwargs* are the keyword-only arguments of :func:`render_and_deploy_codex_agent`.
-    Returns the number of skipped files (``0`` or ``1``); a skipped agent
-    records no claim.
+    A real write also lands in *written_files*, the bundle's receipt evidence;
+    an adopted file or a dry run does not. Returns the number of skipped files
+    (``0`` or ``1``); a skipped agent records no claim.
     """
-    claim = render_and_deploy_codex_agent(src, dest, record=record, **kwargs)
-    if claim is None:
+    deployed = render_and_deploy_codex_agent(src, dest, record=record, **kwargs)
+    if deployed is None:
         return 1
+    claim, wrote = deployed
     deployed_files.append(record)
     deployed_hashes[record] = claim
+    if wrote:
+        written_files.append(record)
     return 0
 
 
@@ -58,24 +63,23 @@ def render_and_deploy_codex_agent(
     dry_run: bool,
     diagnostics: DiagnosticCollector | None,
     logger: Any,
-    written_files: list[str],
-) -> str | None:
+) -> tuple[str, bool] | None:
     """Render one packed Markdown agent to Codex TOML and deploy it.
 
     The packed bytes are checked against their ``pack.bundle_files`` digest,
     normalized as bundle admission normalizes it, and exactly those verified
     bytes are rendered; the source is never read again. The agent is rendered
     once, before any adopt or collision decision. A dry run previews the
-    rendered hash and writes nothing. A real write appends *record* to
-    *written_files*, the bundle's receipt evidence; an adopted file does not.
+    rendered hash and writes nothing.
 
     *record* is the lockfile claim (absolute at user scope). The collision
     check takes *dest* relative to the first of *collision_roots* that
     contains it, since the integrator resolves that key against *dest*.
 
     Returns:
-        The ``sha256:<hex>`` hash of the rendered text when the agent is
-        written, adopted unchanged, or previewed; ``None`` when it is skipped
+        The ``sha256:<hex>`` hash of the rendered text and whether this call
+        wrote the file, when the agent is written, adopted unchanged, or
+        previewed; ``None`` when it is skipped
         (digest mismatch, render failure, a native field Codex rejects,
         unsafe destination or collision).
         A skipped agent writes nothing and must not be recorded as deployed.
@@ -119,6 +123,7 @@ def render_and_deploy_codex_agent(
                 package_name=slug,
                 resolve_links=integrator.resolve_links,
                 content=_verified_text(packed),
+                strict=True,
             )
         except CodexAgentFieldError as exc:
             _warn(
@@ -137,7 +142,7 @@ def render_and_deploy_codex_agent(
         if dry_run:
             if logger is not None:
                 logger.verbose_detail(f"[dry-run] would deploy {record}")
-            return f"sha256:{rendered_hash}"
+            return f"sha256:{rendered_hash}", False
         try:
             outcome = integrator._deploy_rendered_agent(
                 dest,
@@ -154,11 +159,9 @@ def render_and_deploy_codex_agent(
             return None
         if outcome == _SKIPPED:
             return None
-        if integrator.take_rendered_writes():
-            written_files.append(record)
         if logger is not None:
             logger.verbose_detail(f"deployed {record}")
-        return f"sha256:{rendered_hash}"
+        return f"sha256:{rendered_hash}", bool(integrator.take_rendered_writes())
     finally:
         if collector is not diagnostics:
             _relay(collector, record, logger)

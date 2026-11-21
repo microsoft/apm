@@ -301,22 +301,13 @@ class AgentIntegrator(BaseIntegrator):
                     agents_dir.mkdir(parents=True, exist_ok=True)
                     agents_dir_created = True
                 if mapping.format_id == "codex_agent":
-                    try:
-                        rendered, links_resolved = self._render_codex_agent(
-                            source_file,
-                            target_path,
-                            diagnostics=diagnostics,
-                            package_name=package_info.package.name,
-                            resolve_links=self.resolve_links,
-                        )
-                    except CodexAgentFieldError as exc:
-                        if diagnostics is not None:
-                            diagnostics.warn(
-                                message=f"Skipped {exc}.",
-                                package=package_info.package.name,
-                            )
-                        files_skipped += 1
-                        continue
+                    rendered, links_resolved = self._render_codex_agent(
+                        source_file,
+                        target_path,
+                        diagnostics=diagnostics,
+                        package_name=package_info.package.name,
+                        resolve_links=self.resolve_links,
+                    )
                 else:
                     rendered, links_resolved = self._render_copy_agent(source_file, target_path)
 
@@ -694,6 +685,7 @@ class AgentIntegrator(BaseIntegrator):
         package_name: str = "",
         resolve_links: ResolveLinks | None = None,
         content: str | None = None,
+        strict: bool = False,
     ) -> tuple[str, int]:
         """Render an ``.agent.md`` file to Codex ``.toml`` format.
 
@@ -709,8 +701,8 @@ class AgentIntegrator(BaseIntegrator):
         the verified snapshot.
 
         Raises:
-            CodexAgentFieldError: a native field Codex requires is blank or
-                not a string, so Codex could not load the rendered agent.
+            CodexAgentFieldError: with *strict*, a native field Codex requires
+                is blank or not a string, so Codex could not load the agent.
 
         Returns:
             tuple[str, int]: Rendered TOML string and number of links resolved.
@@ -829,7 +821,7 @@ class AgentIntegrator(BaseIntegrator):
             **model_settings,
             "developer_instructions": body.strip(),
         }
-        for field in _CODEX_REQUIRED_FIELDS:
+        for field in _CODEX_REQUIRED_FIELDS if strict else ():
             if not isinstance(doc[field], str) or not doc[field].strip():
                 raise CodexAgentFieldError(
                     f"Codex agent {printable_ascii_text(source.name)}: '{field}' must be "

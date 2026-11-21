@@ -1174,14 +1174,11 @@ class TestCodexAgentIntegration:
         assert data["developer_instructions"] == "Do something useful."
 
     def test_agent_md_to_toml_without_frontmatter(self):
-        """Agent .md without a name in frontmatter uses filename as name."""
+        """Agent .md without frontmatter uses filename as name."""
         import toml
 
         source = self.root / "helper.agent.md"
-        source.write_text(
-            "---\ndescription: Helper\n---\nInstructions for the helper agent.\n",
-            encoding="utf-8",
-        )
+        source.write_text("Instructions for the helper agent.\n", encoding="utf-8")
         target = self.root / ".codex" / "agents" / "helper.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1189,40 +1186,8 @@ class TestCodexAgentIntegration:
 
         data = toml.loads(target.read_text(encoding="utf-8"))
         assert data["name"] == "helper"
+        assert data["description"] == ""
         assert "Instructions for the helper agent." in data["developer_instructions"]
-
-    @pytest.mark.parametrize(
-        ("content", "field"),
-        [
-            ("Instructions only.\n", "description"),
-            ("---\ndescription: '  '\n---\nBody.\n", "description"),
-            ("---\ndescription: Helper\n---\n\n", "developer_instructions"),
-            ("---\nname: 7\ndescription: Helper\n---\nBody.\n", "name"),
-        ],
-        ids=["no-description", "blank-description", "blank-body", "non-string-name"],
-    )
-    def test_codex_agent_codex_cannot_load_is_skipped(self, content: str, field: str) -> None:
-        """Codex rejects blank native fields: warn and skip, never write (#3714)."""
-        from apm_cli.integration.targets import KNOWN_TARGETS
-
-        package_dir = self.root / "package"
-        agents_dir = package_dir / ".apm" / "agents"
-        agents_dir.mkdir(parents=True)
-        (agents_dir / "helper.agent.md").write_text(content, encoding="utf-8")
-        diagnostics = DiagnosticCollector()
-
-        result = AgentIntegrator().integrate_agents_for_target(
-            KNOWN_TARGETS["codex"],
-            self._create_package_info(package_dir),
-            self.root,
-            diagnostics=diagnostics,
-        )
-
-        assert result.files_skipped == 1
-        assert result.target_paths == []
-        assert not (self.root / ".codex" / "agents" / "helper.toml").exists()
-        [warning] = diagnostics.by_category()["warning"]
-        assert f"'{field}' must be a non-empty string" in warning.message
 
     def test_codex_agent_target_filename_is_toml(self):
         """AgentIntegrator generates .toml filenames for Codex target."""

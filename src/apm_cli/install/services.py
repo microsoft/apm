@@ -1090,8 +1090,7 @@ def integrate_local_bundle(
             except ValueError:
                 record = dest.as_posix()
 
-            # Codex agents are rendered to TOML, never copied (#3714).
-            if _bundle_render_format(
+            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
                 _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
             ):
                 skipped += _deploy_bundle_codex_agent(
