@@ -482,7 +482,8 @@ class SourceMachine(MachineBase):
         self.resolved_targets: dict[str, frozenset[str]] = {}
         self.lock_before = "absent"
         self.proxy = False
-        self.catalogs: set[str] = set()
+        # Local catalog form -> its marketplace.json (the file ``marketplace update`` reads).
+        self.catalogs: dict[str, Path] = {}
 
     # -- model -----------------------------------------------------------------
 
@@ -774,12 +775,16 @@ class SourceMachine(MachineBase):
         root = self.bench.world.root / "catalogs" / name
         source = author_catalog(root, name, package, as_file=form == "file-mkt")
         self.egress(self.marketplace_add(str(source), {0}, False))
-        self.catalogs.add(form)
+        self.catalogs[form] = (
+            source if source.is_file() else root / ".claude-plugin" / "marketplace.json"
+        )
 
     def refresh_marketplace(self, *, every: bool = False) -> None:
         """``apm marketplace update [NAME]``: revalidates catalog caches, never the project.
 
         Named, it revalidates the world's git catalog; with *every*, all registered ones.
+        A local catalog is read without a cache, so each one gains a probe plugin first:
+        its refreshed plugin count proves the command re-read that catalog.
         """
         choices = [
             c
@@ -787,6 +792,14 @@ class SourceMachine(MachineBase):
             if c.form in _MARKET_FORMS and (every or c.form not in LOCAL_CATALOGS)
         ]
         args = ("marketplace", "update") if every else ("marketplace", "update", MARKET)
+        probed = {c.form: self.catalogs[c.form] for c in choices if c.form in LOCAL_CATALOGS}
+        saved = {form: path.read_bytes() for form, path in probed.items()}
+        for path in probed.values():
+            document = json.loads(path.read_text(encoding="ascii"))
+            probe = {**document["plugins"][0]}
+            probe["name"] = f"{probe['name']}-probe"
+            document["plugins"].append(probe)
+            path.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
         step = self.step(
             args,
             exits={0},
@@ -801,6 +814,12 @@ class SourceMachine(MachineBase):
             if entry["status"] == 200 and f"/{ORG}/{MARKETPLACE_REPO}" in entry["path"]
         ]
         assert catalog, "marketplace update revalidated nothing (no catalog request)"
+        output = f"{step.result.stdout}\n{step.result.stderr}"
+        for form, path in probed.items():
+            name = LOCAL_CATALOGS[form][0]
+            refreshed = re.search(rf"^\s*{re.escape(name)} \(2 plugins\)\s*$", output, re.M)
+            assert refreshed, f"marketplace update did not re-read {name}: {output}"
+            path.write_bytes(saved[form])
         self.egress(step)
         cells = self.cells("marketplace", "real", choices)
         for choice in choices:
