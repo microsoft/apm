@@ -64,6 +64,9 @@ integration suite runs only at merge time via GitHub Merge Queue
    - `guard` runs the `.github/actions/lint-chain` composite (the single owner of the Lint steps, also used by ci.yml's `Lint` job), the ratchet contracts, the other `tests/quality` modules and the NOTICE check. The base is the head commit's `Queue-Base:` trailer, else the merge base with `main`.
    - `train-gate` (`if: always()`) passes only when every job is green, with the tiers skipped on `-guard`. Shared caches stay off in its own jobs (#4531). Every job checks out the triggering commit only. A manual probe dispatches with `--ref <queue branch>` (`gh workflow run merge-train.yml --ref queue/t<id>/p<k>-full`); the workflow takes no inputs and `scope` fails on any other ref.
    - Never add `pull_request_target` or another push branch. `tests/quality/test_ci_topology.py` pins the triggers, the merge_group coverage of a full train, the gate and the lint-chain owner.
+8. **`main-push-gate.yml`** - `push` to main plus `workflow_dispatch` (S28)
+   - Calls ci.yml (all Tier 1 jobs, every Lifecycle Smoke shard) through `workflow_call` on main's head, with the push's `before` SHA (else `HEAD^1`) as the lint base. Its `main-push-gate` aggregate (`if: always()`) fails the run when any Tier 1 job fails, so main is visibly red. Not a required check; runs are never cancelled.
+   - No new default-branch cache saves: ci.yml's setup-uv steps set `save-cache` to `auto` only on pull_request and merge_group (`false` otherwise) and setup-node sets `package-manager-cache: false`. `tests/quality/test_ci_topology.py` fails if any step reachable from a main push would save a cache.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.
