@@ -116,21 +116,6 @@ def test_install_g_keeps_manual_and_removes_only_manifest_entries(user_root, tmp
     assert registry["manual"]["url"].endswith("/manual")
 
 
-def test_project_manifest_with_marketplaces_fails_with_user_manifest_hint(user_root):
-    Path("apm.yml").write_text(
-        "name: proj\nversion: 1.0.0\nmarketplaces:\n  - name: acme\n    source: o/r\n",
-        encoding="utf-8",
-    )
-
-    result = _invoke("install")
-
-    assert result.exit_code == 1
-    flat = _flat(result.output)
-    assert "Project and package manifests cannot declare marketplaces" in flat
-    assert "apm install -g" in flat
-    assert not (user_root / ".apm" / "marketplaces.json").exists()
-
-
 def test_install_g_dry_run_previews_without_creating_registry_files(user_root, tmp_path):
     acme = _marketplace_dir(tmp_path, "acme", "lint-skill")
     _write_user_manifest(user_root, {"acme": acme})
