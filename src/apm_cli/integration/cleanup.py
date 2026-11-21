@@ -24,7 +24,11 @@ Safety gates, in order:
    deletion (#3663, #3701): it proves content, not that APM wrote it. A
    file that differs from its evidence is user-edited and kept; a file
    without evidence is kept with a warning naming it and the manual fix.
-   ``cowork://`` rows follow the same rule.
+   ``cowork://`` rows follow the same rule. The one exception is explicit
+   per-invocation consent (``apm uninstall --trust-lockfile``, #4295, the
+   req-lk-024 consent exception): a file with no receipt and no producible
+   render may be deleted when its bytes equal the single hash apm.lock.yaml
+   records for it; it never overrides evidence that a file differs.
 
 The helper records cleanup diagnostics via *diagnostics* (collect-then-
 render) and returns a :class:`CleanupResult` summarizing deleted, failed,
@@ -49,6 +53,7 @@ from apm_cli.core.remediation import (
     COWORK_SKILLS_DIR_UNDETECTED,
     UNINSTALL_EVIDENCE_REINSTALL,
     UNINSTALL_EVIDENCE_REMOVE,
+    UNINSTALL_EVIDENCE_TRUST_LOCKFILE,
 )
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
@@ -88,6 +93,8 @@ class DeploymentEvidence:
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
+        recorded_hashes: Mapping[str, frozenset[str]] | None = None,
+        receipts_readable: bool = True,
     ) -> None:
         self._deploy_root = deploy_root
         self.user_scope = user_scope
@@ -99,6 +106,10 @@ class DeploymentEvidence:
         self._owners = dict(owners or {})
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
+        self._recorded_hashes = dict(recorded_hashes or {})
+        self._receipts_readable = receipts_readable
+        self._lockfile_consent = False
+        self._consented: dict[str, None] = {}
 
     @classmethod
     def none(cls, deploy_root: Path) -> DeploymentEvidence:
@@ -127,11 +138,13 @@ class DeploymentEvidence:
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        receipts_readable = True
         try:
             receipts = DeploymentMaterializationSession(deploy_root, scope, None).receipt_hashes()
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
+            receipts_readable = False
         if lockfile is None or not lockfile.dependencies:
             return cls(
                 deploy_root=deploy_root,
@@ -139,6 +152,7 @@ class DeploymentEvidence:
                 render=None,
                 user_scope=user_scope,
                 kept=kept,
+                receipts_readable=receipts_readable,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -157,6 +171,8 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
             kept=kept,
+            recorded_hashes=_recorded_owner_hashes(locked),
+            receipts_readable=receipts_readable,
         )
 
     def add_rendered(self, rendered: Mapping[Path, str]) -> None:
@@ -328,6 +344,51 @@ class DeploymentEvidence:
                 return []
         return [root / relative for root in self._rendered_roots(owner_claim)]
 
+    def consent_to_lockfile_hashes(self) -> None:
+        """Accept, for this uninstall only, the req-lk-024 consent exception (#4295)."""
+        self._lockfile_consent = True
+
+    def consented_deletions(self) -> list[str]:
+        """Claims ``--trust-lockfile`` consent authorized that are now gone from disk."""
+        return [
+            claim
+            for claim in self._consented
+            if (physical := self._physical(claim)) is not None and not os.path.lexists(physical)
+        ]
+
+    def lockfile_consentable(self, claim: str, physical: Path) -> bool:
+        """Return whether ``--trust-lockfile`` consent may delete *physical* (#4295).
+
+        The single consent decision: receipt state was read without error and
+        holds no receipt for the file, no render of its owning locked package
+        could be produced, and its bytes equal the one hash apm.lock.yaml
+        records for *claim* under its owners. Any contrary or missing evidence
+        (a differing receipt or render, a render lacking the path, no or
+        conflicting recorded hash, unreadable, symlinked) keeps the file.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        recorded = self._recorded_hashes.get(claim.replace("\\", "/"), frozenset())
+        if not self._receipts_readable or len(recorded) != 1:
+            return False
+        try:
+            if physical.is_symlink() or not physical.is_file():
+                return False
+            if self._receipt_match(physical) is not None or self._rendered_roots(claim):
+                return False
+            return compute_file_hash(physical) in recorded
+        except OSError:
+            return False
+
+    def consent_preview(self, claims: Iterable[str]) -> frozenset[str]:
+        """Return the *claims* ``--trust-lockfile`` consent would delete (#4295)."""
+        return frozenset(
+            claim
+            for claim in claims
+            if (physical := self._physical(claim)) is not None
+            and self.lockfile_consentable(claim, physical)
+        )
+
     def verdict(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> str:
         """Classify deleting *physical* (lockfile *claim*) as authorized or kept.
 
@@ -345,6 +406,14 @@ class DeploymentEvidence:
         rendered = self.render_verdict(claim, physical, rendered_as=rendered_as)
         if rendered == UNPROVEN and receipt is False:
             return EDITED
+        # Rechecked at each decision, so the bytes removed are the bytes consented.
+        if (
+            rendered == UNPROVEN
+            and self._lockfile_consent
+            and self.lockfile_consentable(claim, physical)
+        ):
+            self._consented[claim] = None
+            return AUTHORIZED
         return rendered
 
     def render_verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
@@ -391,6 +460,22 @@ class DeploymentEvidence:
             if self.verdict(f"{claim}/{member}", child, rendered_as=alias) != AUTHORIZED:
                 return False
         return True
+
+
+def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
+    """Map each owned path to every hash apm.lock.yaml records for it under its owners."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    owners = set(lockfile.dependencies)
+    hashes: dict[str, set[str]] = {}
+    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+        if record.content_hash and owners.intersection(record.owners):
+            hashes.setdefault(record.locator.value, set()).add(record.content_hash)
+    for dependency in lockfile.dependencies.values():
+        for path, content_hash in dependency.deployed_file_hashes.items():
+            if content_hash:
+                hashes.setdefault(path, set()).add(content_hash)
+    return {path: frozenset(values) for path, values in hashes.items()}
 
 
 def _locked_subset(lockfile: LockFile, owner: str) -> LockFile:
@@ -722,15 +807,24 @@ def refusal_reason(verdict: str) -> str:
     return _REFUSAL_REASONS.get(verdict, _REFUSAL_REASONS[UNPROVEN])
 
 
-def uninstall_evidence_remedies(*, user_scope: bool) -> tuple[str, str]:
-    """Return the two runnable remedies when uninstall lacks deletion evidence."""
+def uninstall_evidence_remedies(
+    *, user_scope: bool, trust_lockfile: bool = False
+) -> tuple[str, ...]:
+    """Return the runnable remedies when uninstall lacks deletion evidence.
+
+    The ``--trust-lockfile`` remedy is offered only when *trust_lockfile*: at
+    least one refused file is deletable under that consent (#4295).
+    """
     remove = UNINSTALL_EVIDENCE_REMOVE
     reinstall = UNINSTALL_EVIDENCE_REINSTALL
+    trust = UNINSTALL_EVIDENCE_TRUST_LOCKFILE
     if user_scope:
         reinstall = reinstall.with_command("apm install -g")
         remove = remove.with_command("apm uninstall -g")
+        trust = trust.with_command("apm uninstall -g --trust-lockfile")
     reinstall = reinstall.bind(uninstall=remove.command)
-    return reinstall.sentence(), remove.sentence()
+    remedies = (reinstall.sentence(), remove.sentence())
+    return (*remedies, trust.sentence()) if trust_lockfile else remedies
 
 
 def _keep_without_evidence(
