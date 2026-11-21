@@ -277,19 +277,23 @@ def test_mixed_case_links_survive_install_update_audit_and_uninstall(
     stale_bytes = stale_managed.read_bytes()
     stale_relative = stale_managed.relative_to(consumer.root).as_posix()
 
-    # #4360: a plain install keeps the hand-edited managed file and exits 1;
-    # the printed remedy (move it aside, then install) repairs the link.
+    # #4360 + RA-012: the deployment receipt proves the hand edit and nothing
+    # new comes from upstream, so the install keeps the file, names it with the
+    # true reason and exits 0; the printed remedy (move it aside, then install)
+    # repairs the link.
     kept = runner.run(
         _INSTALL,
         scenario_id="mixed-case-keep-stale-link",
         cwd=consumer.root,
         env=child_env,
     )
-    assert kept.returncode == 1, (kept.stdout, kept.stderr)
-    kept_text = " ".join(kept.stderr.split())
-    assert kept_edit_message(stale_relative, user_scope=False, proven_edit=False) in kept_text, (
+    assert kept.returncode == 0, (kept.stdout, kept.stderr)
+    kept_text = " ".join(kept.stdout.split())
+    assert kept_edit_message(stale_relative, user_scope=False, proven_edit=True) in kept_text, (
         kept_text
     )
+    assert "Kept " not in kept.stderr, kept.stderr
+    assert "no local deployment receipt" not in kept.stdout + kept.stderr
     assert stale_managed.read_bytes() == stale_bytes
     stale_managed.rename(consumer.root.parent / "stale-aside.md")
 
