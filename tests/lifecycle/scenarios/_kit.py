@@ -425,6 +425,8 @@ class Scenario:
         requested: ModelState | None = None,
         credit: Iterable[Mapping[str, str]] = (),
         keep: Mapping[str, Iterable[str]] | None = None,
+        refusal: bool = False,
+        says: Iterable[str] = (),
         **fields: object,
     ) -> Step:
         """Run one command line through the driver and apply I1-I9.
@@ -435,6 +437,8 @@ class Scenario:
         step with no strict known cell credits the generated scenario-lane
         obligations they imply (``credit_step``). *keep* names paths per
         root that must be present and byte-unchanged across the step.
+        *refusal* credits a declared refusal (``EXPECTED_REFUSALS``) instead.
+        *says* lists patterns the output must match; they join the evidence.
         Extra *fields* go to ``operation_for`` (``forbidden``, ``cells``, ...).
         """
         args = self._args(line)
@@ -465,7 +469,7 @@ class Scenario:
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
         if not (known or exit_cell):
-            credit_step(step, credit, keep=keep, scope=self.scope)
+            credit_step(step, credit, keep=keep, scope=self.scope, refusal=refusal, says=says)
         return step
 
     def pair(
@@ -732,21 +736,157 @@ def credited_ids(assignments: Iterable[Mapping[str, str]]) -> tuple[str, ...]:
     return tuple(sorted({key for item in assignments for key in implied(item) if key in lane}))
 
 
+@dataclass(frozen=True)
+class ExpectedRefusal:
+    """A pair whose designed outcome is a refusal that changes nothing.
+
+    *cause* is a regex the command's output must match; *upholds* names the
+    promise or law the refusal keeps and *source* cites where it is decided.
+    """
+
+    exit: int
+    cause: str
+    upholds: str
+    source: str
+
+
+# T-6b (#4101): ownership pairs whose designed outcome is a refusal. Declared,
+# never inferred from what the CLI did: a refusal of any other pair fails the
+# step, and so does a declared pair whose command succeeds.
+EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
+    "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",
+        "P-INV-I3",
+        "req-lk-017 (install/service.py _enforce_frozen_deployed_hashes)",
+    ),
+    "pair|DEPLOYED=present-provenance-unknown|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen requires apm\.lock\.yaml to exist",
+        "P-LAW-lockfile.frozen_preserves_bytes",
+        "req-lk-006: --frozen refuses a project with no lockfile (install/service.py enforce_frozen)",
+    ),
+    "pair|PRIM=mcp|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|SRC=inline-mcp|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|SRC=mcp-registry|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|OP=approve-deny|DEPLOYED=present-provenance-unknown": ExpectedRefusal(
+        1,
+        r"not found in installed packages",
+        "P-LAW-ownership.preserve_unowned",
+        "commands/approve.py: approve acts only on packages the lockfile records",
+    ),
+    "pair|PRIM=bin|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"already exists and the previous apm\.lock\.yaml does not record it",
+        "P-LAW-ownership.preserve_unowned",
+        "claude_plugins/registrar.py: a plugin root APM did not deploy is never replaced",
+    ),
+    "pair|OP=install|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"Installation refused: skill 'p-skill'",
+        "P-LAW-ownership.preserve_unowned",
+        "install/phases/integrate.py skill collision refusal (#4101)",
+    ),
+    "pair|OP=pack|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"does not match the hash recorded in apm\.lock\.yaml",
+        "P-LAW-ownership.preserve_unowned",
+        "commands/pack.py: pack refuses a dependency whose installed files drifted",
+    ),
+    "pair|OP=uninstall|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"Uninstall refused: deleting these tracked files needs deployment evidence",
+        "P-LAW-ownership.preserve_unowned",
+        "docs/src/content/docs/reference/cli/uninstall.md (edited files are kept)",
+    ),
+}
+
+
+def _durable(changed: Iterable[str]) -> list[str]:
+    return sorted(
+        path
+        for path in changed
+        if not any(path == tree or path.startswith(tree + "/") for tree in _BOOKKEEPING_TREES)
+    )
+
+
+def credit_problems(
+    ids: Iterable[str], *, exit: int, output: str, changed: Iterable[str], refusal: bool
+) -> list[str]:
+    """Why a step may not credit *ids*: a declared refusal must refuse, nothing else may."""
+    ids = sorted(ids)
+    if not refusal:
+        return [
+            f"{key}: declared refusal ({EXPECTED_REFUSALS[key].upholds}), but the step exited 0"
+            for key in ids
+            if key in EXPECTED_REFUSALS and exit == 0
+        ]
+    problems = [] if exit != 0 else ["a refusal credit needs a non-zero exit"]
+    for key in ids:
+        expected = EXPECTED_REFUSALS.get(key)
+        if expected is None:
+            problems.append(f"{key}: refusal is not a declared outcome (EXPECTED_REFUSALS)")
+        elif exit != expected.exit:
+            problems.append(f"{key}: exited {exit}, declared {expected.exit}")
+        elif not re.search(expected.cause, output):
+            problems.append(f"{key}: output does not name the cause {expected.cause!r}")
+    durable = _durable(changed)
+    if durable:
+        problems.append(f"a refusal must change nothing, changed: {durable}")
+    return problems
+
+
 def credit_step(
     step: Step,
     assignments: Iterable[Mapping[str, str]],
     *,
     keep: Mapping[str, Iterable[str]] | None = None,
     scope: str = "project",
+    refusal: bool = False,
+    says: Iterable[str] = (),
 ) -> None:
     """Credit the obligations *assignments* imply through ``check_obligation``.
 
-    Only a successful step credits (every scenario-lane obligation is a
-    success pair). The evidence is the step's exact changed set (present or
-    absent after it) plus the *keep* paths (present and byte-unchanged).
+    A successful step credits success pairs; with *refusal*, a step credits
+    only pairs declared in ``EXPECTED_REFUSALS``, and only when it exits with
+    the declared code, names the cause and changes nothing durable. The
+    evidence is the step's exact changed set (present or absent after it)
+    plus the *keep* paths (present and byte-unchanged) and the *says*
+    output patterns (an announced outcome).
     """
     ids = credited_ids(assignments)
-    if not ids or step.result.returncode != 0:
+    if not ids:
+        return
+    problems = credit_problems(
+        ids,
+        exit=step.result.returncode,
+        output=step.output,
+        changed=step.changed,
+        refusal=refusal,
+    )
+    says = tuple(says)
+    problems += [
+        f"output does not say {pattern!r}"
+        for pattern in says
+        if not re.search(pattern, step.output)
+    ]
+    assert not problems, f"{step.line}:\n" + "\n".join(problems)
+    if step.result.returncode != 0 and not refusal:
         return
     present: dict[str, set[str]] = {}
     absent: dict[str, set[str]] = {}
@@ -758,7 +898,17 @@ def credit_step(
     kept = {root: tuple(paths) for root, paths in (keep or {}).items()}
     for root, paths in kept.items():
         present.setdefault(root, set()).update(paths)
-    evidence = Evidence(present=present, absent=absent, unchanged=kept, exit=0, ascii_output=True)
+    exit_code = step.result.returncode
+    causes = tuple(EXPECTED_REFUSALS[key].cause for key in ids) if refusal else ()
+    causes += says
+    evidence = Evidence(
+        present=present,
+        absent=absent,
+        unchanged=kept,
+        exit=exit_code,
+        output_matches=causes,
+        ascii_output=True,
+    )
     strength = "e2e-evidence" if evidence.state_facts() else "e2e"
     for key in ids:
         check_obligation(
