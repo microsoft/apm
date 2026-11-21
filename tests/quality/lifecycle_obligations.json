@@ -19214,7 +19214,7 @@
    "lane": "T-6b",
    "status": "known-failing",
    "strength": "e2e",
-   "tracking": "#4282",
+   "tracking": "#4697",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_lsp_entry_is_never_taken_over"
   },
   "pair|PRIM=lsp|DRYRUN=on": {

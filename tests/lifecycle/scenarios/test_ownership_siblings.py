@@ -692,7 +692,7 @@ def test_a_users_lsp_entry_is_never_taken_over(lifecycle_world) -> None:
 
     # The first failing install still commits the dependency row it resolved, as
     # the MCP native-conflict path does (#4282); the rerun changes nothing.
-    known = {"I7": Known("#4282", r"failed install changed the lockfile")}
+    known = {"I7": Known("#4697", r"failed install changed the lockfile")}
     for line, cells in (("install", known), ("install --force", None)):
         step = scenario.run(line, exit=1, known=cells)
         assert f"LSP server '{LSP_SERVER}' conflicts with the existing" in step.output, line
@@ -1249,7 +1249,7 @@ CREDITS = credits(
     },
     known={
         "test_edited_executable_files_are_kept": "#4626",
-        "test_a_users_lsp_entry_is_never_taken_over": "#4282",
+        "test_a_users_lsp_entry_is_never_taken_over": "#4697",
         "test_a_users_file_at_the_plugin_bin_path_refuses_the_plugin": "#4685",
         "test_a_local_bundle_never_replaces_the_users_hook[present-provenance-unknown]": "#4634",
         "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
