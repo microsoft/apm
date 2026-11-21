@@ -11,6 +11,7 @@ from apm_cli.models.apm_package import DependencyReference
 from apm_cli.policy._constraint_pinning import (
     UnboundedReason,
     classify_unbounded_reason,
+    collect_declared_refs,
     humanize_reason,
     is_pinned_constraint,
 )
@@ -263,30 +264,42 @@ def test_classify_registry_dep_missing_ref_returns_no_ref():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "awaits #1488 (git-source semver routing). The shape-based "
-        "classifier already accepts ``^1.2.0`` regardless of source, so "
-        "this test xpasses today on every supported semver shape. The "
-        "marker stays in place so that once #1488 lands and introduces "
-        "a normalised ``source='git-semver'`` value, a CI failure here "
-        "alerts us to revisit the classification path end-to-end."
-    ),
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("^1.2.0", None),
+        ("~1.2.0", None),
+        (">=1.0.0 <2.0.0", None),
+        ("1.2.0", None),
+        ("v1.2.0", None),
+        (">=1.0.0", UnboundedReason.OPEN_UPPER),
+        ("*", UnboundedReason.WILDCARD),
+        ("main", UnboundedReason.BARE_BRANCH),
+    ],
 )
-def test_classify_git_semver_dep_returns_pinned_none():
-    # Pseudo: when #1488 lands, ``acme/lib#^1.2.0`` will be tagged
-    # source="git-semver" or the resolver will normalize the ref. Either
-    # way, the classifier needs to see "^1.2.0" as a pinned constraint.
-    dep = DependencyReference.parse("acme/lib#^1.2.0")
-    dep.source = "git-semver"  # hypothetical post-#1488 marker
+def test_classify_git_semver_dep_judges_the_declared_constraint(spec, expected):
+    """#1488 resolves git-source semver ranges against repo tags with no
+    ``source`` discriminator: a parsed git dependency keeps ``source=None`` and
+    the classifier judges the declared constraint by shape, as for registry deps.
+    """
+    dep = DependencyReference.parse(f"acme/lib#{spec}")
+    assert dep.source is None
+    assert dep.reference == spec
+    assert classify_unbounded_reason(dep) is expected
+
+
+def test_classify_git_semver_dep_judges_the_declaration_not_the_selected_tag():
+    """Resolution rewrites ``reference`` to the selected tag (#1488); policy
+    judges the declared snapshot, so an open range stays unbounded (#3224).
+    """
+    dep = DependencyReference.parse("acme/lib#>=1.0.0")
+    declared = collect_declared_refs([dep])
+    dep.reference = "v1.4.2"
+
     assert classify_unbounded_reason(dep) is None
-    # Sentinel that will start failing once the source-discriminator
-    # actually exists post-#1488, signalling time to remove the xfail.
-    raise AssertionError(
-        "remove xfail decorator once #1488 lands and 'git-semver' source "
-        "discriminator is wired in the resolver"
-    )
+    (snapshot,) = declared[dep.get_unique_key()]
+    assert snapshot.reference == ">=1.0.0"
+    assert classify_unbounded_reason(snapshot) is UnboundedReason.OPEN_UPPER
 
 
 def test_classify_marketplace_dep_with_caret_returns_pinned_none():
