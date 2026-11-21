@@ -245,6 +245,9 @@ class BaseIntegrator:
 
     # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
     _overwrite_gate: "OverwriteGate | None" = None
+    # While install plans its writes (#4381), every file the gate would keep
+    # without evidence, with its edit kind, instead of any write or keep.
+    _overwrite_plan: list[tuple[Path, str | None]] | None = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -842,6 +845,7 @@ class BaseIntegrator:
                 lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
             )
         )
+        plan = self._overwrite_plan
         if identical:
             target_paths.append(target_path)
             # Already receipted with these bytes: unchanged, not an adoption (RA-007).
@@ -849,7 +853,7 @@ class BaseIntegrator:
                 return True, False
             # A managed file already holding the final render is APM's bytes:
             # record the receipt the skipped rewrite would have (#4184, #3701).
-            if managed_files and rel_path.replace("\\", "/") in managed_files:
+            if plan is None and managed_files and rel_path.replace("\\", "/") in managed_files:
                 self.note_rendered_write(target_path)
             return True, True
         if self.check_collision(
@@ -860,8 +864,12 @@ class BaseIntegrator:
         # deployment evidence; the lockfile hash alone never authorizes it (#4360).
         gate = self._overwrite_gate
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
-            return False, False
-        if gate is not None and gate.adopt_legacy(target_path, rel_path):
+            return plan is not None, False
+        if gate is not None and (
+            gate.legacy_adoptable(target_path, rel_path)
+            if plan is not None
+            else gate.adopt_legacy(target_path, rel_path)
+        ):
             target_paths.append(target_path)
             return True, False
         rendered = self._rendered_hash(source_file, expected_content)
@@ -871,6 +879,11 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
+        if plan is not None:
+            # Planning writes nothing; a blocking keep refuses the whole plan (#4381).
+            if edit != "drift":
+                plan.append((target_path, edit))
+            return True, False
         if gate is not None and gate.keep(target_path, rel_path, edit=edit):
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)

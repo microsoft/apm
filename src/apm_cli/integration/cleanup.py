@@ -444,7 +444,7 @@ def _render_locked(
         with lockfile_scratch_writes():
             (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
-            with contextlib.redirect_stderr(io.StringIO()):
+            with contextlib.redirect_stderr(io.StringIO()), write_seam.private_scratch():
                 return run_replay(config, CheckLogger(verbose=False))
     except Exception as exc:
         if owner is not None:
