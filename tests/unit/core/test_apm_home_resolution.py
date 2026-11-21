@@ -37,25 +37,24 @@ pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-apm-home-resolution")
 USER, PROJECT = InstallScope.USER, InstallScope.PROJECT
 
 
-def _started_in(start: Path | None) -> ModuleType:
-    """Import a fresh scope module as a process started in *start* would.
+def _fresh_scope() -> ModuleType:
+    """Import the scope module afresh, as a process starting now would.
 
-    The starting directory is captured once at import; ``None`` is a process
-    whose starting directory was removed. Only ``os.getcwd`` is replaced.
+    It captures the starting directory at import, like a new APM run. The
+    working directory is never faked: mutmut resolves its sources through it.
     """
-
-    def getcwd() -> str:
-        if start is None:
-            raise FileNotFoundError("starting directory was removed")
-        return str(start)
-
     spec = importlib.util.find_spec("apm_cli.core.scope")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(os, "getcwd", getcwd)
-        spec.loader.exec_module(module)
+    spec.loader.exec_module(module)
     return module
+
+
+def _started_in_a_removed_directory() -> ModuleType:
+    """A fresh scope module of a run whose starting directory was already gone."""
+    started = _fresh_scope()
+    started._STARTUP_CWD = None
+    return started
 
 
 @pytest.fixture
@@ -101,15 +100,17 @@ def test_apm_home_expands_a_leading_tilde(
 def test_relative_apm_home_is_anchored_to_the_starting_directory(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    started = _started_in(dirs["tmp"] / "start")
+    started = _fresh_scope()
     monkeypatch.setenv("APM_HOME", "rel/home")
-    assert started.get_apm_home() == dirs["tmp"] / "start" / "rel" / "home"
+    # The directory the run started in, not the current one (Path.cwd is moved).
+    assert started.get_apm_home() == Path(os.getcwd()) / "rel" / "home"
+    assert Path.cwd() == dirs["cwd"]
 
 
 def test_relative_apm_home_without_a_starting_directory_is_refused(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    started = _started_in(None)
+    started = _started_in_a_removed_directory()
     monkeypatch.setenv("APM_HOME", "rel/home")
     with pytest.raises(ValueError) as refused:
         started.get_apm_home()
@@ -204,7 +205,7 @@ def test_user_scope_root_is_apm_home_and_skips_git_remote_policy(dirs: dict[str,
 def test_user_scope_root_check_fails_closed_to_project(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    started = _started_in(None)
+    started = _started_in_a_removed_directory()
     monkeypatch.setenv("APM_HOME", "rel")
     assert started.is_user_scope_root(dirs["cwd"]) is False
     assert started.policy_discovery_uses_git_remote(dirs["cwd"]) is True
