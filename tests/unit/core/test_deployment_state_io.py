@@ -179,6 +179,25 @@ def test_departing_owner_proof_keeps_the_row_with_remaining_owners(tmp_path: Pat
     assert reconciler.diagnostics.error_count == 0
 
 
+def test_departing_owner_proof_drops_a_row_no_owner_still_holds(tmp_path: Path) -> None:
+    """With no remaining owner, a departing proof removes the row without failing (#4703)."""
+    locator = _locator(".github/instructions/f-doc.instructions.md")
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator, owners=("removed",), active="removed")}
+    )
+    reconciler = _reconciler(tmp_path)
+
+    reconciled = reconciler.reconcile(
+        prior,
+        [_materialization("removed", locator, status=MaterializationStatus.UNCHANGED)],
+        _intent(owners=frozenset({"."})),
+    )
+
+    assert locator.key not in reconciled.ledger.records
+    assert reconciled.failed == ()
+    assert reconciler.diagnostics.error_count == 0
+
+
 def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     tmp_path: Path,
 ) -> None:
