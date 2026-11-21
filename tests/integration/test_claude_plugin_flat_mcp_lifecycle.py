@@ -24,12 +24,17 @@ _SERVERS = {
 
 
 def _install(tmp_path: Path, apm_binary_path: Path, shape: str) -> tuple[Path, str]:
-    """Install a pinned Claude plugin whose .mcp.json uses *shape*."""
+    """Install a pinned plugin whose .mcp.json uses *shape*.
+
+    The manifest is a root plugin.json: at project scope that plugin keeps the
+    split route whose MCP parsing this proves; a Claude-format plugin deploys
+    intact and Claude reads its .mcp.json itself (#3921).
+    """
     isolated = IsolatedApmEnvironment.create(tmp_path / shape, base_env=dict(os.environ))
     env = isolated.subprocess_env()
     source = isolated.package_root / "linear-plugin"
-    (source / ".claude-plugin").mkdir(parents=True)
-    (source / ".claude-plugin/plugin.json").write_text(
+    source.mkdir(parents=True)
+    (source / "plugin.json").write_text(
         json.dumps({"name": "linear", "version": "1.0.0", "description": "Inert fixture"}),
         encoding="utf-8",
     )
