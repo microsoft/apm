@@ -2,7 +2,8 @@
 
 ``targets`` on a ``dependencies.mcp`` entry selects which targets receive the
 server. It is never written into a native MCP config, and a target-scoped
-install keeps servers that are still declared for the targets it skips.
+install keeps servers that are still declared for the targets it skips: an
+install narrowed by ``--target`` changes only the targets it names (#4562).
 """
 
 from __future__ import annotations
@@ -106,13 +107,13 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
     lock_path = apm_home / "apm.lock.yaml"
     receipt = DeploymentLedgerCodec.mcp_native_hashes(LockFile.read(lock_path))["claude"]["srv-a"]
 
-    # An untargeted server follows the run's --target; a scoped one keeps its targets.
+    # A narrowed --target leaves claude's still-declared servers alone (#4562).
     write_global(
         [_scoped("srv-a", "claude"), _scoped("srv-b", "codex"), stdio_server("srv-c", "c")]
     )
     result = chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
-    assert "Removed stale MCP server 'srv-a'" not in result.stdout
-    assert set(claude_servers()) == {"srv-a"}
+    assert "Removed stale MCP server" not in result.stdout
+    assert set(claude_servers()) == {"srv-a", "srv-c"}
 
     codex_text = (home / ".codex" / "config.toml").read_text("utf-8")
     codex_names = {
@@ -123,14 +124,53 @@ def test_global_target_scoped_install_keeps_servers_declared_for_other_targets(
     assert codex_names == {"srv-b", "srv-c"}
     assert not re.search(r"^targets\s*=", codex_text, re.M)
     lock = yaml.safe_load(lock_path.read_text("utf-8"))
-    assert lock["mcp_target_servers"] == {"claude": ["srv-a"], "codex": ["srv-b", "srv-c"]}
+    assert lock["mcp_target_servers"] == {
+        "claude": ["srv-a", "srv-c"],
+        "codex": ["srv-b", "srv-c"],
+    }
     kept = DeploymentLedgerCodec.mcp_native_hashes(LockFile.read(lock_path))["claude"]
     assert kept["srv-a"] == receipt
 
-    # Undeclaring the server still retires it from the target outside this run.
+    # Undeclaring a server still retires it from the target outside this run.
     write_global([_scoped("srv-b", "codex"), stdio_server("srv-c", "c")])
     chain.ok("install", "-g", "--no-policy", "--only", "mcp", "--target", "codex")
-    assert claude_servers() == {}
+    assert set(claude_servers()) == {"srv-c"}
+
+
+@pytest.mark.parametrize("scope", ["user", "project"])
+def test_a_narrowed_target_keeps_still_declared_servers_on_other_targets(
+    tmp_path: Path, apm_binary_path: Path, scope: str
+) -> None:
+    """#4562: ``--target codex`` after a codex,cursor install leaves cursor untouched."""
+    chain = Chain(tmp_path / scope, apm_binary_path, dirs=(".cursor",))
+    home = chain.isolated.home
+    user = scope == "user"
+    root = Path(chain.env["APM_HOME"]) if user else chain.project
+    deploy = home if user else chain.project
+    for directory in (".cursor", ".codex"):
+        (deploy / directory).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = {"name": scope, "version": "1.0.0"}
+    manifest["dependencies"] = {"mcp": [stdio_server("example-stdio", "example")]}
+    (root / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    flags = ("-g",) if user else ()
+    cursor = deploy / ".cursor" / "mcp.json"
+
+    chain.ok("install", *flags, "--no-policy", "--target", "codex,cursor")
+    configured = cursor.read_bytes()
+    assert "example-stdio" in json.loads(configured)["mcpServers"]
+
+    narrowed = chain.ok("install", *flags, "--no-policy", "--only", "mcp", "--target", "codex")
+    assert "Removed stale MCP server" not in narrowed.stdout + narrowed.stderr
+    assert cursor.read_bytes() == configured
+    lock = yaml.safe_load((root / "apm.lock.yaml").read_text("utf-8"))
+    assert lock["mcp_target_servers"] == {"codex": ["example-stdio"], "cursor": ["example-stdio"]}
+
+    # The next install that targets cursor finds its entry current.
+    later = chain.ok("install", *flags, "--no-policy", "--only", "mcp", "--target", "cursor")
+    assert "All servers up to date" in later.stdout, later.stdout
+    assert "Removed stale MCP server" not in later.stdout + later.stderr
+    assert cursor.read_bytes() == configured
 
 
 def test_project_retained_claims_survive_exclude_retarget_and_pending_updates(
