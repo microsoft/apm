@@ -6131,9 +6131,15 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",
-            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
-            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=not flag_narrowed)",
+            "mcp_servers_for_runtime([], owned_target, named_only=not flag_narrowed)",
             id="target-scoped-install-retires-other-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_flag",
+            'target_decision is not None and target_decision.source == "--target flag"',
+            id="narrowed-cleanup-keyed-on-display-label",
         ),
         pytest.param(
             "src/apm_cli/install/service_integration.py",
