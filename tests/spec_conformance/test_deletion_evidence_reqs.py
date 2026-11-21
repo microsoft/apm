@@ -1,6 +1,6 @@
 """Deletion requires deployment evidence, never a lockfile hash alone (req-lk-024).
 
-Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.75
+Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.76
 consent exception (issue #4295). The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
@@ -112,7 +112,7 @@ def _consent_evidence(root: Path, path: Path, *, render) -> DeploymentEvidence:
 
 @pytest.mark.req("req-lk-024")
 def test_spec_states_the_per_invocation_consent_exception() -> None:
-    """Proposed amendment 0.1.75 (issue #4295)."""
+    """Proposed amendment 0.1.76 (issue #4295)."""
     assert_spec_contains("One consent exception applies, only to an uninstall the user explicitly")
     assert_spec_contains("consent is never implied by\nanother option or by configuration.")
 
