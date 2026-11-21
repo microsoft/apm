@@ -13,6 +13,21 @@ if TYPE_CHECKING:
     from apm_cli.models.dependency.reference import DependencyReference
 
 
+def _locked_local_catalog_plugins(
+    lockfile: LockFile, manifest_deps: list[DependencyReference]
+) -> list[DependencyReference]:
+    """Marketplace declarations a local catalog resolved, as their local lock rows (#4639)."""
+    from apm_cli.drift import locked_marketplace_row
+
+    index = lockfile.marketplace_index()
+    plugins = []
+    for dep in manifest_deps:
+        locked = locked_marketplace_row(dep, lockfile, index)
+        if locked is not None and locked.is_local_source:
+            plugins.append(locked.to_edge_reference(dep))
+    return plugins
+
+
 def local_content_reasons(
     apm_package: APMPackage,
     lockfile: LockFile,
@@ -39,6 +54,7 @@ def local_content_reasons(
     from apm_cli.models.dependency.replacement import build_replacement_index
 
     queue = deque(dep for dep in manifest_deps if dep.is_local)
+    queue.extend(_locked_local_catalog_plugins(lockfile, manifest_deps))
     queue.extend(InstallService._selected_locked_replacements(lockfile, manifest_deps))
     if not queue:
         return []
