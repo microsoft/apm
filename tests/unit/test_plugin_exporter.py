@@ -406,7 +406,7 @@ class TestUnpackedDependencyConfigWarning:
     """The warning names only dependency config the bundle will not carry."""
 
     @staticmethod
-    def _warnings(tmp_path, components, *, mcp=False):
+    def _warn(tmp_path, capsys, components, *, mcp=False) -> str:
         install_path = tmp_path / "cache"
         hooks_dir = install_path / ".apm" / "hooks"
         hooks_dir.mkdir(parents=True)
@@ -415,26 +415,25 @@ class TestUnpackedDependencyConfigWarning:
             (install_path / ".mcp.json").write_text(
                 json.dumps({"mcpServers": {"db": {"command": "db"}}})
             )
-        messages: list[str] = []
-        logger = type("L", (), {"warning": staticmethod(messages.append)})()
         _warn_unpacked_dependency_config(
-            LockedDependency(repo_url="acme/hooky"), install_path, components, logger
+            LockedDependency(repo_url="acme/hooky"), install_path, components
         )
-        return messages
+        captured = capsys.readouterr()
+        return " ".join(f"{captured.out} {captured.err}".split())
 
-    def test_packed_hooks_file_is_not_reported(self, tmp_path):
+    def test_packed_hooks_file_is_not_reported(self, tmp_path, capsys):
         packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
-        assert self._warnings(tmp_path, packed) == []
+        assert "acme/hooky" not in self._warn(tmp_path, capsys, packed)
 
-    def test_hook_scripts_alone_do_not_carry_the_config(self, tmp_path):
+    def test_hook_scripts_alone_do_not_carry_the_config(self, tmp_path, capsys):
         scripts = [(tmp_path / "run.sh", "hooks/scripts/hooky/run.sh")]
-        (message,) = self._warnings(tmp_path, scripts)
-        assert "contributed hooks config that is not attested" in message
+        output = self._warn(tmp_path, capsys, scripts)
+        assert "acme/hooky contributed hooks config that is not attested" in output
 
-    def test_mcp_config_is_reported_beside_packed_hooks(self, tmp_path):
+    def test_mcp_config_is_reported_beside_packed_hooks(self, tmp_path, capsys):
         packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
-        (message,) = self._warnings(tmp_path, packed, mcp=True)
-        assert "contributed MCP config that is not attested" in message
+        output = self._warn(tmp_path, capsys, packed, mcp=True)
+        assert "acme/hooky contributed MCP config that is not attested" in output
 
 
 # ---------------------------------------------------------------------------

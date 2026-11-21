@@ -79,9 +79,9 @@ def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
 
     The bundle itself, named by its ``plugin.json`` id and name as a local
     package (``_local/<name>``, as a local-path dependency is keyed), plus
-    every package its embedded ``apm.lock.yaml`` records. A lockfile this
-    APM version cannot read contributes no packages; integrity and the
-    executables gate still judge the files.
+    every package its embedded ``apm.lock.yaml`` records. A bundle without
+    one presents its names only; one it cannot read is refused with
+    ``ValueError``, never judged as recording nothing.
     """
     from ..models.dependency.reference import DependencyReference
 
@@ -95,24 +95,34 @@ def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
         for name in sorted(names)
     ]
     root = bundle_info.source_dir
-    return subjects + locked_package_refs(root / "apm.lock.yaml" if root is not None else None)
+    try:
+        locked = locked_package_refs(root / "apm.lock.yaml" if root is not None else None)
+    except ValueError as exc:
+        raise ValueError(
+            f"Bundle apm.lock.yaml cannot be read ({exc.__cause__ or exc}), so org policy "
+            "cannot check the packages it records. Repack the bundle with 'apm pack' "
+            "and retry."
+        ) from exc
+    return subjects + locked
 
 
 def locked_package_refs(path: Path | None) -> list[DependencyReference]:
-    """Every package the lockfile at *path* records; none when absent or unreadable.
+    """Every package the lockfile at *path* records; none when it is absent.
 
-    Read without side effects: the caller's own lockfile reader reports an
-    unreadable file.
+    Read without side effects. A lockfile that exists but cannot be read
+    raises ``ValueError``: org policy cannot judge packages it cannot list.
     """
     from ..deps.lockfile import LockFile
 
-    if path is None or not path.is_file():
+    if path is None or not (path.exists() or path.is_symlink()):
         return []
     try:
         lockfile = LockFile.from_yaml(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return [dep.to_dependency_ref() for dep in lockfile.get_package_dependencies()]
+        return [dep.to_dependency_ref() for dep in lockfile.get_package_dependencies()]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(
+            f"Cannot read {path.name} to check its packages against org policy: {exc}"
+        ) from exc
 
 
 def apm_bundle_admission(

@@ -6792,7 +6792,7 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
     rule_id: str, path: str, old: str, new: str
 ) -> None:
     """Local bundle identity, pack and bundle canvas each route through their owners."""
-    source = _source(path)
+    source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     mutated = source.replace(old, new, 1)
     ast.parse(mutated, filename=path)
