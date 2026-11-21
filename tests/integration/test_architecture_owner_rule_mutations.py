@@ -6768,8 +6768,8 @@ def test_every_stale_deleter_consumes_the_skip_set(
         pytest.param(
             "install-deployment-bundle-admission-owner",
             "src/apm_cli/bundle/packer.py",
-            "    pack_policy_preflight(Path(project_root), logger)\n",
-            "",
+            "    policy_warnings = pack_policy_preflight(Path(project_root), logger)\n",
+            "    policy_warnings = []\n",
             id="pack-skips-dependency-policy",
         ),
         pytest.param(
@@ -6799,6 +6799,20 @@ def test_every_stale_deleter_consumes_the_skip_set(
             "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
             "holding = found.setdefault((slug, False), BundleCanvas(slug, False))",
             id="bundle-canvas-ownership-unrecorded",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "        path = contained_bundle_path(root, value, prefixes)\n",
+            "        path = root / rel\n",
+            id="bundle-canvas-retire-uncontained",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        hook_file = contained_bundle_path(project_root, value, prefixes)\n",
+            "        hook_file = Path(project_root) / value\n",
+            id="bundle-hook-retire-uncontained",
         ),
         pytest.param(
             "install-deployment-executable-trust-context",

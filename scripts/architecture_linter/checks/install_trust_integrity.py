@@ -375,12 +375,16 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         "            retire_bundle_hooks(",
         # The scope re-check retires bundle canvas through the same pass.
         "    retire_unadmitted_bundle_canvas(",
+        # Committed records and rows are acted on only inside a target root.
+        "hook_file = contained_bundle_path(project_root, value, prefixes)",
+        "    path = contained_bundle_path(project_root, value, prefixes)",
     ),
     "src/apm_cli/install/local_bundle_canvas.py": (
         "package_type_approved(allow_map, (key,), EXEC_TYPE_CANVAS)",
         "if None in holding.keys:",
         "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
         "retire_recorded_bundle_canvas(",
+        "path = contained_bundle_path(root, value, prefixes)",
     ),
     "src/apm_cli/install/services.py": (
         "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",

@@ -5,17 +5,26 @@ or the exact bundle denied) removes the extension and its lock claim. The
 pending record lists canvas, so ``apm approve <key>`` grants it. A plain
 ``apm install`` re-checks every deployed bundle extension as it re-checks
 bundle hooks, and ``apm audit --ci`` reports one trust no longer admits. A
-blocked bundle never retires an extension another bundle deployed.
+blocked bundle never retires an extension another bundle deployed. A
+reinstall retires the extensions the bundle's new version no longer ships.
+Committed bundle records and lock rows that name paths outside the target's
+extension or hook directory are never acted on.
 """
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from apm_cli.bundle.local_bundle import detect_local_bundle
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.scope import InstallScope
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.security.executables import local_bundle_approval_key
+from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._marketplace_pack_kit import (
     MarketplacePackWorld,
@@ -35,21 +44,31 @@ pytestmark = [
 _EXTENSION = ".github/extensions/board/extension.mjs"
 
 
-def _pack(world: MarketplacePackWorld, root: Path, out: Path, name: str = "canvaspkg") -> Path:
+def _pack(
+    world: MarketplacePackWorld,
+    root: Path,
+    out: Path,
+    name: str = "canvaspkg",
+    *,
+    version: str = "1.0.0",
+    extension: str | None = "board",
+) -> Path:
     write(
         root / "apm.yml",
-        f"name: {name}\nversion: 1.0.0\ndescription: c\nlicense: MIT\n"
+        f"name: {name}\nversion: {version}\ndescription: c\nlicense: MIT\n"
         "targets: [copilot]\ndependencies:\n  apm: []\n",
     )
     write(root / ".apm" / "skills" / f"{name}-s" / "SKILL.md", skill_md(f"{name}-s"))
-    write(
-        root / ".apm" / "extensions" / "board" / "extension.mjs",
-        f"export default {{ name: '{name}' }};\n",
-    )
+    shutil.rmtree(root / ".apm" / "extensions", ignore_errors=True)
+    if extension is not None:
+        write(
+            root / ".apm" / "extensions" / extension / "extension.mjs",
+            f"export default {{ name: '{name}' }};\n",
+        )
     (root / ".github").mkdir(exist_ok=True)
     world.apm(root, "install", "--no-policy")
     world.apm(root, "pack", "-o", str(out))
-    return out / f"{name}-1.0.0"
+    return out / f"{name}-{version}"
 
 
 def _approval_key(bundle: Path) -> str:
@@ -150,3 +169,78 @@ def test_blocked_bundle_keeps_another_bundles_extension(
 
     assert (consumer / _EXTENSION).read_bytes() == before
     assert _claimed(world, consumer)
+
+
+def test_reinstall_retires_extensions_the_new_version_no_longer_ships(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    world.apm(world.isolated.work_root, "experimental", "enable", "canvas")
+    root = world.isolated.work_root / "canvaspkg"
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    panel = ".github/extensions/panel/extension.mjs"
+    install = ("install", "--no-policy")
+
+    world.apm(consumer, install[0], str(_pack(world, root, tmp_path / "v1")), install[1])
+    assert (consumer / _EXTENSION).is_file()
+
+    # Version 2 renames the extension: the old one is retired, the new one lands.
+    v2 = _pack(world, root, tmp_path / "v2", version="2.0.0", extension="panel")
+    world.apm(consumer, install[0], str(v2), install[1])
+    assert not (consumer / _EXTENSION).exists()
+    assert not _claimed(world, consumer)
+    assert (consumer / panel).is_file()
+
+    # Version 3 ships no canvas at all: nothing of the bundle's canvas remains.
+    v3 = _pack(world, root, tmp_path / "v3", version="3.0.0", extension=None)
+    world.apm(consumer, install[0], str(v3), install[1])
+    assert not (consumer / panel).exists()
+    assert panel not in (world.lock(consumer).get("local_deployed_files") or [])
+    world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
+def test_recheck_never_removes_files_outside_the_bundle_roots(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    world.apm(world.isolated.work_root, "experimental", "enable", "canvas")
+    consumer = world.consumer("bundle-consumer", targets=("copilot",))
+    _set_executables(consumer, {"allow": {}})
+    victims = {name: consumer.parent / f"{name}.txt" for name in ("row", "canvas", "hook")}
+    for victim in victims.values():
+        victim.write_text("keep me\n", encoding="utf-8")
+    # Committed state names files outside the project: a lock row that climbs
+    # out of the extension root, and records listing absolute paths.
+    escaping = ".github/extensions/../../../row.txt"
+    rows = [escaping, str(victims["canvas"]), str(victims["hook"])]
+    lockfile = LockFile()
+    DeploymentLedgerCodec.record_local_bundle_files(
+        lockfile,
+        rows,
+        {
+            escaping: compute_file_hash(victims["row"]),
+            **{row: compute_file_hash(Path(row)) for row in rows[1:]},
+        },
+        scope=InstallScope.PROJECT,
+    )
+    lockfile.write(consumer / "apm.lock.yaml")
+    marker = "local-bundle::crafted"
+    (consumer / ".github" / "hooks").mkdir(parents=True, exist_ok=True)
+    (consumer / ".github" / "apm-hooks.json").write_text(
+        json.dumps(
+            {
+                "local-bundle-canvas": [
+                    {"_apm_source": marker, "canvas_files": [str(victims["canvas"])]}
+                ],
+                "local-bundle-hooks": [
+                    {"_apm_source": marker, "hook_files": [str(victims["hook"])]}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    world.apm(consumer, "install", "--no-policy", expect=None)
+
+    for victim in victims.values():
+        assert victim.read_text(encoding="utf-8") == "keep me\n", victim

@@ -449,8 +449,10 @@ with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
 them first. Canvas extensions a bundle deploys (with the `canvas` experimental
-flag) follow the same approval, re-check and retirement; retiring one bundle's
-extensions never removes another bundle's, and an extension you edited is kept.
+flag) follow the same approval, re-check and retirement; a reinstall retires
+the extensions the new bundle content no longer ships. Retiring one bundle's
+extensions never removes another bundle's or anything outside the target's
+extensions directory, and an extension you edited is kept.
 Org policy `dependencies.deny` applies to the bundle's package
 name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
 denied bundle is refused before any file is written. A bundle whose
