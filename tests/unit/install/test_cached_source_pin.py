@@ -16,6 +16,8 @@ import pytest
 from apm_cli.install.cache_pin import is_full_source_pin
 from apm_cli.install.sources import CachedDependencySource
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
+
 _LOCKED_SHA = "f1b2ba49d18a3de11f87d8e6dc672dfdaadbff85"
 
 

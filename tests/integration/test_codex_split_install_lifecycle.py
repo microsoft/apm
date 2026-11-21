@@ -24,7 +24,11 @@ from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.codex_spy import write_codex_spy
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
-pytestmark = [pytest.mark.integration]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-codex-split-install"),
+]
 
 
 def _plugin_source(root: Path) -> None:
