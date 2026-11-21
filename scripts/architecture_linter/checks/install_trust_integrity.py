@@ -435,6 +435,7 @@ _BUNDLE_DEPLOY_PRIMITIVES = frozenset({"integrate_local_bundle", "unpack_bundle"
 _BUNDLE_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
     (_LOCAL_BUNDLE, "install_local_bundle"): (
         "admit_bundle",
+        "bundle_policy_subjects",
         "DeploymentLedgerCodec.record_local_bundle_files",
     ),
     (_PACK_COMMAND, "unpack_cmd"): ("apm_bundle_admission", "record_unpacked_files"),
@@ -447,6 +448,14 @@ _ADMISSION_ROUTES: dict[str, tuple[str, ...]] = {
     "prepare_unpack_record": ("ensure_lockfile_writable",),
     "_bundle_target_decision": ("pack_target_prefixes",),
     "record_unpacked_files": ("DeploymentLedgerCodec.record_local_bundle_files",),
+}
+# Pack ships dependency content only after the same org dependency policy.
+_PACK_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("src/apm_cli/bundle/packer.py", "pack_bundle"): ("pack_policy_preflight",),
+    ("src/apm_cli/bundle/pack_policy.py", "pack_policy_preflight"): (
+        "locked_package_refs",
+        "run_policy_preflight",
+    ),
 }
 
 
@@ -475,7 +484,7 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
             if call.qualname.rsplit(".", 1)[-1] in _BUNDLE_DEPLOY_PRIMITIVES
             and (path, call.scope) not in _BUNDLE_ENTRY_POINTS
         )
-    for (path, function), required in _BUNDLE_ENTRY_POINTS.items():
+    for (path, function), required in (*_BUNDLE_ENTRY_POINTS.items(), *_PACK_ENTRY_POINTS.items()):
         facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
         findings.extend(failures)
         if failures:
@@ -486,7 +495,7 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
                 _summary(
                     GUARD_BUNDLE_ADMISSION,
                     path,
-                    f"{function} must admit and record the bundle through the shared "
+                    f"{function} must admit, record or pack the bundle through the shared "
                     "owners; missing " + ", ".join(missing),
                 )
             )

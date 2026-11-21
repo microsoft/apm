@@ -90,9 +90,14 @@ def pack_bundle(
 
     Raises:
         FileNotFoundError: If ``apm.lock.yaml`` is missing.
-        ValueError: If deployed files referenced in the lockfile are missing on disk.
+        ValueError: If deployed files referenced in the lockfile are missing on disk,
+            or org policy refuses a locked dependency.
     """
     bundle_format = coerce_bundle_format(fmt)
+    # Org policy that refuses a dependency refuses to ship its content too.
+    from .pack_policy import pack_policy_preflight
+
+    pack_policy_preflight(Path(project_root), logger)
 
     if bundle_format is BundleFormat.AGENT_PLUGIN:
         from .agent_plugin_exporter import export_agent_plugin_bundle

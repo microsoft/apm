@@ -190,8 +190,14 @@ def _check_dependency_allowlist(
 def _check_dependency_denylist(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    bundled: Sequence[DependencyReference] = (),
 ) -> CheckResult:
-    """Check 2: no dependency matches policy deny list."""
+    """Check 2: no dependency matches policy deny list.
+
+    *bundled* are packages a local bundle or a pack ships without an apm.yml
+    entry in this project; they meet the deny list only, and their
+    violations suggest no apm.yml edit. One declared in *deps* is judged once.
+    """
     from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if not policy.effective_deny:
@@ -202,10 +208,12 @@ def _check_dependency_denylist(
         )
 
     subjects: list[PolicySubject] = []
-    for dep in deps:
+    keys = {dep.get_unique_key() for dep in deps}
+    extra = [(dep, None) for dep in bundled if dep.get_unique_key() not in keys]
+    for dep, remedy in (*((dep, PolicyRemedy.REMOVE) for dep in deps), *extra):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
-            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
 
     if not subjects:
         return CheckResult(
@@ -1562,6 +1570,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
     installing: bool = False,
     marketplace_origins: MarketplaceOrigins | None = None,
+    bundled_deps: Iterable[DependencyReference] = (),
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1638,6 +1647,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         origins of marketplace-resolved dependencies (lock rows and fresh
         resolutions), checked against ``marketplace.allow`` when the policy
         sets it, so a lock cannot bypass it.
+    bundled_deps:
+        Packages a local bundle or a pack ships without an apm.yml entry in
+        this project (the bundle itself and the packages it carries). They
+        meet ``dependencies.deny`` only: the allow list, require and pin
+        checks judge the project's own declarations.
 
     Returns
     -------
@@ -1670,7 +1684,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     # -- Dependency checks (1-6) -----------------------------------
     if _run(_check_dependency_allowlist(source_list, policy.dependencies)):
         return result
-    if _run(_check_dependency_denylist(source_list, policy.dependencies)):
+    if _run(_check_dependency_denylist(source_list, policy.dependencies, list(bundled_deps))):
         return result
     dep_names = None
     if policy.dependencies.effective_require or (

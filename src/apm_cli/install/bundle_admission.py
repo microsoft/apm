@@ -4,7 +4,8 @@
 file is written: org policy is discovered and enforced through the shared
 install preflight (outcome routing, dependency allow/deny, MCP and target
 checks), then the bundle's integrity is checked under the policy's
-``security.integrity.require_hashes`` setting.
+``security.integrity.require_hashes`` setting. A local bundle and the
+packages it records meet ``dependencies.deny`` (:func:`bundle_policy_subjects`).
 
 Each bundle format brings its own integrity check; the policy gate and the
 ``require_hashes`` decision stay here.
@@ -40,8 +41,12 @@ def admit_bundle(
     dry_run: bool,
     fetch_result: Any = None,
     registries: dict[str, str] | None = None,
+    bundled_deps: Iterable[DependencyReference] = (),
 ) -> ApmPolicy | None:
     """Admit a bundle for deployment, or raise before anything is written.
+
+    *bundled_deps* (see :func:`bundle_policy_subjects`) meet the org
+    ``dependencies.deny`` list as a declared dependency would.
 
     Raises :class:`~apm_cli.install.errors.PolicyViolationError` when org
     policy blocks the bundle or cannot be verified under
@@ -62,10 +67,52 @@ def admit_bundle(
         effective_target_source=target_decision.source,
         fetch_result=fetch_result,
         registries=registries,
+        bundled_deps=list(bundled_deps),
     )
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
     return policy
+
+
+def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
+    """The package identities a local bundle presents to org dependency policy.
+
+    The bundle itself, named by its ``plugin.json`` id and name as a local
+    package (``_local/<name>``, as a local-path dependency is keyed), plus
+    every package its embedded ``apm.lock.yaml`` records. A lockfile this
+    APM version cannot read contributes no packages; integrity and the
+    executables gate still judge the files.
+    """
+    from ..models.dependency.reference import DependencyReference
+
+    names = {
+        str(value).strip()
+        for value in (bundle_info.package_id, bundle_info.plugin_json.get("name"))
+        if value and str(value).strip()
+    }
+    subjects = [
+        DependencyReference(repo_url=f"_local/{name}", is_local=True, source="local")
+        for name in sorted(names)
+    ]
+    root = bundle_info.source_dir
+    return subjects + locked_package_refs(root / "apm.lock.yaml" if root is not None else None)
+
+
+def locked_package_refs(path: Path | None) -> list[DependencyReference]:
+    """Every package the lockfile at *path* records; none when absent or unreadable.
+
+    Read without side effects: the caller's own lockfile reader reports an
+    unreadable file.
+    """
+    from ..deps.lockfile import LockFile
+
+    if path is None or not path.is_file():
+        return []
+    try:
+        lockfile = LockFile.from_yaml(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [dep.to_dependency_ref() for dep in lockfile.get_package_dependencies()]
 
 
 def apm_bundle_admission(
@@ -82,7 +129,7 @@ def apm_bundle_admission(
         from ..deps.registry.auth import dependency_ref_with_registry_name_from_lockfile
 
         prepare_unpack_record(output_dir)
-        registries = _project_registries(output_dir)
+        registries = project_registries(output_dir)
         admit_bundle(
             policy_root=output_dir,
             apm_deps=(
@@ -139,7 +186,7 @@ def _bundle_target_decision(candidate: UnpackCandidate) -> EffectiveTargetDecisi
     return decision
 
 
-def _project_registries(output_dir: Path) -> dict[str, str] | None:
+def project_registries(output_dir: Path) -> dict[str, str] | None:
     """The ``registries:`` map of the project at *output_dir*, if any."""
     from ..core.scope import manifest_file
     from ..models.apm_package import APMPackage

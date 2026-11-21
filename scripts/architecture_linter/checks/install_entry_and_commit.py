@@ -65,6 +65,8 @@ _POLICY_PREFLIGHT_SITES = frozenset(
         _ENTRY_OWNER,
         _COMMIT_GATE,
         "src/apm_cli/install/bundle_admission.py",
+        # apm pack judges the packages it ships before any output is written.
+        "src/apm_cli/bundle/pack_policy.py",
     }
 )
 # install --mcp judges its server through the commit gate and refuses it as
