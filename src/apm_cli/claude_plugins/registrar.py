@@ -21,6 +21,7 @@ from apm_cli.core.remediation import (
     CLAUDE_NATIVE_PLUGIN_DRIFT,
     CLAUDE_PLUGIN_BINDING_MOVED,
     CLAUDE_PLUGIN_SOURCE_STALE,
+    kept_note,
 )
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
@@ -349,8 +350,11 @@ def _report(logger, declared, retiring, kept, changed, settings_changed, restore
         logger.tree_item(f"{len(retiring)} native Claude plugin(s) removed.")
     for name in kept:
         logger.warning(
-            f"Kept ~/.agents/plugins/{name}: its files changed since APM deployed it or "
-            "could not be removed. Review and delete it yourself; Claude no longer loads it."
+            kept_note(
+                f"~/.agents/plugins/{name}",
+                "its files changed since APM deployed it or could not be removed",
+                "Review and delete it yourself; Claude no longer loads it.",
+            )
         )
     if declared and (changed or settings_changed):
         logger.tree_item(

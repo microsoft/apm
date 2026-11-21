@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
-from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE
+from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE, kept_note
 from apm_cli.core.scope import is_user_scope
 from apm_cli.drift import detect_stale_files
 from apm_cli.integration.base_integrator import BaseIntegrator
@@ -276,8 +276,10 @@ def _run_cleanup(
             if protected and logger:
                 for protected_path in sorted(protected):
                     logger.verbose_detail(
-                        f"Kept stale file {protected_path} for {dep_key}; "
-                        "still in use by another package or target"
+                        kept_note(
+                            f"stale file {protected_path} for {dep_key}",
+                            "still in use by another package or target",
+                        )
                     )
 
             if not stale:

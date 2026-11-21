@@ -657,10 +657,12 @@ def _safe_remove_skill_directory(
         file_list = ", ".join(preview) + suffix
         release = user_content_only and not failed_path_retained
         if release:
-            message = (
-                f"Kept skill directory {rel_path} for {len(blocking)} file(s) not "
-                f"owned by APM: {file_list}. APM no longer manages it; "
-                "remove it manually if no longer needed."
+            from apm_cli.core.remediation import kept_note
+
+            message = kept_note(
+                f"skill directory {rel_path} for {len(blocking)} file(s) not owned by APM",
+                file_list,
+                "APM no longer manages it; remove it manually if no longer needed.",
             )
         else:
             message = (
@@ -738,11 +740,13 @@ def _keep_without_evidence(
     if verdict == UNPROVEN:
         result.skipped_unmanaged.append(stale_path)
         result.unproven.append(stale_path)
-        message = (
-            f"Kept {stale_path}: no local deployment receipt or render of the locked "
-            "package version proves APM deployed it. Delete it manually if you no "
-            "longer need it."
+        from apm_cli.core.remediation import (
+            KEPT_DELETE_MANUALLY,
+            KEPT_UNPROVEN_REASON,
+            kept_note,
         )
+
+        message = kept_note(stale_path, KEPT_UNPROVEN_REASON, KEPT_DELETE_MANUALLY)
     elif verdict == UNREADABLE:
         result.skipped_user_edit.append(stale_path)
         message = (
