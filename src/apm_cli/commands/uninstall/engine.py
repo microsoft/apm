@@ -1286,6 +1286,7 @@ def _preflight_uninstall_survivors(
         enforce_agent_plugin_deployment_boundary,
         preflight_reintegration_survivors,
     )
+    from ...install.phases.local_content import LocalPackageError, staged_local_package_image
     from ...models.apm_package import PackageInfo
     from ...models.validation import validate_apm_package
 
@@ -1299,17 +1300,23 @@ def _preflight_uninstall_survivors(
             source_path = Path(dep_ref.local_path).expanduser()
             if not source_path.is_absolute():
                 source_path = (source_root / source_path).resolve()
-            validation = validate_apm_package(source_path, source_path=source_path)
-            if validation.is_valid and validation.package is not None:
-                with contextlib.suppress(AgentPluginTargetExcludedError):
-                    enforce_agent_plugin_deployment_boundary(
-                        PackageInfo(
-                            package=validation.package,
-                            install_path=source_path,
-                            dependency_ref=dep_ref,
-                            package_type=validation.package_type,
+            # Validate a staged image: validation normalizes plugins in place (#4566).
+            with contextlib.ExitStack() as stack:
+                try:
+                    image = stack.enter_context(staged_local_package_image(dep_ref, source_root))
+                except (LocalPackageError, PathTraversalError):
+                    continue
+                validation = validate_apm_package(image, source_path=source_path)
+                if validation.is_valid and validation.package is not None:
+                    with contextlib.suppress(AgentPluginTargetExcludedError):
+                        enforce_agent_plugin_deployment_boundary(
+                            PackageInfo(
+                                package=validation.package,
+                                install_path=image,
+                                dependency_ref=dep_ref,
+                                package_type=validation.package_type,
+                            )
                         )
-                    )
     if lockfile is not None:
         refs = [
             dependency.to_dependency_ref()
