@@ -105,7 +105,10 @@ repository.
 
    To register it on every machine without a manual step, list it under `marketplaces:`
    in the user manifest (`~/.apm/apm.yml`) and run `apm install -g`, for example from
-   your dev container setup. A project `apm.yml` cannot declare marketplaces.
+   your dev container setup. Or commit it in the project's own `apm.yml` under
+   `marketplaces:`, so a fresh clone or CI needs no registration; the policy
+   `marketplace.allow` list restricts which marketplaces a project may declare
+   ([Declare marketplaces in a project](../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project)).
 
 4. **Declare the package with a range** (Ana), then install:
 

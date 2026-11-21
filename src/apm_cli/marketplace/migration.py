@@ -28,9 +28,9 @@ import yaml
 
 from apm_cli.core.scope import manifest_file
 
+from ..core.deprecations import deprecation_message
 from ..core.remediation import (
     MARKETPLACE_CONFIG_DUPLICATE,
-    MARKETPLACE_CONFIG_LEGACY,
     MARKETPLACE_CONFIG_MISSING,
     PROJECT_MANIFEST_MISSING,
 )
@@ -50,7 +50,7 @@ __all__ = [
 ]
 
 
-DEPRECATION_MESSAGE = f"marketplace.yml is deprecated. {MARKETPLACE_CONFIG_LEGACY.sentence()}"
+DEPRECATION_MESSAGE = deprecation_message("marketplace-yml")
 
 
 logger = logging.getLogger(__name__)

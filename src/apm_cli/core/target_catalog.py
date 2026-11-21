@@ -7,6 +7,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from .deprecations import deprecation_message
+
 
 @dataclass(frozen=True)
 class TargetCapability:
@@ -59,9 +61,11 @@ def deprecated_target_alias_message(
     *where* names the file (omitted for CLI flags); *key* the field holding it.
     """
     location = f" in {key}" if key else ""
-    message = (
-        f"replace `{token}` with `{DEPRECATED_TARGET_ALIASES[token]}`{location}; "
-        f"`{token}` is deprecated and will be removed in a future release."
+    message = deprecation_message(
+        "target-alias-vscode",
+        token=token,
+        replacement=DEPRECATED_TARGET_ALIASES[token],
+        location=location,
     )
     return f"{where}: {message}" if where else message
 

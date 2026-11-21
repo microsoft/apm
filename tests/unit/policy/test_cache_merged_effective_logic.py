@@ -19,6 +19,7 @@ from apm_cli.policy.schema import (
     ApmPolicy,
     BinDeployPolicy,
     DependencyPolicy,
+    MarketplacePolicy,
     McpPolicy,
     UnmanagedFilesPolicy,
 )
@@ -157,6 +158,8 @@ ACTIONABLE_POLICY_CASES = {
         "exclude",
     ): "unmanaged_files:\n  exclude: [.github/generated/**]\n",
     ("registry_source", "require"): "registry_source:\n  require: [corp]\n",
+    # #2903: a policy whose only rule is marketplace.allow is not empty.
+    ("marketplace", "allow"): "marketplace:\n  allow: [github.com/contoso/*]\n",
     (
         "registry_source",
         "allow_non_registry",
@@ -258,7 +261,8 @@ def test_policy_serializer_covers_every_dataclass_leaf() -> None:
         bin_deploy=BinDeployPolicy(
             deny_all=True,
             deny=("legacy/tool",),
-        )
+        ),
+        marketplace=MarketplacePolicy(allow=("github.com/contoso/*",)),
     )
     declared = _dataclass_leaf_paths(policy)
     serialized = _mapping_leaf_paths(_policy_to_dict(policy))
