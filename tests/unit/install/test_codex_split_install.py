@@ -201,6 +201,16 @@ def test_registration_in_another_codex_home_is_left_alone(legacy, monkeypatch, t
     assert legacy.snapshot.is_dir()
 
 
+def test_registration_already_gone_is_cleaned_up_but_not_reported_retired(legacy) -> None:
+    legacy.config.write_text('model = "gpt-5.4"\n', encoding="utf-8")
+    outcome = retire_legacy_codex_registrations(legacy.modules, InstallScope.USER)
+    assert outcome.retired == ()
+    assert outcome.kept == ()
+    assert not legacy.ledger.exists()
+    assert not legacy.snapshot.exists()
+    assert legacy.config.read_text(encoding="utf-8") == 'model = "gpt-5.4"\n'
+
+
 @pytest.mark.parametrize("target", ["ledger", "config"])
 def test_unreadable_state_changes_nothing_and_keeps_the_journal(legacy, target) -> None:
     broken = legacy.ledger if target == "ledger" else legacy.config

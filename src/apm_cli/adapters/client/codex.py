@@ -243,7 +243,8 @@ class CodexClientAdapter(MCPClientAdapter):
         disabled plugin and a recorded source. An enabled or edited plugin, a
         changed source, or another plugin under the same marketplace is the
         user's and stays. Returns ``(retired, kept)`` marketplace names, or
-        ``None`` when the config cannot be read safely.
+        ``None`` when the config cannot be read safely; a registration already
+        gone from the config is in neither set.
         """
         config = self.get_current_config()
         if config is None:
@@ -271,11 +272,13 @@ class CodexClientAdapter(MCPClientAdapter):
             ):
                 kept.add(marketplace)
                 continue
+            if entry is None and source is None:
+                continue
             if entry is not None:
                 del plugins[plugin_id]
             if source is not None:
                 del marketplaces[marketplace]
-            changed = changed or entry is not None or source is not None
+            changed = True
             retired.add(marketplace)
         if changed:
             self._write_config(config)

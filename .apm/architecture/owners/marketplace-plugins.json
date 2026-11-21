@@ -157,7 +157,7 @@
       "id": "apm-package-manifest-construction",
       "decision": "APMPackage interpreted-manifest construction",
       "owner": "models/apm_package.py (APMPackage.from_mapping)",
-      "selectors": ["src/apm_cli/models/apm_package.py"],
+      "selectors": ["src/apm_cli/models/apm_package.py", "src/apm_cli/deps/package_validator.py"],
       "guards": ["marketplace-integrations-package-construction"]
     },
     {

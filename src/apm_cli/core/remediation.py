@@ -1009,6 +1009,12 @@ CODEX_NATIVE_REGISTRATION_UNVERIFIED = _entry(
     "apm install -g --target codex",
     "register the Codex plugin again from its admitted source",
 )
+CODEX_LEGACY_RETIREMENT_RETRY = _entry(
+    "codex-legacy-retirement-retry",
+    "apm install -g",
+    "retire the Codex registrations an earlier APM version made",
+    before="fix the named file",
+)
 NATIVE_SETTINGS_INVALID = _entry(
     "native-settings-invalid",
     "apm install",

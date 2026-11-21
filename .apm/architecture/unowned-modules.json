@@ -197,7 +197,6 @@
     "src/apm_cli/install/skill_path_migration.py",
     "src/apm_cli/install/summary.py",
     "src/apm_cli/install/target_hints.py",
-    "src/apm_cli/install/target_warnings.py",
     "src/apm_cli/install/template.py",
     "src/apm_cli/integration/__init__.py",
     "src/apm_cli/integration/_hook_dropped_targets.py",

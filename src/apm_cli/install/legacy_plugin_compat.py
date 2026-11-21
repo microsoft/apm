@@ -7,7 +7,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.constants import APM_DIR, APM_YML_FILENAME
+from apm_cli.constants import APM_DIR
 from apm_cli.core.remediation import CLAUDE_PLUGIN_CACHE_INVALID
 from apm_cli.core.scope import manifest_file
 from apm_cli.deps.plugin_parser import has_normalized_plugin_skill_sources_receipt
@@ -164,7 +164,7 @@ def matches_retired_codex_route_hash(
     _reject_unsafe_cache_paths(
         package_path,
         dep_key,
-        (manifest, package_path / APM_YML_FILENAME, package_path / APM_DIR),
+        (manifest, manifest_file(package_path), package_path / APM_DIR),
         kind=_CODEX_PLUGIN_KIND,
     )
     framed = locked_dependency.content_hash_framed
@@ -174,7 +174,7 @@ def matches_retired_codex_route_hash(
     replacement = staging.prepare_replacement(package_path)
     try:
         shutil.copytree(package_path, replacement, symlinks=True)
-        (replacement / APM_YML_FILENAME).unlink(missing_ok=True)
+        manifest_file(replacement).unlink(missing_ok=True)
         if (replacement / APM_DIR).is_dir():
             shutil.rmtree(replacement / APM_DIR)
         # The locked bytes are hashed in the stream the lock row records.

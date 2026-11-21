@@ -113,7 +113,8 @@ def _retire(modules_dir: Path, ledger: Path) -> LegacyRetirement:
         return LegacyRetirement(problem=f"cannot parse {config_path}")
     retired_names, kept_names = outcome
     snapshot_root = ledger.parent / "snapshots"
-    for marketplace in sorted(retired_names):
+    # Snapshots of a registration already gone from the config are APM's too.
+    for marketplace in sorted(set(registrations) - kept_names):
         for path in snapshots[marketplace]:
             if path.exists():
                 safe_rmtree(path, snapshot_root)
@@ -135,10 +136,11 @@ def report_legacy_retirement(outcome: LegacyRetirement | None, logger: Any) -> N
     if outcome is None or logger is None:
         return
     if outcome.problem:
+        from apm_cli.core.remediation import CODEX_LEGACY_RETIREMENT_RETRY
+
         logger.warning(
             "Could not retire Codex plugin registrations from an earlier APM version: "
-            f"{outcome.problem}. Fix the file and rerun 'apm install -g'; "
-            "nothing was changed."
+            f"{outcome.problem}; nothing was changed. {CODEX_LEGACY_RETIREMENT_RETRY.sentence()}"
         )
         return
     if outcome.retired:
