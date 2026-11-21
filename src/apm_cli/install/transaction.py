@@ -286,10 +286,13 @@ class InstallTransaction:
 
         if not self._journal_released or self._deploy_journal is None:
             return False
-        return unless_lockfile_commits(self._undo_uncommitted_deploys)
+        return unless_lockfile_commits(self._undo_deploys)
 
-    def _undo_uncommitted_deploys(self) -> None:
-        """Restore the journaled paths and drop target roots this attempt created."""
+    def _undo_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created.
+
+        Rollback and an uncommitted completed transaction (#4664) both undo here.
+        """
         self._restore_deploy_targets()
         self._remove_created_target_roots()
 
@@ -342,8 +345,7 @@ class InstallTransaction:
             try:
                 self._ref_pins.discard()
                 try:
-                    self._restore_deploy_targets()
-                    self._remove_created_target_roots()
+                    self._undo_deploys()
                 finally:
                     try:
                         cleanup_issues = self._resolution.rollback() or []
