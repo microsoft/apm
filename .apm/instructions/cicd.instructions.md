@@ -66,6 +66,9 @@ integration suite runs only at merge time via GitHub Merge Queue
    - Queue refs are real branches. Train jobs restore caches (main's included) read-only: merge-train's setup-uv sets `save-cache: false`; called ci.yml and ci-integration.yml jobs can save only into the queue branch's scope, never main's.
    - `cleanup` (`if: always()`, after `train-gate`, the only job with `contents: write`) deletes every train branch; it is not part of the verdict. Every job skips the `push` a branch deletion fires (`github.event.deleted`). Each run has its own concurrency group and is never cancelled.
    - Never add `pull_request_target` or another push branch. `tests/quality/test_ci_topology.py` pins the triggers, the merge_group coverage of a full train, the gate and the lint-chain owner.
+8. **`owner-surface.yml`** - `pull_request` and `merge_group`
+   - `Owner Surface Check` runs the integration slice an owner or install-path change can reach (`scripts/owner_surface.py`: owner-rule mutation cases and `test_architecture_*.py` files naming a changed file or affected owner, guard or rule, plus `test_install_*.py` for install changes), in 3 shards. No `paths:` filter: it always reports, and passes when the slice is skipped and on merge_group.
+   - Advisory: it is not in `EXPECTED_CHECKS`. Making it required is a maintainer gate.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.
