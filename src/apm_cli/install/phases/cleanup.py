@@ -105,8 +105,8 @@ def remove_unclaimed_receipted_files(ctx: InstallContext) -> None:
     """Delete receipted files no current lock entry claims after a full install (#3188).
 
     Runs last, once the install deployed every package without an error.
-    A narrowed (selected packages or skills), frozen, dry or lockfile-only
-    install keeps every file and receipt.
+    A narrowed (selected packages or skills, or ``--only``), frozen, dry or
+    lockfile-only install keeps every file and receipt.
     """
     from apm_cli.core.receipt_orphans import remove_receipt_orphans
     from apm_cli.core.scope import InstallScope
@@ -117,6 +117,7 @@ def remove_unclaimed_receipted_files(ctx: InstallContext) -> None:
     if (
         ctx.only_packages
         or ctx.skill_subset_from_cli
+        or not ctx.install_mcp
         or ctx.dry_run
         or ctx.lockfile_only
         or InstallService.frozen_disposition(ctx).replay

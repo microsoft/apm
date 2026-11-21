@@ -268,7 +268,7 @@ def test_moved_checkout_keeps_files_and_receipts(tmp_path: Path, apm_binary_path
     assert not (world.root / _BETA).exists()
 
 
-@pytest.mark.parametrize("operation", ["failed-install", "narrowed-install"])
+@pytest.mark.parametrize("operation", ["failed-install", "narrowed-install", "only-apm-install"])
 def test_failed_or_narrowed_install_keeps_files_and_receipts(
     tmp_path: Path, apm_binary_path: Path, operation: str
 ) -> None:
@@ -279,8 +279,10 @@ def test_failed_or_narrowed_install_keeps_files_and_receipts(
         _write(world.root / "apm.yml", _manifest("alpha", "missing"))
         result = world.run("install", ok=False)
         assert result.returncode != 0, _evidence(result)
-    else:
+    elif operation == "narrowed-install":
         world.run("install", "./pkgs/alpha")
+    else:
+        world.run("install", "--only=apm")
 
     assert (world.root / _BETA).read_bytes() == beta
     assert world.destinations() == {_ALPHA, _BETA}
