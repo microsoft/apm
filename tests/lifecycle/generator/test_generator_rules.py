@@ -624,39 +624,27 @@ def _u_bin_ops(cell) -> bool:
     )
 
 
-def _has_user_scope_form(command) -> bool:
-    import click
-
-    commands = [command]
-    if isinstance(command, click.Group):
-        context = click.Context(command)
-        commands += [command.get_command(context, name) for name in command.list_commands(context)]
-    return any(
-        opt in ("--global", "-g")
-        for item in commands
-        for param in item.params
-        for opt in param.opts
-    )
-
-
 def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
     """Tripwire: U-BIN-OPS lapses the moment a premise changes in the source.
 
-    audit, prune, pack and marketplace must keep no user-scope form, and
-    plugin_bin_deployable must keep requiring a marketplace plugin at user scope
-    (the U-BIN pin hashes that predicate); the closed-world pin of the bin/
-    writer (security/u_bin.py) keeps a local bundle from ever writing bin/.
+    audit, prune, pack and every marketplace subcommand must keep no user-scope
+    form, and plugin_bin_deployable must keep requiring a marketplace plugin at
+    user scope (the U-BIN pin hashes that predicate); the closed-world pin of the
+    bin/ writer (security/u_bin.py) keeps a local bundle from ever writing bin/.
     """
-    import click
+    from click.testing import CliRunner
 
     from apm_cli.cli import cli
     from tests.lifecycle.security import u_bin
 
-    context = click.Context(cli)
-    for name in ("audit", "prune", "pack", "marketplace"):
-        assert not _has_user_scope_form(cli.get_command(context, name)), name
+    subcommands = ("package", "add", "list", "browse", "update", "remove", "audit", "check")
+    commands = [("audit",), ("prune",), ("pack",)]
+    commands += [("marketplace", name) for name in subcommands]
+    for words in commands:
+        result = CliRunner().invoke(cli, [*words, "--help"])
+        assert result.exit_code == 0, (words, result.output)
+        assert "--global" not in result.output and "-g," not in result.output, words
     assert bin_pin.predicate_digest() == U_BIN_PIN
-    # bin/ is written only through the marketplace-plugin path; unpack refuses it.
     assert u_bin.pin_holds()
 
 
