@@ -569,8 +569,8 @@ journeys:
 - id: J05
   persona: consumer
   title: Add a marketplace plugin
-  golden: false
-  tier: nightly
+  golden: true
+  tier: pr
   docs:
   - consumer/installing-from-marketplaces.md
   fixtures:
@@ -682,8 +682,8 @@ journeys:
 - id: J06
   persona: consumer
   title: Add an MCP server (and LSP)
-  golden: false
-  tier: nightly
+  golden: true
+  tier: pr
   docs:
   - consumer/install-mcp-servers.md
   fixtures:
@@ -788,8 +788,8 @@ journeys:
 - id: J07
   persona: consumer
   title: Update and upgrade
-  golden: false
-  tier: nightly
+  golden: true
+  tier: pr
   docs:
   - consumer/update-and-refresh.mdx
   - enterprise/drift-detection.md
@@ -1573,8 +1573,8 @@ journeys:
 - id: P01
   persona: producer
   title: Create and release a package
-  golden: false
-  tier: nightly
+  golden: true
+  tier: pr
   docs:
   - producer/create-a-package.mdx
   - producer/test-packages.md
