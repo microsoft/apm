@@ -169,7 +169,11 @@ def _check_marketplace_ref(dep, verbose):
     try:
         from ..marketplace.catalog_origin import require_locked_row_origin
         from ..marketplace.client import fetch_or_cache
-        from ..marketplace.errors import MarketplaceError, MarketplaceOriginConflictError
+        from ..marketplace.errors import (
+            MarketplaceAuthError,
+            MarketplaceError,
+            MarketplaceOriginConflictError,
+        )
         from ..marketplace.registry import get_marketplace_by_name
     except ImportError:
         return None
@@ -202,6 +206,16 @@ def _check_marketplace_ref(dep, verbose):
 
     try:
         manifest = fetch_or_cache(source_obj)
+    except MarketplaceAuthError as denied:
+        # Denied catalog access is never replaced by a Git-derived answer.
+        return OutdatedRow(
+            package=f"{dep.marketplace_plugin_name}@{dep.discovered_via}",
+            current=_short_ref(dep.resolved_ref or dep.resolved_commit or "(none)"),
+            latest="-",
+            status="access-denied",
+            source=source_label,
+            error=str(denied),
+        )
     except MarketplaceError:
         logger.warning(
             "Failed to fetch marketplace '%s'; falling back to git check for '%s'",
@@ -589,7 +603,7 @@ def outdated(global_, verbose, parallel_checks):
 
     # Check if everything is up-to-date
     has_outdated = any(row.status == "outdated" for row in rows)
-    has_unknown = any(row.status in {"unknown", "origin-conflict"} for row in rows)
+    has_unknown = any(row.status in {"unknown", "origin-conflict", "access-denied"} for row in rows)
     has_outside_constraint = any(row.outside_constraint for row in rows)
 
     has_replacements = any(dep.replacement is not None for dep in checkable)
@@ -642,6 +656,7 @@ def outdated(global_, verbose, parallel_checks):
 
         status_styles = {
             "origin-conflict": "red",
+            "access-denied": "red",
             "up-to-date": "green",
             "outdated": "yellow",
             "unknown": "dim",
@@ -710,7 +725,7 @@ def outdated(global_, verbose, parallel_checks):
             "'apm update' stays within that constraint. "
             f"{OUTSIDE_CONSTRAINT_RELEASE.sentence()}"
         )
-    conflicts = [row for row in rows if row.status == "origin-conflict"]
+    conflicts = [row for row in rows if row.status in {"origin-conflict", "access-denied"}]
     for row in conflicts:
         logger.error(row.error or f"{row.package}: marketplace origin changed")
     if conflicts:

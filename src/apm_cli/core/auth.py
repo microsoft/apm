@@ -33,7 +33,7 @@ import logging
 import os
 import sys
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
@@ -55,6 +55,7 @@ from apm_cli.core.auth_outcome import (  # noqa: F401 -- SecretRedactionFilter r
     classify_auth_outcome,
     sanitize_diagnostic_detail,
 )
+from apm_cli.core.catalog_credentials import CatalogCredential, resolve_catalog_credential
 from apm_cli.core.host_providers import (
     HOST_PROVIDERS,
     classify_host_provider,
@@ -427,6 +428,27 @@ class AuthResolver:
         if not token:
             return {}
         return {"Authorization": f"Bearer {token}"}
+
+    @staticmethod
+    def resolve_marketplace_catalog_credential(
+        *,
+        marketplace: str,
+        binding_url: str,
+        peer_names: Iterable[str],
+    ) -> CatalogCredential:
+        """Resolve the credential for a hosted catalog bound to *marketplace*.
+
+        Marketplace-only entry point: reads only the ``APM_MARKETPLACE_*``
+        variables for that name and never falls back to Git, host, package
+        registry or ``.netrc`` credentials. Every argument is required so a
+        caller cannot skip the binding or the ambiguity check.
+        """
+        return resolve_catalog_credential(
+            marketplace=marketplace,
+            binding_url=binding_url,
+            peer_names=tuple(peer_names),
+            environ=os.environ,
+        )
 
     # -- core resolution ----------------------------------------------------
 
