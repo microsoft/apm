@@ -85,19 +85,24 @@ def run(ctx: InstallContext) -> None:
         else:
             remove_lockfile(lock_path)
         raise
-    if not ctx.dry_run and not getattr(ctx, "frozen", False):
-        _record_declared(lock_path, declared)
+    from apm_cli.install.service import InstallService
+
+    if ctx.dry_run or InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+        return
+    stamped = _record_declared(LockFile.read(lock_path), declared)
+    if stamped is not None:
+        stamped.write(lock_path)
 
 
-def _record_declared(lock_path, declared) -> None:
+def _record_declared(lockfile: LockFile | None, declared) -> LockFile | None:
     """Record beside each native row which harnesses now hold APM's ``true``.
 
     It is what APM last wrote, so a later run can tell its own values from a
-    hand edit (#3921). A frozen install never writes the lock.
+    hand edit (#3921). Returns the lock to write, or ``None`` when nothing
+    changed; a frozen install never writes the lock.
     """
-    lockfile = LockFile.read(lock_path)
     if lockfile is None or not declared:
-        return
+        return None
     changed = False
     for locked in lockfile.dependencies.values():
         record = locked.native_plugin
@@ -107,5 +112,4 @@ def _record_declared(lock_path, declared) -> None:
         if locked.native_declared != harnesses:
             locked.native_declared = harnesses
             changed = True
-    if changed:
-        lockfile.write(lock_path)
+    return lockfile if changed else None

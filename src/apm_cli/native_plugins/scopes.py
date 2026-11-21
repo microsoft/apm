@@ -82,6 +82,19 @@ def record_harnesses(package_type: str | None, marketplace_path: str) -> frozens
     )
 
 
+def native_harnesses(lockfile: Any, dep_key: str) -> frozenset[str]:
+    """Harnesses that load a locked dependency whole through its ``native_plugin`` record.
+
+    A rebuild (uninstall's survivor re-integration) must never also deploy
+    the dependency loose to them.
+    """
+    locked = None if lockfile is None else lockfile.dependencies.get(dep_key)
+    record = getattr(locked, "native_plugin", None)
+    if record is None:
+        return frozenset()
+    return record_harnesses(locked.package_type, record.marketplace_path)
+
+
 def carried_native_row(
     existing_lockfile: Any, dep_key: str, target_subset: Collection[str] | None, run_targets
 ) -> Any:
@@ -133,9 +146,10 @@ def project_identity(project_root: Path) -> str:
         host, segments = parts
         return "/".join([host, *segments]).lower()
     try:
+        from apm_cli.core.scope import manifest_file
         from apm_cli.models.apm_package import APMPackage
 
-        return f"apm.yml:{APMPackage.from_apm_yml(Path(project_root) / 'apm.yml').name}"
+        return f"apm.yml:{APMPackage.from_apm_yml(manifest_file(Path(project_root))).name}"
     except Exception:
         return "apm.yml:"
 

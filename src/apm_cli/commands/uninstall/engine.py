@@ -1434,6 +1434,7 @@ def _sync_integrations_after_uninstall(
         resolve_skill_layout,
         with_every_skill_layout,
     )
+    from ...native_plugins.scopes import native_harnesses
     from ...primitives.discovery import clear_discovery_cache
 
     installed_modules_dir = modules_dir or Path(APM_MODULES_DIR)
@@ -1486,7 +1487,7 @@ def _sync_integrations_after_uninstall(
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
     target_survivor_plan = []
     for dep_ref, pkg_info in validated_survivors:
-        if dep_ref.get_unique_key() in excluded_survivor_keys:
+        if (dep_key := dep_ref.get_unique_key()) in excluded_survivor_keys:
             continue
         target_selection = resolve_effective_package_targets(
             _resolved_targets,
@@ -1495,9 +1496,11 @@ def _sync_integrations_after_uninstall(
             None,
             dep_ref.get_identity(),
         )
+        native = native_harnesses(lockfile, dep_key)  # loaded whole, never loose (#3921)
         authorized_targets = []
         for target in target_selection.targets:
-            authorized_targets.append(target)
+            if target.name not in native:
+                authorized_targets.append(target)
         target_survivor_plan.append((dep_ref, pkg_info, authorized_targets))
 
     # Refuse survivors whose hooks Phase 2 would reject before Phase 1 wipes
@@ -1785,6 +1788,8 @@ def _restage_changed_local_survivors(
     for key, dep in sorted(lockfile.dependencies.items()):
         if key == "." or key in skip_keys or dep.source != "local" or dep.depth != 1:
             continue
+        if dep.native_plugin is not None:  # the native reconcile owns it whole (#3921)
+            continue
         try:
             dep_ref = dep.to_dependency_ref()
             source = (source_root / dep_ref.local_path).resolve()
@@ -1876,8 +1881,7 @@ def gate_retired_hook_survivors(
         if key not in denied:
             logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
     for key in (set(retirements.denied_packages) - set(removed_keys)) | set(hooks):
-        # A native plugin is admitted whole: losing its record retires it (#3921).
-        lockfile.dependencies[key].native_plugin = None
+        lockfile.dependencies[key].native_plugin = None  # admitted whole: retire it (#3921)
     return refreshed | set(denied) | set(hooks), set(denied)
 
 

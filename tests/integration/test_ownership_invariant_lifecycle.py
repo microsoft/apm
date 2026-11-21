@@ -588,9 +588,11 @@ def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
     assert skill_path.read_bytes() == skill_bytes
     assert result.returncode == 0, _result_evidence(result)
     settings = json.loads((project.root / ".claude" / "settings.json").read_text("utf-8"))
-    assert [key for key, on in settings["enabledPlugins"].items() if on] == [
-        key for key in settings["enabledPlugins"] if key.startswith("schema-plugin@")
-    ] != []
+    assert (
+        [key for key, on in settings["enabledPlugins"].items() if on]
+        == [key for key in settings["enabledPlugins"] if key.startswith("schema-plugin@")]
+        != []
+    )
     assert "Parked native plugin" not in result.stdout + result.stderr
     assert "Unrecognized plugin manifest $schema" in " ".join(
         (result.stdout + result.stderr).split()

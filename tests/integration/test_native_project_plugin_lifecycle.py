@@ -188,3 +188,91 @@ def test_multi_harness_plugin_installs_whole_at_project_scope(
         assert catalog["name"] not in declared.get("extraKnownMarketplaces", {}), settings
     assert json.loads(copilot.read_text(encoding="utf-8"))["theme"] == "dark"
     apm("audit", "--ci")
+
+
+def test_uninstalling_a_sibling_keeps_a_local_native_plugin_whole(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """`approve --all` pins the whole local plugin; removing a sibling never splits it.
+
+    CELL: OP=approve,install,uninstall SRC=local PRIM=plugin(hooks) SCOPE=project
+    TGT=claude,copilot. Uninstall used to restage the local plugin from its
+    source and re-integrate its hooks loose beside the enabled native plugin,
+    so the SessionStart hook ran twice and audit failed.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    plugin = project / "plugins" / _PLUGIN
+    for relative, text in _FILES.items():
+        path = plugin / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="ascii")
+    (plugin / "hooks/session-start").chmod(0o755)
+    sibling = project / "packages" / "plain"
+    (sibling / "skills/plain").mkdir(parents=True)
+    (sibling / "apm.yml").write_text("name: plain\nversion: 1.0.0\n", encoding="ascii")
+    (sibling / "skills/plain/SKILL.md").write_text(
+        "---\nname: plain\ndescription: plain\n---\n# plain\n", encoding="ascii"
+    )
+    plugin_dep, sibling_dep = f"./plugins/{_PLUGIN}", "./packages/plain"
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "targets": ["claude", "copilot"],
+                "dependencies": {"apm": [plugin_dep, sibling_dep]},
+                "executables": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str, expect: int = 0) -> CommandResult:
+        result = runner.run(args, cwd=project, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == expect, _evidence(result)
+        return result
+
+    root = project / ".agents/plugins" / _PLUGIN
+    apm("install")
+    assert not root.exists()
+    apm("approve", "--all")
+    pin = load_yaml(project / "apm.yml")["executables"]["allow"][plugin_dep]["plugin"]
+    assert pin.startswith("sha256:")
+    apm("install")
+    assert (root / "hooks/hooks.json").read_text(encoding="ascii") == _FILES["hooks/hooks.json"]
+
+    def enabled() -> dict[str, dict[str, bool]]:
+        return {
+            settings: json.loads((project / settings).read_text(encoding="utf-8"))[
+                "enabledPlugins"
+            ]
+            for settings in _SETTINGS
+        }
+
+    declared = enabled()
+    plugin_bytes = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+    apm("uninstall", sibling_dep)
+    assert not (project / ".agents/skills/plain").exists()
+    assert enabled() == declared
+    assert {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    } == plugin_bytes
+    # Nothing of the plugin is deployed loose beside the enabled native copy.
+    assert "hooks" not in json.loads((project / ".claude/settings.json").read_text("utf-8"))
+    for loose in (".claude/hooks", ".claude/apm-hooks.json", ".github/hooks", ".agents/skills"):
+        assert not (project / loose).exists(), loose
+    (locked,) = load_yaml(project / "apm.lock.yaml")["dependencies"]
+    assert locked["native_plugin"]["root"] == f".agents/plugins/{_PLUGIN}"
+    # No closing `audit --ci`: the survivor preflight still normalizes the local
+    # source in place (apm.yml, .apm/), a pre-existing defect tracked in #4566.

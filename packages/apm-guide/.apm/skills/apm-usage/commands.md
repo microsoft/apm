@@ -159,9 +159,11 @@ every plugin it declares to Claude, follows `targets:`, and warns when it
 overrides a value it did not write. A `--target` run that excludes a native
 plugin keeps its previous lock entry and deployed root, with a note.
 
-A plugin APM cannot install intact (unapproved executables, declared plugin
-`dependencies`, a skill subset, symlinks, `monitors/` or `workflows/`; with
-`-g`, also no `.claude-plugin/plugin.json`) is parked: not deployed or declared, a warning
+At project scope a plugin without `.claude-plugin/plugin.json` or with a
+`skills:` selection deploys loose instead. A plugin APM cannot install intact
+(unapproved executables, declared plugin `dependencies`, symlinks, `monitors/`
+or `workflows/`; with `-g`, also a skill subset or no
+`.claude-plugin/plugin.json`) is parked: not deployed or declared, a warning
 names the package and the next step, and the install continues (exit 0). To
 approve a parked plugin, run `apm approve <package>` (from `~/.apm` for `-g`;
 or `--pending`). `bin/` deploys inside the plugin root under the same approval

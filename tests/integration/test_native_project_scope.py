@@ -387,13 +387,12 @@ def _cli_project(tmp_path: Path, plugins: dict[str, list[str]]) -> Path:
     return project
 
 
-def _apm_install(monkeypatch: pytest.MonkeyPatch, project: Path, *args: str) -> str:
+def _apm_install(cli: tuple[str, ...], project: Path, *args: str) -> str:
     """Run ``apm install`` in its own process: in-process runs reuse the apm.yml cache."""
     import subprocess
-    import sys
 
     result = subprocess.run(
-        [sys.executable, "-m", "apm_cli.cli", "install", "--no-policy", *args],
+        [*cli, "install", "--no-policy", *args],
         cwd=project,
         capture_output=True,
         text=True,
@@ -439,15 +438,15 @@ def _assert_native_state_unchanged(project: Path, before: dict[str, object]) -> 
     ids=["claude-only-plugin-target-copilot", "copilot-only-plugin-target-claude"],
 )
 def test_a_narrowed_target_never_retires_a_plugin_it_did_not_evaluate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, targets: list[str], narrowed: str, changed
+    tmp_path: Path, apm_engine_command: tuple[str, ...], targets: list[str], narrowed: str, changed
 ) -> None:
     project = _cli_project(tmp_path, {"alpha": targets})
-    _apm_install(monkeypatch, project)
+    _apm_install(apm_engine_command, project)
     before = _native_state(project)
     assert any("native_plugin" in row for row in before["rows"].values())
     if changed:
         (tmp_path / "sources/alpha/skills/hello/SKILL.md").write_text("changed upstream\n")
-    output = _apm_install(monkeypatch, project, "--target", narrowed)
+    output = _apm_install(apm_engine_command, project, "--target", narrowed)
     # The whole previous lock row, the deployed root and both declarations stay.
     _assert_native_state_unchanged(project, before)
     if changed:
@@ -461,24 +460,24 @@ def test_a_narrowed_target_never_retires_a_plugin_it_did_not_evaluate(
 )
 def test_apm_reports_when_it_flips_a_copilot_value_it_owns(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    apm_engine_command: tuple[str, ...],
     targets: list[str],
     user_value: bool,
     restored: bool,
 ) -> None:
     project = _cli_project(tmp_path, {"alpha": targets})
-    _apm_install(monkeypatch, project)
+    _apm_install(apm_engine_command, project)
     copilot = project / _COPILOT
     document = json.loads(copilot.read_text())
     (key,) = [key for key in document["enabledPlugins"] if key.startswith("alpha@")]
     document["enabledPlugins"][key] = user_value
     copilot.write_text(json.dumps(document))
-    output = _apm_install(monkeypatch, project)
+    output = _apm_install(apm_engine_command, project)
     assert json.loads(copilot.read_text())["enabledPlugins"][key] is restored
     assert f"[!] Set {key} to {str(restored).lower()}" in output
     assert "'targets:' in apm.yml" in output
     # Said once: the value now matches what APM writes, so a rerun is quiet.
-    assert f"Set {key}" not in _apm_install(monkeypatch, project)
+    assert f"Set {key}" not in _apm_install(apm_engine_command, project)
 
 
 def test_a_value_apm_wrote_under_earlier_targets_changes_without_a_warning(project) -> None:
@@ -501,13 +500,13 @@ def test_a_value_apm_wrote_under_earlier_targets_changes_without_a_warning(proje
     ids=["narrow-to-claude", "widen-to-copilot"],
 )
 def test_a_targets_edit_retires_the_stale_declaration_quietly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before, after, copilot: bool
+    tmp_path: Path, apm_engine_command: tuple[str, ...], before, after, copilot: bool
 ) -> None:
     """A value APM wrote under the previous targets changes without a [!] line."""
     project = _cli_project(tmp_path, {"alpha": before})
-    _apm_install(monkeypatch, project)
+    _apm_install(apm_engine_command, project)
     _set_targets(project, after)
-    output = _apm_install(monkeypatch, project)
+    output = _apm_install(apm_engine_command, project)
     enabled = json.loads((project / _COPILOT).read_text())["enabledPlugins"]
     (key,) = [key for key in enabled if key.startswith("alpha@")]
     assert enabled[key] is copilot
@@ -515,12 +514,11 @@ def test_a_targets_edit_retires_the_stale_declaration_quietly(
     assert f"Set {key}" not in output
 
 
-def _apm(project: Path, *args: str) -> tuple[int, str]:
+def _apm(cli: tuple[str, ...], project: Path, *args: str) -> tuple[int, str]:
     import subprocess
-    import sys
 
     result = subprocess.run(
-        [sys.executable, "-m", "apm_cli.cli", *args],
+        [*cli, *args],
         cwd=project,
         capture_output=True,
         text=True,
@@ -531,21 +529,23 @@ def _apm(project: Path, *args: str) -> tuple[int, str]:
 
 
 def test_a_narrowed_run_leaves_apms_copilot_value_to_change_silently(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
 ) -> None:
     """targets narrowed, `--target claude`, then a full install: no [!] line."""
     project = _cli_project(tmp_path, {"alpha": ["claude", "copilot"]})
-    _apm_install(monkeypatch, project)
+    _apm_install(apm_engine_command, project)
     _set_targets(project, ["claude"])
-    narrowed = _apm_install(monkeypatch, project, "--target", "claude")
-    full = _apm_install(monkeypatch, project)
+    narrowed = _apm_install(apm_engine_command, project, "--target", "claude")
+    full = _apm_install(apm_engine_command, project)
     enabled = json.loads((project / _COPILOT).read_text())["enabledPlugins"]
     (key,) = [key for key in enabled if key.startswith("alpha@")]
     assert enabled[key] is False
     assert "[!] Set" not in narrowed + full
 
 
-def test_a_kept_plugin_deploys_nothing_loose_so_lock_and_disk_agree(tmp_path: Path) -> None:
+def test_a_kept_plugin_deploys_nothing_loose_so_lock_and_disk_agree(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
     """targets [claude, cursor], source edited, `--target cursor` keeps the previous version."""
     source = tmp_path / "sources" / "alpha"
     (source / ".claude-plugin").mkdir(parents=True)
@@ -565,29 +565,31 @@ def test_a_kept_plugin_deploys_nothing_loose_so_lock_and_disk_agree(tmp_path: Pa
             }
         )
     )
-    assert _apm(project, "install", "--no-policy")[0] == 0
+    assert _apm(apm_engine_command, project, "install", "--no-policy")[0] == 0
     before = _native_state(project)
     loose = project / ".agents/skills/hello/SKILL.md"
     assert loose.read_text().endswith("v1\n")
     skill.write_text("---\nname: hello\ndescription: hi\n---\nv2\n")
-    code, output = _apm(project, "install", "--no-policy", "--target", "cursor")
+    code, output = _apm(apm_engine_command, project, "install", "--no-policy", "--target", "cursor")
     assert code == 0, output
     assert "Kept the previous version of native plugin 'alpha'" in output
     assert loose.read_text().endswith("v1\n")
     assert _native_state(project) == before
     # The kept row still describes every file on disk; only the deferred
     # update (source newer than the lock) is reported, never deployed drift.
-    code, output = _apm(project, "audit", "--ci")
+    code, output = _apm(apm_engine_command, project, "audit", "--ci")
     assert "deployed files missing" not in output
     assert "source differs from apm.lock.yaml" in output
-    assert _apm(project, "install", "--no-policy")[0] == 0
+    assert _apm(apm_engine_command, project, "install", "--no-policy")[0] == 0
     assert loose.read_text().endswith("v2\n")
     assert (project / ".agents/plugins/alpha/skills/hello/SKILL.md").read_text().endswith("v2\n")
-    assert _apm(project, "audit", "--ci")[0] == 0
-    assert _apm(project, "install", "--no-policy", "--frozen")[0] == 0
+    assert _apm(apm_engine_command, project, "audit", "--ci")[0] == 0
+    assert _apm(apm_engine_command, project, "install", "--no-policy", "--frozen")[0] == 0
 
 
-def test_a_kept_plugin_converges_on_the_next_full_install(tmp_path: Path) -> None:
+def test_a_kept_plugin_converges_on_the_next_full_install(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
     """Per-dependency targets [claude, cursor]; `.agents/skills` is shared with copilot."""
     project = _cli_project(tmp_path, {"alpha": ["claude", "cursor"]})
     manifest = json.loads((project / "apm.yml").read_text())
@@ -595,21 +597,21 @@ def test_a_kept_plugin_converges_on_the_next_full_install(tmp_path: Path) -> Non
     (project / "apm.yml").write_text(json.dumps(manifest))
     skill = tmp_path / "sources/alpha/skills/hello/SKILL.md"
     skill.write_text("---\nname: hello\ndescription: hi\n---\nv1\n")
-    assert _apm(project, "install", "--no-policy")[0] == 0
+    assert _apm(apm_engine_command, project, "install", "--no-policy")[0] == 0
     lock = (project / "apm.lock.yaml").read_bytes()
     skill.write_text("---\nname: hello\ndescription: hi\n---\nv2\n")
-    assert _apm(project, "install", "--no-policy", "--target", "cursor")[0] == 0
+    assert _apm(apm_engine_command, project, "install", "--no-policy", "--target", "cursor")[0] == 0
     # The kept dependency's deployment records are not re-attributed to cursor.
     assert (project / "apm.lock.yaml").read_bytes() == lock
-    code, output = _apm(project, "install", "--no-policy")
+    code, output = _apm(apm_engine_command, project, "install", "--no-policy")
     assert code == 0, output
     for deployed in (
         ".agents/skills/hello/SKILL.md",
         ".agents/plugins/alpha/skills/hello/SKILL.md",
     ):
         assert (project / deployed).read_text().endswith("v2\n")
-    assert _apm(project, "install", "--no-policy", "--frozen")[0] == 0
-    assert "no drift detected" in _apm(project, "audit", "--ci")[1]
+    assert _apm(apm_engine_command, project, "install", "--no-policy", "--frozen")[0] == 0
+    assert "no drift detected" in _apm(apm_engine_command, project, "audit", "--ci")[1]
 
 
 def test_an_evaluated_dependency_wins_a_ledger_record_it_shares_with_a_kept_one(

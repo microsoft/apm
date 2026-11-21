@@ -266,8 +266,9 @@ Agent Plugins schema selects the portable Agent Plugin route.
 APM normally maps artifacts to runtime directories. For the `claude` target
 (and `copilot` at project scope), APM deploys the plugin intact to
 `.agents/plugins/` instead, which requires `.claude-plugin/plugin.json`. A
-root-only `plugin.json` (an `apm pack` bundle) is mapped to runtime directories
-at project scope and parked with `--global`. Native admission failures park the
+root-only `plugin.json` (an `apm pack` bundle) or a dependency with a `skills:`
+selection is mapped to runtime directories at project scope and parked with
+`--global`. Native admission failures park the
 plugin and do not fall back to loose files. See
 [Native plugins](../../consumer/install-plugins/#native-plugins)
 for capability and runtime qualification limits.

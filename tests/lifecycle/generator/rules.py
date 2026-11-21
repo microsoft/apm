@@ -83,12 +83,12 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/update.py", 702, '"--target"'),
     ),
     "uninstall": (
-        Ev("src/apm_cli/commands/uninstall/cli.py", 789, 'argument("packages"'),
-        Ev("src/apm_cli/commands/uninstall/cli.py", 791, '"--dry-run"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 787, 'argument("packages"'),
+        Ev("src/apm_cli/commands/uninstall/cli.py", 789, '"--dry-run"'),
     ),
     "prune": (
-        Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
-        Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
+        Ev("src/apm_cli/commands/prune.py", 84, '"--dry-run"'),
+        Ev("src/apm_cli/commands/prune.py", 91, "def prune(ctx, dry_run)"),
     ),
     "compile": (Ev(_COMPILE, 1287, '"--target"'), Ev(_COMPILE, 1297, '"--dry-run"')),
     "lock": (
@@ -147,13 +147,13 @@ USER_SCOPE_OPS = frozenset(
 USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 923, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 667, '"--global"'),
-    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 797, '"--global"'),
+    "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 795, '"--global"'),
     "compile": Ev(_COMPILE, 1396, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
-    "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
+    "prune": Ev("src/apm_cli/commands/prune.py", 91, "def prune(ctx, dry_run)"),
     "audit": Ev("src/apm_cli/commands/audit.py", 1542, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
 }
@@ -262,8 +262,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     "E3": (
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
-            Ev("src/apm_cli/install/services.py", 827, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1030, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 836, "staged_files"),
+            Ev("src/apm_cli/install/services.py", 1039, '"instructions" not in target.primitives'),
         ),
     ),
 }
