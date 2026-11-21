@@ -486,6 +486,11 @@ class DriftMachine(ScopeLockMachine):
             mutating=op in MUTATING and state != "newer",
         )
         refused = step.result.returncode != 0
+        if not refused:
+            # Outcome checks run before the credit: a receipt needs them to hold.
+            self.check_side_door(op)
+            if op in self.ADOPTING:
+                self.check_reconciled(step, requested)
         unchanged = self.durable() if refused else {"outside": ("*",)}
         check_obligation(
             cell,
@@ -496,14 +501,32 @@ class DriftMachine(ScopeLockMachine):
             evidence=Evidence(unchanged=unchanged, exit=exits),
             scope=self.bench.scope,
         )
-        if not refused:
-            self.check_side_door(op)
         if not refused and op in MUTATING:
             self.model = requested
         if not refused and op in self.ADOPTING:
             self.unknown_provenance = False
         if not refused and self.bench.lock_path.is_file() and state in DRIFT_STATES:
             self.lock_state = "consistent"
+
+    def check_reconciled(self, step: Step, requested: ModelState) -> None:
+        """A resolving command rewrote a readable lockfile that matches the manifest.
+
+        Every declared package has a lock row, no row is undeclared, and the
+        lock records each declared skill it deployed (adopting what a deleted
+        lockfile left with unknown provenance).
+        """
+        lock = step.after.lock
+        assert lock is not None, "a resolving command left no readable lockfile"
+        declared = {str(entry) for entry in _declared(self.bench.manifest())}
+        rows = {str(dep.local_path) for dep in lock.get_package_dependencies()}
+        assert rows == declared, f"lock rows {sorted(rows)} != manifest {sorted(declared)}"
+        recorded = set(lock.local_deployed_file_hashes)
+        for dep in lock.get_package_dependencies():
+            recorded.update(dep.deployed_file_hashes)
+        for package in requested.declared:
+            skill = f".agents/skills/{package}/SKILL.md"
+            if (self.bench.deploy_root / skill).is_file():
+                assert skill in recorded, f"the lock does not record {skill}"
 
     def check_side_door(self, op: str) -> None:
         """What I1-I9 cannot see of an admitted side door: its own outcome."""
@@ -522,6 +545,20 @@ class DriftMachine(ScopeLockMachine):
             )
             text = config.read_text(encoding="utf-8") if config.is_file() else ""
             assert "p-lsp-server" not in text, f"a parked LSP server was configured: {text}"
+            # The durable install state of a bundle: its exact-content approval
+            # key and the LSP type it parked (install/local_bundle_pending.py).
+            record = self.bench.manifest_dir / "apm_modules" / ".local-bundle-pending.json"
+            assert record.is_file(), "bundle install recorded no pending executables"
+            bundles = json.loads(record.read_text(encoding="utf-8")).get("bundles") or {}
+            assert any(
+                str(entry.get("approval_key", "")).startswith("p-lsp#")
+                and "lsp" in entry.get("exec_types", ())
+                for entry in bundles.values()
+            ), f"p-lsp's parked LSP server is not pending approval: {bundles}"
+
+
+def _declared(manifest: dict) -> list:
+    return list((manifest.get("dependencies") or {}).get("apm") or [])
 
 
 def replay_drift(machine: DriftMachine) -> None:
