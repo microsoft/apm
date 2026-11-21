@@ -267,12 +267,38 @@ def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
 
 
 @pytest.mark.req("req-sc-005")
-@pytest.mark.xfail(strict=True, reason="#4324 opt-in strict host-class credential scope")
 @pytest.mark.usefixtures("isolated_credentials")
-def test_token_scoped_to_its_host_class() -> None:
-    """A credential for one registrable domain is not resolved for another."""
-    context = AuthResolver().resolve("acme.ghe.com")
+def test_token_scoped_to_its_host_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strict mode: a credential for the configured host is not resolved for another
+    host of the GitHub-operated class (#4324)."""
+    monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", "true")
+    resolver = AuthResolver()
+    assert resolver.resolve("github.com").token == _FAKE_PAT
+    context = resolver.resolve("acme.ghe.com")
     assert context.token != _FAKE_PAT
+    assert context.source != "GITHUB_APM_PAT"
+
+
+@pytest.mark.req("req-sc-005")
+@pytest.mark.usefixtures("isolated_credentials")
+def test_default_host_class_shares_the_github_token_with_ghe_hosts() -> None:
+    """Control: without strict mode the documented GitHub-operated class (basis c)
+    lets acme.ghe.com receive GITHUB_APM_PAT."""
+    context = AuthResolver().resolve("acme.ghe.com")
+    assert (context.token, context.source) == (_FAKE_PAT, "GITHUB_APM_PAT")
+
+
+@pytest.mark.req("req-sc-005")
+@pytest.mark.usefixtures("isolated_credentials")
+@pytest.mark.parametrize("strict", ["", "true"], ids=["default", "strict"])
+@pytest.mark.parametrize("host", ["gitlab.com", "github.com.evil.example", "ghe.com.evil.example"])
+def test_host_outside_the_github_operated_class_receives_no_github_token(
+    monkeypatch: pytest.MonkeyPatch, strict: str, host: str
+) -> None:
+    monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", strict)
+    context = AuthResolver().resolve(host)
+    assert context.token != _FAKE_PAT
+    assert not context.source.startswith(("GITHUB_", "GH_"))
 
 
 # --- req-sc-006: plaintext registry URLs ---------------------------------------
