@@ -4527,6 +4527,17 @@
       ]
     },
     {
+      "issue": 4570,
+      "fixed_in": "Unreleased",
+      "summary": "A failed dependency-allowlist check under apm audit --ci names one runnable next step in text and SARIF output: 'apm uninstall' for the apm.yml entries that bring in each denied dependency, or asking the org admin to allow it, naming the policy source.",
+      "failure_modes": ["observation"],
+      "properties": ["outcome.status_matches_state"],
+      "regression_tests": [
+        "tests/lifecycle/journeys/test_journeys.py::test_journey",
+        "tests/unit/policy/test_dependency_allowlist_next_step.py::test_several_denied_dependencies_name_each_entry_that_brings_them_in"
+      ]
+    },
+    {
       "issue": 4572,
       "fixed_in": "Unreleased",
       "summary": "After a dependency switched from a git source to a registry source, apm install kept the git .apm-pin in apm_modules/<pkg>/ until install --update; the cache-pin lockfile sync now drops a marker whose dependency is no longer markable, so the first registry install converges and repeats are byte no-ops.",
