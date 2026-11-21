@@ -345,13 +345,32 @@ def test_only_verified_tags_publish() -> None:
     _assert_publication_gates(_workflow())
 
 
-@pytest.mark.parametrize(("job_id", "step_name"), RUNTIME_SETUP_STEPS)
+CI_INTEGRATION = ROOT / ".github" / "workflows" / "ci-integration.yml"
+# Merge-time steps whose scripts/test-integration.sh run sets up the Codex runtime (INFRA-1).
+CI_INTEGRATION_RUNTIME_SETUP_STEPS = (
+    ("integration-tests-shard", "Run integration tests (sharded + parallelized)"),
+    ("integration-network", "Run network-dependent integration tests"),
+    ("release-validation", "Run release validation tests"),
+)
+
+
+@pytest.mark.parametrize(
+    ("workflow_path", "job_id", "step_name"),
+    [
+        *((WORKFLOW, job_id, step_name) for job_id, step_name in RUNTIME_SETUP_STEPS),
+        *(
+            (CI_INTEGRATION, job_id, step_name)
+            for job_id, step_name in CI_INTEGRATION_RUNTIME_SETUP_STEPS
+        ),
+    ],
+)
 def test_runtime_setup_uses_builtin_github_api_token(
+    workflow_path: Path,
     job_id: str,
     step_name: str,
 ) -> None:
     """Public runtime metadata must not use the private-module PAT."""
-    workflow = _workflow()
+    workflow = load_workflow(workflow_path)
     step = workflow_step(workflow_job(workflow, job_id), step_name)
     assert step["env"]["GITHUB_API_TOKEN"] == "${{ github.token }}"
     assert step["env"]["GITHUB_APM_PAT"] == "${{ secrets.GH_CLI_PAT }}"

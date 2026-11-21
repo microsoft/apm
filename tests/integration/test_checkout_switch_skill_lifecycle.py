@@ -633,7 +633,8 @@ def test_user_edit_variants_never_lose_bytes(
     assert _MODIFIED in output, output
     assert "Cleaned" not in output and "Kept user-edited file" not in output, output
     assert deployed.read_text(encoding="ascii").endswith(_USER_EDIT)
-    expected_a = "reference a v2\n" if case in ("R1", "R4") else "reference a, version A\n"
+    # R4 fails before its lockfile commits, so it restores what it wrote (#4282).
+    expected_a = "reference a v2\n" if case == "R1" else "reference a, version A\n"
     assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == expected_a
     missing = sorted(p for p in _locked_files(world.project) if not (world.project / p).exists())
     assert not missing, missing

@@ -40,7 +40,7 @@ LIMITS = {
     "max-statements": 120,
 }
 RULES = ["C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915"]
-# Mirrors the path list of the "Ruff lint" step in .github/workflows/ci.yml.
+# Mirrors the path list of the "Ruff lint" step in .github/actions/lint-chain/action.yml.
 SCOPE = [
     "scripts/architecture_linter",
     "scripts/lint_architecture_boundaries.py",

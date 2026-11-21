@@ -166,6 +166,21 @@ def test_legacy_marketplace_yml_warns_on_every_load(tmp_path: Path) -> None:
     )
 
 
+def test_config_load_delivers_collected_warnings_through_the_callback(tmp_path: Path) -> None:
+    """Collected parse warnings reach the caller, in order, once per load (#4046)."""
+    (tmp_path / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\ndescription: d\nmarketplace:\n  owner:\n    name: o\n"
+        "  packages: []\n  outputs: [claude]\n",
+        encoding="utf-8",
+    )
+    shown: list[str] = []
+
+    config = load_marketplace_config(tmp_path, warn_callback=shown.append)
+
+    assert shown == list(config.warnings)
+    assert len(shown) == 1 and shown[0].startswith("outputs: [claude] is deprecated")
+
+
 @pytest.mark.parametrize(
     ("raw", "names"),
     [(["claude", "codex"], "claude, codex"), ("claude", "claude")],
@@ -178,7 +193,5 @@ def test_marketplace_outputs_list_form_collects_its_warning(raw, names: str) -> 
 
     map_lines = "\n".join(f"        {name}: {{}}" for name in outputs)
     assert sink == [
-        f"outputs: [{names}] is deprecated; use the map form:\n\n"
-        f"      outputs:\n{map_lines}\n\n"
-        "    The list form will be removed in v0.15."
+        f"outputs: [{names}] is deprecated; use the map form:\n\n      outputs:\n{map_lines}"
     ]

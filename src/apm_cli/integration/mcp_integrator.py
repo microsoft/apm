@@ -42,10 +42,10 @@ from apm_cli.integration.mcp_config_view import (
     _get_server_configs,
     _get_server_provenance,
 )
+from apm_cli.integration.write_seam import atomic_write_text, write_json_config
 from apm_cli.mcp_transport import canonical_remote_transport
 from apm_cli.models.dependency.mcp import ManifestHeaderValue
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -53,7 +53,6 @@ from apm_cli.utils.console import (
     _rich_success,
     _rich_warning,
 )
-from apm_cli.utils.json_config import write_json_config
 from apm_cli.utils.staging_guard import assert_no_staging_paths
 from apm_cli.utils.yaml_io import load_yaml, yaml_to_str
 

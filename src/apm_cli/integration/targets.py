@@ -32,6 +32,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     normalize_target_name,
 )
+from apm_cli.integration import write_seam
 from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -1826,7 +1827,7 @@ def materialize_project_target_profiles(
         # Skills-only roots are created by the skill integrator on first write,
         # so an install that deploys nothing leaves no empty directory behind.
         if not deploy_path.is_dir() and not profile.skills_only:
-            deploy_path.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(deploy_path, parents=True, exist_ok=True)
             if created is not None:
                 created.append(deploy_path)
         profiles.append(profile)

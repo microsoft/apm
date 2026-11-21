@@ -89,6 +89,10 @@ class InstallContext:
     # Dependency keys routed to native Claude this run, admitted or parked.
     claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
+    # The caller's MCP/LSP reconciliation, run before native Claude
+    # registration commits the lockfile (install/phases/services.py, #4329).
+    reconcile_services: Any = None
+    service_failure: Exception | None = None
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -187,6 +191,8 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Receipted files and hashes standing in for a package the prior lock does not record.
+    receipted_prior_deployments: dict[str, dict[str, str]] = field(default_factory=dict)
     # Managed files install kept without deployment evidence: (owner, entry) (#4360).
     kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
     # Kept entries a pre-0.37 lock proves edited: "drift" or "blocked" (#4398).
