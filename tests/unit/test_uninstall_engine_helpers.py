@@ -870,3 +870,61 @@ class TestValidateUninstallPackagesMarketplace:
         mock_resolve.assert_called_once_with(
             "my-plugin", "official", auth_resolver=None, enforce_ref_pins=False
         )
+
+
+# ===========================================================================
+# shrink_retired_paths (#4313)
+# ===========================================================================
+
+
+class _ShrunkNode:
+    def __init__(self, skills, targets):
+        from apm_cli.models.dependency.subsets import SkillTargetSelection
+
+        self._selection = SkillTargetSelection.from_lock_fields(skills, targets)
+
+    def lock_selection(self):
+        return self._selection
+
+
+class TestShrinkRetiredPaths:
+    """The files a shrinking survivor selection stops deploying."""
+
+    def _lockfile(self):
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/bundle",
+                resolved_commit="abc",
+                deployed_files=[
+                    ".agents/skills/alpha",
+                    ".agents/skills/alpha/SKILL.md",
+                    ".agents/skills/beta",
+                    ".agents/skills/beta/SKILL.md",
+                    ".claude/skills/alpha",
+                    ".claude/skills/alpha/SKILL.md",
+                ],
+            )
+        )
+        return lockfile
+
+    def test_unselected_skills_and_dropped_targets_retire_with_their_members(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        retired = shrink_retired_paths(
+            self._lockfile(), {"org/bundle": _ShrunkNode(["alpha"], ["copilot"])}
+        )
+
+        assert retired == {
+            ".agents/skills/beta",
+            ".agents/skills/beta/SKILL.md",
+            ".claude/skills/alpha",
+            ".claude/skills/alpha/SKILL.md",
+        }
+
+    def test_an_unrestricted_survivor_retires_nothing(self):
+        from apm_cli.commands.uninstall.selection_shrink import shrink_retired_paths
+
+        assert shrink_retired_paths(self._lockfile(), {"org/bundle": _ShrunkNode(None, None)}) == (
+            set()
+        )
