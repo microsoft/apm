@@ -355,8 +355,11 @@ def test_kept_copy_is_rendered_for_its_own_destination(tmp_path: Path) -> None:
         )
         (copy / "SKILL.md").write_bytes(rendered.encode("ascii"))
     assert not _stale(source, deep, resolve_links=_depth_links)
-    (deep / "SKILL.md").write_bytes((destination / "SKILL.md").read_bytes())
+    shallow = (destination / "SKILL.md").read_bytes()
+    (deep / "SKILL.md").write_bytes(shallow)
     assert _stale(source, deep, resolve_links=_depth_links)
+    # The probe is read-only: the kept copy keeps its bytes.
+    assert (deep / "SKILL.md").read_bytes() == shallow
 
 
 def test_kept_copy_missing_an_added_member_is_stale(tmp_path: Path) -> None:
@@ -364,6 +367,7 @@ def test_kept_copy_missing_an_added_member_is_stale(tmp_path: Path) -> None:
     assert not _stale(source, destination)
     (source / "references/new.md").write_text("New.\n", encoding="ascii")
     assert _stale(source, destination)
+    assert not (destination / "references/new.md").exists()
 
 
 def test_kept_copy_with_a_dropped_recorded_member_is_stale(tmp_path: Path) -> None:
@@ -372,3 +376,4 @@ def test_kept_copy_with_a_dropped_recorded_member_is_stale(tmp_path: Path) -> No
     user_file.write_text("Mine.\n", encoding="ascii")
     assert not _stale(source, destination)
     assert _stale(source, destination, recorded=[user_file])
+    assert user_file.read_text(encoding="ascii") == "Mine.\n"
