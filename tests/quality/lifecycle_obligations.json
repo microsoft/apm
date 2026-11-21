@@ -1,7 +1,7 @@
 {
  "counts": {
   "baseline_by_lane": {
-   "T-1": 124,
+   "T-1": 133,
    "T-2": 408,
    "T-3": 243,
    "T-6a": 201,
@@ -50,9 +50,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1234,
+   "baseline": 1243,
    "known-failing": 1,
-   "required": 1256
+   "required": 1247
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -3786,9 +3786,6 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=other-file|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|compile|other-file|denied-dependency|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3796,25 +3793,17 @@
    "rules": [
     "U2"
    ],
-   "status": "required",
-   "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e-evidence"
   },
   "T1|OP=compile|PRIM=other-file|GATE=none": {
-   "credited_by": [
-    "G1|compile|other-file|none|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=compile|PRIM=other-file|GATE=revoked-after-deploy": {
-   "credited_by": [
-    "G1|compile|other-file|revoked-after-deploy|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3822,9 +3811,8 @@
    "rules": [
     "U2"
    ],
-   "status": "required",
-   "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e-evidence"
   },
   "T1|OP=compile|PRIM=skill|GATE=denied-dependency": {
    "credited_by": [
@@ -5045,70 +5033,46 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=allowed": {
-   "credited_by": [
-    "G1|mcp-install|mcp|allowed|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|mcp-install|mcp|denied-dependency|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=denied-executable": {
-   "credited_by": [
-    "G1|mcp-install|mcp|denied-executable|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=none": {
-   "credited_by": [
-    "G1|mcp-install|mcp|none|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=revoked-after-deploy": {
-   "credited_by": [
-    "G1|mcp-install|mcp|revoked-after-deploy|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=unapproved-exec": {
-   "credited_by": [
-    "G1|mcp-install|mcp|unapproved-exec|project"
-   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=skill|GATE=denied-dependency": {
    "credited_by": [
@@ -6350,7 +6314,6 @@
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project"
    ],
    "family": "T2",
@@ -11561,7 +11524,6 @@
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -13086,7 +13048,6 @@
     "G1|approve|hook|denied-dependency|project",
     "G1|approve|lsp|denied-dependency|project",
     "G1|approve|mcp|denied-dependency|project",
-    "G1|approve|other-file|denied-dependency|project",
     "G1|approve|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -13423,7 +13384,6 @@
     "G1|audit-ci|hook|denied-dependency|project",
     "G1|audit-ci|lsp|denied-dependency|project",
     "G1|audit-ci|mcp|denied-dependency|project",
-    "G1|audit-ci|other-file|denied-dependency|project",
     "G1|audit-ci|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -14141,7 +14101,6 @@
     "G1|compile|hook|denied-dependency|project",
     "G1|compile|lsp|denied-dependency|project",
     "G1|compile|mcp|denied-dependency|project",
-    "G1|compile|other-file|denied-dependency|project",
     "G1|compile|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -14545,13 +14504,11 @@
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
-    "G1|install|other-file|denied-dependency|project",
     "G1|install|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -15028,7 +14985,6 @@
     "G1|lock|hook|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
-    "G1|lock|other-file|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -15685,8 +15641,7 @@
    "credited_by": [
     "G1|mcp-install|canvas|allowed|project",
     "G1|mcp-install|hook|allowed|project",
-    "G1|mcp-install|lsp|allowed|project",
-    "G1|mcp-install|mcp|allowed|project"
+    "G1|mcp-install|lsp|allowed|project"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -15700,8 +15655,6 @@
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
-    "G1|mcp-install|mcp|denied-dependency|project",
-    "G1|mcp-install|other-file|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -15715,8 +15668,7 @@
    "credited_by": [
     "G1|mcp-install|canvas|denied-executable|project",
     "G1|mcp-install|hook|denied-executable|project",
-    "G1|mcp-install|lsp|denied-executable|project",
-    "G1|mcp-install|mcp|denied-executable|project"
+    "G1|mcp-install|lsp|denied-executable|project"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -15730,8 +15682,6 @@
     "G1|mcp-install|canvas|none|project",
     "G1|mcp-install|hook|none|project",
     "G1|mcp-install|lsp|none|project",
-    "G1|mcp-install|mcp|none|project",
-    "G1|mcp-install|other-file|none|project",
     "G1|mcp-install|skill|none|project"
    ],
    "family": "pair",
@@ -15746,8 +15696,6 @@
     "G1|mcp-install|canvas|revoked-after-deploy|project",
     "G1|mcp-install|hook|revoked-after-deploy|project",
     "G1|mcp-install|lsp|revoked-after-deploy|project",
-    "G1|mcp-install|mcp|revoked-after-deploy|project",
-    "G1|mcp-install|other-file|revoked-after-deploy|project",
     "G1|mcp-install|skill|revoked-after-deploy|project"
    ],
    "family": "pair",
@@ -15761,8 +15709,7 @@
    "credited_by": [
     "G1|mcp-install|canvas|unapproved-exec|project",
     "G1|mcp-install|hook|unapproved-exec|project",
-    "G1|mcp-install|lsp|unapproved-exec|project",
-    "G1|mcp-install|mcp|unapproved-exec|project"
+    "G1|mcp-install|lsp|unapproved-exec|project"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -16320,7 +16267,6 @@
     "G1|prune|hook|denied-dependency|project",
     "G1|prune|lsp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
-    "G1|prune|other-file|denied-dependency|project",
     "G1|prune|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -16715,7 +16661,6 @@
     "G1|uninstall|hook|denied-dependency|project",
     "G1|uninstall|lsp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
-    "G1|uninstall|other-file|denied-dependency|project",
     "G1|uninstall|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -17136,7 +17081,6 @@
     "G1|update|hook|denied-dependency|project",
     "G1|update|lsp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project",
-    "G1|update|other-file|denied-dependency|project",
     "G1|update|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -18580,7 +18524,6 @@
     "G1|install-frozen|mcp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
-    "G1|mcp-install|mcp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project"
@@ -18607,7 +18550,6 @@
     "G1|compile|mcp|none|project",
     "G1|install|mcp|none|project",
     "G1|lock|mcp|none|project",
-    "G1|mcp-install|mcp|none|project",
     "G1|prune|mcp|none|project",
     "G1|uninstall|mcp|none|project",
     "G1|update|mcp|none|project"
@@ -19110,61 +19052,50 @@
     "G1|approve|hook|denied-dependency|project",
     "G1|approve|lsp|denied-dependency|project",
     "G1|approve|mcp|denied-dependency|project",
-    "G1|approve|other-file|denied-dependency|project",
     "G1|approve|skill|denied-dependency|project",
     "G1|audit-ci|canvas|denied-dependency|project",
     "G1|audit-ci|hook|denied-dependency|project",
     "G1|audit-ci|lsp|denied-dependency|project",
     "G1|audit-ci|mcp|denied-dependency|project",
-    "G1|audit-ci|other-file|denied-dependency|project",
     "G1|audit-ci|skill|denied-dependency|project",
     "G1|compile|canvas|denied-dependency|project",
     "G1|compile|hook|denied-dependency|project",
     "G1|compile|lsp|denied-dependency|project",
     "G1|compile|mcp|denied-dependency|project",
-    "G1|compile|other-file|denied-dependency|project",
     "G1|compile|skill|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
-    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
-    "G1|install|other-file|denied-dependency|project",
     "G1|install|skill|denied-dependency|project",
     "G1|lock|canvas|denied-dependency|project",
     "G1|lock|hook|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
-    "G1|lock|other-file|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
-    "G1|mcp-install|mcp|denied-dependency|project",
-    "G1|mcp-install|other-file|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project",
     "G1|prune|canvas|denied-dependency|project",
     "G1|prune|hook|denied-dependency|project",
     "G1|prune|lsp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
-    "G1|prune|other-file|denied-dependency|project",
     "G1|prune|skill|denied-dependency|project",
     "G1|uninstall|canvas|denied-dependency|project",
     "G1|uninstall|hook|denied-dependency|project",
     "G1|uninstall|lsp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
-    "G1|uninstall|other-file|denied-dependency|project",
     "G1|uninstall|skill|denied-dependency|project",
     "G1|update|canvas|denied-dependency|project",
     "G1|update|hook|denied-dependency|project",
     "G1|update|lsp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project",
-    "G1|update|other-file|denied-dependency|project",
     "G1|update|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -25015,5 +24946,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "bc3f1bbb52c68b1ff7f13c0363de7c8e02e5c6633f37d7ec8f45b31ad86bb3b8"
+ "sha256": "0905ae8e48a2e46084538f4084d95a7f5d1f42c541cb5072499597ea0b687e36"
 }
