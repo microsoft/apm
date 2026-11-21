@@ -30,6 +30,7 @@ from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warni
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
+from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
@@ -984,7 +985,15 @@ def integrate_local_bundle(
             if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
                 _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
+        # #3686: an older bundle may hold several renderings of one primitive.
+        _superseded = _superseded_renderings(
+            list(pack_files), _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+        )
         for rel, expected_hash in sorted(pack_files.items()):
+            if rel in _superseded:
+                if logger:
+                    logger.verbose_detail(f"{target.name}: kept another rendering of {rel}")
+                continue
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before
             # constructing any filesystem path, then assert the resolved

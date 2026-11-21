@@ -52,6 +52,61 @@ def plugin_command_prompt_name(name: str) -> str:
     return name
 
 
+PRIMITIVE_FILE_SUFFIXES = (
+    ".instructions.md",
+    ".prompt.md",
+    ".agent.md",
+    ".mdc",
+    ".toml",
+    ".json",
+    ".md",
+)
+"""Per-target rendering suffixes of primitive files, longest first."""
+
+
+def primitive_file_suffix(name: str) -> str | None:
+    """Return the rendering suffix of a primitive filename, if any."""
+    return next((suffix for suffix in PRIMITIVE_FILE_SUFFIXES if name.endswith(suffix)), None)
+
+
+# Plugin directories whose files are per-target renderings of one primitive,
+# with the rendering a plugin bundle keeps, best first (#3686). The Claude
+# plugin rendering leads because Claude Code and Copilot CLI both load it.
+PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
+    "agents": (".md", ".agent.md", ".toml"),
+    "commands": (".md", ".prompt.md", ".toml"),
+    "instructions": (".md", ".instructions.md", ".mdc"),
+}
+
+
+def plugin_rendering_key(plugin_rel: str) -> tuple[str, str, int] | None:
+    """Return ``(primitive, suffix, rank)`` for a path that renders a primitive.
+
+    Two paths with the same primitive are renderings of one source primitive
+    for different targets, e.g. ``agents/rv.md`` and ``agents/rv.agent.md``;
+    the lower *rank* is the rendering a plugin bundle keeps.
+    """
+    head, _, tail = plugin_rel.partition("/")
+    preference = PLUGIN_RENDERING_PREFERENCE.get(head)
+    suffix = primitive_file_suffix(tail) if preference and tail else None
+    if suffix is None or suffix not in preference:
+        return None
+    return f"{head}/{tail[: -len(suffix)]}", suffix, preference.index(suffix)
+
+
+def duplicate_plugin_renderings(plugin_rels: list[str]) -> set[str]:
+    """Return the paths that duplicate a better rendering of the same primitive."""
+    best: dict[str, tuple[int, str]] = {}
+    for rel in plugin_rels:
+        if (key := plugin_rendering_key(rel)) is not None:
+            best[key[0]] = min(best.get(key[0], (key[2], rel)), (key[2], rel))
+    return {
+        rel
+        for rel in plugin_rels
+        if (key := plugin_rendering_key(rel)) is not None and best[key[0]][1] != rel
+    }
+
+
 PLUGIN_LAYOUT: dict[str, PluginDirSpec] = {
     "agents": PluginDirSpec("agents", ("agents",), _identity),
     "skills": PluginDirSpec("skills", ("skills",), _identity),
