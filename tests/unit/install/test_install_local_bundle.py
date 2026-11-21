@@ -975,12 +975,39 @@ class TestLocalBundlePathRouting:
         assert not diagnostics.has_diagnostics
 
     @pytest.mark.parametrize(
+        ("content", "description"),
+        [
+            ("# Lint\nCheck style.\n", "Lint"),
+            ("Check style.\n", "lint"),
+            ("---\nname: linter\ndescription: '  '\n---\nCheck style.\n", "linter"),
+        ],
+        ids=["leading-heading", "no-heading", "blank-description"],
+    )
+    def test_codex_bundle_agent_without_a_description_gets_a_loadable_one(
+        self, tmp_path: Path, content: str, description: str
+    ) -> None:
+        """A plugin agent with no description still installs for Codex (#3714)."""
+        import tomllib
+
+        files = {**_AGENT_FILES, "agents/lint.md": content}
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+
+        result, diagnostics = _integrate_agents(bundle, project, KNOWN_TARGETS["codex"])
+
+        assert result["skipped"] == 0
+        lint = tomllib.loads((project / ".codex/agents/lint.toml").read_text(encoding="utf-8"))
+        assert lint["description"] == description
+        assert lint["developer_instructions"]
+        assert not diagnostics.has_diagnostics
+
+    @pytest.mark.parametrize(
         ("content", "field"),
         [
-            ("# Lint\n", "description"),
             ("---\ndescription: Lint agent\n---\n\n", "developer_instructions"),
+            ("---\nname: ' '\ndescription: Lint agent\n---\nCheck style.\n", "name"),
         ],
-        ids=["no-description", "blank-body"],
+        ids=["blank-body", "blank-name"],
     )
     def test_codex_bundle_agent_with_a_field_codex_rejects_is_skipped(
         self, tmp_path: Path, content: str, field: str
