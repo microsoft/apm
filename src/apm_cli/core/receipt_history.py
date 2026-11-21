@@ -1,7 +1,7 @@
 """Short per-receipt history of the hashes one installation wrote (#4428).
 
-``DeploymentMaterializationSession`` (core/deployment_ledger.py) is the only
-user: each receipt key keeps up to :data:`HISTORY_LIMIT` earlier hashes this
+The deployment ledger's installation-bound session (core/deployment_ledger.py)
+is the only user: each receipt key keeps up to :data:`HISTORY_LIMIT` earlier hashes this
 installation wrote at the same path, so bytes APM wrote here before a branch
 round trip are still recognised as APM's output. The history is local to one
 checkout's receipt file, never stored in ``apm.lock.yaml``, and never deletion

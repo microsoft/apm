@@ -489,9 +489,9 @@ class DeploymentMaterializationSession:
         ):
             return None
         claimed = {claim.content_hash for claim in self._claims[value]} - {None}
-        if record.content_hash in claimed or self._holds(path, record):
-            return record.content_hash
-        return self._history.earlier_write(key, path)  # a branch round trip (#4428)
+        if record.content_hash not in claimed and not self._holds(path, record):
+            return self._history.earlier_write(key, path)  # a branch round trip (#4428)
+        return record.content_hash
 
     @staticmethod
     def _holds(path: Path, record: DeploymentRecord) -> bool:
