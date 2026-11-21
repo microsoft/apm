@@ -351,6 +351,7 @@ def _planned_keeps(
                 continue
             planned: list[tuple[Path, str | None]] = []
             integrator._overwrite_plan = planned
+            owner = ""
             try:
                 with (
                     write_seam.planning(),
@@ -367,9 +368,12 @@ def _planned_keeps(
                         scope=ctx.scope,
                         source_plan=plan.source_plan,
                     )
+            except write_seam.PlannedWriteError:
+                raise
             except Exception:
-                # The real run reports this package's own failure.
-                return []
+                # The real run reports this package's own failure; files the
+                # plan already found unproven still refuse the install.
+                return [*kept, *((owner, path, edit) for path, edit in planned)]
             finally:
                 integrator._overwrite_plan = None
             kept.extend((owner, path, edit) for path, edit in planned)

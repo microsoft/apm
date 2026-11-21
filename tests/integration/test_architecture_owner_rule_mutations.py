@@ -854,6 +854,21 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "                    with write_seam.planning():\n                        write_seam.copy2(source_file, target_file)\n",
             id="planning-outside-the-commit-gate",
         ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    seam = write_seam\n"
+            "                    with seam.planning():\n"
+            "                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-through-a-module-alias",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "from apm_cli.integration import write_seam\n",
+            "from apm_cli.integration import write_seam\n"
+            "from apm_cli.integration.write_seam import private_scratch\n",
+            id="scratch-imported-directly",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(

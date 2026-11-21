@@ -232,7 +232,12 @@ def _seam_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
 
 
 def _mode_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
-    """Planning and private scratch suspend the journal only at their closed call sites."""
+    """Planning and private scratch suspend the journal only at their closed call sites.
+
+    A mode is matched by its name on any receiver (a module alias included),
+    and importing a mode function directly is rejected, so neither can
+    escape the closed sites under another spelling.
+    """
     found: list[Violation] = []
     for path in _python_paths(provider, "src/apm_cli/"):
         if path == _SEAM:
@@ -241,18 +246,28 @@ def _mode_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
         if failures:
             found += failures
             continue
+        found += (
+            violation(
+                rule_id,
+                path,
+                f"import write_seam.{name} only as write_seam.{name}()",
+                line=fact.line,
+            )
+            for fact in facts.imports
+            for name in sorted(set(fact.names) & set(_SEAM_MODES))
+            if (fact.module or "").lstrip(".").endswith("write_seam")
+        )
         for call in facts.calls:
             mode = call.qualname.rsplit(".", 1)[-1]
-            if mode in _SEAM_MODES and _SEAM_RECEIVER in call.qualname:
-                if (path, call.scope) not in _SEAM_MODES[mode]:
-                    found.append(
-                        violation(
-                            rule_id,
-                            path,
-                            f"write_seam.{mode} outside its closed call site",
-                            line=call.line,
-                        )
+            if mode in _SEAM_MODES and (path, call.scope) not in _SEAM_MODES[mode]:
+                found.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"write_seam.{mode} outside its closed call site",
+                        line=call.line,
                     )
+                )
     return found
 
 
