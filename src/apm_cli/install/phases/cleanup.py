@@ -27,8 +27,9 @@ cross-package file protection for stale cleanup (#1831).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE, kept_note
@@ -139,19 +140,22 @@ def _run_cleanup(
             set(existing_lockfile.dependencies)
             - partial_dropped  # architecture-authority-exempt: survivor intent input, not a removal predicate
         )
-    if existing_lockfile:
+    if existing_lockfile or package_deployed_files:
+        from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
 
+        # Without a prior lock the survivors are this run's claims alone; they
+        # still protect a peer's file when receipts stand in for a lost record.
         surviving_files = surviving_deployed_paths(
-            existing_lockfile,
+            existing_lockfile or LockFile(),
             package_deployed_files,
             _targets or [],
             declared_target_profiles(ctx),
             desired_owners=desired_owners,
             failed_owners=frozenset(
                 key
-                for key in existing_lockfile.dependencies
+                for key in (existing_lockfile.dependencies if existing_lockfile else ())
                 if diagnostics.count_for_package(key, "error") > 0
             ),
             user_scope=user_scope,
@@ -251,18 +255,19 @@ def _run_cleanup(
             if diagnostics.count_for_package(dep_key, "error") > 0:
                 continue
 
-            prior = _prior_deployment(ctx, existing_lockfile, dep_key)
-            if prior is None:
+            prev_dep = (
+                existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
+            ) or _receipted_stand_in(ctx, dep_key)
+            if not prev_dep:
                 continue  # new package this install -- nothing stale yet
-            prior_files, prior_hashes, live_peers = prior
-            stale = set(detect_stale_files(prior_files, new_deployed))
-            kept = kept_prior_values(ctx, prior_files)
+            stale = set(detect_stale_files(prev_dep.deployed_files, new_deployed))
+            kept = kept_prior_values(ctx, prev_dep.deployed_files)
             if kept:
                 stale -= set(kept)
                 new_deployed.extend(path for path in kept if path not in new_deployed)
                 package_cleanup_retained[dep_key] = {
                     **package_cleanup_retained.get(dep_key, {}),
-                    **{path: prior_hashes.get(path) for path in kept},
+                    **{path: prev_dep.deployed_file_hashes.get(path) for path in kept},
                 }
             if not stale:
                 continue
@@ -271,7 +276,7 @@ def _run_cleanup(
             # that another currently-installed package still deploys.
             # package_deployed_files is integration outcome, not a security
             # boundary; content-hash provenance remains the deletion gate.
-            other_deployed = (surviving_files | live_peers) - set(new_deployed)
+            other_deployed = surviving_files - set(new_deployed)
             protected = stale & other_deployed
             stale = stale - other_deployed
             if protected and logger:
@@ -299,10 +304,10 @@ def _run_cleanup(
                 targets=_targets or None,
                 diagnostics=diagnostics,
                 evidence=deployment_evidence(ctx),
-                recorded_hashes=prior_hashes,
+                recorded_hashes=dict(prev_dep.deployed_file_hashes),
                 user_scope=user_scope,
                 receipt_retirements=receipt_retirements,
-                live_paths=surviving_files | live_peers | set(new_deployed),
+                live_paths=surviving_files | set(new_deployed),
             )
             # Re-insert every non-deletion so the lockfile retains the
             # prior ownership claim for retry or user review.
@@ -312,7 +317,8 @@ def _run_cleanup(
             if cleanup_result.retained:
                 # Merge: integrate may already keep this package's unproven files (#4360).
                 package_cleanup_retained[dep_key] = package_cleanup_retained.get(dep_key, {}) | {
-                    path: prior_hashes.get(path) for path in cleanup_result.retained
+                    path: prev_dep.deployed_file_hashes.get(path)
+                    for path in cleanup_result.retained
                 }
             if cleanup_result.deleted_targets:
                 BaseIntegrator.cleanup_empty_parents(cleanup_result.deleted_targets, project_root)
@@ -327,33 +333,28 @@ def _run_cleanup(
                 logger.stale_cleanup(dep_key, cleanup_result)
 
 
-def _prior_deployment(
-    ctx: InstallContext, existing_lockfile: Any, dep_key: str
-) -> tuple[list[str], dict[str, str], frozenset[str]] | None:
-    """Return ``(files, hashes, live peers)`` a package deployed before this run, if known.
+@dataclass(frozen=True)
+class _ReceiptedDeployment:
+    """A package's prior deployment as this installation's receipts record it."""
 
-    The lock record is the prior deployment. Without one (the lockfile was
-    lost or regenerated), this installation's deployment receipts for the
-    package stand in, so a lost lock converges like a kept one; the other
-    packages' fresh output is then the cross-package protection set.
+    deployed_files: list[str]
+    deployed_file_hashes: dict[str, str]
+
+
+def _receipted_stand_in(ctx: InstallContext, dep_key: str) -> _ReceiptedDeployment | None:
+    """Stand in for a prior lock record the lock does not hold (it was lost or regenerated).
+
+    This installation's deployment receipts for *dep_key* are the prior
+    deployment, so a lost lock converges like a kept one; lockfile assembly
+    reconciles the same record. Deletion stays gated by deployment evidence.
     """
-    prev_dep = existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
-    if prev_dep:
-        return list(prev_dep.deployed_files), dict(prev_dep.deployed_file_hashes), frozenset()
     receipted = deployment_evidence(ctx).receipted_claims(dep_key)
     if not receipted:
         return None
-    # Lockfile assembly reconciles the same prior record this cleanup used.
     stand_ins = getattr(ctx, "receipted_prior_deployments", None)
     if isinstance(stand_ins, dict):
         stand_ins[dep_key] = receipted
-    peers = frozenset(
-        path
-        for key, files in ctx.package_deployed_files.items()
-        if key != dep_key
-        for path in files
-    )
-    return sorted(receipted), receipted, peers
+    return _ReceiptedDeployment(sorted(receipted), dict(receipted))
 
 
 def _orphan_decision(
