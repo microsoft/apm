@@ -102,7 +102,9 @@ def test_native_findings_identify_only_the_offending_field(
     if output_format == "text":
         assert expected in result.output
         if ci_mode:
-            assert f"unicode: .claude/settings.json{expected}" in " ".join(result.output.split())
+            assert f"unicode: .claude/settings.json at {expected}" in " ".join(
+                result.output.split()
+            )
         return
     report = json.loads(result.stdout)
     if output_format == "json":

@@ -27,7 +27,7 @@ from ..integration.base_integrator import BaseIntegrator
 from ..integration.hook_integrator import native_hook_config
 from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
 from ..integration.targets import TargetProfile
-from ..security.content_scanner import ContentScanner, ScanFinding
+from ..security.content_scanner import ContentScanner, ScanFinding, pointer_location
 from .primitive_discovery import (
     PrimitiveSurface,
     iter_surface_files,
@@ -61,7 +61,7 @@ class CoverageEntry:
     @property
     def location(self) -> str:
         """Render the file path and the JSON pointer inside it as separate parts."""
-        return f"{self.file} at {self.pointer}" if self.pointer else self.file
+        return pointer_location(self.file, self.pointer)
 
 
 @dataclass(frozen=True)

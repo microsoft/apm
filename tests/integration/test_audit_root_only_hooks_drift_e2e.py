@@ -232,3 +232,26 @@ def test_audit_reports_apm_merged_hooks_as_owned_with_a_clean_path(
         f"{_SETTINGS} at /hooks/Stop/0/hooks/0"
     ], lines
     assert f"{_SETTINGS}/hooks" not in result.stdout + result.stderr
+
+
+def test_audit_ci_unicode_detail_renders_path_and_pointer_apart(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-043: a hidden-Unicode finding in a hook field names '<file> at <pointer>'."""
+    project = tmp_path / "unicode-hooks"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: unicode-hooks\nversion: 1.0.0\ntargets: [claude]\n", encoding="utf-8"
+    )
+    _write_json(
+        project / _SETTINGS,
+        {"hooks": {"Stop": [{"hooks": [{"type": "prompt", "prompt": "\u202e"}]}]}},
+    )
+
+    result = _run(
+        apm_binary_path, project, "audit", "--ci", "--no-policy", "--no-drift", "--no-fail-fast"
+    )
+    text = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, text
+    assert f"unicode: {_SETTINGS} at /hooks/Stop/0/hooks/0/prompt" in text, text
+    assert f"{_SETTINGS}/hooks" not in text, text
