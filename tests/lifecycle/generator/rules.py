@@ -240,6 +240,20 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
         (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
+    "U11": (
+        "--frozen refuses any declared-target change before it changes anything: a dropped "
+        "target (#4517) and an added one. A changed TGT with FROZEN maps to one refusal cell, "
+        "witnessed by the T-6a history scenario",
+        (
+            Ev("src/apm_cli/install/service.py", 659, "no longer declares target(s)"),
+            Ev(
+                "src/apm_cli/install/frozen_withdrawal.py",
+                273,
+                "does not record everything this install deploys",
+            ),
+            Ev("src/apm_cli/install/service.py", 133, "cannot replay the selected native services"),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -320,6 +334,25 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     # One canonical no-op line (#4460); the retired wordings must not match.
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"No orphaned packages found\. Nothing to prune\."),
 }
+# U11: --frozen after a declared-target change. Its pinned messages (H2) and its
+# witness: the T-6a history scenario, since a replay row cannot change targets.
+FROZEN_TARGET_CHANGE = "refusal|TGT=changed|FROZEN=on"
+FROZEN_TARGET_CHANGE_MESSAGES = (
+    # narrowed: a dropped target's files are still recorded (#4517).
+    r"--frozen: apm\.yml no longer declares target\(s\) .+, but apm\.lock\.yaml still"
+    r" records their files\.",
+    # widened: the lock records neither the added target's files nor its native
+    # (MCP/LSP) ownership; whichever check runs first refuses.
+    r"--frozen: apm\.lock\.yaml does not record everything this install deploys\."
+    r"|--frozen cannot replay the selected native services\.",
+)
+# Refusal cells a scenario (not a generated replay row) witnesses.
+SCENARIO_REFUSALS: Mapping[str, str] = {
+    FROZEN_TARGET_CHANGE: (
+        "tests/lifecycle/scenarios/test_history_upgrade.py::"
+        "test_frozen_refuses_a_target_change[multi-narrowed]"
+    ),
+}
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
 RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
@@ -355,6 +388,8 @@ class Verdict:
 
 def refusal_cell(cell: Mapping[str, str]) -> tuple[str, int] | None:
     """The refusal cell id (and its exit) a cell falls into, or None."""
+    if "FROZEN" in cell and cell.get("TGT", "").endswith(("widened", "narrowed")):
+        return FROZEN_TARGET_CHANGE, 1
     op = cell.get("OP")
     if "FROZEN" in cell and "UPDATE" in cell and op in (None, "install"):
         return cell_id("refusal", {"OP": "install", "FROZEN": ON, "UPDATE": ON}), 2
@@ -460,6 +495,7 @@ def classify(family: str, cell: Mapping[str, str]) -> Verdict:
     refusal = refusal_cell(cell)
     if refusal:
         rule = "U5" if cell.get("OP") == "pack" and cell.get("SCOPE") == "user" else "U1"
+        rule = "U11" if refusal[0] == FROZEN_TARGET_CHANGE else rule
         return Verdict("mapped", (rule,), refusal[0])
     mapped = mapped_cell(cell)
     if mapped:
