@@ -143,16 +143,17 @@ def _with_mcp_declarers(
 def _with_allowlist_next_step(
     checks: list[CheckResult],
     source_deps: Sequence[DependencyReference],
-    lock: LockFile | None,
+    project: AllowlistProject,
     policy_source: str | None,
 ) -> list[CheckResult]:
     """Attach the catalog next step to a failed ``dependency-allowlist`` check (#4570).
 
-    Each denied dependency maps to the apm.yml entry ``apm uninstall`` can
-    remove: itself when direct, or the direct dependencies that bring it in
-    (traced through the lock) when transitive.
+    The ``apm uninstall`` option is offered only when
+    :func:`~apm_cli.policy.allowlist_remedy.uninstall_selectors` proves it
+    clears every denied dependency; otherwise the advice is admin-only.
     """
     from ..core.remediation import dependency_not_allowed_advice
+    from .allowlist_remedy import uninstall_selectors
     from .discovery import _redact_policy_ref
     from .matcher import dependency_policy_subject
 
@@ -162,33 +163,40 @@ def _with_allowlist_next_step(
     )
     if failed is None:
         return checks
-    denied = {subject.ref for subject in failed.subjects}
-    index = None
-    if lock is not None:
-        from ..integration.mcp_config_view import DirectDependencyIndex
-
-        index = DirectDependencyIndex(lock)
-    packages: list[str] = []
-    resolved = True
-    for dep in source_deps:
-        if dependency_policy_subject(dep) not in denied:
-            continue
-        key = dep.get_unique_key()
-        locked = lock.dependencies.get(key) if lock is not None else None
-        if locked is not None and locked.depth > 1:
-            roots = index.roots(key) if index is not None else None
-            resolved = resolved and bool(roots)
-            entries = sorted(roots or ())
-        else:
-            entries = [key]
-        packages.extend(entry for entry in entries if entry not in packages)
+    refs = {subject.ref for subject in failed.subjects}
+    denied = [dep for dep in source_deps if dependency_policy_subject(dep) in refs]
     remedy, sentence = dependency_not_allowed_advice(
-        packages if resolved else [],
+        uninstall_selectors(denied, project),
         len(failed.subjects),
         _redact_policy_ref(policy_source) if policy_source else None,
     )
     advised = replace(failed, next_step=sentence, remediations=(remedy,) if remedy else ())
     return [advised if check is failed else check for check in checks]
+
+
+def _allowlist_project(
+    project_root: Path,
+    modules_root: Path | None,
+    lock: LockFile | None,
+    raw_yml: dict | None,
+    policy: DependencyPolicy,
+) -> AllowlistProject:
+    """Collect the project state the allow-list next step is proven against."""
+    from .allowlist_remedy import AllowlistProject
+
+    def _entries(section: str) -> tuple[object, ...]:
+        block = (raw_yml or {}).get(section)
+        entries = block.get("apm") if isinstance(block, dict) else None
+        return tuple(entries) if isinstance(entries, list) else ()
+
+    return AllowlistProject(
+        project_root=project_root,
+        modules_dir=modules_root or project_root / "apm_modules",
+        lock=lock,
+        production=_entries("dependencies"),
+        development=_entries("devDependencies"),
+        policy=policy,
+    )
 
 
 def _required_policy_index(
@@ -1922,7 +1930,12 @@ def run_policy_checks(
         ),
     )
     result.checks.extend(
-        _with_allowlist_next_step(dep_result.checks, source_deps, lock, policy_source)
+        _with_allowlist_next_step(
+            dep_result.checks,
+            source_deps,
+            _allowlist_project(project_root, modules_root, lock, raw_yml, policy.dependencies),
+            policy_source,
+        )
     )
 
     # Early exit if dep checks already failed in fail-fast mode

@@ -93,9 +93,11 @@ apm audit --ci --policy ./apm-policy.yml
 [x] 1 of 11 check(s) failed
 ```
 
-The last line names the `apm.yml` entry to remove (for a transitive dependency, the
-direct dependency that brings it in) and the policy that denied it. SARIF results
-carry the same sentence.
+The last line names the policy that denied the dependency and the `apm.yml` entry to
+remove (for a transitive dependency, the direct dependency that brings it in). APM
+offers the `apm uninstall` only when it removes every denied dependency without
+dropping a required package; otherwise the line says to ask your org admin. SARIF
+results carry the same sentence.
 
 Under `enforcement: warn` the same row reads `[!] ... (enforcement: warn)` and the job
 passes. Until you switch to block, a green check does not mean the policy holds.
