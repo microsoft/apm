@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **149 normative statements (144 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **151 normative statements (146 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -345,6 +345,7 @@ The manifest top-level fields are:
 | `compilation`   | no       | mapping                                                                                       |
 | `policy`        | no       | mapping; consumer-side policy hooks                                                           |
 | `marketplace`   | no       | mapping; producer authoring block, see [Section 4.7](#47-marketplace-authoring-block-normative-input) |
+| `marketplaces`  | no       | list; root project marketplace map, see [Section 4.2.5](#425-marketplaces) |
 | `x-<name>`      | no       | vendor extension, see [Section 4.6.2](#462-vendor-extensions)                                 |
 
 #### 4.2.1 `target`
@@ -481,6 +482,58 @@ document that choice in its conformance statement (see
 [Section 11.2](#112-how-to-claim-conformance)). A consumer MUST NOT
 strip any host other than the one selected by `default_host:` or the
 declared implementation-default.
+
+#### 4.2.5 `marketplaces`
+
+The OPTIONAL top-level `marketplaces:` list binds the marketplace names
+that a project's marketplace references (object entries with `name`
+and `marketplace` keys) resolve through. Each entry is a mapping with a
+REQUIRED `name` (ASCII letters, digits, `.`, `_` and `-`), a REQUIRED
+`source` (a catalog location: a Git repository URL or shorthand, a
+direct catalog URL, or a local path) and an OPTIONAL `ref`. Marketplace
+references remain non-normative in v0.1 (see
+[Section 7.1](#71-reference-kinds)); the requirements below apply to a
+consumer that resolves them.
+
+```yaml
+marketplaces:
+  - name: contoso
+    source: https://github.com/contoso/agent-marketplace
+    ref: main
+dependencies:
+  apm:
+    - { name: security-review, marketplace: contoso }
+```
+
+<a id="req-mf-028"></a>
+**[req-mf-028]** A conforming **consumer** implementation that resolves
+marketplace references MUST accept a `marketplaces:` list in the root
+project manifest and MUST: (a) reject, with a diagnostic naming the
+manifest and the entry index, an entry that is not a mapping, lacks
+`name` or `source`, carries an unknown key, or repeats a `name`
+(compared case-insensitively); (b) while resolving that project, resolve
+a reference whose marketplace name the list declares through the
+declared entry, never through a same-named catalog registered in user
+or machine configuration; (c) treat declared names as local to the
+manifest and record, for every marketplace reference it resolves from a
+remote catalog, the catalog origin (not the name) and the resolved
+commit in the lockfile; and (d) never persist a declared entry to any
+user-level or machine-level marketplace registry.
+
+<a id="req-mf-029"></a>
+**[req-mf-029]** A conforming **consumer** implementation that resolves
+marketplace references MUST refuse to install a dependency whose own
+manifest declares `marketplaces:`, with a diagnostic naming the
+dependency. When the root project manifest declares `marketplaces:`,
+the consumer MUST also fail resolution of a transitive marketplace
+reference whose marketplace name the root list does not declare, with a
+diagnostic naming that marketplace and the root manifest entry to add.
+
+> **Note (non-normative).** A declared catalog is reviewed intent of the
+> same kind as a committed Git URL; declaring it grants no trust beyond
+> the consumer's policy. The reference implementation offers an
+> organization policy allow-list for declared catalog origins; that
+> policy key is implementation-defined in v0.1.
 
 ### 4.3 Dependencies block (apm + mcp)
 
@@ -1014,7 +1067,8 @@ This section's normative statements are:
   [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
   [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
   [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
-  [req-mf-027](#req-mf-027),
+  [req-mf-027](#req-mf-027), [req-mf-028](#req-mf-028),
+  [req-mf-029](#req-mf-029),
   [req-ext-001](#req-ext-001),
   [req-ext-002](#req-ext-002),
   [req-ext-003](#req-ext-003),
@@ -1106,7 +1160,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
 | `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `extensions`              | Optional mapping of top-level keys matching `x-[a-z][a-z0-9-]*` from the dependency manifest, in declaration order. Omitted when empty. Values are not interpreted (see [req-ext-003](#req-ext-003)). Manifest-origin metadata, distinct from per-entry `x-<name>` keys. |
-| `native_plugin`           | Optional mapping, present only when the consumer natively activated this entry's plugin under [Section 8.5.11](#8511-native-plugin-activation-profile): `name` (declared plugin name), `root` (deployed plugin root as a POSIX path relative to the deploy root of its scope, the project root or the user home at user scope: `.agents/plugins/<name>`), `fingerprint` (the [req-na-002](#req-na-002) root digest, without the executable-bit byte at project scope, a `sha256:<hex-lowercase>` envelope per [req-lk-016](#req-lk-016); not the [req-na-005](#req-na-005) approval digest, and not itself an approval), and `marketplace` (`{name, path}`: the binding its activation entries were declared under, which a later run reads as the previous binding under [req-na-004](#req-na-004)). Informative: install, including a frozen install (`--frozen` or equivalent), records it only after the lockfile gates pass and then reconciles settings from it; a restore redeploys only bytes whose root digest equals `fingerprint`; audit recomputes the root digest on the materialized source and on the deployed root without writing (see [req-na-002](#req-na-002), [req-na-005](#req-na-005) and [Section 5.5](#55-drift-and-integrity-model)). A consumer MAY record beside it `native_declared`, the targets whose settings held its `true` enable value when the lock was written, to tell its own [req-na-004](#req-na-004) values from user edits; it is advisory and not trust-bearing: it is not an approval and has no identity, replay or ownership role. (Amendments 0.1.65, 0.1.66 and 0.1.73.) |
+| `native_plugin`           | Optional mapping, present only when the consumer natively activated this entry's plugin under [Section 8.5.11](#8511-native-plugin-activation-profile): `name` (declared plugin name), `root` (deployed plugin root as a POSIX path relative to the deploy root of its scope, the project root or the user home at user scope: `.agents/plugins/<name>`), `fingerprint` (the [req-na-002](#req-na-002) root digest, without the executable-bit byte at project scope, a `sha256:<hex-lowercase>` envelope per [req-lk-016](#req-lk-016); not the [req-na-005](#req-na-005) approval digest, and not itself an approval), and `marketplace` (`{name, path}`: the binding its activation entries were declared under, which a later run reads as the previous binding under [req-na-004](#req-na-004)). Informative: install, including a frozen install (`--frozen` or equivalent), records it only after the lockfile gates pass and then reconciles settings from it; a restore redeploys only bytes whose root digest equals `fingerprint`; audit recomputes the root digest on the materialized source and on the deployed root without writing (see [req-na-002](#req-na-002), [req-na-005](#req-na-005) and [Section 5.5](#55-drift-and-integrity-model)). A consumer MAY record beside it `native_declared`, the targets whose settings held its `true` enable value when the lock was written, to tell its own [req-na-004](#req-na-004) values from user edits; it is advisory and not trust-bearing: it is not an approval and has no identity, replay or ownership role. (Amendments 0.1.65, 0.1.66 and 0.1.74.) |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -2301,7 +2355,8 @@ listed:
 4. **git-literal** -- git URL or shorthand with a literal `ref:`
    (commit SHA, tag, branch).
 5. **marketplace** -- non-normative in v0.1; producer-side
-   authoring artifact only.
+   authoring artifact only. A consumer that resolves marketplace
+   references binds their names per [Section 4.2.5](#425-marketplaces).
 
 <a id="req-rs-008"></a>
 **[req-rs-008]** A conforming **consumer** implementation MUST
@@ -3819,7 +3874,7 @@ text shipped in a cited client version.
   consumer that discloses, in its conformance statement, the file priority
   it verified against a cited client version, with a conformance test that
   runs that client where it is installed and skips where it is not
-  (amendment 0.1.73).
+  (amendment 0.1.74).
 
 <a id="req-na-001"></a>
 **[req-na-001]** A conforming **consumer** implementation that natively
@@ -3906,7 +3961,7 @@ approval digest construction of [req-na-005](#req-na-005); the consumer
 MUST still compare the deployed root with the materialized source under the
 executable-bit-including construction on the machine that deploys it,
 before it writes activation entries, and MUST NOT record that comparison in
-the lockfile (amendment 0.1.73). Files so excluded MUST NOT be deployed under the
+the lockfile (amendment 0.1.74). Files so excluded MUST NOT be deployed under the
 profile root, and a plugin whose manifest references an excluded path MUST
 NOT be natively activated. A symbolic link anywhere in the
 plugin root makes that root ineligible for native activation. A plugin
@@ -3929,7 +3984,7 @@ in the in-place reference obligation of [req-tg-013](#req-tg-013).
 > **Editorial note.** The root digest is computed over raw bytes, so a
 > checkout filter that rewrites line endings in a committed project-scope
 > plugin root is reported as drift. At project scope the recorded digest
-> omits the executable bit (amendment 0.1.73), so a teammate's checkout on
+> omits the executable bit (amendment 0.1.74), so a teammate's checkout on
 > a file system that does not carry the bit, or with Git's file-mode
 > tracking off, still matches the committed lock; the bit is compared on
 > the deploying machine between the materialized source and the deployed
@@ -3968,7 +4023,7 @@ another target's settings file at lower priority, the enable key of a
 plugin the consumer declares to that other target is the consumer's own:
 it writes `false` there when the plugin's effective targets exclude the
 reading target, and changes or removes that key as those targets or the
-lockfile change (cross-target suppression, amendment 0.1.73). When
+lockfile change (cross-target suppression, amendment 0.1.74). When
 the previous lockfile is missing or unreadable and the settings file
 already holds an entry under the consumer's marketplace name, the consumer
 MUST report that in an actionable diagnostic, MUST NOT remove any existing
@@ -4955,7 +5010,8 @@ conformance statement identifying:
 [req-mf-021](#req-mf-021), [req-mf-022](#req-mf-022),
 [req-mf-023](#req-mf-023), [req-mf-024](#req-mf-024),
 [req-mf-025](#req-mf-025), [req-mf-026](#req-mf-026),
-[req-mf-027](#req-mf-027),
+[req-mf-027](#req-mf-027), [req-mf-028](#req-mf-028),
+[req-mf-029](#req-mf-029),
 [req-ext-001](#req-ext-001), [req-ext-003](#req-ext-003),
 [req-lk-001](#req-lk-001), [req-lk-002](#req-lk-002),
 [req-lk-003](#req-lk-003), [req-lk-004](#req-lk-004),
@@ -5435,6 +5491,8 @@ staged-replacement capability, not every consumer implementation.
 | [req-mf-025](#req-mf-025)                | MUST    | 4.3.2   | consumer    |
 | [req-mf-026](#req-mf-026)                | MUST    | 4.5     | consumer    |
 | [req-mf-027](#req-mf-027)                | MUST    | 4.5     | consumer    |
+| [req-mf-028](#req-mf-028)                | MUST    | 4.2.5   | consumer    |
+| [req-mf-029](#req-mf-029)                | MUST    | 4.2.5   | consumer    |
 | [req-ext-001](#req-ext-001)              | MUST    | 4.1     | consumer    |
 | [req-ext-002](#req-ext-002)              | MUST    | 4.1     | producer    |
 | [req-ext-003](#req-ext-003)              | MUST    | 4.6.2   | consumer    |
@@ -5558,7 +5616,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 149** (144 MUST, 5 SHOULD).
+**Total normative statements: 151** (146 MUST, 5 SHOULD).
 
 ---
 
@@ -5637,13 +5695,14 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.70  | 2026-11-20 | Amendment for issue #4234 (zip registry archives). Revised [req-sc-004](#req-sc-004) (Section 10.5, consumer MUST) in place: clause (a) admits `application/zip` alongside `tar.gz` and rejects every other container; (c) counts entries as they are read; a new clause (d) refuses path traversal, absolute paths, symbolic and hard links and duplicate entry paths; and the limit set (b) through (d) applies identically to both containers. A violation fails closed and leaves no entry of the archive extracted. Under Section 9.2 this changes evaluations defined by a normative statement, so it is an amendment, not errata. The reserved Appendix B archive-container item is aligned. Proposed and adopted 2026-11-20 in this Working Draft by editor decision recorded in issue #4234, without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.71  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-lk-015](#req-lk-015) (Section 5.6.4, consumer MUST) in place, re-anchoring git-source integrity: every git-sourced lock entry records `content_hash`, a `sha256` envelope over the package tree whose byte stream follows [req-lk-016](#req-lk-016); a frozen install and `apm audit` recompute it at `resolved_commit` and fail closed with a diagnostic naming the entry, the expected envelope and the observed envelope. The canonical git tree hash `tree_sha256` and its Section 5.6.4 byte representation are reserved for v0.2; the Section 5.2 field table, the Section 5.6.4 editorial note, the Section 7.5 lockfile-replay prose and the informative lockfile examples are aligned. Under Section 9.2 this changes the field a normative statement names, so it is an amendment, not errata; the integrity obligation itself is unchanged. Schema bytes and `lockfile_version` are unchanged. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.72  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-sc-005](#req-sc-005) (Section 10.3, consumer MUST) in place: beside identical eTLD+1 (a) and an explicit `aliases:` entry (b), a third basis (c) admits the built-in GitHub-operated host class, which is `github.com` and every `*.ghe.com` host, plus a GitHub Enterprise Server host only when the operator names it through the `GITHUB_HOST` setting, never through a manifest. An implementation that uses (c) documents the class in its conformance statement and applies it under the [req-sc-013](#req-sc-013) determinism and precedence rules. Basis (c) covers only those hosts and does not widen (a) or (b) for any other host. Under Section 9.2 this changes an evaluation defined by a normative statement, so it is an amendment, not errata. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
-| 0.1.73 (proposed) | 2026-11-20 | Amendment for issue #3921 (native plugins at project scope for Claude Code and GitHub Copilot; PR #4010). Pending editor decision; the number is provisional. Revised the [req-na-002](#req-na-002) root digest clause in place: at project scope, where the deployed roots and the lockfile are shared project files, the recorded root digest omits the executable-bit byte (it equals the [req-na-005](#req-na-005) approval digest construction), and the consumer compares the deployed root with the materialized source under the executable-bit-including construction on the deploying machine before writing activation entries, without recording that comparison; the editorial note is rewritten accordingly. Revised criterion [A5](#na-crit-a5) in place: at project scope, a target that documents which other target's files it reads but not their precedence meets A5 for a consumer that discloses the file priority it verified against a cited client version, with a conformance test that runs that client where installed and skips where not. Revised [req-na-004](#req-na-004) in place: at project scope, in the settings file of a target that also reads another target's file at lower priority, the enable key of a plugin the consumer declares to that other target is the consumer's own, written `false` when the plugin's effective targets exclude the reading target (cross-target suppression) and changed or removed as targets or the lockfile change; every other `false` stays untouched. Part C (informative) records GitHub Copilot CLI as native-eligible at project scope under that test, with the order `.claude/settings.json` < `.claude/settings.local.json` < `.github/copilot/settings.json` < `.github/copilot/settings.local.json` verified against Copilot CLI 1.0.112, records that a Claude-only plugin gets the consumer's own `false` in `.github/copilot/settings.json`, and records that the Copilot route of [req-tg-013](#req-tg-013) moved to this profile. The Section 5.2 `native_plugin` row is updated and names the optional sibling `native_declared` (the targets whose settings held the consumer's `true` when the lock was written), which is advisory and not trust-bearing: it has no identity, replay or ownership role. [req-na-005](#req-na-005) is unchanged. Under Section 9.2 this changes verdicts: a project-scope consumer that records the executable bit in the committed root digest, that does not compare the bit on the deploying machine, or that lets Copilot load a plugin activated for Claude Code alone, no longer conforms; a project-scope root digest recorded with the bit is reported as drift until the next install records it without. Sections 5.2 and 8.5.11 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 148 (143 MUST, 5 SHOULD). |
+| 0.1.73 (proposed) | 2026-11-21 | Amendment for accepted issue #2903 (root project marketplace map). Added Section 4.2.5 `marketplaces` and two consumer MUSTs, both conditional on resolving marketplace references, which stay non-normative in v0.1. [req-mf-028](#req-mf-028): the root project manifest may declare a `marketplaces:` list (`name`, `source`, optional `ref`); malformed, unknown-key and duplicate-name entries are rejected; a declared name resolves through its entry, never through a same-named user or machine registration; names are manifest-local and the lockfile records the catalog origin and resolved commit; a declared entry is never persisted to a user-level or machine-level registry. [req-mf-029](#req-mf-029): a dependency whose manifest declares `marketplaces:` is refused, and when the root declares the list a transitive marketplace reference must name a root-declared entry or resolution fails with a diagnostic naming the entry to add. Under Section 9.2, a consumer that resolves marketplace references and ignores a dependency's `marketplaces:` key, or lets a same-named registration override a root declaration, no longer conforms; the reference implementation previously refused the key in every project and package manifest. Sections 1.3, 4.2, 4.9, 7.1, 11.3.2, Appendix C, the requirements manifest, a conformance fixture and conformance coverage are updated; schema bytes are unchanged (the manifest schemas already admit unknown top-level keys). Adds two MUSTs. Statement count: 149 -> 151 (146 MUST, 5 SHOULD). |
+| 0.1.74 (proposed) | 2026-11-20 | Amendment for issue #3921 (native plugins at project scope for Claude Code and GitHub Copilot; PR #4010). Pending editor decision; the number is provisional. Revised the [req-na-002](#req-na-002) root digest clause in place: at project scope, where the deployed roots and the lockfile are shared project files, the recorded root digest omits the executable-bit byte (it equals the [req-na-005](#req-na-005) approval digest construction), and the consumer compares the deployed root with the materialized source under the executable-bit-including construction on the deploying machine before writing activation entries, without recording that comparison; the editorial note is rewritten accordingly. Revised criterion [A5](#na-crit-a5) in place: at project scope, a target that documents which other target's files it reads but not their precedence meets A5 for a consumer that discloses the file priority it verified against a cited client version, with a conformance test that runs that client where installed and skips where not. Revised [req-na-004](#req-na-004) in place: at project scope, in the settings file of a target that also reads another target's file at lower priority, the enable key of a plugin the consumer declares to that other target is the consumer's own, written `false` when the plugin's effective targets exclude the reading target (cross-target suppression) and changed or removed as targets or the lockfile change; every other `false` stays untouched. Part C (informative) records GitHub Copilot CLI as native-eligible at project scope under that test, with the order `.claude/settings.json` < `.claude/settings.local.json` < `.github/copilot/settings.json` < `.github/copilot/settings.local.json` verified against Copilot CLI 1.0.112, records that a Claude-only plugin gets the consumer's own `false` in `.github/copilot/settings.json`, and records that the Copilot route of [req-tg-013](#req-tg-013) moved to this profile. The Section 5.2 `native_plugin` row is updated and names the optional sibling `native_declared` (the targets whose settings held the consumer's `true` when the lock was written), which is advisory and not trust-bearing: it has no identity, replay or ownership role. [req-na-005](#req-na-005) is unchanged. Under Section 9.2 this changes verdicts: a project-scope consumer that records the executable bit in the committed root digest, that does not compare the bit on the deploying machine, or that lets Copilot load a plugin activated for Claude Code alone, no longer conforms; a project-scope root digest recorded with the bit is reported as drift until the next install records it without. Sections 5.2 and 8.5.11 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 151 (146 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.73 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place; none adds a statement. Together, this
 working draft
-contains 149 statements (144 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 151 statements (146 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
 Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004), [req-lk-015](#req-lk-015) and [req-sc-005](#req-sc-005) in place and add no statement.

@@ -9,17 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
+
+### Added
+
 - The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, now verified end to end against the Registry HTTP API on every PR. (#4015)
+- The CLI reference lists every deprecation with its replacement, the version that deprecated it and its removal horizon; warning text is unchanged. (closes #4019, #4035)
 
 ### Changed
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+- An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
 
 ### Fixed
 
 - Project installs deploy Claude-format plugins whole to the committed `.agents/plugins/` and declare them in Claude Code and GitHub Copilot settings, so `obra/superpowers` installs with its hooks approved. (closes #3921, #4559)
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
 - `apm install` (including `--frozen`) replays a registry package after its registry moves, fetching from the configured registry when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
+- `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
+
+### Security
+
+- A dispatched nightly lifecycle run tests only a commit on `main` or a `release/*` branch and refuses any other `ref` before checkout. (closes #4551, #4563)
+- Release CI refuses to publish a `v*` tag whose commit is not on `main` or a `release/*` branch, and fails closed when it cannot check. (closes #3778, #4568)
 
 ## [0.37.0] - 2026-11-21
 

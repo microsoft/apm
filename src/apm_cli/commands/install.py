@@ -287,7 +287,7 @@ def _resolve_package_references(
     invalid_outcomes = []  # (package, reason) tuples
     # Marketplace ref pins each requested package staged while it resolved.
     pins_by_package: dict[str, frozenset] = {}
-    _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
+    _marketplace_provenance = {}  # unique key -> {discovered_via, marketplace_plugin_name}
     _apm_yml_entries = {}  # canonical -> apm.yml entry (str or dict for HTTP deps)
     validated_packages = []
     dependencies_changed = False
@@ -493,7 +493,8 @@ def _resolve_package_references(
             if updates_existing_entry and updated_packages_out is not None:
                 updated_packages_out.append(canonical)
             if marketplace_provenance:
-                _marketplace_provenance[identity] = marketplace_provenance
+                # Keyed like the lock and the policy gate (host-qualified on GHE).
+                _marketplace_provenance[dep_ref.get_unique_key()] = marketplace_provenance
         else:
             reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
@@ -566,9 +567,18 @@ def _validate_and_add_packages_to_apm_yml(
 
     _default_registry_for_cli = get_effective_default_registry(data, create_config=create_config)
 
+    from ..core.scope import InstallScope
+    from ..marketplace.project_marketplaces import bind_project_marketplaces
+    from ..marketplace.user_manifest import validate_marketplaces_declaration
+
+    # ``plugin@name`` resolves through the root ``marketplaces:`` map (#2903).
+    project_marketplaces = bind_project_marketplaces(
+        validate_marketplaces_declaration(data, apm_yml_path),
+        user_scope=scope is InstallScope.USER,
+    )
     # Shorthand packages and existing entries resolve against this manifest's
     # ``default_host:``, and new entries strip only that host (req-mf-019).
-    with manifest_host:
+    with manifest_host, project_marketplaces:
         dep_section, current_deps, other_deps = dependency_sections(data, dev=dev)
         cross_section = borrow_cross_section_declarations(
             packages, current_deps, other_deps, dev=dev

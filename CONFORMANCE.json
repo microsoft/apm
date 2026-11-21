@@ -1282,6 +1282,38 @@
       ]
     },
     {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-028",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_declared_name_wins_and_is_never_registered",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_root_manifest_map_is_accepted_and_validated"
+      ]
+    },
+    {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ],
+      "conformance_class": "consumer",
+      "id": "req-mf-029",
+      "keyword": "MUST",
+      "section": "4.2.5",
+      "status": "active",
+      "test_count": 2,
+      "tests": [
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_dependency_declared_map_is_refused",
+        "tests/spec_conformance/test_root_marketplaces_reqs.py::test_transitive_reference_must_name_a_root_declared_entry"
+      ]
+    },
+    {
       "behavioral_tests": [],
       "conformance_class": "consumer",
       "id": "req-na-001",
@@ -1723,6 +1755,7 @@
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ],
       "conformance_class": "governance",
@@ -1730,12 +1763,13 @@
       "keyword": "MUST",
       "section": "6.3.1",
       "status": "active",
-      "test_count": 5,
+      "test_count": 6,
       "tests": [
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_qualified_patterns_match_effective_host",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_host_recognition_grammar_and_scope",
         "tests/spec_conformance/test_policy_reqs.py::test_policy_identity_casing_matches_dependency_source_semantics",
         "tests/spec_conformance/test_policy_reqs.py::test_require_entry_is_one_host_bound_identity_on_manifest_and_lockfile",
+        "tests/spec_conformance/test_policy_reqs.py::test_require_reads_the_lock_row_written_for_an_explicit_proxy_url",
         "tests/spec_conformance/test_policy_reqs.py::test_required_package_matching_follows_source_replacement"
       ]
     },
@@ -3277,7 +3311,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 107,
+      "active": 109,
       "partial": 1,
       "skipped": 3,
       "text-only": 3,
@@ -3309,5 +3343,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 149
+  "total_requirements": 151
 }

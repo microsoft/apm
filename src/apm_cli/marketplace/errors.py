@@ -319,3 +319,46 @@ class GitLsRemoteError(BuildError):
             f"{summary} {hint}",
             package=package,
         )
+
+
+class UndeclaredMarketplaceError(MarketplaceError):
+    """A transitive dependency names a marketplace the root project does not declare.
+
+    Raised only when the root ``apm.yml`` declares ``marketplaces:``
+    (#2903 D3): every ``marketplace: <name>`` in the graph must then resolve
+    through that map, so a name cannot mean different things on different
+    machines.
+    """
+
+    def __init__(self, name: str, plugin_name: str, required_by: str):
+        self.name = name
+        self.plugin_name = plugin_name
+        self.required_by = required_by
+        super().__init__(
+            f"marketplace '{name}' is not declared in the root apm.yml, and a "
+            "transitive dependency may only use marketplaces the root declares. "
+            f"Add it to apm.yml:\n  marketplaces:\n    - name: {name}\n"
+            "      source: <catalog repository URL>"
+        )
+
+
+class ProjectMarketplaceOriginConflictError(MarketplaceOriginConflictError):
+    """``--frozen`` met a lock row from an origin the root ``apm.yml`` no longer declares.
+
+    The file wins (#2903 D3), so a plain install re-resolves through the map;
+    ``--frozen`` only replays the lock and refuses instead.
+    """
+
+    def __init__(self, marketplace_name: str, plugin_name: str, locked: str, current: str):
+        self.marketplace_name = marketplace_name
+        self.plugin_name = plugin_name
+        self.locked_origin = locked
+        self.current_origin = current
+        from ..core.remediation import MARKETPLACE_PROJECT_ORIGIN_RELOCK
+
+        MarketplaceError.__init__(
+            self,
+            f"marketplace {marketplace_name!r} in apm.yml now points at {current}, but "
+            f"apm.lock.yaml recorded {plugin_name!r} from {locked}. Nothing was changed. "
+            + MARKETPLACE_PROJECT_ORIGIN_RELOCK.sentence(),
+        )

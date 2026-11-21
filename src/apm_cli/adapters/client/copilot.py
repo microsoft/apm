@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from ...core.command_logger import library_logger
+from ...core.deprecations import deprecation_message
 from ...core.token_manager import GitHubTokenManager
 from ...mcp_transport import canonical_remote_transport
 from ...models.dependency.mcp import TrustedEnvLiteral
@@ -409,9 +410,9 @@ class CopilotClientAdapter(MCPClientAdapter):
             noun = "server" if count == 1 else "servers"
             _emit_separator_once()
             library_logger().warning(
-                f"Deprecated: <VAR> placeholder syntax used in {count} {noun} "
-                f"({', '.join(servers)}). Migrate to ${{VAR}} in apm.yml. "
-                f"<VAR> support will be removed in v1.0.",
+                deprecation_message(
+                    "mcp-angle-var", count=count, noun=noun, servers=", ".join(servers)
+                ),
                 symbol="warning",
             )
         cls._install_run_summary_emitted = True

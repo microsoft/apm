@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from apm_cli.agent_plugins.ir import AgentPlugin
     from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.marketplace.user_manifest import DeclaredMarketplace
     from apm_cli.models.dependency.replacement import ReplacementRule
 
 _log = logging.getLogger(__name__)
@@ -363,7 +364,8 @@ _KNOWN_TOP_LEVEL_KEYS = frozenset(
         "compilation",
         "policy",
         "marketplace",
-        # User-manifest only; rejected elsewhere by marketplace.user_manifest.
+        # User manifest and root project only; the resolver refuses it in a
+        # dependency (marketplace.user_manifest, #2903).
         "marketplaces",
         "allowExecutables",
         "executables",
@@ -539,6 +541,11 @@ class APMPackage:
     # not declare them (enforced by the resolver, not the parser).
     # ``None`` means the key was absent; ``[]`` means it was present but empty.
     replace_rules: "list[ReplacementRule] | None" = None
+
+    # ``marketplaces:`` map (#2903 D3). Counts only in the user manifest and
+    # the root project; the resolver refuses it in a dependency. ``None``
+    # means the key was absent; ``()`` means present but empty.
+    marketplaces: "tuple[DeclaredMarketplace, ...] | None" = None
 
     target_declaration: ManifestTargetDeclaration | None = field(
         default=None, repr=False, compare=False
@@ -840,7 +847,7 @@ class APMPackage:
 
         from ..marketplace.user_manifest import validate_marketplaces_declaration
 
-        validate_marketplaces_declaration(data, source_manifest)
+        marketplaces = validate_marketplaces_declaration(data, source_manifest)
 
         # Parse root-owned ``replace:`` block.  Only present in the consumer
         # root manifest; dependency manifests should not declare it (enforced
@@ -900,6 +907,7 @@ class APMPackage:
             allow_executables=allow_executables,
             extensions=extensions,
             replace_rules=replace_rules,
+            marketplaces=marketplaces,
         )
         return result
 

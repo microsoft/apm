@@ -410,11 +410,22 @@ another commit fails until `apm update <name>@<marketplace>`); one with no
 locked servers (`--only=apm`, root-overridden server) fails its content-hash
 check when cold -- run `apm update` for it.
 
-The `marketplace` value names a marketplace registered with
-`apm marketplace add` or declared in the user manifest's `marketplaces:`
-list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
-`apm install -g`). Dependencies and
-project manifests cannot declare `marketplaces:`.
+The `marketplace` value names a marketplace declared in the root project's
+`marketplaces:` map, registered with `apm marketplace add`, or declared in the
+user manifest's `marketplaces:` list (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`, reconciled by `apm install -g`).
+
+A root project `apm.yml` may declare `marketplaces:` in the user-manifest
+shape (`name`, `source`, optional `ref`). `apm install` and `apm update` then
+resolve those names with no registration (fresh clone, CI). The map is never
+written to the marketplace registry; inside the project it wins over a
+same-named registration, with one `[i]` line, and over a lock row recorded
+from another catalog: `apm install` / `apm update` re-resolve it through the
+map (one `[i]` line); `apm install --frozen` refuses. When the root declares a map,
+a transitive `marketplace: <name>` must name one of its entries, or the
+install fails showing the entry to add. A dependency's `apm.yml` that
+declares `marketplaces:` is refused. Org policy `marketplace.allow` can
+restrict the declared and locked catalogs (see governance.md).
 `apm uninstall name@marketplace` removes an object-form entry offline, with
 its lock row and deployed files.
 

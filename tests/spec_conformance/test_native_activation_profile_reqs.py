@@ -409,14 +409,14 @@ def test_project_scope_declares_a_relative_path_under_a_per_project_name(
 def test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine(
     tmp_path: Path,
 ) -> None:
-    """Amendment 0.1.73: the committed digest is the approval digest construction."""
+    """Amendment 0.1.74: the committed digest is the approval digest construction."""
     from apm_cli.claude_plugins.registrar import _machine_hash
     from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
 
     assert_spec_contains(
         "At project scope, where the deployed plugin\nroots and the lockfile are project files "
         "shared between machines, the\nrecorded root digest MUST omit the executable-bit byte",
-        "MUST NOT record that comparison in\nthe lockfile (amendment 0.1.73)",
+        "MUST NOT record that comparison in\nthe lockfile (amendment 0.1.74)",
     )
     root = tmp_path / "plugin"
     (root / "hooks").mkdir(parents=True)
@@ -435,9 +435,9 @@ def test_project_scope_root_digest_omits_the_exec_bit_and_checks_it_per_machine(
 
 @pytest.mark.req("req-na-004")
 def test_cross_target_suppression_is_the_consumers_own_false() -> None:
-    """Amendment 0.1.73: APM owns Copilot's key for a plugin it declares to Claude."""
+    """Amendment 0.1.74: APM owns Copilot's key for a plugin it declares to Claude."""
     assert_spec_contains(
-        "(cross-target suppression, amendment 0.1.73)",
+        "(cross-target suppression, amendment 0.1.74)",
         "writes a `false` enable value for it in `.github/copilot/settings.json`",
     )
     owned = frozenset({"alpha", "beta"})
