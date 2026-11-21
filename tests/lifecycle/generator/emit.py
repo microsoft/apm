@@ -6,8 +6,10 @@ Outputs (sorted, ASCII, no time and no randomness):
   family, required strength, status and owning lane; ``required`` ones name
   the covering row that witnesses them, ``known-failing`` ones the tracking
   issue, ``baseline`` ones the lane and issue that must discharge them. Mapped
-  and removed cells keep their rule chain. ``sha256`` hashes the canonical
-  content (the document without that key), which includes the row hashes.
+  and removed cells keep their rule chain. The file holds no aggregate that
+  every change would rewrite (status counts, a content hash), so two PRs that
+  credit different cells merge cleanly; ``--counts`` prints the counts and
+  ``--check`` proves the file is a fresh generation.
 - ``tests/lifecycle/replay/rows/generated_<row id>.yaml``: the covering rows.
 """
 
@@ -18,6 +20,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -159,8 +162,23 @@ def _counts(space: Space, statuses: Mapping[str, str], lanes: Mapping[str, str],
     }
 
 
+def render(document: dict[str, Any]) -> str:
+    """The checked-in text of the obligation list: one key per line, sorted, ASCII."""
+    return json.dumps(document, indent=1, sort_keys=True, ensure_ascii=True) + "\n"
+
+
 def generate() -> tuple[str, dict[str, str]]:
     """(obligation list JSON text, row file name -> YAML text)."""
+    document, _, rendered = _build()
+    return render(document), rendered
+
+
+def counts() -> dict[str, object]:
+    """Status, lane, family and rule counts of a fresh generation (``--counts``)."""
+    return _build()[1]
+
+
+def _build() -> tuple[dict[str, Any], dict[str, object], dict[str, str]]:
     space = build_space()
     rows = covering.cover(space.obligations)
     witness = {
@@ -246,7 +264,6 @@ def generate() -> tuple[str, dict[str, str]]:
             rule: {"text": text, "evidence": [str(item) for item in evidence]}
             for rule, (text, evidence) in sorted(RULES.items())
         },
-        "counts": _counts(space, statuses, lanes, rows),
         "rows": {
             name: hashlib.sha256(text.encode("ascii")).hexdigest()
             for name, text in sorted(rendered.items())
@@ -259,10 +276,7 @@ def generate() -> tuple[str, dict[str, str]]:
         "removed": {key: list(rules) for key, rules in sorted(space.removed.items())},
         "pins": {"U-BIN": predicate_digest()},
     }
-    canonical = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    document["sha256"] = hashlib.sha256(canonical.encode("ascii")).hexdigest()
-    text = json.dumps(document, indent=1, sort_keys=True, ensure_ascii=True) + "\n"
-    return text, rendered
+    return document, _counts(space, statuses, lanes, rows), rendered
 
 
 def drift() -> list[str]:
