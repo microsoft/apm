@@ -431,7 +431,9 @@ def _run_refused(
     if local:
         both = " ".join((result.stdout + result.stderr).split())
         assert result.returncode == 1, both
-        assert f"Kept {entry}:" in both and "Move it aside, then run 'apm install'" in both, both
+        # The receipt proves the edit, so the refusal names the true reason (RA-012).
+        assert kept_edit_message(entry, user_scope=False, proven_edit=True) in both, both
+        assert "no local deployment receipt" not in both, both
         assert kept.read_bytes() == before
         return
     assert result.returncode == 0, text
