@@ -340,28 +340,39 @@ class TestLedger:
             {"ledger": "abc1234", "requested": "def5678"},
         )
 
-    def test_gate_is_pending_on_an_unbound_ledger(self) -> None:
+    def test_gate_is_pending_on_an_unbound_ledger(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """No walk recorded for any SHA: never GO (#4586)."""
-        row = findings.gate_row({"sha": None, "findings": []}, "abc1234")
+        ledger = tmp_path / "findings.json"
+        ledger.write_text(json.dumps({"sha": None, "findings": []}), encoding="utf-8")
+        assert findings.main(["gate-row", "--ledger", str(ledger), "--sha", "abc1234"]) == 0
+        row = json.loads(capsys.readouterr().out)
         assert (row["verdict"], row["unbound_ledger"]) == ("PENDING-VERIFICATION", True)
 
     def test_gate_is_pending_on_a_missing_ledger(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         missing = tmp_path / "findings.json"
-        assert findings.gate_row(findings.load_ledger(missing), "abc1234")["verdict"] == (
-            "PENDING-VERIFICATION"
-        )
         assert findings.main(["gate-row", "--ledger", str(missing), "--sha", "abc1234"]) == 2
-        assert json.loads(capsys.readouterr().out)["verdict"] == "PENDING-VERIFICATION"
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["verdict"] == "PENDING-VERIFICATION"
+        assert f"findings: ledger not found: {missing}" in captured.err
 
-    def test_add_with_sha_binds_a_walk_without_findings(self) -> None:
-        ledger = {"sha": None, "findings": []}
-        findings.add(ledger, [], "abc1234")
-        assert findings.gate_row(ledger, "abc1234")["verdict"] == "GO"
-        assert findings.gate_row(ledger, "def5678")["verdict"] == "PENDING-VERIFICATION"
-        with pytest.raises(findings.LedgerError, match="bound to abc1234"):
-            findings.add(ledger, [], "def5678")
+    def test_add_with_sha_binds_a_walk_without_findings(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ledger, empty = tmp_path / "findings.json", tmp_path / "none.jsonl"
+        empty.write_text("", encoding="utf-8")
+        add = ["add", "--ledger", str(ledger), "--findings", str(empty)]
+        assert findings.main([*add, "--sha", "abc1234"]) == 0
+        assert json.loads(ledger.read_text(encoding="utf-8"))["sha"] == "abc1234"
+        capsys.readouterr()
+        for sha, verdict in (("abc1234", "GO"), ("def5678", "PENDING-VERIFICATION")):
+            assert findings.main(["gate-row", "--ledger", str(ledger), "--sha", sha]) == 0
+            assert json.loads(capsys.readouterr().out)["verdict"] == verdict
+        assert findings.main([*add, "--sha", "def5678"]) != 0
+        assert "bound to abc1234" in capsys.readouterr().err
 
     def test_recheck_must_cover_every_unresolved_finding(self) -> None:
         ledger = {"sha": None, "findings": []}

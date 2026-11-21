@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 pytestmark = [
-    pytest.mark.component,
+    pytest.mark.unit,
     pytest.mark.promise("P-OWN-native-lifecycle-evidence"),
 ]
 

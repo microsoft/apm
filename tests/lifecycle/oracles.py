@@ -814,7 +814,7 @@ class Evidence:
     observed: object = _UNSET
 
     def assertion_facts(self) -> bool:
-        """At least one checked fact: state, an output line, or an expected/observed pair.
+        """At least one checked fact: state, an output fact, or an expected/observed pair.
 
         A pinned exit code is the CLI result's expected/observed pair.
         """
@@ -822,6 +822,7 @@ class Evidence:
             self.state_facts()
             or self.output_matches
             or self.output_forbids
+            or self.ascii_output
             or self.exit is not None
             or self.expected is not _UNSET
         )

@@ -203,12 +203,13 @@ def test_e2e_receipt_needs_an_assertion_fact() -> None:
         oracles.Evidence(exit=0),
         oracles.Evidence(output_matches=(r"^$|.",)),
         oracles.Evidence(output_forbids=(r"Traceback",)),
+        oracles.Evidence(ascii_output=True),
         oracles.Evidence(expected=1, observed=1),
     ):
         oracles.check_obligation(
             "G|install|local-deny|hook", strength="e2e", result=_result(), evidence=facts
         )
-    assert len(receipts.earned()) == start + 4
+    assert len(receipts.earned()) == start + 5
 
 
 def test_check_obligation_credits_only_verified_evidence(tmp_path: Path) -> None:
