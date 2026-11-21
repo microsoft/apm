@@ -231,6 +231,17 @@ def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str
     )
 
 
+def edit_kind(recorded: object, rendered: object) -> str:
+    """Classify a proven user edit of an output APM recorded deploying as *recorded*.
+
+    ``"drift"`` when the package still renders *recorded* (nothing new to
+    deploy: kept, reported, exit 0); ``"blocked"`` when it renders something
+    new that the kept edit holds back (exit 1). Files compare hashes, LSP
+    server entries compare rendered entries (#4398, RA-012, #4626).
+    """
+    return "drift" if rendered == recorded else "blocked"
+
+
 def kept_entry_message(subject: str, *, user_scope: bool, proven_edit: bool) -> str:
     """Name a managed config entry install kept (an LSP server, #4626).
 
@@ -444,8 +455,6 @@ class BaseIntegrator:
         to deploy: kept, reported, exit 0); ``"blocked"`` when it renders new
         bytes the edit holds back. ``None`` without a receipt.
         """
-        from apm_cli.core.deployment_ledger import edit_kind
-
         receipted = self._receipted_hash(path)
         if receipted is None or self._file_hash(path) in (None, receipted):
             return None
@@ -476,7 +485,6 @@ class BaseIntegrator:
         upgrade the kept edit blocks). A file that already holds the package's
         bytes is rewritten, which records them.
         """
-        from apm_cli.core.deployment_ledger import edit_kind
         from apm_cli.utils.content_hash import compute_file_hash
 
         if not target_file.is_file():

@@ -704,17 +704,6 @@ def recorded_writes(
         )
 
 
-def edit_kind(recorded: object, rendered: object) -> str:
-    """Classify a proven user edit of an output APM recorded deploying as *recorded*.
-
-    ``"drift"`` when the package still renders *recorded* (nothing new to
-    deploy: kept, reported, exit 0); ``"blocked"`` when it renders something
-    new that the kept edit holds back (exit 1). Files compare hashes, LSP
-    server entries compare rendered entries (#4398, RA-012, #4626).
-    """
-    return "drift" if rendered == recorded else "blocked"
-
-
 @dataclass(frozen=True)
 class OverwriteGate:
     """The evidence one integrator call needs to replace a deployed file (#4360).
@@ -769,6 +758,7 @@ class OverwriteGate:
         ``"drift"`` when the package renders the recorded bytes (a user edit
         with nothing new to deploy), ``"blocked"`` when it renders new bytes.
         """
+        from apm_cli.integration.base_integrator import edit_kind
         from apm_cli.utils.content_hash import compute_file_hash
 
         recorded = self.session.legacy_recorded_hash(claim) if self.session else None

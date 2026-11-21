@@ -895,7 +895,7 @@ class LSPIntegrator:
         locked config. Otherwise it is kept: ``"unproven"`` without a locked
         render, else the proven edit's ``"drift"`` or ``"blocked"``.
         """
-        from apm_cli.core.deployment_ledger import edit_kind
+        from apm_cli.integration.base_integrator import edit_kind
 
         if locked is None:
             return "unproven"
