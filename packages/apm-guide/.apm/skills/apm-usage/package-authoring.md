@@ -140,7 +140,8 @@ symlinked source files and names each skipped link in a warning.
 
 `apm install <bundle>` (a packed Claude plugin bundle) registers plugin hooks
 like a source install once the bundle key is approved; see
-[Hook files](#hook-files).
+[Hook files](#hook-files). It copies other bundle files into each target's
+layout, except agents for Codex, which it renders to TOML in `.codex/agents/`.
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between

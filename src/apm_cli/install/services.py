@@ -15,10 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
-from apm_cli.core.remediation import (
-    CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS,
-    CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT,
-)
+from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
 from .deployed_paths import destination_tree_lines as _destination_tree_lines
@@ -27,9 +24,11 @@ from .deployed_paths import log_hook_display_payloads as _log_hook_display_paylo
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
+from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
+from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
@@ -139,11 +138,7 @@ def _check_native_claude_transition(
         failed = ", ".join(reconcile_stats.get("failed_paths", []))
         recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
         if not reconcile_stats.get("errors"):
-            switch = (
-                CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
-                if flag
-                else CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT
-            )
+            switch = claude_native_switch_loose_hooks(user_scope=bool(flag))
             recovery = switch.bind(package=package).sentence()
         raise ClaudeNativePluginError(
             f"Cannot switch {package} to a native plugin. Hook settings were preserved. {recovery}"
@@ -316,9 +311,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     ):
         return result
 
-    # A native Agent Plugin stays opaque: Copilot loads it whole from .agents/plugins,
-    # so decomposing it would double-load it. This fires only AFTER target narrowing
-    # (excluding copilot registers nothing) and AFTER the executable trust gate.
+    # A native Agent Plugin stays opaque (Copilot loads it whole from .agents/plugins); this
+    # fires only AFTER target narrowing and AFTER the executable trust gate.
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
@@ -1095,6 +1089,28 @@ def integrate_local_bundle(
                     )
             except ValueError:
                 record = dest.as_posix()
+
+            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
+                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+            ):
+                skipped += _deploy_bundle_codex_agent(
+                    src,
+                    dest,
+                    rel_path=_rel_norm,
+                    record=record,
+                    collision_roots=(project_root, deploy_root),
+                    expected_hash=expected_hash,
+                    target_name=target.name,
+                    slug=str(slug),
+                    force=force,
+                    dry_run=dry_run,
+                    diagnostics=diagnostics,
+                    logger=logger,
+                    deployed_files=deployed_files,
+                    deployed_hashes=deployed_hashes,
+                    written_files=written_files,
+                )
+                continue
 
             normalized_text = _normalized_bundle_text(src)
             if normalized_text is None:

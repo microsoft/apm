@@ -727,7 +727,6 @@
       "tests/integration/test_install_cli_cursor_claude_import_recheck_e2e.py": 3,
       "tests/integration/test_install_local_bundle_e2e.py": 4,
       "tests/integration/test_install_services_orchestration.py": 1,
-      "tests/integration/test_install_services_phase3w5.py": 1,
       "tests/integration/test_install_subdir_dedup_e2e.py": 3,
       "tests/integration/test_install_target_copilot_app_e2e.py": 10,
       "tests/integration/test_install_validation_rules.py": 2,

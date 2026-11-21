@@ -865,6 +865,11 @@ def diff_scratch_against_project(
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
     local_bundle_paths = DeploymentLedgerCodec.local_bundle_paths(lockfile)
+    # An absolute claim under an external target root ($CODEX_HOME) is compared
+    # rebased onto that root, as its tracked claim is (#3714).
+    local_bundle_paths |= ReplayClaims.rebased(
+        local_bundle_paths, project_root, targets=tuple(targets), absolute_only=absolute_claims_only
+    )
     if local_bundle_paths:
         scratch_files = {
             relative_path: path

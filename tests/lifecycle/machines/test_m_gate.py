@@ -25,7 +25,10 @@ from tests.lifecycle.machines._gate_kit import (
     GateMachine,
     GateWorld,
 )
+from tests.lifecycle.machines._gate_matrix import GateMatrix, matrix_cells, replay_matrix
+from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
+from tests.lifecycle.receipts import current_node
 from tests.lifecycle.snapshot import restore_tree
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -165,6 +168,30 @@ def test_gate_generated_sequences_keep_cross_cutting_laws(
             suppress_health_check=(HealthCheck.too_slow,),
         ),
     )
+
+
+# Scopes the GATE matrix spine runs at (user scope joins with its own commands).
+MATRIX_SCOPES = ("project",)
+
+
+@pytest.mark.parametrize("scope", MATRIX_SCOPES)
+def test_gate_matrix_credits_op_prim_gate_cells(
+    lifecycle_template, tmp_path: Path, scope: str
+) -> None:
+    """Every command under every gate level keeps I1-I9 and earns its OP x PRIM x GATE ids."""
+    machine = GateMatrix(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), scope), scope)
+    replay_matrix(machine)
+    assert machine.expected_seen == set(), sorted(machine.expected_seen)
+    missing = matrix_cells(scope) - earned_cells(current_node(), "G1|")
+    assert not missing, f"GATE matrix ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends by uninstalling every package under the dependency deny.
+    leftovers = [
+        p
+        for p in (".agents/skills", ".github/hooks", ".github/extensions")
+        if (machine.bench.deploy_root / p).exists()
+        and any((machine.bench.deploy_root / p).iterdir())
+    ]
+    assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:

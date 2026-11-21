@@ -24,8 +24,9 @@ apm marketplace add contoso/agent-marketplace#v2.0.0 --name contoso
 Without `#ref` (or `--ref`), APM tracks the default branch and warns that it
 can move. `SOURCE` can also be a GitLab, Azure DevOps or other git URL, an SSH
 URL, a local folder, or a hosted `marketplace.json` URL. APM downloads
-hosted URLs over HTTPS with no credentials, so use a git-backed marketplace
-for private lists ([credentials](../../getting-started/authentication/#generic-marketplace-git-transport)).
+hosted URLs over HTTPS anonymously unless you register them with `--name`;
+a private hosted list then authenticates with `APM_MARKETPLACE_TOKEN_<NAME>`
+([private hosted catalogs](../../getting-started/authentication/#private-hosted-marketplace-catalogs)).
 If the file is not in a default location, pass `--path`.
 
 `apm marketplace list` shows what you registered; `apm marketplace remove

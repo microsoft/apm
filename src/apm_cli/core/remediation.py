@@ -458,6 +458,17 @@ MARKETPLACE_ALLOW_READD = _entry(
     before="remove its entry from apm.yml",
     then="add it back from an allowed catalog",
 )
+MARKETPLACE_CREDENTIAL_BIND = _entry(
+    "marketplace-credential-bind",
+    "apm marketplace add {url} --name {name}",
+    "bind that name to this catalog",
+    then="set {token} (Bearer), or {user} and {password} (Basic)",
+)
+MARKETPLACE_CREDENTIAL_REBIND = _entry(
+    "marketplace-credential-rebind",
+    "apm marketplace remove {name}",
+    "free the name for a new binding",
+)
 # -- end W2 marketplace --
 # -- W2 bundle --
 PACK_LOCKFILE_MISSING = _entry(
@@ -1474,6 +1485,15 @@ CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT = _entry(
     "remove the loose hook deployment",
     then="run 'apm install {package}' to activate it as a native plugin",
 )
+
+
+def claude_native_switch_loose_hooks(*, user_scope: bool) -> Remediation:
+    """The loose-hooks switch remedy for the scope the install runs at."""
+    return (
+        CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS if user_scope else CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS_PROJECT
+    )
+
+
 SKILL_PATH_MIGRATION_CONFLICT = _entry(
     "skill-path-migration-conflict",
     "apm install",

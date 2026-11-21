@@ -1,14 +1,14 @@
 {
  "counts": {
   "baseline_by_lane": {
-   "T-1": 254,
-   "T-2": 496,
+   "T-1": 133,
+   "T-2": 418,
    "T-3": 243,
    "T-6a": 201,
    "T-6b": 141,
    "T-6c": 28,
    "T-6e": 42,
-   "T-7b": 63
+   "T-7b": 47
   },
   "exception_pairs": 94,
   "mapped": 427,
@@ -50,8 +50,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1468,
-   "required": 1023
+   "baseline": 1253,
+   "known-failing": 1,
+   "required": 1237
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -2822,11 +2823,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -2837,11 +2842,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=approve-deny|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|approve|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -2872,11 +2881,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -2887,11 +2900,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=approve-deny|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|approve|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -2922,11 +2939,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -2937,11 +2958,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=approve-deny|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|approve|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -2972,11 +2997,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -2987,11 +3016,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=approve-deny|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|approve|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3014,6 +3047,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3021,8 +3057,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=approve-deny|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -3033,6 +3070,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=approve-deny|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|deny|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3040,8 +3080,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -3098,11 +3139,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -3113,11 +3158,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|audit|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3144,11 +3193,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=audit|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -3159,11 +3212,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=audit|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|audit|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3190,11 +3247,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=audit|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -3205,11 +3266,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=audit|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|audit|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3236,11 +3301,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=audit|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -3251,11 +3320,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=audit|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|audit|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3274,6 +3347,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=audit|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3281,8 +3357,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -3293,6 +3370,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=audit|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|audit|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3300,8 +3380,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=bundle-install|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -3626,11 +3707,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=compile|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -3641,11 +3726,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=compile|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|compile|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3664,25 +3753,37 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-04-lsp-canvas-local-multi-unapproved-mcp]"
   },
   "T1|OP=compile|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=other-file|GATE=denied-dependency": {
    "family": "T1",
@@ -3714,6 +3815,9 @@
    "strength": "e2e-evidence"
   },
   "T1|OP=compile|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3721,8 +3825,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -3733,6 +3838,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=compile|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|compile|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3740,8 +3848,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -3798,11 +3907,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -3813,11 +3927,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=install|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|install|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3844,11 +3962,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -3859,11 +3982,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=install|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|install|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3890,11 +4017,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -3905,11 +4037,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=install|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|install|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3936,11 +4072,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -3951,11 +4092,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=install|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|install|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -3974,6 +4119,10 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|skill|denied-dependency|project",
+    "G1|install|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -3981,8 +4130,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -3993,6 +4143,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=install|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|install|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4000,8 +4153,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -4058,11 +4212,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -4073,11 +4231,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=lock|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|lock|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -4104,11 +4266,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -4119,11 +4285,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=lock|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|lock|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -4150,11 +4320,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -4165,11 +4339,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=lock|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|lock|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -4196,11 +4374,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -4211,11 +4393,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=lock|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|lock|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -4234,6 +4420,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=lock|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4241,8 +4430,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -4253,6 +4443,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=lock|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|lock|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4260,8 +4453,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=marketplace|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -4569,6 +4763,9 @@
    "strength": "e2e-evidence"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=allowed": {
+   "credited_by": [
+    "G1|mcp-install|canvas|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4576,10 +4773,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4587,10 +4788,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=denied-executable": {
+   "credited_by": [
+    "G1|mcp-install|canvas|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4598,10 +4803,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4609,10 +4818,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|mcp-install|canvas|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4620,10 +4833,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=canvas|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|mcp-install|canvas|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4631,10 +4848,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=allowed": {
+   "credited_by": [
+    "G1|mcp-install|hook|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4642,10 +4863,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4653,10 +4878,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=denied-executable": {
+   "credited_by": [
+    "G1|mcp-install|hook|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4664,10 +4893,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4675,10 +4908,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|mcp-install|hook|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4686,10 +4923,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=hook|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|mcp-install|hook|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4697,10 +4938,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=allowed": {
+   "credited_by": [
+    "G1|mcp-install|lsp|allowed|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4708,10 +4953,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4719,10 +4968,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=denied-executable": {
+   "credited_by": [
+    "G1|mcp-install|lsp|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4730,10 +4983,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4741,10 +4998,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|mcp-install|lsp|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4752,10 +5013,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=lsp|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|mcp-install|lsp|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4763,8 +5028,9 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=allowed": {
    "family": "T1",
@@ -4809,6 +5075,9 @@
    "strength": "e2e"
   },
   "T1|OP=mcp-install|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4817,10 +5086,14 @@
     "U2",
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=skill|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|skill|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4828,10 +5101,14 @@
    "rules": [
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|mcp-install|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4840,8 +5117,9 @@
     "U2",
     "U7"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=pack|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -5149,11 +5427,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-04-lsp-canvas-local-multi-unapproved-mcp]"
   },
   "T1|OP=prune|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -5164,11 +5446,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=prune|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|prune|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5179,11 +5465,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=canvas|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|canvas|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=hook|GATE=allowed": {
    "family": "T1",
@@ -5194,11 +5484,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=prune|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -5209,11 +5503,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=prune|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|prune|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5224,11 +5522,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=hook|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|hook|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=allowed": {
    "family": "T1",
@@ -5239,11 +5541,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-04-lsp-canvas-local-multi-unapproved-mcp]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -5254,11 +5560,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|prune|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5269,11 +5579,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=lsp|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|lsp|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=allowed": {
    "family": "T1",
@@ -5284,11 +5598,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -5299,11 +5617,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|prune|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5314,13 +5636,20 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=mcp|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|mcp|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5328,8 +5657,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=prune|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -5340,6 +5670,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=prune|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|prune|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5347,8 +5680,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -5404,11 +5738,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-12-canvas-local-single-unapproved-mcp]"
   },
   "T1|OP=uninstall|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -5419,11 +5757,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=uninstall|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|uninstall|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5434,11 +5776,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-11-canvas-local-multi-approve-mcp]"
   },
   "T1|OP=uninstall|PRIM=canvas|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|uninstall|canvas|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=allowed": {
    "family": "T1",
@@ -5449,11 +5795,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -5464,11 +5814,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|uninstall|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5479,11 +5833,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-05-exec-git-single-approve-mcp]"
   },
   "T1|OP=uninstall|PRIM=hook|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|uninstall|hook|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=allowed": {
    "family": "T1",
@@ -5493,39 +5851,59 @@
    "strength": "e2e"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=denied-executable": {
+   "credited_by": [
+    "G1|uninstall|lsp|denied-executable|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|uninstall|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|uninstall|lsp|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=lsp|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|uninstall|lsp|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=allowed": {
    "family": "T1",
@@ -5536,11 +5914,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -5551,11 +5933,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|uninstall|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5566,13 +5952,20 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-05-exec-git-single-approve-mcp]"
   },
   "T1|OP=uninstall|PRIM=mcp|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|uninstall|mcp|unapproved-exec|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5580,8 +5973,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=uninstall|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -5592,6 +5986,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=uninstall|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|uninstall|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5599,8 +5996,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=bin|GATE=allowed": {
    "family": "T1",
@@ -5657,11 +6055,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|canvas|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=canvas|GATE=denied-executable": {
    "family": "T1",
@@ -5672,11 +6074,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=update|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|update|canvas|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5703,11 +6109,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|hook|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=hook|GATE=denied-executable": {
    "family": "T1",
@@ -5718,11 +6128,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=update|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|update|hook|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5749,11 +6163,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|lsp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=lsp|GATE=denied-executable": {
    "family": "T1",
@@ -5764,11 +6182,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "T1|OP=update|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|update|lsp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5795,11 +6217,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=mcp|GATE=denied-executable": {
    "family": "T1",
@@ -5810,11 +6236,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T1|OP=update|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|update|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "T1",
@@ -5833,6 +6263,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=update|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|skill|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5840,8 +6273,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=skill|GATE=none": {
    "family": "T1",
@@ -5852,6 +6286,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T1|OP=update|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|update|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5859,8 +6296,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T2|SCOPE=project|GATE=allowed|FROZEN=on": {
    "family": "T2",
@@ -5871,11 +6309,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T2|SCOPE=project|GATE=denied-dependency|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|skill|denied-dependency|project"
+   ],
    "family": "T2",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T2|SCOPE=project|GATE=denied-executable|FROZEN=on": {
    "family": "T2",
@@ -6687,11 +7133,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|install|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -6900,11 +7350,15 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=other-file": {
    "family": "T3",
@@ -6914,11 +7368,15 @@
    "strength": "e2e"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -7215,11 +7673,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|install|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -7236,18 +7698,26 @@
    "strength": "e2e"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|install|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|install|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=install|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -7608,11 +8078,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|lock|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -7629,18 +8103,26 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|lock|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8101,11 +8583,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|prune|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8122,18 +8608,26 @@
    "strength": "e2e"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|prune|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|prune|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=prune|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8433,11 +8927,15 @@
    "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|uninstall|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8454,18 +8952,26 @@
    "strength": "e2e"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|uninstall|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|uninstall|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=uninstall|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -8784,11 +9290,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|update|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -8805,18 +9315,26 @@
    "strength": "e2e"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|update|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|update|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=update|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
@@ -10977,11 +11495,19 @@
    "strength": "e2e"
   },
   "pair|GATE=denied-dependency|FROZEN=on": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|GATE=denied-dependency|NET=offline": {
    "family": "pair",
@@ -12493,11 +13019,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=approve-deny|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|canvas|denied-dependency|project",
+    "G1|approve|hook|denied-dependency|project",
+    "G1|approve|lsp|denied-dependency|project",
+    "G1|approve|mcp|denied-dependency|project",
+    "G1|approve|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=approve-deny|GATE=denied-executable": {
    "family": "pair",
@@ -12821,11 +13355,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=audit|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|canvas|denied-dependency|project",
+    "G1|audit-ci|hook|denied-dependency|project",
+    "G1|audit-ci|lsp|denied-dependency|project",
+    "G1|audit-ci|mcp|denied-dependency|project",
+    "G1|audit-ci|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=audit|GATE=denied-executable": {
    "family": "pair",
@@ -13179,11 +13721,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|FORCE=on": {
+   "credited_by": [
+    "X|install|bundle|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|GATE=allowed": {
    "family": "pair",
@@ -13221,11 +13767,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|bundle|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|LOCK=absent": {
    "family": "pair",
@@ -13263,11 +13813,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|NET=online": {
+   "credited_by": [
+    "X|install|bundle|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|NOPOLICY=on": {
    "family": "pair",
@@ -13306,11 +13860,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|PRIM=lsp": {
+   "credited_by": [
+    "T3|install|bundle|lsp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|PRIM=mcp": {
    "credited_by": [
@@ -13338,11 +13896,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|SCOPE=project": {
+   "credited_by": [
+    "X|install|bundle|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|SCOPE=user": {
    "family": "pair",
@@ -13352,19 +13914,31 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|SELECT=on": {
+   "credited_by": [
+    "X|install|bundle|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|SRC=local-bundle": {
    "credited_by": [
     "T3|install|bundle|bin",
     "T3|install|bundle|hook",
+    "T3|install|bundle|lsp",
     "T3|install|bundle|mcp",
     "T5|dry-run|install|bundle",
-    "T5|real|install|bundle"
+    "T5|real|install|bundle",
+    "X|install|bundle|FORCE=on",
+    "X|install|bundle|GATE=unapproved-exec",
+    "X|install|bundle|NET=online",
+    "X|install|bundle|SCOPE=project",
+    "X|install|bundle|SELECT=on",
+    "X|install|bundle|TGT=multi-unchanged",
+    "X|install|bundle|TGT=single-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -13381,11 +13955,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|TGT=multi-widened": {
    "family": "pair",
@@ -13402,11 +13980,15 @@
    "strength": "e2e"
   },
   "pair|OP=bundle-install|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=bundle-install|TGT=single-widened": {
    "family": "pair",
@@ -13490,11 +14072,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=compile|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|canvas|denied-dependency|project",
+    "G1|compile|hook|denied-dependency|project",
+    "G1|compile|lsp|denied-dependency|project",
+    "G1|compile|mcp|denied-dependency|project",
+    "G1|compile|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=compile|GATE=denied-executable": {
    "family": "pair",
@@ -13719,6 +14309,9 @@
   },
   "pair|OP=compile|SRC=native-plugin": {
    "credited_by": [
+    "T3|compile|native|bin",
+    "T3|compile|native|mcp",
+    "T3|compile|native|skill",
     "T5|dry-run|compile|native",
     "T5|real|compile|native"
    ],
@@ -13873,11 +14466,24 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=install|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|skill|denied-dependency|project",
+    "G1|install|canvas|denied-dependency|project",
+    "G1|install|hook|denied-dependency|project",
+    "G1|install|lsp|denied-dependency|project",
+    "G1|install|mcp|denied-dependency|project",
+    "G1|install|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=install|GATE=denied-executable": {
    "family": "pair",
@@ -14104,7 +14710,16 @@
    "credited_by": [
     "T3|install|inline-mcp|mcp",
     "T5|dry-run|install|inline-mcp",
-    "T5|real|install|inline-mcp"
+    "T5|real|install|inline-mcp",
+    "X|install|inline-mcp|FORCE=on",
+    "X|install|inline-mcp|FROZEN=on",
+    "X|install|inline-mcp|GATE=unapproved-exec",
+    "X|install|inline-mcp|NET=online",
+    "X|install|inline-mcp|SCOPE=project",
+    "X|install|inline-mcp|SELECT=on",
+    "X|install|inline-mcp|TGT=multi-unchanged",
+    "X|install|inline-mcp|TGT=single-unchanged",
+    "X|install|inline-mcp|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14137,7 +14752,16 @@
     "T5|dry-run|install|marketplace-object",
     "T5|dry-run|install|plugin-at-mkt",
     "T5|real|install|marketplace-object",
-    "T5|real|install|plugin-at-mkt"
+    "T5|real|install|plugin-at-mkt",
+    "X|install|plugin-at-mkt|FORCE=on",
+    "X|install|plugin-at-mkt|FROZEN=on",
+    "X|install|plugin-at-mkt|GATE=unapproved-exec",
+    "X|install|plugin-at-mkt|NET=online",
+    "X|install|plugin-at-mkt|SCOPE=project",
+    "X|install|plugin-at-mkt|SELECT=on",
+    "X|install|plugin-at-mkt|TGT=multi-unchanged",
+    "X|install|plugin-at-mkt|TGT=single-unchanged",
+    "X|install|plugin-at-mkt|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14157,7 +14781,16 @@
    "credited_by": [
     "T3|install|mcp-registry|mcp",
     "T5|dry-run|install|mcp-registry",
-    "T5|real|install|mcp-registry"
+    "T5|real|install|mcp-registry",
+    "X|install|mcp-registry|FORCE=on",
+    "X|install|mcp-registry|FROZEN=on",
+    "X|install|mcp-registry|GATE=unapproved-exec",
+    "X|install|mcp-registry|NET=online",
+    "X|install|mcp-registry|SCOPE=project",
+    "X|install|mcp-registry|SELECT=on",
+    "X|install|mcp-registry|TGT=multi-unchanged",
+    "X|install|mcp-registry|TGT=single-unchanged",
+    "X|install|mcp-registry|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14168,8 +14801,20 @@
   },
   "pair|OP=install|SRC=native-plugin": {
    "credited_by": [
+    "T3|install|native|bin",
+    "T3|install|native|mcp",
+    "T3|install|native|skill",
     "T5|dry-run|install|native",
-    "T5|real|install|native"
+    "T5|real|install|native",
+    "X|install|native|FORCE=on",
+    "X|install|native|FROZEN=on",
+    "X|install|native|GATE=unapproved-exec",
+    "X|install|native|NET=online",
+    "X|install|native|SCOPE=project",
+    "X|install|native|SELECT=on",
+    "X|install|native|TGT=multi-unchanged",
+    "X|install|native|TGT=single-unchanged",
+    "X|install|native|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14185,7 +14830,15 @@
     "T3|install|pkg-registry|mcp",
     "T3|install|pkg-registry|skill",
     "T5|dry-run|install|pkg-registry",
-    "T5|real|install|pkg-registry"
+    "T5|real|install|pkg-registry",
+    "X|install|pkg-registry|FORCE=on",
+    "X|install|pkg-registry|FROZEN=on",
+    "X|install|pkg-registry|GATE=unapproved-exec",
+    "X|install|pkg-registry|NET=online",
+    "X|install|pkg-registry|SCOPE=project",
+    "X|install|pkg-registry|SELECT=on",
+    "X|install|pkg-registry|TGT=multi-unchanged",
+    "X|install|pkg-registry|TGT=single-unchanged"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -14292,11 +14945,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=lock|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|canvas|denied-dependency|project",
+    "G1|lock|hook|denied-dependency|project",
+    "G1|lock|lsp|denied-dependency|project",
+    "G1|lock|mcp|denied-dependency|project",
+    "G1|lock|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=lock|GATE=denied-executable": {
    "family": "pair",
@@ -14563,6 +15224,9 @@
   },
   "pair|OP=lock|SRC=native-plugin": {
    "credited_by": [
+    "T3|lock|native|bin",
+    "T3|lock|native|mcp",
+    "T3|lock|native|skill",
     "T5|real|lock|native"
    ],
    "family": "pair",
@@ -14931,46 +15595,85 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=mcp-install|GATE=allowed": {
+   "credited_by": [
+    "G1|mcp-install|canvas|allowed|project",
+    "G1|mcp-install|hook|allowed|project",
+    "G1|mcp-install|lsp|allowed|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|canvas|denied-dependency|project",
+    "G1|mcp-install|hook|denied-dependency|project",
+    "G1|mcp-install|lsp|denied-dependency|project",
+    "G1|mcp-install|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|GATE=denied-executable": {
+   "credited_by": [
+    "G1|mcp-install|canvas|denied-executable|project",
+    "G1|mcp-install|hook|denied-executable|project",
+    "G1|mcp-install|lsp|denied-executable|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|canvas|none|project",
+    "G1|mcp-install|hook|none|project",
+    "G1|mcp-install|lsp|none|project",
+    "G1|mcp-install|skill|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|mcp-install|canvas|revoked-after-deploy|project",
+    "G1|mcp-install|hook|revoked-after-deploy|project",
+    "G1|mcp-install|lsp|revoked-after-deploy|project",
+    "G1|mcp-install|skill|revoked-after-deploy|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|mcp-install|canvas|unapproved-exec|project",
+    "G1|mcp-install|hook|unapproved-exec|project",
+    "G1|mcp-install|lsp|unapproved-exec|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=mcp-install|LOCK=absent": {
    "family": "pair",
@@ -15516,11 +16219,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=prune|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|prune|canvas|denied-dependency|project",
+    "G1|prune|hook|denied-dependency|project",
+    "G1|prune|lsp|denied-dependency|project",
+    "G1|prune|mcp|denied-dependency|project",
+    "G1|prune|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=prune|GATE=denied-executable": {
    "family": "pair",
@@ -15547,11 +16258,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=prune|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|prune|canvas|unapproved-exec|project",
+    "G1|prune|hook|unapproved-exec|project",
+    "G1|prune|lsp|unapproved-exec|project",
+    "G1|prune|mcp|unapproved-exec|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=prune|LOCK=absent": {
    "family": "pair",
@@ -15755,6 +16473,9 @@
   },
   "pair|OP=prune|SRC=native-plugin": {
    "credited_by": [
+    "T3|prune|native|bin",
+    "T3|prune|native|mcp",
+    "T3|prune|native|skill",
     "T5|dry-run|prune|native",
     "T5|real|prune|native"
    ],
@@ -15892,11 +16613,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "pair|OP=uninstall|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|uninstall|canvas|denied-dependency|project",
+    "G1|uninstall|hook|denied-dependency|project",
+    "G1|uninstall|lsp|denied-dependency|project",
+    "G1|uninstall|mcp|denied-dependency|project",
+    "G1|uninstall|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=uninstall|GATE=denied-executable": {
    "family": "pair",
@@ -15923,11 +16652,18 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-05-exec-git-single-approve-mcp]"
   },
   "pair|OP=uninstall|GATE=unapproved-exec": {
+   "credited_by": [
+    "G1|uninstall|canvas|unapproved-exec|project",
+    "G1|uninstall|hook|unapproved-exec|project",
+    "G1|uninstall|lsp|unapproved-exec|project",
+    "G1|uninstall|mcp|unapproved-exec|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=uninstall|HOSTID=bare-default": {
    "family": "pair",
@@ -16148,6 +16884,9 @@
   },
   "pair|OP=uninstall|SRC=native-plugin": {
    "credited_by": [
+    "T3|uninstall|native|bin",
+    "T3|uninstall|native|mcp",
+    "T3|uninstall|native|skill",
     "T5|dry-run|uninstall|native",
     "T5|real|uninstall|native"
    ],
@@ -16294,11 +17033,19 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=update|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|canvas|denied-dependency|project",
+    "G1|update|hook|denied-dependency|project",
+    "G1|update|lsp|denied-dependency|project",
+    "G1|update|mcp|denied-dependency|project",
+    "G1|update|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=update|GATE=denied-executable": {
    "family": "pair",
@@ -16544,7 +17291,8 @@
     "T5|dry-run|update|marketplace-object",
     "T5|dry-run|update|plugin-at-mkt",
     "T5|real|update|marketplace-object",
-    "T5|real|update|plugin-at-mkt"
+    "T5|real|update|plugin-at-mkt",
+    "X|update|marketplace-object|DEPLOYED=clean"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -16575,6 +17323,9 @@
   },
   "pair|OP=update|SRC=native-plugin": {
    "credited_by": [
+    "T3|update|native|bin",
+    "T3|update|native|mcp",
+    "T3|update|native|skill",
     "T5|dry-run|update|native",
     "T5|real|update|native"
    ],
@@ -16592,7 +17343,8 @@
     "T3|update|pkg-registry|mcp",
     "T3|update|pkg-registry|skill",
     "T5|dry-run|update|pkg-registry",
-    "T5|real|update|pkg-registry"
+    "T5|real|update|pkg-registry",
+    "X|update|pkg-registry|DEPLOYED=clean"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -16942,11 +17694,24 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=canvas|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|canvas|denied-dependency|project",
+    "G1|audit-ci|canvas|denied-dependency|project",
+    "G1|compile|canvas|denied-dependency|project",
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install|canvas|denied-dependency|project",
+    "G1|lock|canvas|denied-dependency|project",
+    "G1|mcp-install|canvas|denied-dependency|project",
+    "G1|prune|canvas|denied-dependency|project",
+    "G1|uninstall|canvas|denied-dependency|project",
+    "G1|update|canvas|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=canvas|GATE=denied-executable": {
    "family": "pair",
@@ -16957,11 +17722,23 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "pair|PRIM=canvas|GATE=none": {
+   "credited_by": [
+    "G1|approve|canvas|none|project",
+    "G1|audit|canvas|none|project",
+    "G1|compile|canvas|none|project",
+    "G1|install|canvas|none|project",
+    "G1|lock|canvas|none|project",
+    "G1|mcp-install|canvas|none|project",
+    "G1|prune|canvas|none|project",
+    "G1|uninstall|canvas|none|project",
+    "G1|update|canvas|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=canvas|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -17177,11 +17954,24 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=hook|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|hook|denied-dependency|project",
+    "G1|audit-ci|hook|denied-dependency|project",
+    "G1|compile|hook|denied-dependency|project",
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install|hook|denied-dependency|project",
+    "G1|lock|hook|denied-dependency|project",
+    "G1|mcp-install|hook|denied-dependency|project",
+    "G1|prune|hook|denied-dependency|project",
+    "G1|uninstall|hook|denied-dependency|project",
+    "G1|update|hook|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=hook|GATE=denied-executable": {
    "family": "pair",
@@ -17192,11 +17982,23 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "pair|PRIM=hook|GATE=none": {
+   "credited_by": [
+    "G1|approve|hook|none|project",
+    "G1|audit|hook|none|project",
+    "G1|compile|hook|none|project",
+    "G1|install|hook|none|project",
+    "G1|lock|hook|none|project",
+    "G1|mcp-install|hook|none|project",
+    "G1|prune|hook|none|project",
+    "G1|uninstall|hook|none|project",
+    "G1|update|hook|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=hook|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -17412,11 +18214,24 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=lsp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|lsp|denied-dependency|project",
+    "G1|audit-ci|lsp|denied-dependency|project",
+    "G1|compile|lsp|denied-dependency|project",
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install|lsp|denied-dependency|project",
+    "G1|lock|lsp|denied-dependency|project",
+    "G1|mcp-install|lsp|denied-dependency|project",
+    "G1|prune|lsp|denied-dependency|project",
+    "G1|uninstall|lsp|denied-dependency|project",
+    "G1|update|lsp|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=lsp|GATE=denied-executable": {
    "family": "pair",
@@ -17427,11 +18242,23 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-06-exec-lsp-git-single-deny-mcp]"
   },
   "pair|PRIM=lsp|GATE=none": {
+   "credited_by": [
+    "G1|approve|lsp|none|project",
+    "G1|audit|lsp|none|project",
+    "G1|compile|lsp|none|project",
+    "G1|install|lsp|none|project",
+    "G1|lock|lsp|none|project",
+    "G1|mcp-install|lsp|none|project",
+    "G1|prune|lsp|none|project",
+    "G1|uninstall|lsp|none|project",
+    "G1|update|lsp|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=lsp|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -17647,11 +18474,23 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|mcp|denied-dependency|project",
+    "G1|audit-ci|mcp|denied-dependency|project",
+    "G1|compile|mcp|denied-dependency|project",
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install|mcp|denied-dependency|project",
+    "G1|lock|mcp|denied-dependency|project",
+    "G1|prune|mcp|denied-dependency|project",
+    "G1|uninstall|mcp|denied-dependency|project",
+    "G1|update|mcp|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=mcp|GATE=denied-executable": {
    "family": "pair",
@@ -17662,11 +18501,22 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "pair|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|approve|mcp|none|project",
+    "G1|audit|mcp|none|project",
+    "G1|compile|mcp|none|project",
+    "G1|install|mcp|none|project",
+    "G1|lock|mcp|none|project",
+    "G1|prune|mcp|none|project",
+    "G1|uninstall|mcp|none|project",
+    "G1|update|mcp|none|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=mcp|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -17902,15 +18752,28 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=skill|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|skill|denied-dependency|project",
+    "G1|audit-ci|skill|denied-dependency|project",
+    "G1|compile|skill|denied-dependency|project",
+    "G1|install-frozen|skill|denied-dependency|project",
+    "G1|install|skill|denied-dependency|project",
+    "G1|lock|skill|denied-dependency|project",
+    "G1|mcp-install|skill|denied-dependency|project",
+    "G1|prune|skill|denied-dependency|project",
+    "G1|uninstall|skill|denied-dependency|project",
+    "G1|update|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
+   "issue": "#4095",
+   "lane": "T-1",
    "must_cover": true,
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=skill|GATE=none": {
    "family": "pair",
@@ -17921,6 +18784,17 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|audit|skill|revoked-after-deploy|project",
+    "G1|compile|skill|revoked-after-deploy|project",
+    "G1|deny|skill|revoked-after-deploy|project",
+    "G1|install|skill|revoked-after-deploy|project",
+    "G1|lock|skill|revoked-after-deploy|project",
+    "G1|mcp-install|skill|revoked-after-deploy|project",
+    "G1|prune|skill|revoked-after-deploy|project",
+    "G1|uninstall|skill|revoked-after-deploy|project",
+    "G1|update|skill|revoked-after-deploy|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
@@ -17928,8 +18802,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|PRIM=skill|LOCK=absent": {
    "family": "pair",
@@ -18129,11 +19004,63 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SCOPE=project|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|approve|canvas|denied-dependency|project",
+    "G1|approve|hook|denied-dependency|project",
+    "G1|approve|lsp|denied-dependency|project",
+    "G1|approve|mcp|denied-dependency|project",
+    "G1|approve|skill|denied-dependency|project",
+    "G1|audit-ci|canvas|denied-dependency|project",
+    "G1|audit-ci|hook|denied-dependency|project",
+    "G1|audit-ci|lsp|denied-dependency|project",
+    "G1|audit-ci|mcp|denied-dependency|project",
+    "G1|audit-ci|skill|denied-dependency|project",
+    "G1|compile|canvas|denied-dependency|project",
+    "G1|compile|hook|denied-dependency|project",
+    "G1|compile|lsp|denied-dependency|project",
+    "G1|compile|mcp|denied-dependency|project",
+    "G1|compile|skill|denied-dependency|project",
+    "G1|install-frozen|canvas|denied-dependency|project",
+    "G1|install-frozen|hook|denied-dependency|project",
+    "G1|install-frozen|lsp|denied-dependency|project",
+    "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|skill|denied-dependency|project",
+    "G1|install|canvas|denied-dependency|project",
+    "G1|install|hook|denied-dependency|project",
+    "G1|install|lsp|denied-dependency|project",
+    "G1|install|mcp|denied-dependency|project",
+    "G1|install|skill|denied-dependency|project",
+    "G1|lock|canvas|denied-dependency|project",
+    "G1|lock|hook|denied-dependency|project",
+    "G1|lock|lsp|denied-dependency|project",
+    "G1|lock|mcp|denied-dependency|project",
+    "G1|lock|skill|denied-dependency|project",
+    "G1|mcp-install|canvas|denied-dependency|project",
+    "G1|mcp-install|hook|denied-dependency|project",
+    "G1|mcp-install|lsp|denied-dependency|project",
+    "G1|mcp-install|skill|denied-dependency|project",
+    "G1|prune|canvas|denied-dependency|project",
+    "G1|prune|hook|denied-dependency|project",
+    "G1|prune|lsp|denied-dependency|project",
+    "G1|prune|mcp|denied-dependency|project",
+    "G1|prune|skill|denied-dependency|project",
+    "G1|uninstall|canvas|denied-dependency|project",
+    "G1|uninstall|hook|denied-dependency|project",
+    "G1|uninstall|lsp|denied-dependency|project",
+    "G1|uninstall|mcp|denied-dependency|project",
+    "G1|uninstall|skill|denied-dependency|project",
+    "G1|update|canvas|denied-dependency|project",
+    "G1|update|hook|denied-dependency|project",
+    "G1|update|lsp|denied-dependency|project",
+    "G1|update|mcp|denied-dependency|project",
+    "G1|update|skill|denied-dependency|project"
+   ],
    "family": "pair",
-   "issue": "#4108",
-   "lane": "T-7b",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|SCOPE=project|GATE=denied-executable": {
    "family": "pair",
@@ -18939,18 +19866,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|FORCE=on": {
+   "credited_by": [
+    "X|install|inline-mcp|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|FROZEN=on": {
+   "credited_by": [
+    "X|install|inline-mcp|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|GATE=allowed": {
    "family": "pair",
@@ -18988,11 +19923,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|inline-mcp|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|LOCK=absent": {
    "family": "pair",
@@ -19030,11 +19969,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|NET=online": {
+   "credited_by": [
+    "X|install|inline-mcp|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|NOPOLICY=on": {
    "family": "pair",
@@ -19052,11 +19995,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
   },
   "pair|SRC=inline-mcp|SCOPE=project": {
+   "credited_by": [
+    "X|install|inline-mcp|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|SCOPE=user": {
    "family": "pair",
@@ -19066,11 +20013,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|SELECT=on": {
+   "credited_by": [
+    "X|install|inline-mcp|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=multi-narrowed": {
    "family": "pair",
@@ -19080,11 +20031,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|inline-mcp|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=multi-widened": {
    "family": "pair",
@@ -19101,11 +20056,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|inline-mcp|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=inline-mcp|TGT=single-widened": {
    "family": "pair",
@@ -19115,11 +20074,15 @@
    "strength": "e2e"
   },
   "pair|SRC=inline-mcp|UPDATE=on": {
+   "credited_by": [
+    "X|install|inline-mcp|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|DEPLOYED=absent": {
    "family": "pair",
@@ -19168,11 +20131,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|FORCE=on": {
+   "credited_by": [
+    "X|install|bundle|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|FROZEN=on": {
    "family": "pair",
@@ -19217,11 +20184,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|bundle|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|LOCK=absent": {
    "family": "pair",
@@ -19259,11 +20230,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|NET=online": {
+   "credited_by": [
+    "X|install|bundle|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|NOPOLICY=on": {
    "family": "pair",
@@ -19302,11 +20277,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|install|bundle|lsp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -19327,11 +20306,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|SCOPE=project": {
+   "credited_by": [
+    "X|install|bundle|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|SCOPE=user": {
    "family": "pair",
@@ -19341,11 +20324,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|SELECT=on": {
+   "credited_by": [
+    "X|install|bundle|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=multi-narrowed": {
    "family": "pair",
@@ -19355,11 +20342,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=multi-widened": {
    "family": "pair",
@@ -19376,11 +20367,15 @@
    "strength": "e2e"
   },
   "pair|SRC=local-bundle|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|bundle|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=local-bundle|TGT=single-widened": {
    "family": "pair",
@@ -19947,11 +20942,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|DEPLOYED=clean": {
+   "credited_by": [
+    "X|update|marketplace-object|DEPLOYED=clean"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|DEPLOYED=edited": {
    "family": "pair",
@@ -19995,18 +20994,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|FORCE=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|FROZEN=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|GATE=allowed": {
    "family": "pair",
@@ -20044,11 +21051,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|HOSTID=bare-default": {
    "family": "pair",
@@ -20107,11 +21118,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|NET=online": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|NOPOLICY=on": {
    "family": "pair",
@@ -20199,11 +21214,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|SCOPE=project": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|SCOPE=user": {
    "family": "pair",
@@ -20213,11 +21232,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|SELECT=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=multi-narrowed": {
    "family": "pair",
@@ -20227,11 +21250,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=multi-widened": {
    "family": "pair",
@@ -20248,11 +21275,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-git|TGT=single-widened": {
    "family": "pair",
@@ -20262,11 +21293,15 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|UPDATE=on": {
+   "credited_by": [
+    "X|install|plugin-at-mkt|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-local|DEPLOYED=absent": {
    "family": "pair",
@@ -20581,11 +21616,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|SRC=mcp-registry|FROZEN=on": {
+   "credited_by": [
+    "X|install|mcp-registry|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|GATE=allowed": {
    "family": "pair",
@@ -20623,11 +21662,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|mcp-registry|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=mcp-registry|LOCK=absent": {
    "family": "pair",
@@ -20758,11 +21801,15 @@
    "strength": "e2e"
   },
   "pair|SRC=mcp-registry|UPDATE=on": {
+   "credited_by": [
+    "X|install|mcp-registry|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|DEPLOYED=absent": {
    "family": "pair",
@@ -20815,18 +21862,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|FORCE=on": {
+   "credited_by": [
+    "X|install|native|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|FROZEN=on": {
+   "credited_by": [
+    "X|install|native|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|GATE=allowed": {
    "family": "pair",
@@ -20864,11 +21919,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|native|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|LOCK=absent": {
    "family": "pair",
@@ -20906,11 +21965,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|NET=online": {
+   "credited_by": [
+    "X|install|native|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|NOPOLICY=on": {
    "family": "pair",
@@ -20920,11 +21983,20 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|native|bin",
+    "T3|install|native|bin",
+    "T3|lock|native|bin",
+    "T3|prune|native|bin",
+    "T3|uninstall|native|bin",
+    "T3|update|native|bin"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|PRIM=hook": {
    "family": "pair",
@@ -20941,25 +22013,47 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|compile|native|mcp",
+    "T3|install|native|mcp",
+    "T3|lock|native|mcp",
+    "T3|prune|native|mcp",
+    "T3|uninstall|native|mcp",
+    "T3|update|native|mcp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|native|skill",
+    "T3|install|native|skill",
+    "T3|lock|native|skill",
+    "T3|prune|native|skill",
+    "T3|uninstall|native|skill",
+    "T3|update|native|skill"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|SCOPE=project": {
+   "credited_by": [
+    "X|install|native|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|SCOPE=user": {
    "family": "pair",
@@ -20969,11 +22063,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|SELECT=on": {
+   "credited_by": [
+    "X|install|native|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=multi-narrowed": {
    "family": "pair",
@@ -20983,11 +22081,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|native|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=multi-widened": {
    "family": "pair",
@@ -21004,11 +22106,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|native|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=native-plugin|TGT=single-widened": {
    "family": "pair",
@@ -21018,11 +22124,15 @@
    "strength": "e2e"
   },
   "pair|SRC=native-plugin|UPDATE=on": {
+   "credited_by": [
+    "X|install|native|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|DEPLOYED=absent": {
    "family": "pair",
@@ -21032,11 +22142,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|DEPLOYED=clean": {
+   "credited_by": [
+    "X|update|pkg-registry|DEPLOYED=clean"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|DEPLOYED=edited": {
    "family": "pair",
@@ -21075,18 +22189,26 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|FORCE=on": {
+   "credited_by": [
+    "X|install|pkg-registry|FORCE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|FROZEN=on": {
+   "credited_by": [
+    "X|install|pkg-registry|FROZEN=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|GATE=allowed": {
    "family": "pair",
@@ -21124,11 +22246,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=unapproved-exec": {
+   "credited_by": [
+    "X|install|pkg-registry|GATE=unapproved-exec"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|LOCK=absent": {
    "family": "pair",
@@ -21166,11 +22292,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|NET=online": {
+   "credited_by": [
+    "X|install|pkg-registry|NET=online"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|NOPOLICY=on": {
    "family": "pair",
@@ -21258,11 +22388,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|SCOPE=project": {
+   "credited_by": [
+    "X|install|pkg-registry|SCOPE=project"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|SCOPE=user": {
    "family": "pair",
@@ -21272,11 +22406,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|SELECT=on": {
+   "credited_by": [
+    "X|install|pkg-registry|SELECT=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=multi-narrowed": {
    "family": "pair",
@@ -21286,11 +22424,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|TGT=multi-unchanged": {
+   "credited_by": [
+    "X|install|pkg-registry|TGT=multi-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=multi-widened": {
    "family": "pair",
@@ -21307,11 +22449,15 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|TGT=single-unchanged": {
+   "credited_by": [
+    "X|install|pkg-registry|TGT=single-unchanged"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=pkg-registry|TGT=single-widened": {
    "family": "pair",
@@ -21321,11 +22467,16 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|UPDATE=on": {
+   "credited_by": [
+    "X|install|pkg-registry|UPDATE=on"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4572",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|TGT=multi-narrowed|DRYRUN=on": {
    "family": "pair",
@@ -23648,8 +24799,8 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:835",
-    "src/apm_cli/install/services.py:1038"
+    "src/apm_cli/install/services.py:829",
+    "src/apm_cli/install/services.py:1032"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -23735,5 +24886,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "8ca054980a016c807d41dcda4882e111833fd8dcfa0af3f9e1e8c9020336ce39"
+ "sha256": "d76ae495a8eac7a800e7333edca1e3baf5448eeb2a24f6a5bf5c4b19229909ae"
 }

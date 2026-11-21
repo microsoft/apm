@@ -288,3 +288,62 @@ def test_marketplace_fetch_threads_path_to_credential_fill(isolated_env, stub_gh
     assert "path=acme-org/plugins" in captured_stdin[-1], (
         f"credential fill stdin missing path= for marketplace fetch: {captured_stdin[-1]!r}"
     )
+
+
+_LONG_IDP_TOKEN = "eyJ" + "A" * 2597  # 2600 chars: GCM enterprise IdP token with extra claims
+
+
+def test_long_enterprise_idp_token_from_credential_fill_is_used(
+    isolated_env, stub_gh_cli_unavailable, capsys, caplog
+):
+    """Regression (#4391): a 2600-char credential-helper token is accepted and
+    used for the request instead of reported as "no credential", and the token
+    value never reaches verbose output or logs.
+    """
+    from apm_cli.install.validation import _validate_package_exists
+
+    assert len(_LONG_IDP_TOKEN) == 2600
+    api_auth_headers: list[str] = []
+
+    def fake_helper(*args, **kwargs):
+        return MagicMock(
+            returncode=0,
+            stdout=f"protocol=https\nhost=github.com\nusername=u\npassword={_LONG_IDP_TOKEN}\n",
+        )
+
+    def fake_http_request(session, method, url=None, headers=None, **kwargs):
+        # I/O boundary only: the real _github_api_get and its credential
+        # scoping run; requests never reaches the network.
+        auth = (headers or {}).get("Authorization", "")
+        api_auth_headers.append(auth)
+        resp = MagicMock()
+        resp.headers = {}
+        if _LONG_IDP_TOKEN in auth:
+            resp.ok = True
+            resp.status_code = 200
+        elif "bad-token" in auth:
+            resp.ok = False
+            resp.status_code = 401
+            resp.reason = "Unauthorized"
+        else:
+            resp.ok = False
+            resp.status_code = 404
+            resp.reason = "Not Found"
+        return resp
+
+    caplog.set_level("DEBUG")
+    with (
+        patch("subprocess.run", side_effect=fake_helper),
+        patch("requests.Session.request", autospec=True, side_effect=fake_http_request),
+    ):
+        result = _validate_package_exists("acme/widgets", verbose=True)
+
+    assert result is True, "validation must succeed with the long credential-helper token"
+    assert any(_LONG_IDP_TOKEN in header for header in api_auth_headers), (
+        "the long credential-helper token was never used for the API request"
+    )
+
+    captured = capsys.readouterr()
+    assert _LONG_IDP_TOKEN not in captured.out
+    assert _LONG_IDP_TOKEN not in captured.err
+    assert _LONG_IDP_TOKEN not in caplog.text

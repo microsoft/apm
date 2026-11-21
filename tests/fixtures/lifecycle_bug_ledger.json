@@ -1423,8 +1423,8 @@
         "routing.authorized_targets_only"
       ],
       "regression_tests": [
+        "tests/integration/test_local_bundle_codex_agents_lifecycle.py::test_codex_bundle_agent_project_lifecycle",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_bundle_reinstall_migrates_pre_3705_staging_claims",
-        "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_codex_bundle_install_skips_markdown_agents_with_one_warning_each",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_instructions_only_bundle_upgrade_keeps_install_time_hash",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_prune_retires_staging_records_whose_root_is_gone",
         "tests/integration/test_local_bundle_compile_only_targets_lifecycle.py::test_staged_instruction_edits_are_reported_as_hash_drift",
@@ -4538,6 +4538,17 @@
         "tests/integration/test_mcp_json_style_lifecycle.py::test_a_user_formatted_mcp_config_survives_install_update_and_uninstall",
         "tests/unit/install/test_mcp_json_style_retired.py::test_heal_removing_apm_entry_returns_the_user_bytes",
         "tests/unit/integration/test_mcp_json_style_integrator.py::test_add_then_remove_round_trips_byte_identical"
+      ]
+    },
+    {
+      "issue": 4572,
+      "fixed_in": "Unreleased",
+      "summary": "After a dependency switched from a git source to a registry source, apm install kept the git .apm-pin in apm_modules/<pkg>/ until install --update; the cache-pin lockfile sync now drops a marker whose dependency is no longer markable, so the first registry install converges and repeats are byte no-ops.",
+      "failure_modes": ["cache", "idempotency"],
+      "properties": ["idempotency.byte_stable", "source.ref_cache_coherent"],
+      "regression_tests": [
+        "tests/integration/test_cache_pin.py::test_sync_drops_the_marker_of_an_unmarkable_dep",
+        "tests/lifecycle/machines/test_m_source.py::test_git_to_registry_switch_drops_the_stale_cache_pin"
       ]
     }
   ],
