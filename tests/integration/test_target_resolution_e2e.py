@@ -353,8 +353,8 @@ def test_s12_empty_repo_errors_no_silent_copilot(tmp_path):
 
 
 @pytest.mark.xfail(
-    reason="#650 global copilot path resolution; handled by three-guard collapse",
-    strict=False,
+    reason="#4544 bare 'apm install -g' without a user manifest exits 1 (after #650)",
+    strict=True,
 )
 def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch, apm_binary_path: Path):
     """S13: Closes #650 - 'apm install -g --target copilot' must not silently skip."""
@@ -412,8 +412,8 @@ def test_s16a_targets_inactive_shows_reasons(tmp_path):
 
 
 @pytest.mark.xfail(
-    reason="#888 cwd anchoring partial; provenance project-root display",
-    strict=False,
+    reason="#4545 install from a subdirectory does not discover the project root (after #888)",
+    strict=True,
 )
 def test_s16b_provenance_uses_project_root(tmp_path):
     """S16b: Closes #888 (partial) - provenance reflects project root, not cwd."""

@@ -366,7 +366,7 @@ class TestDefaultRouting:
             assert dep.source == "registry"
             assert dep.registry_name == "corp"
 
-    @pytest.mark.xfail(reason="@registry scope shorthand not yet implemented", strict=True)
+    @pytest.mark.xfail(reason="#4543 @registry scope shorthand not yet implemented", strict=True)
     def test_at_scope_overrides_default(self, write_yml):
         p = write_yml("""
             name: x
