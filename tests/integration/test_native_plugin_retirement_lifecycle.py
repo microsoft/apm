@@ -24,7 +24,11 @@ import yaml
 
 from tests.lifecycle import driver
 from tests.lifecycle.world import World, use_policy
-from tests.lifecycle.world.fixtures import lifecycle_template, lifecycle_world  # noqa: F401
+from tests.lifecycle.world.fixtures import (  # noqa: F401
+    _world_dir,
+    lifecycle_template,
+    lifecycle_world,
+)
 from tests.lifecycle.world.services import ORG
 from tests.utils.apm_lifecycle_runner import CommandResult
 
