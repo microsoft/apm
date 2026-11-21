@@ -8,7 +8,6 @@ python -m scripts.merge_queue.runner metrics [--state-dir DIR]
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import sys
 import time
@@ -189,16 +188,31 @@ def tick(api: Api, current: state.State, log: Log, depth: int = 2) -> state.Stat
     return current
 
 
+def _try_lock(handle: Any) -> bool:
+    """Non-blocking exclusive lock on an open file: fcntl on POSIX, msvcrt on Windows."""
+    try:
+        import fcntl
+    except ImportError:  # Windows
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
 @contextmanager
 def single_instance(lock_path: Path) -> Iterator[bool]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("w", encoding="utf-8") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
-        yield True
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        yield _try_lock(handle)
 
 
 def _one_tick(api: Api, state_dir: Path, depth: int) -> None:
