@@ -75,10 +75,20 @@ def record(ids: list[str], directory: Path) -> int:
     return subprocess.run(record_command(ids), cwd=REPO, env=env, check=False).returncode
 
 
+def allowed_repeats(jid: str) -> list[str]:
+    """The journey's ``allow_repeat`` lines (the same exemption O4 applies)."""
+    for path in sorted(HERE.glob("*/*.yaml")):
+        data = yaml.safe_load(path.read_text(encoding="ascii")) or {}
+        if data.get("id") == jid:
+            return list(data.get("allow_repeat") or ())
+    return []
+
+
 def review(directory: Path, ids: list[str], *, write: bool) -> tuple[int, int]:
     """Return (refused, changed) counts; write accepted goldens when *write*."""
     refused = changed = 0
     for jid in ids:
+        allow = allowed_repeats(jid)
         recorded = sorted((directory / jid).glob("*.txt"))
         known = sorted((norm.GOLDENS / jid).glob("*.txt"))
         stale = {p.name for p in known} - {p.name for p in recorded}
@@ -87,7 +97,7 @@ def review(directory: Path, ids: list[str], *, write: bool) -> tuple[int, int]:
             changed += 1
         for path in recorded:
             text = path.read_text(encoding="utf-8")
-            problems = norm.golden_problems(text)
+            problems = norm.golden_problems(text, allow)
             if problems:
                 refused += 1
                 print(f"[x] {jid}/{path.name} refused: " + "; ".join(problems))

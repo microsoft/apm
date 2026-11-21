@@ -51,7 +51,8 @@ steps:
       - .agents/skills/triage/SKILL.md
     key_lines:
       - "ref: 6a2b9bdb -> c9663563 (v1.1.0)"
-      - "[i] Cleaned 2 stale deployed files for acme/release-kit"
+      - "[i] Cleaned 1 stale deployed path for acme/release-kit:"
+      - "  - .agents/skills/legacy/"
   - n: 4
     run:
       - git add -A
@@ -80,20 +81,3 @@ steps:
     files: []
     key_lines: ["[i] Current version:", "[+] You're already on the latest version:"]
 known_cells:
-  - id: update-plan-lists-pinned-package-twice
-    law: O4
-    tracking: "#4208"
-    step: 2
-    match: "repeats '\\[~\\] acme/release-kit'"
-  - id: update-plan-lists-pinned-package-twice-apply
-    law: O4
-    tracking: "#4208"
-    step: 3
-    match: "repeats '\\[~\\] acme/release-kit'"
-  # No O1 golden until the defect is fixed: the pinned package line prints
-  # twice (O4), so regen_goldens refuses the transcript.
-  - id: update-plan-lists-pinned-package-twice-golden
-    law: O1
-    tracking: "#4208"
-    step: 3
-    match: "no golden tests/lifecycle/journeys/goldens/J07/03\\.txt"

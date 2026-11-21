@@ -159,9 +159,12 @@ _APM_HOME_WRITES: Mapping[str, tuple[str, ...]] = {
     # A trusted project lifecycle script run appends its log (reference/cli/lifecycle.md).
     "install": ("logs/scripts.log", "logs/scripts.log.lock"),
 }
-# Written only by a successful command: a marketplace install records its version pin.
+# Written only by a successful command: a marketplace install records its version pin,
+# and an applied update refreshes the registered marketplace's metadata cache. A
+# --dry-run writes neither (#4484).
 _APM_HOME_WRITES_ON_SUCCESS: Mapping[str, tuple[str, ...]] = {
     "install": ("cache/marketplace/version-pins.json",),
+    "update": ("cache/marketplace/lifecycle-market.meta.json",),
 }
 _UNTRACKED_ROOTS = frozenset({".git", ".apm-local"})
 _DECLARED_WRITES = ("apm.yml", "apm.lock.yaml", ".gitignore", "apm_modules/")
@@ -641,7 +644,7 @@ class JourneyRun:
     def _user_writes(self, args: tuple[str, ...], *, ok: bool = True) -> tuple[str, ...]:
         """HOME-relative paths under APM_HOME a command declares it writes (I5)."""
         names = _APM_HOME_WRITES.get(args[0], ())
-        if ok:
+        if ok and "--dry-run" not in args:
             names = (*names, *_APM_HOME_WRITES_ON_SUCCESS.get(args[0], ()))
         if args[0] == "lifecycle" and args[1:2] not in (("trust",), ("untrust",)):
             names = ()
@@ -1441,6 +1444,17 @@ def test_journey_files_agree_with_the_index() -> None:
                     f"{path.stem} step {step['n']}: {p}" for p in docs_problems(step["docs"])
                 ]
     assert problems == []
+
+
+def test_golden_rules_follow_the_o4_exemptions_and_resolve_order() -> None:
+    """N5/N7: allow_repeat lines are not refused; resolve progress compares in any order."""
+    text = "$ apm install --frozen\n|     +- wrote: .mcp.json\n|     +- wrote: .mcp.json\n"
+    assert norm.golden_problems(text) == ["duplicate line '|     +- wrote: .mcp.json'"]
+    assert norm.golden_problems(text, ["|     +- wrote: .mcp.json"]) == []
+    first = ["[>] Resolving b...", "[>] Resolving a...", "[i] Targets: copilot"]
+    second = ["[>] Resolving a...", "[>] Resolving b...", "[i] Targets: copilot"]
+    assert norm.canonical(first) == norm.canonical(second)
+    assert norm.canonical(["[i] x", "[i] y"]) != norm.canonical(["[i] y", "[i] x"])
 
 
 @pytest.mark.parametrize("path", _params())
