@@ -2,13 +2,18 @@
 
 The state machines credit their own cell ids through
 ``oracles.check_obligation``: M-SOURCE ``T3|<op>|<form>|<kind>`` and
-``T5|<dry-run|real>|<op>|<form>``, M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``.
+``T5|<dry-run|real>|<op>|<form>``, M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``,
+the M-GATE matrix ``G1|<op>|<prim>|<gate>|<scope>``.
 This module translates each machine id into the factor assignment it proves
 and lists the generated obligations that assignment implies (every pair and
 named triple whose values it fixes). Such an obligation is ``required`` with
 the machine spine as witness, and the receipt of any listed machine id
 discharges it (``credited_by``). A machine id the machine records as a strict
 known cell with an owning issue makes the obligation ``known-failing``.
+
+A GATE matrix id credits only the implied ids that name GATE (its anchor):
+the step proves what the gate level did to that command, so a refusal under
+a dependency deny never discharges a success cell without a GATE value.
 
 Machine vocabulary that has no factor value here (``deps``/``outdated``
 reads, ``corrupt``/``symlink`` locks, the ``native`` kind) implies nothing.
@@ -56,6 +61,24 @@ LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "audit-ci": ("audit", ()),
 }
 LOCK_STATES: Mapping[str, str] = {"consistent": "consistent", "newer": "newer-generator"}
+GATE_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[{scope}]"
+)
+# M-GATE matrix op -> (OP, modifiers).
+GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "install": ("install", ()),
+    "install-frozen": ("install", ("FROZEN",)),
+    "update": ("update", ()),
+    "lock": ("lock", ()),
+    "audit": ("audit", ()),
+    "audit-ci": ("audit", ()),
+    "compile": ("compile", ()),
+    "prune": ("prune", ()),
+    "uninstall": ("uninstall", ()),
+    "approve": ("approve-deny", ()),
+    "deny": ("approve-deny", ()),
+    "mcp-install": ("mcp-install", ()),
+}
 
 
 @dataclass(frozen=True)
@@ -67,6 +90,8 @@ class MachineCell:
     lane: str
     assignment: Mapping[str, str]
     tracking: str | None = None
+    # When set, only implied ids that name this factor are credited.
+    anchor: str | None = None
 
 
 def _source_assignment(key: str) -> dict[str, str] | None:
@@ -91,9 +116,16 @@ def _lock_assignment(key: str) -> dict[str, str] | None:
     return {"OP": name, "SCOPE": scope, "LOCK": LOCK_STATES[lock], **dict.fromkeys(modifiers, ON)}
 
 
+def _gate_assignment(key: str) -> dict[str, str]:
+    _, op, prim, gate, scope, *_ = key.split("|")
+    name, flags = GATE_OPS[op]
+    return {"OP": name, "PRIM": prim, "GATE": gate, "SCOPE": scope, **dict.fromkeys(flags, ON)}
+
+
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
-    from tests.lifecycle.machines import test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines._gate_matrix import matrix_cells
 
     cells: list[MachineCell] = []
     known_source = getattr(test_m_source, "KNOWN_CELLS_BY_ID", {})
@@ -108,6 +140,11 @@ def machine_cells() -> list[MachineCell]:
                 witness = SCOPE_LOCK_SPINE.format(scope=scope)
                 tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
                 cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+    for scope in test_m_gate.MATRIX_SCOPES:
+        for key in sorted(matrix_cells(scope)):
+            witness = GATE_SPINE.format(scope=scope)
+            assignment = _gate_assignment(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
     return cells
 
 
@@ -139,6 +176,8 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
         for key in implied(cell.assignment):
+            if cell.anchor and f"|{cell.anchor}=" not in key:
+                continue
             if key in obligations:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
