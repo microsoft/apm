@@ -1,0 +1,16 @@
+{
+  "issue": 2851,
+  "fixed_in": "Unreleased",
+  "summary": "Successful MCP HTTP cache hits did not refresh LRU recency and were evicted before cold entries.",
+  "failure_modes": [
+    "cache"
+  ],
+  "properties": [
+    "cache.successful_reads_refresh_recency"
+  ],
+  "regression_tests": [
+    "tests/integration/test_http_cache_recency_lifecycle.py::test_mcp_show_hit_survives_cache_pressure_without_refetch",
+    "tests/unit/cache/test_http_cache.py::TestHttpCacheSizeCap::test_successful_hit_protects_entry_from_eviction",
+    "tests/unit/cache/test_http_cache.py::TestHttpCacheHitMiss::test_hit_updates_recency_without_rewriting_response"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "issue": 3992,
+  "summary": "Traps policy refusals and approve usage errors landing on stderr; needs blocking org policy and stream split.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_refusal_stderr_lifecycle.py::test_policy_refusals_and_approve_usage_error_write_stderr"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 4233,
+  "fixed_in": "Unreleased",
+  "summary": "A lockfile with an unsupported lockfile_version now fails install, install --frozen, lock and audit --ci with an [x] diagnostic that names both remedies: move the lockfile aside and regenerate it with 'apm lock', or upgrade APM with 'apm self-update' (req-lk-004).",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_unsupported_lockfile_version_lifecycle.py::test_unsupported_lockfile_version_names_both_remedies"
+  ]
+}

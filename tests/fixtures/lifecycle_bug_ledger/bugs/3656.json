@@ -1,0 +1,15 @@
+{
+  "issue": 3656,
+  "summary": "Edited managed files and user-owned skill contents trigger refusal paths not represented in rows.",
+  "failure_modes": [
+    "outcome",
+    "ownership",
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_refusal_lockfile_truth_lifecycle.py::test_refused_uninstall_lock_claims_only_files_on_disk"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 3993,
+  "summary": "Traps non-default-host require entries failing both presence checks (#3993); needs org policy file, git host rewrites and audit JSON details.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/policy/test_required_packages_host_identity_lifecycle.py::test_matching_require_passes_both_presence_checks",
+    "tests/integration/policy/test_required_packages_host_identity_lifecycle.py::test_unmatched_require_fails_both_presence_checks"
+  ]
+}

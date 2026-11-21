@@ -1,0 +1,19 @@
+{
+  "issue": 3191,
+  "summary": "Native Claude hook behavior uses a non-Copilot target.",
+  "failure_modes": [
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_bin_plugin_deploys_inside_its_native_root_once_approved_and_trusted",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_installed_hook_source_reinstall_and_removal",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_native_plugin_deploys_publisher_bytes_not_normalization_output",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_native_plugin_mcp_server_is_loaded_by_claude_not_written_by_apm",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_runtime_plugin_root_hooks_stay_intact_per_plugin",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_transitive_native_plugin_with_mcp_needs_a_pin_or_one_off_trust",
+    "tests/integration/test_claude_native_hook_lifecycle.py::test_upgrade_retires_the_loose_claude_mcp_entry_of_a_now_native_plugin"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 2926,
+  "summary": "Traps prune of manifestless skills and released roots hosting nested dependencies (#2926, #3699); needs prune, aliases and git subdirectory packages.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_skill_lifecycle.py::test_install_remove_install_prune_skill",
+    "tests/integration/test_prune_skill_lifecycle.py::test_install_trims_released_root_to_nested_dependency_it_hosts",
+    "tests/integration/test_prune_skill_lifecycle.py::test_prune_preserves_declared_skill_bundle"
+  ]
+}

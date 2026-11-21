@@ -1,0 +1,9 @@
+{
+  "id": "late-lock-write-atomicity",
+  "summary": "An injected lockfile replacement failure can occur after target files move to the newly declared target while the prior lockfile remains intact.",
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "bounded_by": "tests/integration/test_required_lifecycle_state_machine.py::test_required_failed_lock_write_bounds_partial_state_and_recovers",
+  "next_decision": "Full install transaction expansion remains deferred with phases 2-4."
+}
