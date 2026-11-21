@@ -50,7 +50,10 @@ def _write(path: Path, text: str) -> None:
 def _package(root: Path) -> None:
     root.mkdir(parents=True)
     dump_yaml({"name": "prims", "version": "1.0.0"}, root / "apm.yml")
-    _write(root / ".apm/instructions/style.instructions.md", "---\napplyTo: '**'\n---\n# Style\n")
+    # A file-type glob keeps a .claude/rules/ file: '**' routes to AGENTS.md (#3939).
+    _write(
+        root / ".apm/instructions/style.instructions.md", "---\napplyTo: '**/*.py'\n---\n# Style\n"
+    )
     _write(root / ".apm/prompts/hello.prompt.md", "---\ndescription: Hello\n---\nHello.\n")
     _write(root / ".apm/agents/helper.agent.md", "---\ndescription: Helper\n---\nHelp.\n")
     hook = {
