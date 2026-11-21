@@ -27,6 +27,7 @@ from hypothesis.stateful import RuleBasedStateMachine
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver, receipts
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
@@ -239,6 +240,9 @@ class KnownCell:
     tracking: str
     match: str
     applies: Callable[..., bool]
+
+    def __post_init__(self) -> None:
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
 
     @property
     def label(self) -> str:

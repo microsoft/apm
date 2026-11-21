@@ -136,20 +136,25 @@ def machine_cells() -> list[MachineCell]:
     from tests.lifecycle.machines._gate_matrix import matrix_cells
 
     cells: list[MachineCell] = []
-    known_source = getattr(test_m_source, "KNOWN_CELLS_BY_ID", {})
+    known_source = test_m_source.KNOWN_CELLS_BY_ID
     for key in sorted(test_m_source.rule_cells()):
-        cells.append(MachineCell(key, SOURCE_SPINE, "T-2", {}, known_source.get(key)))
+        known = known_source.get(key)
+        tracking = known.tracking if known else None
+        cells.append(MachineCell(key, SOURCE_SPINE, "T-2", {}, tracking))
     source_cells = test_m_source.t3_cells() | test_m_source.t5_cells()
     for key in sorted(source_cells | test_m_source.x_cells()):
         assignment = _source_assignment(key)
         if assignment:
-            cells.append(MachineCell(key, SOURCE_SPINE, "T-2", assignment, known_source.get(key)))
+            known = known_source.get(key)
+            tracking = known.tracking if known else None
+            cells.append(MachineCell(key, SOURCE_SPINE, "T-2", assignment, tracking))
     for scope in test_m_scope_lock.SCOPES:
         for key in sorted(test_m_scope_lock.t4_cells(scope)):
             assignment = _lock_assignment(key)
             if assignment:
                 witness = SCOPE_LOCK_SPINE.format(scope=scope)
-                tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
+                known = test_m_scope_lock.KNOWN_T4.get(key)
+                tracking = known.tracking if known else None
                 cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):

@@ -21,7 +21,8 @@ This module is a framework of two tables; a row is data, never code:
 
 Add a site: add one ``SiteSlice`` to ``SITE_SLICES``. Add a class: add its
 setup to ``CLASS_SETUPS`` and an ``Expect`` to each slice that covers it.
-A row whose CLI behavior is wrong today carries ``xfail="#<issue> <neutral text>"``
+A row whose CLI behavior is wrong today carries ``xfail=KnownFailure(...)``
+(``tests/lifecycle/known.py``: open issue, neutral text, failure signature)
 and becomes a strict expected failure.
 """
 
@@ -44,6 +45,7 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.outcome_routing import resolve_trust_policy, route_discovery_outcome
 from apm_cli.policy.schema import ApmPolicy
 from tests.lifecycle import driver, oracles, rows
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.obligation_space import security_obligations
 from tests.lifecycle.rows import Row, RowReplay
 from tests.lifecycle.world import World, use_policy
@@ -255,7 +257,7 @@ class Expect:
     # True: the command requested the org policy file; False: it did not fetch the
     # served policy repository (a warm cache may still probe ``.github-private``).
     policy_fetch: bool | None = None
-    xfail: str | None = None  # "#<issue> <neutral text>" -> strict expected failure
+    xfail: KnownFailure | None = None  # strict expected failure
     smoke: bool = False
     # Overrides CLASS_SETUPS[cls] when the site needs another input for the class.
     setup: Callable[[World, RowReplay], None] | None = None
@@ -803,17 +805,20 @@ SITE_SLICES["audit-ci"] = SiteSlice(
     },
 )
 
-# commands/approve.py -- approval loads the org policy best-effort.
-_APPROVE_UNRESOLVED = r"Org policy could not be resolved; approval is proceeding"
-_APPROVE_TWICE = "#4178 approve prints its org policy warning twice"
+# commands/approve.py -- approval routes the org policy through the trust-reader
+# owner (resolve_trust_policy), once per command (#4178): an unusable policy under
+# the block knob refuses and writes nothing; otherwise the miss is reported once.
+_APPROVE_UNRESOLVED = r"Org policy not applied"
 _NOTHING_WRITTEN = r"Nothing was written"
 SITE_SLICES["approve"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm approve p-exec",
     classes={
-        "cache_miss_fetch_fail/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "cache_miss_fetch_fail/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "hash_mismatch": Expect(0, (r"Policy hash verification failed",), xfail=_APPROVE_TWICE),
+        "cache_miss_fetch_fail/block": Expect(
+            1, (*_routed_block("cache_miss_fetch_fail"), _NOTHING_WRITTEN)
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (_not_applied("cache_miss_fetch_fail"),)),
+        "hash_mismatch": Expect(1, (TRUST_BLOCK + "policy hash mismatch", _NOTHING_WRITTEN)),
         "absent/block": Expect(
             1, (*_routed_block("absent"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
         ),
@@ -825,14 +830,14 @@ SITE_SLICES["approve"] = SiteSlice(
         "empty/block": Expect(
             1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
         ),
-        "empty/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "empty/warn": Expect(0, (_not_applied("empty"),)),
         "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
         "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "malformed/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "malformed/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "garbage_response/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "garbage_response/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "incomplete_chain": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "malformed/block": Expect(1, (*_routed_block("malformed"), _NOTHING_WRITTEN)),
+        "malformed/warn": Expect(0, (_not_applied("malformed"),)),
+        "garbage_response/block": Expect(1, (*_routed_block("garbage_response"), _NOTHING_WRITTEN)),
+        "garbage_response/warn": Expect(0, (_not_applied("garbage_response"),)),
+        "incomplete_chain": Expect(1, (_CHAIN_BLOCK, _NOTHING_WRITTEN)),
         "cached_stale/org-block": Expect(
             1, (_STALE_BLOCK, _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
         ),
@@ -840,7 +845,7 @@ SITE_SLICES["approve"] = SiteSlice(
         "cache=cold": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=True),
         "cache=warm-fresh": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=False),
         "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "cache=stale>7d-or-expired": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "cache=stale>7d-or-expired": Expect(0, (_not_applied("cache_miss_fetch_fail"),)),
     },
 )
 
@@ -1018,7 +1023,7 @@ def _site_rows():
             if expect.smoke:
                 marks.append(pytest.mark.lifecycle_smoke)
             if expect.xfail:
-                marks.append(pytest.mark.xfail(strict=True, reason=expect.xfail))
+                marks.append(expect.xfail.mark())
             yield pytest.param(cell_id, id=cell_id, marks=marks)
 
 

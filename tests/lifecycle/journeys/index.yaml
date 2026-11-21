@@ -2308,9 +2308,11 @@ journeys:
     - token value
     - Traceback
     files: []
+    # O8 models remediation advice; E04 step 4 prints DIAGNOSTIC advice (#4174)
+    # that cannot make a missing repo pass. Model residual #4571; Q&L ruling
+    # 2026-11-21. The key lines and O5 still pin host, credential and advice.
     oracles:
     - O5
-    - O8
   - n: 5
     cmd: apm auth github.com
     argv:
