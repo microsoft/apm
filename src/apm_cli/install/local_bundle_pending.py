@@ -14,6 +14,7 @@ import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 _RECORD = Path("apm_modules") / ".local-bundle-pending.json"
 
@@ -118,6 +119,20 @@ def recorded_bundle_keys(scope_dir: Path, owner: str) -> tuple[str, ...]:
         for bundle in _recorded(scope_dir)
         if bundle.slug == owner or bundle.approval_key.split("#", 1)[0] == owner
     )
+
+
+def bundle_grant_withdrawn(scope_dir: Path, owner: str, context: Any, exec_type: str) -> bool:
+    """Whether a deny or revoke withdrew *exec_type* from bundle *owner* (RA-025, RA-041).
+
+    The one baseline rule for a local bundle's services: a bundle is not in
+    apm.yml, so its MCP and LSP servers stay on the lock's baseline until the
+    exact bundle key its install recorded no longer grants the type. A bundle
+    without a record keeps its baseline.
+    """
+    from apm_cli.security.trust import package_grants_type
+
+    keys = recorded_bundle_keys(scope_dir, owner)
+    return bool(keys) and not package_grants_type(context, keys, exec_type)
 
 
 def recorded_bundle(scope_dir: Path, approval_key: str) -> PendingBundle | None:

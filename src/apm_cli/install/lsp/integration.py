@@ -234,6 +234,39 @@ def _bundle_owner_aliases(owner: str) -> frozenset[str]:
     return frozenset({canonical, owner})
 
 
+def _withdrawn_bundle_names(
+    bundle_names: set[str],
+    provenance: Mapping[str, str],
+    scope_dir: Path,
+    project_root: Path,
+    *,
+    user_scope: bool,
+    no_policy: bool,
+) -> set[str]:
+    """Bundle-owned LSP servers whose bundle's LSP grant a deny or revoke withdrew (RA-041)."""
+    if not bundle_names:
+        return set()
+    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn, recorded_bundle_keys
+    from apm_cli.security.executables import EXEC_TYPE_LSP
+    from apm_cli.security.trust import McpAdmission
+
+    owners = {
+        name: provenance[name].removeprefix(_BUNDLE_LSP_OWNER_PREFIX) for name in bundle_names
+    }
+    if not any(recorded_bundle_keys(scope_dir, owner) for owner in owners.values()):
+        return set()
+    context = McpAdmission.for_project(
+        project_root, user_scope=user_scope, no_policy=no_policy
+    ).context
+    if context is None:
+        return set()
+    return {
+        name
+        for name, owner in owners.items()
+        if bundle_grant_withdrawn(scope_dir, owner, context, EXEC_TYPE_LSP)
+    }
+
+
 def _clean_target_differences(
     *,
     old_targets: dict[str, set[str]],
@@ -663,6 +696,15 @@ def run_lsp_integration(  # noqa: PLR0913
         bundle_names = {
             name for name, owner in old_lsp_provenance.items() if not _is_regular_owner(owner)
         }
+        withdrawn = _withdrawn_bundle_names(
+            bundle_names,
+            old_lsp_provenance,
+            apm_modules_path.parent,
+            project_root,
+            user_scope=user_scope,
+            no_policy=no_policy,
+        )
+        bundle_names -= withdrawn
         old_regular_names = {
             name for name, owner in old_lsp_provenance.items() if _is_regular_owner(owner)
         }
@@ -700,7 +742,7 @@ def run_lsp_integration(  # noqa: PLR0913
             for runtime_name, server_names in old_lsp_targets.items()
         }
         for server_names in new_targets.values():
-            server_names.difference_update(old_regular_names)
+            server_names.difference_update(old_regular_names | withdrawn)
         for target_runtime in target_runtimes or []:
             new_targets.setdefault(target_runtime, set()).update(
                 LSPIntegrator.expressible_server_names(lsp_deps, target_runtime)

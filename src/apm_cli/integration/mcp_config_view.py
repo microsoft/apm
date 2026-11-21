@@ -633,16 +633,16 @@ def _granted_bundle_servers(
     context = admission.context
     if context is None:
         return owned
-    from apm_cli.install.local_bundle_pending import recorded_bundle_keys
+    from apm_cli.install.local_bundle_pending import bundle_grant_withdrawn
     from apm_cli.security.executables import EXEC_TYPE_MCP
-    from apm_cli.security.trust import package_grants_type
 
-    granted: dict[str, str] = {}
-    for name, token in owned.items():
-        keys = recorded_bundle_keys(modules_root.parent, token[len(BUNDLE_MCP_OWNER_PREFIX) :])
-        if not keys or package_grants_type(context, tuple(keys), EXEC_TYPE_MCP):
-            granted[name] = token
-    return granted
+    return {
+        name: token
+        for name, token in owned.items()
+        if not bundle_grant_withdrawn(
+            modules_root.parent, token[len(BUNDLE_MCP_OWNER_PREFIX) :], context, EXEC_TYPE_MCP
+        )
+    }
 
 
 def _bundle_owned_baseline(
