@@ -1523,9 +1523,11 @@ class TestGitSubprocessEnv:
                     "PATH": os.environ["PATH"],
                     "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_GLOBAL": os.devnull,
-                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_COUNT": "2",
                     "GIT_CONFIG_KEY_0": "url.file:///fixture/.insteadOf",
                     "GIT_CONFIG_VALUE_0": "https://git.example.com/",
+                    "GIT_CONFIG_KEY_1": "http.extraheader",
+                    "GIT_CONFIG_VALUE_1": "Authorization: Basic sentinel",
                     "GIT_HTTP_EXTRAHEADER": "Authorization: Basic sentinel",
                 },
                 clear=True,
@@ -1536,8 +1538,18 @@ class TestGitSubprocessEnv:
 
         assert len(snapshots) == 1
         assert "GIT_HTTP_EXTRAHEADER" not in child
-        assert child["GIT_CONFIG_KEY_0"].lower() == "url.file:///fixture/.insteadof"
-        assert child["GIT_CONFIG_VALUE_0"] == "https://git.example.com/"
+        entries = {
+            (
+                child.get(f"GIT_CONFIG_KEY_{index}", ""),
+                child.get(f"GIT_CONFIG_VALUE_{index}", ""),
+            )
+            for index in range(int(child["GIT_CONFIG_COUNT"]))
+        }
+        assert ("url.file:///fixture/.insteadof", "https://git.example.com/") in {
+            (key.lower(), value) for key, value in entries
+        }
+        assert all("sentinel" not in value for _, value in entries)
+        assert all("sentinel" not in value for value in child.values())
 
     def test_clone_streams_git_progress_to_reporter(self, tmp_path) -> None:
         reporter = MagicMock()

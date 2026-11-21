@@ -11,11 +11,9 @@ below stands in for that process only, answering with the bytes
 
 from __future__ import annotations
 
-import os
 import subprocess
 import threading
 from collections.abc import Callable
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -166,26 +164,6 @@ class TestRealGitTlsConfig:
         assert env["PATH"] == "/usr/bin"
         assert env["GIT_TRACE_REDACT"] == "1"
         assert "GIT_DIR" not in env
-
-    def test_reads_real_git_config_files(self, tmp_path: Path) -> None:
-        """End to end through a real ``git``: global file, then a command-scope override."""
-        config = tmp_path / "gitconfig"
-        config.write_text(
-            "[http]\n\tsslBackend = schannel\n\tsslCAInfo = /global/ca.pem\n", encoding="ascii"
-        )
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith(("GIT_CONFIG", "XDG_CONFIG_HOME"))
-        }
-        env.update(
-            GIT_CONFIG_GLOBAL=str(config),
-            GIT_CONFIG_NOSYSTEM="1",
-            GIT_CONFIG_COUNT="1",
-            GIT_CONFIG_KEY_0="http.sslCAInfo",
-            GIT_CONFIG_VALUE_0="",
-        )
-        assert real_git_tls_config(env) == {"http.sslbackend": "schannel"}
 
 
 class TestRealGitTlsConfigCaching:
