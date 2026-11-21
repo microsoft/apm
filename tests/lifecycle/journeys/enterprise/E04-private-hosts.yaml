@@ -46,11 +46,9 @@ steps:
     files: []
     key_lines:
       - "[x] lifecycle.ghe.com/lifecycle/p-missing -- not accessible or doesn't exist"
-      - GITHUB_APM_PAT_LIFECYCLE
+      - "host: lifecycle.ghe.com, credential tried: GITHUB_APM_PAT_LIFECYCLE"
+      - "Run 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing'"
     forbidden_lines: [e04-bad-token-444, Traceback]
-    remediate:
-      - {advice: apm install --verbose lifecycle.ghe.com/lifecycle/p-missing}
-    rerun: [apm install --verbose lifecycle.ghe.com/lifecycle/p-missing]
   - n: 5
     env:
       GH_TOKEN: e04-gh-token-555
@@ -62,11 +60,3 @@ steps:
       output: ["[+] github.com: using credential from GH_TOKEN.", "[i] Add --check to validate it against the API."]
     key_lines: ["[+] github.com: using credential from GH_TOKEN."]
     forbidden_lines: [e04-gh-token-555]
-known_cells:
-  # The hint is 'run with --verbose for auth details' (no runnable 'apm ...'
-  # advice), and the --verbose run prints no auth details.
-  - id: e04-auth-failure-advice-not-actionable
-    law: O8
-    tracking: "#4174"
-    step: 4
-    match: "apm install --verbose lifecycle\\.ghe\\.com/lifecycle/p-missing"

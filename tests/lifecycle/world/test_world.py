@@ -26,6 +26,7 @@ import yaml
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import (
     World,
     apm_home_outside_home,
@@ -135,7 +136,7 @@ _TARGETS = {
     "p-native-codex": "codex",
     "p-native-claude-bin": "claude",
 }
-_KNOWN = {}
+_KNOWN: dict[tuple[str, str], KnownFailure] = {}
 
 
 def _deploy_root(world: World, scope: str) -> Path:
@@ -276,11 +277,7 @@ def _use_qualified_codex(world: World) -> None:
 def _cell_marks(package: str, scope: str) -> list[pytest.MarkDecorator]:
     if (package, scope) not in _KNOWN:
         return []
-    return [
-        pytest.mark.xfail(
-            strict=True, reason=f"tracking {_KNOWN[(package, scope)]}", raises=AssertionError
-        )
-    ]
+    return [_KNOWN[(package, scope)].mark()]
 
 
 _CELLS = [

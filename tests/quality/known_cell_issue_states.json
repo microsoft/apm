@@ -1,0 +1,7 @@
+{
+  "description": "GitHub state of every issue a strict known cell cites; regenerate with 'python -m tests.quality.known_cell_issues --write'.",
+  "issues": {
+    "3703": "OPEN",
+    "4570": "OPEN"
+  }
+}

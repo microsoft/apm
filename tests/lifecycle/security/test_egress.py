@@ -414,7 +414,7 @@ def _param(host: HostSlice, row: EgressRow):
     if row.smoke:
         marks.append(pytest.mark.lifecycle_smoke)
     if row.xfail:
-        marks.append(pytest.mark.xfail(strict=True, raises=AssertionError, reason=row.xfail))
+        marks.append(row.xfail.mark())
     return pytest.param(host, row, id=row.id, marks=marks)
 
 

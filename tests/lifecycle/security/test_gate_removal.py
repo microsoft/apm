@@ -581,7 +581,7 @@ def _param(gate_slice: GateSlice, gate_row: GateRow):
     if gate_row.smoke:
         marks.append(pytest.mark.lifecycle_smoke)
     if gate_row.xfail:
-        marks.append(pytest.mark.xfail(strict=True, raises=AssertionError, reason=gate_row.xfail))
+        marks.append(gate_row.xfail.mark())
     return pytest.param(gate_slice, gate_row, id=gate_row.id, marks=marks)
 
 

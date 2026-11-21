@@ -4,7 +4,9 @@
 - world fixtures: ``tests/lifecycle/world`` (lane T-0W);
 - receipts plugin: ``ReceiptWitnessPlugin`` (session receipts directory and
   the per-witness obligation ratchet);
-- global output oracle: every driver command keeps I6, I8 and I9.
+- global output oracle: every driver command keeps I6, I8 and I9;
+- known cell signatures: a strict expected failure counts only with its
+  ``KnownFailure.match`` in the failure message (``tests/lifecycle/known.py``).
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.lifecycle import driver, oracles
+from tests.lifecycle import driver, known, oracles
 from tests.lifecycle.obligations import ReceiptWitnessPlugin, load_catalog
 from tests.lifecycle.world.fixtures import _world_dir, lifecycle_template, lifecycle_world
 from tests.quality.taxonomy import directory_marker
@@ -23,6 +25,7 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 __all__ = ["_world_dir", "lifecycle_template", "lifecycle_world"]
 
 _PLUGIN_NAME = "lifecycle-receipts"
+_KNOWN_PLUGIN = "lifecycle-known-cells"
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -39,6 +42,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    if not config.pluginmanager.has_plugin(_KNOWN_PLUGIN):
+        config.pluginmanager.register(known, _KNOWN_PLUGIN)
     if not config.pluginmanager.has_plugin(_PLUGIN_NAME):
         config.pluginmanager.register(ReceiptWitnessPlugin(load_catalog()), _PLUGIN_NAME)
 
