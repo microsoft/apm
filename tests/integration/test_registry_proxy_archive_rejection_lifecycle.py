@@ -64,7 +64,7 @@ def _archive(name: str, *, link: bool) -> bytes:
             f"{root}.apm/instructions/{name}.instructions.md", _GUIDE.format(name=name)
         )
         if link:
-            member = zipfile.ZipInfo(f"{root}.apm/instructions/linked.instructions.md")
+            member = zipfile.ZipInfo(f"{root}.apm/instructions/alias.instructions.md")
             member.create_system = 3
             member.external_attr = (stat.S_IFLNK | 0o777) << 16
             archive.writestr(member, f"{name}.instructions.md")
@@ -180,7 +180,7 @@ def test_rejected_proxy_archive_is_reported_instead_of_later_404(
     assert refused.returncode != 0, _text(refused)
     # The cause is the refused archive, not the 404 of a later fallback URL.
     assert f"Archiveerror:Unsafeziparchivefrom{rejected_url}" in flat, _text(refused)
-    assert f"Refusingtoextractsymlink:linked-{REF}/.apm/instructions/" in flat, _text(refused)
+    assert f"Refusingtoextractsymlink:linked-{REF}/.apm/instructions/alias" in flat, _text(refused)
     assert "Lasterror:HTTP404" not in flat, _text(refused)
     # Every later fallback URL was tried and answered 404.
     statuses = {r.path: r.status for r in proxy.requests_to(PROXY_HOST)}
