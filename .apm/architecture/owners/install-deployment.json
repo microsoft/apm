@@ -382,7 +382,8 @@
       "selectors": [
         "src/apm_cli/install/deployed_paths.py",
         "src/apm_cli/commands/uninstall/engine.py",
-        "src/apm_cli/commands/uninstall/local_survivors.py"
+        "src/apm_cli/commands/uninstall/local_survivors.py",
+        "src/apm_cli/commands/uninstall/recorded_targets.py"
       ],
       "guards": ["install-deployment-skills-root-derivation"]
     },
