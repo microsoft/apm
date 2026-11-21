@@ -195,7 +195,7 @@ def test_a_refused_declaration_restores_the_original_bytes_with_comments(tmp_pat
     assert lock_path.read_bytes() == original
 
 
-def test_a_type_only_service_change_is_kept_by_the_rollback() -> None:
+def test_a_type_only_service_change_is_kept_by_the_rollback(tmp_path: Path) -> None:
     """``1`` and ``true`` differ: the rollback carries the committed ``true``."""
     previous = LockFile(mcp_servers=[_SERVER], mcp_configs={_SERVER: {"name": _SERVER, "flag": 1}})
     committed = LockFile(
@@ -203,6 +203,7 @@ def test_a_type_only_service_change_is_kept_by_the_rollback() -> None:
     )
 
     rollback = claude_plugins._with_reconciled_services(previous, committed)
+    lock_path = get_lockfile_path(tmp_path)
+    rollback.write(lock_path)
 
-    assert rollback is not previous
-    assert rollback.mcp_configs[_SERVER]["flag"] is True
+    assert "flag: true" in lock_path.read_text(encoding="utf-8")
