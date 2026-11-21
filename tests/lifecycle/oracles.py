@@ -54,7 +54,12 @@ class OracleLaw:
 
 
 ORACLE_LAWS: Mapping[str, OracleLaw] = {
-    "I1": OracleLaw("lock and deployed files agree", ("outcome.status_matches_state",)),
+    "I1": OracleLaw(
+        "lock and deployed files agree "
+        "(I1-X2: a path holding exactly the bytes a scenario declared as a user write "
+        "is exempt from lock==disk and earns no I1 receipt; APM must keep those bytes)",
+        ("outcome.status_matches_state",),
+    ),
     "I2": OracleLaw("a converged operation repeats as a byte no-op", ("idempotency.byte_stable",)),
     "I3": OracleLaw(
         "install --frozen succeeds iff audit --ci is clean",
@@ -133,6 +138,9 @@ class Observation:
     surface_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
     # True when deploy_root is the user deploy root, where native plugin roots live.
     user_scope: bool = False
+    # I1-X2: deploy-root-relative path -> sha256 of the bytes a scenario wrote
+    # there as a declared user write (Scenario.user_write).
+    user_bytes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -390,8 +398,9 @@ def _i1_lock_deployed(
 ) -> list[Violation] | None:
     del before, result, model, op
     lock = after.lock
+    found, user = _user_write_violations(after)
     if lock is None and not after.managed_paths and not after.services:
-        return None
+        return found or None
     recorded: dict[str, str | None] = {}
     if lock is not None:
         for record in lock.deployment_ledger.records.values():
@@ -400,22 +409,41 @@ def _i1_lock_deployed(
         for dependency in lock.get_package_dependencies():
             recorded.update(dependency.deployed_file_hashes)
         recorded.update(lock.local_deployed_file_hashes)
-    found = []
     for relative, digest in sorted(recorded.items()):
         path = after.deploy_root / relative
         # A record without a hash may be a directory (a deployed skill); it must exist.
         if not (path.is_file() if digest else path.exists()):
             found.append(Violation("I1", f"recorded file is missing: {relative}"))
         # The lock records line-ending-normalized hashes (apm#1952), so CRLF on Windows matches.
-        elif digest and digest != compute_file_hash(path):
+        elif digest and digest != compute_file_hash(path) and relative not in user:
             found.append(Violation("I1", f"recorded hash does not match disk: {relative}"))
     native, native_found = _native_plugin_recorded(after)
     found.extend(native_found)
-    for relative in sorted(after.managed_paths - set(recorded) - native):
+    for relative in sorted(after.managed_paths - set(recorded) - native - user):
         if (after.deploy_root / relative).exists():
             found.append(Violation("I1", f"deployed file is not in the lock: {relative}"))
     found.extend(_service_claim_violations(after))
-    return found
+    # An exempted path earns no I1 receipt for the step (I1-X2).
+    return found if found or not user else None
+
+
+def _user_write_violations(after: Observation) -> tuple[list[Violation], set[str]]:
+    """I1-X2: (violations, exempt paths) of the scenario's declared user writes.
+
+    A declared path is the user's while it holds exactly the declared bytes;
+    APM must keep them, so any other content (or a removal) is a violation.
+    """
+    found: list[Violation] = []
+    exempt: set[str] = set()
+    for relative, declared in sorted(after.user_bytes.items()):
+        path = after.deploy_root / relative
+        if not path.is_file():
+            found.append(Violation("I1", f"I1-X2: the user's file was removed: {relative}"))
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != declared:
+            found.append(Violation("I1", f"I1-X2: the user's bytes were changed: {relative}"))
+        else:
+            exempt.add(relative)
+    return found, exempt
 
 
 def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violation]]:

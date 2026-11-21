@@ -24,6 +24,7 @@ Package names in a command line are replaced by their spec, as in rows.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -233,6 +234,8 @@ class Scenario:
         self.model = ModelState(targets=frozenset(targets), scope=scope, policy=policy)
         self.expected_seen: set[str] = set()
         self.expected_all: set[str] = set()
+        # I1-X2: deploy-root-relative path -> sha256 of the bytes the user wrote there.
+        self.user_bytes: dict[str, str] = {}
         self.steps: list[Step] = []
         self.set_targets(*targets)
 
@@ -273,6 +276,24 @@ class Scenario:
     def source_moved(self) -> None:
         """An input outside the CLI moved (a new tag, an edited cache): not converged."""
         self.model = replace(self.model, converged=False)
+
+    def user_write(self, relative: str, content: str) -> str:
+        """Write the user's own bytes at *relative* under the deploy root (an input edit).
+
+        An edited deployed file, or a user file at a package's path: I1-X2
+        exempts it from lock==disk while it holds exactly these bytes, and
+        fails any step that changes or removes them.
+        """
+        path = self.deploy_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = content.encode("ascii")
+        path.write_bytes(data)
+        self.user_bytes[relative] = hashlib.sha256(data).hexdigest()
+        return relative
+
+    def release_user_write(self, relative: str) -> None:
+        """The user lets APM replace *relative* (``install --force``): I1-X2 stops guarding it."""
+        del self.user_bytes[relative]
 
     def drop_from_manifest(self, *names: str) -> None:
         """Edit apm.yml by hand: remove *names* from ``dependencies.apm`` (an input edit)."""
@@ -340,6 +361,7 @@ class Scenario:
             deploy_root=self.deploy_root,
             lock=self.lock(),
             managed_paths=managed,
+            user_bytes=dict(self.user_bytes),
         )
 
     def snapshot(self) -> ArtifactSnapshotSet:
