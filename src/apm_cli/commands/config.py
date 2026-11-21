@@ -14,6 +14,7 @@ from apm_cli.core.remediation import (
 from apm_cli.core.scope import manifest_file
 
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
 from ..install.locking import serialized_lifecycle
 from ..utils.credential_rendering import redact_secrets, render_config_value
 from ..version import get_version
@@ -93,10 +94,7 @@ def _get_config_getters():
 # Keys still accepted by get/set so existing scripts keep working, but no
 # longer advertised. Each maps to the warning shown when it is used.
 _DEPRECATED_CONFIG_KEYS = {
-    "auto-integrate": (
-        "'auto-integrate' is deprecated and has no effect: no command reads it. "
-        "It will be removed in a future release."
-    ),
+    "auto-integrate": deprecation_message("config-auto-integrate"),
 }
 
 

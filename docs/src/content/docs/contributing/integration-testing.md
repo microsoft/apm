@@ -589,6 +589,10 @@ For the fast path, dispatch `manual-build-release` on the `main` commit, wait
 for it to finish green, then tag that commit. Nothing publishes without a
 green full validation of the exact SHA.
 
+The tag must point at a commit on `main` or a `release/*` branch. Any other
+tag fails the plan before anything builds or publishes; if the plan cannot
+reach the GitHub compare API, it fails too, and you re-run the job.
+
 If a published stable release never reached PyPI, re-publish it from its tag
 without re-running validation:
 

@@ -11,7 +11,6 @@ from apm_cli.core.remediation import (
     AGENT_PLUGIN_BUNDLE_CONSUMER,
     BUNDLE_TARGET_MISMATCH,
     DEPLOYMENT_RECORDS_STALE,
-    LEGACY_BUNDLE_FORMAT,
 )
 from apm_cli.core.scope import manifest_file
 
@@ -25,6 +24,7 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
 from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
 from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
@@ -416,11 +416,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         except Exception:
             effective_target = None
     else:
-        logger.warning(
-            "--target is deprecated and will be removed in a future release. "
-            "Bundles are target-agnostic; the value is recorded as informational "
-            "pack.target metadata only and is ignored by 'apm install'."
-        )
+        logger.warning(deprecation_message("pack-target"))
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
@@ -975,10 +971,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     from ..install.errors import InstallFailureAlreadyRendered, PolicyViolationError
 
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
-    logger.warning(
-        "'apm unpack' is deprecated and will be removed in a future release. "
-        f"{LEGACY_BUNDLE_FORMAT.sentence()}",
-    )
+    logger.warning(deprecation_message("unpack"))
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 
