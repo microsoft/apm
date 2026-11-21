@@ -1,8 +1,9 @@
 """Tracking issues of every strict known cell and their recorded GitHub state (#4565).
 
-A strict known cell is a lifecycle known cell (generated obligations, journey
-and machine known cells, rule cells) or any strict xfail in ``tests/``, whether
-a ``KnownFailure`` (kind ``bug`` or ``deferred-design``) or a raw mark.
+A strict known cell is a lifecycle known cell (generated obligations, journey,
+machine and scenario known cells, table-level machine and scenario rows, rule
+cells) or any strict xfail in ``tests/``, whether a ``KnownFailure`` (kind
+``bug`` or ``deferred-design``) or a raw mark.
 
 A strict known cell stays a known failure only while its tracking issue is
 open. Reading issue state needs the network, so the gate
@@ -66,27 +67,57 @@ def _is_xfail(func: ast.AST) -> bool:
     )
 
 
-def static_cells(root: Path = ROOT / "tests") -> dict[str, str]:
-    """Strict known cells written in test source: ``KnownFailure(...)`` and raw strict xfails.
+# Constructors of a strict known cell -> the positional index of its tracking issue.
+# KnownFailure: tables and unit tests; Known / known_defect: scenarios (a scenario
+# credit takes its tracking from a Known); KnownCell: machines.
+_TRACKING_ARG = {"KnownFailure": 0, "Known": 0, "known_defect": 0, "KnownCell": 2}
 
-    A raw strict xfail's tracking is the ``#<n>`` its reason starts with, or
-    ``""`` when it cites none (the gate rejects that).
+
+def _constants(tree: ast.Module) -> dict[str, str]:
+    """Module-level ``NAME = "text"`` constants, so ``Known(_ISSUE, ...)`` resolves."""
+    found: dict[str, str] = {}
+    for statement in tree.body:
+        value = getattr(statement, "value", None)
+        targets = statement.targets if isinstance(statement, ast.Assign) else []
+        if isinstance(statement, ast.AnnAssign):
+            targets = [statement.target]
+        for target in targets:
+            if isinstance(target, ast.Name) and _literal(value) is not None:
+                found[target.id] = _literal(value)
+    return found
+
+
+def _tracking(call: ast.Call, index: int, constants: dict[str, str]) -> str | None:
+    node = call.args[index] if len(call.args) > index else _keyword(call, "tracking")
+    if isinstance(node, ast.Name):
+        return constants.get(node.id, "")
+    if node is None or (isinstance(node, ast.Constant) and node.value is None):
+        return None
+    return _literal(node) if _literal(node) is not None else ""
+
+
+def static_cells(root: Path = ROOT / "tests") -> dict[str, str]:
+    """Strict known cells written in test source, by ``path:line``.
+
+    Every constructor in ``_TRACKING_ARG`` and every raw strict xfail. A raw
+    xfail's tracking is the ``#<n>`` its reason starts with; a tracking the scan
+    cannot resolve to a literal is ``""``, which the gate rejects.
     """
     cells: dict[str, str] = {}
     for path in sorted(root.rglob("*.py")):
         if path in _NOT_CELLS:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        constants = _constants(tree)
         where = path.relative_to(ROOT).as_posix()
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-            if name == "KnownFailure":
-                first = node.args[0] if node.args else _keyword(node, "tracking")
-                tracking = _literal(first)
-                if tracking is not None:  # the class itself and its tests build no cell
+            if name in _TRACKING_ARG:
+                tracking = _tracking(node, _TRACKING_ARG[name], constants)
+                if tracking is not None:
                     cells[f"source:{where}:{node.lineno}"] = tracking
             elif _is_xfail(func):
                 strict = _keyword(node, "strict")
