@@ -1,0 +1,20 @@
+{
+  "issue": 3423,
+  "summary": "Named Claude profiles and Codex user scope are outside the project-Copilot row cell.",
+  "failure_modes": [
+    "ownership",
+    "routing"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_claude_profile_cleanup_refuses_unsafe_paths_without_changing_state",
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_claude_user_profile_installation_is_independent_and_idempotent",
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_install_keeps_files_deployed_to_other_profiles",
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_uninstall_does_not_redeploy_retained_package",
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_profile_uninstall_removes_only_the_selected_profile",
+    "tests/integration/test_claude_config_profile_lifecycle.py::test_relative_codex_home_does_not_block_claude_global_lifecycle"
+  ]
+}

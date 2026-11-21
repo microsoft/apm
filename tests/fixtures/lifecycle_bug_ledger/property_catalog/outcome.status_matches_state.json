@@ -1,0 +1,6 @@
+{
+  "id": "outcome.status_matches_state",
+  "phase": 1,
+  "oracle_tier": "outcome",
+  "law": "Exit status and diagnostics truthfully describe the durable outcome."
+}

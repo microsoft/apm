@@ -1,0 +1,14 @@
+{
+  "issue": 3912,
+  "summary": "Catalog origin evidence and Git marketplace provenance exceed local-path replay sources.",
+  "failure_modes": [
+    "reference"
+  ],
+  "properties": [
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update",
+    "tests/integration/test_marketplace_origin_evidence_lifecycle.py::test_pre_037_lock_without_origin_evidence_still_updates"
+  ]
+}

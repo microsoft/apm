@@ -1,0 +1,14 @@
+{
+  "issue": 4203,
+  "fixed_in": "0.37.0",
+  "summary": "apm pack --json dropped the missing-license authoring warning: the report carried an empty warnings array and stderr did not show it.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_pack_deprecation_warning_lifecycle.py::test_pack_json_keeps_the_missing_license_warning"
+  ]
+}
