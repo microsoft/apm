@@ -27,8 +27,9 @@ cross-package file protection for stale cleanup (#1831).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE, kept_note
@@ -139,19 +140,21 @@ def _run_cleanup(
             set(existing_lockfile.dependencies)
             - partial_dropped  # architecture-authority-exempt: survivor intent input, not a removal predicate
         )
-    if existing_lockfile:
+    if existing_lockfile or package_deployed_files:
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
 
+        # Without a prior lock the survivors are this run's claims (packages and
+        # root-local content); they protect them when receipts stand in.
         surviving_files = surviving_deployed_paths(
-            existing_lockfile,
+            existing_lockfile or _run_local_basis(ctx),
             package_deployed_files,
             _targets or [],
             declared_target_profiles(ctx),
             desired_owners=desired_owners,
             failed_owners=frozenset(
                 key
-                for key in existing_lockfile.dependencies
+                for key in (existing_lockfile.dependencies if existing_lockfile else ())
                 if diagnostics.count_for_package(key, "error") > 0
             ),
             user_scope=user_scope,
@@ -243,7 +246,7 @@ def _run_cleanup(
     # Complements the package-level orphan cleanup above, which handles
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
-    if existing_lockfile and package_deployed_files:
+    if package_deployed_files:
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --
             # a file that failed to re-deploy would look stale and get
@@ -251,7 +254,9 @@ def _run_cleanup(
             if diagnostics.count_for_package(dep_key, "error") > 0:
                 continue
 
-            prev_dep = existing_lockfile.get_dependency(dep_key)
+            prev_dep = (
+                existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
+            ) or _receipted_stand_in(ctx, dep_key)
             if not prev_dep:
                 continue  # new package this install -- nothing stale yet
             stale = set(detect_stale_files(prev_dep.deployed_files, new_deployed))
@@ -325,6 +330,37 @@ def _run_cleanup(
                         f"Renamed {_aliased} to the new letter case from {dep_key}"
                     )
                 logger.stale_cleanup(dep_key, cleanup_result)
+
+
+def _run_local_basis(ctx: InstallContext) -> Any:
+    """An empty prior lock carrying this run's root-local claims as survivors."""
+    from apm_cli.deps.lockfile import LockFile
+
+    return LockFile(local_deployed_files=list(getattr(ctx, "local_deployed_files", None) or ()))
+
+
+@dataclass(frozen=True)
+class _ReceiptedDeployment:
+    """A package's prior deployment as this installation's receipts record it."""
+
+    deployed_files: list[str]
+    deployed_file_hashes: dict[str, str]
+
+
+def _receipted_stand_in(ctx: InstallContext, dep_key: str) -> _ReceiptedDeployment | None:
+    """Stand in for a prior lock record the lock does not hold (it was lost or regenerated).
+
+    This installation's deployment receipts for *dep_key* are the prior
+    deployment, so a lost lock converges like a kept one; lockfile assembly
+    reconciles the same record. Deletion stays gated by deployment evidence.
+    """
+    receipted = deployment_evidence(ctx).receipted_claims(dep_key)
+    if not receipted:
+        return None
+    stand_ins = getattr(ctx, "receipted_prior_deployments", None)
+    if isinstance(stand_ins, dict):
+        stand_ins[dep_key] = receipted
+    return _ReceiptedDeployment(sorted(receipted), dict(receipted))
 
 
 def _orphan_decision(

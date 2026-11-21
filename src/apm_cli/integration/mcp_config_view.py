@@ -105,6 +105,8 @@ class CurrentMcpConfigView:
     # gate, dependency inclusion, transitive trust): ``omissions`` then holds
     # exactly the evidence this run would record, so recorded evidence must equal it.
     selection_replayed: bool = False
+    # Server name -> (declaring lock key, declaration) this run's admission parked.
+    parked: Mapping[str, tuple[str, MCPDependency]] = field(default_factory=dict)
 
     @classmethod
     def select(
@@ -233,6 +235,11 @@ class CurrentMcpConfigView:
             },
             project_root=project_root,
             gated_names=frozenset(collected.gated - root_names),
+            parked={
+                name: declaration
+                for name, declaration in collected.parked.items()
+                if name not in configs
+            },
             approval_targets={
                 name: target
                 for name, target in collected.approval_targets.items()
@@ -874,6 +881,7 @@ class _CollectedDependencies:
     brought_in_by: dict[str, str | None] = field(default_factory=dict)
     approval_targets: dict[str, str] = field(default_factory=dict)
     one_off: list[tuple[str, str]] = field(default_factory=list)
+    parked: dict[str, tuple[str, MCPDependency]] = field(default_factory=dict)
 
 
 def _copy_contradicts_lock(
@@ -1121,6 +1129,7 @@ def _collect_locked_dependencies(
                     mcp_dependency.name,
                     {"declaration": fingerprint, "reason": str(verdict.reason)},
                 )
+                result.parked.setdefault(mcp_dependency.name, (package_key, mcp_dependency))
                 if native_runtimes and verdict.reason == REASON_UNTRUSTED_TRANSITIVE:
                     # The native plugin verdict applies the same refusal to
                     # the plugin Claude loads; its diagnostic is the one shown.

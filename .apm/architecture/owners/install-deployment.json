@@ -46,7 +46,8 @@
       "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints)",
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
-        "src/apm_cli/install/mcp/native_entry.py"
+        "src/apm_cli/install/mcp/native_entry.py",
+        "src/apm_cli/install/mcp/parked_retirement.py"
       ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
