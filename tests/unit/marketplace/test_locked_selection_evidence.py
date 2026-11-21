@@ -368,3 +368,31 @@ def test_local_catalog_rows_reread_the_catalog_and_frozen_keeps_the_lock(
     resolved = resolver._resolve_marketplace_dep(_plain_selection())
     assert resolved.is_local
     assert resolved.local_path == selected
+
+
+def test_changed_local_catalog_selection_refuses_before_pre_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#4639: a frozen local-catalog refusal comes before any lifecycle script."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.apm_package import APMPackage
+
+    runner = MagicMock()
+    monkeypatch.setattr(
+        "apm_cli.core.lifecycle_scripts.build_runner_from_context", lambda **_kw: runner
+    )
+    monkeypatch.setattr(
+        "apm_cli.install.local_content_verdict.local_catalog_selection_reasons",
+        lambda lockfile, deps: ["  - tool@catalog: the local catalog now selects other"],
+    )
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    package = APMPackage(name="demo", version="1.0.0", package_path=tmp_path)
+
+    with pytest.raises(FrozenInstallError, match="local marketplace catalog") as refused:
+        InstallService().run(InstallRequest(apm_package=package, frozen=True))
+    assert "the local catalog now selects other" in str(refused.value.reasons)
+    runner.fire.assert_not_called()

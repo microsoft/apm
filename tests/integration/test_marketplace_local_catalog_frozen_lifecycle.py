@@ -145,3 +145,62 @@ def test_local_catalog_plugin_passes_frozen_and_refuses_changes_without_writes(
     assert "content differs from its locked snapshot" in refused.stdout + refused.stderr
     assert snap() == relocked, "a refused --frozen install wrote state"
     apm("audit", "--ci", expected=1)
+
+
+def test_nested_local_catalog_plugin_content_change_refuses_frozen_without_writes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A local package's marketplace child is content-verified like a root plugin."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    root = isolated.work_root / "catalog"
+    plugins = LocalPackageFactory(root / "plugins")
+    plugin = _plugin(plugins, _PLUGIN, "locked rule")
+    marketplace = "lifecycle-local"
+    _write_catalog(root / ".claude-plugin/marketplace.json", marketplace, f"./plugins/{_PLUGIN}")
+
+    parent = isolated.work_root / "parent"
+    parent.mkdir()
+    dump_yaml(
+        {
+            "name": "parent",
+            "version": "1.0.0",
+            "dependencies": {"apm": [{"name": _PLUGIN, "marketplace": marketplace}]},
+        },
+        parent / "apm.yml",
+    )
+    project = isolated.work_root / "project"
+    project.mkdir()
+    dump_yaml(
+        {
+            "name": "consumer",
+            "version": "0.1.0",
+            "targets": [_TARGET],
+            "marketplaces": [{"name": marketplace, "source": str(root)}],
+            "dependencies": {"apm": ["../parent"]},
+        },
+        project / "apm.yml",
+    )
+
+    def apm(*args: str, expected: int = 0) -> CommandResult:
+        result = runner.run(args, cwd=project, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == expected, _evidence(result)
+        return result
+
+    def snap() -> LifecycleStateSnapshot:
+        return LifecycleStateSnapshot.capture(project, targets=(_TARGET,))
+
+    apm("install")
+    assert (project / _RULE).read_text(encoding="ascii") == _rule("locked rule")
+    converged = snap()
+    apm("install", "--frozen")
+    assert snap() == converged
+
+    plugins.add_instruction(plugin, "rule", _rule("edited rule"))
+    refused = apm("install", "--frozen", expected=1)
+    assert "content differs from its locked snapshot" in refused.stdout + refused.stderr
+    assert snap() == converged, "a refused --frozen install wrote state"
+    assert (project / _RULE).read_text(encoding="ascii") == _rule("locked rule")
