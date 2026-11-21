@@ -23681,7 +23681,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:872"
+    "src/apm_cli/core/deployment_ledger.py:879"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
@@ -23735,5 +23735,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "294a8fdf1843feb7f4062086f8e60ea7c11e2011897af1da01ea9b4e68be56c8"
+ "sha256": "863c158dce5afa29b348ffd31b2117f188f5192d16f9a88da9cd744eaa66410c"
 }
