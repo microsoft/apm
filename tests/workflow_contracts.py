@@ -61,6 +61,30 @@ def workflow_job(workflow: WorkflowNode, name: str) -> WorkflowNode:
     return jobs[name]
 
 
+def load_action_steps(path: Path) -> list[WorkflowNode]:
+    """Return a local composite action's steps."""
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    runs = loaded.get("runs") if isinstance(loaded, dict) else None
+    if not isinstance(runs, dict) or runs.get("using") != "composite":
+        raise AssertionError(f"local action must be a composite action: {path}")
+    steps = runs.get("steps")
+    if not isinstance(steps, list):
+        raise AssertionError(f"composite action steps must be a list: {path}")
+    return steps
+
+
+def expand_local_actions(job: WorkflowNode, root: Path) -> WorkflowNode:
+    """Copy a job with each ``uses: ./<path>`` step replaced by that action's steps."""
+    steps: list[Any] = []
+    for step in job.get("steps") or []:
+        uses = step.get("uses") if isinstance(step, dict) else None
+        if isinstance(uses, str) and uses.startswith("./"):
+            steps.extend(load_action_steps(root / uses / "action.yml"))
+        else:
+            steps.append(step)
+    return {**job, "steps": steps}
+
+
 def workflow_step(job: WorkflowNode, name: str) -> WorkflowNode:
     """Return one named step mapping."""
     steps = job.get("steps")

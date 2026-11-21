@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import frontmatter
 import yaml
 
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
 from apm_cli.utils.path_security import (
@@ -443,7 +444,7 @@ class CommandIntegrator(BaseIntegrator):
             return (links_resolved, False, bool(dropped_keys))
 
         # Ensure target directory exists
-        target.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(target.parent, parents=True, exist_ok=True)
 
         # A byte-identical rendered command is left untouched (#4184); the
         # write is LF on every platform, as _LF_NORMALIZED_DEPLOY declares.
@@ -753,7 +754,7 @@ class CommandIntegrator(BaseIntegrator):
         Ref: https://geminicli.com/docs/cli/gemini-md/
         """
         text = CommandIntegrator._gemini_command_text(source)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(target.parent, parents=True, exist_ok=True)
         BaseIntegrator.write_text_if_changed(target, text)
 
     @staticmethod
@@ -803,7 +804,7 @@ class CommandIntegrator(BaseIntegrator):
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
-        (project_root / ".claude").mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(project_root / ".claude", parents=True, exist_ok=True)
         return self.integrate_commands_for_target(
             KNOWN_TARGETS["claude"],
             package_info,

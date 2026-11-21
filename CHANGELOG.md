@@ -41,6 +41,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content. (closes #4556, #4580)
 - `apm audit --ci` and `apm install` accept required packages declared as explicit registry-proxy URLs (`<proxy-host>/owner/repo`) under `required-packages-deployed`. (closes #4037, #4067)
 - `apm outdated` lists refs separately for dependencies that share a host and path but use different providers. (closes #4560, #4622)
+
+### Added
+
+- The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, now verified end to end against the Registry HTTP API on every PR. (#4015)
+- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/` instead of skipping them; an agent without a description gets one from its leading heading or name, one Codex cannot load (empty name or body) is skipped with a warning, and other targets still copy bundle files. (closes #3714, #4007)
+- The CLI reference lists every deprecation with its replacement, the version that deprecated it and its removal horizon; warning text is unchanged. (closes #4019, #4035)
+- Private hosted `marketplace.json` catalogs registered with `--name` authenticate with `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_`/`PASS_<NAME>` (Basic). (closes #3300, #4020)
+
+### Changed
+
+- OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+- An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
+- A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (#4612)
+
+### Fixed
+
+- `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once: MCP/LSP reconciliation now runs before native plugin registration commits the lockfile. (#4579)
+- `apm outdated` keys its per-run ref listing on the host type and resolved provider, so dependencies on one host and path with different providers each resolve their own listing. (closes #4560, #4622)
+- A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
+- `apm install` (including `--frozen`) replays a registry package after its registry moves, fetching from the configured registry when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
 - Git credential-helper tokens up to 16384 characters, such as enterprise IdP tokens from Git Credential Manager, now authenticate instead of failing as "no credential". (closes #4391, #4587)
 - A rebound marketplace refusal under `apm install -g` prints runnable re-record steps instead of telling you to restore `~/.apm/apm.lock.yaml` from version control. (#4555)
 - `apm runtime setup codex` retries transient GitHub API failures instead of failing on the first one. (#4573)
@@ -48,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Release CI refuses to publish a `v*` tag whose commit is not on `main` or a `release/*` branch, and fails closed when it cannot check. (closes #3778, #4568)
+- `apm pack`, `apm marketplace check` and `outdated` now print `marketplace.outputs` list-form and output-path conflict warnings, once each. (#4062)
 
 ## [0.37.0] - 2026-11-21
 

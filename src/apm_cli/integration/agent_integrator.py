@@ -24,10 +24,11 @@ from apm_cli.install.primitive_classification import (
     PrimitiveKind,
     classify_agent_source_file,
 )
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.primitives.models import resolve_user_invocable
-from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -119,6 +120,13 @@ _CODEX_REQUIRED_FIELDS = ("name", "description", "developer_instructions")
 
 class CodexAgentFieldError(ValueError):
     """A rendered Codex agent field that Codex's agent-role parser rejects."""
+
+
+def _derived_codex_description(name: object, body: str) -> object:
+    """Return the agent's leading Markdown heading, else *name*, as its description."""
+    first = next((line.strip() for line in body.splitlines() if line.strip()), "")
+    heading = first.lstrip("#").strip() if first.startswith("#") else ""
+    return heading or name
 
 
 class AgentIntegrator(BaseIntegrator):
@@ -298,7 +306,7 @@ class AgentIntegrator(BaseIntegrator):
             else:
                 # Non-kiro path: eager mkdir (existing behavior preserved).
                 if not agents_dir_created:
-                    agents_dir.mkdir(parents=True, exist_ok=True)
+                    write_seam.mkdir(agents_dir, parents=True, exist_ok=True)
                     agents_dir_created = True
                 if mapping.format_id == "codex_agent":
                     rendered, links_resolved = self._render_codex_agent(
@@ -451,7 +459,7 @@ class AgentIntegrator(BaseIntegrator):
         )
         if skip:
             return _ADOPTED if adopted else _SKIPPED
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(target_path.parent, parents=True, exist_ok=True)
         write_text_lf(target_path, rendered)
         self.note_rendered_write(target_path)
         target_paths.append(target_path)
@@ -700,6 +708,10 @@ class AgentIntegrator(BaseIntegrator):
         given, *source* is not read again, so the rendered text is exactly
         the verified snapshot.
 
+        With *strict*, an agent that ships no description gets one derived
+        from its leading Markdown heading, else its name, so Codex can load
+        it (a plugin agent need not declare one).
+
         Raises:
             CodexAgentFieldError: with *strict*, a native field Codex requires
                 is blank or not a string, so Codex could not load the agent.
@@ -815,6 +827,11 @@ class AgentIntegrator(BaseIntegrator):
         if resolve_links is not None:
             body, links_resolved = resolve_links(body, source, target)
 
+        # A blank YAML ``description:`` loads as None: treat it as absent.
+        if strict and (
+            description is None or (isinstance(description, str) and not description.strip())
+        ):
+            description = _derived_codex_description(name, body)
         doc = {
             "name": name,
             "description": description,
@@ -1038,19 +1055,19 @@ class AgentIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         agents_dir = project_root / ".github" / "agents"
-        agents_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(agents_dir, parents=True, exist_ok=True)
 
         claude_agents_dir = None
         claude_dir = project_root / ".claude"
         if claude_dir.exists() and claude_dir.is_dir():
             claude_agents_dir = claude_dir / "agents"
-            claude_agents_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(claude_agents_dir, parents=True, exist_ok=True)
 
         cursor_agents_dir = None
         cursor_dir = project_root / ".cursor"
         if cursor_dir.exists() and cursor_dir.is_dir():
             cursor_agents_dir = cursor_dir / "agents"
-            cursor_agents_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(cursor_agents_dir, parents=True, exist_ok=True)
 
         files_integrated = 0
         files_skipped = 0
@@ -1198,7 +1215,7 @@ class AgentIntegrator(BaseIntegrator):
         """
         from apm_cli.integration.targets import KNOWN_TARGETS
 
-        (project_root / ".claude").mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(project_root / ".claude", parents=True, exist_ok=True)
         return self.integrate_agents_for_target(
             KNOWN_TARGETS["claude"],
             package_info,
