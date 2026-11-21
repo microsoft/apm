@@ -1,0 +1,26 @@
+{
+  "issue": 4230,
+  "fixed_in": "Unreleased",
+  "summary": "A skill member the install declared but skipped was absent from the run's deployed set, so cleanup treated it as stale and deleted it when its bytes matched the locked render, dropping its lock entry.",
+  "failure_modes": [
+    "cleanup",
+    "transaction",
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "transaction.failed_command_preserves_state",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_branch_switch_then_source_edit_never_deletes_skill_members",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_discarded_deploy_then_source_edit_installs",
+    "tests/unit/integration/test_cleanup_helper.py::test_member_this_install_kept_is_retained_despite_evidence",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_removed_from_source_is_still_cleaned",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_branch_switch_then_source_edit_never_deletes_skill_members",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_member_skipped_as_modified_is_never_stale",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_edit_variants_never_lose_bytes",
+    "tests/integration/test_checkout_switch_skill_lifecycle.py::test_user_scope_discarded_deploy_then_source_edit_installs",
+    "tests/unit/install/phases/test_lockfile_union.py::TestCurrentInstallGovernance::test_row_this_run_retained_is_never_stale"
+  ]
+}

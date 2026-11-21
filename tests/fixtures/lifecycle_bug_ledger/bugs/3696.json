@@ -1,0 +1,20 @@
+{
+  "issue": 3696,
+  "summary": "Traps same owner/repo from two hosts or ports colliding in apm_modules (#3696, #3927); needs multiple git hosts and aliases.",
+  "failure_modes": [
+    "outcome",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_alias_installs_both_packages",
+    "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_same_repo_from_two_hosts_is_rejected_before_fetch",
+    "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_same_repo_on_another_port_is_a_different_package",
+    "tests/integration/test_same_repo_two_hosts_lifecycle.py::test_transitive_declaration_names_its_parent"
+  ]
+}

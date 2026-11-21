@@ -1,0 +1,18 @@
+{
+  "issue": 3699,
+  "summary": "Nested declaration refusal is a manifest validation contract.",
+  "failure_modes": [
+    "auth",
+    "outcome"
+  ],
+  "properties": [
+    "auth.credentials_isolated",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_nested_package_declaration_lifecycle.py::test_repository_depending_on_its_own_subdirectory_still_installs",
+    "tests/integration/test_nested_package_declaration_lifecycle.py::test_repository_with_its_subdirectory_package_is_rejected",
+    "tests/integration/test_public_github_anonymous_lifecycle_e2e.py::test_all_public_graph_lifecycle_never_resolves_or_leaks_credentials",
+    "tests/integration/test_public_github_anonymous_lifecycle_e2e.py::test_private_github_fallback_normalizes_locale_and_completes_lifecycle"
+  ]
+}

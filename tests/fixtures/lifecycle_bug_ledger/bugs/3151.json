@@ -1,0 +1,18 @@
+{
+  "issue": 3151,
+  "fixed_in": "Unreleased",
+  "summary": "Audit replay promoted a sibling root skills/ folder that install never deploys, so a clean install failed audit as unintegrated drift.",
+  "failure_modes": [
+    "routing",
+    "observation",
+    "idempotency"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_project_self_audit_lifecycle.py::test_required_project_self_audit_replays_install_without_sibling_skills"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "issue": 4180,
+  "fixed_in": "Unreleased",
+  "summary": "With policy.fetch_failure_default: block and an unreachable org policy, a blocked install also printed that it was proceeding without policy enforcement.",
+  "failure_modes": [
+    "observation",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_miss_reported_once_lifecycle.py::test_blocked_install_does_not_claim_to_proceed_without_policy"
+  ]
+}

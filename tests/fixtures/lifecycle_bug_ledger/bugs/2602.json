@@ -1,0 +1,15 @@
+{
+  "issue": 2602,
+  "summary": "Traps TLS failure hints naming the wrong trust mode and non-atomic failed installs (#2602); needs HTTPS proxy and CA trust configuration.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_tls_trust_hint_lifecycle.py::test_tls_hint_matches_trust_mode_and_install_is_atomic"
+  ]
+}

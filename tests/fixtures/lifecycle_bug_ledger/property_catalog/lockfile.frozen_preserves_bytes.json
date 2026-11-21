@@ -1,0 +1,6 @@
+{
+  "id": "lockfile.frozen_preserves_bytes",
+  "phase": 1,
+  "oracle_tier": "open-world",
+  "law": "Frozen install preserves the committed lockfile bytes, including when deployment adds an unrecorded path and the command fails after deployment."
+}

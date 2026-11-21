@@ -1,0 +1,15 @@
+{
+  "issue": 4263,
+  "fixed_in": "Unreleased",
+  "summary": "apm update <pkg> exited 0 for an undeclared package when apm.yml declared no APM dependencies, so a typo looked like a successful update.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_update_undeclared_package_refusal_lifecycle.py::test_update_refuses_an_undeclared_package"
+  ]
+}

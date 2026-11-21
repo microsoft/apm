@@ -1,0 +1,25 @@
+{
+  "issue": 3736,
+  "fixed_in": "0.36.1",
+  "summary": "Registry v0.1 remotes[].type was ignored, so SSE servers rendered as Streamable HTTP for every harness and apm mcp show printed UNKNOWN.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state",
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_type_reaches_every_harness_in_its_native_shape",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_mcp_show_reports_the_registry_remote_transport",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_frozen_deferred_pair_that_turns_out_supported_is_refused",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_frozen_replay_skips_a_registry_sse_server_its_harness_refuses",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_harnesses_outside_the_changed_rows_keep_their_remote_shape",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_legacy_transport_type_sse_still_renders_as_sse",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_refused_frozen_replay_changes_no_native_config",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_registry_remote_without_transport_defaults_to_streamable_http",
+    "tests/integration/test_mcp_remote_transport_harness_lifecycle.py::test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped"
+  ]
+}

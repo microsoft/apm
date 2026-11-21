@@ -1,0 +1,15 @@
+{
+  "issue": 3319,
+  "summary": "Traps per-audience marketplace catalogs via add --path; marketplace is outside replay vocabulary.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "source.ref_cache_coherent"
+  ],
+  "regression_tests": [
+    "tests/integration/test_marketplace_catalog_path_lifecycle.py::test_two_catalogs_from_one_repository_register_install_and_refresh"
+  ]
+}
