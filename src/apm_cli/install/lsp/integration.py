@@ -145,7 +145,8 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
     allow_map = closed_exec_map(None)
     allow_resolved = False
     for dep_ref in dependencies:
-        manifest = manifest_file(dep_ref.get_install_path(ctx.apm_modules_dir))
+        install_path = dep_ref.get_install_path(ctx.apm_modules_dir)
+        manifest = manifest_file(install_path)
         try:
             declared = (
                 manifest.is_file() and APMPackage.from_apm_yml(manifest).get_lsp_dependencies()
@@ -157,7 +158,9 @@ def _graph_declares_trusted_lsp(ctx: "InstallContext") -> bool:
             continue
         if not allow_resolved:
             allow_map, allow_resolved = effective_allow_map(ctx), True
-        package_info = SimpleNamespace(dependency_ref=dep_ref)
+        # Pinned-hook admission reads the package's files, so the approval owner
+        # needs its install path as well as its identity (#4658).
+        package_info = SimpleNamespace(dependency_ref=dep_ref, install_path=install_path)
         if check_executable_approval(dep_ref.get_unique_key(), package_info, allow_map)[4]:
             return True
     return False
