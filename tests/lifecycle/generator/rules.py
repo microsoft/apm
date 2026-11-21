@@ -249,11 +249,11 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "one rule cell witnessed at the allowed and the revoked GATE level (deployed "
         "surfaces and the lock byte-identical)",
         (
-            Ev("src/apm_cli/commands/marketplace/__init__.py", 357, "def add(source, name"),
-            Ev("docs/src/content/docs/reference/cli/marketplace.md", 251, "apm marketplace update"),
+            Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
+            Ev("docs/src/content/docs/reference/cli/marketplace.md", 292, "apm marketplace update"),
             Ev(
                 "docs/src/content/docs/consumer/installing-from-marketplaces.md",
-                111,
+                112,
                 "refreshes the cached",
             ),
         ),

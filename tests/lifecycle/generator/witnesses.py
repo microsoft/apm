@@ -168,6 +168,20 @@ def implied(assignment: Mapping[str, str]) -> Iterator[str]:
             yield cell_id(family, {name: assignment[name] for name in factors})
 
 
+def credits(cell: MachineCell) -> Iterator[str]:
+    """Obligation ids a receipt of *cell* discharges.
+
+    A rule cell id (``rule|...``) is its own obligation and implies nothing
+    else; an anchored cell credits only the implied ids that name its anchor.
+    """
+    if cell.id.startswith("rule|"):
+        yield cell.id
+        return
+    for key in implied(cell.assignment):
+        if not cell.anchor or f"|{cell.anchor}=" in key:
+            yield key
+
+
 @dataclass(frozen=True)
 class Witness:
     node: str
@@ -185,11 +199,7 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
-        # A rule cell id (rule|...) is its own obligation; it implies nothing else.
-        keys = [cell.id] if cell.id.startswith("rule|") else implied(cell.assignment)
-        for key in keys:
-            if cell.anchor and not key.startswith("rule|") and f"|{cell.anchor}=" not in key:
-                continue
+        for key in credits(cell):
             if key in obligations:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}

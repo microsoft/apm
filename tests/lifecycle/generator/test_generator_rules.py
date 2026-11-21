@@ -43,7 +43,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
-from tests.lifecycle.generator.witnesses import implied, machine_cells
+from tests.lifecycle.generator.witnesses import credits, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -312,15 +312,17 @@ def test_a_refusal_that_wrote_bytes_earns_nothing(tmp_path: Path) -> None:
 
 
 def test_machine_witnessed_obligations_are_implied_by_their_credited_ids() -> None:
-    cells = {cell.id: cell for cell in machine_cells()}
+    cells: dict[str, list] = {}
+    for cell in machine_cells():
+        cells.setdefault(cell.id, []).append(cell)
     witnessed = {
         key: entry for key, entry in _document()["obligations"].items() if "credited_by" in entry
     }
     assert witnessed
     for key, entry in witnessed.items():
         for machine_id in entry["credited_by"]:
-            assert cells[machine_id].witness == entry["witness"], (key, machine_id)
-            assert key in set(implied(cells[machine_id].assignment)), (key, machine_id)
+            assert {c.witness for c in cells[machine_id]} == {entry["witness"]}, (key, machine_id)
+            assert any(key in set(credits(c)) for c in cells[machine_id]), (key, machine_id)
 
 
 @pytest.mark.usefixtures("isolated_receipts")

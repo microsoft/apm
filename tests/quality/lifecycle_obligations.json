@@ -24939,9 +24939,9 @@
   },
   "U-MKT": {
    "evidence": [
-    "src/apm_cli/commands/marketplace/__init__.py:357",
-    "docs/src/content/docs/reference/cli/marketplace.md:251",
-    "docs/src/content/docs/consumer/installing-from-marketplaces.md:111"
+    "src/apm_cli/commands/marketplace/__init__.py:372",
+    "docs/src/content/docs/reference/cli/marketplace.md:292",
+    "docs/src/content/docs/consumer/installing-from-marketplaces.md:112"
    ],
    "text": "marketplace commands act on catalogs, never on deployed primitives: add, list, browse, update, remove and validate read or refresh the catalog cache, and the authoring commands edit the marketplace block; a primitive reaches a project only through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto one rule cell witnessed at the allowed and the revoked GATE level (deployed surfaces and the lock byte-identical)"
   },
@@ -25019,5 +25019,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "a4a03cb2efdaa1456a4bcd780ef72e08d86a53b6172c3e668ecc3a52bf84a34a"
+ "sha256": "adc33c318bc5368298153388d8a5d4d25ed41ee72c65ddb23bc0086d3d045632"
 }
