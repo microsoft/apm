@@ -68,3 +68,21 @@ class TestDriftTextHint:
             ]
         )
         assert "apm export-patch" not in out
+
+
+@pytest.mark.parametrize("retired", [True, False], ids=["gate-retired", "user-edit"])
+def test_shared_hook_config_drift_gets_local_edit_advice_only_for_user_edits(retired):
+    """RA-028: gate residue in a shared hook config is re-synced, never exported."""
+    finding = DriftFinding(
+        path=".claude/settings.json", kind="modified", owned_entries_only=retired
+    )
+
+    text = render_drift_text([finding])
+
+    assert "Drift detected: 1 file(s)" in text
+    if retired:
+        for advice in ("local edit", "export-patch", "Delete the edited files"):
+            assert advice not in text
+        assert "Run 'apm install' to re-sync deployed files with the lockfile." in text
+    else:
+        assert "1 local edit(s) to managed files" in text
