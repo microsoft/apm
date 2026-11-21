@@ -6,11 +6,13 @@ process working directory. ``Path.cwd`` and ``HOME`` are patched instead.
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from apm_cli.core import scope
 from apm_cli.core.scope import (
     InstallScope,
     get_apm_dir,
@@ -33,6 +35,27 @@ from apm_cli.core.scope import (
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-apm-home-resolution")]
 
 USER, PROJECT = InstallScope.USER, InstallScope.PROJECT
+
+
+def _started_in(start: Path | None) -> ModuleType:
+    """Import a fresh scope module as a process started in *start* would.
+
+    The starting directory is captured once at import; ``None`` is a process
+    whose starting directory was removed. Only ``os.getcwd`` is replaced.
+    """
+
+    def getcwd() -> str:
+        if start is None:
+            raise FileNotFoundError("starting directory was removed")
+        return str(start)
+
+    spec = importlib.util.find_spec("apm_cli.core.scope")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "getcwd", getcwd)
+        spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -78,18 +101,18 @@ def test_apm_home_expands_a_leading_tilde(
 def test_relative_apm_home_is_anchored_to_the_starting_directory(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(scope, "_STARTUP_CWD", dirs["tmp"] / "start")
+    started = _started_in(dirs["tmp"] / "start")
     monkeypatch.setenv("APM_HOME", "rel/home")
-    assert get_apm_home() == dirs["tmp"] / "start" / "rel" / "home"
+    assert started.get_apm_home() == dirs["tmp"] / "start" / "rel" / "home"
 
 
 def test_relative_apm_home_without_a_starting_directory_is_refused(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(scope, "_STARTUP_CWD", None)
+    started = _started_in(None)
     monkeypatch.setenv("APM_HOME", "rel/home")
     with pytest.raises(ValueError) as refused:
-        get_apm_home()
+        started.get_apm_home()
     assert str(refused.value) == (
         "APM_HOME='rel/home' is relative, but the starting directory is unavailable. "
         "Set an absolute APM_HOME or start APM from an existing directory."
@@ -181,7 +204,7 @@ def test_user_scope_root_is_apm_home_and_skips_git_remote_policy(dirs: dict[str,
 def test_user_scope_root_check_fails_closed_to_project(
     dirs: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(scope, "_STARTUP_CWD", None)
+    started = _started_in(None)
     monkeypatch.setenv("APM_HOME", "rel")
-    assert is_user_scope_root(dirs["cwd"]) is False
-    assert policy_discovery_uses_git_remote(dirs["cwd"]) is True
+    assert started.is_user_scope_root(dirs["cwd"]) is False
+    assert started.policy_discovery_uses_git_remote(dirs["cwd"]) is True

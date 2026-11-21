@@ -92,13 +92,25 @@ def test_a_writer_that_stages_nothing_writes_nothing(lock: Path) -> None:
     assert not lock.exists()
 
 
+def _other_spellings(lock: Path) -> list[Path]:
+    """Spellings of *lock* that only an absolute, normalized key folds together."""
+    nested = lock.parent / "nested"
+    nested.mkdir(exist_ok=True)
+    spellings = [nested / ".." / lock.name]
+    # A relative spelling exists only on the working directory's drive (Windows).
+    if Path.cwd().drive == lock.drive:
+        spellings.append(Path(os.path.relpath(lock)))
+    return spellings
+
+
 def test_staged_reads_are_keyed_by_absolute_path(lock: Path) -> None:
-    relative = Path(os.path.relpath(lock))
-    with lockfile_write_scope(LockfileWriter.INSTALL):
-        stage_lockfile(relative, DOC_A)
-        assert staged_lockfile_text(lock) == DOC_A
-        assert has_staged_lockfile(lock) is True
-    assert lock.read_text(encoding="utf-8") == DOC_A
+    for spelling in _other_spellings(lock):
+        with lockfile_write_scope(LockfileWriter.INSTALL):
+            stage_lockfile(spelling, DOC_A)
+            assert staged_lockfile_text(lock) == DOC_A
+            assert has_staged_lockfile(lock) is True
+        assert lock.read_text(encoding="utf-8") == DOC_A
+        lock.unlink()
 
 
 def test_an_unstaged_path_in_a_writer_reads_disk(lock: Path, tmp_path: Path) -> None:
@@ -196,16 +208,12 @@ def test_a_flush_commits_early_and_staging_continues(lock: Path) -> None:
 def test_commits_follow_the_order_of_the_latest_write(tmp_path: Path) -> None:
     first, second = tmp_path / "a.yaml", tmp_path / "b.yaml"
     order: list[str] = []
-    from apm_cli.utils import atomic_io
 
-    original = atomic_io.atomic_write_text
-
-    def record(path: Path, *args: object, **kwargs: object) -> None:
+    def record(path: Path, *_args: object, **_kwargs: object) -> None:
         order.append(Path(path).name)
-        original(path, *args, **kwargs)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(atomic_io, "atomic_write_text", record)
+        patch.setattr("apm_cli.utils.atomic_io.atomic_write_text", record)
         with lockfile_write_scope(LockfileWriter.INSTALL):
             stage_lockfile(first, DOC_A)
             stage_lockfile(second, DOC_A)
@@ -231,12 +239,10 @@ def test_a_commit_refuses_a_symlinked_lockfile(lock: Path, tmp_path: Path) -> No
 
 
 def test_a_failed_commit_names_the_lockfile(lock: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from apm_cli.utils import atomic_io
-
     def fail(*_args: object, **_kwargs: object) -> None:
         raise PermissionError("read-only")
 
-    monkeypatch.setattr(atomic_io, "atomic_write_text", fail)
+    monkeypatch.setattr("apm_cli.utils.atomic_io.atomic_write_text", fail)
     ran: list[str] = []
     with pytest.raises(LockfileCommitError) as raised:
         with lockfile_write_scope(LockfileWriter.INSTALL):

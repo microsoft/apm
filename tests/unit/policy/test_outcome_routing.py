@@ -8,8 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from apm_cli.install.errors import PolicyViolationError
-from apm_cli.policy import discovery, outcome_routing
-from apm_cli.policy.discovery import PolicyFetchResult
+from apm_cli.policy import PolicyFetchResult, outcome_routing
 from apm_cli.policy.outcome_routing import (
     classify_discovery_outcome,
     classify_project_policy,
@@ -21,6 +20,10 @@ from apm_cli.policy.outcome_routing import (
 from apm_cli.policy.schema import ApmPolicy
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-outcome-routing")]
+
+# Collaborators replaced at their own module: discovery (network, git, cache) and console.
+DISCOVERY = "apm_cli.policy.discovery.discover_policy_with_chain"
+WARNING = "apm_cli.utils.console._rich_warning"
 
 SRC = "org:contoso/.github"
 FETCH_FAILURE_DEFAULT_OUTCOMES = (
@@ -356,7 +359,7 @@ def test_a_discovery_error_is_a_neutral_fetch_failure(
     def broken(_root: Path) -> PolicyFetchResult:
         raise error
 
-    monkeypatch.setattr(discovery, "discover_policy_with_chain", broken)
+    monkeypatch.setattr(DISCOVERY, broken)
 
     result = discover_trust_policy(tmp_path)
 
@@ -369,9 +372,7 @@ def test_discovery_receives_the_project_root_as_a_path(
 ) -> None:
     seen: list[object] = []
     found = _result("found", policy=ApmPolicy())
-    monkeypatch.setattr(
-        discovery, "discover_policy_with_chain", lambda root: seen.append(root) or found
-    )
+    monkeypatch.setattr(DISCOVERY, lambda root: seen.append(root) or found)
 
     assert discover_trust_policy(str(tmp_path)) is found
     assert seen == [tmp_path]
@@ -396,14 +397,12 @@ def test_classify_project_policy_reads_the_project_knob(
 def test_classify_project_policy_discovers_when_no_result_is_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(
-        discovery, "discover_policy_with_chain", lambda root: _result("hash_mismatch")
-    )
+    monkeypatch.setattr(DISCOVERY, lambda root: _result("hash_mismatch"))
     assert classify_project_policy(str(_project(tmp_path, None))).kind == "always-block"
 
 
 def test_no_policy_skips_discovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(outcome_routing, "discover_trust_policy", Mock(side_effect=AssertionError))
+    monkeypatch.setattr(DISCOVERY, Mock(side_effect=AssertionError))
     assert resolve_trust_policy(tmp_path, no_policy=True) is None
 
 
@@ -445,9 +444,7 @@ def test_a_trust_reader_discovers_when_no_result_is_given(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     policy = ApmPolicy()
-    monkeypatch.setattr(
-        discovery, "discover_policy_with_chain", lambda root: _result("found", policy=policy)
-    )
+    monkeypatch.setattr(DISCOVERY, lambda root: _result("found", policy=policy))
     assert resolve_trust_policy(_project(tmp_path, None)) is policy
 
 
@@ -523,12 +520,8 @@ def test_a_reader_without_policy_wording_reports_the_miss_neutrally(
     verbose: bool,
     message: str | None,
 ) -> None:
-    from apm_cli.utils import console
-
     warnings: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        console, "_rich_warning", lambda text, symbol=None: warnings.append((text, symbol))
-    )
+    monkeypatch.setattr(WARNING, lambda text, symbol=None: warnings.append((text, symbol)))
     policy = ApmPolicy() if outcome == "cached_stale" else None
     resolve_trust_policy(
         _project(tmp_path, None),
@@ -541,10 +534,8 @@ def test_a_reader_without_policy_wording_reports_the_miss_neutrally(
 def test_a_neutral_reader_report_happens_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from apm_cli.utils import console
-
     warnings: list[str] = []
-    monkeypatch.setattr(console, "_rich_warning", lambda text, symbol=None: warnings.append(text))
+    monkeypatch.setattr(WARNING, lambda text, symbol=None: warnings.append(text))
     reader = outcome_routing._TrustReaderLog(_PlainLogger())
     reader.policy_discovery_miss(outcome="malformed", source=SRC)
     reader.flush()
@@ -602,7 +593,7 @@ def test_trailing_periods_of_cause_and_hint_are_not_doubled() -> None:
 def test_a_given_fetch_result_is_classified_without_discovery(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(outcome_routing, "discover_trust_policy", Mock(side_effect=AssertionError))
+    monkeypatch.setattr(DISCOVERY, Mock(side_effect=AssertionError))
     route = classify_project_policy(_project(tmp_path, None), fetch_result=_result("hash_mismatch"))
     assert route.kind == "always-block"
 
@@ -611,10 +602,8 @@ def test_a_given_fetch_result_is_classified_without_discovery(
 def test_a_logger_without_verbosity_is_not_verbose(
     monkeypatch: pytest.MonkeyPatch, outcome: str, reported: bool
 ) -> None:
-    from apm_cli.utils import console
-
     warnings: list[str] = []
-    monkeypatch.setattr(console, "_rich_warning", lambda text, symbol=None: warnings.append(text))
+    monkeypatch.setattr(WARNING, lambda text, symbol=None: warnings.append(text))
     outcome_routing._report_miss_neutrally(object(), outcome=outcome)
     assert warnings == (
         [f"Org policy not applied (outcome={outcome}, source=unknown)"] if reported else []
