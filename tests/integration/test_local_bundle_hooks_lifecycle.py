@@ -518,3 +518,99 @@ def test_tampered_bundle_refusal_names_the_reason_and_remedy(
         assert part not in result.stdout, result.stdout
     assert "Error installing dependencies" not in result.stdout + result.stderr
     assert tree_bytes(consumer) == before
+
+
+def _bundle_hook_claims(world: MarketplacePackWorld, project: Path) -> list[str]:
+    lock = world.lock(project)
+    return [p for p in lock.get("local_deployed_files") or [] if "/hooks/" in p]
+
+
+def test_uninstall_bundle_removes_its_hooks_and_claims(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700: 'apm uninstall <bundle>' retires what 'apm install <bundle>' registered.
+
+    Hooks park until approved, register with lock claims, and leave with
+    'apm uninstall' through the hook owner: the bundle's merged entries, its
+    scripts and their claims go; user and sibling entries and the bundle's
+    non-hook files stay, and the kept files are named.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("uninstall-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    user_entry = {"matcher": "Mine", "hooks": [{"type": "command", "command": "true"}]}
+    write(consumer / ".claude" / "settings.json", json.dumps({"hooks": {"Stop": [user_entry]}}))
+
+    # Parked until approved: no entry, no script, no claim.
+    parked = output(world.apm(consumer, "install", str(bundle)))
+    assert "Skipped 2 bundle hook file(s) from hookpkg" in parked, parked
+    assert _hook_entries(consumer) == {"Stop": ["Mine"]}
+    assert _bundle_hook_claims(world, consumer) == []
+
+    # Approved: registered with a lock claim, next to an unrelated hooked dependency.
+    world.apm(consumer, "approve", key)
+    world.apm(consumer, "install", str(bundle))
+    dep = _hooked_package(world.isolated.work_root / "otherpkg", "otherpkg", "Write", "os")
+    _allow(consumer, key, f"{dep}#1.0.0")
+    world.apm(consumer, "install", str(dep))
+    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Bash", "Write"]}
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert _bundle_hook_claims(world, consumer) == [script]
+    _assert_lock_matches_disk(world, consumer)
+
+    # A dry run names the removal and writes nothing.
+    before = tree_bytes(consumer)
+    preview = output(world.apm(consumer, "uninstall", str(bundle), "--dry-run"))
+    assert "Would remove hooks from local bundle 'hookpkg'" in preview, preview
+    assert tree_bytes(consumer) == before
+
+    removed = world.apm(consumer, "uninstall", str(bundle))
+    text = output(removed)
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert "Kept 1 other file(s) from local bundles" in text, text
+    assert "cannot remove local-bundle content" not in text, text
+    assert removed.stdout.isascii() and removed.stderr.isascii()
+    after = tree_bytes(consumer)
+    changed = {p for p in before.keys() | after.keys() if before.get(p) != after.get(p)}
+    assert changed == {
+        ".claude/settings.json",
+        ".claude/apm-hooks.json",
+        "apm.lock.yaml",
+        "apm_modules/.local-bundle-pending.json",
+        script,
+    }, changed
+    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Write"]}
+    assert "local-bundle::hookpkg" not in (consumer / ".claude" / "apm-hooks.json").read_text()
+    assert _bundle_hook_claims(world, consumer) == []
+    assert not (consumer / ".claude" / "hooks" / "hookpkg").exists()
+    assert (consumer / ".claude" / "skills" / "hs" / "SKILL.md").is_file()
+    assert ".claude/skills/hs/SKILL.md" in world.lock(consumer)["local_deployed_files"]
+    world.apm(consumer, "audit", "--ci")
+
+    # Converged: a second uninstall finds nothing to remove and changes no bytes.
+    again = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "Local bundle 'hookpkg' has no hooks installed" in again, again
+    assert tree_bytes(consumer) == after
+
+    # Symmetric: reinstalling the approved bundle registers it again.
+    world.apm(consumer, "install", str(bundle))
+    assert _hook_entries(consumer) == {"Stop": ["Mine"], "PreToolUse": ["Write", "Bash"]}
+    assert _bundle_hook_claims(world, consumer) == [script]
+
+    # User scope, selected by the bundle name once the bundle directory is gone.
+    home = world.isolated.home
+    (home / ".claude").mkdir(exist_ok=True)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    _allow(home / ".apm", key)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle))
+    assert _hook_entries(home) == {"PreToolUse": ["Bash"]}
+    shutil.rmtree(bundle)
+    text = output(world.apm(world.isolated.work_root, "uninstall", "-g", "hookpkg"))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert _hook_entries(home) == {}
+    assert not (home / ".claude" / "hooks" / "hookpkg").exists()
+    user_lock = load_yaml(home / ".apm" / "apm.lock.yaml")
+    assert not [p for p in user_lock.get("local_deployed_files") or [] if "/hooks/" in p]

@@ -96,6 +96,23 @@ def _recorded(scope_dir: Path) -> list[PendingBundle]:
     return found
 
 
+def recorded_bundle_slugs(scope_dir: Path, *, exec_type: str | None = None) -> list[str]:
+    """Return installed bundle slugs, optionally only those shipping *exec_type*."""
+    return [
+        bundle.slug
+        for bundle in _recorded(scope_dir)
+        if exec_type is None or exec_type in bundle.exec_types
+    ]
+
+
+def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Forget *exec_type* for one installed bundle once its uninstall removed it (#3700)."""
+    for bundle in _recorded(scope_dir):
+        if bundle.slug == slug and exec_type in bundle.exec_types:
+            remaining = [t for t in bundle.exec_types if t != exec_type]
+            record_bundle_executables(scope_dir, slug, bundle.approval_key, remaining)
+
+
 def pending_bundles(
     scope_dir: Path, is_approved: Callable[[str, str], bool]
 ) -> list[PendingBundle]:

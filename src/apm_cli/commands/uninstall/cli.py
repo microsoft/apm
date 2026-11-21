@@ -960,6 +960,23 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         lockfile_path = get_lockfile_path(apm_dir)
         lockfile = LockFile.read(lockfile_path)
 
+        # A local bundle is not in apm.yml; its hooks leave through the hook owner (#3700).
+        from .local_bundle import select_local_bundles, uninstall_local_bundles
+
+        bundle_slugs, bundle_scope = select_local_bundles(
+            packages,
+            current_deps,
+            lockfile,
+            scope=scope,
+            manifest_path=manifest_path,
+            logger=logger,
+        )
+        if bundle_scope is not None:
+            uninstall_local_bundles(
+                bundle_slugs, bundle_scope, scope=scope, logger=logger, dry_run=dry_run
+            )
+            return
+
         # Step 1: Validate packages
         from ...core.auth import AuthResolver
 

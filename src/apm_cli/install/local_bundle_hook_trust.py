@@ -240,7 +240,7 @@ def retire_unadmitted_bundle_hooks(
     """Retire every local-bundle hook trust no longer admits."""
     # The lockfile is read only when a per-file hooks directory holds files.
     unadmitted = unadmitted_bundle_hooks(
-        project_root, targets, allow_executables, lambda: _lock_bundle_paths(lock_dir)
+        project_root, targets, allow_executables, lambda: local_bundle_paths(lock_dir)
     )
     if not unadmitted:
         return []
@@ -294,8 +294,10 @@ def _relative_value(value: str, project_root: Path) -> str:
 
 def _remove_unedited(project_root: Path, rows: Collection[str], recorded: dict[str, str]) -> None:
     """Remove deployed files whose bytes still match the lock; edits are kept."""
+    from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import compute_file_hash
 
+    removed: list[Path] = []
     for value in rows:
         path = Path(value) if Path(value).is_absolute() else project_root / value
         if not path.is_file() or path.is_symlink():
@@ -303,6 +305,8 @@ def _remove_unedited(project_root: Path, rows: Collection[str], recorded: dict[s
         digest = recorded.get(value)
         if digest is None or digest == compute_file_hash(path):
             path.unlink()
+            removed.append(path)
+    BaseIntegrator.cleanup_empty_parents(removed, project_root)
 
 
 def retire_bundle_hooks(
@@ -326,7 +330,7 @@ def retire_bundle_hooks(
 
     project_root = Path(project_root)
     lockfile = LockFile.read(get_lockfile_path(lock_dir)) if lock_dir is not None else None
-    lock_paths = _lock_bundle_paths(lock_dir)
+    lock_paths = local_bundle_paths(lock_dir)
     state = deployed_bundle_hook_keys(project_root, targets, lock_paths).get(slug)
     hook_files = {
         _relative_value(value, project_root) for value in (state.hook_files if state else ())
@@ -357,7 +361,8 @@ def retire_bundle_hooks(
     return True
 
 
-def _lock_bundle_paths(lock_dir: Path | None) -> frozenset[str]:
+def local_bundle_paths(lock_dir: Path | None) -> frozenset[str]:
+    """Return the paths the scope's lockfile records for local bundles."""
     if lock_dir is None:
         return frozenset()
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -425,7 +430,7 @@ def installed_local_bundles(scope: Any, apm_package: Any) -> tuple[list[str], in
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
     lock_dir = get_apm_dir(scope)
-    paths = _lock_bundle_paths(lock_dir)
+    paths = local_bundle_paths(lock_dir)
     lockfile = LockFile.read(get_lockfile_path(lock_dir))
     staged = set(lockfile.local_staging_slugs()) if lockfile is not None else set()
     if not paths and not staged:
