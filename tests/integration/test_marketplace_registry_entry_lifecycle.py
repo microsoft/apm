@@ -16,13 +16,11 @@ is on main (the shared Registry HTTP API fixture may move to ``tests/utils``).
 from __future__ import annotations
 
 import base64
-import io
 import json
 import os
 import shutil
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -37,6 +35,7 @@ from tests.integration.test_registry_redirect_origin_lifecycle import (
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_github_https_fixture import openssl_executable
+from tests.utils.local_package_registry import flat_registry_archive
 from tests.utils.local_scripted_https_proxy import (
     ScriptedHttpsProxy,
     ScriptedRequest,
@@ -70,12 +69,13 @@ _OUT_OF_SYNC = (
 )
 
 
-def _tampered_archive() -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as package:
-        package.writestr("apm.yml", "name: widget\nversion: 1.0.0\ndescription: fixture\n")
-        package.writestr(".apm/instructions/guide.instructions.md", "# tampered\n")
-    return buffer.getvalue()
+def _widget_archive(guide: str) -> bytes:
+    return flat_registry_archive(
+        [
+            ("apm.yml", "name: widget\nversion: 1.0.0\ndescription: fixture\n"),
+            (".apm/instructions/guide.instructions.md", guide),
+        ]
+    )
 
 
 class _Scenario:
@@ -88,6 +88,7 @@ class _Scenario:
         )
         self.runner = ApmLifecycleRunner((str(binary),), timeout_seconds=180)
         self.gateway = RegistryGateway()
+        self.gateway.registry.seed(_PACKAGE, "1.0.0", _widget_archive("# guide\n"))
         self.project = self.isolated.work_root / "consumer"
         self.project.mkdir()
         (self.project / ".github").mkdir()
@@ -303,7 +304,8 @@ def test_registry_marketplace_frozen_replay_fails_closed(
         assert all(part in " ".join(_text(result).split()) for part in _OUT_OF_SYNC), _text(result)
         lock_path.write_bytes(lock_bytes)
 
-        scenario.gateway.archive = _tampered_archive()
+        scenario.gateway.registry.download_fault = "wrong-bytes"
+        scenario.gateway.registry.substitute_archive = _widget_archive("# tampered\n")
         result = scenario.run(env, *_FROZEN, step="4-changed-bytes-frozen")
         assert result.returncode != 0, _text(result)
         assert not (scenario.project / "apm_modules" / _PACKAGE).exists()
