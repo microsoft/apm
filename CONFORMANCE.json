@@ -998,18 +998,27 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_admits_anchored_sibling_outside_project_root",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_contains_remote_declared_paths_in_repository",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_contains_symlinks_within_local_package",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_derives_local_destination_inside_dependency_directory",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_recognises_local_path_entries",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_refuses_unanchored_relative_entry_at_user_scope"
+      ],
       "conformance_class": "consumer",
       "id": "req-mf-016",
       "keyword": "MUST",
       "section": "4.3.5",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 6,
       "tests": [
-        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
-      ],
-      "waivers": [
-        "Path-shape negative test requires apm_cli's path-policy loader to be invokable from the test harness; the JSON Schema currently models `path` as a free-form string. Tracked as a follow-up: tighten the schema to forbid leading `/` and document the absolute-path rejection in the schema additionalProperties."
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_admits_anchored_sibling_outside_project_root",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_contains_remote_declared_paths_in_repository",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_contains_symlinks_within_local_package",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_derives_local_destination_inside_dependency_directory",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_recognises_local_path_entries",
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_refuses_unanchored_relative_entry_at_user_scope"
       ]
     },
     {
@@ -3315,9 +3324,9 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 110,
+      "active": 111,
       "partial": 1,
-      "skipped": 3,
+      "skipped": 2,
       "text-only": 3,
       "unbound": 0,
       "xfail": 0
