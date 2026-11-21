@@ -87,6 +87,9 @@ GATE_BUNDLE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
 )
 GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
+GATE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+)
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
@@ -166,6 +169,7 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines._gate_bin import bin_cells
     from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
@@ -189,7 +193,11 @@ def machine_cells() -> list[MachineCell]:
                     # The step's context, credited only on the ids that name LOCK.
                     context = _lock_assignment(key, context=True) or {}
                     cells.append(MachineCell(key, witness, "T-3", context, tracking, "LOCK"))
-    side_doors = ((GATE_BUNDLE_SPINE, bundle_cells()), (GATE_PACK_SPINE, pack_cells()))
+    side_doors = (
+        (GATE_BUNDLE_SPINE, bundle_cells()),
+        (GATE_PACK_SPINE, pack_cells()),
+        (GATE_BIN_SPINE, bin_cells()),
+    )
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
