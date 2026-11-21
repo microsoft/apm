@@ -664,18 +664,29 @@ single `train-gate` check at that SHA:
 
 `guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
 `Lint` job), the architecture ratchet contracts, every other `tests/quality`
-module and the NOTICE check. The ratchets compare against the head commit's
-`Queue-Base: <sha>` trailer, else the merge base with `main`. A full train runs
-every check the `merge_group` gate requires. `train-gate` passes only when
-every job is green. Only write-access users can push `queue/*` branches.
-Every job tests the triggering commit. To re-run a probe by hand, dispatch with
-`--ref <queue branch>`; any other ref fails.
+module and the NOTICE check. The ratchets compare against the merge base with
+`main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
+train runs every check the `merge_group` gate requires. `train-gate` passes only
+when every job is green.
+
+Queue refs are real branches: only write-access users can push them, and every
+job tests the triggering commit. Train jobs restore caches (including `main`'s)
+read-only and never save one. After `train-gate` reports, the `cleanup` job
+deletes the train branch, so push it again to re-run (a manual dispatch with
+`--ref <queue branch>` works only while the branch exists).
+
+A green `train-gate` found by SHA alone is not a full proof: the same SHA can
+also carry a guard-only run. A full proof is a successful merge-train run on the
+`-full` branch (`queue/t<id>/p<k>-full` or `queue/b<sha12>/p0-full`) at that
+exact SHA:
 
 ```bash
 git push origin HEAD:refs/heads/queue/t0001/p1-full
-gh workflow run merge-train.yml --ref queue/t0001/p1-full
-gh api "repos/microsoft/apm/commits/$(git rev-parse HEAD)/check-runs?check_name=train-gate"
+gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
+  --commit "$(git rev-parse HEAD)" --json conclusion,url
 ```
+
+The run must show `"conclusion": "success"`; cite its `url` as the proof.
 
 ### Windows unit hang diagnostics
 
