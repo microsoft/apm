@@ -53,6 +53,8 @@ FORM_SOURCES: Mapping[str, str] = {
     "pkg-registry": "pkg-registry",
     "mcp-registry": "mcp-registry",
     "inline-mcp": "inline-mcp",
+    "local-mkt": "marketplace-local",
+    "file-mkt": "marketplace-file",
 }
 # M-SCOPE-LOCK op -> (OP, modifiers).
 LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
