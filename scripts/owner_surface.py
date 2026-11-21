@@ -37,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -379,8 +380,10 @@ def run(
     selection = build_selection(base, changed, root)
     selection["shard"] = list(shard) if shard else None
     selection["durations"] = durations
-    location = root / "build" / "owner-surface-selection.json"
-    location.parent.mkdir(parents=True, exist_ok=True)
+    # Outside the checkout: a selection file must never land in the working tree.
+    location = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / (
+        "owner-surface-selection.json"
+    )
     location.write_text(json.dumps(selection, indent=2), encoding="utf-8")
     print(f"owner-surface keys ({len(selection['keys'])}): {', '.join(selection['keys'])}")
     os.environ[SELECTION_ENV] = str(location)
