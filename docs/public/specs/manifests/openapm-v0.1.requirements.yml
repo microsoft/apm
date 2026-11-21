@@ -356,7 +356,7 @@ requirements:
     keyword: MUST
     section: "6.1"
     conformance_class: governance
-    notes: "PROPOSED amendment 0.1.74, not adopted: an explicit install/update policy source composes tighten-only with discovered policy; an unloadable explicit source follows policy.fetch_failure_default"
+    notes: "PROPOSED amendment 0.1.75, not adopted: an explicit install/update policy source composes tighten-only with discovered policy; an unloadable explicit source follows policy.fetch_failure_default"
   - id: req-rs-001
     keyword: MUST
     section: "7.2"
