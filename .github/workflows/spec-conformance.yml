@@ -14,6 +14,14 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # merge-train.yml runs the spec checks on write-access queue/* refs (#4574),
+  # since merge_group requires them (#4337).
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 permissions:
   contents: read

@@ -33,9 +33,6 @@
     "tests/integration/test_architecture_hook_package_admission.py": [
       "test_hook_admission_cannot_bypass_canonical_owners"
     ],
-    "tests/integration/test_architecture_lifecycle_lock.py": [
-      "test_lifecycle_mutators_route_through_canonical_lock"
-    ],
     "tests/integration/test_architecture_marketplace_ado_auth.py": [
       "test_marketplace_ado_auth_owner_is_compliant"
     ],
@@ -270,6 +267,9 @@
     ],
     "tests/unit/scripts/test_architecture_authenticated_egress.py": [
       "test_head_is_clean"
+    ],
+    "tests/unit/scripts/test_architecture_lifecycle_lock.py": [
+      "test_lifecycle_mutators_route_through_canonical_lock"
     ],
     "tests/unit/scripts/test_architecture_skill_layout_guard.py": [
       "test_allowlist_is_not_stale",

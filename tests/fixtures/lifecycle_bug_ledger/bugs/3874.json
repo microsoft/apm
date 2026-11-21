@@ -1,0 +1,16 @@
+{
+  "issue": 3874,
+  "summary": "Traps a failed multi-package install leaving untracked deployed files (#3874); needs git refs, an invalid package and claude target.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_fail_before_integrate_lifecycle.py::test_failed_direct_dependency_integrates_nothing",
+    "tests/integration/test_fail_before_integrate_lifecycle.py::test_failed_direct_local_dependency_integrates_nothing"
+  ]
+}

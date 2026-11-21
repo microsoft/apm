@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.workflow_contracts import load_workflow, workflow_job, workflow_step, workflow_step_index
+from tests.workflow_contracts import (
+    expand_local_actions,
+    load_workflow,
+    workflow_job,
+    workflow_step,
+    workflow_step_index,
+)
 
 pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +65,6 @@ def test_native_cleanup_and_evidence_survive_subject_failure() -> None:
 
 
 def test_native_script_is_in_lint_format_and_duplication_checks() -> None:
-    lint = workflow_job(load_workflow(WORKFLOW), "lint")
+    lint = expand_local_actions(workflow_job(load_workflow(WORKFLOW), "lint"), ROOT)
     for name in ("Ruff lint", "Ruff format check", "Code duplication guardrail (pylint R0801)"):
         assert "scripts/windows_native_symlink_probe_entry.py" in workflow_step(lint, name)["run"]

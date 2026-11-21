@@ -47,6 +47,10 @@ PLAIN_PRIMS = ("skill", "other-file")
 # The executable domain of the gate (commands/approve.py:255).
 EXECUTABLE_PRIMS = ("hook", "mcp", "lsp", "bin", "canvas")
 PRIMS = (*PLAIN_PRIMS, *EXECUTABLE_PRIMS)
+# TGT is <shape>-<change>. The shape is the declared target set BEFORE the step
+# (one target is single, two or more are multi). narrowed = the step drops at
+# least one previously declared target; it may add others (a switch counts as
+# narrowed); widened = it adds at least one and drops none.
 TARGET_CHANGES = tuple(
     f"{shape}-{change}"
     for shape in ("single", "multi")
