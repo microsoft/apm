@@ -20,6 +20,7 @@ from pathlib import Path
 from ratchet_baseline import (
     BaselineError,
     load_baseline,
+    load_baseline_at_ref,
     validate_provisional,
     write_baseline,
 )
@@ -229,6 +230,49 @@ def _validate(payload: dict[str, object]) -> tuple[set[str], set[str]]:
     )
 
 
+def baseline_growth(current: dict[str, object], base: dict[str, object]) -> list[str]:
+    """Return one failure per baseline entry absent from the base revision's copy.
+
+    The checker trusts its baseline, so a hand-added entry would grandfather a
+    new duplicate. An added entry passes only as a move: the base lists the
+    same test name under another file and the current baseline no longer does.
+    """
+    failures: list[str] = []
+    for key, qualified in (("duplicate_bodies", False), ("duplicate_names", True)):
+        now = _load_layout(current[key], key, qualified=qualified)
+        before = _load_layout(base.get(key, {}), key, qualified=qualified)
+        gone: dict[str, list[str]] = defaultdict(list)
+        for nodeid in sorted(before - now):
+            gone[nodeid.split("::", 1)[1]].append(nodeid)
+        for nodeid in sorted(now - before):
+            sources = gone.get(nodeid.split("::", 1)[1])
+            if sources:
+                sources.pop(0)
+                continue
+            failures.append(
+                f"{nodeid}: added to {key} in the test-duplicate baseline. Fix: delete, "
+                "parametrize or change the duplicate instead; the baseline only shrinks "
+                "(an entry may only be re-keyed by a move)."
+            )
+    return failures
+
+
+def check_base_growth(root: Path, baseline: Path, payload: dict[str, object], ref: str) -> int:
+    """Return 0 when *payload* adds no entry over *ref*'s copy, else an exit status."""
+    try:
+        base = load_baseline_at_ref(root, baseline, ref, label="test-duplicate")
+        grown = baseline_growth(payload, base) if base is not None else []
+    except BaselineError as error:
+        print(f"[x] {error}", file=sys.stderr)
+        return 2
+    except _Invalid as error:
+        print(f"[x] invalid test-duplicate baseline at {ref}: {error}", file=sys.stderr)
+        return 2
+    for failure in grown:
+        print(f"[x] {failure}", file=sys.stderr)
+    return 1 if grown else 0
+
+
 def report_equal_copies(root: Path) -> int:
     """Print every D5 equal-copy group; never fails on findings."""
     try:
@@ -267,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow explicitly provisional metadata during non-final checks.",
     )
+    parser.add_argument(
+        "--base-ref",
+        help="Also fail on baseline entries absent from this git revision's copy.",
+    )
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -292,6 +340,10 @@ def main(argv: list[str] | None = None) -> int:
     except _Invalid as error:
         print(f"[x] invalid test-duplicate baseline: {error}", file=sys.stderr)
         return 2
+    if args.base_ref:
+        status = check_base_growth(root, baseline, payload, args.base_ref)
+        if status:
+            return status
 
     try:
         module_count, digests, qualnames = scan(root, SCOPE)

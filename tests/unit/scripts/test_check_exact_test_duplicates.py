@@ -444,3 +444,55 @@ def test_unique_but_present_test_is_not_a_move_source(tmp_path: Path) -> None:
         result.stderr
     )
     assert "moved" not in result.stdout
+
+
+def _commit_base(root: Path, baseline: Path) -> None:
+    """Commit the tracked tests and *baseline* as the base revision."""
+    git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "add", "tests", baseline.name], check=True)
+    subprocess.run([*git, "commit", "-qm", "base"], check=True)
+
+
+def test_hand_added_baseline_entry_fails_against_base_ref(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    for name in ("test_a.py", "test_b.py"):
+        _write(root, name, BODY)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, _payload(bodies=PAIR))
+    _commit_base(root, baseline)
+    _write(root, "test_c.py", BODY)
+    subprocess.run(["git", "-C", str(root), "add", "tests"], check=True)
+    _write_baseline(baseline, _payload(bodies={**PAIR, "tests/test_c.py": ["test_value"]}))
+
+    trusting = _run(root, baseline)
+    guarded = _run(root, baseline, "--base-ref", "HEAD")
+
+    assert trusting.returncode == 0, trusting.stderr
+    assert guarded.returncode == 1
+    assert (
+        "[x] tests/test_c.py::test_value: added to duplicate_bodies in the test-duplicate "
+        "baseline. Fix: delete, parametrize or change the duplicate instead"
+    ) in guarded.stderr
+    assert "tests/test_a.py::test_value: added" not in guarded.stderr
+
+
+def test_rekeyed_move_passes_against_base_ref(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    for name in ("test_a.py", "test_b.py"):
+        _write(root, name, BODY)
+    _track_tests(root)
+    baseline = root / "baseline.json"
+    _write_baseline(baseline, _payload(bodies=PAIR))
+    _commit_base(root, baseline)
+    (root / "tests" / "sub").mkdir()
+    subprocess.run(
+        ["git", "-C", str(root), "mv", "tests/test_b.py", "tests/sub/test_b.py"], check=True
+    )
+    moved = {"tests/sub/test_b.py": ["test_value"], "tests/test_a.py": ["test_value"]}
+    _write_baseline(baseline, _payload(bodies=moved))
+
+    result = _run(root, baseline, "--base-ref", "HEAD")
+
+    assert result.returncode == 0, result.stderr
+    assert "[+] test duplicate ratchet clean" in result.stdout

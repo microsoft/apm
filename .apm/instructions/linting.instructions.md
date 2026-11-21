@@ -34,8 +34,14 @@ The `Lint` job runs (see `.github/workflows/ci.yml`):
    max-args 12 and max-returns 8. Existing violators are grandfathered in
    `tests/quality/complexity_baseline.json`, keyed by file and function
    qualname (no line numbers); `# noqa` does not exempt a function.
+9. **Test-duplicate baseline shrink-only check:**
+   `uv run --extra dev python scripts/check_exact_test_duplicates.py \
+   --base-ref origin/main` (CI passes `--base-ref <base sha>`). Every entry
+   in `tests/quality/exact_test_duplicates.json` that the base copy lacks
+   fails, unless it re-keys a moved test; fix the duplicate instead of
+   adding it to the baseline.
 
-All eight must succeed. CI evaluates these on the **PR merge commit**
+All nine must succeed. CI evaluates these on the **PR merge commit**
 (HEAD merged with current `main`), so duplication introduced by a
 recent main commit can fail your PR even if your own diff is clean.
 Always merge `main` locally before running the mirror.
@@ -57,6 +63,8 @@ Always merge `main` locally before running the mirror.
        scripts/lint_architecture_boundaries.py scripts/architecture_linter/ \
     && bash scripts/lint-auth-signals.sh \
     && uv run --extra dev python scripts/check_complexity_ratchet.py \
+       --base-ref origin/main \
+    && uv run --extra dev python scripts/check_exact_test_duplicates.py \
        --base-ref origin/main \
     && uv run --extra dev python -m tests.quality.taxonomy --changed
   ```
