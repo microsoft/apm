@@ -25015,16 +25015,16 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:827",
-    "src/apm_cli/install/services.py:1030"
+    "src/apm_cli/install/services.py:829",
+    "src/apm_cli/install/services.py:1032"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:713",
-    "src/apm_cli/install/exec_gate.py:714",
-    "src/apm_cli/install/exec_gate.py:717"
+    "src/apm_cli/install/exec_gate.py:719",
+    "src/apm_cli/install/exec_gate.py:720",
+    "src/apm_cli/install/exec_gate.py:723"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -25033,7 +25033,7 @@
     "src/apm_cli/integration/mcp_config_view.py:1220",
     "src/apm_cli/integration/mcp_config_view.py:1232",
     "docs/src/content/docs/enterprise/control-executables.mdx:19",
-    "docs/src/content/docs/consumer/install-mcp-servers.md:168"
+    "docs/src/content/docs/consumer/install-mcp-servers.md:169"
    ],
    "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies)"
   },
@@ -25097,7 +25097,7 @@
     "src/apm_cli/commands/uninstall/engine.py:890",
     "src/apm_cli/commands/uninstall/engine.py:719",
     "src/apm_cli/commands/update.py:560",
-    "src/apm_cli/core/command_logger.py:297",
+    "src/apm_cli/core/command_logger.py:298",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
    "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
