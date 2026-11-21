@@ -93,6 +93,15 @@ def test_conflict_remediation_quotes_the_locked_origin() -> None:
     assert "run: apm marketplace add" not in unsafe or "'https://x/$(rm)'" in unsafe
 
 
+def test_conflict_advice_restores_the_lock_first_and_renders_origins_as_ascii() -> None:
+    message = str(MarketplaceOriginConflictError("company", "plugin", _A, _B))
+    restore = message.index("restore it from version control")
+    assert restore < message.index("verify that source first, then run 'apm marketplace add")
+    escaped = str(MarketplaceOriginConflictError("company", "plugin", "https://x/\x1b[31m", "\x07"))
+    assert escaped.isascii() and "\x1b" not in escaped and "\x07" not in escaped
+    assert "apm marketplace add https://x" not in escaped
+
+
 def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registered) -> None:
     """``apm outdated`` checks the row it already holds through the same owner (#3959)."""
     registered(_B)
@@ -107,7 +116,9 @@ def test_row_level_check_refuses_a_rebound_alias_and_accepts_legacy_rows(registe
 
 _PROJECT_CONFLICT = (
     f"marketplace 'company' now points at {_B}, but apm.lock.yaml recorded 'plugin' "
-    f"from {_A}. Nothing was changed. Run 'apm marketplace add {_A} --name company' "
+    f"from {_A}. Nothing was changed. If apm.lock.yaml was not changed on purpose, "
+    "restore it from version control. Otherwise, verify that source first, then run "
+    f"'apm marketplace add {_A} --name company' "
     "to keep the locked marketplace (add --ref or --path if the original "
     "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
     "apm.yml, then run 'apm install' to drop the plugin locked from the old marketplace, "
@@ -115,7 +126,9 @@ _PROJECT_CONFLICT = (
 )
 _USER_CONFLICT = (
     f"marketplace 'company' now points at {_B}, but ~/.apm/apm.lock.yaml recorded "
-    f"'plugin' from {_A}. Nothing was changed. Run 'apm marketplace add {_A} --name "
+    f"'plugin' from {_A}. Nothing was changed. If ~/.apm/apm.lock.yaml was not changed "
+    "on purpose, restore it from version control. Otherwise, verify that source first, "
+    f"then run 'apm marketplace add {_A} --name "
     "company' to keep the locked marketplace (add --ref or --path if the original "
     "registration used them). To switch marketplaces on purpose, remove 'plugin' from "
     "~/.apm/apm.yml, then run 'apm install -g' to drop the plugin locked from the old "

@@ -126,6 +126,7 @@ class MarketplaceOriginConflictError(MarketplaceError):
     ):
         import shlex
 
+        from ..utils.diagnostics import printable_ascii_text
         from .source_identity import parse_marketplace_source
 
         self.marketplace_name = marketplace_name
@@ -134,26 +135,34 @@ class MarketplaceOriginConflictError(MarketplaceError):
         self.current_origin = current
         self.user_scope = user_scope
         self.manifest_entry = manifest_entry
+        # The locked origin is lock-file data: render it as printable ASCII and
+        # advise restoring the lock before re-registering what it names.
+        shown_locked = printable_ascii_text(locked)
+        shown_current = printable_ascii_text(current)
         try:
+            if shown_locked != locked:
+                raise ValueError(locked)
             parse_marketplace_source(locked)
         except ValueError:
-            restore = (
-                "To keep the locked marketplace, register its origin again with "
+            keep = (
+                "Otherwise, verify the locked source, then register it again with "
                 f"'apm marketplace add' under the name {marketplace_name!r}."
             )
         else:
-            restore = MARKETPLACE_ORIGIN_RESTORE.bind(
+            remedy = MARKETPLACE_ORIGIN_RESTORE.bind(
                 source=shlex.quote(locked), name=shlex.quote(marketplace_name)
-            ).sentence()
+            )
+            keep = f"Otherwise, {remedy.clause()}."
         switch_entry = MARKETPLACE_ORIGIN_SWITCH_GLOBAL if user_scope else MARKETPLACE_ORIGIN_SWITCH
         switch = switch_entry.bind(
             plugin=_manifest_entry_label(manifest_entry, plugin_name)
         ).clause()
         lockfile = "~/.apm/apm.lock.yaml" if user_scope else "apm.lock.yaml"
         super().__init__(
-            f"marketplace {marketplace_name!r} now points at {current}, but {lockfile} "
-            f"recorded {plugin_name!r} from {locked}. Nothing was changed. {restore} "
-            f"To switch marketplaces on purpose, {switch}."
+            f"marketplace {marketplace_name!r} now points at {shown_current}, but {lockfile} "
+            f"recorded {plugin_name!r} from {shown_locked}. Nothing was changed. "
+            f"If {lockfile} was not changed on purpose, restore it from version control. "
+            f"{keep} To switch marketplaces on purpose, {switch}."
         )
 
 
