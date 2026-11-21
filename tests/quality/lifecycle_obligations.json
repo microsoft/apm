@@ -2,7 +2,7 @@
  "counts": {
   "baseline_by_lane": {
    "T-1": 254,
-   "T-2": 408,
+   "T-2": 410,
    "T-3": 243,
    "T-6a": 201,
    "T-6b": 141,
@@ -50,9 +50,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1380,
+   "baseline": 1382,
    "known-failing": 1,
-   "required": 1110
+   "required": 1108
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -14296,7 +14296,6 @@
     "T5|dry-run|install|plugin-at-mkt",
     "T5|real|install|marketplace-object",
     "T5|real|install|plugin-at-mkt",
-    "X|install|marketplace-object|GATE=none",
     "X|install|plugin-at-mkt|FORCE=on",
     "X|install|plugin-at-mkt|FROZEN=on",
     "X|install|plugin-at-mkt|GATE=unapproved-exec",
@@ -14377,7 +14376,6 @@
     "T5|real|install|pkg-registry",
     "X|install|pkg-registry|FORCE=on",
     "X|install|pkg-registry|FROZEN=on",
-    "X|install|pkg-registry|GATE=none",
     "X|install|pkg-registry|GATE=unapproved-exec",
     "X|install|pkg-registry|NET=online",
     "X|install|pkg-registry|SCOPE=project",
@@ -20339,15 +20337,11 @@
    "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=none": {
-   "credited_by": [
-    "X|install|marketplace-object|GATE=none"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=marketplace-git|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -21538,15 +21532,11 @@
    "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=none": {
-   "credited_by": [
-    "X|install|pkg-registry|GATE=none"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=pkg-registry|GATE=revoked-after-deploy": {
    "family": "pair",
@@ -24196,5 +24186,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "c610e1c8e61ef532f390025ae5e65fb50553524c8545e91055120ae8d1400188"
+ "sha256": "756c2ce3a6644ba12f90fda3365919711c6c8961ef566f27bff606787f8071ad"
 }
