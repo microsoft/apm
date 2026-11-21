@@ -253,8 +253,28 @@ def _kept_entry(world: _World, path: str) -> tuple[str | None, list[str | None]]
     return dependency["deployed_file_hashes"].get(path), rows
 
 
+def _keep_only_sentence(kept: int, *, lock_rewritten: bool) -> str:
+    """The closing line of a failed install that wrote no file (RA-009).
+
+    A lock the install rewrote (older format, or hash copies normalized to the
+    deployment ledger) is said to be rewritten; an untouched lock keeps its entries.
+    """
+    if lock_rewritten:
+        return (
+            "apm.lock.yaml is rewritten in the current format; it records the "
+            f"{kept} kept file(s) as APM last deployed them."
+        )
+    return f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
+
+
 def _assert_kept_partial_apply(
-    world: _World, output: str, kept_entry_before: tuple, edited_bytes: bytes, *, rewrites: bool
+    world: _World,
+    output: str,
+    kept_entry_before: tuple,
+    edited_bytes: bytes,
+    *,
+    rewrites: bool,
+    lock_rewritten: bool,
 ) -> None:
     """RA-009/RA-010: a failed install with a kept file is an honest partial apply.
 
@@ -283,7 +303,7 @@ def _assert_kept_partial_apply(
     else:
         assert headers == [], headers
         assert "written file(s)" not in " ".join(flat)
-        assert f"apm.lock.yaml {kept_note}" in " ".join(flat)
+        assert _keep_only_sentence(1, lock_rewritten=lock_rewritten) in " ".join(flat)
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
     # Remedy: export the edit (RA-008: --force is no Kept remedy). This fixture's
@@ -375,6 +395,7 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
     assert (git_status == "") is (git_state == "tracked-clean"), git_status
 
     kept_entry_before = _kept_entry(world, _C3_EDITED)
+    lock_before = (world.project / "apm.lock.yaml").read_bytes()
 
     code, out, err = world.run("install")
 
@@ -395,7 +416,12 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
         _assert_kept_partial_apply(
-            world, out + err, kept_entry_before, edited_bytes, rewrites=stamp != "candidate"
+            world,
+            out + err,
+            kept_entry_before,
+            edited_bytes,
+            rewrites=stamp != "candidate",
+            lock_rewritten=(world.project / "apm.lock.yaml").read_bytes() != lock_before,
         )
 
 
@@ -425,6 +451,7 @@ def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
     )
     _hash_before, rows_before = _kept_entry(world, _C3_EDITED)
     assert rows_before == [recorded], rows_before
+    lock_before = lock_path.read_bytes()
 
     code, out, err = world.run("install")
 
@@ -436,8 +463,13 @@ def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
     assert _kept_lines(out) == []
     flat = " ".join((out + err).split())
     wrote = re.search(r"\[i\] This install wrote (\d+) file\(s\)", flat)
-    recorded_part = f"records the {wrote.group(1)} written file(s) and " if wrote else ""
-    sentence = f"apm.lock.yaml {recorded_part}keeps the previous entries of the 1 kept file(s)."
+    if wrote:
+        sentence = (
+            f"apm.lock.yaml records the {wrote.group(1)} written file(s) and keeps the "
+            "previous entries of the 1 kept file(s)."
+        )
+    else:
+        sentence = _keep_only_sentence(1, lock_rewritten=lock_path.read_bytes() != lock_before)
     assert sentence in flat, flat
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
@@ -446,6 +478,71 @@ def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
     target.rename(world.project.parent / "kept-aside")
     world.ok("install")
     _assert_lock_matches_disk(world)
+
+
+_SINGLE = ".github/instructions/tools.instructions.md"
+
+
+@pytest.mark.parametrize("lock", ["half-forged", "recorded"])
+def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
+    tmp_path: Path, apm_binary_path: Path, lock: str
+) -> None:
+    """RA-009 residue: a failed install that writes no file names what happened
+    to apm.lock.yaml. The red team's upg.sh 0.36.1 world: one Copilot file, a
+    v0.36.1 lock (lockfile_version 1, real release binary), edited after install.
+
+    half-forged: only deployed_file_hashes is forged to the edit. The install
+    writes no file but rewrites the lock (v1 -> 4, the hash normalized to the
+    ledger row), so it says the lock is rewritten; the repeat install leaves the
+    lock untouched and says it keeps the previous entries.
+    recorded: no forge. The upgrade install keeps the edit as a proven drift
+    (exit 0); the next one writes nothing, leaves the lock untouched and keeps
+    the previous entries.
+    """
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    world = _World(tmp_path / "c3c", apm_binary_path, FIXTURES / "v0.36.1-copilot-single")
+    target = world.project / _SINGLE
+    lock_path = world.project / "apm.lock.yaml"
+    assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '1'\n")
+    recorded = compute_file_hash(target)
+    target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
+    edited_bytes = target.read_bytes()
+    if lock == "half-forged":
+        text = lock_path.read_text(encoding="utf-8")
+        pattern = f"{_SINGLE}: {recorded}"
+        assert text.count(pattern) == 1, text
+        lock_path.write_text(
+            text.replace(pattern, f"{_SINGLE}: {compute_file_hash(target)}"), "utf-8"
+        )
+        lock_before = lock_path.read_bytes()
+        code, out, err = world.run("install")
+        assert code == 1, f"{out}\n{err}"
+        assert target.read_bytes() == edited_bytes
+        assert lock_path.read_bytes() != lock_before
+        assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '4'\n")
+        assert _kept_entry(world, _SINGLE) == (recorded, [recorded])
+        assert _kept_lines(err) == [_unproven_line(_SINGLE)]
+        assert _kept_lines(out) == []
+        flat_err = " ".join(err.split())
+        assert "This install wrote" not in " ".join((out + err).split())
+        assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=True)), flat_err
+        assert "keeps the previous entries" not in " ".join((out + err).split())
+    else:
+        world.ok("install")
+        assert target.read_bytes() == edited_bytes
+
+    lock_before = lock_path.read_bytes()
+    code, out, err = world.run("install")
+
+    assert code == 1, f"{out}\n{err}"
+    assert target.read_bytes() == edited_bytes
+    assert lock_path.read_bytes() == lock_before
+    assert _kept_lines(err) == [_unproven_line(_SINGLE)]
+    flat_err = " ".join(err.split())
+    assert "This install wrote" not in " ".join((out + err).split())
+    assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=False)), flat_err
+    assert "is rewritten in the current format" not in " ".join((out + err).split())
 
 
 def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_path: Path) -> None:

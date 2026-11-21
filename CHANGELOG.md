@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed `apm install` that writes no file but upgrades or normalizes `apm.lock.yaml` now says the lockfile was rewritten, instead of claiming it kept the previous entries of the kept files. (#4424)
 - Global `apm audit --ci` passes after `apm install -g` when `APM_HOME` is outside `HOME` or a local native plugin is installed. (closes #3901, #3946)
 - Kiro agents with current tool IDs or `@server` selectors deploy; an unsupported tool skips only that agent with a warning. (closes #2671, #3947)
 - `apm uninstall plugin@marketplace`, `apm install --dry-run` and `apm prune` handle object-form `{name, marketplace}` entries; uninstall works offline. (closes #3928, #3960, #3933, #3988)

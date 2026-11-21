@@ -418,10 +418,21 @@ class InstallLogger(CommandLogger):
                 self.error_detail(f"  {path}")
         # The lock is rewritten for the files written; the kept files' entries
         # are carried over unchanged (RA-009), so say both.
-        recorded = f"records the {len(written)} written file(s) and " if written else ""
-        self._failed_install_residue_note = (
-            f"apm.lock.yaml {recorded}keeps the previous entries of the {kept} kept file(s)."
-        )
+        if written:
+            note = (
+                f"apm.lock.yaml records the {len(written)} written file(s) and keeps the "
+                f"previous entries of the {kept} kept file(s)."
+            )
+        elif self._lockfile_written:
+            # Nothing was written, but the lock was (an older format upgraded,
+            # or hash copies normalized to the deployment ledger): say so.
+            note = (
+                "apm.lock.yaml is rewritten in the current format; it records the "
+                f"{kept} kept file(s) as APM last deployed them."
+            )
+        else:
+            note = f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
+        self._failed_install_residue_note = note
 
     def revision_pins_retained(self, skips: Sequence[RevisionPinSkip]) -> None:
         """Report retained revision pins once, with per-pin verbose detail."""

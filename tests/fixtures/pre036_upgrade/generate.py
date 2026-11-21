@@ -10,7 +10,9 @@ Usage (from the repository root; any released version, e.g. 0.35.1 or 0.36.1):
 A released binary from the GitHub release works too (``gh release download
 v<version> -p 'apm-<os>-<arch>.tar.gz*'``, checked against its ``.sha256``);
 pass ``--provenance`` to record how it was obtained. ``--case copilot-kiro-mcp``
-produces the Copilot + Kiro project with a self-defined MCP server.
+produces the Copilot + Kiro project with a self-defined MCP server;
+``--case copilot-single`` produces a Copilot project with one instructions file,
+which 0.37 renders identically (RA-009: an install that writes no file).
 
 The released binary installs one consumer project with one local ``path:``
 dependency in a temp HOME without network access. The package carries
@@ -85,10 +87,24 @@ MANIFEST = (
     "targets:\n- claude\n- cursor\n- codex\n"
     "dependencies:\n  apm:\n  - path: ../pkg\n"
 )
+# One Copilot instructions file, rendered identically by 0.36 and 0.37, like
+# the red team's upgrade repro (RA-009): a 0.37 install writes no file.
+COPILOT_SINGLE_PACKAGE_FILES = {
+    "apm.yml": "name: single-pkg\nversion: 1.0.0\ndescription: Single-file upgrade fixture\n",
+    ".apm/instructions/tools.instructions.md": (
+        '---\napplyTo: "**"\ndescription: Tools\n---\n# Tools\nUse the tools.\n'
+    ),
+}
+COPILOT_SINGLE_MANIFEST = (
+    "name: copilot-single-project\nversion: 1.0.0\n"
+    "targets:\n- copilot\n"
+    "dependencies:\n  apm:\n  - path: ../pkg\n"
+)
 TARGET_DIRS = (".claude", ".cursor", ".codex")
 CASES = {
     "legacy": (PACKAGE_FILES, MANIFEST, TARGET_DIRS),
     "copilot-kiro-mcp": (COPILOT_KIRO_PACKAGE_FILES, COPILOT_KIRO_MANIFEST, (".github", ".kiro")),
+    "copilot-single": (COPILOT_SINGLE_PACKAGE_FILES, COPILOT_SINGLE_MANIFEST, (".github",)),
 }
 SKIP = {"apm_modules", ".apm-local"}
 

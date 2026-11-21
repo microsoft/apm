@@ -183,7 +183,9 @@ def test_receiptless_install_keeps_each_edited_kind(
         world.lock_path.write_text(text, encoding="utf-8")
     hashes_before = _locked_hashes(world)
 
+    lock_unchanged_runs = 0
     for _ in range(2):
+        lock_before = world.lock_path.read_bytes()
         result = world.install()
         output = _output(result)
         assert result.returncode == 1, output
@@ -201,9 +203,22 @@ def test_receiptless_install_keeps_each_edited_kind(
             ) in output
         else:
             assert "written file(s)" not in output, output
-            assert f"apm.lock.yaml {kept_note}" in output, output
+            if world.lock_path.read_bytes() != lock_before:
+                # RA-009: no file written, but the lock itself was rewritten.
+                assert (
+                    "apm.lock.yaml is rewritten in the current format; it records the "
+                    "5 kept file(s) as APM last deployed them."
+                ) in output, output
+                assert kept_note not in output, output
+            else:
+                lock_unchanged_runs += 1
+                assert f"apm.lock.yaml {kept_note}" in output, output
+                assert "is rewritten in the current format" not in output, output
         assert {path: path.read_bytes() for path in paths.values()} == edited
         assert _locked_hashes(world) == hashes_before
+
+    # The repeat install changes nothing, so its line keeps the previous entries.
+    assert lock_unchanged_runs >= 1
 
     # Restore remedy, as printed: move each file aside, then install.
     for path in paths.values():
