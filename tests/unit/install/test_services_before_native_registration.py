@@ -14,7 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
 from apm_cli.install.context import InstallContext
 from apm_cli.install.errors import InstallFailureAlreadyRendered, PolicyViolationError
@@ -49,7 +50,7 @@ def _stage_mcp(ctx: InstallContext):
     return reconcile
 
 
-def _install_tail(ctx: InstallContext) -> list[str]:
+def _install_tail(ctx: InstallContext, *, declare_fails: bool = False) -> list[str]:
     """Run the pipeline tail and the command's deferred raise.
 
     Returns the lockfile on disk each time native registration declared.
@@ -59,6 +60,8 @@ def _install_tail(ctx: InstallContext) -> list[str]:
 
     def declare(**_kwargs) -> None:
         declared_against.append(lock_path.read_text(encoding="utf-8"))
+        if declare_fails:
+            raise ClaudeNativePluginError("could not write Claude settings")
 
     with patch.object(claude_plugins, "reconcile_claude_plugins", side_effect=declare):
         try:
@@ -69,6 +72,8 @@ def _install_tail(ctx: InstallContext) -> list[str]:
                     claude_plugins.run(ctx)
                 if ctx.service_failure is not None:
                     raise ctx.service_failure
+        except ClaudeNativePluginError:
+            assert declare_fails
         except Exception as error:
             assert error is ctx.service_failure
     return declared_against
@@ -132,3 +137,22 @@ def test_an_install_finalize_fails_reconciles_nothing(tmp_path: Path) -> None:
     on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
     assert declared_against == [on_disk]
     assert _SERVER not in on_disk
+
+
+@pytest.mark.parametrize("previous", [False, True], ids=["first-install", "existing-lock"])
+def test_a_failed_native_declaration_keeps_the_reconciled_services_recorded(
+    tmp_path: Path, previous: bool
+) -> None:
+    """Rolling back native records keeps the MCP servers reconciliation wrote (req-na-004)."""
+    ctx = _ctx(tmp_path, None)
+    ctx.reconcile_services = _stage_mcp(ctx)
+    if previous:
+        ctx.existing_lockfile = LockFile(
+            dependencies={"owner/kept": LockedDependency(repo_url="owner/kept")}
+        )
+
+    _install_tail(ctx, declare_fails=True)
+
+    rolled_back = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
+    assert _SERVER in rolled_back
+    assert ("owner/kept" in rolled_back) is previous

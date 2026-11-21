@@ -4036,7 +4036,8 @@
         "tests/integration/test_lockfile_commit_point_lifecycle.py::test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_to_disk",
         "tests/unit/install/test_services_before_native_registration.py::test_services_reconcile_before_native_registration_commits_once",
         "tests/unit/install/test_services_before_native_registration.py::test_a_committing_reconcile_failure_still_registers_and_commits_once",
-        "tests/unit/install/test_services_before_native_registration.py::test_a_refused_reconcile_registers_and_commits_nothing"
+        "tests/unit/install/test_services_before_native_registration.py::test_a_refused_reconcile_registers_and_commits_nothing",
+        "tests/unit/install/test_services_before_native_registration.py::test_a_failed_native_declaration_keeps_the_reconciled_services_recorded"
       ]
     },
     {
