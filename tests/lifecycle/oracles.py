@@ -66,7 +66,10 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
         ("outcome.status_matches_state", "lockfile.frozen_preserves_bytes"),
     ),
     "I4": OracleLaw(
-        "deny, revoke and tightening never widen what is deployed",
+        "deny, revoke and tightening never widen what is deployed "
+        "(I4-X2: a gate surface whose every deployed path holds exactly declared user "
+        "bytes (Scenario.user_write) is exempt from I4 only if the step announces the "
+        "keep AND audit --ci fails naming the path; it earns no I4 receipt)",
         ("routing.authorized_targets_only",),
     ),
     "I5": OracleLaw(
@@ -141,6 +144,11 @@ class Observation:
     # I1-X2: deploy-root-relative path -> sha256 of the bytes a scenario wrote
     # there as a declared user write (Scenario.user_write).
     user_bytes: Mapping[str, str] = field(default_factory=dict)
+    # I4-X2: deployed cell -> the deploy-root-relative paths found for it.
+    cell_paths: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # I4-X2: (exit code, output) of ``audit --ci`` run right after the step,
+    # when a cell the gate does not allow holds only declared user bytes.
+    audit_ci: tuple[int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -560,10 +568,53 @@ def _i4_gate_monotonicity(
     del before
     if not op.mutating or (result is not None and result.returncode != 0):
         return None
-    return [
-        Violation("I4", f"{surface} still deployed but not allowed")
-        for surface in sorted(after.deployed - model.allowed_surfaces())
-    ]
+    output = "" if result is None else f"{result.stdout}\n{result.stderr}"
+    found: list[Violation] = []
+    exempt = False
+    for surface in sorted(after.deployed - model.allowed_surfaces()):
+        gap = _i4_keep_gap(surface, after, output)
+        if gap is None:
+            exempt = True
+        else:
+            found.append(Violation("I4", f"{surface} still deployed but not allowed{gap}"))
+    # An exempted surface earns no I4 receipt for the step (I4-X2).
+    return found if found or not exempt else None
+
+
+def user_kept_cells(after: Observation, allowed: frozenset[str]) -> frozenset[str]:
+    """I4-X2: deployed cells the gate does not allow whose every path holds user bytes."""
+    return frozenset(
+        cell
+        for cell in after.deployed - allowed
+        if after.cell_paths.get(cell)
+        and all(_holds_user_bytes(after, path) for path in after.cell_paths[cell])
+    )
+
+
+def _holds_user_bytes(after: Observation, relative: str) -> bool:
+    declared = after.user_bytes.get(relative)
+    path = after.deploy_root / relative
+    return (
+        declared is not None
+        and path.is_file()
+        and hashlib.sha256(path.read_bytes()).hexdigest() == declared
+    )
+
+
+def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
+    """I4-X2: None for an announced, detected keep of user bytes; else what is missing."""
+    if surface not in user_kept_cells(after, frozenset()):
+        return ""
+    paths = sorted(after.cell_paths[surface])
+    silent = [p for p in paths if not re.search(rf"\bKept\b[^\n]*{re.escape(p)}", output)]
+    if silent:
+        return f" (I4-X2: the keep is not announced: {silent})"
+    code, text = after.audit_ci or (0, "")
+    flat = " ".join(text.split())
+    unnamed = [p for p in paths if p not in flat]
+    if code == 0 or unnamed:
+        return f" (I4-X2: an undetected keep: audit --ci exited {code}, not naming {unnamed})"
+    return None
 
 
 def _i5_write_set(
