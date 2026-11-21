@@ -404,7 +404,6 @@ def _normalize_legacy_local_plugin_for_replay(
     from apm_cli.agent_plugins.loader import detect_agent_plugin
     from apm_cli.deps.plugin_parser import normalize_plugin_directory
     from apm_cli.models.validation import PackageType, detect_package_type
-    from apm_cli.utils.helpers import find_plugin_json
 
     if lock_dep.package_type == PackageType.AGENT_PLUGIN.value:
         return install_path
@@ -413,11 +412,12 @@ def _normalize_legacy_local_plugin_for_replay(
         return install_path
 
     # Install normalizes only what the canonical classifier calls a legacy
-    # plugin; an apm.yml package that also ships plugin.json is not one.
-    if detect_package_type(install_path)[0] != PackageType.MARKETPLACE_PLUGIN:
+    # plugin; an apm.yml package that also ships plugin.json is not one. Use
+    # the manifest it selected so a .codex-plugin bundle replays as installed.
+    detected_type, plugin_json = detect_package_type(install_path)
+    if detected_type != PackageType.MARKETPLACE_PLUGIN:
         return install_path
 
-    plugin_json = find_plugin_json(install_path)
     if plugin_json is None:
         return install_path
 
