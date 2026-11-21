@@ -59,6 +59,15 @@
       "guards": ["marketplace-integrations-dependency-confusion"]
     },
     {
+      "id": "marketplace-project-map",
+      "decision": "Which catalog a marketplace: <name> entry resolves through inside a project whose root apm.yml declares marketplaces: (#2903 D1/D3): the root map wins over a same-named registration and is never registered or cache-keyed by name; a transitive name must be root-declared; a dependency's map is refused",
+      "owner": "marketplace/project_marketplaces.py (bind_project_marketplaces, project_marketplace, require_root_declared_marketplace); marketplace/user_manifest.py owns the marketplaces: grammar and dependency_marketplaces_error; registry.get_marketplace_by_name consults the owner first; bound by install/service.py, commands/install.py and commands/outdated.py; enforced by deps/apm_resolver.py",
+      "selectors": [
+        "src/apm_cli/marketplace/project_marketplaces.py"
+      ],
+      "guards": ["marketplace-integrations-project-map"]
+    },
+    {
       "id": "marketplace-entry-ref-verification",
       "decision": "Which remote an authored marketplace entry resolves against, and whether its explicit ref exists there",
       "owner": "marketplace/ref_resolver.py (package_entry_coordinates, explicit_ref_error); consumers: apm marketplace check and marketplace package add/set. Build-time sibling: builder._remote_source_coordinates",

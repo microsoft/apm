@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .errors import ManualMarketplaceConflictError, MarketplaceNotFoundError
-from .models import ORIGIN_MANIFEST, MarketplaceSource
+from .models import ORIGIN_MANIFEST, PERSISTED_ORIGINS, MarketplaceSource
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,9 @@ def _load(*, create: bool = True) -> list[MarketplaceSource]:
 def _save(sources: list[MarketplaceSource]) -> None:
     """Write marketplace list to disk atomically."""
     global _registry_cache
+    # A root project's ``marketplaces:`` map is never registered (#2903 D3).
+    if any(s.origin not in PERSISTED_ORIGINS for s in sources):
+        raise ValueError("Project-declared marketplaces are never written to the registry")
     path = _ensure_file()
     data = {"marketplaces": [s.to_dict() for s in sources]}
     tmp = path + ".tmp"
@@ -118,9 +121,17 @@ def read_registered_marketplaces() -> list[MarketplaceSource]:
 def get_marketplace_by_name(name: str) -> MarketplaceSource:
     """Return a marketplace by display name (case-insensitive).
 
+    Inside a project whose root ``apm.yml`` declares ``marketplaces:``, a
+    declared name wins over a registration with the same name (#2903 D3).
+
     Raises:
         MarketplaceNotFoundError: If not found.
     """
+    from .project_marketplaces import project_marketplace
+
+    declared = project_marketplace(name)
+    if declared is not None:
+        return declared
     lower = name.lower()
     for src in _load():
         if src.name.lower() == lower:

@@ -252,6 +252,12 @@ class TestRegistryUrlScheme:
             # Just outside the RFC 1918 172.16.0.0/12 range on both sides.
             "http://172.32.0.1/apm",
             "http://172.15.255.255/apm",
+            # Integer, hex and leading-zero spellings of 10.0.0.1 are not
+            # strict literals; resolvers read them differently, so they are
+            # never local (utils/net.py is_local_network_host).
+            "http://167772161/apm",
+            "http://0x0a000001/apm",
+            "http://010.0.0.1/apm",
         ],
     )
     def test_http_to_public_host_is_a_parse_error(self, write_yml, schema_line, url):

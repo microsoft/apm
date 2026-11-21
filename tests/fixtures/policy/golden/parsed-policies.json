@@ -44,6 +44,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -117,6 +120,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -194,6 +200,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -268,6 +277,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -341,6 +353,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -418,6 +433,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -494,6 +512,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -567,6 +588,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -642,6 +666,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -716,6 +743,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -789,6 +819,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": [
@@ -872,6 +905,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -946,6 +982,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1019,6 +1058,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1096,6 +1138,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1171,6 +1216,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1248,6 +1296,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1321,6 +1372,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1405,6 +1459,9 @@
       "required_fields": [],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": null,
       "deny": [],
@@ -1478,6 +1535,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,
@@ -1571,6 +1631,9 @@
       ],
       "scripts": "allow"
     },
+    "marketplace": {
+      "allow": null
+    },
     "mcp": {
       "allow": [
         "io.github.github/*",
@@ -1652,6 +1715,9 @@
       "require_explicit_includes": false,
       "required_fields": [],
       "scripts": "allow"
+    },
+    "marketplace": {
+      "allow": null
     },
     "mcp": {
       "allow": null,

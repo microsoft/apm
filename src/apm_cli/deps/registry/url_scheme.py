@@ -9,27 +9,15 @@ RFC 1918 private address. Any other scheme is rejected.
 
 from __future__ import annotations
 
-import ipaddress
 from urllib.parse import urlsplit
 
 from ...utils.credential_rendering import redact_url_userinfo
-from ...utils.net import is_loopback_host, parse_host_address
-
-_PRIVATE_NETWORKS = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-)
+from ...utils.net import is_local_network_host
 
 
 def _is_local_host(host: str) -> bool:
-    """True for a loopback host or an RFC 1918 private IPv4 literal."""
-    if is_loopback_host(host):
-        return True
-    address = parse_host_address(host)
-    return isinstance(address, ipaddress.IPv4Address) and any(
-        address in network for network in _PRIVATE_NETWORKS
-    )
+    """True for a loopback host or an RFC 1918 private IPv4 literal (utils/net.py owns it)."""
+    return is_local_network_host(host)
 
 
 def registry_url_error(name: str, url: object, *, insecure: object = False) -> str | None:
