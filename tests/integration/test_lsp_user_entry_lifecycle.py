@@ -71,6 +71,9 @@ def test_install_preserves_a_same_name_user_lsp_entry_and_configures_the_rest(
         assert servers["p-lsp"] == _MINE
         assert servers["user-lsp"] == {"command": "u"}
         assert servers["other-lsp"]["command"] == "other"
+        lock = load_yaml(project / "apm.lock.yaml")
+        assert "p-lsp" not in lock.get("lsp_servers", []), "lock claims the user's entry"
+        assert "p-lsp" not in lock.get("lsp_configs", {}), "lock claims the user's entry"
 
     # Control: once the user removes their entry, APM writes it and later updates it.
     servers = _servers(project)

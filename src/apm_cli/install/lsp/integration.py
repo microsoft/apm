@@ -632,6 +632,15 @@ def _legacy_lsp_owner_names(names: set[str], targets_recorded: bool) -> dict:
     return {} if targets_recorded or not names else {"legacy_server_names": set(names)}
 
 
+def _preserved_everywhere(conflict, new_targets: dict[str, set[str]]) -> set[str]:
+    """Preserved server names APM wrote on no target, so the lock never claims them (#4628)."""
+    if conflict is None:
+        return set()
+    preserved = set().union(*conflict.preserved.values())
+    written = set().union(*new_targets.values(), set())
+    return preserved - written
+
+
 def run_lsp_integration(  # noqa: PLR0913
     *,
     apm_package: "APMPackage",
@@ -811,6 +820,8 @@ def run_lsp_integration(  # noqa: PLR0913
                 fail_on_write_error=fail_on_write_error,
             )
 
+        # A server preserved on every target was never written: record nothing for it.
+        unwritten = _preserved_everywhere(conflict, new_targets)
         new_regular_configs = LSPIntegrator.get_server_configs(lsp_deps)
         new_configs = {
             name: config for name, config in old_lsp_configs.items() if name in bundle_names
@@ -820,7 +831,10 @@ def run_lsp_integration(  # noqa: PLR0913
             name: owner for name, owner in old_lsp_provenance.items() if name in bundle_names
         }
         new_provenance.update(_dependency_provenance(lsp_deps))
-        all_names = bundle_names | new_regular_names
+        for name in unwritten:
+            new_configs.pop(name, None)
+            new_provenance.pop(name, None)
+        all_names = (bundle_names | new_regular_names) - unwritten
         LSPIntegrator.update_lockfile(
             all_names,
             lock_path,
