@@ -51,8 +51,7 @@
   "rows": 17,
   "status": {
    "baseline": 1253,
-   "known-failing": 1,
-   "required": 1237
+   "required": 1238
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -14838,7 +14837,8 @@
     "X|install|pkg-registry|SCOPE=project",
     "X|install|pkg-registry|SELECT=on",
     "X|install|pkg-registry|TGT=multi-unchanged",
-    "X|install|pkg-registry|TGT=single-unchanged"
+    "X|install|pkg-registry|TGT=single-unchanged",
+    "X|install|pkg-registry|UPDATE=on"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -22473,9 +22473,8 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4572",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|TGT=multi-narrowed|DRYRUN=on": {
@@ -24886,5 +24885,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "74d4c98dc02f655aeb71f79466b9f08a726c67c8d483c55a70e408022709ab00"
+ "sha256": "83c22ad91854e3e320bc9228a34de90b0ade5549fb608abe1f53ad35f098a74d"
 }
