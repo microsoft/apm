@@ -9,6 +9,7 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/integration/test_missing_module_link_diagnostic_lifecycle.py::test_a_missing_apm_modules_link_target_is_named_once_with_its_remedy"
+    "tests/integration/test_missing_module_link_diagnostic_lifecycle.py::test_a_missing_apm_modules_link_target_is_named_once_with_its_remedy",
+    "tests/unit/compilation/test_missing_module_links.py::test_a_link_into_apm_modules_is_reported_only_while_its_target_is_missing"
   ]
 }
