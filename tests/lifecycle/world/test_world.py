@@ -898,6 +898,7 @@ _POLICY_EXIT = {
     "malformed": 0,
     "garbage_response": 0,
     "cached_stale": 1,
+    "deny-all-deps": 1,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
@@ -907,6 +908,7 @@ _POLICY_ANNOUNCE = {
     "malformed": "is not valid YAML",
     "garbage_response": "is not a YAML mapping",
     "cached_stale": "Using stale cached policy",
+    "deny-all-deps": "denied by pattern",
 }
 
 
