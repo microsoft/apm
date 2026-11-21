@@ -750,8 +750,11 @@ as `apm audit --policy`).
   inheritance merge and can never loosen it (no re-allowing a denied
   dependency, no lowering `enforcement`).
 - A local path needs no network.
-- A source that cannot be loaded follows `policy.fetch_failure_default` in
-  `apm.yml`: `warn` reports it and continues, `block` fails closed.
+- A source that cannot be loaded (unreachable, missing, malformed, or
+  publishing no policy) fails the command before any write, whatever
+  `policy.fetch_failure_default` says; a cached copy within the stale-cache
+  window counts as loaded. Only a failed discovered policy follows
+  `policy.fetch_failure_default`.
 - Effective sources always print: `[i] Policy: org:contoso/.github + file:/repo/p.yml -- enforcement=block`.
 - `policy.hash` pins the discovered org policy only. Not valid with
   `--global` or `--no-policy`.
