@@ -244,6 +244,17 @@ def declared_origin_conflict(name: str, locked_origin: str | None) -> str | None
     return declared or entry.source
 
 
+def rebound_by_project_map(name: str, locked_origin: str | None) -> bool:
+    """Return True when the bound map names another origin than the lock row.
+
+    Such a row re-resolves through the map (:func:`project_wins_locked_origin`
+    prints its one ``[i]`` line); a row from the declared origin does not.
+    """
+    return declared_origin_conflict(name, locked_origin) is not None and (
+        project_wins_locked_origin(name, locked_origin)
+    )
+
+
 def project_wins_locked_origin(name: str, locked_origin: str | None) -> bool:
     """Return True when the bound map, not a registration, owns *name*'s origin.
 

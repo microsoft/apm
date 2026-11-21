@@ -320,6 +320,7 @@ def reverify_locked_provenance(
         MarketplaceOriginConflictError: The alias names a different catalog.
     """
     from .dependency_confusion import admit_marketplace_resolution
+    from .project_marketplaces import rebound_by_project_map
     from .resolver import resolve_marketplace_plugin
 
     if lockfile is None:
@@ -343,6 +344,10 @@ def reverify_locked_provenance(
                 f"apm.lock.yaml records no marketplace origin for {key} ({plugin}@{alias}). "
                 + _NEXT_STEP
             )
+        if rebound_by_project_map(alias, dep.source_url):
+            # apm.yml now names another catalog: the update re-resolves this
+            # row through the map instead of re-verifying the lock's (#2903).
+            continue
         require_locked_row_origin(dep)
         try:
             # Origin only: ref pins stay with install and update resolution.

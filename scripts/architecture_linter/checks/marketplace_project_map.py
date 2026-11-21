@@ -27,6 +27,7 @@ _OWNER_FUNCTIONS = (
     "require_root_declared_marketplace",
     "declared_origin_conflict",
     "project_wins_locked_origin",
+    "rebound_by_project_map",
 )
 _ORIGIN_READERS = frozenset(
     {
@@ -46,6 +47,7 @@ _REQUIRED_CALLS = (
         "bind_project_marketplaces",
     ),
     ("src/apm_cli/commands/outdated.py", "outdated", "bind_project_marketplaces"),
+    ("src/apm_cli/commands/update.py", "_reverified_lock", "bind_project_marketplaces"),
     (
         "src/apm_cli/deps/apm_resolver.py",
         "_resolve_marketplace_dep",
@@ -62,6 +64,11 @@ _REQUIRED_CALLS = (
         "src/apm_cli/marketplace/catalog_origin.py",
         "require_locked_catalog_origin",
         "project_wins_locked_origin",
+    ),
+    (
+        "src/apm_cli/marketplace/catalog_origin.py",
+        "reverify_locked_provenance",
+        "rebound_by_project_map",
     ),
     # marketplace.allow judges locked and fresh catalog origins, not only apm.yml.
     ("src/apm_cli/install/phases/policy_gate.py", "run", "marketplace_resolution_origins"),

@@ -51,6 +51,16 @@ def test_project_map_routes_through_owner() -> None:
             "        if True:\n",
         ),
         (
+            "marketplace/catalog_origin.py",
+            "        if rebound_by_project_map(alias, dep.source_url):\n",
+            "        if False:\n",
+        ),
+        (
+            "commands/update.py",
+            "            bind_project_marketplaces(marketplaces),\n",
+            "            nullcontext(marketplaces),\n",
+        ),
+        (
             "policy/policy_checks.py",
             "marketplace_resolution_origins(lock)",
             "()",
