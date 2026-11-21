@@ -201,7 +201,12 @@ def _packs_root_skills(package_root: Path) -> bool:
     from ..integration.skill_integrator import SkillIntegrator
 
     root = package_root / "skills"
-    if root.is_symlink() or any((package_root / ".apm" / "skills").glob("*/SKILL.md")):
+    authored = package_root / ".apm" / "skills"
+    # A skill is a directory holding a SKILL.md file, as install counts them.
+    if root.is_symlink() or (
+        authored.is_dir()
+        and any(child.is_dir() and (child / "SKILL.md").is_file() for child in authored.iterdir())
+    ):
         return False
     return any(
         source.parent == root

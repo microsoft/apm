@@ -1519,6 +1519,23 @@ class TestExportPluginBundle:
         assert (result.bundle_path / "instructions" / "style.instructions.md").is_file()
         assert not any("root-level skills/" in message for message in captured), captured
 
+    @pytest.mark.parametrize("marker", ["directory", "dangling-link"])
+    def test_a_non_file_skill_marker_under_apm_does_not_hide_root_skills(self, tmp_path, marker):
+        project = _setup_plugin_project(tmp_path, instructions=["style.instructions.md"])
+        stub = project / ".apm" / "skills" / "draft" / "SKILL.md"
+        stub.parent.mkdir(parents=True)
+        if marker == "directory":
+            stub.mkdir()
+        else:
+            stub.symlink_to(tmp_path / "missing.md")
+        skill = project / "skills" / "review"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\nbody\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "skills" / "review" / "SKILL.md").is_file()
+
     def test_root_skills_stay_skipped_when_apm_dir_authors_skills(self, tmp_path):
         project = _setup_plugin_project(tmp_path, skills={"published": ["SKILL.md"]})
         draft = project / "skills" / "draft"
