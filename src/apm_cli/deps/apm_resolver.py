@@ -1087,9 +1087,9 @@ class APMDependencyResolver:
             for (node, dep_ref, _parent_node, is_dev), loaded_package, exc in results:
                 if dep_ref.replacement is not None and loaded_package is None:
                     detail = str(exc) if exc is not None else "selected source could not be loaded"
-                    tree.resolution_errors.append(
-                        f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
-                    )
+                    message = f"Cannot load replacement for {dep_ref.get_unique_key()}: {detail}"
+                    tree.resolution_errors.append(message)
+                    tree.replacement_load_errors[dep_ref.get_unique_key()] = message
                     continue
                 if self._read_only and (exc is not None or loaded_package is None):
                     tree.resolution_errors.append(

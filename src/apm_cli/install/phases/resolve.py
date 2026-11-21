@@ -319,6 +319,18 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
+def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_graph) -> None:
+    """A replacement whose selected source policy refused before fetch is no load failure.
+
+    The policy gate reports the refusal with the violation wording.
+    """
+    for dep_ref in ctx.prefetch_policy_denials:
+        errors = dependency_graph.dependency_tree.replacement_load_errors
+        error = errors.get(dep_ref.get_unique_key())
+        if error in dependency_graph.resolution_errors:
+            dependency_graph.resolution_errors.remove(error)
+
+
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
     """Raise on fatal resolution errors; show the download *failures* behind them once."""
     if ctx.dry_run:
@@ -789,6 +801,7 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
+    _drop_policy_refused_replacement_errors(ctx, dependency_graph)
     _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
