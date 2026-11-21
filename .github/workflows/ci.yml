@@ -12,11 +12,20 @@ on:
   merge_group:
     branches: [ main ]
     types: [ checks_requested ]
+  # merge-train.yml calls Tier 1 on a speculative queue/* ref (#4574).
+  workflow_call:
+    inputs:
+      base_sha:
+        description: Base main SHA of the train.
+        required: false
+        type: string
 
 # Superseded pushes to a PR cancel their in-flight run so they stop spending
 # the shared Actions API quota. Push, merge_group and schedule runs are never
 # grouped or cancelled: each run keeps its own group, so every SHA keeps its
-# evidence.
+# evidence. Called from merge-train.yml, the event is the caller's push or
+# dispatch and run_id is the caller's, so the group (ci-<run_id>) never
+# matches the caller's or ci-integration.yml's and is never cancelled.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -37,100 +46,11 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
-    - name: Ruff lint
-      run: >-
-        uv run --frozen --extra dev ruff check
-        src/ tests/
-        scripts/lint_architecture_boundaries.py
-        scripts/architecture_linter/
-        scripts/windows_native_symlink_probe_entry.py
-
-    - name: Ruff format check
-      run: >-
-        uv run --frozen --extra dev ruff format --check
-        src/ tests/
-        scripts/lint_architecture_boundaries.py
-        scripts/architecture_linter/
-        scripts/windows_native_symlink_probe_entry.py
-
-    - name: Complexity ratchet (Stage 2 limits, shrink-only baseline)
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-      run: |
-        # New and changed functions must meet the Stage 2 Ruff limits; existing
-        # violators are grandfathered in tests/quality/complexity_baseline.json.
-        # Fails on new violations, stale entries, or baseline growth vs base.
-        git fetch --no-tags --depth=1 origin "$BASE_SHA"
-        uv run --frozen --extra dev python scripts/check_complexity_ratchet.py \
-          --base-ref "$BASE_SHA"
-
-    - name: Taxonomy allowance ratchet (shrink-only vs base)
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-      run: |
-        # Unclassified, misplaced and promise-less allowances may only shrink;
-        # an added entry is accepted only as a validated move of a removed one.
-        git fetch --no-tags --depth=1 origin "$BASE_SHA"
-        uv run --frozen --extra dev python scripts/check_taxonomy_allowances.py \
-          --base-ref "$BASE_SHA"
-
-    - name: Check YAML encoding safety
-      run: |
-        # Ensure YAML file I/O goes through yaml_io helpers.
-        # Catches yaml.dump/safe_dump writing to a file handle outside yaml_io.py.
-        VIOLATIONS=$(grep -rn --include='*.py' -P \
-          'yaml\.(safe_)?dump\(.+,\s*[a-zA-Z_]\w*\b' src/apm_cli/ \
-          | grep -v 'utils/yaml_io.py' \
-          | grep -v '# yaml-io-exempt' \
-          || true)
-        if [ -n "$VIOLATIONS" ]; then
-          echo "::error::Direct yaml.dump() to file handle detected. Use yaml_io.dump_yaml() instead:"
-          echo "$VIOLATIONS"
-          exit 1
-        fi
-
-    - name: File length guardrail
-      run: |
-        # Ruff has no max-module-lines rule. This check prevents new files from
-        # exceeding the current worst case. Tighten the threshold over time.
-        MAX_LINES=2100   # Stage 1 (was 2450); target 1400 deferred to Stage 2
-        VIOLATIONS=$(
-          {
-            find src/ scripts/architecture_linter/ -name '*.py' -print0
-            printf '%s\0' scripts/lint_architecture_boundaries.py
-          } | xargs -0 -I{} awk -v max="$MAX_LINES" \
-            'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {}
-        )
-        if [ -n "$VIOLATIONS" ]; then
-          echo "::error::Source files exceed $MAX_LINES-line limit:"
-          echo "$VIOLATIONS"
-          exit 1
-        fi
-
-    - name: Lint - no raw str(relative_to) patterns
-      run: |
-        # Fail if any code uses str(x.relative_to(y)) instead of portable_relpath()
-        if grep -rn --include="*.py" -P 'str\([^)]*\.relative_to\(' src/apm_cli/ | grep -v portable_relpath | grep -v '\.pyc'; then
-          echo "::error::Found raw str(path.relative_to()) calls. Use portable_relpath() from apm_cli.utils.paths instead."
-          exit 1
-        fi
-
-    - name: Code duplication guardrail (pylint R0801)
-      run: |
-        uv run --frozen --extra dev python -m pylint \
-          --disable=all --enable=R0801 \
-          --min-similarity-lines=10 \
-          --fail-on=R0801 \
-          src/apm_cli/ \
-          scripts/lint_architecture_boundaries.py \
-          scripts/architecture_linter/ \
-          scripts/windows_native_symlink_probe_entry.py
-
-    - name: Lint - auth-protocol boundary (#1212 anti-regression)
-      run: bash scripts/lint-auth-signals.sh
-
-    - name: Lint - architecture authority boundaries
-      run: bash scripts/lint-architecture-boundaries.sh
+    # The chain has one owner, shared with merge-train.yml's guard job.
+    - name: Lint chain
+      uses: ./.github/actions/lint-chain
+      with:
+        base-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base_sha }}
 
   # Windows compatibility gate -- runs at PR time (not just post-merge
   # in build-release.yml) so Windows-only path, encoding, process, and

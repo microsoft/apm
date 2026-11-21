@@ -1363,7 +1363,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:e55152e3ec59fb193e78960c56005668adad192bda588f4c3fdc57d8eee5768f
+  content_hash: sha256:8b326e7adf51d4b3f6e347bf82bb9f62315cde3ee8462b535b02609507fd2961
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/entry-sanitizer.md
@@ -1426,7 +1426,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:4aaacc7f61ca85be9776e921d02a67112569b370d31b581d045e0c3dc941a071
+  content_hash: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/scripts/verify-lint-mirror.sh
@@ -3190,7 +3190,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:95986c55cf9a4c3f8141b975399cabac982644d4238b7e7a8c1f6cf4199fafd8
+  content_hash: sha256:cbbec7d475683fc90ab5bf5233d582e0a3b530df73ca50affe6b6e36af380218
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3483,14 +3483,14 @@ local_deployed_file_hashes:
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
   .agents/skills/auth/SKILL.md: sha256:64f08ad849c95cf7d949499bd2939d7bfc52a8e773b4e990b632ae5a38de4dac
   .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
-  .agents/skills/cut-release/SKILL.md: sha256:e55152e3ec59fb193e78960c56005668adad192bda588f4c3fdc57d8eee5768f
+  .agents/skills/cut-release/SKILL.md: sha256:8b326e7adf51d4b3f6e347bf82bb9f62315cde3ee8462b535b02609507fd2961
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:f5bd68ff42a2b408b7a3ebc106a9b6a2bb6057db5e8ef970a5b46aa74880beb2
   .agents/skills/cut-release/assets/pr-body-template.md: sha256:4d7fb7d8908d9938f4587af7bcafb016362a39ba38a8e0891147d5fab1b9016e
   .agents/skills/cut-release/assets/semver-rubric.md: sha256:ef1d9338ac0d0c3790ebd677f4f95acaa648118d9c74e018ed877d0587349c95
   .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/changelog_fragments.py: sha256:d6310a5a2f196e731e0b29df6e95b95be999e2b1ad4a3165694bb22d28e378c8
-  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:4aaacc7f61ca85be9776e921d02a67112569b370d31b581d045e0c3dc941a071
+  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
   .agents/skills/cut-release/scripts/verify-lint-mirror.sh: sha256:ab3f4a9ebc8f2b8c357c4cf81e0ada3be093cfc94c06703805d56c87f6fd7ecc
   .agents/skills/devx-ux/SKILL.md: sha256:e66de2f844eebbfccf641b1a6fdf0ff9bb8c476364bda87266ce47f7ebfa7e5a
   .agents/skills/docs-corpus-audit/SKILL.md: sha256:d20498ee8c1a38553303e23fc2f184c59fab624d1f701839f00dc7b291db3afb
@@ -3733,7 +3733,7 @@ local_deployed_file_hashes:
   .github/agents/test-coverage-expert.agent.md: sha256:6754110c0c19ad9e787febd92a6e326670b90bf21e39cf4f017002c2638616e0
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:36e968e8cd087501f8933a649ee3c4ae8c1116620c35572bdc61866285f54aac
-  .github/instructions/cicd.instructions.md: sha256:95986c55cf9a4c3f8141b975399cabac982644d4238b7e7a8c1f6cf4199fafd8
+  .github/instructions/cicd.instructions.md: sha256:cbbec7d475683fc90ab5bf5233d582e0a3b530df73ca50affe6b6e36af380218
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5
