@@ -61,13 +61,15 @@ from tests.lifecycle.receipts import current_node
 from tests.lifecycle.rows import _PROJECT_HOME_ALLOWED, _SURFACE_GLOBS
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.packages import INERT_COMMAND
-from tests.lifecycle.world.routes import PROXY_HOST
+from tests.lifecycle.world.routes import PROXY_HOST, PROXY_PREFIX
 from tests.lifecycle.world.scopes import use_registry_proxy
 from tests.lifecycle.world.services import (
     API_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
     MARKETPLACE_NAME,
+    MARKETPLACE_REPO,
+    ORG,
     RAW_HOST,
     REGISTRY_HOST,
     REGISTRY_SERVER,
@@ -403,6 +405,7 @@ class SourceMachine(MachineBase):
         # the same targets is "unchanged" for that slot.
         self.resolved_targets: dict[str, frozenset[str]] = {}
         self.lock_before = "absent"
+        self.proxy = False
 
     # -- model -----------------------------------------------------------------
 
@@ -456,7 +459,9 @@ class SourceMachine(MachineBase):
             found |= {f"GATE={self.model.gate(choice.package, kind)}" for kind in gated}
         if any(cell.startswith(f"{choice.package}/") for cell in step.before.deployed):
             found.add("DEPLOYED=clean")
-        hostid = self.hostid(step.before if op == "uninstall" else step.after, choice.package)
+        hostid = None
+        if any(c.startswith("HOSTID=") for c in X_CONTEXT.get((op, choice.form), ())):
+            hostid = self.hostid(step.before if op == "uninstall" else step.after, choice)
         if hostid is not None:
             lock = "absent" if step.before.lock is None else self.lock_before
             found |= {f"HOSTID={hostid}", f"HOSTID={hostid}|LOCK={lock}"}
@@ -489,19 +494,37 @@ class SourceMachine(MachineBase):
         host, prefix = HOST_ALIASES["ghes"]
         return f"https://{host}:{_PORT}/{prefix}"
 
-    def hostid(self, observation: Observation, package: str) -> str | None:
-        """The HOSTID shape of *package*'s lock row, as the lock records it (E1)."""
+    def declared_hostid(self, choice: Choice) -> str | None:
+        """The HOSTID shape *choice*'s declaration must produce in the lock (E1)."""
+        if self.proxy:
+            return "proxy-logical" if choice.form == "shorthand" else None
+        if choice.form == "git-object":
+            return {"github": "bare-default", PORTED: "qualified-host-port"}.get(self.shape)
+        return "bare-default" if choice.form in ("shorthand", "plugin-at-mkt") else None
+
+    def hostid(self, observation: Observation, choice: Choice) -> str | None:
+        """The declared HOSTID once the lock row records it exactly: host, port, prefix, key."""
+        hostid = self.declared_hostid(choice)
+        if hostid is None:
+            return None
         lock = observation.lock
-        for row in lock.get_package_dependencies() if lock else ():
-            if package_name(row.repo_url or "") != package:
-                continue
-            if row.registry_prefix:
-                return "proxy-logical"
-            if row.port:
-                return "qualified-host-port"
-            if row.host in (None, GITHUB_HOST):
-                return "bare-default"
-        return None
+        rows = [
+            row
+            for row in (lock.get_package_dependencies() if lock else ())
+            if package_name(row.repo_url or "") == choice.package
+        ]
+        assert len(rows) == 1, f"{choice.package}: lock rows {[r.repo_url for r in rows]}"
+        row = rows[0]
+        repo = f"lifecycle/{choice.package}"
+        ghes = HOST_ALIASES["ghes"][0]
+        expected = {
+            "bare-default": (GITHUB_HOST, None, None, repo),
+            "qualified-host-port": (ghes, _PORT, None, f"{ghes}:{_PORT}/{repo}"),
+            "proxy-logical": (PROXY_HOST, None, PROXY_PREFIX, repo),
+        }[hostid]
+        found = (row.host, row.port, row.registry_prefix, row.get_unique_key())
+        assert found == expected, f"{hostid} lock row of {choice.package}: {found} != {expected}"
+        return hostid
 
     def selector(self, choice: Choice) -> str:
         """The ``apm uninstall`` argument that selects *choice*."""
@@ -674,6 +697,12 @@ class SourceMachine(MachineBase):
             forbidden={"project": ("*",), "outside": ("*",)},
             allowed={"home": (*_PROJECT_HOME_ALLOWED, *_CATALOG_CACHE, _PINS)},
         )
+        catalog = [
+            entry
+            for entry in self.bench.world.services.egress_log()
+            if entry["status"] == 200 and f"/{ORG}/{MARKETPLACE_REPO}" in entry["path"]
+        ]
+        assert catalog, "marketplace update revalidated nothing (no catalog request)"
         self.egress(step)
         cells = self.cells("marketplace", "real", choices)
         for choice in choices:
@@ -921,6 +950,7 @@ class SourceMachine(MachineBase):
                 self.edit(
                     "registry-proxy-on", lambda: use_registry_proxy(self.bench.world, only=False)
                 )
+                self.proxy = True
                 self.declare(_BY_FORM["shorthand"], False)
             else:
                 self.host_alias(shape)
@@ -929,6 +959,7 @@ class SourceMachine(MachineBase):
             self.uninstall("remote-skill", False)
         names = ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_TOKEN", "PROXY_REGISTRY_ONLY")
         self.edit("registry-proxy-off", lambda: [env.pop(name, None) for name in names])
+        self.proxy = False
 
 
 _DURABLE = {
