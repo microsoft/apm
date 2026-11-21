@@ -292,24 +292,58 @@ def _locked_with(files=(), manifest_targets=None):
     return lockfile
 
 
+_DEPLOYMENT_ROW = """lockfile_version: '1'
+dependencies:
+- repo_url: acme/a
+  deployed_files:
+  - {value}
+deployments:
+- kind: project-relative
+  target: {target}
+  value: {value}
+  runtime: null
+  scope: project
+  owners:
+  - acme/a
+  active_owner: acme/a
+  content_hash: null
+"""
+
+
+def _recorded(target, value):
+    return LockFile.from_yaml(_DEPLOYMENT_ROW.format(target=target, value=value))
+
+
 @pytest.mark.parametrize(
-    ("declared", "recorded", "kept", "new"),
+    ("declared", "files", "kept", "new"),
     [
-        (("claude",), ["copilot"], [], ["claude"]),
-        (("copilot", "claude"), ["copilot"], ["copilot"], ["claude"]),
-        (("copilot", "claude", "gemini"), ["claude", "copilot"], ["copilot", "claude"], ["gemini"]),
-        (("copilot",), ["claude", "copilot"], ["copilot"], []),
-        (("copilot",), ["copilot"], ["copilot"], []),
+        (("claude",), [".github/prompts/a.prompt.md"], [], ["claude"]),
+        (("copilot", "claude"), [".github/prompts/a.prompt.md"], ["copilot"], ["claude"]),
+        (
+            ("copilot", "claude", "gemini"),
+            [".github/prompts/a.prompt.md", ".claude/commands/a.md"],
+            ["copilot", "claude"],
+            ["gemini"],
+        ),
+        (("copilot",), [".github/prompts/a.prompt.md", ".claude/commands/a.md"], ["copilot"], []),
+        (("copilot",), [".github/prompts/a.prompt.md"], ["copilot"], []),
     ],
 )
-def test_uninstall_reconciles_only_targets_the_lock_declares(declared, recorded, kept, new):
+def test_uninstall_reconciles_only_targets_the_lock_declares(declared, files, kept, new):
     from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
 
-    targets, added = lock_recorded_targets(
-        _profiles(*declared), _locked_with(manifest_targets=recorded)
-    )
+    targets, added = lock_recorded_targets(_profiles(*declared), _locked_with(files=files))
     assert [target.name for target in targets] == kept
     assert added == new
+
+
+def test_a_refreshed_declaration_is_not_deployment_evidence():
+    """A changed uninstall write records apm.yml's new targets in manifest_targets."""
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _locked_with(files=[".github/prompts/a.prompt.md"], manifest_targets=["claude"])
+    targets, added = lock_recorded_targets(_profiles("claude"), lockfile)
+    assert (targets, added) == ([], ["claude"])
 
 
 def test_without_recorded_declarations_a_target_needs_a_recorded_file():
@@ -319,8 +353,27 @@ def test_without_recorded_declarations_a_target_needs_a_recorded_file():
     targets, added = lock_recorded_targets(_profiles("copilot", "claude"), lockfile)
     assert [target.name for target in targets] == ["claude"]
     assert added == ["copilot"]
-    lockfile.manifest_targets = []
-    assert lock_recorded_targets(_profiles("copilot", "claude"), lockfile)[1] == ["copilot"]
+
+
+@pytest.mark.parametrize(
+    ("declared", "kept"),
+    [(("copilot",), ["copilot"]), (("copilot", "gemini"), [])],
+)
+def test_a_legacy_shared_root_row_counts_only_for_its_one_governing_target(declared, kept):
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _locked_with(files=[".agents/skills/a/SKILL.md"])
+    targets, _added = lock_recorded_targets(_profiles(*declared), lockfile)
+    assert [target.name for target in targets] == kept
+
+
+def test_a_deployment_row_names_its_target_on_a_shared_root():
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _recorded("copilot", ".agents/skills/a/SKILL.md")
+    targets, added = lock_recorded_targets(_profiles("copilot", "gemini"), lockfile)
+    assert [target.name for target in targets] == ["copilot"]
+    assert added == ["gemini"]
 
 
 @pytest.mark.parametrize("lockfile", [None, LockFile()])

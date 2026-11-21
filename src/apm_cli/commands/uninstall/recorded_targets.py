@@ -6,33 +6,36 @@ from typing import Any
 
 
 def lock_recorded_targets(targets: list[Any], lockfile: Any) -> tuple[list[Any], list[str]]:
-    """Split *targets* into the ones apm.lock.yaml records and the new ones.
+    """Split *targets* into the ones apm.lock.yaml holds deployments for and the new ones.
 
     Uninstall reconciles only targets the project was installed for, so every
-    file it writes is recorded (I1). A lock written with declared targets
-    records them in ``manifest_targets``; otherwise a target counts as
-    recorded when the lock records a file it governs. A target apm.yml
-    declares since then is left to ``apm install``.
+    file it writes is recorded (I1). The evidence is the target each recorded
+    deployment row names, never ``manifest_targets``: any changed lock write
+    refreshes that from the current apm.yml. A legacy row on a root several
+    targets share (``.agents/``) counts only for the one candidate governing
+    it. A target apm.yml declares since then is left to ``apm install``.
     """
+    from apm_cli.core.deployment_ledger import UNATTRIBUTED_TARGET, DeploymentLedgerCodec
     from apm_cli.install.target_governance import install_governance, is_governed_by_install
 
     if lockfile is None:
         return list(targets), []
-    if lockfile.manifest_targets:
-        recorded_names = set(lockfile.manifest_targets)
-        kept = [target for target in targets if target.name in recorded_names]
-    else:
-        paths = [
-            *(path for dep in lockfile.dependencies.values() for path in dep.deployed_files),
-            *lockfile.local_deployed_files,
-        ]
-        if not paths:
-            return list(targets), []
-        kept = [
-            target
-            for target in targets
-            if any(is_governed_by_install(path, *install_governance([target])) for path in paths)
-        ]
+    files = [
+        record.locator
+        for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
+        if record.locator.runtime is None
+    ]
+    if not files:
+        return list(targets), []
+    named = {locator.target for locator in files}
+    unattributed = [locator.value for locator in files if locator.target == UNATTRIBUTED_TARGET]
+    governance = {target.name: install_governance([target]) for target in targets}
+
+    def governing(path: str) -> list[str]:
+        return [name for name, rule in governance.items() if is_governed_by_install(path, *rule)]
+
+    exclusive = {names[0] for path in unattributed if len(names := governing(path)) == 1}
+    kept = [target for target in targets if target.name in named | exclusive]
     kept_names = {target.name for target in kept}
     return kept, [target.name for target in targets if target.name not in kept_names]
 
