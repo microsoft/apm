@@ -107,6 +107,9 @@ class ModelState:
     def with_policy(self, variant: str, denied: Iterable[str] = ()) -> ModelState:
         return self._moved(policy=variant, policy_denied=frozenset(denied))
 
+    def with_exec_gate(self, enabled: bool) -> ModelState:
+        return self._moved(exec_gate=enabled)
+
     def with_targets(self, *targets: str) -> ModelState:
         return self._moved(targets=frozenset(targets))
 

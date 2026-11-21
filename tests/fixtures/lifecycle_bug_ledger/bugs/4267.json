@@ -1,0 +1,14 @@
+{
+  "issue": 4267,
+  "fixed_in": "Unreleased",
+  "summary": "apm install printed the blocking org policy line twice when the MCP phase re-checked the merged MCP set against the same policy.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_announced_once_lifecycle.py::test_blocking_policy_line_printed_once_when_mcp_phase_is_denied"
+  ]
+}

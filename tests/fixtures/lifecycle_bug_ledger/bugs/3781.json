@@ -1,0 +1,15 @@
+{
+  "issue": 3781,
+  "summary": "Traps audit demanding apm_modules after service-only update -g; needs user scope and released-version lockfiles.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_global_audit_still_reports_missing_package_materialization",
+    "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_global_update_then_audit_passes_for_released_user_lockfiles",
+    "tests/integration/test_global_update_audit_materialization_lifecycle.py::test_project_update_then_audit_is_unchanged"
+  ]
+}

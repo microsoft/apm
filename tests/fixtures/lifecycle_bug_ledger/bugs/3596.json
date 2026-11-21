@@ -1,0 +1,19 @@
+{
+  "issue": 3596,
+  "summary": "Org-wide lifecycle-script policy is outside the replay world's policy model.",
+  "failure_modes": [
+    "cleanup",
+    "portability",
+    "routing"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lifecycle_deny_all_chain_lifecycle.py::test_deny_all_suppresses_every_lifecycle_tier_across_chain",
+    "tests/integration/test_pre_compile_chain_lifecycle.py::test_compiled_outputs_follow_umask_and_keep_existing_modes",
+    "tests/integration/test_pre_compile_chain_lifecycle.py::test_pre_compile_trust_generation_and_suppressed_modes",
+    "tests/integration/test_pre_compile_chain_lifecycle.py::test_user_pre_compile_does_not_fire_for_global_compile"
+  ]
+}

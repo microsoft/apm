@@ -1,0 +1,14 @@
+{
+  "issue": 4178,
+  "fixed_in": "Unreleased",
+  "summary": "apm approve <pkg> printed its unreachable org policy warning twice because two trust readers in one command each resolved the policy.",
+  "failure_modes": [
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_policy_miss_reported_once_lifecycle.py::test_approve_reports_unreachable_policy_once"
+  ]
+}

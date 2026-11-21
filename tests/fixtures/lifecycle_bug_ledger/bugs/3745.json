@@ -1,0 +1,23 @@
+{
+  "issue": 3745,
+  "fixed_in": "0.36.1",
+  "summary": "COPILOT_HOME moved only the MCP config; skills, agents, instructions, hooks and LSP config still landed under ~/.copilot.",
+  "failure_modes": [
+    "routing",
+    "cleanup"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "filesystem.open_world_observation",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_harness_user_root_lifecycle.py::test_copilot_home_receives_every_copilot_user_primitive",
+    "tests/integration/test_harness_user_root_lifecycle.py::test_relative_user_root_is_rejected_before_any_write",
+    "tests/integration/test_copilot_home_adjacent_lifecycle.py::test_compile_global_writes_into_neither_copilot_home",
+    "tests/integration/test_copilot_home_adjacent_lifecycle.py::test_copilot_app_workflows_stay_in_the_default_copilot_home",
+    "tests/integration/test_copilot_home_profile_lifecycle.py::test_copilot_home_outside_home_owns_every_copilot_user_primitive",
+    "tests/integration/test_copilot_home_profile_lifecycle.py::test_relative_copilot_home_fails_clearly_without_writes",
+    "tests/integration/test_copilot_home_profile_lifecycle.py::test_unsetting_copilot_home_leaves_the_other_profile_in_place"
+  ]
+}

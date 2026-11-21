@@ -2,7 +2,7 @@
 
 PROMISE: P-LAW-auth.credentials_isolated -- credentials remain scoped to
 their intended host and never enter persisted URLs or output (source:
-tests/fixtures/lifecycle_bug_ledger.json). The docs promise the same per
+tests/fixtures/lifecycle_bug_ledger/). The docs promise the same per
 artifact: secrets are written as references, never values
 (docs/src/content/docs/consumer/install-mcp-servers.md "Keep secrets out of
 config files"); a packed plugin carries no MCP credentials

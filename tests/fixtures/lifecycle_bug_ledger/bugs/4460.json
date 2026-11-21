@@ -1,0 +1,14 @@
+{
+  "issue": 4460,
+  "fixed_in": "Unreleased",
+  "summary": "A no-op apm prune printed one of two different messages depending on whether apm_modules/ existed; it now prints one message through CommandLogger.nothing_to_prune, with or without --dry-run.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_prune_noop_message_lifecycle.py::test_noop_prune_prints_one_message"
+  ]
+}

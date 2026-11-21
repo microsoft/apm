@@ -1,0 +1,24 @@
+{
+  "issue": 3760,
+  "fixed_in": "0.36.1",
+  "summary": "Uninstalling an unrelated package re-deployed every skill of surviving skill bundles, ignoring their skills selection and leaving the extra skills unrecorded while audit still passed.",
+  "failure_modes": [
+    "cleanup",
+    "ownership",
+    "observation"
+  ],
+  "properties": [
+    "filesystem.open_world_observation",
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_survivor_skill_selection",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_uninstall_keeps_non_skill_primitives_and_only_selected_skills_of_a_survivor",
+    "tests/integration/test_skill_selection_merge_lifecycle.py::test_copilot_home_uninstall_rebuilds_survivor_skills_in_the_legacy_layout",
+    "tests/integration/test_skill_selection_upgrade_lifecycle.py::test_skills_leaked_by_an_old_uninstall_stay_unmanaged",
+    "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_legacy_layout_skill_selection",
+    "tests/integration/test_uninstall_skill_selection_lifecycle.py::test_uninstall_unrelated_package_keeps_survivor_target_selection"
+  ]
+}
