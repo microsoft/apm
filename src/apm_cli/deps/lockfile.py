@@ -41,7 +41,7 @@ from ..models.dependency.replacement import (
     project_effective_reference,
 )
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
-from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
+from ..native_plugins.record import NativePluginRecord, NativePluginRecordError, native_lock_fields
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
@@ -542,6 +542,8 @@ class LockedDependency:
     # Intact native plugin APM deployed and declared for this dependency; the
     # only ownership evidence for native settings keys and deployed roots.
     native_plugin: NativePluginRecord | None = None
+    # Harnesses whose settings held APM's true when written (tells hand edits apart).
+    native_declared: list[str] | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Stream ``content_hash`` was recorded in; set from the owning lockfile's
     # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
@@ -708,8 +710,7 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
-        if self.native_plugin is not None:
-            result["native_plugin"] = self.native_plugin.to_lock_data()
+        result.update(native_lock_fields(self.native_plugin, self.native_declared))
         if self.exec_allowed_types:
             result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
@@ -800,6 +801,7 @@ class LockedDependency:
             "exec_allowed_types",
             "name",
             "native_plugin",
+            "native_declared",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -857,11 +859,12 @@ class LockedDependency:
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
-        if "native_plugin" in data:
-            try:
-                locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
-            except NativePluginRecordError as exc:
-                raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
+        from ..native_plugins.record import native_fields_from_lock_data
+
+        try:
+            locked.native_plugin, locked.native_declared = native_fields_from_lock_data(data)
+        except NativePluginRecordError as exc:
+            raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(

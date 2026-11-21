@@ -1,7 +1,8 @@
-"""Gate removal rows for KIND native: p-native-claude's plugin MCP server (#4107).
+"""Gate removal rows for KIND native: the p-native-claude plugin (#4107, #3921).
 
-The Claude plugin's stdio server lands in the project ``.mcp.json`` (claude
-target), shared with other servers; the entry goes when the gate closes.
+The approved Claude plugin lands whole under the committed ``.agents/plugins``
+(claude target) with its stdio server inside its own ``.mcp.json``; the whole
+root goes as one unit when the gate closes.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice
 
-_PROJECT = {"project": (".mcp.json",)}
+_PROJECT = {"project": (".agents/plugins/p-native-claude/.claude-plugin/plugin.json",)}
 _ALL = (
     "definition-changed",
     "local-deny",
@@ -18,8 +19,6 @@ _ALL = (
     "policy-dep-deny",
     "revoke-approval",
 )
-# Plain files of the plugin survive an executable-level gate change.
-_SKILL = {"project": (".claude/skills/p-native-claude",)}
 # gate_paths/native_plugin.py: the git-served p-native-claude-bin at user scope; the
 # approved plugin lands whole under ~/.agents/plugins and goes as one unit.
 _PLUGIN = {"home": (".agents/plugins/p-native-claude-bin/.claude-plugin/plugin.json",)}
@@ -65,8 +64,6 @@ SLICE = GateSlice(
         GateRow(
             f"G|{path}|{change}|native",
             surface=surface,
-            shared=True,
-            unchanged=_SKILL,
             smoke=f"G|{path}|{change}|native" in _SMOKE,
             xfail=_XFAIL.get(f"G|{path}|{change}|native"),
         )
