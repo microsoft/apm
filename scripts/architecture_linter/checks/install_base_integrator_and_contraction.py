@@ -1426,6 +1426,15 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "DeploymentMaterializationSession.retire_removed(",
             "receipt_retirements=receipt_retirements",
         ),
+        # A file no lock entry claims goes only on this installation's own
+        # held receipt, through the cleanup owner (#3188, req-lk-024).
+        "src/apm_cli/core/receipt_orphans.py": (
+            "return DeploymentMaterializationSession(deploy_root, scope, None)",
+            "if lockfile is None:",
+            "session.receipt_held(path)",
+            "result = remove_stale_deployed_files(",
+            "render=None,",
+        ),
         "src/apm_cli/commands/uninstall/engine.py": (
             "DeploymentMaterializationSession(project_root, _rebuild_scope, lockfile)",
             'with _integrators["skills"].ownership_snapshot(materialization_session=materialization_session):',

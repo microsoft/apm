@@ -960,6 +960,7 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
             _run_phase("services", services, ctx)
             if services.native_registration_allowed(ctx):
                 _run_phase("claude_plugins", claude_plugins, ctx)
+            _cleanup_phase.remove_unclaimed_receipted_files(ctx)  # last, full success only (#3188)
 
         # Emit verbose integration stats + bare-success fallback + return result
         from .phases import finalize as _finalize_phase

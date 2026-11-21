@@ -1,6 +1,7 @@
 """APM prune command."""
 
 import contextlib
+import copy
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.deployment_ledger import DeploymentLedgerCodec
 from ..core.deployment_state import LocatorKind
+from ..core.receipt_orphans import receipt_orphans, remove_receipt_orphans
 from ..core.scope import InstallScope, manifest_file
 
 # APM Dependencies
@@ -209,11 +211,15 @@ def prune(ctx, dry_run):
             lockfile.absent_staging_slugs(apm_modules_dir) if lockfile is not None else []
         )
 
+        # Receipted files no lock entry claims any more, e.g. after a pull
+        # dropped their package (#3188); they go only if the prune succeeds.
+        unclaimed, prior_lockfile = _unclaimed_receipted_files(project_root, lockfile)
         if (
             not orphaned_packages
             and not missing_orphaned_keys
             and not owner_violations
             and not absent_staging
+            and not unclaimed
         ):
             logger.nothing_to_prune()
             _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
@@ -260,6 +266,7 @@ def prune(ctx, dry_run):
                 logger.dry_run_notice(
                     f"forget {len(absent_staging)} stale local bundle staging record(s)"
                 )
+            _preview_unclaimed(logger, unclaimed)
             planned_owner_repairs = (
                 DeploymentLedgerCodec.owner_reference_violations(
                     lockfile,
@@ -426,6 +433,10 @@ def prune(ctx, dry_run):
                 )
                 sys.exit(1)
 
+        receipt_cleaned = (
+            0 if failed_count else _remove_unclaimed(project_root, lockfile, prior_lockfile, logger)
+        )
+
         _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
 
         logger.render_summary()
@@ -483,6 +494,8 @@ def prune(ctx, dry_run):
             logger.success(f"Repaired {len(pruned_keys)} stale dependency record(s)")
         elif owner_violations:
             logger.success(f"Repaired {len(owner_violations)} deployment ownership record(s)")
+        elif unclaimed:
+            _report_unclaimed(logger, receipt_cleaned)
         else:
             logger.warning("No packages were removed")
 
@@ -491,6 +504,38 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _unclaimed_receipted_files(project_root: Path, lockfile: LockFile | None):
+    """Receipted files no lock entry claims (#3188), and the lock they were judged against."""
+    unclaimed = receipt_orphans(project_root, InstallScope.PROJECT, lockfile)
+    return unclaimed, copy.deepcopy(lockfile) if unclaimed else None
+
+
+def _preview_unclaimed(logger, unclaimed) -> None:
+    for orphan in unclaimed:
+        verb = "remove" if orphan.held else "keep edited"
+        logger.dry_run_notice(f"{verb} {orphan.path}: no package in apm.lock.yaml claims it")
+
+
+def _remove_unclaimed(project_root: Path, lockfile, prior, logger) -> int:
+    """Delete the receipted files a successful prune leaves unclaimed; return how many."""
+    return logger.receipt_orphan_cleanup(
+        remove_receipt_orphans(
+            project_root,
+            InstallScope.PROJECT,
+            lockfile,
+            diagnostics=logger.diagnostics,
+            prior=prior,
+        )
+    )
+
+
+def _report_unclaimed(logger, cleaned: int) -> None:
+    if cleaned:
+        logger.success(f"Cleaned {cleaned} deployed file(s) no package claims")
+    else:
+        logger.warning("No files were removed")
 
 
 def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:

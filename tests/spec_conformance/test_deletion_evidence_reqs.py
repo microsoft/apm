@@ -4,11 +4,13 @@ Amendment 0.1.69 (issue #3701), adopted 2026-11-20. The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
 equality with the locked render authorizes the deletion; a file that
-differs from its evidence is kept.
+differs from its evidence is kept. Proposed amendment 0.1.77 (issue #3188):
+a file no lock entry claims goes only on this installation's held receipt.
 """
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -96,3 +98,92 @@ def test_file_differing_from_its_evidence_is_kept(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "edited by the user\n"
     assert result.skipped_user_edit == [_PATH]
     assert "edited since APM deployed it" in messages
+
+
+_LOCK = """lockfile_version: '4'
+apm_version: 0.37.0
+dependencies:
+- repo_url: _local/alpha
+  name: alpha
+  version: 0.1.0
+  package_type: apm_package
+  deployed_files:
+  - .claude/skills/alpha
+  - .claude/skills/alpha/SKILL.md
+  source: local
+  local_path: ./pkgs/alpha
+"""
+
+
+def _receipted_project(root: Path) -> dict[str, Path]:
+    """Deploy and receipt alpha, beta and edited; add an unreceipted identical copy."""
+    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    paths = {
+        name: root / ".claude" / "skills" / name / "SKILL.md"
+        for name in ("alpha", "beta", "edited", "copy")
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True)
+        path.write_text("---\nname: skill\n---\nSkill.\n", encoding="utf-8")
+    session = DeploymentMaterializationSession(root, InstallScope.PROJECT, None)
+    for name in ("alpha", "beta", "edited"):
+        session.record(
+            {paths[name]: compute_file_hash(paths[name])},
+            [KNOWN_TARGETS["claude"]],
+            f"./pkgs/{name}",
+        )
+    session.flush()
+    paths["edited"].write_text("edited by the user\n", encoding="utf-8")
+    return paths
+
+
+@pytest.mark.req("req-lk-024")
+def test_spec_states_receipt_bound_deletion_of_unclaimed_files() -> None:
+    assert_spec_contains(
+        "A consumer MAY also delete a deployed file that no current lockfile entry"
+    )
+    assert_spec_contains("An audit MUST report such a file as orphaned without")
+
+
+@pytest.mark.req("req-lk-024")
+def test_only_this_installations_held_receipt_authorizes_deleting_an_unclaimed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.core.receipt_orphans import ReceiptOrphan, receipt_orphans, remove_receipt_orphans
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.deps.lockfile import LockFile
+
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home" / ".apm"))
+    root = tmp_path / "project"
+    paths = _receipted_project(root)
+    lock = LockFile.from_yaml(_LOCK)
+    receipt = next((tmp_path / "home" / ".apm").rglob("*.json"))
+    before = receipt.read_bytes()
+
+    # Read-only selection (audit): claimed and unreceipted files are never candidates.
+    assert receipt_orphans(root, InstallScope.PROJECT, lock) == (
+        ReceiptOrphan(".claude/skills/beta/SKILL.md", held=True),
+        ReceiptOrphan(".claude/skills/edited/SKILL.md", held=False),
+    )
+    assert receipt_orphans(root, InstallScope.PROJECT, None) == ()
+    moved = tmp_path / "moved"
+    shutil.copytree(root, moved)
+    assert receipt_orphans(moved, InstallScope.PROJECT, lock) == ()
+    assert receipt.read_bytes() == before
+
+    diagnostics = DiagnosticCollector()
+    result = remove_receipt_orphans(root, InstallScope.PROJECT, lock, diagnostics=diagnostics)
+
+    assert result.deleted == [".claude/skills/beta/SKILL.md"]
+    assert not paths["beta"].parent.exists()
+    assert paths["alpha"].is_file() and paths["copy"].is_file()
+    assert paths["edited"].read_text(encoding="utf-8") == "edited by the user\n"
+    messages = [d.message for d in diagnostics._diagnostics]
+    assert len(messages) == 1
+    assert ".claude/skills/edited/SKILL.md" in messages[0] and "manually" in messages[0]
+    assert receipt_orphans(root, InstallScope.PROJECT, lock) == (
+        ReceiptOrphan(".claude/skills/edited/SKILL.md", held=False),
+    )

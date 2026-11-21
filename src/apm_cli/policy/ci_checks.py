@@ -1211,6 +1211,26 @@ def _without_pre037_renders(
     ]
 
 
+def _receipt_orphan_findings(
+    deployment_root: Path,
+    lockfile: LockFile,
+    reported: Sequence[DriftFinding],
+    user_scope: bool,
+) -> list[DriftFinding]:
+    """Read-only: receipted files no lock entry claims that install or prune would remove (#3188)."""
+    from ..core.receipt_orphans import receipt_orphans
+    from ..core.scope import InstallScope
+    from ..install.drift import DriftFinding
+
+    seen = {finding.path for finding in reported}
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    return [
+        DriftFinding(path=orphan.path, kind="orphaned", package="")
+        for orphan in receipt_orphans(deployment_root, scope, lockfile)
+        if orphan.held and orphan.path not in seen
+    ]
+
+
 def _check_drift(
     project_root: Path,
     lockfile: LockFile,
@@ -1376,6 +1396,7 @@ def _check_drift(
             replace(finding, path=str(live_root / finding.path)) for finding in external_findings
         )
 
+    findings.extend(_receipt_orphan_findings(deployment_root, lockfile, findings, user_scope))
     findings = _without_pre037_renders(findings, lockfile, deployment_root)
     if not findings:
         logger.clean()
