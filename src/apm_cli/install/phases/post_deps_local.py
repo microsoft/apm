@@ -84,11 +84,8 @@ def run(ctx: InstallContext) -> None:
 
     # Members this run skipped keep their prior rows and hashes (#4230).
     _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
-    _current_files = sorted(ctx.local_deployed_files)
-    _current_hashes = _hash_deployed(
-        ctx.local_deployed_files,
-        ctx.project_root,
-    )
+    _current_files = sorted(_root_claimed(ctx))
+    _current_hashes = _hash_deployed(_current_files, ctx.project_root)
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -145,3 +142,16 @@ def run(ctx: InstallContext) -> None:
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):
         _persist_lock.save(_lock_path)
+
+
+def _root_claimed(ctx: InstallContext) -> list[str]:
+    """Return the root-local deployments the root package claims.
+
+    At user scope the root package is ``$HOME``, which also holds dependency
+    sources; a file a dependency of this install already claims stays that
+    dependency's, so uninstalling it removes the file (#3772).
+    """
+    if not is_user_scope(getattr(ctx, "scope", None)):
+        return list(ctx.local_deployed_files)
+    dependency_claims = {path for paths in ctx.package_deployed_files.values() for path in paths}
+    return [path for path in ctx.local_deployed_files if path not in dependency_claims]

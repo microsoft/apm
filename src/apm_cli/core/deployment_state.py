@@ -90,6 +90,24 @@ class DeploymentLedger:
     records: Mapping[str, DeploymentRecord]
 
 
+def is_canonical_bundle_hash(content_hash: str | None) -> bool:
+    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
+    digest = (
+        content_hash.removeprefix("sha256:")
+        if isinstance(content_hash, str) and content_hash.startswith("sha256:")
+        else ""
+    )
+    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
+
+
+def require_local_bundle_hash(path: str, content_hash: str | None) -> None:
+    """Reject imperative provenance without one canonical SHA-256 digest."""
+    if not is_canonical_bundle_hash(content_hash):
+        raise ValueError(
+            f"Local bundle deployment {path!r} requires a canonical sha256:<hex> content hash"
+        )
+
+
 def validate_deployment_rows(rows: object) -> None:
     """Reject any malformed deployment row before ledger construction."""
     if not isinstance(rows, list):

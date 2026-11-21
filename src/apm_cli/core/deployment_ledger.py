@@ -22,6 +22,8 @@ from apm_cli.core.deployment_state import (
     DeploymentReconcileResult,
     DeploymentRecord,
     LocatorKind,
+    is_canonical_bundle_hash,
+    require_local_bundle_hash,
     validate_deployment_rows,
 )
 from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
@@ -57,11 +59,10 @@ _LEGACY_USER_TARGET_PREFIXES = {
 }
 _LOCAL_BUNDLE_OWNER = "local-bundle"
 UNATTRIBUTED_TARGET = "legacy"
+_SHA256_PREFIX = "sha256:"
 DEPLOYMENT_OWNER_REMEDIATION = DEPLOYMENT_OWNERS_INVALID.sentence()
 LOCAL_STATE_DIR = ".apm-local"
 """Per-deployment-root directory for local, never-shared APM state."""
-_SHA256_PREFIX = "sha256:"
-_LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
@@ -186,6 +187,8 @@ class DeploymentMaterializationSession:
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
         self._written: dict[str, str] = {}
+        # Lockless pre-0.38 receipts adopted this run, rebound after commit (#3772).
+        self._migrated: dict[str, str] = {}
         self._kept: set[str] = set()
         self._dirty = False
         self._claims: dict[str, list[DeploymentRecord]] = {}
@@ -310,7 +313,7 @@ class DeploymentMaterializationSession:
                 if (
                     record.locator.kind == LocatorKind.URI
                     or record.locator.scope != self.scope.value
-                    or not _is_canonical_bundle_hash(record.content_hash)
+                    or not is_canonical_bundle_hash(record.content_hash)
                     or not isinstance(destinations[record.locator.key], str)
                     or not isinstance(bindings[record.locator.key], list)
                     or len(bindings[record.locator.key]) != 2
@@ -388,29 +391,38 @@ class DeploymentMaterializationSession:
         record = self._records.get(self._physical_keys.get(path.resolve().as_posix(), ""))
         return record is not None and self._holds(path, record)
 
-    def adopt_lockless_root_receipts(self, prior: Sequence[str]) -> list[str]:
+    def adopt_root_receipts(
+        self, prior: Sequence[str], targets: Sequence[TargetProfile]
+    ) -> list[str]:
         """Bind user-root receipts a pre-0.38 ``install -g`` wrote without a lock (#3772).
 
-        Those installs receipted root-local writes but recorded no claim. A
-        receipt qualifies only at user scope, for the root owner, for a path
-        the lock does not claim, while the file still holds its bytes; it is
-        bound to the self-entry claim this install then commits. Returns
-        *prior* (the old root-local claims) plus the adopted lock values; a
-        frozen replay verifies and adopts nothing.
+        Only the legacy unbound root receipt (``[".", "[]"]``) qualifies, at user
+        scope, for a path the lock does not claim (keyed by its compatibility
+        value, so relocated roots match), while the file still holds its bytes.
+        It is bound for this run and rebound to the committed claim after the
+        lockfile commits. Returns *prior* plus the adopted lock values; a frozen
+        replay verifies and adopts nothing.
         """
-        adopted = list(prior)
+        from apm_cli.install.deployed_paths import deployed_path_entry
+
+        adopted = set(prior)
         if self.scope.value != "user" or self.verify_only:
-            return sorted(set(adopted))
+            return sorted(adopted)
         for key, record in self._records.items():
-            value, physical = record.locator.value, self._destinations.get(key)
-            if record.active_owner != "." or self._claims.get(value) or physical is None:
+            physical = self._destinations.get(key)
+            if physical is None or self._bindings.get(key) != [".", "[]"]:
                 continue
-            if self._holds(Path(physical), record):
-                self._claims[value] = [record]
-                self._bindings[key] = [".", self._claim_signature(value)]
-                self._dirty = True
-                adopted.append(value)
-        return sorted(set(adopted))
+            try:
+                value = deployed_path_entry(Path(physical), self.root, targets)
+            except (RuntimeError, ValueError):
+                continue
+            if record.active_owner == "." and not self._claims.get(value):
+                if self._holds(Path(physical), record):
+                    self._claims[value] = [record]
+                    self._bindings[key] = [".", self._claim_signature(value)]
+                    self._migrated[key], self._dirty = value, True
+                    adopted.add(value)
+        return sorted(adopted)
 
     def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
         """Record a declared member this run deliberately left on disk unwritten."""
@@ -566,7 +578,7 @@ class DeploymentMaterializationSession:
         prepared: list[tuple[DeploymentRecord, str, str]] = []
         for path, content_hash in written.items():
             locator = self._write_locator(path, targets)
-            if locator is None or path.is_symlink() or not _is_canonical_bundle_hash(content_hash):
+            if locator is None or path.is_symlink() or not is_canonical_bundle_hash(content_hash):
                 raise ValueError(f"Cannot record unverified materialization: {path}")
             prepared.append(
                 (
@@ -610,8 +622,10 @@ class DeploymentMaterializationSession:
         Keep that projection separate from the actual writer; never infer a
         writer or a baseline from the committed lock.
         """
-        if not self._written:
+        if not (self._written or self._migrated):
             return
+        # Migrated receipts rebind like writes; written_entries() was read before the commit.
+        self._written = {**self._migrated, **self._written}
         committed = type(self)(self.root, self.scope, lockfile)
         for key, value in self._written.items():
             record = committed._records.get(key)
@@ -854,24 +868,6 @@ def record_bundle_receipts(
         except ValueError:
             continue
     session.flush()
-
-
-def _is_canonical_bundle_hash(content_hash: str | None) -> bool:
-    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
-    digest = (
-        content_hash.removeprefix(_SHA256_PREFIX)
-        if isinstance(content_hash, str) and content_hash.startswith(_SHA256_PREFIX)
-        else ""
-    )
-    return len(digest) == 64 and all(character in _LOWER_HEX for character in digest)
-
-
-def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
-    """Reject imperative provenance without one canonical SHA-256 digest."""
-    if not _is_canonical_bundle_hash(content_hash):
-        raise ValueError(
-            f"Local bundle deployment {path!r} requires a canonical sha256:<hex> content hash"
-        )
 
 
 def trusted_receipt_baselines(
@@ -1224,7 +1220,7 @@ class DeploymentLedgerCodec:
             provenance_bundles = DeploymentLedgerCodec.local_bundle_values(provenance) & owned
             # Malformed provenance is dropped, as a rebuild without it would.
             prior_bundle_paths |= {
-                path for path in provenance_bundles if _is_canonical_bundle_hash(hashes.get(path))
+                path for path in provenance_bundles if is_canonical_bundle_hash(hashes.get(path))
             }
             preferred = DeploymentLedgerCodec._preferred_locators(
                 owned
@@ -1340,7 +1336,7 @@ class DeploymentLedgerCodec:
             if path in retired_paths
         }
         for path in files:
-            _require_local_bundle_hash(path, hashes.get(path))
+            require_local_bundle_hash(path, hashes.get(path))
         merged_files = sorted((set(lockfile.local_deployed_files) - retired_paths).union(files))
         merged_hashes = {
             path: digest
@@ -1381,7 +1377,7 @@ class DeploymentLedgerCodec:
         for record in ledger.records.values():
             if record.active_owner == _LOCAL_BUNDLE_OWNER:
                 path = DeploymentLedgerCodec.legacy_value(record.locator)
-                _require_local_bundle_hash(path, record.content_hash)
+                require_local_bundle_hash(path, record.content_hash)
                 paths.add(path)
         return frozenset(paths)
 
@@ -1431,7 +1427,7 @@ class DeploymentLedgerCodec:
                 or locator.target != "mcp"
                 or locator.runtime is None
                 or record.content_hash is None
-                or not _is_canonical_bundle_hash(record.content_hash)
+                or not is_canonical_bundle_hash(record.content_hash)
             ):
                 continue
             result.setdefault(locator.runtime, {})[locator.value] = record.content_hash
@@ -1498,7 +1494,7 @@ class DeploymentLedgerCodec:
             ):
                 continue
             supplied = (native_hashes.get(locator.runtime) or {}).get(locator.value)
-            new_hash = supplied if _is_canonical_bundle_hash(supplied) else None
+            new_hash = supplied if is_canonical_bundle_hash(supplied) else None
             if new_hash != record.content_hash:
                 records[key] = DeploymentRecord(
                     locator=locator,
@@ -1705,7 +1701,7 @@ class DeploymentLedgerCodec:
             path = DeploymentLedgerCodec.legacy_value(record.locator)
             if path not in bundle_paths:
                 continue
-            _require_local_bundle_hash(path, record.content_hash)
+            require_local_bundle_hash(path, record.content_hash)
             owners = tuple(owner for owner in record.owners if owner != _LOCAL_BUNDLE_OWNER)
             scope = (scopes or {}).get(path, record.locator.scope)
             target = (targets or {}).get(path, record.locator.target)

@@ -141,7 +141,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
     if session is not None:
         session.locked_sources = locked
         session.verify_only = InstallService.frozen_disposition(ctx).replay
-        ctx.old_local_deployed = session.adopt_lockless_root_receipts(ctx.old_local_deployed)
+        ctx.old_local_deployed = session.adopt_root_receipts(ctx.old_local_deployed, ctx.targets)
         retire_receipts_of_missing_projects()
     try:
         with (

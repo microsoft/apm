@@ -57,10 +57,10 @@ def _source(scene: HarnessScene) -> Path:
     return scene.isolated.config_root / "agents" / "research.agent.md"
 
 
-def _install(scene: HarnessScene, *, expect: int = 0) -> CommandResult:
+def _install(scene: HarnessScene, *, expect: int = 0, target: str = "copilot") -> CommandResult:
     cwd = scene.isolated.work_root / "cwd"
     cwd.mkdir(exist_ok=True)
-    result = scene.runner.run(("install", "-g", "--target", "copilot"), cwd=cwd, env=scene.env)
+    result = scene.runner.run(("install", "-g", "--target", target), cwd=cwd, env=scene.env)
     assert result.returncode == expect, describe(result)
     for stream in (result.stdout, result.stderr):
         assert stream.isascii(), describe(result)
@@ -105,10 +105,10 @@ def test_install_g_with_only_user_root_agents_writes_the_user_lockfile(
     assert (scene.home / _DEPLOYED).read_bytes() == agent_bytes
 
 
-def _as_037_state(scene: HarnessScene) -> None:
+def _as_037_state(scene: HarnessScene, deployed_path: Path | None = None) -> None:
     """Rewind to what 0.37 left: the receipt bound to no lock claim, and no user lock."""
     states = list((scene.isolated.config_root / "deployment-receipts").glob("*.json"))
-    deployed = (scene.home / _DEPLOYED).resolve().as_posix()
+    deployed = (deployed_path or scene.home / _DEPLOYED).resolve().as_posix()
     receipted = False
     for state in states:
         data = json.loads(state.read_text(encoding="utf-8"))
@@ -144,6 +144,54 @@ def test_first_upgraded_install_migrates_a_receipt_without_a_lock(
     assert _NO_CHANGES not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
     assert deployed.read_text(encoding="utf-8").endswith("Version two.\n")
     _assert_claimed(scene)
+
+
+def _assert_claims_bytes(scene: HarnessScene, deployed: Path) -> None:
+    """I1: one user-lock claim for the agent records its on-disk hash."""
+    hashes = _lock(scene).get("local_deployed_file_hashes") or {}
+    claims = [value for value in hashes if value.endswith(f"agents/{deployed.name}")]
+    assert [hashes[value] for value in claims] == [compute_file_hash(deployed)], hashes
+
+
+@pytest.mark.parametrize("relocated", [False, True], ids=["home-root", "claude-config-dir"])
+def test_migrated_receipt_survives_an_unchanged_upgrade_on_claude(
+    scene: HarnessScene, relocated: bool
+) -> None:
+    """Case 3 on a non-Copilot target: the migrated claim rebinds to the committed lock."""
+    root = scene.home / ".claude"
+    if relocated:
+        root = scene.isolated.root / "claude-profile"
+        root.mkdir()
+        scene.env["CLAUDE_CONFIG_DIR"] = str(root)
+    else:
+        root.mkdir()
+    deployed = root / "agents" / "research.md"
+    _source(scene).write_text(_agent("Version one."), encoding="utf-8")
+    _install(scene, target="claude")
+    _as_037_state(scene, deployed)
+
+    adopted = _install(scene, target="claude")
+    assert "skipped" not in flat(adopted.stdout + adopted.stderr), describe(adopted)
+    _assert_claims_bytes(scene, deployed)
+
+    _source(scene).write_text(_agent("Version two."), encoding="utf-8")
+    upgraded = _install(scene, target="claude")
+    assert _NO_CHANGES not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
+    assert deployed.read_text(encoding="utf-8").rstrip().endswith("Version two.")
+    _assert_claims_bytes(scene, deployed)
+
+
+def test_a_bound_receipt_whose_claim_was_removed_is_not_migrated(scene: HarnessScene) -> None:
+    """Only a pre-0.38 unbound receipt migrates; a lock that dropped its claim keeps it unowned."""
+    _source(scene).write_text(_agent("Version one."), encoding="utf-8")
+    _install(scene)
+    (scene.isolated.config_root / "apm.lock.yaml").unlink()
+    _source(scene).write_text(_agent("Version two."), encoding="utf-8")
+
+    result = _install(scene)
+
+    assert (scene.home / _DEPLOYED).read_text(encoding="utf-8").endswith("Version one.\n")
+    assert re.search(r"\b1 file skipped\b", flat(result.stdout + result.stderr)), describe(result)
 
 
 def test_hand_edited_deployed_agent_is_kept_and_named(scene: HarnessScene) -> None:
