@@ -25,7 +25,7 @@ from scripts.architecture_linter.checks.marketplace_integration_shared import (
     _subdir_python,
 )
 from scripts.architecture_linter.facts import FactsProvider
-from scripts.architecture_linter.groups.common import checked_facts, forbid_text, violation
+from scripts.architecture_linter.groups.common import checked_facts, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _AGENT_PLUGINS_PREFIX = "src/apm_cli/agent_plugins/"
@@ -300,7 +300,6 @@ _RID_BUNDLE_LAYOUT = "install-deployment-bundle-native-layout"
 
 _PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
 _LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
-_LOCAL_BUNDLE_AGENTS = "src/apm_cli/install/local_bundle_agents.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
 _TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
 
@@ -336,45 +335,9 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
                 "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
-                '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})',
-                '_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
+                '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command", "codex_agent"})',
             ),
             "local bundle deployment must route through PLUGIN_LAYOUT and TargetProfile.primitives",
-        )
-    )
-    # Codex bundle agents render through AgentIntegrator, never a copy (#3714).
-    findings.extend(
-        _require_subs(
-            provider,
-            inv,
-            _RID_BUNDLE_LAYOUT,
-            _INSTALL_SERVICES,
-            ("if _bundle_render_format(", "skipped += _deploy_bundle_codex_agent("),
-            "the bundle deploy loop must hand rendered-format agents to local_bundle_agents",
-        )
-    )
-    findings.extend(
-        _require_subs(
-            provider,
-            inv,
-            _RID_BUNDLE_LAYOUT,
-            _LOCAL_BUNDLE_AGENTS,
-            (
-                "integrator._render_codex_agent(",
-                "resolve_links=integrator.resolve_links",
-                "integrator._deploy_rendered_agent(",
-                "managed_files=None",
-            ),
-            "bundle Codex agents must render and deploy through AgentIntegrator",
-        )
-    )
-    findings.extend(
-        forbid_text(
-            provider,
-            rule_id=_RID_BUNDLE_LAYOUT,
-            path=_LOCAL_BUNDLE_AGENTS,
-            needles=("write_text", "write_bytes", "shutil", ".open("),
-            message="bundle Codex agents are written only by AgentIntegrator._deploy_rendered_agent",
         )
     )
     for path in (_LOCAL_BUNDLE_PATHS, _INSTALL_SERVICES):

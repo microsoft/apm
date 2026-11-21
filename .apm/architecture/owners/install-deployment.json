@@ -191,12 +191,11 @@
     },
     {
       "id": "bundle-native-layout-lowering",
-      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout, including which packed agents are rendered (codex_agent) instead of copied",
-      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target, bundle_render_format_id); rendered Codex agents deploy through install/local_bundle_agents.py via AgentIntegrator._render_codex_agent and _deploy_rendered_agent",
+      "decision": "Bundle-native directory and filename lowering to APM primitive kinds and target deploy layout",
+      "owner": "bundle/plugin_layout.py (PLUGIN_LAYOUT, plugin_command_prompt_name) consumed by install/local_bundle_paths.py (_lower_to_target)",
       "selectors": [
         "src/apm_cli/bundle/plugin_layout.py",
-        "src/apm_cli/install/local_bundle_paths.py",
-        "src/apm_cli/install/local_bundle_agents.py"
+        "src/apm_cli/install/local_bundle_paths.py"
       ],
       "guards": ["install-deployment-bundle-native-layout"]
     },

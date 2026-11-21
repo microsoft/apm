@@ -24,11 +24,9 @@ from .deployed_paths import log_hook_display_payloads as _log_hook_display_paylo
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
-from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
-from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
@@ -1089,28 +1087,6 @@ def integrate_local_bundle(
                     )
             except ValueError:
                 record = dest.as_posix()
-
-            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
-                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
-            ):
-                skipped += _deploy_bundle_codex_agent(
-                    src,
-                    dest,
-                    rel_path=_rel_norm,
-                    record=record,
-                    collision_roots=(project_root, deploy_root),
-                    expected_hash=expected_hash,
-                    target_name=target.name,
-                    slug=str(slug),
-                    force=force,
-                    dry_run=dry_run,
-                    diagnostics=diagnostics,
-                    logger=logger,
-                    deployed_files=deployed_files,
-                    deployed_hashes=deployed_hashes,
-                    written_files=written_files,
-                )
-                continue
 
             normalized_text = _normalized_bundle_text(src)
             if normalized_text is None:

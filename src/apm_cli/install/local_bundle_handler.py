@@ -364,7 +364,6 @@ def install_local_bundle(
                 staged=staged_instructions,
                 staged_hashes=result.get("staged_file_hashes", {}),
                 staged_fallback_hashes=staged_fallbacks,
-                targets=_external_claim_targets(deployed, targets),
             )
             # Receipts are a bundle file's only deletion evidence (#4223); a
             # dry run writes nothing, so it reports no written files.
@@ -774,32 +773,6 @@ def _home_relative_claims(
     return [_relative(path) for path in deployed], {
         _relative(path): digest for path, digest in hashes.items()
     }
-
-
-def _external_claim_targets(deployed: list[str], targets: Any) -> dict[str, str]:
-    """Name the target whose absolute static root holds each absolute claim.
-
-    A claim under an external root (``$CODEX_HOME`` outside ``$HOME``) stays
-    absolute and its path prefix names no target; without this its ledger
-    row is unattributed and audit cannot resolve it (#3714).
-    """
-    from ..utils.path_security import PathTraversalError, ensure_path_within
-
-    attributed: dict[str, str] = {}
-    for claim in deployed:
-        if not Path(claim).is_absolute():
-            continue
-        for target in targets:
-            root = target.managed_deploy_root
-            if root is None or target.resolved_deploy_root is not None:
-                continue
-            try:
-                ensure_path_within(Path(claim), root)
-            except PathTraversalError:
-                continue
-            attributed[claim] = target.name
-            break
-    return attributed
 
 
 def _bootstrap_project_manifest(logger) -> None:

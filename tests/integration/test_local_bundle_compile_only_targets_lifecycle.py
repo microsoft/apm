@@ -7,8 +7,9 @@ compile input, not deployed output: it must never become a deployment claim
 that ``apm audit --ci`` then reports as missing or unresolved, and
 ``apm prune`` still clears it.
 
-Rendering bundle agents to Codex TOML is covered by
-``test_local_bundle_codex_agents_lifecycle.py`` (#3714).
+A bundle carries plugin-native Markdown agents. Local bundle install cannot
+render Codex TOML agents, so it skips them with one warning per agent instead
+of writing Markdown into ``.codex/agents/*.toml``.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ pytestmark = [
 
 _NO_POLICY = "--no-policy"
 _AGENTS = ("rev", "lint")
+_SKIP_WARNING = "[!] Skipped packed bundle path"
 _STAGED = "apm_modules/bundler/.apm/instructions/glob.instructions.md"
 _COMPILE_ONLY_TARGETS = ("codex", "gemini", "opencode")
 
@@ -318,3 +320,27 @@ def test_prune_retires_staging_records_whose_root_is_gone(
     lock = (project / "apm.lock.yaml").read_bytes()
     world.apm(project, "prune")
     assert (project / "apm.lock.yaml").read_bytes() == lock
+
+
+def test_codex_bundle_install_skips_markdown_agents_with_one_warning_each(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _Bundle(tmp_path, apm_binary_path)
+    bundle = world.pack()
+    project = world.consumer("codex")
+
+    installed = world.apm(project, "install", str(bundle), "--target", "codex", _NO_POLICY)
+    text = _output(installed)
+    for name in _AGENTS:
+        assert text.count(f"'agents/{name}.agent.md' for target codex") == 1, text
+    # Exactly one [!] skip warning per skipped agent, and nothing else skipped.
+    assert text.count(_SKIP_WARNING) == len(_AGENTS), text
+    assert f"({len(_AGENTS)} skipped)" in text, text
+    assert not (project / ".codex/agents").exists()
+    assert not any(claim.startswith(".codex/") for claim in _claims(project))
+    world.apm(project, "audit", "--ci", _NO_POLICY, "--no-fail-fast")
+
+    # Targets that deploy Markdown agents natively still receive them.
+    other = world.consumer("opencode")
+    world.apm(other, "install", str(bundle), "--target", "opencode", _NO_POLICY)
+    assert (other / ".opencode/agents/rev.md").is_file()
