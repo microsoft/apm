@@ -17,6 +17,7 @@ from typing import NamedTuple
 from apm_cli.core.scope import manifest_file
 
 from ..core.remediation import (
+    BUNDLE_PACKAGES_UNRECORDED,
     CONTENT_HASHES_MISSING,
     REQUIRED_PACKAGE_UNLOCKED,
     UNMANAGED_FILE_TRACK,
@@ -24,6 +25,7 @@ from ..core.remediation import (
 from .models import (
     CheckResult,
     CIAuditResult,
+    LocalBundleSubjects,
     PolicyRemedy,
     PolicySubject,
 )
@@ -154,11 +156,30 @@ def _required_policy_index(
     return DependencyPolicyIndex.from_dependencies(deps)
 
 
+def _declared_then_bundled(
+    deps: Sequence[DependencyReference], bundled: Sequence[DependencyReference]
+) -> list[tuple[DependencyReference, PolicyRemedy | None]]:
+    """Each declared dependency, then each bundled one not declared, with its remedy.
+
+    A declared dependency's violation suggests removing it from apm.yml; a
+    bundled one has no apm.yml entry, so it suggests no edit.
+    """
+    keys = {dep.get_unique_key() for dep in deps}
+    return [(dep, PolicyRemedy.REMOVE) for dep in deps] + [
+        (dep, None) for dep in bundled if dep.get_unique_key() not in keys
+    ]
+
+
 def _check_dependency_allowlist(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    bundle: LocalBundleSubjects | None = None,
 ) -> CheckResult:
-    """Check 1: every dependency matches policy allow list."""
+    """Check 1: every dependency matches policy allow list.
+
+    A local *bundle* is judged by the packages it records, never by its
+    author-chosen name; one that records none is refused (#4646).
+    """
     from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if policy.allow is None:
@@ -169,10 +190,12 @@ def _check_dependency_allowlist(
         )
 
     subjects: list[PolicySubject] = []
-    for dep in deps:
+    for dep, remedy in _declared_then_bundled(deps, bundle.packages if bundle else ()):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "not in allowed" in reason:
-            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
+    if bundle is not None and not bundle.packages:
+        subjects.append(_unmatchable_bundle_subject(bundle))
 
     if not subjects:
         return CheckResult(
@@ -184,6 +207,23 @@ def _check_dependency_allowlist(
         "dependency-allowlist",
         f"{len(subjects)} dependency(ies) not in allow list",
         subjects,
+    )
+
+
+def _unmatchable_bundle_subject(bundle: LocalBundleSubjects) -> PolicySubject:
+    """The allow-list refusal of a local bundle that records no packages (#4646).
+
+    Passing it would let any content through an allow list under an
+    author-chosen name, so it fails closed.
+    """
+    from .matcher import dependency_policy_subject
+
+    ref = dependency_policy_subject(bundle.names[0]) if bundle.names else "local bundle"
+    return PolicySubject(
+        ref,
+        "the bundle records no packages for dependencies.allow to match, and a bundle "
+        f"name never satisfies the allow list. {BUNDLE_PACKAGES_UNRECORDED.sentence()}",
+        None,
     )
 
 
@@ -208,9 +248,7 @@ def _check_dependency_denylist(
         )
 
     subjects: list[PolicySubject] = []
-    keys = {dep.get_unique_key() for dep in deps}
-    extra = [(dep, None) for dep in bundled if dep.get_unique_key() not in keys]
-    for dep, remedy in (*((dep, PolicyRemedy.REMOVE) for dep in deps), *extra):
+    for dep, remedy in _declared_then_bundled(deps, bundled):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
             subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
@@ -1588,7 +1626,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
     installing: bool = False,
     marketplace_origins: MarketplaceOrigins | None = None,
-    bundled_deps: Iterable[DependencyReference] = (),
+    bundled_deps: Iterable[DependencyReference] | LocalBundleSubjects = (),
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1666,10 +1704,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         resolutions), checked against ``marketplace.allow`` when the policy
         sets it, so a lock cannot bypass it.
     bundled_deps:
-        Packages a local bundle or a pack ships without an apm.yml entry in
-        this project (the bundle itself and the packages it carries). They
-        meet ``dependencies.deny`` only: the allow list, require and pin
-        checks judge the project's own declarations.
+        Packages shipped without an apm.yml entry in this project. A plain
+        iterable meets ``dependencies.deny`` only. A local bundle's
+        :class:`LocalBundleSubjects` meets deny with its name and packages,
+        and ``dependencies.allow`` with its packages alone (#4646). Require
+        and pin checks judge the project's own declarations.
 
     Returns
     -------
@@ -1700,9 +1739,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         return fail_fast and not check.passed
 
     # -- Dependency checks (1-6) -----------------------------------
-    if _run(_check_dependency_allowlist(source_list, policy.dependencies)):
+    bundle = bundled_deps if isinstance(bundled_deps, LocalBundleSubjects) else None
+    deny_bundled = [*bundle.names, *bundle.packages] if bundle else list(bundled_deps)
+    if _run(_check_dependency_allowlist(source_list, policy.dependencies, bundle)):
         return result
-    if _run(_check_dependency_denylist(source_list, policy.dependencies, list(bundled_deps))):
+    if _run(_check_dependency_denylist(source_list, policy.dependencies, deny_bundled)):
         return result
     dep_names = None
     if policy.dependencies.effective_require or (
