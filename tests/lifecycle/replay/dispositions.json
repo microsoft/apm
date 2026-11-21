@@ -272,7 +272,7 @@
    "failure_modes": [
     "transaction"
    ],
-   "file": "tests/integration/test_architecture_lifecycle_lock.py",
+   "file": "tests/unit/scripts/test_architecture_lifecycle_lock.py",
    "issue": null,
    "ledger_today": [],
    "merge_into": null,
