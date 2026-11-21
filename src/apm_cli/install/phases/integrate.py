@@ -789,6 +789,7 @@ def run(ctx: InstallContext) -> None:
             from apm_cli.install.template import effective_allow_map
             from apm_cli.security.trust import McpAdmission
 
+            InstallService.enforce_frozen_restored(ctx.transitive_failures)
             InstallService.enforce_frozen_selections(ctx.deps_to_install, ctx.existing_lockfile)
             effective_allow_map(ctx)
             InstallService.enforce_hydrated_mcp(
