@@ -1,6 +1,9 @@
 """APMLifecycle: a deny retires every executable of an installed local bundle (RA-025, #3956).
 
 PROMISE: P-INV-I4 -- deny, revoke and tightening never widen what is deployed.
+After the deny, ``apm audit --ci`` flags the stale bundle and names the
+remedy; once ``apm install`` retires it, ``install --frozen`` and
+``audit --ci`` both pass (I3).
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ pytestmark = [
     pytest.mark.e2e,
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I4"),
+    pytest.mark.promise("P-INV-I3"),
 ]
 
 _BUNDLE = "p-exec:bundle"
@@ -89,6 +93,11 @@ def test_deny_then_install_retires_every_bundle_executable(
     # The deny names the command that retires the bundle's executables; run it.
     hint = " ".join(f"{denied.stdout} {denied.stderr}".split())
     assert "apm install" in hint, _evidence(denied)
+    stale = _apm(world, "audit", "--ci")
+    assert stale.returncode != 0, "I3: audit --ci passed a denied bundle\n" + _evidence(stale)
+    assert "apm install" in " ".join(f"{stale.stdout} {stale.stderr}".split()), _evidence(stale)
     _ok(world, "install")
 
     assert _executables(world) == {"hook": [], "mcp": []}, _evidence(denied)
+    _ok(world, "install", "--frozen")
+    _ok(world, "audit", "--ci")
