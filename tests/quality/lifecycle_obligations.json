@@ -15206,6 +15206,7 @@
     "T5|real|install|file-mkt",
     "X|install|file-mkt|DEPLOYED=clean",
     "X|install|file-mkt|FORCE=on",
+    "X|install|file-mkt|FROZEN=on",
     "X|install|file-mkt|GATE=none",
     "X|install|file-mkt|GATE=unapproved-exec",
     "X|install|file-mkt|NET=online",
@@ -15264,6 +15265,7 @@
     "T5|real|install|local-mkt",
     "X|install|local-mkt|DEPLOYED=clean",
     "X|install|local-mkt|FORCE=on",
+    "X|install|local-mkt|FROZEN=on",
     "X|install|local-mkt|GATE=none",
     "X|install|local-mkt|GATE=unapproved-exec",
     "X|install|local-mkt|NET=online",
@@ -21474,9 +21476,8 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4639",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-file|GATE=allowed": {
@@ -22240,9 +22241,8 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4639",
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|SRC=marketplace-local|GATE=allowed": {
