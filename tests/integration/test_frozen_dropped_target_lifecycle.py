@@ -51,7 +51,7 @@ class _Project:
         (source / ".apm" / "instructions").mkdir(parents=True)
         dump_yaml({"name": "a", "version": "1.0.0"}, source / "apm.yml")
         (source / ".apm" / "instructions" / "one.instructions.md").write_bytes(
-            b"---\napplyTo: '**'\n---\n# One\n"
+            b"---\napplyTo: '**/*.py'\n---\n# One\n"
         )
         dump_yaml(
             {
