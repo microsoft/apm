@@ -113,7 +113,7 @@ def test_native_bin_plugin_denied_at_user_scope_names_the_deny(
 
         first = apm("install", "-g", "--trust-bin", step="1-install")
         assert (
-            "1 native plugin(s) deployed to ~/.agents/plugins and declared in Claude Code settings"
+            "1 native plugin(s) deployed to ~/.agents/plugins/ and declared in ~/.claude/settings.json (Claude Code)"
             in first
         ), first
 

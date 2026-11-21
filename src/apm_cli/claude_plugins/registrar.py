@@ -64,6 +64,7 @@ from apm_cli.native_plugins.settings import (
     write_declaration,
 )
 from apm_cli.utils.content_hash import compute_native_plugin_hash
+from apm_cli.utils.paths import portable_relpath
 
 from .admission import (
     ClaudeNativePlugin,
@@ -452,7 +453,11 @@ def reconcile_native_plugins(
                 "them and remove any you no longer want."
             )
     _warn_overridden(logger, changes, settings_paths, prior)
-    rewritten = {harness for harness, change in changes.items() if change.changed}
+    rewritten = {
+        harness: _display_path(settings_paths[harness], root.parent.parent, user_scope)
+        for harness, change in changes.items()
+        if change.changed
+    }
     _report(
         logger,
         declared,
@@ -677,6 +682,14 @@ def _display_root(root: Path, user_scope: bool) -> str:
     return f"~/{root.parent.name}/{root.name}" if user_scope else f"{root.parent.name}/{root.name}"
 
 
+def _display_path(path: Path, base: Path, user_scope: bool) -> str:
+    """A settings file as users name it: relative to the project, or ``~/`` at user scope."""
+    relative = portable_relpath(Path(path), base)
+    if Path(relative).is_absolute():
+        return relative
+    return f"~/{relative}" if user_scope else relative
+
+
 def _report(
     logger, declared, retiring, kept, changed, settings_changed, root: str, restored=()
 ) -> None:
@@ -695,10 +708,14 @@ def _report(
             )
         )
     if declared and (changed or settings_changed):
-        labels = " and ".join(_HARNESS_LABELS[h] for h in HARNESSES if h in settings_changed)
-        where = f" in {labels} settings" if labels else ""
+        files = " and ".join(
+            f"{settings_changed[h]} ({_HARNESS_LABELS[h]})"
+            for h in HARNESSES
+            if h in settings_changed
+        )
+        where = f" in {files}" if files else ""
         logger.tree_item(
-            f"{len(declared)} native plugin(s) deployed to {root} and declared{where}. "
+            f"{len(declared)} native plugin(s) deployed to {root}/ and declared{where}. "
             "Start a new session, or run /reload-plugins in Claude, to load them."
         )
 

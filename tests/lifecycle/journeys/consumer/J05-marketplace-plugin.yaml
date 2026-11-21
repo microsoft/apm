@@ -36,12 +36,12 @@ steps:
       - apm.lock.yaml
       - .gitignore
       - apm_modules/
-      - .claude/commands/commit.md
-      - .claude/commands/commit-push-pr.md
-      - .claude/commands/clean_gone.md
+      - .agents/plugins/
+      - .claude/settings.json
+      - .github/copilot/settings.json
     key_lines:
       - "[+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>"
-      - "|-- 3 commands integrated -> .claude/commands/"
+      - "1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot)."
     forbidden_lines:
       - "#main #main"
       - bin/ executables skipped
@@ -63,13 +63,13 @@ steps:
       - "[i] apm.yml restored to its previous state."
     forbidden_lines: [Traceback, staging, "<TMP>"]
   - n: 6
-    run: ["rm -rf apm_modules .claude", apm install --frozen]
+    run: ["rm -rf apm_modules .agents .claude .github", apm install --frozen]
     exit: 0
     cold_cache: true
     note: a fresh machine (no apm_modules, no deployed files, empty cache) replays the lock
     files: []
     key_lines:
-      - "|-- 3 commands integrated -> .claude/commands/"
+      - "1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot)."
       - "[i] Deployed files verified against apm.lock.yaml."
     forbidden_lines: ["#main #<SHA40>"]
 known_cells:
