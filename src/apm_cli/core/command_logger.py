@@ -102,6 +102,7 @@ class CommandLogger:
         self.verbose = verbose
         self.dry_run = dry_run
         self._diagnostics = None  # Lazy init
+        self._targets_announced = False
 
     @property
     def diagnostics(self):
@@ -121,6 +122,13 @@ class CommandLogger:
     def progress(self, message: str, symbol: str = "info"):
         """Log progress during an operation."""
         _rich_info(message, symbol=symbol)
+
+    def announce_targets(self, line: str) -> None:
+        """Print the canonical ``Targets: X  (source: Y)`` line once per command."""
+        if self._targets_announced:
+            return
+        self._targets_announced = True
+        _rich_info(line, symbol="info")
 
     def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Emit a single batch heartbeat before MCP registry validation

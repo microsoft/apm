@@ -138,7 +138,7 @@ class TestMCPTargetsGatingE2E:
         )
 
         captured = capsys.readouterr()
-        assert "Targeting declared target from apm.yml: copilot" in captured.out
+        assert "Targets: copilot  (source: apm.yml)" in captured.out
 
         assert not _cursor_mcp_path(project).exists(), (
             "cursor MCP config MUST NOT be written when cursor is absent "

@@ -485,7 +485,7 @@ class TestInstallProjectRootDetection:
 
         called_runtimes = {call.args[0] for call in mock_install_rt.call_args_list}
         assert called_runtimes == {"copilot"}
-        logger.progress.assert_any_call("Targeting declared target from apm.yml: copilot")
+        logger.announce_targets.assert_any_call("Targets: copilot  (source: apm.yml)")
 
     @pytest.mark.parametrize(
         "apm_config",

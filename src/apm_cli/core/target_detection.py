@@ -1319,5 +1319,9 @@ def format_provenance(resolved: ResolvedTargets) -> str:
     # Double-space between target list and metadata is intentional and
     # canonical. Test assertions match this exact spacing. Do not collapse.
     """
-    targets_csv = ", ".join(resolved.targets)
-    return f"Targets: {targets_csv}  (source: {resolved.source})"
+    return provenance_line(resolved.targets, resolved.source)
+
+
+def provenance_line(targets: Iterable[str], source: str) -> str:
+    """Render the canonical ``Targets: X  (source: Y)`` line for any caller."""
+    return f"Targets: {', '.join(targets)}  (source: {source})"
