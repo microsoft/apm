@@ -1165,8 +1165,8 @@ def export_plugin_bundle(
     if unpacked_lsp:
         message = (
             "LSP servers without a complete config (command and extensionToLanguage) "
-            f"are not packed: {', '.join(unpacked_lsp)}. Declare them in apm.yml "
-            "dependencies.lsp or .lsp.json, then run 'apm install' and pack again."
+            f"are not packed: {', '.join(unpacked_lsp)}. Add both fields to each one in "
+            "apm.yml dependencies.lsp or .lsp.json, then pack again."
         )
         if logger:
             logger.warning(message)
