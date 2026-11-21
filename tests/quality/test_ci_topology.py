@@ -3380,3 +3380,57 @@ def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
         step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
 
     assert _early_stopping_in("ci-integration.yml", workflow)
+
+
+MUTATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "mutation-pilot.yml"
+MUTATION_STEP = "Mutate one owner and enforce its baseline"
+
+
+def _assert_mutation_shards_enforce_every_owner(workflow: WorkflowNode) -> None:
+    """One scheduled shard per owner, each enforcing its floor with a negative control (#4121)."""
+    assert "schedule" in workflow["on"], "the floors must be enforced on a schedule"
+    owners = workflow_job(workflow, "owners")
+    listing = " ".join(str(step.get("run", "")) for step in owners["steps"])
+    assert "scripts/run_mutation_pilot.py --list-owners" in listing
+    shard = workflow_job(workflow, "mutation-pilot")
+    assert "continue-on-error" not in shard and "if" not in shard
+    assert shard["needs"] == "owners"
+    strategy = shard["strategy"]
+    assert strategy["fail-fast"] is False
+    assert strategy["matrix"] == {"owner": "${{ fromJSON(needs.owners.outputs.keys) }}"}
+    step = workflow_step(shard, MUTATION_STEP)
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"]["OWNER"] == "${{ matrix.owner }}"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert ("--owner", '"$OWNER"') in set(pairwise(tokens))
+    assert "--negative-control" in tokens
+    assert not {"--update-baseline", "--report-only", "--reuse-cache"} & set(tokens)
+    for job in workflow["jobs"].values():
+        for job_step in job.get("steps") or []:
+            assert not str(job_step.get("uses", "")).startswith("actions/cache")
+
+
+def test_mutation_shards_enforce_every_owner_floor() -> None:
+    _assert_mutation_shards_enforce_every_owner(load_workflow(MUTATION_WORKFLOW))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["no-negative-control", "soft-shard", "static-matrix", "no-schedule", "baseline-write"],
+)
+def test_mutation_shard_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(MUTATION_WORKFLOW)
+    shard = workflow_job(workflow, "mutation-pilot")
+    step = workflow_step(shard, MUTATION_STEP)
+    if mutation == "no-negative-control":
+        step["run"] = step["run"].replace("--negative-control", "")
+    elif mutation == "soft-shard":
+        shard["continue-on-error"] = True
+    elif mutation == "static-matrix":
+        shard["strategy"]["matrix"] = {"owner": ["update-plan"]}
+    elif mutation == "no-schedule":
+        del workflow["on"]["schedule"]
+    else:
+        step["run"] += " --update-baseline"
+    with pytest.raises(AssertionError):
+        _assert_mutation_shards_enforce_every_owner(workflow)
