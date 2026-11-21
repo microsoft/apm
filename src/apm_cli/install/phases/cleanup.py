@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
 from apm_cli.core.remediation import ORPHANED_PACKAGES_PRUNE, kept_note
@@ -141,14 +141,13 @@ def _run_cleanup(
             - partial_dropped  # architecture-authority-exempt: survivor intent input, not a removal predicate
         )
     if existing_lockfile or package_deployed_files:
-        from apm_cli.deps.lockfile import LockFile
         from apm_cli.install.manifest_reconcile import surviving_deployed_paths
         from apm_cli.install.phases.targets import declared_target_profiles
 
-        # Without a prior lock the survivors are this run's claims alone; they
-        # still protect a peer's file when receipts stand in for a lost record.
+        # Without a prior lock the survivors are this run's claims (packages and
+        # root-local content); they protect them when receipts stand in.
         surviving_files = surviving_deployed_paths(
-            existing_lockfile or LockFile(),
+            existing_lockfile or _run_local_basis(ctx),
             package_deployed_files,
             _targets or [],
             declared_target_profiles(ctx),
@@ -331,6 +330,13 @@ def _run_cleanup(
                         f"Renamed {_aliased} to the new letter case from {dep_key}"
                     )
                 logger.stale_cleanup(dep_key, cleanup_result)
+
+
+def _run_local_basis(ctx: InstallContext) -> Any:
+    """An empty prior lock carrying this run's root-local claims as survivors."""
+    from apm_cli.deps.lockfile import LockFile
+
+    return LockFile(local_deployed_files=list(getattr(ctx, "local_deployed_files", None) or ()))
 
 
 @dataclass(frozen=True)

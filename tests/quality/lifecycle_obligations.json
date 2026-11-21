@@ -25030,8 +25030,8 @@
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
-    "src/apm_cli/integration/mcp_config_view.py:1220",
-    "src/apm_cli/integration/mcp_config_view.py:1232",
+    "src/apm_cli/integration/mcp_config_view.py:1229",
+    "src/apm_cli/integration/mcp_config_view.py:1241",
     "docs/src/content/docs/enterprise/control-executables.mdx:19",
     "docs/src/content/docs/consumer/install-mcp-servers.md:168"
    ],
