@@ -902,9 +902,7 @@ class DeploymentLedgerCodec:
         lockfile: LockFile, *, scope: str, supported_targets: Collection[str]
     ) -> tuple[str, ...]:
         """Project concrete target identities from recorded deployment state."""
-        rows = _deployment_queries.recorded_rows(lockfile)
-        if rows is None:
-            return ()
+        rows = _deployment_queries.recorded_rows(lockfile) or ()
         targets = {r.locator.target for r in rows if r.locator.scope == scope}
         return tuple(sorted(targets.intersection(supported_targets)))
 
