@@ -2830,41 +2830,6 @@ def test_merge_group_only_node_is_collected_as_lifecycle_smoke(
     result.stdout.no_fnmatch_line("*::test_unmarked")
 
 
-def test_exactly_one_job_provisions_and_requires_codex() -> None:
-    """The Codex native plugin cell runs for real in one job and cannot silently vanish (#4154).
-
-    The lifecycle world skips that cell without a qualified Codex unless
-    APM_REQUIRE_CODEX is set; exactly one job sets it, and that job installs
-    Codex pinned to the production floor before running the lifecycle suite.
-    """
-    from apm_cli.codex_plugins.client import MINIMUM_CODEX_VERSION
-
-    requiring: list[tuple[str, str]] = []
-    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
-        if path.name.endswith(".lock.yml"):
-            continue
-        workflow = load_workflow(path)
-        for job_id, job in (workflow.get("jobs") or {}).items():
-            steps = [step for step in job.get("steps") or [] if isinstance(step, dict)]
-            if any(effective_env(workflow, job, step).get("APM_REQUIRE_CODEX") for step in steps):
-                requiring.append((path.name, job_id))
-    assert requiring == [("lifecycle-journeys.yml", "lifecycle-full")], requiring
-    workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
-    job = workflow_job(workflow, "lifecycle-full")
-    names = [step.get("name") for step in job["steps"]]
-    install = workflow_step(job, "Install the pinned Codex CLI")
-    assert install["run"].split() == [
-        "npm",
-        "install",
-        "-g",
-        f"@openai/codex@{MINIMUM_CODEX_VERSION}",
-    ]
-    run = workflow_step(job, "Run the full lifecycle suite")
-    assert effective_env(workflow, job, run)["APM_REQUIRE_CODEX"] == "1"
-    assert "tests/lifecycle" in run["run"].split()
-    assert names.index("Install the pinned Codex CLI") < names.index("Run the full lifecycle suite")
-
-
 def test_every_quality_module_runs_in_some_workflow_job() -> None:
     """A tests/quality module that no job collects is a contract CI never checks."""
     workflows = REPO_ROOT / ".github" / "workflows"

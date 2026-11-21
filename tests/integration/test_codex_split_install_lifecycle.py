@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +21,7 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import DependencyReference
 from apm_cli.utils.yaml_io import dump_yaml
+from tests.utils.codex_spy import write_codex_spy
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = [pytest.mark.integration]
@@ -48,23 +48,6 @@ def _plugin_source(root: Path) -> None:
     skill.write_text(
         "---\nname: example\ndescription: Inert fixture\n---\nBody\n", encoding="utf-8"
     )
-
-
-def _spy_codex(bin_dir: Path, marker: Path) -> None:
-    """Put a codex executable first on PATH that only records that it ran."""
-    bin_dir.mkdir()
-    script = f"import pathlib; pathlib.Path({str(marker)!r}).write_text('ran')\n"
-    (bin_dir / "codex-spy.py").write_text(script, encoding="utf-8")
-    if os.name == "nt":
-        (bin_dir / "codex.cmd").write_text(
-            f'@"{sys.executable}" "{bin_dir / "codex-spy.py"}"\r\n', encoding="utf-8"
-        )
-    else:
-        launcher = bin_dir / "codex"
-        launcher.write_text(
-            f'#!/bin/sh\nexec "{sys.executable}" "{bin_dir / "codex-spy.py"}"\n', encoding="utf-8"
-        )
-        launcher.chmod(0o755)
 
 
 def _seed_legacy_registration(apm_home: Path, codex_home: Path, key: str, *, enabled: bool) -> Path:
@@ -120,7 +103,7 @@ def codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     codex = isolated.home / ".codex"
     codex.mkdir()
     marker = tmp_path / "codex-ran"
-    _spy_codex(tmp_path / "bin", marker)
+    write_codex_spy(tmp_path / "bin", marker)
     monkeypatch.setenv("CODEX_HOME", str(codex))
     monkeypatch.setenv("PATH", str(tmp_path / "bin") + os.pathsep + inherited_path)
     monkeypatch.chdir(isolated.work_root)
@@ -197,11 +180,24 @@ def test_user_enabled_registration_is_left_in_place(codex_home) -> None:
 _REMOTE = "https://git.example.invalid/acme/example-plugin.git"
 
 
+@pytest.mark.parametrize(
+    ("lockfile_version", "apm_version"),
+    [("1", "0.36.1"), ("4", "0.37.0")],
+    ids=["lock-v1-legacy-hash", "lock-v4-framed-hash"],
+)
 @pytest.mark.parametrize("downloads", ["parallel", "sequential"])
 def test_cached_copy_from_the_retired_route_is_split_installed(
-    codex_home, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, downloads: str
+    codex_home,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    downloads: str,
+    lockfile_version: str,
+    apm_version: str,
 ) -> None:
-    """An old-route ``apm_modules`` copy plus its lock row still deploys after retirement."""
+    """An old-route ``apm_modules`` copy plus its lock row still deploys after retirement.
+
+    The row's ``content_hash`` is in the stream its lockfile version records.
+    """
     from apm_cli.utils.content_hash import compute_package_hash
     from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
@@ -231,8 +227,8 @@ def test_cached_copy_from_the_retired_route_is_split_installed(
     shutil.copytree(source, cached)
     dump_yaml(
         {
-            "lockfile_version": "1",
-            "apm_version": "0.36.1",
+            "lockfile_version": lockfile_version,
+            "apm_version": apm_version,
             "dependencies": [
                 {
                     "repo_url": dependency.repo_url,
@@ -241,7 +237,7 @@ def test_cached_copy_from_the_retired_route_is_split_installed(
                     "resolved_commit": commit.sha,
                     "depth": 1,
                     "package_type": "marketplace_plugin",
-                    "content_hash": compute_package_hash(cached),
+                    "content_hash": compute_package_hash(cached, framed=lockfile_version == "4"),
                 }
             ],
         },

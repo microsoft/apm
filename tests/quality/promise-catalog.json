@@ -57,7 +57,7 @@
     "P-OWN-claude-native-plugin-registration": "architecture owner (marketplace-plugins.json): Intact Claude plugin admission, lockfile-derived native ownership (native_plugin records), deployment to ~/.agents/plugins, and settings-only declaration through the shared native settings writer without any vendor CLI",
     "P-OWN-cli-startup-import-budget": "architecture owner (core-runtime.json): CLI startup (apm --help / --version) imports no command module and no GitPython; root verbs register as lazy stubs and deps exports resolve lazily",
     "P-OWN-cli-version-rendering": "architecture owner (core-runtime.json): CLI version rendering and lightweight entrypoint delegation",
-    "P-OWN-codex-native-plugin-lifecycle": "architecture owner (marketplace-plugins.json): Qualified Codex compatibility-bundle admission, public native lifecycle, APM transport ownership and immutable source-pin integrity",
+    "P-OWN-codex-split-install": "architecture owner (marketplace-plugins.json): Codex receives every plugin as a split install with one A3 diagnostic, APM never spawns codex, and registrations from the removed app-server route retire once",
     "P-OWN-compile-nested-git-boundary": "architecture owner (core-runtime.json): Compile traversal and nested Git repository boundary",
     "P-OWN-compiled-output-writes": "architecture owner (core-runtime.json): Compiled-output writes (atomic)",
     "P-OWN-console-construction": "architecture owner (core-runtime.json): Rich Console and Table construction: every console and table comes from one ASCII-rendering factory; the stream and wrap mode of every line (error lines on stderr, no hard wrap when not a terminal)",

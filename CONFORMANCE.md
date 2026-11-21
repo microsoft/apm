@@ -41,7 +41,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |
 |-------|-------:|--------:|--------:|------:|----------:|--------:|
 | Producer | 9 | 0 | 0 | 0 | 3 | 0 |
-| Consumer | 107 | 1 | 3 | 1 | 3 | 0 |
+| Consumer | 108 | 1 | 2 | 1 | 3 | 0 |
 | Registry | 0 | 0 | 0 | 0 | 1 | 0 |
 | Governance | 21 | 0 | 0 | 0 | 0 | 0 |
 
@@ -110,7 +110,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-na-003](docs/src/content/docs/specs/openapm-v0.1.md#req-na-003) | MUST | 8.5.11 | consumer | active | 1 / 1 | - |
 | [req-na-004](docs/src/content/docs/specs/openapm-v0.1.md#req-na-004) | MUST | 8.5.11 | consumer | active | 12 / 12 | tests/fixtures/spec-conformance/native-activation/req-na-004.json |
 | [req-na-005](docs/src/content/docs/specs/openapm-v0.1.md#req-na-005) | MUST | 8.5.11 | consumer | active | 2 / 2 | - |
-| [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | skipped | 0 / 1 | - |
+| [req-na-006](docs/src/content/docs/specs/openapm-v0.1.md#req-na-006) | MUST | 8.5.11 | consumer | active | 1 / 1 | - |
 | [req-na-007](docs/src/content/docs/specs/openapm-v0.1.md#req-na-007) | MUST | 8.5.11 | consumer | active | 1 / 1 | - |
 | [req-pl-001](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-001) | MUST | 6.1 | governance | active | 3 / 4 | - |
 | [req-pl-002](docs/src/content/docs/specs/openapm-v0.1.md#req-pl-002) | MUST | 6.2 | governance | active | 3 / 4 | - |
@@ -172,13 +172,13 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-sc-006](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-006) | MUST | 4.2.3 | consumer | active | 4 / 5 | - |
 | [req-sc-007](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-007) | MUST | 10.3 | consumer | active | 3 / 4 | - |
 | [req-sc-008](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-008) | SHOULD | 10.3 | consumer | active | 3 / 4 | - |
-| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 5 / 10 | - |
+| [req-sc-009](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-009) | MUST | 10.13 | consumer | active | 4 / 9 | - |
 | [req-sc-010](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-010) | MUST | 10.13 | consumer | active | 1 / 2 | - |
 | [req-sc-011](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-011) | MUST | 10.14 | consumer | active | 2 / 3 | - |
 | [req-sc-012](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-012) | MUST | 10.14 | consumer | active | 1 / 2 | - |
 | [req-sc-013](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-013) | MUST | 10.3 | consumer | active | 4 / 4 | - |
 | [req-sc-014](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-014) | MUST | 10.15 | consumer | active | 4 / 5 | - |
-| [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 7 / 8 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
+| [req-sc-015](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-015) | MUST | 10.16 | consumer | active | 4 / 5 | tests/fixtures/spec-conformance/source-plan/req-sc-015.json |
 | [req-sc-016](docs/src/content/docs/specs/openapm-v0.1.md#req-sc-016) | MUST | 10.13 | consumer | active | 5 / 5 | - |
 | [req-tg-001](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-001) | MUST | 8.4 | consumer | active | 10 / 11 | - |
 | [req-tg-002](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-002) | MUST | 8.5 | consumer | active | 3 / 4 | - |
@@ -217,7 +217,4 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 
 ### req-na-001
 - The Claude user-scope route (#3290) qualifies on its human runtime witness; its conformance-statement disclosure follows that witness.
-
-### req-na-006
-- The explicit split fallback for Codex, which fails A3, is implemented in #3920; schema-bearing Agent Plugins v1 dependencies stay opaque under req-tg-011.
 
