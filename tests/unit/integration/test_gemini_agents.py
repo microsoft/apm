@@ -131,7 +131,10 @@ def test_gemini_agent_renders_only_schema_keys(tmp_path: Path) -> None:
     }
     assert set(fm) <= _GEMINI_SCHEMA_KEYS
     assert text.endswith("# Reviewer\n\nReview the diff.\n")
-    assert diagnostics.by_category() == {}
+    # Every dropped key is named, so none disappears silently.
+    [dropped] = [d.message for ds in diagnostics.by_category().values() for d in ds]
+    assert "'color', 'argument-hint', 'handoffs' were dropped" in dropped
+    assert dropped.startswith("Gemini agent reviewer.agent.md")
 
 
 def test_gemini_agent_name_defaults_to_file_stem_and_tools_stay_omitted(tmp_path: Path) -> None:
@@ -199,6 +202,21 @@ def test_gemini_agent_empty_tools_list_is_kept(tmp_path: Path) -> None:
         ("a.agent.md", "---\ndescription: d\ndisallowedTools: [x]\n---\nB\n", "'disallowedTools'"),
         ("a.agent.md", "---\ndescription: d\npermissionMode: plan\n---\nB\n", "'permissionMode'"),
         ("a.agent.md", "---\ndescription: d\nkind: remote\n---\nB\n", "only local agents"),
+        # Restriction-bearing keys of other harnesses, with no tools list: the
+        # agent would otherwise get every Gemini session tool.
+        ("a.agent.md", "---\ndescription: d\nhooks: {}\n---\nB\n", "'hooks'"),
+        ("a.agent.md", "---\ndescription: d\nisolation: worktree\n---\nB\n", "'isolation'"),
+        ("a.agent.md", "---\ndescription: d\npermissions: []\n---\nB\n", "'permissions'"),
+        ("a.agent.md", "---\ndescription: d\npermission: {}\n---\nB\n", "'permission'"),
+        ("a.agent.md", "---\ndescription: d\nreadonly: true\n---\nB\n", "readonly: true"),
+        (
+            "a.agent.md",
+            "---\ndescription: d\ndisable-model-invocation: true\n---\nB\n",
+            "disable-model-invocation: true",
+        ),
+        ("a.agent.md", "---\ndescription: d\ninfer: false\n---\nB\n", "infer: false"),
+        ("a.agent.md", "---\ndescription: d\ndisabled: true\n---\nB\n", "disabled: true"),
+        ("a.agent.md", "---\ndescription: d\ndisable: true\n---\nB\n", "disable: true"),
         ("a.agent.md", "---\ndescription: d\ntemperature: hot\n---\nB\n", "'temperature'"),
         ("a.agent.md", "---\ndescription: d\ntemperature: .nan\n---\nB\n", "'temperature'"),
         ("a.agent.md", "---\ndescription: d\nmax_turns: 0\n---\nB\n", "'max_turns'"),
@@ -237,6 +255,25 @@ def test_gemini_tool_rejection_names_the_full_approved_set(tmp_path: Path) -> No
     assert all(tool in message for tool in GEMINI_AGENT_BUILTIN_TOOLS)
     assert "mcp_<server>_<tool>" in message
     assert not (tmp_path / ".gemini" / "agents" / "a.md").exists()
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["readonly: false", "disable-model-invocation: false", "infer: true", "disabled: false"],
+)
+def test_gemini_non_restricting_flag_values_deploy_with_dropped_warning(
+    tmp_path: Path, flag: str
+) -> None:
+    _write_agent(tmp_path, "f.agent.md", f"---\ndescription: d\n{flag}\n---\nB\n")
+
+    result, diagnostics = _integrate(tmp_path)
+
+    assert result.files_integrated == 1
+    deployed = tmp_path / ".gemini" / "agents" / "f.md"
+    assert _frontmatter(deployed.read_text(encoding="utf-8")) == {"name": "f", "description": "d"}
+    key = flag.split(":")[0]
+    messages = [d.message for ds in diagnostics.by_category().values() for d in ds]
+    assert any(f"'{key}' was dropped" in m for m in messages)
 
 
 def test_gemini_invalid_agent_does_not_block_siblings(tmp_path: Path) -> None:

@@ -159,9 +159,12 @@ _GEMINI_AGENT_OPTIONAL_FIELDS: tuple[str, ...] = (
     "max_turns",
     "timeout_mins",
 )
-# Source keys that would change what the agent can reach if APM dropped them
-# (agent-scoped MCP servers, deny lists, permission modes) or that describe a
-# remote (A2A) agent. Such an agent is not deployed.
+# Source keys whose loss would change what the agent may do, or that
+# describe a remote (A2A) agent. Gemini cannot carry them, so an agent that
+# declares one is not deployed instead of losing the restriction silently:
+# agent-scoped MCP servers, Claude deny lists, permission modes, hooks and
+# worktree isolation (https://code.claude.com/docs/en/sub-agents), OpenCode
+# permission rules (https://opencode.ai/docs/agents/).
 _GEMINI_AGENT_REJECTED_FIELDS: frozenset[str] = frozenset(
     {
         "mcp_servers",
@@ -170,11 +173,29 @@ _GEMINI_AGENT_REJECTED_FIELDS: frozenset[str] = frozenset(
         "disallowedTools",
         "disallowed-tools",
         "permissionMode",
+        "hooks",
+        "isolation",
+        "permissions",
+        "permission",
         "agent_card_url",
         "agent_card_json",
         "auth",
     }
 )
+# Flags that restrict an agent only at one value, which blocks deployment:
+# Cursor read-only mode (https://cursor.com/docs/context/subagents), Copilot
+# manual-only selection, including the retired ``infer`` key
+# (https://docs.github.com/en/copilot/reference/custom-agents-configuration),
+# and OpenCode's disabled agent (https://opencode.ai/docs/agents/).
+_GEMINI_AGENT_REJECTED_FLAGS: tuple[tuple[str, bool], ...] = (
+    ("readonly", True),
+    ("disable-model-invocation", True),
+    ("infer", False),
+    ("disabled", True),
+    ("disable", True),
+)
+# Keys covered by their own handling, so the dropped-field warning skips them.
+_GEMINI_AGENT_NOT_DROPPED: frozenset[str] = frozenset({"kind", "user-invocable", "visibility"})
 _GEMINI_TOOLS_HINT = (
     "Approved Gemini tool names: built-ins ("
     + ", ".join(sorted(GEMINI_AGENT_BUILTIN_TOOLS))
@@ -676,6 +697,47 @@ class AgentIntegrator(BaseIntegrator):
         return text
 
     @staticmethod
+    def _warn_dropped_fields(
+        dropped_field_names: list,
+        source: Path,
+        target_name: str,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Name the frontmatter keys a renderer dropped, bounded and ASCII-safe.
+
+        Shared by renderers that keep an allowlist of keys (Codex, Gemini), so
+        no source key disappears without a diagnostic.
+        """
+        if not dropped_field_names or diagnostics is None:
+            return
+        shown_names = dropped_field_names[: AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN]
+        remaining = len(dropped_field_names) - len(shown_names)
+        shown_fields = [
+            f"'{AgentIntegrator._display_dropped_field_key(field)}'" for field in shown_names
+        ]
+        fields_text = ", ".join(shown_fields)
+        if remaining > 0:
+            fields_text += f" (and {remaining} more)"
+        singular = len(dropped_field_names) == 1
+        field_label = "field" if singular else "fields"
+        dropped_verb = "was" if singular else "were"
+        field_reference = "this field" if singular else "these fields"
+        setting_reference = "its setting" if singular else "their settings"
+        diagnostics.lossy_agent_compilation(
+            message=(
+                f"{target_name} agent {printable_ascii_text(source.name)}: frontmatter "
+                f"{field_label} {fields_text} {dropped_verb} dropped; "
+                f"this metadata is not translated by APM for {target_name}."
+            ),
+            package=printable_ascii_text(package_name),
+            detail=(
+                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
+                f"rely on {setting_reference} in the generated {target_name} agent."
+            ),
+        )
+
+    @staticmethod
     def _warn_codex_unverified_scope(
         diagnostics: DiagnosticCollector | None,
         source: Path,
@@ -872,41 +934,13 @@ class AgentIntegrator(BaseIntegrator):
                                     f"{CODEX_AGENT_FIELD_NOT_STRING.bind(field=field).clause()}."
                                 ),
                             )
-                    # Collect only the raw dropped keys here (no formatting)
-                    # so hostile frontmatter with many keys does not force
-                    # rendering every key just to discard most of them below.
-                    dropped_field_names = [
-                        field for field in fm if field not in AgentIntegrator._CODEX_KNOWN_FIELDS
-                    ]
-                    if dropped_field_names and diagnostics is not None:
-                        shown_names = dropped_field_names[
-                            : AgentIntegrator._MAX_DROPPED_FIELDS_SHOWN
-                        ]
-                        remaining = len(dropped_field_names) - len(shown_names)
-                        shown_fields = [
-                            f"'{AgentIntegrator._display_dropped_field_key(field)}'"
-                            for field in shown_names
-                        ]
-                        fields_text = ", ".join(shown_fields)
-                        if remaining > 0:
-                            fields_text += f" (and {remaining} more)"
-                        singular = len(dropped_field_names) == 1
-                        field_label = "field" if singular else "fields"
-                        dropped_verb = "was" if singular else "were"
-                        field_reference = "this field" if singular else "these fields"
-                        setting_reference = "its setting" if singular else "their settings"
-                        diagnostics.lossy_agent_compilation(
-                            message=(
-                                f"Codex agent {printable_ascii_text(source.name)}: frontmatter "
-                                f"{field_label} {fields_text} {dropped_verb} dropped; "
-                                "this metadata is not translated by APM for Codex."
-                            ),
-                            package=printable_ascii_text(package_name),
-                            detail=(
-                                f"Fix: remove {field_reference} if unnecessary; otherwise do not "
-                                f"rely on {setting_reference} in the generated Codex agent."
-                            ),
-                        )
+                    AgentIntegrator._warn_dropped_fields(
+                        [f for f in fm if f not in AgentIntegrator._CODEX_KNOWN_FIELDS],
+                        source,
+                        "Codex",
+                        diagnostics,
+                        package_name,
+                    )
                 else:
                     AgentIntegrator._warn_codex_unverified_scope(
                         diagnostics,
@@ -1139,6 +1173,9 @@ class AgentIntegrator(BaseIntegrator):
     def _gemini_agent_problem(fm: dict, filename: str) -> str | None:
         """Return why Gemini would reject *fm* (or APM must not deploy it), or None."""
         rejected = sorted(str(k) for k in fm if k in _GEMINI_AGENT_REJECTED_FIELDS)
+        rejected += [
+            f"{k}: {str(v).lower()}" for k, v in _GEMINI_AGENT_REJECTED_FLAGS if fm.get(k) is v
+        ]
         if rejected:
             return (
                 f"field(s) {rejected!a} cannot be deployed to Gemini without changing the "
@@ -1251,6 +1288,13 @@ class AgentIntegrator(BaseIntegrator):
         for field in ("tools", "model", *_GEMINI_AGENT_OPTIONAL_FIELDS):
             if fm.get(field) is not None:
                 out_fm[field] = fm[field]
+        AgentIntegrator._warn_dropped_fields(
+            [k for k in fm if k not in out_fm and k not in _GEMINI_AGENT_NOT_DROPPED],
+            source,
+            "Gemini",
+            diagnostics,
+            package_name,
+        )
         AgentIntegrator._warn_user_invocable_dropped(
             fm, source, "Gemini", diagnostics, package_name
         )
