@@ -134,7 +134,7 @@ def _check_ref_consistency(
     from ..models.dependency.replacement import project_manifest_dependencies
 
     _, mismatches = lockfile_satisfies_replacements(lock, manifest.replace_rules)
-    requires_update = False
+    requires_update = unlocked = False
     marketplace_index = lock.marketplace_index()
     for dep_ref in project_manifest_dependencies(manifest):
         key = dep_ref.get_unique_key()
@@ -148,9 +148,10 @@ def _check_ref_consistency(
                     f"{display}: {reason} marketplace provenance in lockfile; "
                     "inspect the locked sources before reinstalling"
                 )
+                requires_update = requires_update or bool(lock.dependencies)
             else:
                 mismatches.append(f"{key}: not found in lockfile")
-            requires_update = requires_update or bool(lock.dependencies)
+                unlocked = True
             continue
         if dep_ref.is_marketplace:
             if reason := marketplace_ref_mismatch(dep_ref, locked_dep):
@@ -174,6 +175,11 @@ def _check_ref_consistency(
             passed=True,
             message="All dependency refs match lockfile",
         )
+    # A newly declared dependency is locked by a plain install. A direct lock
+    # row the manifest no longer declares may be that dependency's identity
+    # rewritten, so re-resolve everything from the manifest instead.
+    if unlocked and not requires_update:
+        requires_update = bool(_orphaned_direct_keys(manifest, lock))
     repair_command = "apm update" if requires_update else "apm install"
     n = len(mismatches)
     noun = "mismatch" if n == 1 else "mismatches"
@@ -449,18 +455,8 @@ def _check_lockfile_targets_current(
     )
 
 
-def _check_no_orphans(
-    manifest: APMPackage,
-    lock: LockFile,
-) -> CheckResult:
-    """Verify no packages in lockfile are absent from manifest.
-
-    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
-    candidates for orphan detection. Transitive deps belong to a
-    sub-package's manifest, not the root manifest, so the root manifest
-    cannot make them go away by editing its dependency lists. This is the
-    orphan owner's direct-entry projection of the install decision.
-    """
+def _orphaned_direct_keys(manifest: APMPackage, lock: LockFile) -> list[str]:
+    """Direct lockfile entries the manifest no longer declares (orphan owner's projection)."""
     from ..install.orphans import OrphanOperation, decide_orphan_removal
 
     decision = decide_orphan_removal(
@@ -474,7 +470,22 @@ def _check_no_orphans(
         reachability=None,
         deployment_claims=None,
     )
-    orphaned = [dep_key for dep_key in lock.dependencies if dep_key in decision.removed_keys]
+    return [dep_key for dep_key in lock.dependencies if dep_key in decision.removed_keys]
+
+
+def _check_no_orphans(
+    manifest: APMPackage,
+    lock: LockFile,
+) -> CheckResult:
+    """Verify no packages in lockfile are absent from manifest.
+
+    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
+    candidates for orphan detection. Transitive deps belong to a
+    sub-package's manifest, not the root manifest, so the root manifest
+    cannot make them go away by editing its dependency lists. This is the
+    orphan owner's direct-entry projection of the install decision.
+    """
+    orphaned = _orphaned_direct_keys(manifest, lock)
     if not orphaned:
         return CheckResult(
             name="no-orphaned-packages",

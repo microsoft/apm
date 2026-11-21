@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` tells you to run `apm install`, not `apm update`, for a dependency declared in apm.yml but missing from the lockfile. (#4539)
 - A dependency that blocking org policy denies is refused before APM contacts, downloads or caches it, including transitive dependencies. (#4534)
 - A policy refusal of a package that `apm install <pkg>` was adding suggests choosing a package the policy allows. (#4535)
 - Updating `.mcp.json`, `.github/mcp.json`, `~/.claude.json` or the IntelliJ MCP config keeps its indentation, final newline, line endings and non-ASCII text; other layout is normalized. (#4530)
