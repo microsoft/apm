@@ -11600,15 +11600,17 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[revoked-after-deploy]"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=unapproved-exec": {
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[unapproved-exec]"
   },
   "pair|DEPLOYED=present-provenance-unknown|NET=offline": {
    "family": "pair",
@@ -18970,7 +18972,7 @@
    "lane": "T-6b",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_deployed_executables_without_a_lock_are_kept"
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[revoked-after-deploy]"
   },
   "pair|PRIM=hook|DEPLOYED=unowned": {
    "family": "pair",

@@ -566,6 +566,40 @@ def _drop_approval(scenario: Scenario, package: str) -> None:
     scenario.model = scenario.model.revoke(package, scenario.kinds[package])
 
 
+_SOLO_HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo h"}]}]}}
+
+
+def _hook_package(world) -> Scenario:
+    """h-hook: one hook and nothing else, installed and approved."""
+    factory = LocalPackageFactory(world.root / "hook-only")
+    package = factory.create("h-hook", version="1.0.0")
+    factory.add_hook(package, "session", _SOLO_HOOK)
+    use_policy(world, "allow")
+    kinds = {"h-hook": ("hook",)}
+    scenario = Scenario(world, {"h-hook": str(package.root)}, kinds=kinds, policy="allow")
+    scenario.run("install h-hook")
+    scenario.run("approve h-hook")
+    scenario.run("install")
+    return scenario
+
+
+@pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
+def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> None:
+    scenario = _hook_package(lifecycle_world)
+    hook = lifecycle_world.project / ".github/hooks/h-hook-session.json"
+    assert hook.is_file()
+    if gate == "revoked-after-deploy":
+        scenario.run("deny h-hook")
+    else:
+        _drop_approval(scenario, "h-hook")
+    _forget_lock(scenario)
+    step = scenario.run(
+        "install", credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=gate)]
+    )
+    assert not hook.exists(), step.output
+    scenario.finish()
+
+
 @pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
 def test_an_edited_hook_outlives_a_closed_gate_announced_and_detected(
     lifecycle_world, gate
@@ -1180,6 +1214,12 @@ CREDITS = credits(
             for src in ("inline-mcp", "mcp-registry")
         },
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
+        **{
+            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
+                _pair("present-provenance-unknown", PRIM="hook", GATE=gate)
+            ]
+            for gate in ("revoked-after-deploy", "unapproved-exec")
+        },
         **{
             f"test_a_native_plugins_skill_in_the_users_hands_survives_install[{deployed}]": [
                 _pair(deployed, SRC="native-plugin")
