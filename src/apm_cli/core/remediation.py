@@ -879,6 +879,11 @@ BUNDLE_EXECUTABLES_ALLOW = _entry(
 LOCKFILE_UNMANAGED_PATHS = _entry(
     "lockfile-unmanaged-paths", "apm install", "repair it", then="retry"
 )
+UNINSTALL_NEW_TARGET_UNDEPLOYED = _entry(
+    "uninstall-new-target-undeployed",
+    "apm install",
+    "deploy the remaining packages to {targets} and record them in apm.lock.yaml",
+)
 
 # -- end commands/** (W1) -----------------------------------------------------
 

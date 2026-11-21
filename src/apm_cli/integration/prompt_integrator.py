@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.diagnostics import printable_ascii_text
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -405,7 +406,7 @@ class PromptIntegrator(BaseIntegrator):
                 files_skipped += int(not adopted)
                 continue
 
-            prompts_dir.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(prompts_dir, parents=True, exist_ok=True)
             if rendered is not None:
                 write_text_lf(target_path, rendered)
             else:

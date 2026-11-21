@@ -18,13 +18,15 @@ from typing import TYPE_CHECKING
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, LockfileRefusal, get_lockfile_path
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
+from apm_cli.integration import write_seam
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
 )
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
+from apm_cli.utils.atomic_io import umask_file_mode
 from apm_cli.utils.path_security import PathTraversalError
 
 if TYPE_CHECKING:
@@ -170,6 +172,10 @@ class _PreparedTargetConfig:
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
+    # Same-name entries APM did not write, left as the user wrote them (#4628):
+    # *preserved* differ from the package's entry, *matching* already equal it.
+    preserved: tuple[str, ...] = ()
+    matching: tuple[str, ...] = ()
     # Managed server name -> "drift" | "blocked" | "unproven" for an entry kept (#4626).
     kept: dict[str, str] = field(default_factory=dict)
 
@@ -470,6 +476,38 @@ class LSPIntegrator:
         return builtins.set(servers)
 
     @staticmethod
+    def matching_entry_names(
+        lsp_deps: list, runtime: str, *, project_root: Path, user_scope: bool
+    ) -> builtins.set:
+        """Names whose *runtime* config entry already equals what install would write.
+
+        A frozen install needs no recorded claim for them: install leaves such
+        an entry as it is whoever wrote it (#4628), as MCP does for a matching
+        native connection.
+        """
+        spec = _LSP_TARGET_SPECS[runtime]
+        runtime_deps = LSPIntegrator.deps_for_runtime(lsp_deps, runtime)
+        servers = LSPIntegrator._servers_for_target(
+            LSPIntegrator._base_server_entries(runtime_deps), spec, warn=lambda _message: None
+        )
+        if not servers:
+            return builtins.set()
+        try:
+            servers = LSPIntegrator._render_plugin_roots(
+                servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
+            )
+            config = LSPIntegrator._read_json_object(
+                LSPIntegrator._target_config_path(spec, project_root, user_scope=user_scope)
+            )
+        except (OSError, ValueError):
+            return builtins.set()
+        servers_key = spec.servers_key(user_scope=user_scope)
+        existing = config if servers_key is None else config.get(servers_key)
+        if not isinstance(existing, dict):
+            return builtins.set()
+        return {name for name, entry in servers.items() if existing.get(name) == entry}
+
+    @staticmethod
     def deps_for_runtime(lsp_deps: list, runtime: str) -> list:
         """Drop servers *runtime* loads natively from their plugin (never APM's copy)."""
         from apm_cli.install.mcp.native_runtimes import native_runtimes_of
@@ -687,6 +725,7 @@ class LSPIntegrator:
         user_scope: bool,
         managed_server_names: builtins.set | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
         locked_servers: dict[str, dict] | None = None,
     ) -> _PreparedTargetConfig:
         """Validate and render one target config without writing it.
@@ -785,22 +824,29 @@ class LSPIntegrator:
             config[servers_key] = existing
 
         changed: builtins.set = builtins.set()
+        preserved: list[str] = []
+        matching: list[str] = []
         kept: dict[str, str] = {}
         for name, server_config in servers.items():
-            # A same-name entry APM does not manage is user content: refuse to
-            # overwrite it (and so never claim it) unless --force is given.
-            if (
-                (protected_plugin or spec.shared_config)
-                and name in existing
-                and existing[name] != server_config
-                and name not in managed_names
-                and not force
-            ):
+            # A same-name entry APM does not manage is user content: never
+            # overwrite it (and so never claim it).
+            foreign = name in existing and name not in managed_names
+            unmanaged = foreign and existing[name] != server_config
+            if unmanaged and (protected_plugin or spec.shared_config) and not force:
                 raise FileExistsError(
                     f"LSP server '{name}' already exists in "
                     f"{spec.label(user_scope=user_scope)} and is not managed by APM; "
                     "rename it or rerun with --force"
                 )
+            if (
+                foreign
+                and not (protected_plugin or spec.shared_config)
+                and name not in (legacy_server_names or ())
+            ):
+                # Kept like a native MCP connection: equality alone never
+                # establishes ownership, and --force does not take it.
+                (preserved if unmanaged else matching).append(name)
+                continue
             if existing.get(name) == server_config:
                 existing[name] = server_config
                 continue
@@ -826,6 +872,8 @@ class LSPIntegrator:
             changed=changed,
             created_servers_key=created_servers_key,
             owner_only=user_scope,
+            preserved=tuple(preserved),
+            matching=tuple(matching),
             kept=kept,
         )
 
@@ -906,7 +954,7 @@ class LSPIntegrator:
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
-        prepared.path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(prepared.path.parent, parents=True, exist_ok=True)
         LSPIntegrator._atomic_write_config(
             prepared.path, prepared.content, owner_only=prepared.owner_only
         )
@@ -997,10 +1045,10 @@ class LSPIntegrator:
             if servers_key is not None:
                 owned_keys.add(servers_key)
             if not servers and owned_keys and set(config) <= owned_keys:
-                config_path.unlink()
+                write_seam.unlink(config_path)
                 for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
                     try:
-                        directory.rmdir()
+                        write_seam.rmdir(directory)
                     except OSError:
                         break
             else:
@@ -1145,11 +1193,15 @@ class LSPIntegrator:
         managed_server_names: builtins.set | None = None,
         managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
+        kept_unowned: dict[str, builtins.set] | None = None,
         locked_configs: dict[str, dict] | None = None,
         kept_servers: dict[str, str] | None = None,
     ) -> int:
         """Install LSP dependencies by writing target-specific runtime config.
 
+        *kept_unowned*, when given, receives runtime -> the server names left as
+        the user wrote them; the caller must not record them as APM-owned (#4628).
         *locked_configs* are the server configs of the existing lock: the
         evidence of which entry APM wrote. A managed entry the user edited is
         kept, named, and recorded into *kept_servers* so the caller keeps its
@@ -1196,6 +1248,7 @@ class LSPIntegrator:
                     user_scope=user_scope,
                     managed_server_names=managed_names,
                     force=force,
+                    legacy_server_names=legacy_server_names,
                     locked_servers=LSPIntegrator._locked_target_servers(
                         locked_configs,
                         runtime_deps,
@@ -1234,7 +1287,26 @@ class LSPIntegrator:
             kept_servers=kept_servers,
         )
         changed_servers: builtins.set = builtins.set()
+        preserved: dict[str, builtins.set] = {}
         for runtime, spec, prepared in prepared_targets:
+            if kept_unowned is not None and (prepared.preserved or prepared.matching):
+                kept_unowned[runtime] = {*prepared.preserved, *prepared.matching}
+            for name in prepared.matching:
+                logger.verbose_detail(
+                    f"LSP server '{name}' already matches the {runtime} entry in "
+                    f"{spec.label(user_scope=user_scope)}; APM did not write it, so "
+                    "it stays yours"
+                )
+            if prepared.preserved:
+                preserved[runtime] = builtins.set(prepared.preserved)
+                for name in prepared.preserved:
+                    logger.error(
+                        f"LSP server '{name}' conflicts with the existing {runtime} entry "
+                        f"in {spec.label(user_scope=user_scope)}. Preserved that entry. "
+                        "Rename or remove the conflicting entry yourself, then retry the "
+                        "same install command. --force does not take ownership of user "
+                        "entries."
+                    )
             try:
                 changed = LSPIntegrator._write_prepared_target_config(prepared)
                 changed_servers.update(changed)
@@ -1282,4 +1354,14 @@ class LSPIntegrator:
                         "Review the path and permissions, then retry."
                     ) from exc
 
+        if preserved:
+            from apm_cli.install.errors import LSPUserEntryConflictError
+
+            message = "LSP installation incomplete: " + ", ".join(
+                f"{name} ({runtime})"
+                for runtime, names in sorted(preserved.items())
+                for name in sorted(names)
+            )
+            logger.error(message)
+            raise LSPUserEntryConflictError(message, preserved=preserved)
         return len(changed_servers)

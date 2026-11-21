@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.integration import write_seam
 from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
@@ -21,7 +22,7 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.integration.hook_ir import HookBinding, HookHandler
 from apm_cli.integration.hook_native_formats import _entries_to_ir
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -260,7 +261,7 @@ def integrate_kiro_hooks(
         return HookIntegrationResult(0, 0, 0, [])
 
     hooks_dir = target_dir / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    write_seam.mkdir(hooks_dir, parents=True, exist_ok=True)
     deploy_root_for_rewrite = integrator._deploy_root_for_hook_rewrite(project_root, user_scope)
     home_reference = integrator._home_reference_for_hook_rewrite(target, user_scope)
 

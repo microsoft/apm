@@ -3,7 +3,6 @@
 import errno
 import os
 import re
-import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -13,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.core.remediation import LOCAL_FILE_UNMANAGED
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration import write_seam
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -602,9 +603,9 @@ class BaseIntegrator:
                     if on_member_skipped is not None:
                         on_member_skipped(target_file)
                     continue
-                target_file.parent.mkdir(parents=True, exist_ok=True)
+                write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
                 try:
-                    shutil.copy2(source_file, target_file)
+                    write_seam.copy2(source_file, target_file)
                 except OSError:
                     if not destination_existed:
                         self.cleanup_empty_parents([target_file], destination.parent)
@@ -808,7 +809,8 @@ class BaseIntegrator:
         """
         if cls.is_content_identical_to_text(path, text, lf_normalized_deploy=True):
             return False
-        path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(path.parent, parents=True, exist_ok=True)
+        write_seam.record_before_write(path)
         writer(path, text)
         return True
 
@@ -1301,7 +1303,7 @@ class BaseIntegrator:
         for d in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
             try:
                 if d.exists() and not any(d.iterdir()):
-                    d.rmdir()
+                    write_seam.rmdir(d)
             except OSError:
                 pass
 
@@ -1497,7 +1499,7 @@ class BaseIntegrator:
         elif legacy_glob_dir and legacy_glob_pattern and legacy_glob_dir.exists():
             for f in legacy_glob_dir.glob(legacy_glob_pattern):
                 try:
-                    f.unlink()
+                    write_seam.unlink(f)
                     stats["files_removed"] += 1
                 except Exception:
                     stats["errors"] += 1
