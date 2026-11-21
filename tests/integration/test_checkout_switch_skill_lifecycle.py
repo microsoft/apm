@@ -348,10 +348,11 @@ def _deployed(world: _World) -> dict[str, bytes]:
 def test_branch_switch_then_source_edit_never_deletes_skill_members(
     tmp_path: Path, apm_binary_path: Path, variant: str
 ) -> None:
-    """Install keeps every member and lock entry; an unprovable edit refuses with a recovery.
+    """Install keeps every member; a source edit after the round trip installs (#4428).
 
-    The printed recovery is scoped to the refused skill: running it never
-    overwrites a genuine user edit in another deployed skill.
+    The deployed bytes of the edited skill equal a render APM wrote earlier on
+    this checkout, so the receipt history proves them and no recovery step is
+    needed. A genuine user edit in another deployed skill is kept and named.
     """
     world = _new_world(tmp_path, apm_binary_path)
     _committed_local_project(world)
@@ -391,45 +392,30 @@ def test_branch_switch_then_source_edit_never_deletes_skill_members(
     other.write_text(other.read_text(encoding="ascii") + _USER_EDIT, encoding="ascii")
     other_bytes = other.read_bytes()
     before = _deployed(world)
-    lock_before = (world.project / "apm.lock.yaml").read_bytes()
 
-    refused = world.apm("install")
-    output = _output(refused)
+    installed = world.apm("install")
+    output = _output(installed)
     _assert_nothing_deleted(before, world.project)
-    assert refused.returncode == 1, output
-    assert _REFUSAL in output, output
-    assert f"move {_X}/ aside" in output, output
-    assert "then run 'apm install'" in output, output
+    assert installed.returncode == 0, output
+    assert _REFUSAL not in output, output
     assert "--force" not in output, output
     assert "Cleaned" not in output, output
-    assert _deployed(world) == before
-    assert (world.project / "apm.lock.yaml").read_bytes() == lock_before
     assert (world.project / ".apm/skills/x/SKILL.md").read_text(encoding="ascii") == edited
-
-    # Execute the printed recovery: move the deployed skill aside, then install.
-    aside = world.isolated.root / "x-aside"
-    shutil.move(str(world.project / _X), aside)
-    recovered = world.apm("install")
-    output = _output(recovered)
-    assert recovered.returncode == 0, output
-    assert _REFUSAL not in output and "Cleaned" not in output, output
-    # The genuine edit in another skill survives the advised recovery.
+    assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited
+    assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
+        "reference a, version A\n"
+    )
+    # The genuine edit in another skill is kept and named, never overwritten.
     assert other.read_bytes() == other_bytes
-    # The recovery converges: a further install changes nothing.
+    assert _MODIFIED in output, output
+    # A further install changes nothing.
     converged = _tree(world.project, ".agents")
     lock_converged = (world.project / "apm.lock.yaml").read_bytes()
     again = world.apm("install")
     assert again.returncode == 0, _output(again)
     assert _tree(world.project, ".agents") == converged
     assert (world.project / "apm.lock.yaml").read_bytes() == lock_converged
-    assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited
-    assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
-        "reference a, version A\n"
-    )
-    kept = {
-        p.relative_to(aside).as_posix(): p.read_bytes() for p in aside.rglob("*") if p.is_file()
-    }
-    assert kept == {path[len(_X) + 1 :]: data for path, data in before.items()}
+    assert set(_deployed(world)) == members
 
 
 def _discard(world: _World, how: str, root: Path | None = None) -> None:
@@ -669,20 +655,12 @@ def test_user_scope_discarded_deploy_then_source_edit_installs(
     assert not missing, missing
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4428: multi-hash receipt history (step 5 of #4230 fails closed today)",
-)
-def test_source_edit_after_branch_round_trip_installs_without_recovery(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """STRICT KNOWN CELL: step 5 of the #4230 repro should install the edit directly.
+def _branch_round_trip(world: _World) -> None:
+    """Deploy on main and B, round-trip both, then return to main without an install.
 
-    The deployed bytes match a render APM wrote earlier in this installation,
-    but receipts keep only the latest hash, so install refuses (exit 1). A
-    multi-hash receipt history would prove them and let this pass.
+    The receipts then hold branch B's bytes while main's checked-out deploys
+    hold bytes APM wrote earlier in this installation (#4428).
     """
-    world = _new_world(tmp_path, apm_binary_path)
     _committed_local_project(world)
     world.git("checkout", "-q", "-b", "B")
     _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (B).\n")
@@ -692,11 +670,73 @@ def test_source_edit_after_branch_round_trip_installs_without_recovery(
     for branch in ("main", "B"):
         world.git("checkout", "-q", branch)
         assert world.apm("install").returncode == 0
-    # Back on main without an install: the receipts still hold branch B's bytes.
     world.git("checkout", "-q", "main")
+
+
+def test_source_edit_after_branch_round_trip_installs_without_recovery(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Step 5 of the #4230 repro installs the edit directly (#4428).
+
+    The deployed bytes match a render APM wrote earlier in this installation;
+    the receipt history proves them, so no manual recovery step is needed.
+    """
+    world = _new_world(tmp_path, apm_binary_path)
+    _branch_round_trip(world)
     edited = _LOCAL_SKILL + "Read a (A2).\n"
     _write(world.project / ".apm/skills/x/SKILL.md", edited)
+    before = _deployed(world)
 
     result = world.apm("install")
-    assert result.returncode == 0, _output(result)
+    output = _output(result)
+    _assert_nothing_deleted(before, world.project)
+    assert result.returncode == 0, output
+    assert _REFUSAL not in output and _MODIFIED not in output, output
     assert (world.project / _X / "SKILL.md").read_text(encoding="ascii") == edited
+    assert (world.project / _X / "references/a.md").read_text(encoding="ascii") == (
+        "reference a, version A\n"
+    )
+
+
+def test_user_edit_after_branch_round_trip_is_still_refused(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """History proves only bytes this installation wrote: a user edit stays refused (#4428)."""
+    world = _new_world(tmp_path, apm_binary_path)
+    _branch_round_trip(world)
+    _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "Read a (A2).\n")
+    member = world.project / _X / "references/a.md"
+    member.write_text(member.read_text(encoding="ascii") + _USER_EDIT, encoding="ascii")
+    before = _deployed(world)
+    lock_before = (world.project / "apm.lock.yaml").read_bytes()
+
+    refused = world.apm("install")
+    output = _output(refused)
+    _assert_nothing_deleted(before, world.project)
+    assert refused.returncode == 1, output
+    assert _REFUSAL in output, output
+    assert f"move {_X}/ aside" in output, output
+    assert _deployed(world) == before
+    assert (world.project / "apm.lock.yaml").read_bytes() == lock_before
+
+
+def test_dropped_member_after_branch_round_trip_needs_todays_deletion_evidence(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """History is never deletion evidence: a dropped member is kept without it (#4428).
+
+    After the round trip the receipt holds branch B's bytes and the deployed
+    member holds main's bytes; only the history proves those, and cleanup
+    does not consult it, so the member stays on disk.
+    """
+    world = _new_world(tmp_path, apm_binary_path)
+    _branch_round_trip(world)
+    (world.project / ".apm/skills/x/references/a.md").unlink()
+    _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "No references.\n")
+    member = world.project / _X / "references/a.md"
+    member_bytes = member.read_bytes()
+
+    result = world.apm("install")
+    output = _output(result)
+    assert member.read_bytes() == member_bytes, output
+    assert "Cleaned" not in output, output
