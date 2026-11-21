@@ -13,6 +13,8 @@ from apm_cli.core.catalog_credentials import (
     resolve_catalog_credential,
 )
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-catalog-credentials")]
+
 _URL = "https://catalog.example.com/team/marketplace.json?catalog=a"
 
 

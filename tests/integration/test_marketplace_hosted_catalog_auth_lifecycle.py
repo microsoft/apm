@@ -39,6 +39,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.requires_e2e_mode,
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX openssl/git fixture"),
+    pytest.mark.promise("P-OWN-marketplace-catalog-credentials"),
 ]
 
 _NAME = "corp"
@@ -327,7 +328,7 @@ def _output(result: CommandResult) -> str:
     return " ".join(f"{result.stdout}\n{result.stderr}".split())
 
 
-def _ok(result: CommandResult) -> str:
+def _expect_ok(result: CommandResult) -> str:
     output = _output(result)
     assert result.returncode == 0, output
     return output
@@ -371,17 +372,17 @@ def test_private_catalog_lifecycle_sends_only_the_bound_credential(
         env = scenario.env(server, **credentials)
         url = f"{server.base}/private/marketplace.json"
 
-        add = _ok(scenario.run(env, "marketplace", "add", url, "--name", _NAME, step="add"))
+        add = _expect_ok(scenario.run(env, "marketplace", "add", url, "--name", _NAME, step="add"))
         assert f"Marketplace '{_NAME}' registered (1 plugin)" in add
-        browse = _ok(scenario.run(env, "marketplace", "browse", _NAME, step="browse"))
+        browse = _expect_ok(scenario.run(env, "marketplace", "browse", _NAME, step="browse"))
         assert _PLUGIN in browse
-        search = _ok(scenario.run(env, "search", f"hello@{_NAME}", step="search"))
+        search = _expect_ok(scenario.run(env, "search", f"hello@{_NAME}", step="search"))
         assert f"{_PLUGIN}@{_NAME}" in search
-        view = _ok(scenario.run(env, "view", f"{_PLUGIN}@{_NAME}", step="view"))
+        view = _expect_ok(scenario.run(env, "view", f"{_PLUGIN}@{_NAME}", step="view"))
         assert "Hello from the private catalog" in view
         catalog_auth = _catalog_authorizations(server)
         server.clear()
-        _ok(scenario.run(env, "install", f"{_PLUGIN}@{_NAME}", *_INSTALL, step="install"))
+        _expect_ok(scenario.run(env, "install", f"{_PLUGIN}@{_NAME}", *_INSTALL, step="install"))
         install_seen = server.seen
 
     assert len(catalog_auth) >= 2, "add and browse must fetch the catalog"
@@ -447,7 +448,7 @@ def test_out_of_binding_redirect_carries_no_credential(
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         env = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=_TOKEN)
         url = f"{server.base}/{route}/marketplace.json"
-        _ok(scenario.run(env, "marketplace", "add", url, "--name", _NAME, step=route))
+        _expect_ok(scenario.run(env, "marketplace", "add", url, "--name", _NAME, step=route))
 
     hops = [(seen.path, seen.authorization) for seen in server.seen]
     assert hops == [
@@ -463,7 +464,7 @@ def test_denied_refresh_keeps_the_cached_catalog_and_is_not_fresh(
     with _catalog_server(scenario.certificate, scenario.key, scenario.package_root) as server:
         good = scenario.env(server, APM_MARKETPLACE_TOKEN_CORP=_TOKEN)
         url = f"{server.base}/private/marketplace.json"
-        _ok(scenario.run(good, "marketplace", "add", url, "--name", _NAME, step="seed"))
+        _expect_ok(scenario.run(good, "marketplace", "add", url, "--name", _NAME, step="seed"))
         cache = scenario.isolated.config_root / "cache" / "marketplace"
         before = {path.name: path.read_bytes() for path in cache.iterdir()}
         assert before

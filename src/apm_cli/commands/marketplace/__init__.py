@@ -322,6 +322,21 @@ Examples:
 """
 
 
+def _require_credential_binding(name: str | None, url: str, *, is_direct_url: bool) -> bool:
+    """Return whether this registration binds *name* to a hosted catalog URL.
+
+    A hosted catalog registered with --name binds that name to the URL for its
+    APM_MARKETPLACE_* credential. Checked before any network access.
+    """
+    credential_bound = is_direct_url and name is not None
+    if credential_bound:
+        from ...marketplace.catalog_binding import require_binding_available
+        from ...marketplace.registry import get_registered_marketplaces
+
+        require_binding_available(name, url, get_registered_marketplaces())
+    return credential_bound
+
+
 @marketplace.command(help="Register a marketplace", epilog=_ADD_EPILOG)
 @click.argument("source", metavar="SOURCE", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
@@ -502,14 +517,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
                 "Omit --offline to register a JSON or repository source."
             )
             sys.exit(1)
-        # A hosted catalog registered with --name binds that name to the URL
-        # for its APM_MARKETPLACE_* credential. Check before any network access.
-        credential_bound = is_direct_url and name is not None
-        if credential_bound:
-            from ...marketplace.catalog_binding import require_binding_available
-            from ...marketplace.registry import get_registered_marketplaces
-
-            require_binding_available(name, url, get_registered_marketplaces())
+        credential_bound = _require_credential_binding(name, url, is_direct_url=is_direct_url)
         try:
             fetch_source, manifest = probe_registration(
                 probe_name,

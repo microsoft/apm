@@ -16,6 +16,8 @@ from apm_cli.marketplace.errors import (
 )
 from apm_cli.marketplace.models import MarketplaceSource
 
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-marketplace-catalog-credentials")]
+
 _URL = "https://catalog.example.com/team/marketplace.json"
 _CATALOG = json.dumps({"name": "corp", "plugins": [{"name": "p", "source": "./p"}]}).encode()
 
@@ -54,7 +56,8 @@ class _Session:
 
 def _install(monkeypatch, *responses) -> _Session:
     session = _Session(*responses)
-    monkeypatch.setattr(client_mod, "_HTTP_SESSION", session, raising=False)
+    # Replace only the I/O boundary: the shared session's transport call.
+    monkeypatch.setattr(client_mod._HTTP_SESSION, "request", session.request)
     return session
 
 
