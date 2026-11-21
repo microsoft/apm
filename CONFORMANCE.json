@@ -2672,31 +2672,29 @@
     },
     {
       "behavioral_tests": [
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_default_host_class_shares_the_github_token_with_ghe_hosts",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ],
       "conformance_class": "consumer",
       "id": "req-sc-005",
       "keyword": "MUST",
       "section": "10.3",
       "status": "active",
-      "test_count": 9,
+      "test_count": 8,
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_host_class_collapse_constrained_to_psl_or_aliases",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_default_host_class_shares_the_github_token_with_ghe_hosts",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[ghe.com.evil.example-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[github.com.evil.example-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-default]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_host_outside_the_github_operated_class_receives_no_github_token[gitlab.com-strict]",
-        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class"
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[default-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[empty-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-configured-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-lookalike]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[strict-other-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-ghe-host]",
+        "tests/spec_conformance/test_security_behavior_reqs.py::test_token_scoped_to_its_host_class[unset-outside-class]"
       ]
     },
     {

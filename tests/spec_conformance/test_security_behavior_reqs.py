@@ -276,18 +276,22 @@ def test_rejected_archive_leaves_no_partial_extraction(tmp_path: Path) -> None:
         pytest.param("true", "github.com", True, id="strict-configured-host"),
         pytest.param("true", "acme.ghe.com", False, id="strict-other-ghe-host"),
         # Control: the default GitHub-operated class (basis c) shares it.
-        pytest.param("", "acme.ghe.com", True, id="default-ghe-host"),
+        pytest.param(None, "acme.ghe.com", True, id="unset-ghe-host"),
+        pytest.param("", "acme.ghe.com", True, id="empty-ghe-host"),
         # Hosts outside the class never receive a GitHub token.
-        pytest.param("", "gitlab.com", False, id="default-outside-class"),
+        pytest.param(None, "gitlab.com", False, id="unset-outside-class"),
         pytest.param("", "ghe.com.evil.example", False, id="default-lookalike"),
         pytest.param("true", "github.com.evil.example", False, id="strict-lookalike"),
     ],
 )
 def test_token_scoped_to_its_host_class(
-    monkeypatch: pytest.MonkeyPatch, strict: str, host: str, receives_env_token: bool
+    monkeypatch: pytest.MonkeyPatch, strict: str | None, host: str, receives_env_token: bool
 ) -> None:
     """A credential reaches only hosts of its class; strict mode narrows the class."""
-    monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", strict)
+    if strict is None:
+        monkeypatch.delenv("APM_STRICT_HOST_CREDENTIALS", raising=False)
+    else:
+        monkeypatch.setenv("APM_STRICT_HOST_CREDENTIALS", strict)
     context = AuthResolver().resolve(host)
     assert (context.token == _FAKE_PAT) is receives_env_token
     assert (context.source == "GITHUB_APM_PAT") is receives_env_token

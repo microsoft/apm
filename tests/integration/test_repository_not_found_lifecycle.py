@@ -263,7 +263,11 @@ def test_strict_host_credentials_withhold_env_token_from_unconfigured_ghe_host(
         assert withheld.returncode == 1, _evidence(withheld)
         output = _flat(withheld)
         assert _GHE_HOST in output, _evidence(withheld)
-        assert "APM_STRICT_HOST_CREDENTIALS" in output, _evidence(withheld)
+        notice = f"withheld the environment token from {_GHE_HOST}"
+        assert notice in output, _evidence(withheld)
+        assert f"gh auth login --hostname {_GHE_HOST}" in output, _evidence(withheld)
+        # One warning per command; an auth failure on the host may repeat it once.
+        assert 1 <= output.count(notice) <= 2, _evidence(withheld)
         assert proxy.requests_to(_GHE_HOST) or proxy.requests_to(f"api.{_GHE_HOST}")
         assert authorized_requests() == [], "strict mode sent a credential to the host"
         assert project.manifest_path.read_bytes() == manifest_bytes
