@@ -319,18 +319,6 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_graph) -> None:
-    """A replacement whose selected source policy refused before fetch is no load failure.
-
-    The policy gate reports the refusal with the violation wording.
-    """
-    for dep_ref in ctx.prefetch_policy_denials:
-        errors = dependency_graph.dependency_tree.replacement_load_errors
-        error = errors.get(dep_ref.get_unique_key())
-        if error in dependency_graph.resolution_errors:
-            dependency_graph.resolution_errors.remove(error)
-
-
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
     """Raise on fatal resolution errors; show the download *failures* behind them once."""
     if ctx.dry_run:
@@ -370,29 +358,6 @@ def _build_dependency_graph(ctx: InstallContext, resolver):
     for warning in dependency_graph.dependency_tree.resolution_warnings if ctx.logger else ():
         ctx.logger.warning(warning)
     return dependency_graph
-
-
-def _prefetch_policy_refusal(ctx: InstallContext):
-    """Return ``refuse(dep_ref) -> bool``: a blocking org policy refuses by identity.
-
-    The policy is read once, lazily, at the scope manifest root. A refused
-    dependency is never contacted, cloned or cached; it is recorded on
-    ``ctx.prefetch_policy_denials`` and the policy gate reports it.
-    """
-    from apm_cli.install.phases.policy_gate import _policy_root
-    from apm_cli.policy.install_preflight import identity_policy_denial, prefetch_identity_policy
-
-    state: dict = {}
-
-    def refuse(dep_ref) -> bool:
-        if "policy" not in state:
-            state["policy"] = prefetch_identity_policy(_policy_root(ctx), no_policy=ctx.no_policy)
-        if identity_policy_denial(dep_ref, state["policy"]) is None:
-            return False
-        ctx.prefetch_policy_denials.append(dep_ref)
-        return True
-
-    return refuse
 
 
 def _resolve_dependencies(
@@ -479,6 +444,8 @@ def _resolve_dependencies(
     )
 
     verbose = ctx.verbose  # noqa: F841
+
+    from apm_cli.install.phases.policy_gate import _prefetch_policy_refusal
 
     refuse_before_fetch = _prefetch_policy_refusal(ctx)
 
@@ -801,6 +768,8 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
+    from apm_cli.install.phases.policy_gate import _drop_policy_refused_replacement_errors
+
     _drop_policy_refused_replacement_errors(ctx, dependency_graph)
     _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
 

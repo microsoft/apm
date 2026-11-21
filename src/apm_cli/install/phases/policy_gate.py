@@ -232,3 +232,37 @@ def _discover_with_chain(ctx: InstallContext):
     from apm_cli.policy.discovery import discover_policy_with_chain
 
     return discover_policy_with_chain(_policy_root(ctx))
+
+
+def _prefetch_policy_refusal(ctx: InstallContext):
+    """Return ``refuse(dep_ref) -> bool``: a blocking org policy refuses by identity.
+
+    The policy is read once, lazily, at the scope manifest root. A refused
+    dependency is never contacted, cloned or cached; it is recorded on
+    ``ctx.prefetch_policy_denials`` and the policy gate reports it.
+    """
+    from apm_cli.policy.install_preflight import identity_policy_denial, prefetch_identity_policy
+
+    state: dict = {}
+
+    def refuse(dep_ref) -> bool:
+        if "policy" not in state:
+            state["policy"] = prefetch_identity_policy(_policy_root(ctx), no_policy=ctx.no_policy)
+        if identity_policy_denial(dep_ref, state["policy"]) is None:
+            return False
+        ctx.prefetch_policy_denials.append(dep_ref)
+        return True
+
+    return refuse
+
+
+def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_graph) -> None:
+    """A replacement whose selected source policy refused before fetch is no load failure.
+
+    The policy gate reports the refusal with the violation wording.
+    """
+    for dep_ref in ctx.prefetch_policy_denials:
+        errors = dependency_graph.dependency_tree.replacement_load_errors
+        error = errors.get(dep_ref.get_unique_key())
+        if error in dependency_graph.resolution_errors:
+            dependency_graph.resolution_errors.remove(error)
