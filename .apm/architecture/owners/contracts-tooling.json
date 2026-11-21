@@ -164,9 +164,10 @@
     {
       "id": "lockfile-write-authority",
       "decision": "When apm.lock.yaml reaches disk and which command may persist it: a closed writer set (install, install --mcp, local bundle install, lock, update, uninstall, prune, compile) commits the lockfile once per command",
-      "owner": "deps/lockfile_write_authority.py (LockfileWriter, lockfile_writer, lockfile_exists, flush_lockfile_writes, remove_lockfile, restore_lockfile_bytes); deps/lockfile.py (LockFile.write stages, LockFile.read reads staged)",
+      "owner": "deps/lockfile_write_authority.py (LockfileWriter, lockfile_writer, lockfile_exists, flush_lockfile_writes, commits_on_failure, remove_lockfile, restore_lockfile_bytes); deps/lockfile.py (LockFile.write stages, LockFile.read reads staged)",
       "selectors": [
         "src/apm_cli/deps/lockfile_write_authority.py",
+        "src/apm_cli/install/phases/services.py",
         "src/apm_cli/deps/lockfile_extensions.py",
         "src/apm_cli/models/extension_keys.py",
         "src/apm_cli/deps/lockfile_container.py"
