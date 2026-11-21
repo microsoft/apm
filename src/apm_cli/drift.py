@@ -73,12 +73,16 @@ def _registry_range_covers_locked_version(
     manifest_range: str | None,
     locked_version: str | None,
 ) -> bool:
-    """True when the lockfile's exact registry version still satisfies the manifest range."""
+    """True when the manifest range would still select the lockfile's exact registry version.
+
+    Uses the resolver's own ``pick_best`` so replay applies the same
+    pre-release eligibility rule: a stable range never selects a pre-release.
+    """
     if not manifest_range or not locked_version:
         return False
-    from apm_cli.deps.registry.semver import is_semver_range, match_version
+    from apm_cli.deps.registry.semver import pick_best
 
-    return bool(is_semver_range(manifest_range) and match_version(manifest_range, locked_version))
+    return pick_best(manifest_range, [locked_version]) == locked_version
 
 
 def registry_selector_mismatch(selector: str | None, locked_version: str | None) -> bool:
@@ -155,13 +159,9 @@ def _registry_marketplace_mismatch(spec: str | None, locked_dep: Any) -> str | N
     A catalog entry routed to a registry locks registry evidence, not a commit
     (#4009): the exact version, resolved URL and resolved hash.
     """
-    from apm_cli.deps.revision_pins import is_full_revision_pin
-
     if not has_complete_registry_pin(locked_dep):
         return "missing locked registry version, URL or hash evidence"
-    if spec and (
-        is_full_revision_pin(spec) or registry_selector_mismatch(spec, locked_dep.version)
-    ):
+    if spec and registry_selector_mismatch(spec, locked_dep.version):
         return f"manifest version '{spec}' != lockfile registry version '{locked_dep.version}'"
     return None
 
