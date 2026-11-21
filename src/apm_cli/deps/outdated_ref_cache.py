@@ -23,8 +23,8 @@ preserving the per-dep ``unknown`` degradation of the un-wrapped path.
 
 Auth-lens: the cache key is the full repo *identity*: host, repo_url, port,
 insecure-transport, ref-family, the manifest ``host_type`` and the provider
-the host resolves to (``classify_host_provider``: kind and credential
-purpose) -- never a token. Two deps share a listing only when every input
+the host resolves to (``effective_host_provider_identity``: kind and
+credential purpose) -- never a token. Two deps share a listing only when every input
 that selects the listing or its provider and credential resolution matches,
 so each distinct dep still runs its own resolution.
 """
@@ -34,7 +34,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Any
 
-from ..core.host_providers import classify_host_provider
+from ..core.host_providers import effective_host_provider_identity
 from ..utils.github_host import default_host
 
 if TYPE_CHECKING:
@@ -65,16 +65,15 @@ def _identity_key(dep_ref: DependencyReference, include_heads: bool) -> tuple:
 
 
 def _provider_identity(host: str, host_type: str | None) -> tuple[str, str]:
-    """The provider *host* resolves to: ``(kind, credential_purpose)``.
+    """The provider *host* resolves to, from the canonical identity owner.
 
     An unclassifiable pair keeps its own bucket; the wrapped downloader then
     reports the error for that dep as it would without the cache.
     """
     try:
-        provider = classify_host_provider(host, host_type=host_type)
+        return effective_host_provider_identity(host, host_type=host_type)
     except ValueError:
         return ("unclassified", "")
-    return (provider.kind, provider.credential_purpose or "")
 
 
 class OutdatedRefCache:

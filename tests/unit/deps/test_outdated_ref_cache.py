@@ -229,3 +229,12 @@ def test_identical_typed_deps_still_share_one_listing():
     cache.list_remote_refs(_typed("gitlab"))
 
     assert inner.list_remote_refs.call_count == 1
+
+
+def test_cache_key_uses_the_canonical_provider_identity():
+    """The key embeds exactly what the identity owner returns for the dep."""
+    from apm_cli.core.host_providers import effective_host_provider_identity
+
+    dep = _typed("gitlab")
+    expected = effective_host_provider_identity("git.example.com", host_type="gitlab")
+    assert _identity_key(dep, True)[-1] == expected
