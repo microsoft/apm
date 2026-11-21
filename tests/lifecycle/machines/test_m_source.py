@@ -807,6 +807,63 @@ def test_source_spine_covers_every_form_and_op(lifecycle_template, tmp_path: Pat
     assert not missing, f"T3/T5/X cells without an oracle receipt: {sorted(missing)}"
 
 
+def _cache_bytes(bench: Bench) -> dict[str, bytes]:
+    """Every byte under apm_modules plus the lockfile: the I2 fixpoint surface."""
+    modules = bench.manifest_dir / "apm_modules"
+    files = {
+        path.relative_to(bench.manifest_dir).as_posix(): path.read_bytes()
+        for path in sorted(modules.rglob("*"))
+        if path.is_file()
+    }
+    files[bench.lock_path.name] = bench.lock_path.read_bytes()
+    return files
+
+
+def test_git_to_registry_switch_drops_the_stale_cache_pin(
+    lifecycle_template, tmp_path: Path
+) -> None:
+    """X|install|pkg-registry|UPDATE=on (law I2, #4572).
+
+    PROMISE: P-INV-I2 -- a converged project is a byte fixpoint: after a git ->
+    registry source switch the first install drops the git ``.apm-pin`` (owner:
+    src/apm_cli/install/cache_pin.py), so a repeat install and ``install --update``
+    change no bytes. Control: a registry -> git switch writes a fresh marker.
+    """
+    from apm_cli.install.cache_pin import MARKER_FILENAME, verify_marker
+
+    bench = Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project")
+    machine = SourceMachine(bench)
+    pin = bench.manifest_dir / "apm_modules" / "lifecycle" / "p-skill" / MARKER_FILENAME
+
+    def locked_commit() -> str | None:
+        rows = machine.observe().lock.dependencies
+        return next(r.resolved_commit for r in rows.values() if "p-skill" in r.repo_url)
+
+    machine.declare(_BY_FORM["shorthand"], False)
+    machine.reconcile("install", False)
+    commit = locked_commit()
+    assert pin.is_file() and commit, "a git install writes the cache pin"
+    verify_marker(pin.parent, commit)
+
+    machine.declare(_REGISTRY_SKILL, False)
+    machine.reconcile("install", False)
+    assert locked_commit() is None
+    assert not pin.exists(), "the first registry install must drop the stale git .apm-pin"
+
+    converged = _cache_bytes(bench)
+    for args in ((), ("--update",)):
+        machine.command("install", args, [_REGISTRY_SKILL], False)
+        assert _cache_bytes(bench) == converged, f"install {args} changed bytes (I2)"
+    audit = bench.run(("audit",))
+    assert audit.returncode == 0, f"{audit.stdout}\n{audit.stderr}"
+
+    machine.declare(_BY_FORM["shorthand"], False)
+    machine.reconcile("install", False)
+    commit = locked_commit()
+    assert pin.is_file() and commit, "a registry -> git switch writes a fresh cache pin"
+    verify_marker(pin.parent, commit)
+
+
 def test_source_generated_sequences_keep_cross_cutting_laws(
     lifecycle_template, tmp_path: Path
 ) -> None:

@@ -441,16 +441,6 @@ scripts:
 class TestGithubDownloader:
     """Tests for GitHub download operations."""
 
-    def test_github_downloader_initializes(self) -> None:
-        """GitHubPackageDownloader initializes."""
-        from apm_cli.core.auth import AuthResolver
-
-        auth_resolver = AuthResolver()
-        downloader = GitHubPackageDownloader(
-            auth_resolver=auth_resolver,
-        )
-        assert downloader is not None
-
     def test_github_downloader_has_delegate(self) -> None:
         """GitHubPackageDownloader works with delegates."""
         from apm_cli.core.auth import AuthResolver

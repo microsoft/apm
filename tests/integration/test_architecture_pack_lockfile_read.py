@@ -15,7 +15,7 @@ pytestmark = pytest.mark.component
 ROOT = Path(__file__).resolve().parents[2]
 RULE_ID = "contracts-tooling-lockfile-read"
 OWNER = "src/apm_cli/deps/lockfile.py"
-# deps/lockfile_lookup.py reads the row from_dependency_ref wrote (#4037).
+# #4067 registered the lock-row lookup beside the lockfile owner.
 LOOKUP = "src/apm_cli/deps/lockfile_lookup.py"
 
 
