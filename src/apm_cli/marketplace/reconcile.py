@@ -198,10 +198,10 @@ def reconcile_user_marketplaces(
         ValueError: The user manifest or its ``marketplaces:`` declaration
             is malformed. Raised before the registry is read or changed.
     """
-    from .registry import read_registered_marketplaces
+    from .registry import get_registered_marketplaces
 
     declared = parse_declared_marketplaces(_load_user_manifest(manifest_path), manifest_path)
-    registered = {s.name.lower(): s for s in read_registered_marketplaces()}
+    registered = {s.name.lower(): s for s in get_registered_marketplaces()}
     owned = [s for s in registered.values() if s.origin == ORIGIN_MANIFEST]
     report = MarketplaceReconcileReport()
     if not declared and not owned:

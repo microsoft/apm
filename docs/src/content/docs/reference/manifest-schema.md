@@ -1100,7 +1100,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
 | `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Shorthand for `claude.output`; the `claude` block wins when both are set. |
-| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses with a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
+| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses; `apm pack` and `apm marketplace check` print a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
 | `claude` / `codex` / `copilot` | `{output: string}` | OPTIONAL | `.claude-plugin/marketplace.json` / `.agents/plugins/marketplace.json` / `.github/plugin/marketplace.json` | Per-format output path. Wins over `outputs.<name>.path`. |
 | `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/release-a-version/). |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |

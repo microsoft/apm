@@ -57,6 +57,11 @@ _EXCLUDED_ANYWHERE: frozenset[str] = frozenset(
 )
 _EXCLUDED_AT_ROOT: frozenset[str] = frozenset(EXCLUDED_ROOTS) - _EXCLUDED_ANYWHERE
 
+# coverage.py data files (``parallel = true``). An xdist worker that finishes
+# early writes ``.coverage.<host>.<pid>.<random>`` at the repository root
+# while other workers are still running, so a mid-run walk must not see them.
+_COVERAGE_DATA_FILE = ".coverage"
+
 # Suffixes that mark a directory as generated regardless of its base name
 # (e.g. "apm_cli.egg-info").
 _EXCLUDED_SUFFIXES: tuple[str, ...] = (".egg-info",)
@@ -107,9 +112,18 @@ def _is_excluded_name(name: str) -> bool:
     return name in _EXCLUDED_ANYWHERE or any(name.endswith(suffix) for suffix in _EXCLUDED_SUFFIXES)
 
 
+def _is_coverage_data_file(relative_parts: tuple[str, ...]) -> bool:
+    if len(relative_parts) != 1:
+        return False
+    name = relative_parts[0]
+    return name == _COVERAGE_DATA_FILE or name.startswith(f"{_COVERAGE_DATA_FILE}.")
+
+
 def _is_excluded(relative_parts: tuple[str, ...]) -> bool:
-    return (bool(relative_parts) and relative_parts[0] in _EXCLUDED_AT_ROOT) or any(
-        _is_excluded_name(part) for part in relative_parts
+    return (
+        (bool(relative_parts) and relative_parts[0] in _EXCLUDED_AT_ROOT)
+        or _is_coverage_data_file(relative_parts)
+        or any(_is_excluded_name(part) for part in relative_parts)
     )
 
 
