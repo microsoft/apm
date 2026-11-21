@@ -235,6 +235,37 @@ def test_a_failure_after_deploy_leaves_every_byte_as_it_was(
     world.assert_converges()
 
 
+@pytest.mark.parametrize(
+    "command",
+    [("update", "--yes"), ("deps", "update")],
+    ids=["update", "deps-update"],
+)
+def test_a_failed_lockfile_write_after_an_update_restores_deploys_and_the_lock(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    """#4664: update entry points keep the deploy journal until their lockfile commits."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    manifest = world.project / "apm.yml"
+    manifest.write_text(manifest.read_text(encoding="ascii") + f"    - {delta}\n", encoding="ascii")
+    lock = world.lockfile_bytes()
+    before = _target_state(world)
+
+    failed = world.runner.run(
+        command,
+        cwd=world.project,
+        env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
+    )
+
+    output = failed.stdout + failed.stderr
+    assert failed.returncode != 0, evidence(failed)
+    assert "apm.lock.yaml" in output, evidence(failed)
+    _assert_pre_command_state(world, before, lock, output)
+    assert not (world.project / _DELTA_SKILL).exists(), output
+    world.assert_converges()
+    assert (world.project / _DELTA_SKILL).is_file()
+
+
 @pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])
 @pytest.mark.parametrize("change", ["new-package", "changed-package"])
 def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install(
