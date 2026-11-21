@@ -69,6 +69,22 @@ if TYPE_CHECKING:
     from .replacement import ReplacementBinding
     from .subsets import EdgeSelection, SkillTargetSelection
 
+_BACKSLASH_LOCAL_PREFIXES = (".\\", "..\\", "~\\")
+
+
+def normalise_local_path_separators(local_path: str) -> str:
+    """Return *local_path* in POSIX form when it starts with a backslash prefix.
+
+    OpenAPM v0.1 Section 4.3.1: ``.\\``, ``..\\`` and ``~\\`` local paths are
+    normalised to POSIX form on read, so they resolve, anchor and pass every
+    traversal and containment check exactly like ``./``, ``../`` and ``~/``.
+    Windows absolute forms (``C:\\x``, ``\\\\server\\share``) are left as written.
+    """
+    if local_path.startswith(_BACKSLASH_LOCAL_PREFIXES):
+        return local_path.replace("\\", "/")
+    return local_path
+
+
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
@@ -1865,7 +1881,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # --- Local path detection (must run before URL/host parsing) ---
         if cls.is_local_path(dependency_str):
-            local = dependency_str.strip()
+            local = normalise_local_path_separators(dependency_str.strip())
             pkg_name = (PureWindowsPath(local) if "\\" in local else Path(local)).name
             if not pkg_name or pkg_name in (".", ".."):
                 raise ValueError(
