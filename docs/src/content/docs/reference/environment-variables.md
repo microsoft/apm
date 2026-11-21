@@ -72,6 +72,8 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any dependency content not served by the proxy, including marketplace catalogs and lookups in the default MCP registry. Policy fetches and `apm self-update` stay direct; the automatic update check is skipped. | unset | Air-gapped deployments. |
 | `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is the registry name uppercased, with `-` and `.` replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
+| `APM_MARKETPLACE_TOKEN_<NAME>` | Bearer token for a hosted `marketplace.json` registered with `apm marketplace add URL --name <NAME>`. | unset | `<NAME>` normalized like registry names. Sent only within the registered URL's scope; never to packages. See [Private hosted catalogs](../cli/marketplace/#private-hosted-catalogs). |
+| `APM_MARKETPLACE_USER_<NAME>` / `APM_MARKETPLACE_PASS_<NAME>` | Basic-auth credentials for that hosted catalog. | unset | Used when no bearer token is set. |
 | `ARTIFACTORY_BASE_URL` | Legacy alias for `PROXY_REGISTRY_URL`. | unset | Prefer `PROXY_REGISTRY_URL` in new setups. |
 | `ARTIFACTORY_ONLY` | Legacy alias for `PROXY_REGISTRY_ONLY`. | unset | Prefer `PROXY_REGISTRY_ONLY`. |
 | `ARTIFACTORY_MAX_ARCHIVE_MB` | Maximum archive size accepted from Artifactory, in MB. | `500` | Integer-like string. |

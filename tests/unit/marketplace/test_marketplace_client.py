@@ -24,6 +24,12 @@ from apm_cli.marketplace.models import MarketplaceSource
 pytestmark = pytest.mark.component
 
 
+def _anonymous(url: str):
+    from apm_cli.core.catalog_credentials import anonymous_catalog_credential
+
+    return anonymous_catalog_credential("catalog", url, bound=False)
+
+
 def _quoted_hosts(text: str) -> set[str]:
     """Extract host tokens from `Host '<host>'` patterns in error text.
 
@@ -419,7 +425,7 @@ class TestExplicitFreshness:
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
         with pytest.raises(MarketplaceFetchError, match="downgrades HTTPS to HTTP"):
-            client_mod._fetch_url_direct(source_url)
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
         assert calls == [source_url]
 
     def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
@@ -514,7 +520,7 @@ class TestExplicitFreshness:
 
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
-        result = client_mod._fetch_url_direct(source_url)
+        result = client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
 
         assert result is not None
         assert result.data == {"name": "catalog", "plugins": []}
@@ -556,7 +562,7 @@ class TestExplicitFreshness:
         monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
 
         with pytest.raises(MarketplaceFetchError, match=r"marketplace\.json exceeds"):
-            client_mod._fetch_url_direct(source_url)
+            client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
 
 
 class TestAutoDetectPath:
