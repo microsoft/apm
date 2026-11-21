@@ -2,13 +2,19 @@
 
 The state machines credit their own cell ids through
 ``oracles.check_obligation``: M-SOURCE ``T3|<op>|<form>|<kind>`` and
-``T5|<dry-run|real>|<op>|<form>``, M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``.
+``T5|<dry-run|real>|<op>|<form>``, M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>`` (its
+lockfile spine and its drift spine: stale and absent lockfiles, side-door commands).
 This module translates each machine id into the factor assignment it proves
 and lists the generated obligations that assignment implies (every pair and
 named triple whose values it fixes). Such an obligation is ``required`` with
 the machine spine as witness, and the receipt of any listed machine id
 discharges it (``credited_by``). A machine id the machine records as a strict
 known cell with an owning issue makes the obligation ``known-failing``.
+
+A lockfile cell also carries what its step acted on (``lock_context``: source,
+primitive, gate level, target, network, prior deployment) and credits only the
+implied ids that name LOCK (its anchor), so a refused write under a newer
+lockfile never discharges a success cell.
 
 Machine vocabulary that has no factor value here (``deps``/``outdated``
 reads, ``corrupt``/``symlink`` locks, the ``native`` kind) implies nothing.
@@ -54,8 +60,21 @@ LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "remove": ("uninstall", ("SELECT",)),
     "audit": ("audit", ()),
     "audit-ci": ("audit", ()),
+    "deny": ("approve-deny", ()),
+    "mcp-install": ("mcp-install", ()),
+    "bundle": ("bundle-install", ()),
+    "marketplace": ("marketplace", ()),
 }
-LOCK_STATES: Mapping[str, str] = {"consistent": "consistent", "newer": "newer-generator"}
+LOCK_STATES: Mapping[str, str] = {
+    "consistent": "consistent",
+    "newer": "newer-generator",
+    "stale": "stale",
+    "absent": "absent",
+}
+DRIFT_SPINE = (
+    "tests/lifecycle/machines/test_m_scope_lock.py::"
+    "test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[{scope}]"
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +86,8 @@ class MachineCell:
     lane: str
     assignment: Mapping[str, str]
     tracking: str | None = None
+    # When set, only implied ids that name this factor are credited.
+    anchor: str | None = None
 
 
 def _source_assignment(key: str) -> dict[str, str] | None:
@@ -83,17 +104,26 @@ def _source_assignment(key: str) -> dict[str, str] | None:
     return {**assignment, "DRYRUN": ON} if mode == "dry-run" else assignment
 
 
-def _lock_assignment(key: str) -> dict[str, str] | None:
+def _lock_assignment(key: str, *, context: bool = False) -> dict[str, str] | None:
+    from tests.lifecycle.machines.test_m_scope_lock import lock_context
+
     _, op, scope, lock = key.split("|")
     if op not in LOCK_OPS or lock not in LOCK_STATES:
         return None
     name, modifiers = LOCK_OPS[op]
-    return {"OP": name, "SCOPE": scope, "LOCK": LOCK_STATES[lock], **dict.fromkeys(modifiers, ON)}
+    return {
+        **(lock_context(op, lock) if context else {}),
+        "OP": name,
+        "SCOPE": scope,
+        "LOCK": LOCK_STATES[lock],
+        **dict.fromkeys(modifiers, ON),
+    }
 
 
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
     known_source = getattr(test_m_source, "KNOWN_CELLS_BY_ID", {})
@@ -101,13 +131,18 @@ def machine_cells() -> list[MachineCell]:
         assignment = _source_assignment(key)
         if assignment:
             cells.append(MachineCell(key, SOURCE_SPINE, "T-2", assignment, known_source.get(key)))
+    spines = ((SCOPE_LOCK_SPINE, test_m_scope_lock.t4_cells), (DRIFT_SPINE, drift_cells))
     for scope in test_m_scope_lock.SCOPES:
-        for key in sorted(test_m_scope_lock.t4_cells(scope)):
-            assignment = _lock_assignment(key)
-            if assignment:
-                witness = SCOPE_LOCK_SPINE.format(scope=scope)
+        for spine, enumerate_cells in spines:
+            witness = spine.format(scope=scope)
+            for key in sorted(enumerate_cells(scope)):
                 tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
-                cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+                assignment = _lock_assignment(key)
+                if assignment:
+                    cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+                    # The step's context, credited only on the ids that name LOCK.
+                    context = _lock_assignment(key, context=True) or {}
+                    cells.append(MachineCell(key, witness, "T-3", context, tracking, "LOCK"))
     return cells
 
 
@@ -139,6 +174,8 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
         for key in implied(cell.assignment):
+            if cell.anchor and f"|{cell.anchor}=" not in key:
+                continue
             if key in obligations:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
