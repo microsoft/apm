@@ -235,16 +235,11 @@ def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
     return [{**item, **overrides} for item in _assignments(op, tgt, packages)]
 
 
-# uninstall deploys the remaining packages to a newly declared target without
-# recording the files in apm.lock.yaml (I1); strict until #4636 is fixed.
-_UNINSTALL_UNRECORDED = Known("#4636", r"^deployed file is not in the lock: ")
-KNOWN_ROWS = {
-    ("uninstall", tgt): {"I1": _UNINSTALL_UNRECORDED}
-    for tgt in ("single-narrowed", "single-widened")
-}
-# On multi-widened the same path shows #4636 as a repeated "Skipped .gemini/commands/"
-# hint (I9), which the strict output cell uninstall-new-target-skipped-hint-repeats
-# owns (tests/utils/lifecycle_evidence.py); the row credits nothing until it is fixed.
+# Rows whose step is a strict known cell (none: #4636 is fixed).
+KNOWN_ROWS: dict[tuple[str, str], dict[str, Known]] = {}
+# On multi-widened the uninstall repeats a "Skipped .gemini/commands/" hint (I9),
+# which the strict output cell uninstall-new-target-skipped-hint-repeats owns
+# (tests/utils/lifecycle_evidence.py); the row credits nothing until it is fixed.
 UNCREDITED_ROWS = {*KNOWN_ROWS, ("uninstall", "multi-widened")}
 
 
