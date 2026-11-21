@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apm_cli.core.remediation import CLAUDE_PLUGIN_BINDING_MOVED, CLAUDE_PLUGIN_SOURCE_STALE
+from apm_cli.core.remediation import (
+    CLAUDE_NATIVE_PLUGIN_DRIFT,
+    CLAUDE_PLUGIN_BINDING_MOVED,
+    CLAUDE_PLUGIN_SOURCE_STALE,
+    kept_note,
+)
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
@@ -247,6 +252,8 @@ def reconcile_claude_plugins(
         _refuse_binding(preview_declaration(settings_path, declaration), settings_path, marketplace)
         rollback.snapshot()
         changed = 0
+        restored: list[str] = []
+        locked_before = {own.record.name: own.record.fingerprint for own in prior.values()}
         for name, (key, own, source) in declared.items():
             fresh = not (root / name).exists()
             plan = (prepared or {}).get(key)
@@ -265,6 +272,8 @@ def reconcile_claude_plugins(
                     rollback.created.append(name)
                 if deployment.replaced is not None:
                     rollback.replaced[name] = deployment.replaced
+                    if locked_before.get(name) == own.record.fingerprint:
+                        restored.append(name)
         write_catalog(root, marketplace, declared, owned=bool(prior_names))
         change = write_declaration(settings_path, declaration)
         _refuse_binding(change, settings_path, marketplace)
@@ -286,7 +295,7 @@ def reconcile_claude_plugins(
             "previous apm.lock.yaml records them. APM left them in place; review them in "
             "Claude and remove any you no longer want."
         )
-    _report(logger, declared, retiring, kept, changed, change.changed)
+    _report(logger, declared, retiring, kept, changed, change.changed, restored)
 
 
 def _retire(root: Path, name: str, fingerprint: str | None) -> bool:
@@ -332,21 +341,60 @@ def _declared_plugins(
     return declared
 
 
-def _report(logger, declared, retiring, kept, changed, settings_changed) -> None:
+def _report(logger, declared, retiring, kept, changed, settings_changed, restored=()) -> None:
     if not logger:
         return
+    for name in restored:
+        logger.warning(f"Restored ~/.agents/plugins/{name}: its files differed from apm.lock.yaml.")
     if retiring:
         logger.tree_item(f"{len(retiring)} native Claude plugin(s) removed.")
     for name in kept:
         logger.warning(
-            f"Kept ~/.agents/plugins/{name}: its files changed since APM deployed it or "
-            "could not be removed. Review and delete it yourself; Claude no longer loads it."
+            kept_note(
+                f"~/.agents/plugins/{name}",
+                "its files changed since APM deployed it or could not be removed",
+                "Review and delete it yourself; Claude no longer loads it.",
+            )
         )
     if declared and (changed or settings_changed):
         logger.tree_item(
             f"{len(declared)} native Claude plugin(s) declared and enabled in Claude settings. "
             "Restart Claude, or run /reload-plugins, to load them."
         )
+
+
+def native_deployed_drift(deploy_root: Path, lockfile: Any) -> list[Any]:
+    """A ``DeployedHashDrift`` for each locked native plugin whose deployed copy differs.
+
+    The deployed root must carry its record's fingerprint, as audit's drift
+    replay checks (:func:`verify_claude_native_cache`). A root that does not
+    exist yet is not drift: the install deploys it.
+    """
+    from apm_cli.policy.ci_checks import DeployedHashDrift
+
+    found = []
+    for key, record in lock_native_plugins(lockfile).items():
+        path = plugins_root(deploy_root) / record.name
+        if not path.exists() and not path.is_symlink():
+            continue
+        try:
+            observed = (
+                fingerprint_native_claude_source(path)
+                if path.is_dir() and not path.is_symlink()
+                else "unreadable"
+            )
+        except ClaudeNativePluginError:
+            observed = "unreadable"
+        if observed != record.fingerprint:
+            found.append(
+                DeployedHashDrift(
+                    owner=key,
+                    path=f"native plugin '{record.name}' ({record.root})",
+                    expected=record.fingerprint,
+                    actual=f"{observed}; {CLAUDE_NATIVE_PLUGIN_DRIFT.clause()}",
+                )
+            )
+    return found
 
 
 def verify_claude_native_cache(*, modules_dir: Path, locked: Any, source_root: Path) -> None:

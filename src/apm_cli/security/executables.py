@@ -744,23 +744,32 @@ def local_bundle_approval_key(
 
 
 def local_bundle_approval_hint(approval_key: str, exec_type: str, *, user_scope: bool) -> str:
-    """Name the manifest whose ``executables.allow`` approves *approval_key*.
+    """Name the ``apm approve`` command that grants *approval_key*, then its manifest entry.
 
-    Grants come from the scope's manifest: the project ``apm.yml``, or the
-    user manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads.
+    Grants live in the scope's manifest: the project ``apm.yml``, or the user
+    manifest (``$APM_HOME/apm.yml``) that ``apm install -g`` reads. The command
+    and its next step come from the remediation catalog (#4436); the entry is
+    the same grant written by hand.
     """
+    from apm_cli.core.remediation import LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED
     from apm_cli.core.scope import InstallScope, get_manifest_path
+    from apm_cli.security.trust import approve_command
 
     target = (
         f"the user manifest {get_manifest_path(InstallScope.USER)}" if user_scope else "apm.yml"
     )
+    install = "apm install -g <bundle-path>" if user_scope else "apm install <bundle-path>"
+    remedy = LOCAL_BUNDLE_EXECUTABLES_UNAPPROVED.bind(
+        key=approval_key, exec_type=exec_type, install=install
+    ).with_command(approve_command(approval_key, user_scope=user_scope))
     return (
-        f"To approve this exact local bundle, add to {target}:\n"
+        f"To {remedy.fixes_promise}, run:\n"
+        f"    {remedy.command}\n"
+        f"then {remedy.then}. The same grant as this entry in {target}:\n"
         "executables:\n"
         "  allow:\n"
         f'    "{approval_key}":\n'
-        f"      {exec_type}: true\n"
-        "Then rerun the install."
+        f"      {exec_type}: true"
     )
 
 
@@ -1467,6 +1476,7 @@ def _filter_declared_services(
         return dependencies
     filtered = []
     skipped: dict[str, bool] = {}
+    denied_owners: set[str] = set()
     for dependency in dependencies:
         owner = getattr(dependency, "resolved_by", None)
         approval_keys = getattr(dependency, "approval_keys", ())
@@ -1479,7 +1489,19 @@ def _filter_declared_services(
             continue
         skipped[owner] = bool(approval_keys)
         dependency_name = getattr(dependency, "name", "(unnamed)")
-        if approval_keys:
+        trust_ctx = getattr(effective_allow_execs, "trust_context", None)
+        if (
+            approval_keys
+            and trust_ctx is not None
+            and denied_exec_types(trust_ctx, list(approval_keys), (exec_type,))
+        ):
+            denied_owners.add(owner)
+        if owner in denied_owners:
+            logger.verbose_detail(
+                f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
+                f"denied. Run 'apm policy explain {owner}' to see which deny applies."
+            )
+        elif approval_keys:
             logger.verbose_detail(
                 f"Skipping {service_label} server '{dependency_name}' from '{owner}': "
                 f"executables not trusted. {MCP_EXECUTABLES_UNTRUSTED.bind(package=owner).sentence()}"
@@ -1494,8 +1516,33 @@ def _filter_declared_services(
         skipped_count = len(dependencies) - len(filtered)
         noun = "server" if skipped_count == 1 else "servers"
         owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
-        known_owners = sorted(owner for owner, has_keys in skipped.items() if has_keys)
+        known_owners = sorted(
+            owner for owner, has_keys in skipped.items() if has_keys and owner not in denied_owners
+        )
         unlocked_owners = sorted(owner for owner, has_keys in skipped.items() if not has_keys)
+        if denied_owners:
+            # A denied package is named as denied; approving cannot lift it (#4237).
+            denied_names = ", ".join(f"'{owner}'" for owner in sorted(denied_owners))
+            denied_count = sum(
+                1
+                for dependency in dependencies
+                if getattr(dependency, "resolved_by", None) in denied_owners
+            )
+            denied_noun = "server" if denied_count == 1 else "servers"
+            explain = (
+                f"Run 'apm policy explain {sorted(denied_owners)[0]}' to see which deny applies."
+                if len(denied_owners) == 1
+                else "Run 'apm policy explain <package>' to see which deny applies."
+            )
+            logger.warning(
+                f"Filtered {denied_count} {service_label} {denied_noun} from {denied_names}: "
+                f"declaring package {'is' if len(denied_owners) == 1 else 'are'} denied. "
+                f"{explain}",
+                symbol="warning",
+            )
+            skipped = {o: k for o, k in skipped.items() if o not in denied_owners}
+            skipped_count -= denied_count
+            owners = ", ".join(f"'{owner}'" for owner in sorted(skipped))
         remediation_parts = []
         if known_owners:
             remediation_parts.append(
@@ -1513,11 +1560,13 @@ def _filter_declared_services(
             )
         remediation = " " + " ".join(remediation_parts)
         package_clause = "declaring package is" if len(skipped) == 1 else "declaring packages are"
-        logger.warning(
-            f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
-            f"{package_clause} not trusted yet.{remediation}",
-            symbol="warning",
-        )
+        if skipped:
+            noun = "server" if skipped_count == 1 else "servers"
+            logger.warning(
+                f"Filtered {skipped_count} {service_label} {noun} from {owners}: "
+                f"{package_clause} not trusted yet.{remediation}",
+                symbol="warning",
+            )
     return filtered
 
 
@@ -1726,11 +1775,9 @@ def warn_allow_executables_alias_once(logger: Any | None = None) -> None:
     if _ALIAS_DEPRECATION_WARNED:
         return
     _ALIAS_DEPRECATION_WARNED = True
-    msg = (
-        "'allowExecutables' in apm.yml is deprecated; it now maps to "
-        "'executables.allow'. It will migrate automatically on your next "
-        "'apm approve'/'apm deny'."
-    )
+    from ..core.deprecations import deprecation_message
+
+    msg = deprecation_message("allow-executables")
     if logger is not None:
         logger.warning(msg, symbol="warning")
         return

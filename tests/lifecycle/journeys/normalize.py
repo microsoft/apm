@@ -12,6 +12,7 @@ is written and compared through the same code.
 
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -59,6 +60,9 @@ _RULE = re.compile(r"^[\s+\-|=_.:]*$")
 _ADJACENT_TOKEN = re.compile(r"\b([A-Za-z][A-Za-z'-]*) \1\b")
 
 
+_WINDOWS_SEPARATOR = re.compile(r"(?<=[\w.>~-])\\(?=[\w.<-])")
+
+
 def strip_ansi(text: str) -> str:
     return _ANSI.sub("", text)
 
@@ -70,6 +74,9 @@ def normalize_text(text: str, paths: Mapping[str, Path | str]) -> str:
         raw = str(path)
         for form in {raw, raw.replace("\\", "/")}:
             text = text.replace(form, placeholder)
+    if os.name == "nt":
+        # APM prints native separators on Windows; goldens and key lines use "/".
+        text = _WINDOWS_SEPARATOR.sub("/", text)
     text = _ENTRY_POINT.sub("apm", text)
     for pattern, replacement in _SUBSTITUTIONS:
         text = pattern.sub(replacement, text)
@@ -91,11 +98,25 @@ def package_blocks(lines: Iterable[str]) -> list[list[str]]:
     return [block for block in blocks if len(block) > 1]
 
 
+# Dependencies resolve concurrently, so their progress lines arrive in any order.
+_RESOLVING = "[>] Resolving "
+
+
 def canonical(lines: list[str]) -> list[str]:
-    """N5: sort each run of consecutive package blocks; other lines keep their order."""
+    """N5: sort each run of consecutive package blocks or resolve-progress lines.
+
+    Other lines keep their order.
+    """
     out: list[str] = []
     index = 0
     while index < len(lines):
+        progress: list[str] = []
+        while index < len(lines) and lines[index].startswith(_RESOLVING):
+            progress.append(lines[index])
+            index += 1
+        if progress:
+            out.extend(sorted(progress))
+            continue
         run: list[list[str]] = []
         while index < len(lines) and _BLOCK_HEAD.match(lines[index]):
             block = [lines[index]]
@@ -149,8 +170,11 @@ def adjacent_tokens(lines: Iterable[str]) -> list[str]:
     return sorted({m.group(0) for line in lines for m in _ADJACENT_TOKEN.finditer(line)})
 
 
-def golden_problems(text: str) -> list[str]:
-    """N7: a golden must keep O3 (ASCII) and O4 (no duplicate line within one command)."""
+def golden_problems(text: str, allow: Iterable[str] = ()) -> list[str]:
+    """N7: a golden must keep O3 (ASCII) and O4 (no duplicate line within one command).
+
+    *allow* is the journey's ``allow_repeat`` list, the same exemption O4 applies.
+    """
     problems = []
     if not text.isascii():
         bad = sorted({hex(ord(char)) for char in text if ord(char) > 0x7E})[:5]
@@ -158,7 +182,7 @@ def golden_problems(text: str) -> list[str]:
     command: list[str] = []
     for line in [*text.split("\n"), "$ <end>"]:
         if line.startswith("$ "):
-            problems.extend(f"duplicate line {dup!r}" for dup in duplicate_lines(command))
+            problems.extend(f"duplicate line {dup!r}" for dup in duplicate_lines(command, allow))
             command = []
         elif not line.startswith(("--- ", "[exit ", "#")):
             command.append(line)

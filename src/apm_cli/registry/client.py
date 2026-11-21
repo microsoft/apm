@@ -11,10 +11,12 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 
+from ..core.deprecations import deprecation_message
 from ..mcp_transport import canonical_remote_transport
 from ..utils.http_credentials import CredentialScopedSession
 
 _log = logging.getLogger(__name__)
+_CACHE_UNSET = object()
 
 # Hard byte ceiling for an MCP registry HTTP body. The registry URL can come
 # from an untrusted cloned apm.yml (``MCPDependency.registry``), so the
@@ -374,7 +376,10 @@ class SimpleRegistryClient:
         # Registry calls send only the credentials APM was given, never ~/.netrc.
         self.session = CredentialScopedSession(ambient_credentials=False)
         self._timeout = _resolve_timeout()
-        self._http_cache = self._init_http_cache()
+        # Built on the first registry request: constructing an adapter (for
+        # example ``apm audit`` comparing native entries) writes nothing
+        # under the APM cache.
+        self._http_cache_value: Any = _CACHE_UNSET
 
     def _refuse_direct_egress_when_proxy_only(self) -> None:
         """Refuse an unsanctioned MCP registry when ``PROXY_REGISTRY_ONLY`` is set.
@@ -393,7 +398,7 @@ class SimpleRegistryClient:
         raise RegistryEgressRefusedError(
             f"PROXY_REGISTRY_ONLY is set: refusing direct MCP registry lookup at "
             f"{self.registry_url}. Point MCP_REGISTRY_URL (or 'apm config set "
-            "mcp-registry-url') at your proxied registry, or unset PROXY_REGISTRY_ONLY."
+            "mcp-registry-url') at your proxied registry."
         )
 
     def _is_operator_mirror(self) -> bool:
@@ -411,6 +416,17 @@ class SimpleRegistryClient:
         return configured_source != "default" and redact_mcp_registry_url(
             normalize_mcp_registry_url(configured)
         ) == redact_mcp_registry_url(self.registry_url)
+
+    @property
+    def _http_cache(self) -> Any:
+        """The shared HTTP response cache, created on first use, or ``None``."""
+        if self._http_cache_value is _CACHE_UNSET:
+            self._http_cache_value = self._init_http_cache()
+        return self._http_cache_value
+
+    @_http_cache.setter
+    def _http_cache(self, value: Any) -> None:
+        self._http_cache_value = value
 
     @staticmethod
     def _init_http_cache():
@@ -737,9 +753,7 @@ class SimpleRegistryClient:
         endpoint no longer exists on spec-compliant registries.
         """
         warnings.warn(
-            "SimpleRegistryClient.get_server_info(server_name) is deprecated; "
-            "use SimpleRegistryClient.get_server(server_name, version='latest'). "
-            "The parameter now means a server name per MCP Registry v0.1.",
+            deprecation_message("registry-get-server-info"),
             DeprecationWarning,
             stacklevel=2,
         )

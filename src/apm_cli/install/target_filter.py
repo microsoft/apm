@@ -31,8 +31,9 @@ class EffectivePackageTargets:
 def log_package_target_restriction(
     logger: InstallLogger | None,
     target_selection: EffectivePackageTargets,
+    package_name: str,
 ) -> None:
-    """Name declared and effective targets when a package narrows them."""
+    """Name the package and its declared and effective targets when it narrows them."""
     if logger is None or not target_selection.package_restriction_active:
         return
     declared = (
@@ -42,7 +43,8 @@ def log_package_target_restriction(
     )
     effective = ", ".join(target.name for target in target_selection.targets) or "none"
     logger.verbose_detail(
-        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
+        f"Package target restriction for {package_name}: [{declared}]; "
+        f"effective targets: [{effective}]"
     )
 
 

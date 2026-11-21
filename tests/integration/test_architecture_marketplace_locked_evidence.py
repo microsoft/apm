@@ -158,8 +158,12 @@ def test_marketplace_catalog_origin_guard_requires_check_before_catalog_io() -> 
     [
         (
             "commands/install.py",
-            "                    require_locked_catalog_origin("
-            "marketplace_name, plugin_name, existing_lockfile)\n",
+            "                    require_locked_catalog_origin(\n"
+            "                        marketplace_name,\n"
+            "                        plugin_name,\n"
+            "                        existing_lockfile,\n"
+            "                        user_scope=scope == _InstallScope.USER,\n"
+            "                    )\n",
             "",
         ),
         (

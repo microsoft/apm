@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pytest
 
@@ -11,6 +12,7 @@ from apm_cli.install.drift import (
     DriftFinding,
     _governed_root_dirs,
     _normalize_line_endings,
+    _only_retired_sources_differ,
     _strip_bom,
     _strip_build_id,
     render_drift_sarif,
@@ -178,3 +180,41 @@ def test_render_text_advisory_drift_never_prints_error_header(kind):
     out = render_drift_text([finding], advisory=True)
     assert out.splitlines()[0] == "[!] Drift detected: 1 file(s)"
     assert "[x]" not in out
+
+
+def _owned(**owners: list[str]) -> bytes:
+    """Canonical APM-owned hook entries: ``{event: [entry with _apm_source]}``."""
+    entries = [
+        {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": command}],
+            "_apm_source": owner,
+        }
+        for owner, commands in owners.items()
+        for command in commands
+    ]
+    return json.dumps({"PreToolUse": entries}, sort_keys=True).encode()
+
+
+@pytest.mark.parametrize(
+    ("replayed", "on_disk", "retired"),
+    [
+        (_owned(kept=["echo kept"]), _owned(kept=["echo kept"], gone=["echo gone"]), True),
+        (b"{}", _owned(gone=["echo gone"]), True),
+        (_owned(pkg=["echo apm"]), b"{}", False),
+        (_owned(pkg=["echo apm"]), _owned(pkg=["echo edited"]), False),
+        (_owned(pkg=["echo apm"]), _owned(pkg=["echo apm"]), False),
+        (b"{}", b'{"PreToolUse": [{"matcher": "Bash"}]}', False),
+    ],
+    ids=[
+        "owner-retired-beside-kept-owner",
+        "only-owner-retired",
+        "user-edit-drops-ownership-marker",
+        "replayed-owner-content-differs",
+        "no-drift",
+        "unmarked-entry-is-never-retired",
+    ],
+)
+def test_only_gate_retired_owners_skip_local_edit_classification(replayed, on_disk, retired):
+    """RA-028: only owners on disk but absent from the gated replay are gate residue."""
+    assert _only_retired_sources_differ(replayed, on_disk) is retired

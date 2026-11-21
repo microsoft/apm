@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -62,7 +63,7 @@ from tests.lifecycle.security.gate_paths import Step, paths
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
-from tests.lifecycle.world.services import DENIED_PACKAGE, ORG
+from tests.lifecycle.world.services import DENIED_PACKAGE, ORG, policy_org
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
@@ -125,9 +126,13 @@ _DENIED: Mapping[str, frozenset[str]] = {
 class GateReplay(RowReplay):
     """``RowReplay`` with input edits, user scope and the gate-removal checks."""
 
-    def __init__(self, world, row: Row, *, scope: str = "project") -> None:
+    def __init__(
+        self, world, row: Row, *, scope: str = "project", ungoverned: bool = False
+    ) -> None:
         super().__init__(world, replace(row, scope="project"))
         self.scope = scope
+        # The org policy edits reach no command of this scope (the documented contract).
+        self.ungoverned = ungoverned
         self.ceiling: frozenset[str] | None = None
         self.witness: tuple[str, ...] = ()
         self.at_change: Observation | None = None
@@ -157,12 +162,17 @@ class GateReplay(RowReplay):
             ref = self.world.packages[key]
             if ref.source == "local-bundle":
                 _redefine_bundle(Path(ref.spec), kind)
+                # The approval pins the whole bundle digest: every kind loses it.
+                self.model = self.model.revoke(key, self.kinds[key])
             else:
                 _redefine(Path(ref.spec), kind)
-            self.model = self.model.revoke(key, {kind})
+                self.model = self.model.revoke(key, {kind})
         elif edit == "policy":
             variant = str(step["variant"])
             use_policy(self.world, variant)
+            if self.ungoverned:
+                _home_remote(self.world, variant)
+                return
             names = _DENIED.get(variant, frozenset())
             denied = [k for k in self.kinds if self.world.packages[k].name in names]
             self.model = self.model.with_policy(variant, denied)
@@ -298,6 +308,7 @@ class GateReplay(RowReplay):
             deploy_root=root,
             lock=LockFile.read(workspace / "apm.lock.yaml"),
             managed_paths=frozenset(managed),
+            user_scope=user,
         )
 
     def check_then(self) -> None:
@@ -544,8 +555,12 @@ def build_row(gate_slice: GateSlice, gate_row: GateRow) -> tuple[Row, str, str]:
     given += arrange[1:]
     apply = spec.change_steps.get(change, how.apply)
     when: list[Step] = [{"edit": "mark", "witness": witness}, *apply(key, kind)]
-    when += [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
-    if how.refuses_package:
+    act = [step.format(key=key) if isinstance(step, str) else step for step in spec.act]
+    when += act
+    if gate_row.ungoverned:
+        # The local gate still governs this scope: a local deny retires the surface.
+        when += [*CHANGES["local-deny"].apply(key, kind), *act]
+    elif how.refuses_package:
         when.append(f"apm uninstall {key}")
     announce = gate_row.announce or spec.announce or how.announce
     row = Row(
@@ -587,10 +602,13 @@ def test_gate_change_removes_on_the_next_mutating_command(
     lifecycle_world, gate_slice: GateSlice, gate_row: GateRow
 ) -> None:
     row, scope, announce = build_row(gate_slice, gate_row)
-    replay = GateReplay(lifecycle_world, row, scope=scope)
+    replay = GateReplay(lifecycle_world, row, scope=scope, ungoverned=bool(gate_row.ungoverned))
     replay.replay()
     assert replay.removal is not None, "no removing step ran after the gate change"
     before, result, after = replay.removal
+    if gate_row.ungoverned:
+        _check_ungoverned(lifecycle_world, gate_row, scope, before, result, after)
+        return
     # A removing step that succeeds deletes the surface files (or edits shared
     # ones); one that refuses or only plans keeps them byte for byte.
     removed = result.returncode == 0 and "--dry-run" not in result.command
@@ -619,13 +637,58 @@ def test_gate_change_removes_on_the_next_mutating_command(
     )
 
 
+def _home_remote(world, variant: str) -> None:
+    """Make HOME a checkout whose remote names the policy org too.
+
+    The org policy is then reachable from every root a user-scope command could
+    derive a git remote from: the project it runs in and HOME (which holds
+    APM_HOME), so the ungoverned outcome cannot pass for want of a remote.
+    """
+    git = ("git", "-C", str(world.home))
+    if not (world.home / ".git").exists():
+        subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remote = f"https://github.com/{policy_org(variant)}/dotfiles.git"
+    subprocess.run((*git, "remote", "add", "origin", remote), env=world.env, check=True)
+
+
+def _check_ungoverned(world, gate_row: GateRow, scope: str, before, result, after) -> None:
+    """The org change does not govern this scope; the local deny that follows does.
+
+    The first install after the org change keeps the surface byte for byte,
+    exits 0 and names no policy; no command sent a policy request or wrote a
+    policy cache. The replay's I4 check already proved the later local deny
+    retired the surface.
+    """
+    requests = [
+        entry
+        for entry in world.services.egress_log()
+        if "apm-policy" in str(entry["path"]) or "/policy-" in str(entry["path"])
+    ]
+    assert not requests, f"{gate_row.id}: policy requests at {scope} scope: {requests}"
+    cache_root = world.cache_root or world.root / "cache"
+    cached = sorted(str(path) for path in cache_root.rglob("*") if "policy" in path.name)
+    assert not cached, f"{gate_row.id}: policy cache written: {cached}"
+    evidence = Evidence(
+        unchanged={**gate_row.unchanged, **gate_row.surface},
+        exit=0,
+        output_forbids=(r"(?i)polic(y|ies)",),
+    )
+    check_obligation(
+        gate_row.id,
+        strength=STRENGTH,
+        before=before,
+        after=after,
+        result=result,
+        evidence=evidence,
+        scope=scope,
+    )
+
+
 # -- deny by install spec (#4189) --------------------------------------------
 #
-# The fix contract: a deny written under the install spec is canonicalized
-# on read (with a one-time notice), and ``apm policy explain`` agrees with
-# approve and deny. Strict until #4189 lands.
+# A deny written under the install spec is canonicalized on read (with a
+# one-time notice), and ``apm policy explain`` agrees with approve and deny.
 
-_DENY_SPEC_CELL = "#4189 deny by install spec and installed identity"
 _USER_HOOK = ".copilot/hooks/p-exec-session.json"
 
 
@@ -645,8 +708,8 @@ def _marketplace_exec_deployed(world) -> str:
     return spec
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
 def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_world) -> None:
+    """A deny stored under the install spec applies on read and is rewritten by the next deny."""
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
     config = world.apm_home / "config.json"
@@ -654,14 +717,24 @@ def test_deny_entry_under_the_install_spec_is_canonicalized_on_read(lifecycle_wo
     deny = data.setdefault("executables", {}).setdefault("deny", {})
     deny[spec] = {"hooks": True, "mcp": True, "bin": True}
     config.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    before = config.read_bytes()
     result = driver.run(world, ("install",), scope="user")
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (world.home / _USER_HOOK).exists(), "the existing deny must retire the hook"
+    notice = "names an install spec; it applies to"
+    output = result.stdout + result.stderr
+    assert output.count(f"{notice} {ORG}/p-exec.") == 1, output
+    assert config.read_bytes() == before, "install must not write the user store"
+    denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
+    assert denied.returncode == 0, denied.stdout + denied.stderr
     stored = json.loads(config.read_text(encoding="utf-8"))["executables"]["deny"]
     assert f"{ORG}/p-exec" in stored and spec not in stored, stored
+    again = driver.run(world, ("install",), scope="user")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert notice not in again.stdout + again.stderr, again.stdout + again.stderr
+    assert not (world.home / _USER_HOOK).exists(), "the rewritten deny must keep the hook retired"
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_DENY_SPEC_CELL)
 def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> None:
     world = lifecycle_world
     spec = _marketplace_exec_deployed(world)
@@ -676,11 +749,6 @@ def test_policy_explain_agrees_with_a_deny_by_install_spec(lifecycle_world) -> N
     assert "verdict: blocked" in explained.stdout, explained.stdout
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4245 apm approve with a marketplace install spec reports not found and exits 0",
-)
 def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world) -> None:
     world = lifecycle_world
     spec = world.packages["p-exec:marketplace"].spec
@@ -698,12 +766,8 @@ def test_approve_by_marketplace_install_spec_approves_or_refuses(lifecycle_world
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#4246 apm policy explain suggests approving a package the user denied",
-)
 def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecycle_world) -> None:
+    """A user deny explains as blocked; the only approve mention is the lift remedy (#4275)."""
     world = lifecycle_world
     _marketplace_exec_deployed(world)
     denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
@@ -712,8 +776,17 @@ def test_policy_explain_of_a_denied_package_does_not_suggest_approving_it(lifecy
     explained = runner.run(
         ("policy", "explain", f"{ORG}/p-exec"), cwd=world.apm_home, env=world.env
     )
-    assert "verdict: blocked" in explained.stdout, explained.stdout
-    assert "apm approve" not in explained.stdout, explained.stdout
+    out = explained.stdout
+    assert explained.returncode == 0, out + explained.stderr
+    assert "verdict: blocked" in out, out
+    assert "(layer: user-deny)" in out, out
+    assert "not approved" not in out, out
+    approve_lines = [line for line in out.splitlines() if "apm approve" in line]
+    assert len(approve_lines) == 1, out
+    lift = approve_lines[0]
+    assert "executables.deny entry" in lift and "To lift it" in lift, lift
+    assert lift.index("To lift it") < lift.index("apm approve"), lift
+    assert not any(line.lstrip().startswith("Approve:") for line in out.splitlines()), out
 
 
 # -- local trust controls at user scope (-g) -----------------------------------

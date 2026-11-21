@@ -58,7 +58,7 @@ apm install
 
 On success, `apm.lock.yaml` records `source: registry`, `version`, `resolved_url`, and `resolved_hash` for each registry dep. A `404` usually means the package is not published or the `owner/repo` is wrong.
 
-Registry URLs MUST start with `https://`. Anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Prefer lowercase registry names with letters, digits, and `-` (see [names that share an env var](#registry-names-that-sanitize-to-the-same-env-var)). Unknown keys under a registry entry are rejected at parse time (typo guard).
+Registry URLs MUST start with `https://`. An `http://` URL is a parse error unless the host is loopback or an RFC 1918 private address, or the entry sets `insecure: true`; at install time anonymous `http://` access is limited to loopback addresses for local development. Credentials are never sent over HTTP. Prefer lowercase registry names with letters, digits, and `-` (see [names that share an env var](#registry-names-that-sanitize-to-the-same-env-var)). Unknown keys under a registry entry are rejected at parse time (typo guard); `x-` extension keys are ignored.
 
 ## 2. Install from a private or self-hosted registry
 
@@ -290,7 +290,9 @@ dependencies:
       - .agents/skills/foo/SKILL.md
 ```
 
-`resolved_url` is the trust anchor for re-installs -- APM re-fetches from the URL stored in the lockfile, not from the registry name, and re-verifies bytes against `resolved_hash`. A hash mismatch aborts the install before extraction. See [Lockfile spec](../../reference/lockfile-spec/) for full field semantics.
+`resolved_hash` is the trust anchor for re-installs. On `apm install` and `apm install --frozen`, APM fetches the locked version through a registry declared in `apm.yml`, sending each registry's credentials only to its own URL, and verifies the bytes against `resolved_hash`. A hash mismatch aborts the install before extraction, and `apm update` re-resolves and records a new URL.
+
+**Moved registries and mirrors.** If another declared registry serves the locked `resolved_url` (a mirror), APM fetches from it. If no declared registry serves it (you pointed the registry name at a new URL), APM never contacts the old URL: it fetches the locked version from the configured registry, prints one `[i]` line naming both URLs, and keeps the lockfile unchanged when the hash matches. A mismatch fails the install and names the package, both URLs and both hashes.
 
 ## 5. Publish a package (producer summary)
 
@@ -359,6 +361,32 @@ The following are deferred to a later milestone and not yet implemented:
 - **Yank** -- marking a published version unavailable.
 - **Signature verification** -- cryptographic signing of registry-published packages.
 :::
+
+### Enterprise workflow: publish, install, replay in CI
+
+Each machine enables registries and maps the registry name to its URL. Projects declare the same registry in `apm.yml` with `default: corp-main`.
+
+```bash
+# Every machine (producer, developer, CI)
+apm experimental enable registries
+apm config set registry.corp-main.url https://registry.corp.example.com/apm
+export APM_REGISTRY_TOKEN_CORP_MAIN=...
+
+# Producer: publish required dependencies first, from each package root
+apm publish --package acme/base --registry corp-main
+apm publish --package acme/widget --registry corp-main
+
+# Developer: install, then commit apm.yml and apm.lock.yaml
+apm install acme/widget#1.0.0
+
+# CI: clean checkout, empty cache
+apm install --frozen
+apm audit --ci
+```
+
+`--frozen` downloads each package from its lockfile `resolved_url` and checks the bytes against `resolved_hash`. It never contacts the producer's Git host. If the registry is down or returns different bytes, the install fails and deploys nothing. Run with `--verbose` to see which check failed. `apm uninstall` removes only files APM deployed.
+
+APM tests this workflow on every PR with the installed CLI against a local server that implements the [Registry HTTP API](../../reference/registry-http-api/). You can browse a hosted catalog (`apm marketplace add https://.../marketplace.json`) next to a registry. Installing registry packages by catalog name is not supported yet ([#4009](https://github.com/microsoft/apm/issues/4009)).
 
 ## 6. Enterprise policy
 

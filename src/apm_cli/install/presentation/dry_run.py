@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
+from apm_cli.core.remediation import DRY_RUN_INCOMPLETE, kept_note
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
 
 if TYPE_CHECKING:
@@ -27,6 +27,8 @@ def render_and_exit(
     apm_dir: Path,
     local_cleanup_pending: Callable[[LockFile], bool] | None = None,
     project_root: Path | None = None,
+    no_policy: bool = False,
+    scope: object = None,
 ) -> None:
     """Render the dry-run preview to the user.
 
@@ -112,6 +114,24 @@ def render_and_exit(
             if len(_orphan_preview) > 10:
                 logger.progress(f"  ... and {len(_orphan_preview) - 10} more")
 
+    if _dryrun_lock and plan.should_install_apm:
+        from apm_cli.install.frozen_retirement import preview_executable_retirements
+
+        # Deny wins (#3944, #4043): install would remove these packages' deployed
+        # executables; the preview removes nothing.
+        retirements = preview_executable_retirements(
+            _dryrun_lock, apm_dir, no_policy=no_policy, scope=scope
+        )
+        if retirements:
+            logger.progress(
+                f"Executables that would be retired (decision changed since apm.lock.yaml): "
+                f"{len(retirements)}"
+            )
+            for source, surfaces in retirements:
+                logger.progress(f"  - {source}")
+                for surface in surfaces:
+                    logger.progress(f"      {surface}")
+
     if _dryrun_lock and plan.should_install_mcp and project_root is not None:
         from apm_cli.install.mcp.retired_destinations import preview_retired_mcp_moves
 
@@ -167,5 +187,5 @@ def _preview_orphan_files(lockfile: LockFile, plan: ProspectiveInstallPlan, logg
         deployment_claims=DeploymentClaims(live_files=None, retained={}),
     )
     for path in sorted({path for files in decision.claimed_files.values() for path in files}):
-        logger.verbose_detail(f"Kept {path}: still deployed by a remaining package")
+        logger.verbose_detail(kept_note(path, "still deployed by a remaining package"))
     return {path for files in decision.removed_files.values() for path in files}

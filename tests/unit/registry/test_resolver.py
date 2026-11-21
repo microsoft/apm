@@ -478,21 +478,82 @@ class TestDownloadFromLockfile:
         assert info.install_path == target
         assert (target / "apm.yml").exists()
 
-    def test_rejects_lockfile_registry_origin_override(self, tmp_path):
+    def test_foreign_locked_url_is_never_fetched(self, tmp_path):
+        """req-rs-009: a locked URL no declared registry serves is never contacted."""
+        raw, _ = _make_apm_tarball()
         fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.return_value = (raw, "application/gzip")
         resolver = _make_resolver(fake)
-        with pytest.raises(RegistryResolutionError, match="configured registry endpoint"):
+        attacker = (
+            "https://attacker.example/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+        configured = (
+            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+        with pytest.raises(RegistryResolutionError) as excinfo:
             resolver.download_from_lockfile(
                 _make_dep(),
                 tmp_path / "p",
-                resolved_url=(
-                    "https://attacker.example/apm/v1/packages/"
-                    "acme/web-skills/versions/1.2.0/download"
-                ),
+                resolved_url=attacker,
                 resolved_hash="sha256:" + "a" * 64,
                 version="1.2.0",
             )
-        fake.fetch_from_url.assert_not_called()
+        fake.fetch_from_url.assert_called_once_with(configured)
+        message = str(excinfo.value)
+        assert attacker in message and configured in message and "a" * 64 in message
+        assert not (tmp_path / "p").exists(), "mismatch must not touch the install target"
+
+    def test_moved_endpoint_with_matching_hash_keeps_locked_url(self, tmp_path, capsys):
+        raw, digest = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.return_value = (raw, "application/gzip")
+        resolver = _make_resolver(fake)
+        old = "https://old.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        dep = _make_dep()
+        resolver.download_from_lockfile(
+            dep,
+            tmp_path / "p",
+            resolved_url=old,
+            resolved_hash=f"sha256:{digest}",
+            version="1.2.0",
+        )
+        assert (tmp_path / "p" / "apm.yml").exists()
+        res = resolver.last_resolutions[dep.get_unique_key()]
+        assert (res.resolved_url, res.resolved_hash) == (old, f"sha256:{digest}")
+        assert "locked hash verified" in " ".join(capsys.readouterr().out.split())
+
+    def test_declared_mirror_may_serve_but_the_locked_hash_decides(self, tmp_path):
+        """req-rs-009 (#4278): each registry's client fetches only its own URL."""
+        from apm_cli.deps.registry.extractor import HashMismatchError
+
+        clients: dict[str, MagicMock] = {}
+
+        def factory(url, auth):
+            fake = MagicMock(spec=RegistryClient)
+            fake.archive_url.side_effect = lambda owner, repo, version: (
+                f"{url}/v1/packages/{owner}/{repo}/versions/{version}/download"
+            )
+            fake.fetch_from_url.return_value = (b"not the locked bytes", "application/gzip")
+            clients[url] = fake
+            return fake
+
+        resolver = RegistryPackageResolver(
+            {"corp-main": "https://reg.example.com/apm", "mirror": "https://mirror.example/apm"},
+            client_factory=factory,
+        )
+        mirror_url = (
+            "https://mirror.example/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+        with pytest.raises(HashMismatchError):
+            resolver.download_from_lockfile(
+                _make_dep(),
+                tmp_path / "p",
+                resolved_url=mirror_url,
+                resolved_hash="sha256:" + "a" * 64,
+                version="1.2.0",
+            )
+        clients["https://mirror.example/apm"].fetch_from_url.assert_called_once_with(mirror_url)
+        clients["https://reg.example.com/apm"].fetch_from_url.assert_not_called()
 
     def test_last_resolutions_populated(self, tmp_path):
         raw, digest = _make_apm_tarball()

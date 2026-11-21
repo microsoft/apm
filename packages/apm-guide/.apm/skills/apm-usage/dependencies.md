@@ -199,6 +199,8 @@ aliases, or marketplace dependencies.
 
 Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
 
+An `x-` vendor-extension key (`x-[a-z][a-z0-9-]*`) in an entry is ignored and kept on rewrite; any other unknown key fails the parse.
+
 The legacy string suffix `@alias` is not supported; write `alias:` explicitly
 instead so `@` remains reserved for git usernames and version syntax.
 
@@ -376,6 +378,13 @@ ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resoluti
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
 Unknown keys in a marketplace entry are rejected.
+A committed install records each plugin version's catalog ref under
+`APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
+version). If the catalog later points that version at another ref, install
+refuses (exit 1) and names both refs; `apm update`
+accepts the new ref. A raw
+ref override (`version: main`) never checks or records a pin, and a failed or
+`--dry-run` install records nothing.
 On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
 `git-subdir`, `gitlab`, `url`) with a bare cross-repo `owner/repo` is refused
 as a dependency-confusion risk (#1326)
@@ -401,11 +410,22 @@ another commit fails until `apm update <name>@<marketplace>`); one with no
 locked servers (`--only=apm`, root-overridden server) fails its content-hash
 check when cold -- run `apm update` for it.
 
-The `marketplace` value names a marketplace registered with
-`apm marketplace add` or declared in the user manifest's `marketplaces:`
-list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
-`apm install -g`). Dependencies and
-project manifests cannot declare `marketplaces:`.
+The `marketplace` value names a marketplace declared in the root project's
+`marketplaces:` map, registered with `apm marketplace add`, or declared in the
+user manifest's `marketplaces:` list (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`, reconciled by `apm install -g`).
+
+A root project `apm.yml` may declare `marketplaces:` in the user-manifest
+shape (`name`, `source`, optional `ref`). `apm install` and `apm update` then
+resolve those names with no registration (fresh clone, CI). The map is never
+written to the marketplace registry; inside the project it wins over a
+same-named registration, with one `[i]` line, and over a lock row recorded
+from another catalog: `apm install` / `apm update` re-resolve it through the
+map (one `[i]` line); `apm install --frozen` refuses. When the root declares a map,
+a transitive `marketplace: <name>` must name one of its entries, or the
+install fails showing the entry to add. A dependency's `apm.yml` that
+declares `marketplaces:` is refused. Org policy `marketplace.allow` can
+restrict the declared and locked catalogs (see governance.md).
 `apm uninstall name@marketplace` removes an object-form entry offline, with
 its lock row and deployed files.
 
@@ -425,8 +445,9 @@ origin, re-resolving the entry (`apm update`, `apm install <plugin>@<alias>`,
 `apm outdated`) fails and names both origins; `apm install` keeps replaying the
 locked catalog. Restore the alias with `apm marketplace add <locked-origin>
 --name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
-add it back and run `apm install` again. Only the origin is compared, not the
-catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
+add it back and run `apm install` again. At user scope (`-g`) the same steps
+use `~/.apm/apm.yml` and `apm install -g`, and also repair a mistakenly changed
+`~/.apm/apm.lock.yaml`. Only the origin is compared, not the catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
 it on the next lock write.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
@@ -501,6 +522,11 @@ dependencies:
       alias: review-prompt                 # optional local alias
 ```
 
+A registry `url` must use `https://`. `http://` is a parse error unless the
+host is loopback or an RFC 1918 private address, or the entry sets
+`insecure: true`. Unknown keys in a registry entry are rejected; `x-` keys
+are ignored.
+
 Object-form fields:
 
 | Field | Required | Notes |
@@ -537,6 +563,15 @@ From APM 0.37 a writable `apm install` promotes `apm.lock.yaml` to
 otherwise the version stays. Older lockfiles still verify; `--frozen` and
 `apm audit` never rewrite them. APM 0.36 and earlier refuse version `"4"`:
 update CI to 0.37 before committing.
+
+On replay (`apm install`, `apm install --frozen`), a registry dep is
+fetched through a registry declared in `apm.yml`: the one serving the
+locked `resolved_url` (a mirror), else its configured registry (a moved
+endpoint; the old URL is never contacted, and one `[i]` line names both
+URLs). The bytes must match `resolved_hash` before extraction; the
+lockfile is unchanged. A mismatch fails the install and names the
+package, both URLs and both hashes. `apm update` re-resolves and records
+the new URL.
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with

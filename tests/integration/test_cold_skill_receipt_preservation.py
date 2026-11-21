@@ -93,10 +93,10 @@ def test_cold_overlapping_skill_replay_preserves_files_and_lock(
         elif edited:
             assert result.returncode != 0, output
             assert "no trustworthy local deployment baseline" in output
-            assert (
-                "Move the conflicting file aside and retry; "
-                "use --force only to intentionally overwrite it." in output
-            ), output
+            assert "Move the conflicting file aside and retry." in output, output
+            # Recovery is scoped to the refused skill, never a global --force.
+            assert "To redeploy only this skill" in output, output
+            assert "--force" not in output, output
         else:
             assert result.returncode == 0, output
             assert "no trustworthy local deployment baseline" not in output

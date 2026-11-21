@@ -17,17 +17,25 @@
     },
     {
       "id": "ci-validation-topology",
-      "decision": "Merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
-      "owner": ".github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
+      "decision": "Windows unit-suite selection run by the PR Windows Compatibility Gate and the main-push and full-validation Windows jobs; each sharded CI job's explicit per-shard test file list (scripts/ci_sharding.py shard_test_files), checked against a full collect on the same SHA; and merge-time validation topology: which merge_group jobs produce every merge-gate.yml merge_group EXPECTED_CHECKS name, how ci-integration.yml shards the merge-time integration corpus, and the alarm that fails when main moves without a merge_group run",
+      "owner": "scripts/ci_selections.py (SELECTIONS) + scripts/ci_sharding.py (shard_test_files) + .github/workflows/merge-gate.yml (merge_group EXPECTED_CHECKS) + .github/workflows/ci-integration.yml (merge-time lanes via the scripts/ci_sharding.py planner) + .github/workflows/merge-queue-freshness.yml with scripts/merge_queue_freshness.py (freshness alarm); closed-world guard in tests/quality/test_ci_topology.py",
       "selectors": [
+        ".github/workflows/build-release.yml",
         ".github/workflows/ci-integration.yml",
+        ".github/workflows/ci.yml",
         ".github/workflows/merge-gate.yml",
         ".github/workflows/merge-queue-freshness.yml",
+        "scripts/architecture_linter/checks/contracts_ci_shard_file_lists.py",
+        "scripts/architecture_linter/checks/contracts_ci_topology.py",
+        "scripts/ci_selections.py",
+        "scripts/ci_sharding.py",
         "scripts/merge_queue_freshness.py"
       ],
       "guards": [
         "contracts-tooling-ci-merge-queue-freshness",
-        "contracts-tooling-ci-merge-time-topology"
+        "contracts-tooling-ci-merge-time-topology",
+        "contracts-tooling-ci-shard-file-lists",
+        "contracts-tooling-ci-validation-topology"
       ]
     },
     {
@@ -39,8 +47,8 @@
     },
     {
       "id": "dependency-identity-materialization",
-      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation",
-      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison) + install/phases/lockfile.py (including empty-graph root intent persistence)",
+      "decision": "Dependency comparison identity and policy casing vs display-cased materialization path; host-bound exact policy require identity (required_package_policy_hosts), resolved once by policy/matcher.py DependencyPolicyIndex.find for the manifest and, via the matched dependency's unique key, the lockfile; distinct remote packages never share one materialization directory (MaterializationSlots, before fetch); root-owned exact source replacement and original ownership; embedded git URL subpath validation; the anchor a relative local_path resolves against (the declaring package at every scope; a root-declared relative path at user scope is refused)",
+      "owner": "models/dependency/identity.py + materialization.py + replacement.py (typed root binding and clean selected-source projection) + object_fields.py (alias validation) + deps/apm_resolver.py (remote source-coordinate anchoring) + DependencyReference (_check_no_embedded_subpath consumes core/host_providers.py) + install/plan.py (root intent comparison; update plans compare the ref the lockfile records) + install/phases/lockfile.py (including empty-graph root intent persistence) + deps/path_anchoring.py local_dep_base_dir (local_path anchor: it decides which directory a relative dependency path names, so it is the local half of materialization identity)",
       "selectors": [
         "src/apm_cli/models/dependency/identity.py",
         "src/apm_cli/models/dependency/materialization.py",
@@ -55,9 +63,10 @@
         "src/apm_cli/install/helpers/plan_inputs.py",
         "src/apm_cli/install/presentation/resolution.py",
         "src/apm_cli/install/helpers/no_work.py",
-        "src/apm_cli/install/plan.py"
+        "src/apm_cli/install/plan.py",
+        "src/apm_cli/deps/path_anchoring.py"
       ],
-      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements"]
+      "guards": ["contracts-tooling-dependency-identity", "contracts-tooling-local-path-anchor", "contracts-tooling-policy-identity", "contracts-tooling-source-replacements", "contracts-tooling-update-plan-recorded-ref"]
     },
     {
       "id": "native-lifecycle-evidence",
@@ -85,11 +94,16 @@
     },
     {
       "id": "cached-policy-shape",
-      "decision": "Cached policy shape and the APM_POLICY_DISABLE switch reader",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
-      "selectors": ["src/apm_cli/policy/discovery.py"],
+      "decision": "Cached policy shape, that a cached policy document is verified against its recorded fingerprint and the project policy.hash pin before any command uses it (#4218), and the APM_POLICY_DISABLE switch reader",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry, the only policy cache reader, verifying through policy/_cache_verify.py _cached_policy_verified; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
+      "selectors": [
+        "src/apm_cli/policy/discovery.py",
+        "src/apm_cli/policy/_cache_verify.py",
+        "src/apm_cli/policy/_cached_candidates.py"
+      ],
       "guards": [
         "contracts-tooling-cached-policy-shape",
+        "install-deployment-policy-cache-pin",
         "install-deployment-policy-disable-switch-owner"
       ]
     },
@@ -138,17 +152,32 @@
       "id": "lockfile-generator-compatibility",
       "decision": "Whether the running CLI may write, replay or certify a lockfile another APM generated (apm_version)",
       "owner": "deps/lockfile_generator.py (assert_writable, check_current_cli, require_current_cli, warn_if_newer); utils/version_checker.py (release_precedence) orders versions; deps/lockfile.py (LockFile.write) stamps apm_version",
-      "selectors": ["src/apm_cli/deps/lockfile_generator.py"],
+      "selectors": [
+        "src/apm_cli/deps/lockfile_generator.py",
+        "src/apm_cli/deps/lockfile_version_remedy.py"
+      ],
       "guards": [
         "contracts-tooling-lockfile-generator-gate",
         "contracts-tooling-lockfile-generator-stamp"
       ]
     },
     {
+      "id": "lockfile-write-authority",
+      "decision": "When apm.lock.yaml reaches disk and which command may persist it: a closed writer set (install, install --mcp, local bundle install, lock, update, uninstall, prune, compile) commits the lockfile once per command",
+      "owner": "deps/lockfile_write_authority.py (LockfileWriter, lockfile_writer, lockfile_exists, flush_lockfile_writes, remove_lockfile, restore_lockfile_bytes); deps/lockfile.py (LockFile.write stages, LockFile.read reads staged)",
+      "selectors": [
+        "src/apm_cli/deps/lockfile_write_authority.py",
+        "src/apm_cli/deps/lockfile_extensions.py",
+        "src/apm_cli/models/extension_keys.py",
+        "src/apm_cli/deps/lockfile_container.py"
+      ],
+      "guards": ["contracts-tooling-lockfile-write-authority"]
+    },
+    {
       "id": "read-only-lockfile-path",
       "decision": "Lockfile read path, timestamp emission, reproducible fallback, and marketplace declaration association",
-      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency)",
-      "selectors": ["src/apm_cli/deps/lockfile.py"],
+      "owner": "deps/lockfile.py (resolve_lockfile_path_for_read, LockFile.write, resolve_reproducible_timestamp, LockedDependency alias projection, LockFile.get_dependency; deps/lockfile_lookup.py locked_row_for reads the row from_dependency_ref wrote)",
+      "selectors": ["src/apm_cli/deps/lockfile.py", "src/apm_cli/deps/lockfile_lookup.py"],
       "guards": [
         "contracts-tooling-lockfile-read",
         "contracts-tooling-lockfile-symlink-write-guard",
@@ -156,6 +185,20 @@
         "contracts-tooling-lockfile-timestamp-constructor",
         "contracts-tooling-lockfile-timestamp-fallback",
         "marketplace-integrations-locked-association"
+      ]
+    },
+    {
+      "id": "architecture-linter-performance",
+      "decision": "Session-scoped reuse of the architecture linter inventory, owner registry and content-keyed file facts; findings identical with and without reuse",
+      "owner": "scripts/architecture_linter/session_cache.py (LinterSession) consumed by facts.py FactsProvider.file_facts and runner.py _run",
+      "selectors": [
+        "scripts/architecture_linter/facts.py",
+        "scripts/architecture_linter/runner.py",
+        "scripts/architecture_linter/session_cache.py"
+      ],
+      "guards": [
+        "contracts-tooling-linter-cache-content-key",
+        "contracts-tooling-linter-cache-parse-once"
       ]
     },
     {

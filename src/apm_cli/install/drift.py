@@ -76,6 +76,13 @@ from apm_cli.install.drift_render import (
 from apm_cli.install.drift_render import (
     render_drift_text as render_drift_text,
 )
+from apm_cli.install.drift_replay_support import (  # noqa: F401 -- re-exported for callers
+    _clear_path,
+    _make_integrators,
+    _only_retired_sources_differ,
+    _owned_entries_by_source,
+    _walk_managed,
+)
 from apm_cli.install.errors import DirectDependencyError
 from apm_cli.install.source_helpers import locked_content_failure, locked_content_mismatch
 from apm_cli.utils.console import STATUS_SYMBOLS
@@ -124,6 +131,10 @@ class DriftFinding:
     kind: str
     package: str = ""
     inline_diff: str = ""
+    # The drift in a config shared with the user (merged hooks) is only
+    # APM-owned entries of packages the current gate no longer deploys:
+    # 'apm install' retires them, so it is never a local edit (RA-028).
+    owned_entries_only: bool = False
 
 
 # Errors
@@ -189,16 +200,6 @@ def _make_scratch_root(project_root: Path) -> Path:
 
     atexit.register(_cleanup)
     return scratch
-
-
-def _clear_path(path: Path) -> None:
-    """Remove one file tree so a fresh materialization can replace it."""
-    if not path.exists():
-        return
-    if path.is_dir():
-        rmtree(path)
-        return
-    path.unlink()
 
 
 def _copy_install_tree(source: Path, target: Path) -> None:
@@ -271,10 +272,8 @@ def _materialize_install_path(
     For local deps -- contents live at the source directory the install
     resolver anchored on: ``project_root`` for direct (root-declared) deps,
     or the declaring package's directory for transitive ``../sibling`` deps
-    (resolved via ``resolved_by``; see
-    :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`). The
-    ``lockfile`` is required to walk that chain; it is unused for remote
-    deps and for direct local deps (``resolved_by is None``).
+    (``resolved_by``; see :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`).
+    ``lockfile`` walks that chain; remote and direct local deps do not use it.
     For remote deps -- contents live at the canonical apm_modules subpath.
     In ``cache_only`` mode the replay reads a verified live cache entry. In
     self-hydrating mode it materializes a scratch-private copy using the lock's
@@ -433,10 +432,7 @@ def _build_package_info(
     install_path: Path,
 ):
     """Construct ``PackageInfo`` with the selected manifest's package identity."""
-    from apm_cli.agent_plugins.errors import (
-        AgentPluginDeploymentBoundaryError,
-        AgentPluginError,
-    )
+    from apm_cli.agent_plugins.errors import AgentPluginDeploymentBoundaryError, AgentPluginError
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.codex_plugins.manifest import is_codex_compatibility_manifest
     from apm_cli.models.apm_package import (
@@ -484,7 +480,10 @@ def _build_package_info(
         pkg = None
         if apm_yml.exists():
             try:
-                pkg = APMPackage.from_apm_yml(apm_yml, source_path=install_path)
+                # Replay reads config; it never creates it (dry-run and audit stay read-only).
+                pkg = APMPackage.from_apm_yml(
+                    apm_yml, source_path=install_path, create_config=False
+                )
             except Exception:
                 if lock_dep.replacement is not None:
                     raise
@@ -510,29 +509,6 @@ def _build_package_info(
         dependency_ref=lock_dep.to_dependency_ref(),
         package_type=package_type,
     )
-
-
-def _make_integrators():
-    """Build a fresh integrator set for one replay run.
-
-    Mirrors ``apm_cli.install.phases.targets:208-215`` so the replay
-    behaves identically to a real ``apm install --integrate``.
-    """
-    from apm_cli.integration.agent_integrator import AgentIntegrator
-    from apm_cli.integration.command_integrator import CommandIntegrator
-    from apm_cli.integration.hook_integrator import HookIntegrator
-    from apm_cli.integration.instruction_integrator import InstructionIntegrator
-    from apm_cli.integration.prompt_integrator import PromptIntegrator
-    from apm_cli.integration.skill_integrator import SkillIntegrator
-
-    return {
-        "prompt": PromptIntegrator(),
-        "agent": AgentIntegrator(),
-        "skill": SkillIntegrator(),
-        "command": CommandIntegrator(),
-        "hook": HookIntegrator(),
-        "instruction": InstructionIntegrator(),
-    }
 
 
 def _filter_targets(all_targets, names: frozenset[str] | None):
@@ -613,6 +589,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     registry_resolver = None
     declared_transports: DeclaredTransportIndex | None = None
     if not config.cache_only:
+        from apm_cli.cache.git_cache import attach_persistent_git_cache
         from apm_cli.core.auth import AuthResolver
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
@@ -620,6 +597,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         from apm_cli.models.apm_package import APMPackage
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        attach_persistent_git_cache(downloader, read_only=True)
         declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
         if (apm_yml := manifest_file(project_root)).exists():
             manifest = APMPackage.from_apm_yml(apm_yml)
@@ -796,29 +774,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
 
 # Diff engine
-
-
-def _walk_managed(root: Path, governed_roots: set[str]) -> dict[str, Path]:
-    """Return a mapping of project-relative posix paths to absolute paths."""
-    out: dict[str, Path] = {}
-    if not root.exists():
-        return out
-    for top in governed_roots:
-        base = root / top
-        if not base.exists():
-            continue
-        if base.is_file() and not base.is_symlink():
-            out[top] = base
-            continue
-        for p in base.rglob("*"):
-            if p.is_file() and not p.is_symlink():
-                rel = p.relative_to(root).as_posix()
-                out[rel] = p
-    # AGENTS.md is a flat top-level file in some target layouts.
-    agents_md = root / "AGENTS.md"
-    if agents_md.is_file() and not agents_md.is_symlink():
-        out["AGENTS.md"] = agents_md
-    return out
 
 
 def _collect_tracked_files(lockfile: LockFile) -> dict[str, str]:
@@ -1013,6 +968,9 @@ def diff_scratch_against_project(
                     kind="unmanaged-conflict" if unmanaged else "modified",
                     package=tracked.get(rel, ""),
                     inline_diff=_inline_diff_for(scratch_path, project_path),
+                    owned_entries_only=not unmanaged
+                    and (projection_spec is not None or rel in merge_sidecar_paths)
+                    and _only_retired_sources_differ(s_bytes, p_bytes),
                 )
             )
         elif claims.unclaimed(rel):
@@ -1038,7 +996,9 @@ def diff_scratch_against_project(
             project_root / rel, project_root / spec[0], spec[1]
         ):
             # Replay deploys no hooks here, yet APM-owned entries remain (#3924).
-            findings.append(DriftFinding(path=rel, kind="modified", package=""))
+            findings.append(
+                DriftFinding(path=rel, kind="modified", package="", owned_entries_only=True)
+            )
         # else: untracked governed file -- ignore (user authored).
 
     if local_bundle_paths:

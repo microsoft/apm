@@ -51,7 +51,7 @@ def test_frozen_install_announces_mcp_targets_once(tmp_path, apm_binary_path):
 
     output = expect_ok("install", "--frozen", "--no-policy")
 
-    assert output.count("Targeting declared target from apm.yml: copilot") == 1, output
+    assert output.count("Targets: copilot  (source: apm.yml)") == 1, output
 
 
 def test_skill_bundle_reports_one_line_per_package(tmp_path, apm_binary_path):

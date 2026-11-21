@@ -1044,6 +1044,22 @@ def _type_decision(ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_ty
     return decisions[0]
 
 
+def package_grants_type(
+    ctx: ExecTrustContext, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether any of a package's approval keys still grants *exec_type*."""
+    return bool(package_keys) and _type_decision(ctx, package_keys, exec_type).allowed
+
+
+def package_denies_type(
+    ctx: ExecTrustContext | None, package_keys: tuple[str, ...], exec_type: str
+) -> bool:
+    """Whether a deny rule, not a missing approval, withholds *exec_type* from the package."""
+    if ctx is None or not package_keys:
+        return False
+    return _type_decision(ctx, package_keys, exec_type).trust_state == TRUST_DENIED
+
+
 def package_type_verdicts(
     ctx: ExecTrustContext,
     package_keys: tuple[str, ...],
@@ -1183,6 +1199,43 @@ def package_exec_decision(
             allowed.add(exec_type)
     partial = allowed and len(allowed) < len(verdicts)
     return status, tuple(sorted(allowed)) if partial else ()
+
+
+def package_withholding_layers(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> tuple[str, ...]:
+    """Return the deciding layers that withhold this package's executables now.
+
+    Empty when the gate is off or every declared type is allowed. The layers
+    name where the decision came from (org policy, a local deny, or no
+    approval), which ``install --frozen`` and ``--dry-run`` report (#4043).
+    """
+    withheld = package_withheld_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return tuple(sorted({verdict.layer for verdict in withheld.values()}))
+
+
+def package_withheld_verdicts(
+    ctx: ExecTrustContext | None,
+    package_keys: tuple[str, ...],
+    install_path: Path | None,
+    exec_types: tuple[str, ...] | list[str],
+    *,
+    native: bool = False,
+) -> dict[str, TypeVerdict]:
+    """Return the verdict of each declared type the gate withholds now, by type.
+
+    Empty when the gate is off or every declared type is allowed; ``--dry-run``
+    names each withheld surface with its verdict (#4454).
+    """
+    if ctx is None or not exec_types or not ctx.gate_enabled:
+        return {}
+    verdicts = package_type_verdicts(ctx, package_keys, install_path, exec_types, native=native)
+    return {exec_type: verdict for exec_type, verdict in verdicts.items() if not verdict.allowed}
 
 
 # -------------------------------------------------------------------

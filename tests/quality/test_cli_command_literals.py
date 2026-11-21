@@ -25,6 +25,8 @@ import pytest
 
 from tests.utils.click_tree import iter_commands, resolve
 
+RATCHET_TEST_SCOPE = "repository"
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.promise("P-DOC-cli-surface"),

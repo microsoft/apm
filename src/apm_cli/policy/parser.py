@@ -8,7 +8,9 @@ from typing import Any
 
 import yaml
 
+from ..core.deprecations import deprecation_message
 from ..mcp_transport import POLICY_TRANSPORTS, canonical_transport_names
+from ..models.extension_keys import is_extension_key
 from ..utils.yaml_io import load_yaml_str
 from .schema import (
     ApmPolicy,
@@ -21,6 +23,7 @@ from .schema import (
     ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
+    MarketplacePolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
@@ -56,6 +59,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "unmanaged_files",
     "security",
     "registry_source",
+    "marketplace",
     "bin_deploy",
     "executables",
 }
@@ -85,6 +89,7 @@ _MAPPING_FIELDS: tuple[tuple[str, ...], ...] = (
     ("manifest", "content_types"),
     ("unmanaged_files",),
     ("registry_source",),
+    ("marketplace",),
     ("security",),
     ("security", "audit"),
     ("security", "integrity"),
@@ -134,6 +139,8 @@ _STR_LIST_FIELDS: dict[tuple[str, ...], str] = {
     ("unmanaged_files", "directories"): "a YAML list of directories",
     ("unmanaged_files", "exclude"): "a YAML list of path globs",
     ("registry_source", "require"): "a YAML list of package patterns",
+    # Fail closed: a malformed allow-list must not read as "no opinion".
+    ("marketplace", "allow"): "a YAML list of origin patterns",
     ("security", "audit", "external"): "a YAML list of scanner names",
     ("bin_deploy", "deny"): "a YAML list of package strings",
     ("executables", "deny"): "a YAML list of package strings",
@@ -248,8 +255,10 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
         errors.append("Policy must be a YAML mapping")
         return errors, warnings
 
-    # Unknown top-level keys (warn, don't fail)
-    for key in sorted(str(key) for key in set(data.keys()) - _KNOWN_TOP_LEVEL_KEYS):
+    # Unknown top-level keys (warn, don't fail). Vendor-extension keys are
+    # ignored, never interpreted, and do not warn (req-pl-009).
+    unknown = {key for key in data if not is_extension_key(key)} - _KNOWN_TOP_LEVEL_KEYS
+    for key in sorted(str(key) for key in unknown):
         warnings.append(f"Unknown top-level policy key: '{key}'")
 
     _check_mappings(data, errors)
@@ -273,10 +282,8 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
 def _validate_executables(data: dict, warnings: list[str]) -> None:
     """Warn on deprecated ``bin_deploy`` and the inert ``executables.enforce``."""
     if data.get("bin_deploy") is not None:
-        warnings.append(
-            "'bin_deploy' is deprecated; use 'executables' (deny_all/deny) instead. "
-            "bin_deploy is still honored as a bin-scoped deny alias for one minor cycle."
-        )
+        warnings.append(deprecation_message("policy-bin-deploy"))
+
     execs = data.get("executables")
     if isinstance(execs, dict) and execs.get("enforce"):
         warnings.append(
@@ -381,6 +388,10 @@ def _build_policy(data: dict) -> ApmPolicy:
         allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
     )
 
+    marketplace = MarketplacePolicy(
+        allow=_parse_allow((data.get("marketplace") or {}).get("allow"))
+    )
+
     sec_data = data.get("security") or {}
     raw_audit = sec_data.get("audit")
     audit_data = raw_audit if isinstance(raw_audit, dict) else {}
@@ -433,6 +444,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         manifest=manifest,
         unmanaged_files=unmanaged_files,
         registry_source=registry_source,
+        marketplace=marketplace,
         security=security,
         bin_deploy=bin_deploy,
         executables=executables,

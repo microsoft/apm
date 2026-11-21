@@ -12,7 +12,8 @@ from typing import Any, ClassVar
 from ...core.command_logger import library_logger
 from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
-from ...utils.atomic_io import atomic_write_text, umask_file_mode
+from ...utils.atomic_io import umask_file_mode
+from ...utils.json_config import write_json_config
 from ...utils.path_security import has_symlink_component
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -628,11 +629,13 @@ class MCPClientAdapter(ABC):
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeError) as exc:
-            library_logger().warning(
-                f"Could not read {config_path}: {exc} -- skipping config write; "
-                "fix the file's permissions or encoding, or add this server manually",
-                symbol="warning",
-            )
+            if str(config_path) not in _UNREADABLE_CONFIGS_WARNED:
+                _UNREADABLE_CONFIGS_WARNED.add(str(config_path))
+                library_logger().warning(
+                    f"Could not read {config_path}: {exc} -- skipping config write; "
+                    "fix the file's permissions or encoding, or add this server manually",
+                    symbol="warning",
+                )
             return None
         if not raw.strip():
             return {}
@@ -691,14 +694,21 @@ class MCPClientAdapter(ABC):
         if self._is_linked_project_config(config_path):
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(config, indent=2) + ("\n" if self.json_config_trailing_newline else "")
+        trailing_newline = self.json_config_trailing_newline
         if shared and self._is_project_config_path(config_path):
-            atomic_write_text(config_path, payload, new_file_mode=umask_file_mode(config_path))
+            write_json_config(
+                config_path,
+                config,
+                default_trailing_newline=trailing_newline,
+                new_file_mode=umask_file_mode(config_path),
+            )
             return
         if config_path.is_file():
             # Tighten first: the atomic write keeps an existing file's mode.
             os.chmod(config_path, 0o600)
-        atomic_write_text(config_path, payload, new_file_mode=0o600)
+        write_json_config(
+            config_path, config, default_trailing_newline=trailing_newline, new_file_mode=0o600
+        )
         os.chmod(config_path, 0o600)
 
     @abstractmethod

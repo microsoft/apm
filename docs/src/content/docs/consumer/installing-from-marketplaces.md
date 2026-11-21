@@ -118,6 +118,13 @@ plus where it was found:
 `source_url` records the origin; the digest records provenance and is not a
 trust anchor.
 
+APM also remembers, under `APM_HOME`, which git ref each plugin version
+resolved to the first time an install committed it. If the marketplace later
+points that same version at another ref, `apm install` (with or without `-g`)
+refuses and names both refs. Run `apm update` to accept
+the new ref, only once the publisher confirms the change. A failed or
+`--dry-run` install records nothing.
+
 ## Declare marketplaces in your user manifest
 
 To register the same marketplaces on every machine, list them in your user
@@ -132,8 +139,47 @@ marketplaces:
 
 APM adds missing entries, updates changed ones, and removes ones it added that
 you deleted. It leaves registrations you made with `apm marketplace add`
-alone. A project `apm.yml` cannot declare `marketplaces:`. Registering grants
-no trust and installs nothing.
+alone. Registering grants no trust and installs nothing. A project can also
+declare its marketplaces (next section); a package (dependency) `apm.yml` may
+not declare `marketplaces:`.
+
+## Declare marketplaces in a project
+
+Commit the marketplaces a project installs from in its root `apm.yml`, in
+the same shape as the user manifest:
+
+```yaml title="apm.yml"
+marketplaces:
+  - name: contoso
+    source: https://github.com/contoso/agent-marketplace
+    ref: main
+dependencies:
+  apm:
+    - { name: security-review, marketplace: contoso }
+```
+
+Then `apm install` and `apm update` resolve `marketplace: contoso` through
+this map, on a fresh clone or in CI, with no `apm marketplace add`:
+
+- The map is never written to your marketplace registry. Names are local to
+  the file, and `apm.lock.yaml` records each catalog's URL and the resolved
+  commit, so `contoso` cannot mean a different catalog on another machine.
+- Inside the project the file wins over a registration with the same name.
+  APM prints one `[i]` line naming both catalogs.
+- The file also wins over the lock: if `apm.lock.yaml` recorded a package
+  from another catalog (for example, locked through a registration), the
+  next `apm install` or `apm update` re-resolves it through the map and
+  prints one `[i]` line. `apm install --frozen` refuses instead.
+- A dependency's own `marketplace: <name>` entries may only use names the
+  root map declares. Otherwise the install fails and shows the entry to add.
+- A dependency that declares `marketplaces:` is refused: a package cannot
+  add marketplaces.
+- Your org can restrict the catalogs a project may declare, and the
+  catalogs locked packages came from, with the policy
+  [`marketplace.allow`](../../reference/policy-schema/#marketplace) list.
+
+A committed marketplace is reviewed intent, like a committed Git URL:
+declaring it grants no trust beyond your org policy.
 
 ## Codex compatibility bundles through APM
 
@@ -164,6 +210,9 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
 
 ## When things go wrong
 
+- **`ref changed: was '...', now '...'`.** The marketplace moved a plugin
+  version you already installed to another ref. Confirm with the publisher,
+  then run `apm update` to accept it.
 - **`marketplace.json` changed but my install did not.** Expected: run
   `apm outdated` to see it, then `apm update`.
 - **Refused bare cross-repo source on `*.ghe.com`.** The entry would fall back

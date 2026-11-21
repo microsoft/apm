@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -799,6 +800,123 @@ class TestAutoDiscover(unittest.TestCase):
             self.assertEqual(mock_fetch.call_count, 1)
             self.assertFalse(result.found)
 
+    @staticmethod
+    def _age_cache(root: Path, age_seconds: int) -> dict[str, bytes]:
+        """Age every cached entry; return the cache files' bytes after aging."""
+        cache_dir = _get_cache_dir(root)
+        for meta in cache_dir.glob("*.meta.json"):
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            data["cached_at"] = time.time() - age_seconds
+            meta.write_text(json.dumps(data), encoding="utf-8")
+        return {path.name: path.read_bytes() for path in sorted(cache_dir.iterdir())}
+
+    @staticmethod
+    def _contents_api(mock_auth, mock_get, answers) -> None:
+        """Serve the GitHub Contents API through the real fetch path.
+
+        *answers* maps a repository name to the policy YAML it serves, a
+        status code, or an exception; only HTTP and credentials are faked.
+        """
+        mock_auth.side_effect = lambda host, operation, **kwargs: operation(None, {})
+
+        def _get(url, **_kwargs):
+            repo = url.split("/repos/", 1)[1].split("/contents/", 1)[0].split("/", 1)[1]
+            answer = answers[repo]
+            if isinstance(answer, Exception):
+                raise answer
+            response = MagicMock(headers={})
+            if isinstance(answer, int):
+                response.status_code = answer
+                return response
+            response.status_code = 200
+            response.json.return_value = {
+                "encoding": "base64",
+                "content": base64.b64encode(answer.encode("utf-8")).decode("ascii"),
+            }
+            return response
+
+        mock_get.side_effect = _get
+
+    @patch("apm_cli.policy.discovery.policy_get")
+    @patch("apm_cli.core.auth.AuthResolver.try_with_fallback")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_unreachable_github_private_serves_the_recorded_stale_github_cache(
+        self, mock_extract, mock_auth, mock_get
+    ):
+        """Offline, the policy last resolved from .github (under 7 days) applies (#4456)."""
+        import requests as real_requests
+
+        mock_extract.return_value = ("contoso", "github.com", None)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._contents_api(
+                mock_auth, mock_get, {".github-private": 404, ".github": VALID_POLICY_YAML}
+            )
+            self.assertTrue(_auto_discover(root).found)
+            cached = self._age_cache(root, 2 * 3600)
+            offline = real_requests.exceptions.ConnectionError()
+            self._contents_api(
+                mock_auth, mock_get, {".github-private": offline, ".github": offline}
+            )
+            result = _auto_discover(root)
+            after = {p.name: p.read_bytes() for p in sorted(_get_cache_dir(root).iterdir())}
+
+        self.assertEqual(result.outcome, "cached_stale")
+        self.assertTrue(result.cache_stale)
+        self.assertIsNotNone(result.policy)
+        self.assertEqual(result.source, "org:contoso/.github")
+        self.assertIn("Connection error", result.fetch_error)
+        self.assertEqual(after, cached)
+
+    @patch("apm_cli.policy.discovery.policy_get")
+    @patch("apm_cli.core.auth.AuthResolver.try_with_fallback")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_unreachable_github_private_without_an_absence_record_does_not_downgrade(
+        self, mock_extract, mock_auth, mock_get
+    ):
+        """A cached .github never stands in for an unreachable .github-private
+        that was not recorded as absent: the failure stands (#4456)."""
+        import requests as real_requests
+
+        mock_extract.return_value = ("contoso", "github.com", None)
+        offline = real_requests.exceptions.ConnectionError()
+        self._contents_api(mock_auth, mock_get, {".github-private": offline, ".github": offline})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_cache("contoso/.github", _make_test_policy(), root)
+            cached = self._age_cache(root, 2 * 3600)
+            result = _auto_discover(root)
+            after = {p.name: p.read_bytes() for p in sorted(_get_cache_dir(root).iterdir())}
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNone(result.policy)
+        self.assertEqual(after, cached)
+
+    @patch("apm_cli.policy.discovery.policy_get")
+    @patch("apm_cli.core.auth.AuthResolver.try_with_fallback")
+    @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
+    def test_github_private_auth_error_fails_closed_despite_a_recorded_github(
+        self, mock_extract, mock_auth, mock_get
+    ):
+        """A readable-but-denied .github-private may hide a stricter policy (#4456)."""
+        mock_extract.return_value = ("contoso", "github.com", None)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._contents_api(
+                mock_auth, mock_get, {".github-private": 404, ".github": VALID_POLICY_YAML}
+            )
+            self.assertTrue(_auto_discover(root).found)
+            cached = self._age_cache(root, 2 * 3600)
+            self._contents_api(
+                mock_auth, mock_get, {".github-private": 403, ".github": VALID_POLICY_YAML}
+            )
+            result = _auto_discover(root)
+            after = {p.name: p.read_bytes() for p in sorted(_get_cache_dir(root).iterdir())}
+
+        self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        self.assertIsNone(result.policy)
+        self.assertEqual(after, cached)
+
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_host_port_from_git_remote")
     def test_github_private_absent_falls_back_to_github(self, mock_extract, mock_fetch):
@@ -1348,6 +1466,44 @@ class TestGitlabPolicyInheritance(unittest.TestCase):
 
 class TestFetchFromAdoRepo(unittest.TestCase):
     """Test _fetch_from_ado_repo orchestration around the ADO transport."""
+
+    @patch("apm_cli.policy.discovery.policy_get")
+    def test_authenticated_fetch_caches_no_credential(self, mock_get):
+        """The policy cache holds the document and its warnings, never the credential."""
+        token = "adopat-4c0ffee-secret-needle"
+        seen_headers: list[dict] = []
+
+        def _get(url, *, headers=None, ambient_credentials=True):
+            seen_headers.append(dict(headers or {}))
+            response = MagicMock()
+            response.status_code = 200
+            response.text = VALID_POLICY_YAML + "enforcment: block\n"
+            return response
+
+        mock_get.side_effect = _get
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.dict(os.environ, {"ADO_APM_PAT": token}, clear=False),
+        ):
+            root = Path(tmpdir)
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="apm",
+                repo="apm-policy",
+                host="dev.azure.com",
+                project_root=root,
+            )
+            cached = b"".join(p.read_bytes() for p in sorted(_get_cache_dir(root).iterdir()))
+
+        self.assertTrue(result.found)
+        self.assertIn("Unknown top-level policy key: 'enforcment'", result.warnings)
+        # The fetch carried the credential, so the check below is not vacuous.
+        authorization = seen_headers[0]["Authorization"]
+        encoded = authorization.removeprefix("Basic ")
+        self.assertEqual(base64.b64decode(encoded).decode(), f":{token}")
+        self.assertIn(b"enforcment", cached)
+        for needle in (token, encoded, authorization):
+            self.assertNotIn(needle.encode(), cached)
 
     @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
     def test_legacy_coordinate_is_used_only_after_primary_404(self, mock_fetch):

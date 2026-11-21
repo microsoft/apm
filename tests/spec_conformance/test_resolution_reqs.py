@@ -246,6 +246,68 @@ def test_resolver_supports_tilde_range():
         assert c["expected"] in c["tags"] or c["expected"] is None
 
 
+_MIRROR_CONFIGURED_URL = (
+    "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+)
+_MIRROR_LOCKED_URL = (
+    "https://moved.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+)
+
+
+def _mirror_replay(tmp_path: Path, locked_hash: str | None = None):
+    from unittest.mock import MagicMock
+
+    from apm_cli.deps.registry.client import RegistryClient
+    from tests.unit.registry.test_resolver import _make_apm_tarball, _make_dep, _make_resolver
+
+    raw, digest = _make_apm_tarball()
+    client = MagicMock(spec=RegistryClient)
+    client.fetch_from_url.return_value = (raw, "application/gzip")
+    resolver = _make_resolver(client)
+    dep = _make_dep()
+    expected = locked_hash or f"sha256:{digest}"
+
+    def replay():
+        return resolver.download_from_lockfile(
+            dep,
+            tmp_path / "pkg",
+            resolved_url=_MIRROR_LOCKED_URL,
+            resolved_hash=expected,
+            version="1.2.0",
+        )
+
+    return resolver, client, dep, replay, digest
+
+
+@pytest.mark.req("req-rs-009")
+def test_locked_url_mismatch_is_satisfied_by_configured_registry_when_hash_matches(tmp_path):
+    resolver, client, dep, replay, digest = _mirror_replay(tmp_path)
+    replay()
+    client.fetch_from_url.assert_called_once_with(_MIRROR_CONFIGURED_URL)
+    assert (tmp_path / "pkg" / "apm.yml").exists()
+    recorded = resolver.last_resolutions[dep.get_unique_key()]
+    assert (recorded.resolved_url, recorded.resolved_hash) == (
+        _MIRROR_LOCKED_URL,
+        f"sha256:{digest}",
+    )
+
+
+@pytest.mark.req("req-rs-009")
+@pytest.mark.req("req-lk-013")
+def test_locked_url_mismatch_with_wrong_hash_fails_closed_before_extraction(tmp_path):
+    from apm_cli.deps.registry.resolver import RegistryResolutionError
+
+    expected = "sha256:" + "0" * 64
+    _, client, _, replay, digest = _mirror_replay(tmp_path, expected)
+    with pytest.raises(RegistryResolutionError) as excinfo:
+        replay()
+    client.fetch_from_url.assert_called_once_with(_MIRROR_CONFIGURED_URL)
+    message = str(excinfo.value)
+    for needle in ("acme/web-skills", expected, digest, _MIRROR_LOCKED_URL, _MIRROR_CONFIGURED_URL):
+        assert needle in message
+    assert not (tmp_path / "pkg").exists()
+
+
 @pytest.mark.req("req-rs-010")
 def test_resolver_supports_exact_pin():
     oracle = load_json_fixture("resolution", "semver-dialect.json")
@@ -330,7 +392,7 @@ def test_registry_picker_matches_semver_dialect_oracle(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]
 
 
-@pytest.mark.xfail(strict=True, reason="registry range grammar does not accept this form yet")
+@pytest.mark.xfail(strict=True, reason="#3648 registry range grammar does not accept this form yet")
 @pytest.mark.parametrize("case", _registry_oracle_cases(grammar_gaps=True))
 def test_registry_picker_range_grammar_gaps(case):
     assert pick_best(case["range"], case["tags"]) == case["expected"]

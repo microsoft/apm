@@ -60,6 +60,12 @@ COMPONENT_ONLY: dict[str, str] = {
     "bundle-instructions-staged": "an informational hint every local bundle install with "
     "staged instructions prints; the advised compile does not silence it",
     "claude-plugin-cache-invalid": "needs a corrupted legacy Claude Plugin cache entry",
+    "local-bundle-executables-denied": "executed by test_bundle_deny_retires_lsp_lifecycle "
+    "and test_bundle_deny_retires_executables_lifecycle (RA-041): the reinstall names the deny",
+    "local-bundle-executables-parked": "executed by test_local_bundle_hooks_lifecycle::"
+    "test_update_names_a_bundle_whose_executables_are_parked (#4441)",
+    "local-bundle-executables-unapproved": "needs apm approve for content-bound bundle keys "
+    "(#4490); executed by test_local_bundle_approval_hint_is_the_catalog_remedy_and_runs",
     "mcp-registry-url-invalid": "the retried --mcp install resolves against the live default "
     "MCP registry (network)",
     "mcp-update-flag": "usage refusal; the reported state is the flag combination, not "

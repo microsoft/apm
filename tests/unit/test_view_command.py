@@ -831,7 +831,7 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
             result = self.runner.invoke(cli, ["view", "x@corp-mkt"])
 
         assert result.exit_code == 0, result.output
-        resolve.assert_called_once_with("x", "corp-mkt")
+        resolve.assert_called_once_with("x", "corp-mkt", enforce_ref_pins=False)
         assert "apm install x@corp-mkt" not in result.output
         assert "Install: refused" in result.output
 

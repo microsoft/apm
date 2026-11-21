@@ -114,3 +114,55 @@ def test_install_dry_run_previews_locked_object_form_marketplace_dependency(
         assert _PLUGIN in output
         assert "Cannot compute install path" not in output
         assert _snapshot(root) == before
+
+
+def _plan_lines(text: str) -> list[str]:
+    """The dry-run plan's dependency lines, ``<package> -> <action>``."""
+    import re
+
+    return re.findall(r"^\s*(?:\[i\]\s*)?-\s+(\S+ -> \w+)\s*$", text, re.MULTILINE)
+
+
+def test_install_dry_run_lists_an_unlocked_object_form_dependency_once(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-036: before any lock, dry-run names the package the install resolves, once.
+
+    A ``{name, marketplace}`` declaration resolves to its plugin's repository;
+    the preview must not also list the unresolved ``_marketplace/<alias>/<name>``
+    coordinate, so its lines and count equal what the real install installs.
+    """
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    catalog, _ = _publish_catalog(repositories, "catalog-a", _REMOTE_A, "from catalog A")
+    env = repositories.url_rewrite_subprocess_env(catalog, _REMOTE_A)
+    consumer = LocalPackageFactory(isolated.work_root).create(
+        "consumer", targets=("codex",), dependencies=(_DECLARATION,)
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=300)
+
+    def run(*args: str):
+        (result,) = runner.run_sequence(
+            (args,), expected_returncodes=(0,), scenario_id="ra036", cwd=consumer.root, env=env
+        )
+        return result
+
+    run("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main")
+    before = _snapshot(consumer.root)
+
+    result = run("install", "--dry-run", *_INSTALL_FLAGS)
+    preview = _output(result)
+
+    assert "_marketplace/" not in preview, preview
+    assert _snapshot(consumer.root) == before
+    run("install", *_INSTALL_FLAGS)
+    installed = load_yaml(consumer.root / "apm.lock.yaml")["dependencies"]
+    planned = [line for line in _plan_lines(result.stdout) if line.endswith("-> install")]
+    # The preview names exactly the packages the real install recorded.
+    assert len(planned) == len(installed) == 1, (planned, installed)
+    assert installed[0]["repo_url"] in planned[0], (planned, installed)
+    assert f"would install {len(installed)} APM dependency" in preview, preview

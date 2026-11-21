@@ -199,7 +199,7 @@ class TestPolicyDiscoveryMiss:
         assert "Could not fetch org policy" in msg
         assert "Connection timeout" in msg
         assert "proceeding without policy enforcement" in msg
-        assert "--no-policy" in msg
+        assert "--no-policy" not in msg and "APM_POLICY_DISABLE" not in msg
 
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_garbage_response_does_not_say_check_vpn(self, mock_warning):
@@ -215,7 +215,8 @@ class TestPolicyDiscoveryMiss:
         assert "HTML in response" in msg
         assert "VPN" not in msg
         assert "firewall" not in msg
-        assert "org admin" in msg or "--no-policy" in msg
+        assert "org admin" in msg
+        assert "--no-policy" not in msg
 
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_cached_stale_explicit_posture(self, mock_warning):
@@ -270,12 +271,12 @@ class TestPolicyViolationBlockNextStep:
             remedy=PolicyRemedy.REMOVE,
         )
         mock_error.assert_called_once()
-        # Secondary dim line should mention apm.yml and --no-policy
+        # Secondary dim line names the apm.yml edit and never a bypass (RA-015)
         dim_calls = [c for c in mock_echo.call_args_list if c[1].get("color") == "dim"]
         assert len(dim_calls) == 1
         dim_text = dim_calls[0][0][0]
         assert "apm.yml" in dim_text
-        assert "--no-policy" in dim_text
+        assert "--no-policy" not in dim_text
         assert "acme/evil" in dim_text
 
     @patch("apm_cli.core.command_logger._rich_echo")
@@ -666,7 +667,8 @@ class TestPolicyReasonHelpers:
     def test_reason_unreachable(self):
         msg = InstallLogger._policy_reason_unreachable("acme/.github/apm-policy.yml")
         assert "unreachable" in msg
-        assert "--no-policy" in msg
+        assert "--no-policy" not in msg
+        assert "apm policy status" in msg
         assert "VPN" in msg or "firewall" in msg
 
     def test_reason_malformed(self):
@@ -680,26 +682,39 @@ class TestPolicyReasonHelpers:
         )
         assert "acme/evil-pkg" in msg
         assert "acme/.github/apm-policy.yml" in msg
-        assert "use `--no-policy` for one-off bypass" in msg
-        assert "APM_POLICY_DISABLE" not in msg
-        assert "apm.yml" in msg
-
-    def test_reason_blocked_for_update_names_only_a_bypass_update_accepts(self):
-        """'apm update' has no --no-policy; name the one-shot env prefix (#3994)."""
-        msg = InstallLogger._policy_reason_blocked(
-            "acme/evil-pkg", "org:acme/.github", remedy=PolicyRemedy.REMOVE, command="update"
+        assert msg == (
+            "Blocked by org policy at acme/.github/apm-policy.yml. Nothing was changed. "
+            "Remove `acme/evil-pkg` from apm.yml, or contact your policy admin to allow it. "
+            "Run `apm policy status` to see the active policy."
         )
-        assert "--no-policy" not in msg
-        assert "`APM_POLICY_DISABLE=1 apm update` (never export it in CI)" in msg
 
-    def test_update_logger_renders_the_update_bypass(self, capsys):
-        logger = InstallLogger(command="update")
+    @pytest.mark.parametrize("command", ["install", "update"])
+    def test_policy_violation_never_names_a_bypass(self, capsys, command):
+        """G7: no policy refusal advertises a bypass, for any command (RA-015)."""
+        logger = InstallLogger(command=command)
         logger.policy_violation(
             "acme/evil-pkg", "denied", severity="block", source="org:acme/.github"
         )
+        captured = capsys.readouterr()
+        for token in ("--no-policy", "APM_POLICY_DISABLE", "bypass"):
+            assert token not in captured.out + captured.err
+
+    def test_refused_add_names_no_apm_yml_edit(self, capsys):
+        """RA-015b: a refused `apm install <pkg>` never wrote the add to apm.yml."""
+        logger = InstallLogger(partial=True)
+        logger.record_adding(["evilcorp/bad-pkg"])
+        logger.policy_violation(
+            "github.com/evilcorp/bad-pkg",
+            "denied",
+            severity="block",
+            source="org:acme/.github",
+            remedy=PolicyRemedy.REMOVE,
+        )
         err = " ".join(capsys.readouterr().err.split())
-        assert "APM_POLICY_DISABLE=1 apm update" in err
-        assert "--no-policy" not in err
+        assert "apm.yml" not in err
+        assert (
+            "Choose a package the policy allows, or contact your policy admin to allow it." in err
+        )
 
     def test_reason_blocked_transitive_mcp_names_declaring_dependency(self):
         msg = InstallLogger._policy_reason_blocked(
@@ -708,7 +723,7 @@ class TestPolicyReasonHelpers:
             remedy=PolicyRemedy.REMOVE,
             declared_by="acme/parent-pkg",
         )
-        assert "remove `acme/parent-pkg` (it brings in `evil-srv`) from apm.yml" in msg
+        assert "Remove `acme/parent-pkg` (it brings in `evil-srv`) from apm.yml" in msg
 
     def test_reason_blocked_cites_rule_as_category(self):
         msg = InstallLogger._policy_reason_blocked(
@@ -717,32 +732,32 @@ class TestPolicyReasonHelpers:
             remedy=PolicyRemedy.REMOVE,
             rule="dependency-denylist",
         )
-        assert msg.startswith("Blocked by org policy at org:acme/.github (dependency-denylist) --")
-        assert "remove `github.com/evilcorp/bad-pkg` from apm.yml" in msg
-        assert "remove `dependency-denylist`" not in msg
+        assert msg.startswith("Blocked by org policy at org:acme/.github (dependency-denylist).")
+        assert "Remove `github.com/evilcorp/bad-pkg` from apm.yml" in msg
+        assert "`dependency-denylist`" not in msg
 
     def test_reason_blocked_required_package_says_add(self):
         msg = InstallLogger._policy_reason_blocked(
             "acme/std", "org:acme/.github", remedy=PolicyRemedy.ADD
         )
-        assert "add `acme/std` to apm.yml" in msg
-        assert "remove" not in msg
+        assert "Add `acme/std` to apm.yml" in msg
+        assert "remove" not in msg.lower()
 
     def test_reason_blocked_pin_says_pin(self):
         msg = InstallLogger._policy_reason_blocked(
             "acme/std", "org:acme/.github", remedy=PolicyRemedy.PIN
         )
-        assert "pin `acme/std` to a semver range, tag, or SHA in apm.yml" in msg
-        assert "remove" not in msg
+        assert "Pin `acme/std` to a semver range, tag, or SHA in apm.yml" in msg
+        assert "remove" not in msg.lower()
 
     @pytest.mark.parametrize("remedy", [None, "delete", "bogus"])
     def test_reason_blocked_unknown_remedy_never_defaults_to_remove(self, remedy):
         msg = InstallLogger._policy_reason_blocked(
             "acme/evil-pkg", "org:acme/.github", remedy=remedy, declared_by="acme/parent"
         )
-        assert "remove" not in msg
+        assert "remove" not in msg.lower()
         assert "apm.yml" not in msg
-        assert "--no-policy" in msg
+        assert "--no-policy" not in msg
 
     def test_reason_blocked_default_remedy_suggests_no_apm_yml_edit(self):
         msg = InstallLogger._policy_reason_blocked("acme/evil-pkg", "org:acme/.github")
@@ -764,7 +779,7 @@ class TestPolicyReasonHelpers:
         )
         assert "compilation-target" not in msg
         assert "apm.yml" not in msg
-        assert "--no-policy" in msg
+        assert "--no-policy" not in msg
 
 
 # ── _render_policy_group (via DiagnosticCollector.render_summary) ───

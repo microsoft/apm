@@ -47,7 +47,7 @@ integration suite runs only at merge time via GitHub Merge Queue
    - `.github/CODEOWNERS` requires Lead Maintainer review for any change
      to `.github/workflows/**`.
 4. **`build-release.yml`** - `push` to main, `v*` tags, nightly schedule, `repository_dispatch` (`manual-build-release`); no `workflow_dispatch`
-   - **`release-plan`** (`scripts/release_plan.py`) picks a mode: `push` (unit tests + Linux/Windows binaries), `full` (schedule/dispatch: every lane; a green full run is promotion evidence for its SHA) or, for a `v*` tag, `promoted` (SHA has a green full run on main: build, smoke, release validation, publish) or full validation in the tag run before publishing. Releasing is always "push a tag"; nothing publishes without a green full validation of the exact SHA.
+   - **`release-plan`** (`scripts/release_plan.py`) picks a mode: `push` (unit tests + Linux/Windows binaries), `full` (schedule/dispatch: every lane; a green full run is promotion evidence for its SHA) or, for a `v*` tag, `promoted` (SHA has a green full run on main: build, smoke, release validation, publish) or full validation in the tag run before publishing. Releasing is always "push a tag"; nothing publishes without a green full validation of the exact SHA. A tag must point at a commit on `main` or a `release/*` branch (compare API, checked before evidence); any other tag, or a compare API error, fails the plan before any build or publish job.
    - **Linux + Windows** build in `build-linux-x86`, `build-linux-arm`, `build-windows` (check name `Build & Test`). Linux integration is duration-sharded (`integration-plan` + `scripts/ci_sharding.py`, seeds in `.github/ci-durations/`); network-dependent tests run in their own retrying lane; `Integration Tests Summary` requires every lane.
    - **macOS** never runs on push. Intel is one job running `windows_compat or platform_sensitive`. arm64 is two parallel jobs on the same SHA: `unit-macos-arm` (unit tests, full runs only) and `build-and-validate-macos-arm` (build, `lifecycle_smoke or windows_compat or platform_sensitive`, release validation). `create-release` requires both (the unit job may be skipped only on a promoted tag).
    - **Windows units on push** run as three seed-balanced shards (`windows-unit-1..3`); `build-windows-push` builds only if the plan, installer and every shard succeeded.
@@ -56,6 +56,9 @@ integration suite runs only at merge time via GitHub Merge Queue
    - **Linux x86_64 only**. Live inference smoke tests (`apm run`) isolated from release pipeline.
    - Uses `GH_MODELS_PAT` for GitHub Models API access.
    - Failures do not block releases - annotated as warnings.
+6. **`main-architecture-ratchets.yml`** - `push` to main only
+   - Re-runs ci.yml's `test-architecture-contracts` job (check `Architecture Ratchet Contracts (main)`), so a change that reaches main without a `merge_group` run cannot leave main silently red on the ratchet contracts.
+   - Never opts into provisional baselines. `tests/quality/test_ci_topology.py` pins the job to ci.yml's, so the two cannot drift.
 
 ## Platform Testing Strategy
 - **PR time**: Linux-only combined build-and-test in `ci.yml`. Catches logic bugs and dependency issues before merge. Windows is tested on every push to main; macOS and full integration run nightly, on dispatch and on release tags.

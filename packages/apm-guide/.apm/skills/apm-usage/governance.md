@@ -124,8 +124,10 @@ in full (`gitlab.example.com/group/sub/pkg`). `required-packages` (apm.yml)
 and `required-packages-deployed` (apm.lock.yaml) compare that same
 identity; an entry matching no declared package fails both, and the
 message names the other host and the entry that would match it (for a
-trusted host). An explicit proxy path (`host/artifactory/...`) is identified
-by the proxy host; prefer `PROXY_REGISTRY_URL` with plain shorthand.
+trusted host). An explicit proxy path (`art.example.com/artifactory/github/acme/tools`)
+is identified by the proxy host: require `art.example.com/acme/tools`; both
+checks read the lockfile entry written under that host. Prefer
+`PROXY_REGISTRY_URL` with plain shorthand to keep default-host entries.
 A project `default_host:` never rebinds a hostless entry, and `GITHUB_HOST`
 varies per machine, so org-wide policies should host-qualify every entry.
 Required-package matching follows source replacement: with a root
@@ -154,6 +156,31 @@ registry_source:
 
 The same registry-source rule applies to `apm install`,
 `apm install <pkg>`, `apm update`, and `apm audit --ci`.
+
+## Marketplace origin governance
+
+Restrict the marketplace catalogs a root project `apm.yml` may declare
+under `marketplaces:`, and the catalogs marketplace packages are installed
+from (the lock's `source_url` and each fresh resolution, map or
+registration), so a committed lock cannot bypass the list. A locked package
+with no recorded origin is refused. Checked at install (policy gate) and by
+`apm audit --ci`. To clear a refused package: remove its `apm.yml` entry, run
+`apm install`, then add it back from an allowed catalog (`apm update` keeps
+the recorded catalog).
+
+```yaml
+# .github/apm-policy.yml
+marketplace:
+  allow:
+    - github.com/contoso/*              # host/path glob of the catalog origin
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `allow` | `null` | Catalog origins every declared marketplace and every locked or resolved marketplace package must match (`*` = one segment, `**` = any depth; scheme, `.git` and host case ignored). `null` = no opinion; `[]` = none allowed. Local-path catalogs never match. Intersected (tighten-only) through `extends`. |
+
+Registration (`apm marketplace add`) enables discovery and `@name` shorthand
+only; it is never a trust gate. This policy is the org control.
 
 ## Integrity and drift enforcement
 
@@ -467,13 +494,15 @@ Identity casing compares GitHub and registry owner/repository prefixes case-inse
 
 These checks run without a policy file:
 
-- `lockfile-exists` -- apm.lock.yaml present
+- `lockfile-exists` -- apm.lock.yaml present when APM, MCP or LSP dependencies are declared
 - `ref-consistency` -- dependency refs match lockfile
 - `deployment-ledger-owners` -- every canonical deployment owner and active owner resolves to a current dependency, `.`, or `local-bundle`
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
+- `lockfile-targets-current` -- no lockfile-recorded files of a target `apm.yml` no longer declares; `apm install --frozen` refuses the same state without writing
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
+- `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
@@ -490,7 +519,8 @@ modify the manifest, lockfile, or deployment.
 Additional checks when a policy is provided:
 
 - **Dependencies:** allowlist, denylist, required packages (present, deployed,
-  version, executables trusted), transitive depth, pinned constraints, registry source
+  version, executables trusted), transitive depth, pinned constraints, registry source,
+  declared marketplace origins (`marketplace.allow`)
 - **Integrity:** dependency content hashes
 - **MCP:** allowlist, denylist, transport, self-defined servers
 - **Compilation:** target, strategy, source attribution
@@ -527,7 +557,8 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers org policy from the project's git remote by checking
+APM auto-discovers org policy from the project's git remote (`origin`, else the
+single remote; several remotes without `origin` stop the install and are named) by checking
 `.github-private`, `.github`, `.apm`, and `_apm` policy repos in order on GitHub
 API-compatible hosts. No policy found is silent by default; on github.com, `*.ghe.com` and
 the `GITHUB_HOST` host, `apm policy status`, `--verbose` and the `fetch_failure_default: block`
@@ -623,7 +654,7 @@ $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-denylist). Nothing was changed. Remove `github.com/acme/evil-pkg` from apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 [x] Install blocked by org policy -- see violations above
 ```
 
@@ -669,20 +700,22 @@ $ apm install acme/evil-pkg
 [>] Installing 1 new package...
 [!] Policy: org:contoso/.github -- enforcement=block
 [x] Policy violation: github.com/acme/evil-pkg -- denied by pattern: acme/evil-pkg
-  Blocked by org policy at org:contoso/.github (dependency-denylist) -- remove `github.com/acme/evil-pkg` from apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-denylist). Nothing was changed. Choose a package the policy allows, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 [i] apm.yml restored to its previous state.
 [x] Install blocked by org policy -- see violations above
 ```
 
-One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in) and cites the check in parentheses.
+One violation line per offending dependency or MCP server; the hint names what to change in apm.yml (for a transitive MCP server, the dependency that brings it in; nothing for a refused `apm install <pkg>`, whose add is never kept) and cites the check in parentheses. A refusal never suggests bypassing policy.
 
-Transitive MCP server blocked -- APM packages stay installed, MCP configs are not written:
+Transitive MCP server blocked -- the install stops before anything is committed; `apm.lock.yaml`, deployed files and MCP configs are unchanged:
 
 ```shell
 $ apm install
 [>] Installing dependencies from apm.yml...
 [!] Policy: org:contoso/.github -- enforcement=block
-[x] MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.
+[x] Policy violation: evil-srv -- denied by pattern: evil-*
+  Blocked by org policy at org:contoso/.github (mcp-denylist). Nothing was changed. Remove `acme/carrier` (it brings in `evil-srv`) from apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
+[x] Install blocked by org policy: 1 check(s) failed
 ```
 
 ### 8. Escape hatches
@@ -799,7 +832,7 @@ Violation classes:
 
 | Class | Triggers | Remediation |
 |-------|----------|-------------|
-| `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
+| `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, or ask your policy admin to allow it |
 | `allowlist` | Dep not in a set `dependencies.allow` (`[]` allows nothing) | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
 | `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal tag (`vX.Y.Z`, or `{name}-vX.Y.Z` / `{name}--vX.Y.Z` for the dep's own package name), an exact package release tag (`name@X.Y.Z` / `@scope/name@X.Y.Z`), or a full SHA. Leading zeros or non-ASCII digits (`v01.2.3`) are not SemVer and fail as bare branches. The check judges declared release intent, not immutability (a tag can move; `apm install --frozen` replays the locked commit). The constraint is judged as declared in `apm.yml` (a `replace:` rule by the ref it selects), not the tag a range resolved to. Roll out enforcement with `warn` before `block`. |

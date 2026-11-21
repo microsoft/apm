@@ -46,9 +46,9 @@
     {
       "id": "user-facing-output-diagnostics",
       "decision": "User-facing output / diagnostics, including MCP client adapters and the safe MCP installer, which emit through CommandLogger",
-      "owner": "core/command_logger.py (CommandLogger, library_output, library_logger)",
-      "selectors": ["src/apm_cli/core/command_logger.py"],
-      "guards": ["registry-delegation-output-diagnostics"]
+      "owner": "core/command_logger.py (CommandLogger, library_output, library_logger); core/deprecations.py owns deprecation warning text",
+      "selectors": ["src/apm_cli/core/command_logger.py", "src/apm_cli/core/deprecations.py"],
+      "guards": ["registry-delegation-output-diagnostics", "registry-delegation-deprecation-catalog"]
     },
     {
       "id": "console-construction",
@@ -159,6 +159,17 @@
       "owner": "cli.py (main, _route_sigterm_to_interrupt)",
       "selectors": ["src/apm_cli/cli.py"],
       "guards": ["registry-delegation-process-interrupt-signals"]
+    },
+    {
+      "id": "cli-startup-import-budget",
+      "decision": "CLI startup (apm --help / --version) imports no command module and no GitPython; root verbs register as lazy stubs and deps exports resolve lazily",
+      "owner": "cli.py (_LazyCommand, _LAZY_COMMANDS, _OutputModeGroup) + deps/__init__.py (PEP 562 __getattr__); installed-CLI budget in tests/integration/test_cli_startup_import_budget.py",
+      "selectors": [
+        "src/apm_cli/deps/__init__.py",
+        "src/apm_cli/update_notice.py",
+        "tests/integration/test_cli_startup_import_budget.py"
+      ],
+      "guards": ["registry-delegation-cli-startup-import-budget"]
     }
   ]
 }

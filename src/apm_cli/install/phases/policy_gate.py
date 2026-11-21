@@ -64,7 +64,7 @@ def run(ctx: InstallContext) -> None:
         fetch_result,
         logger=logger,
         fetch_failure_default=fetch_failure_default,
-        raise_blocking_errors=True,
+        raise_blocking_errors=getattr(ctx, "dry_run", False) is not True,
     )
 
     # ------------------------------------------------------------------
@@ -88,7 +88,11 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 4. Run dependency policy checks
     # ------------------------------------------------------------------
-    from apm_cli.policy.policy_checks import run_dependency_policy_checks
+    from apm_cli.policy.policy_checks import (
+        MarketplaceOrigins,
+        marketplace_resolution_origins,
+        run_dependency_policy_checks,
+    )
 
     mcp_deps = getattr(ctx, "direct_mcp_deps", None)
 
@@ -109,7 +113,7 @@ def run(ctx: InstallContext) -> None:
             extra_kwargs["registries"] = registries_map
 
     audit_result = run_dependency_policy_checks(
-        ctx.deps_to_install,
+        _with_prefetch_denials(ctx),
         lockfile=ctx.existing_lockfile,
         policy=policy,
         mcp_deps=mcp_deps,
@@ -118,6 +122,18 @@ def run(ctx: InstallContext) -> None:
         fail_fast=(enforcement == "block"),
         direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
         declared_refs=getattr(ctx, "declared_direct_refs", None) or None,
+        # This install locks deps_to_install; a required one it adds is not absent.
+        installing=True,
+        # Root ``marketplaces:`` origins, and the catalog origins of locked
+        # and freshly resolved marketplace deps, meet marketplace.allow (#2903).
+        marketplace_origins=MarketplaceOrigins(
+            getattr(apm_package, "marketplaces", None),
+            marketplace_resolution_origins(
+                ctx.existing_lockfile,
+                keys=[d.get_unique_key() for d in ctx.deps_to_install],
+                provenance=getattr(ctx, "marketplace_provenance", None),
+            ),
+        ),
         **extra_kwargs,
     )
 
@@ -126,7 +142,13 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # One violation per offending dependency / MCP server; the check
     # name is only the category (#3835).
-    from apm_cli.policy.install_preflight import emit_check_violations
+    from apm_cli.policy.install_preflight import emit_check_violations, render_dry_run_verdicts
+
+    if getattr(ctx, "dry_run", False) is True:
+        # --dry-run previews the same verdicts and never stops the preview.
+        if not audit_result.passed and logger:
+            render_dry_run_verdicts(logger, audit_result, enforcement)
+        return
 
     has_blocking = False
     for check in audit_result.checks:
@@ -144,7 +166,9 @@ def run(ctx: InstallContext) -> None:
 
     if has_blocking:
         raise PolicyViolationError(
-            "Install blocked by org policy -- see violations above",
+            "Install blocked by org policy -- see violations above. Remove or replace "
+            "the blocked dependencies in apm.yml (run 'apm policy status' to see the "
+            "active policy), then re-run the install.",
             audit_result=audit_result,
             policy_source=source or "unknown",
         )
@@ -153,6 +177,31 @@ def run(ctx: InstallContext) -> None:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _with_prefetch_denials(ctx: InstallContext) -> list:
+    """The resolved dependencies plus any refused by identity before fetching.
+
+    A positional install keeps only the denials inside its selection, the
+    same filter its resolved dependencies got.
+    """
+    denied = getattr(ctx, "prefetch_policy_denials", None) or ()
+    graph = getattr(ctx, "dependency_graph", None)
+    if denied and getattr(ctx, "only_packages", None) and graph is not None:
+        from apm_cli.install.package_selection import selected_subtree_dependencies
+
+        denied = selected_subtree_dependencies(
+            ctx.only_packages, graph.dependency_tree, list(denied)
+        )
+    if not denied:
+        return ctx.deps_to_install
+    deps = list(ctx.deps_to_install)
+    seen = {dep.get_unique_key() for dep in deps}
+    for dep in denied:
+        if dep.get_unique_key() not in seen:
+            seen.add(dep.get_unique_key())
+            deps.append(dep)
+    return deps
 
 
 def _is_policy_disabled(ctx: InstallContext) -> bool:
@@ -208,3 +257,37 @@ def _discover_with_chain(ctx: InstallContext):
     from apm_cli.policy.discovery import discover_policy_with_chain
 
     return discover_policy_with_chain(_policy_root(ctx))
+
+
+def _prefetch_policy_refusal(ctx: InstallContext):
+    """Return ``refuse(dep_ref) -> bool``: a blocking org policy refuses by identity.
+
+    The policy is read once, lazily, at the scope manifest root. A refused
+    dependency is never contacted, cloned or cached; it is recorded on
+    ``ctx.prefetch_policy_denials`` and the policy gate reports it.
+    """
+    from apm_cli.policy.install_preflight import identity_policy_denial, prefetch_identity_policy
+
+    state: dict = {}
+
+    def refuse(dep_ref) -> bool:
+        if "policy" not in state:
+            state["policy"] = prefetch_identity_policy(_policy_root(ctx), no_policy=ctx.no_policy)
+        if identity_policy_denial(dep_ref, state["policy"]) is None:
+            return False
+        ctx.prefetch_policy_denials.append(dep_ref)
+        return True
+
+    return refuse
+
+
+def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_graph) -> None:
+    """A replacement whose selected source policy refused before fetch is no load failure.
+
+    The policy gate reports the refusal with the violation wording.
+    """
+    for dep_ref in ctx.prefetch_policy_denials:
+        errors = dependency_graph.dependency_tree.replacement_load_errors
+        error = errors.get(dep_ref.get_unique_key())
+        if error in dependency_graph.resolution_errors:
+            dependency_graph.resolution_errors.remove(error)

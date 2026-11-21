@@ -23,6 +23,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import stored_alias
 
 if TYPE_CHECKING:
+    from apm_cli.core.deployment_ledger import OverwriteGate
     from apm_cli.integration.cleanup import DeploymentEvidence
 
 
@@ -30,6 +31,20 @@ def discover_primitives(*args: Any, **kwargs: Any) -> Any:
     from apm_cli.primitives.discovery import discover_primitives as _discover_primitives
 
     return _discover_primitives(*args, **kwargs)
+
+
+def _target_root_dirs(base: Path) -> frozenset[Path]:
+    """Every project-layout target root directory under *base*.
+
+    A project's target roots signal which harnesses it uses (opt-in targets
+    deploy only where their root exists), so project cleanup never removes
+    them. Cleanup bounded by the home directory is user scope, where roots
+    APM created itself (such as ``~/.claude``) go when their last file is
+    retired.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return frozenset((base / profile.root_dir).resolve() for profile in KNOWN_TARGETS.values())
 
 
 def _managed_absolute_target_root(
@@ -116,6 +131,10 @@ class IntegrationResult:
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
 
+    # Hook files whose entries are registered after this call, written or
+    # unchanged; adoption display (RA-007) never changes it (#4033).
+    hooks_registered: int = 0
+
     # Hook transparency: per-file display metadata populated by HookIntegrator.
     # Each entry is a dict with keys: target_label, output_path, source_hook_file,
     # actions (list of {event, summary}), rendered_json.
@@ -159,11 +178,59 @@ def _read_bytes_no_follow(path: Path) -> bytes:
         os.close(fd)
 
 
-def untrusted_baseline_message(entry: str) -> str:
-    """Refuse to replace an existing file that has no trustworthy deployment baseline."""
+def recovery_directory(entry: str, destination: Path, *, user_scope: bool) -> str:
+    """Name a deployed skill directory so a user can move it: project-relative or absolute."""
+    if user_scope or "://" in entry or Path(entry).is_absolute():
+        return destination.resolve().as_posix()
+    return entry
+
+
+def untrusted_baseline_message(
+    entry: str, directory: str | None = None, *, user_scope: bool = False
+) -> str:
+    """Refuse to replace an existing file that has no trustworthy deployment baseline.
+
+    *directory* names the deployed skill directory whose removal lets the next
+    install, in the same scope, redeploy it from source.
+    """
+    head = f"Skipped {entry}: no trustworthy local deployment baseline. "
+    if directory is None:
+        return (
+            f"{head}Move the conflicting file aside and retry; "
+            "use --force only to intentionally overwrite it."
+        )
+    # Scoped recovery: never a global --force that could overwrite edits elsewhere.
+    skill = f"{directory.rstrip('/')}/"
     return (
-        f"Skipped {entry}: no trustworthy local deployment baseline. Move the conflicting "
-        "file aside and retry; use --force only to intentionally overwrite it."
+        f"{head}Move the conflicting file aside and retry. To redeploy only this skill, "
+        f"move {skill} aside (or delete it if it holds no edits), then run "
+        f"'{'apm install -g' if user_scope else 'apm install'}'; that rewrites {skill} "
+        "alone and keeps edited files elsewhere."
+    )
+
+
+def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str:
+    """Name a managed file install kept, and the runnable way past it.
+
+    *proven_edit* means the file differs from the bytes APM recorded deploying;
+    otherwise no receipt or locked render proves APM wrote it (#4360).
+    """
+    from apm_cli.core import remediation
+
+    reason = (
+        "it was modified since APM deployed it"
+        if proven_edit
+        else "it differs from what APM renders and there is no local deployment "
+        "receipt or locked render proving APM wrote it, so it may hold local edits"
+    )
+    # Restore, or keep the edit by exporting it; never a --force overwrite,
+    # which would also deploy despite critical security findings (RA-008).
+    if user_scope:
+        # export-patch reads the project lock only; user scope can only restore.
+        restore = remediation.KEPT_FILE_RESTORE.with_command("apm install -g")
+        return remediation.kept_file_message(entry, reason, restore)
+    return remediation.kept_file_message(
+        entry, reason, remediation.KEPT_FILE_RESTORE, remediation.LOCAL_EDITS_EXPORT
     )
 
 
@@ -174,6 +241,9 @@ class BaseIntegrator:
     detection, sync removal, and link resolution logic is
     handled here.
     """
+
+    # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
+    _overwrite_gate: "OverwriteGate | None" = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -313,6 +383,93 @@ class BaseIntegrator:
             fail(error)
         yield from os.walk(source, followlinks=False, onerror=fail)
 
+    def install_user_scope(self) -> bool:
+        """Return whether this integrator deploys at user scope; recovery advice uses -g."""
+        return False
+
+    def untrusted_member_message(self, entry: str, directory: str, destination: Path) -> str:
+        """Refuse an unprovable member and name the skill directory and scoped retry."""
+        user_scope = self.install_user_scope()
+        return untrusted_baseline_message(
+            entry,
+            recovery_directory(directory, destination, user_scope=user_scope),
+            user_scope=user_scope,
+        )
+
+    def _receipted_hash(self, path: Path) -> str | None:
+        """The hash this checkout's deployment receipt binds for *path*, if any."""
+        gate = self._overwrite_gate
+        if gate is None or gate.session is None:
+            return None
+        return gate.session.receipted_hash(path, gate.targets)
+
+    def receipted_unchanged(self, path: Path) -> bool:
+        """Whether this checkout's receipt already binds *path*'s current bytes (RA-007)."""
+        receipted = self._receipted_hash(path)
+        return receipted is not None and receipted == self._file_hash(path)
+
+    @staticmethod
+    def _file_hash(path: Path) -> str | None:
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        try:
+            return compute_file_hash(path)
+        except OSError:
+            return None
+
+    def _receipted_edit(self, path: Path, rendered_hash: str) -> str | None:
+        """Classify a managed file a receipt proves the user edited (RA-012).
+
+        ``"drift"`` when the package renders the receipted bytes (nothing new
+        to deploy: kept, reported, exit 0); ``"blocked"`` when it renders new
+        bytes the edit holds back. ``None`` without a receipt.
+        """
+        receipted = self._receipted_hash(path)
+        if receipted is None or self._file_hash(path) in (None, receipted):
+            return None
+        return "drift" if rendered_hash == receipted else "blocked"
+
+    def _rendered_hash(self, source_file: Path, expected_content: str | None) -> str:
+        """Content hash of the bytes this integrator would deploy for one file."""
+        from apm_cli.utils.content_hash import compute_file_hash, content_hash_of_bytes
+
+        if expected_content is None:
+            return compute_file_hash(source_file)
+        text = (
+            normalize_crlf_to_lf(expected_content)
+            if self._LF_NORMALIZED_DEPLOY
+            else expected_content
+        )
+        return content_hash_of_bytes(text.encode("utf-8"))
+
+    @staticmethod
+    def _member_edit(
+        target_file: Path, source_file: Path, expected: str | None, *, untrusted: bool
+    ) -> str | None:
+        """Classify an existing member against the bytes APM recorded deploying.
+
+        ``None`` writes it. ``"untrusted"``: no baseline proves APM wrote it.
+        ``"drift"``: a user edit while the package brings the recorded bytes.
+        ``"blocked"``: a user edit while the package brings new bytes (an
+        upgrade the kept edit blocks). A file that already holds the package's
+        bytes is rewritten, which records them.
+        """
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        if not target_file.is_file():
+            return None
+        if untrusted:
+            return "untrusted"
+        if expected is None:
+            return None
+        disk = compute_file_hash(target_file)
+        if disk == expected:
+            return None
+        incoming = compute_file_hash(source_file)
+        if incoming == disk:
+            return None
+        return "drift" if incoming == expected else "blocked"
+
     def copy_directory_files(
         self,
         source: Path,
@@ -338,7 +495,6 @@ class BaseIntegrator:
         without deleting or inventorying destination siblings. *package* is the
         owning dependency key used to attribute refusal diagnostics.
         """
-        from apm_cli.utils.content_hash import compute_file_hash
 
         copied: list[Path] = []
         destination_existed = destination.exists()
@@ -386,26 +542,30 @@ class BaseIntegrator:
                     if baseline_hash is not None
                     else recorded_hashes.get(entry)
                 )
-                if (
-                    not force
-                    and target_file.is_file()
-                    and (
-                        (baseline_hash is not None and expected is None)
-                        or (expected is not None and compute_file_hash(target_file) != expected)
+                state = (
+                    None
+                    if force
+                    else self._member_edit(
+                        target_file,
+                        source_file,
+                        expected,
+                        untrusted=(baseline_hash is not None and expected is None),
                     )
-                ):
-                    if expected is None:
-                        message = untrusted_baseline_message(entry)
+                )
+                if state is not None:
+                    if state == "untrusted":
+                        message = self.untrusted_member_message(
+                            entry, path_entry(destination), destination
+                        )
                     else:
-                        message = (
-                            f"Skipped {entry}: modified since deployment. "
-                            "Preserve your changes before reinstalling with --force."
+                        message = kept_edit_message(
+                            entry, user_scope=self.install_user_scope(), proven_edit=True
                         )
                     if diagnostics is not None:
-                        if expected is None:
-                            diagnostics.error(message, package=package)
-                        else:
+                        if state == "drift":
                             diagnostics.warn(message)
+                        else:
+                            diagnostics.error(message, package=package)
                     else:
                         _rich_warning(message)
                     if on_member_skipped is not None:
@@ -682,12 +842,47 @@ class BaseIntegrator:
         )
         if identical:
             target_paths.append(target_path)
+            # Already receipted with these bytes: unchanged, not an adoption (RA-007).
+            if self.receipted_unchanged(target_path):
+                return True, False
+            # A managed file already holding the final render is APM's bytes:
+            # record the receipt the skipped rewrite would have (#4184, #3701).
+            if managed_files and rel_path.replace("\\", "/") in managed_files:
+                self.note_rendered_write(target_path)
             return True, True
         if self.check_collision(
             target_path, rel_path, managed_files, force, diagnostics=diagnostics
         ):
             return True, False
-        return False, False
+        # A managed file that differs from the render is replaced only with
+        # deployment evidence; the lockfile hash alone never authorizes it (#4360).
+        gate = self._overwrite_gate
+        if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
+            return False, False
+        if gate is not None and gate.adopt_legacy(target_path, rel_path):
+            target_paths.append(target_path)
+            return True, False
+        rendered = self._rendered_hash(source_file, expected_content)
+        edit = (
+            gate.legacy_edit(target_path, rel_path, rendered)
+            or self._receipted_edit(target_path, rendered)
+            if gate is not None
+            else None
+        )
+        if gate is not None and gate.keep(target_path, rel_path, edit=edit):
+            # The claim stays with its prior lock entry; finalize names the file.
+            target_paths.append(target_path)
+            return True, False
+        # A proven edit the gate cannot keep (the project's own local content)
+        # still names the true reason (RA-012).
+        message = kept_edit_message(
+            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
+        )
+        if diagnostics is not None:
+            diagnostics.error(message, package=gate.owner if gate else "")
+        else:
+            _rich_warning(message)
+        return True, False
 
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
@@ -981,6 +1176,13 @@ class BaseIntegrator:
         if not deleted_paths:
             return
         stop_resolved = stop_at.resolve()
+        # A project's target roots stay (#4132); at user scope the same names
+        # are roots APM created, which go with their last file.
+        target_roots = (
+            frozenset()
+            if stop_resolved == Path.home().resolve()
+            else _target_root_dirs(stop_resolved)
+        )
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
@@ -993,7 +1195,11 @@ class BaseIntegrator:
             except (ValueError, OSError):
                 cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
+            while (
+                parent not in (parent.parent, stop_at)
+                and parent.resolve() != cleanup_boundary
+                and parent.resolve() not in target_roots
+            ):
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal

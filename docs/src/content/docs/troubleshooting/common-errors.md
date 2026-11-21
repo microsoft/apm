@@ -98,12 +98,12 @@ See also: [Install failures](../install-failures/), [Lockfile specification](../
 
 ```
 <owner>/<repo>: not found in lockfile
-1 ref mismatch -- run 'apm update' to update lockfile
+1 ref mismatch -- run 'apm install' to update lockfile
 ```
 
 Cause: a dependency exists in `apm.yml` but has no entry in `apm.lock.yaml`. Most often hit in CI when the lockfile was not regenerated after editing the manifest.
 
-Fix: run `apm install` locally to refresh `apm.lock.yaml` and commit the result. Do not hand-edit the lockfile.
+Fix: run `apm install` locally to refresh `apm.lock.yaml` and commit the result. Do not hand-edit the lockfile. If the lockfile also holds a direct entry `apm.yml` does not declare (for example, a dependency's source was rewritten), the hint names `apm update` instead, which re-resolves every dependency from `apm.yml`.
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
@@ -124,19 +124,19 @@ See also: [Install failures](../install-failures/)
 
 ```
 [!] Drift detected: N file(s)
-[i] To restore the locked content, delete the modified files and rerun 'apm install', then commit the result ('apm install --force' also restores them, but overwrites every local edit and deploys despite critical security findings).
+[i] Delete the modified files, then run 'apm install' to restore the locked content, then commit the result.
 ```
 
 When some files are missing or unrecorded instead, APM prints `Run 'apm install' to re-sync deployed files with the lockfile.`
 
 Cause: deployed primitive files in the project differ from the content recorded in `apm.lock.yaml`. Either the files were edited locally, or the lockfile was updated without re-running install.
 
-Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. `apm install --force` also restores them, but it overwrites every local edit and deploys despite critical security findings. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
+Fix: for missing or unrecorded files, run `apm install`. Plain `apm install` can keep a local edit to a managed file, so for `modified` files delete them, rerun `apm install`, and commit the result. Files a local bundle deployed (shown as `[local-bundle]`) come back only from the bundle: delete them and rerun `apm install <bundle-path>`. If the local edits were intentional, vendor them into the source package or a local override before re-installing.
 
 For `unmanaged-conflict`, the file is yours, not a managed edit: install skipped
 it (or refused the skill plan). Rename the conflicting local file or skill, or
-choose a valid existing skill/target selection, first; `apm install --force`
-overwrites a skipped non-skill file. Audit does not adopt, overwrite, or delete the local file.
+choose a valid existing skill/target selection, first. Audit does not adopt,
+overwrite, or delete the local file.
 
 See also: [Install failures](../install-failures/)
 
@@ -145,23 +145,25 @@ See also: [Install failures](../install-failures/)
 ```
 [x] Content hash mismatch for <owner>/<repo>: expected <sha>, got <sha>.
 The downloaded content differs from the lockfile record. This may
-indicate a supply-chain attack. Run 'apm cache clean' and retry. To accept
-the new content, remove the '<owner>/<repo>' entry from <project>/apm.lock.yaml
-and run 'apm install'.
+indicate a supply-chain attack. If the package copies changed, run
+'apm cache clean --yes' to discard the cached package copies, then retry.
+If <project>/apm.lock.yaml changed, restore <project>/apm.lock.yaml from
+version control (for example 'git checkout -- <project>/apm.lock.yaml'), then
+run 'apm install' to verify the dependency against the committed lockfile.
 ```
 
-At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
+`apm install`, `apm install --frozen`, `apm audit --ci` and `apm update` refuse the same way, so `apm update` with no ref change still fails closed. At user scope the hint names `$APM_HOME/apm.lock.yaml` and `apm install -g`.
 
 Cause: the bytes APM downloaded for a locked dependency do not match the `content_hash` recorded in `apm.lock.yaml`. Usually a force-pushed tag, a mutated branch, or a tampered mirror. Older APM versions on Windows also recorded CRLF hashes when Git's host settings (`core.autocrlf=true`, or `core.eol`, which defaults to CRLF on Windows, for `.gitattributes` `text=auto` files) expanded LF-committed files. Current APM pins `core.autocrlf=false` and `core.eol=lf` on its dependency checkouts and rematerializes older cache shards, but `--frozen` cannot rewrite a lockfile that already stored that CRLF hash.
 
-Fix: investigate the upstream package before accepting. For a stale cache, run `apm cache clean` and retry. If the new content is legitimate, remove the dependency's entry from the lockfile the hint names, run `apm install`, and review the SHA and `content_hash` diff before committing. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)). The same entry-removal flow regenerates a CRLF hash recorded by a pre-fix Windows CLI; bare `apm lock` does not rewrite it.
+Fix: a same-commit mismatch means a local copy or the lockfile changed, so restore, never edit: run `apm cache clean --yes` and retry, or restore `apm.lock.yaml` from version control and run `apm install`. APM never asks you to edit or delete lockfile entries. `apm update` does not accept new content for an unchanged commit (see [`apm update`](../../reference/cli/update/)).
 
 See also: [Install failures](../install-failures/), [Lockfile specification](../../reference/lockfile-spec/)
 
 ### `Install blocked by org policy -- see violations above`
 
 ```
-[x] Install blocked by org policy -- see violations above
+[x] Install blocked by org policy -- see violations above. Remove or replace the blocked dependencies in apm.yml (run 'apm policy status' to see the active policy), then re-run the install.
 ```
 
 Cause: an org-level policy (compilation target, dependency allowlist, security baseline) rejected one or more dependencies. The per-violation lines printed above this message identify the offending packages and rules.
@@ -216,7 +218,7 @@ marketplace 'company' now points at <new-origin>, but apm.lock.yaml recorded 'ex
 
 Cause: the alias was re-registered for a different repository than the one `apm.lock.yaml` recorded. Any command that re-resolves a locked entry through the marketplace (such as `apm update`, `apm install --refresh`, `apm install` after you change the entry in `apm.yml`, or a fresh-checkout install of a package that contributes MCP or LSP servers) refuses to switch marketplaces silently.
 
-Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists.
+Fix: run the `apm marketplace add` command the message prints to restore the locked origin. To switch on purpose, follow the remove, `apm install`, re-add steps it lists. At user scope (`-g`), `~/.apm/apm.lock.yaml` is usually not under version control, so the message offers those same steps (with `~/.apm/apm.yml` and `apm install -g`) if the lockfile changed by mistake.
 
 ### `<a> and <b> are different packages that would both install to apm_modules/<path>`
 
@@ -303,7 +305,7 @@ See also: [`apm targets` reference](../../reference/cli/targets/), [Targets matr
 
 Cause: APM found markers for more than one harness and cannot pick.
 
-Fix: pin a target with `--target <harness>` or declare `targets:` in `apm.yml`. Use `apm install --dry-run` to preview each option.
+Fix: deploy to every detected harness with `apm install --target <a>,<b>`, or declare them once under `targets:` in `apm.yml` so plain `apm install` works. Add `--dry-run` to preview.
 
 See also: [`apm targets` reference](../../reference/cli/targets/)
 

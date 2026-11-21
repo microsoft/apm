@@ -24,7 +24,7 @@
     {
       "id": "marketplace-catalog-origin",
       "decision": "Which catalog a marketplace alias names: canonical origin recorded as lock source_url/source_digest for every remote catalog kind, fail-closed alias rebind against the lock, and duplicate-origin registration warning",
-      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, require_locked_row_origin, registrations_sharing_origin) compares lock and registrations; every marketplace resolution entry point checks the origin before catalog I/O (deps/apm_resolver.py _resolve_marketplace_dep, commands/install.py plugin@alias intercept, commands/outdated.py, uninstall registry fallback; apm view is a listed read-only exemption); also marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
+      "owner": "marketplace/source_identity.py (marketplace_origin, same_marketplace_origin) owns the origin key; marketplace/models.py (catalog_digest), applied for Git kinds by marketplace/client.py _parse_catalog, owns the Git catalog digest; deps/lockfile.py (marketplace_rows) selects the locked rows for an alias/plugin pair; marketplace/catalog_origin.py (require_locked_catalog_origin, require_locked_row_origin, registrations_sharing_origin) compares lock and registrations, and reverify_locked_provenance re-verifies every locked row against its catalog before apm update plans (#4228); every marketplace resolution entry point checks the origin before catalog I/O (deps/apm_resolver.py _resolve_marketplace_dep, commands/install.py plugin@alias intercept, commands/outdated.py, uninstall registry fallback; apm view is a listed read-only exemption); also marketplace/resolver.py, apm marketplace add, user-manifest reconcile",
       "selectors": [
         "src/apm_cli/marketplace/catalog_origin.py"
       ],
@@ -57,6 +57,15 @@
         "src/apm_cli/marketplace/dependency_confusion.py"
       ],
       "guards": ["marketplace-integrations-dependency-confusion"]
+    },
+    {
+      "id": "marketplace-project-map",
+      "decision": "Which catalog a marketplace: <name> entry resolves through inside a project whose root apm.yml declares marketplaces: (#2903 D1/D3): the root map wins over a same-named registration and is never registered or cache-keyed by name; a transitive name must be root-declared; a dependency's map is refused",
+      "owner": "marketplace/project_marketplaces.py (bind_project_marketplaces, project_marketplace, require_root_declared_marketplace); marketplace/user_manifest.py owns the marketplaces: grammar and dependency_marketplaces_error; registry.get_marketplace_by_name consults the owner first; bound by install/service.py, commands/install.py and commands/outdated.py; enforced by deps/apm_resolver.py",
+      "selectors": [
+        "src/apm_cli/marketplace/project_marketplaces.py"
+      ],
+      "guards": ["marketplace-integrations-project-map"]
     },
     {
       "id": "marketplace-entry-ref-verification",
@@ -159,6 +168,7 @@
         "src/apm_cli/agent_plugins/projection.py",
         "src/apm_cli/models/validation.py",
         "src/apm_cli/install/drift.py",
+        "src/apm_cli/install/drift_replay_support.py",
         "src/apm_cli/install/native_plugin_admission.py"
       ],
       "guards": ["marketplace-integrations-package-projection"]
@@ -207,7 +217,10 @@
         "src/apm_cli/utils/content_hash.py",
         "src/apm_cli/deps/package_validator.py"
       ],
-      "guards": ["marketplace-integrations-codex-native-lifecycle"]
+      "guards": [
+        "marketplace-integrations-codex-native-lifecycle",
+        "marketplace-integrations-codex-offline-launch"
+      ]
     },
     {
       "id": "copilot-marketplace-ownership",
@@ -239,6 +252,15 @@
         "src/apm_cli/bundle/credential_files.py"
       ],
       "guards": ["marketplace-integrations-pack-credential-files"]
+    },
+    {
+      "id": "marketplace-ref-pin-commit",
+      "decision": "Marketplace ref pins are trust on first use: resolution checks and stages, a contradicting ref is refused, and only a committed install records pins",
+      "owner": "marketplace/version_pins.py (enforce_ref_pin, RefPinStage.commit, RefPinStage.discard); install/transaction.py InstallTransaction.commit is the single recorder",
+      "selectors": [
+        "src/apm_cli/marketplace/version_pins.py"
+      ],
+      "guards": ["marketplace-integrations-ref-pin-commit"]
     }
   ]
 }

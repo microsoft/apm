@@ -421,7 +421,7 @@ def build_patch_export(
     patches: dict[str, str] = {}
 
     dir_prefixes = _dir_prefix_table(lockfile)
-    modified = [f for f in findings if f.kind == "modified"]
+    modified = [f for f in findings if f.kind == "modified" and not f.owned_entries_only]
     by_package: dict[str, list[DriftFinding]] = {}
     for finding in modified:
         key = _resolve_package_key(finding.path, finding.package, dir_prefixes)
@@ -675,13 +675,13 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
     except LockfileFormatError as exc:
         logger.error(
             f"Lockfile at {lockfile_path} could not be parsed ({exc}); "
-            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path.name).clause()}."
+            f"{LOCKFILE_UNREADABLE.bind(lockfile=lockfile_path.name).clause()}."
         )
         sys.exit(1)
     if lockfile is None:
         logger.error(
             f"Lockfile at {lockfile_path} could not be parsed; "
-            f"{LOCKFILE_UNREADABLE.bind(path=lockfile_path.name).clause()}."
+            f"{LOCKFILE_UNREADABLE.bind(lockfile=lockfile_path.name).clause()}."
         )
         sys.exit(1)
 

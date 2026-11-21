@@ -601,6 +601,8 @@ class TestResolvePackageReferencesProbeSkipProvenance:
         dep_ref.reference = "1.0.0"
         dep_ref.to_canonical.return_value = "acme/reg-plugin#1.0.0"
         dep_ref.get_identity.return_value = "github.com/acme/reg-plugin"
+        # Provenance is keyed like the lockfile, by unique key.
+        dep_ref.get_unique_key.return_value = "github.com/acme/reg-plugin"
         dep_ref.is_insecure = False
         dep_ref.is_virtual = False
         dep_ref.is_virtual_subdirectory.return_value = False

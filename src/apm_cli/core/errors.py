@@ -99,22 +99,24 @@ def render_no_harness_error(project_root: Path | None = None) -> str:
 def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> str:
     """Render the 3-section error for 'multiple harnesses detected'."""
     detected_csv = ", ".join(detected)
+    # Both remedies name the whole detected set, so either one converges.
+    declared = "\n".join(f"    - {target}" for target in detected)
     return (
         f"Multiple harnesses detected: {detected_csv}\n"
         "\n"
         f"APM found signals for {detected_csv} but cannot decide which\n"
-        "to deploy to. Pin your target explicitly.\n"
+        "to deploy to. Pin your targets explicitly.\n"
         "\n"
         "Fix with one of:\n"
         "\n"
-        f"  apm install <pkg> --target {detected[0]}\n"
-        "  apm install <pkg> --dry-run            # preview what each target does\n"
+        f"  apm install --target {','.join(detected)}\n"
+        f"  apm install --target {','.join(detected)} --dry-run   # preview first\n"
         "  apm targets                            # see all detected harnesses\n"
         "\n"
         "Or declare in apm.yml:\n"
         "\n"
         "  targets:\n"
-        f"    - {detected[0]}"
+        f"{declared}"
     )
 
 
@@ -131,7 +133,13 @@ def render_unknown_target_error(
         if "copilot" in visible_sorted
         else (visible_sorted[0] if visible_sorted else "claude")
     )
-    valid_csv = ", ".join(visible_sorted) if visible_sorted else suggestion
+    from apm_cli.core.target_catalog import target_value_label
+
+    valid_csv = (
+        ", ".join(target_value_label(value) for value in visible_sorted)
+        if visible_sorted
+        else suggestion
+    )
     # Strip bracket/quote noise that can leak in from misparsed tokens
     # (e.g. "['copilot'"). Defense-in-depth: callers should pass clean
     # values, but this keeps the headline readable if they don't. Fall

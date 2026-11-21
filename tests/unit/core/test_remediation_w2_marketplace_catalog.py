@@ -30,7 +30,6 @@ _BLOCK = re.compile(
 EXECUTED = frozenset(
     {
         "marketplace-reconcile-failed",
-        "marketplaces-outside-user-manifest",
     }
 )
 
@@ -55,11 +54,19 @@ COMPONENT_ONLY: dict[str, str] = {
     "registration later moved; covered by the marketplace origin lifecycle tests",
     "marketplace-origin-switch": "needs a lockfile recorded against a marketplace whose "
     "registration later moved; covered by the marketplace origin lifecycle tests",
-    "marketplace-register-manual": "alternative to marketplaces-outside-user-manifest; "
-    "manual registration is covered by the marketplace add tests",
+    "marketplace-origin-switch-global": "user-scope form of marketplace-origin-switch; "
+    "full sentence asserted by test_conflict_remedy_names_the_refused_scope",
     "marketplace-unregistered-shorthand": _NETWORK,
     "marketplace-unregistered-url": _NETWORK,
     "marketplace-yml-compile": _TEMPLATE,
+    "marketplace-origin-readd": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
+    "marketplace-origin-reinstall": "full sentence asserted by test_remediation_gate9_call_sites; test_marketplace_origin_entry_points_lifecycle reaches the refusal",
+    "marketplace-project-origin-relock": "installed-CLI refusal asserted by "
+    "test_root_map_wins_over_a_lock_written_through_a_registration (needs a remote catalog "
+    "locked through a registration, then a committed map naming another origin)",
+    "marketplace-allow-readd": "installed-CLI remedy executed by "
+    "test_marketplace_allow_judges_locked_and_declared_origins (needs a served org policy)",
+    "marketplace-ref-swap-accept": "test_marketplace_ref_swap_lifecycle asserts the printed next step; full sentence in test_remediation_gate9_call_sites",
 }
 
 

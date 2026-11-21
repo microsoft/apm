@@ -21,6 +21,8 @@ registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check; #3754 policy discovery
                                         returns diagnostics as data; #4089
                                         adapters emit through CommandLogger
+registry-delegation-deprecation-catalog Deprecation warning text lives only
+                                        in core/deprecations.py (#4019)
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -53,6 +55,10 @@ from scripts.architecture_linter.checks.python_semantics import (
     binding_nodes,
     direct_definitions,
     import_bound_name,
+)
+from scripts.architecture_linter.checks.registry_deprecation_catalog import (
+    DEPRECATION_CATALOG,
+    check_deprecation_catalog_text,
 )
 from scripts.architecture_linter.checks.registry_output_guards import (
     library_output_findings,
@@ -260,7 +266,7 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
     "src/apm_cli/core/deployment_ledger.py": (
-        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+        'state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"'
     ),
 }
 
@@ -498,7 +504,7 @@ def _target_deprecation_findings(
         for definition in facts.definitions
     ):
         emitters.add(path)
-    if path != _TARGET_DEPRECATION_OWNER:
+    if path != DEPRECATION_CATALOG:
         findings.extend(
             violation(
                 rule_id,
@@ -658,7 +664,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -761,7 +767,7 @@ def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violati
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -1962,6 +1968,15 @@ RULES: tuple[Rule, ...] = (
             "adapters and the safe installer emit through CommandLogger."
         ),
         check=_check_output_diagnostics,
+    ),
+    Rule(
+        id="registry_delegation.deprecation_catalog",
+        group=GROUP,
+        guard_ids=("registry-delegation-deprecation-catalog",),
+        description="Deprecation warning text is spelled only in core/deprecations.py.",
+        check=lambda provider: check_deprecation_catalog_text(
+            provider, "registry_delegation.deprecation_catalog"
+        ),
     ),
     Rule(
         id="registry_delegation.compiled_output_writes",

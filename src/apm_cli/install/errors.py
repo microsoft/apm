@@ -44,6 +44,10 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class PreviewIncomplete(Exception):
+    """``--dry-run`` stops where install would refuse; errors are on the context."""
+
+
 class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 
@@ -173,6 +177,9 @@ class PolicyViolationError(RuntimeError):
         Human-readable origin string (e.g. ``"org:acme/.github"``).  May
         be empty when discovery failed before a source was resolved.
     """
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
     def __init__(
         self,

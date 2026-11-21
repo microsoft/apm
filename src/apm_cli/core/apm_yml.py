@@ -23,6 +23,7 @@ from apm_cli.core.errors import (
 from apm_cli.core.target_catalog import (
     canonical_target_token,
     get_target_capability,
+    is_vendor_target_id,
     manifest_target_names,
 )
 
@@ -87,20 +88,17 @@ def _warn_legacy_all_once() -> None:
     if _legacy_all_warned:
         return
     _legacy_all_warned = True
+    from apm_cli.core.deprecations import deprecation_message
     from apm_cli.utils.console import _rich_warning
 
-    _rich_warning(
-        "'all' in apm.yml targets is deprecated and will become a hard "
-        "error in a future release. APM is treating the field as omitted "
-        "so the current command's default target selection applies. If you "
-        "maintain this package, remove 'all' from the manifest.",
-        symbol="warning",
-    )
+    _rich_warning(deprecation_message("manifest-targets-all"), symbol="warning")
 
 
 def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
     for token in tokens:
+        if is_vendor_target_id(token):
+            continue
         try:
             capability = get_target_capability(token)
         except KeyError:

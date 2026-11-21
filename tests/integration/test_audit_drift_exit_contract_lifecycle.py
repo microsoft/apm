@@ -90,14 +90,18 @@ def test_plain_audit_drift_line_severity_matches_exit_code(
         assert f"    - {_DEPLOYED_SKILL}  [{package.slug}]" in lines, output(drifted)
         assert tree_snapshot(project) == before, "audit must not write"
 
-        # Execute the printed restore hint: delete the modified file, rerun install.
+        # Execute the printed restore hint: move the edited file aside (RA-044,
+        # never delete), rerun install; the moved copy still holds the edit.
         hint = (
-            "  [i] Delete the edited skill files, then run 'apm install' to restore the "
-            "locked content"
+            "  [i] Move the edited files aside, then run 'apm install' to restore the "
+            "locked content, or 'apm export-patch' to export the local edits as upstream "
+            "patches."
         )
-        assert any(line.startswith(hint) for line in lines), output(drifted)
-        deployed.unlink()
+        assert hint in lines, output(drifted)
+        aside = project.parent / "edited-aside.md"
+        deployed.rename(aside)
         apm("install", step="restore-install")
+        assert "local edit" in aside.read_text(encoding="utf-8")
         restored = apm("audit", step="audit-restored")
         assert "[+] No drift detected" in output(restored), output(restored)
         assert "local edit" not in deployed.read_text(encoding="utf-8")

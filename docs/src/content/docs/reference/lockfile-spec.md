@@ -178,7 +178,8 @@ deployments:
 |---|---|---|---|
 | `lockfile_version` | string | yes | `"4"` once a new or promoted lockfile records any `content_hash`; otherwise `"1"` for plain Git projects, `"2"` for registry/Git semver evidence, and candidate `"3"` when a root replacement table is present. |
 | _(Deprecated)_ `generated_at` | ISO 8601 string | no | Legacy write timestamp. New lockfiles omit it; when an existing lockfile carries it, APM refreshes it on substantive writes. Ignored by equivalence checks. |
-| `apm_version` | string | no | APM CLI version that last changed the file; every command that rewrites it records itself. An older APM refuses to install, update, uninstall, prune, lock, audit or pack against it, and read-only commands warn; see [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm). Missing or `unknown` values are accepted; a duplicate or invalid value is refused. Otherwise it is diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. A lockfile written before 0.37 that records `copilot` or `vscode` MCP entries keeps its `apm_version` until an install moves those entries to `.mcp.json`. |
+| `apm_version` | string | no | APM CLI version that last changed the file; every command that rewrites it records itself. An older APM refuses to install, update, uninstall, prune, lock, compile, audit or pack against it, and read-only commands warn; see [Lockfile written by a newer APM](../../troubleshooting/install-failures/#lockfile-written-by-a-newer-apm). Missing or `unknown` values are accepted; a duplicate or invalid value is refused. Otherwise it is diagnostic except for a narrow compatibility path: exact APM 0.28 metadata, a locked `marketplace_plugin` type, and a matching content hash together authorize the receipt-less cached-plugin upgrade. It never overrides canonical `apm.yml` precedence or applies to freshly fetched dependencies. A lockfile written before 0.37 that records `copilot` or `vscode` MCP entries keeps its `apm_version` until an install moves those entries to `.mcp.json`. |
+| `manifest_targets` | string list | no | Targets `apm.yml` declared when the lockfile was last changed (`[]` when it declares none and targets are auto-detected). A target this list names and `apm.yml` no longer declares is a dropped target: `apm install --frozen` refuses and `apm audit --ci` fails until `apm install` retires its files. Files of a target only an explicit `--target` deployed are not dropped. Older lockfiles without this field treat every undeclared target as dropped. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. A Claude plugin's `${CLAUDE_PLUGIN_ROOT}` is recorded unexpanded; a value an older release recorded expanded at an `apm_modules` path still matches. |
@@ -312,7 +313,7 @@ on the next lockfile write. No new fields are added for this.
 | `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `exec_allowed_types` | array of strings | no | Executable types a `gated_pending_approval` or `denied` package still deployed because they are approved (for example `[hooks]`). Present only for a partial approval, so `apm update` notices when one type's approval is added or removed. |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
-| `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
+| `resolved_url` | string | registry only | Fully-qualified download URL recorded at resolution. Advisory on replay: APM fetches it only through a registry declared in `apm.yml` that serves it; otherwise it fetches the locked version from the configured registry. Either way the bytes must match `resolved_hash`. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
 | `local_path` | string | no | Original path from `apm.yml` for local deps, relative to project root. |
 | `content_hash` | string | no | SHA-256 of the materialized package tree, excluding `carried_licenses` copies. In version `"4"` each file in sorted relative-path order contributes its path, a NUL byte and the SHA-256 of its raw bytes; versions `"1"` to `"3"` keep the earlier path-and-bytes stream. Dependency checkouts pin `core.autocrlf=false` and `core.eol=lf`, so LF-committed `text` / `text=auto` content is not rewritten as CRLF on any platform. Explicit `.gitattributes` `eol=` requests, binary files and bytes committed as CRLF keep their repository-defined bytes. For remote dependencies it verifies that downloaded or cached content still matches the lock; for local path dependencies it detects source-tree changes. |
@@ -463,12 +464,18 @@ shipped.
 | Command | Reads | Writes |
 |---|---|---|
 | `apm install` | existing lockfile (for `--frozen` and incremental reuse) | full rewrite on resolution change |
-| `apm install --frozen` | required | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
-| `apm compile` | yes (resolution + integrity) | no |
+| `apm install --frozen` | required, unless `apm.yml` declares no APM, MCP or LSP dependency | rejects missing pins, incompatible immutable requirements, or MCP config/server-name drift |
+| `apm compile` | yes (resolution + integrity) | only when a `targets:` contraction removes deployed files |
 | `apm audit` | yes | no |
 | `apm prune` | yes (orphans and `deployments` ownership, even with nothing else to prune) | yes (after removing orphans and reconciling `deployments`) |
 | `apm deps why`, `apm view --file` | yes | no |
 | `apm unpack` | bundle's pack-enriched lockfile | merges into project lockfile |
+
+Only `apm install` (including `--mcp` and local bundles), `apm lock`, `apm update`
+(and `apm deps update`), `apm uninstall`, `apm prune` and `apm compile` write the
+lockfile. Each writes it at most once, when the command finishes; it is written
+earlier only before lifecycle scripts or native Claude plugin registration need
+to observe it.
 
 `apm install` only rewrites the file when its semantic content changes
 (`generated_at` and `apm_version` are ignored when comparing). A no-op install
@@ -503,6 +510,7 @@ check maps to specific lockfile fields:
 | `skill-subset-consistency` | `skill_subset`, `target_subset` and `subset_pairings` per entry, matched against the merge declared by `apm.yml` and the installed packages' manifests, and against the resolved package tree |
 | `config-consistency` | `mcp_configs`, `mcp_config_provenance` and exact `mcp_omissions` evidence |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
+| `lockfile-targets-current` | `deployed_files` per entry vs. `apm.yml` `targets:` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
 directory markers ending in `/`) are skipped by content-integrity. Missing

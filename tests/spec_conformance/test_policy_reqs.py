@@ -102,7 +102,9 @@ def test_native_findings_identify_only_the_offending_field(
     if output_format == "text":
         assert expected in result.output
         if ci_mode:
-            assert f"unicode: .claude/settings.json{expected}" in " ".join(result.output.split())
+            assert f"unicode: .claude/settings.json at {expected}" in " ".join(
+                result.output.split()
+            )
         return
     report = json.loads(result.stdout)
     if output_format == "json":
@@ -568,6 +570,29 @@ def test_required_package_matching_follows_source_replacement(tmp_path, monkeypa
 
     assert presence("fork-org/app-fork") == (True, True)
     assert presence("example-org/app") == (False, False)
+
+
+@pytest.mark.req("req-pl-018")
+def test_require_reads_the_lock_row_written_for_an_explicit_proxy_url(monkeypatch):
+    """Clause (g), require (#4037): an explicit proxy URL is identified by its
+    written proxy host, and the lockfile side reads the row the writer keyed
+    for it, never a same-path row from the default host."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.dependency import DependencyReference
+    from apm_cli.policy.policy_checks import _check_required_packages_deployed
+    from apm_cli.policy.schema import DependencyPolicy
+
+    monkeypatch.delenv("GITHUB_HOST", raising=False)
+    explicit = DependencyReference.parse("art.example.com/artifactory/github/acme/tools")
+    policy = DependencyPolicy(require=("art.example.com/acme/tools",))
+
+    def deployed(written):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency.from_dependency_ref(written, None, 1, None))
+        return _check_required_packages_deployed([explicit], lock, policy).passed
+
+    assert deployed(explicit)
+    assert not deployed(DependencyReference.parse("acme/tools"))
 
 
 @pytest.mark.req("req-pl-018")

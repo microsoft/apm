@@ -74,6 +74,17 @@ def _config_check(result: CommandResult) -> dict[str, object]:
     return next(check for check in payload["checks"] if check["name"] == "config-consistency")
 
 
+def _assert_replay_failure_reported_once(
+    result: CommandResult, config_check: dict[str, object]
+) -> None:
+    """A failed replay fails config-consistency closed; drift owns its text (RA-005)."""
+    drift_check = _drift_check(result)
+    assert "reported under drift" in config_check["message"], config_check
+    assert not config_check.get("details"), config_check
+    assert drift_check["passed"] is False, drift_check
+    assert drift_check["details"], drift_check
+
+
 def _drift_check(result: CommandResult) -> dict[str, object]:
     """Return the public audit payload's drift check."""
     payload = _audit_payload(result)
@@ -452,7 +463,7 @@ def test_non_virtual_manifestless_package_still_fails_audit(
 
     config_check = _config_check(audit)
     assert config_check["passed"] is False
-    assert config_check["details"]
+    _assert_replay_failure_reported_once(audit, config_check)
 
 
 def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
@@ -482,7 +493,7 @@ def test_non_virtual_manifestless_package_still_fails_audit_from_cold_cache(
     config_check = _config_check(audit)
     drift_check = _drift_check(audit)
     assert config_check["passed"] is False
-    assert config_check["details"]
+    _assert_replay_failure_reported_once(audit, config_check)
     assert "skipped" not in drift_check["message"].lower()
     assert not virtual_skill_lifecycle.module_root.exists()
     _assert_same_state(before, after)
@@ -626,7 +637,7 @@ def test_cold_cache_malformed_virtual_skill_bytes_fail_closed(
     config_check = _config_check(audit)
     drift_check = _drift_check(audit)
     assert config_check["passed"] is False
-    assert config_check["details"]
+    _assert_replay_failure_reported_once(audit, config_check)
     assert "skipped" not in drift_check["message"].lower()
     assert not virtual_skill_lifecycle.module_root.exists()
     _assert_same_state(before, after)

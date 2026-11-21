@@ -784,12 +784,9 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "src/apm_cli/policy/ci_checks.py",
         _replace(
             "    if prepared_replay_error is not None:\n"
-            "        return CheckResult(\n"
-            '            name="skill-subset-consistency",\n'
-            "            passed=False,\n"
-            '            message=f"replay failed: '
-            '{prepared_replay_error}",\n'
-            "            details=[prepared_replay_error],\n"
+            "        return replay_failure_check(\n"
+            '            "skill-subset-consistency", prepared_replay_error, '
+            "owner=replay_error_owner\n"
             "        )\n"
             "    modules_root = (\n",
             "    modules_root = (\n",

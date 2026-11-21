@@ -111,7 +111,7 @@ def _assert_install_denies(result: CommandResult) -> None:
     flat = " ".join(output.split())
     # One violation per denied dependency, naming it (#3835).
     assert f"Policy violation: github.com/{_DENIED} -- denied by pattern: {_DENIED}" in flat, output
-    assert f"remove `github.com/{_DENIED}` from apm.yml" in flat, output
+    assert f"Remove `github.com/{_DENIED}` from apm.yml" in flat, output
 
 
 def _denylist_check(report: dict) -> dict:

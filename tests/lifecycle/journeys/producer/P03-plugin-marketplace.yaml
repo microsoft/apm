@@ -98,8 +98,3 @@ steps:
       - "[*] Updated apm.lock.yaml in <DUR>."
     forbidden_lines: ["[x]", "[!]"]
 known_cells:
-  - id: marketplace-outdated-local-source-ls-remote
-    law: FORBID
-    tracking: "#4201"
-    step: 5
-    match: "Git failed during ls-remote"

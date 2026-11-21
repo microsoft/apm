@@ -269,7 +269,7 @@ journeys:
     - '[i] Deployed files verified against apm.lock.yaml.'
     forbidden_lines:
     - '[!]'
-    - Targeting declared targets from apm.yml (twice)
+    - 'Targets: claude, copilot  (source: apm.yml) (twice)'
     - Skipped inactive experimental resolver
     files:
     - apm_modules/ only; tracked files unchanged
@@ -769,7 +769,7 @@ journeys:
     key_lines:
     - Installed 0 APM dependencies and 2 MCP servers or equivalent
     forbidden_lines:
-    - Targeting declared targets from apm.yml (twice)
+    - 'Targets: claude, copilot  (source: apm.yml) (twice)'
     files: []
     oracles:
     - O1

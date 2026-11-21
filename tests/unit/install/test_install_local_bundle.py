@@ -1266,3 +1266,36 @@ def test_bundle_without_integrity_manifest_skips_hooks(tmp_path: Path) -> None:
     assert "no integrity manifest" in message
     assert "apm pack" in message
     assert not (project / ".claude" / "settings.json").exists()
+
+
+def test_tampered_bundle_fails_integrity_before_executable_approval_advice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bundle that fails integrity is refused without approval advice (RA-035)."""
+    bundle = _make_bundle(tmp_path / "source")
+    (bundle / ".lsp.json").write_text(
+        json.dumps(
+            {
+                "lspServers": {
+                    "unsafe": {
+                        "command": "unsafe-language-server",
+                        "extensionToLanguage": {".unsafe": "unsafe"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = _make_project(tmp_path / "destination")
+    manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
+    manifest["executables"] = {}
+    (project / "apm.yml").write_text(yaml.dump(manifest), encoding="utf-8")
+
+    result = _invoke(project, monkeypatch, str(bundle), "--no-policy")
+
+    assert result.exit_code == 1, result.output
+    assert "To approve this exact local bundle" not in result.stdout
+    assert "To approve this exact local bundle" not in result.stderr
+    assert "[x] Bundle integrity check failed:" in result.stderr
+    assert "Unlisted bundle file (not in pack.bundle_files): .lsp.json" in result.stderr

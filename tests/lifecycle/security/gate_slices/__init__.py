@@ -31,8 +31,7 @@ class GateRow:
     # Regex the removing step's output must match; None uses the change default.
     announce: str | None = None
     smoke: bool = False
-    # Strict expected failure: "#<issue> <neutral text>" (output defects) or
-    # "S-pending (neutral issue to follow): <neutral phrase>" (gate enforcement).
+    # Strict expected failure: "#<open issue> <neutral text>".
     xfail: str = ""
     # World package and target that replace the slice's for this row.
     package: str | None = None
@@ -40,6 +39,10 @@ class GateRow:
     # Non-empty: the gated surface never deploys on this path, so the row checks
     # its facts without earning a receipt until the steward rules (the reason).
     definition_pending: str = ""
+    # Non-empty: the change is an org policy this path's scope does not consult
+    # (the documented contract). The next install keeps the surface, sends no
+    # policy request and writes no policy cache; a local deny still retires it.
+    ungoverned: str = ""
 
     @property
     def parts(self) -> tuple[str, str, str]:

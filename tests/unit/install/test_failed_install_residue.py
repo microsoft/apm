@@ -94,7 +94,7 @@ class TestCliFailureAfterNativeDeploy:
         # The skill directory may hold unrelated files; it is not listed as removable.
         assert ".claude/skills/demo" not in listed
         assert "native target files on disk" in output
-        assert "Remove these files, or re-run 'apm install' (add --force" in output
+        assert "Remove these files, then re-run 'apm install'." in output
         _assert_no_rollback_claim(result.output)
         # Existing apm.yml and lockfile behavior on failure is unchanged.
         assert (project / "apm.yml").read_bytes() == manifest
@@ -306,6 +306,20 @@ class TestUnrecordedDeployedPaths:
         report_failed_install_residue(ctx)
 
         logger.failed_install_residue.assert_not_called()
+
+    @pytest.mark.parametrize("restores", [False, True])
+    def test_files_the_transaction_restores_are_not_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], restores: bool
+    ) -> None:
+        ctx = _ctx(tmp_path, InstallLogger())
+        ctx.transaction = SimpleNamespace(restores_deploy_targets=restores)
+        ctx.package_deployed_files = {"owner/new": [".claude/agents/new.md"]}
+
+        report_failed_install_residue(ctx)
+
+        output = capsys.readouterr()
+        shown = ".claude/agents/new.md" in output.out + output.err
+        assert shown is not restores
 
     @pytest.mark.parametrize(
         ("disposition", "reported"),

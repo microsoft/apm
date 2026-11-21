@@ -851,7 +851,7 @@ class TestRenderCheckTable:
         from apm_cli.commands.marketplace import _render_check_table
 
         logger = MagicMock()
-        mock_console = MagicMock()
+        mock_console = MagicMock(width=120)
         with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
             _render_check_table(logger, [self._make_result()])
         mock_console.print.assert_called()

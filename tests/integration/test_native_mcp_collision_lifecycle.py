@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -151,6 +152,19 @@ class _Scenario:
             scenario_id="native-mcp-collision-lifecycle",
         )
 
+    def audit(self) -> CommandResult:
+        """Run the CI audit at this scope's root (audit has no --global flag)."""
+        environment = self.isolated.subprocess_env(
+            overrides={"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": str(self.isolated.home / ".codex")}
+        )
+        environment.update(self.environment_overrides)
+        return self.runner.run(
+            ("audit", "--ci", "--no-policy"),
+            cwd=self.root,
+            env=environment,
+            scenario_id="native-mcp-collision-lifecycle",
+        )
+
     def install(self, *flags: str, targets: str = "claude,codex") -> CommandResult:
         """Reconcile the requested scope and exact target selection."""
         return self.run("install", "--target", targets, "--no-policy", *flags)
@@ -216,6 +230,16 @@ def _http(url: str = "http://127.0.0.1:8000/company") -> dict[str, Any]:
     return {"name": "notes", "registry": False, "transport": "http", "url": url}
 
 
+def _apm_state(isolated: IsolatedApmEnvironment) -> list[tuple[str, bytes | None]]:
+    """Every path (directories included) under APM home and the APM cache."""
+    state: list[tuple[str, bytes | None]] = []
+    for base in (isolated.config_root, isolated.cache_root):
+        for path in sorted(base.rglob("*")) if base.exists() else ():
+            data = path.read_bytes() if path.is_file() else None
+            state.append((path.relative_to(isolated.root).as_posix(), data))
+    return state
+
+
 def _success(result: CommandResult) -> None:
     assert result.returncode == 0, f"{result.command!r}\n{result.stdout}\n{result.stderr}"
 
@@ -249,7 +273,11 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     foreign_target: str,
     identical: bool,
 ) -> None:
-    """Direct adds never adopt foreign matches or overwrite differing connections."""
+    """Direct adds never adopt foreign matches or overwrite differing connections.
+
+    An identical foreign entry needs no write, so install and --frozen both pass
+    without claiming it; a differing one is refused by both.
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     requested = _http()["url"]
     scenario.write(foreign_target, requested if identical else "http://127.0.0.1:9/personal")
@@ -264,9 +292,8 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     other_bytes = scenario.path(other).read_bytes()
     for flags in ((), ("--force",), ("--frozen",)):
         repeated = scenario.install(*flags)
-        expected_success = identical and "--frozen" not in flags
-        assert (repeated.returncode == 0) is expected_success, repeated.stdout + repeated.stderr
-        if "--frozen" in flags:
+        assert (repeated.returncode == 0) is identical, repeated.stdout + repeated.stderr
+        if "--frozen" in flags and not identical:
             assert "ownership is not recorded" in " ".join(repeated.stdout.split())
         assert scenario.path(foreign_target).read_bytes() == before
         assert scenario.path(other).read_bytes() == other_bytes
@@ -694,3 +721,52 @@ def test_registry_receipt_never_adopts_or_deletes_unverified_native_state(
     result = scenario.install(targets=target)
     assert result.returncode == (1 if evidence == "edited" else 0)
     assert scenario.path(target).read_bytes() == before
+
+
+def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A user's own entry equal to the declaration, only switched off, is no conflict."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    declared = {"name": "notes", "registry": False, "transport": "stdio", "command": "INERT"}
+    scenario.declare([declared])
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["executables"] = {"allow": {"notes": {"mcp": True}}}
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    path = scenario.path("codex")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '# user comment\n[mcp_servers.notes]\ncommand = "INERT"\nenabled = false\n',
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    # Zero bytes of the user's entry change, and replay and audit agree it is fine.
+    _success(scenario.install(targets="codex"))
+    assert path.read_bytes() == before
+    assert scenario.lock().mcp_target_servers == {}
+    lock_before = (scenario.root / "apm.lock.yaml").read_bytes()
+    _success(scenario.install("--frozen", targets="codex"))
+    _success(scenario.audit())
+    assert path.read_bytes() == before
+    assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
+
+    # A different command stays a conflict on install and on replay.
+    scenario.edit("codex", "notes", {"command": "OTHER", "enabled": False})
+    edited = path.read_bytes()
+    for flags in ((), ("--frozen",)):
+        refused = scenario.install(*flags, targets="codex")
+        assert refused.returncode == 1, refused.stdout + refused.stderr
+        assert path.read_bytes() == edited
+    # The CI audit reaches the frozen verdict for the same entry and names it (#4477),
+    # and comparing it writes nothing under APM home or the APM cache, even on a
+    # CI runner whose APM cache starts empty.
+    shutil.rmtree(scenario.isolated.cache_root)
+    scenario.isolated.cache_root.mkdir()
+    apm_state = _apm_state(scenario.isolated)
+    audited = scenario.audit()
+    assert audited.returncode == 1, audited.stdout + audited.stderr
+    assert "MCP server 'notes' target 'codex'" in audited.stdout + audited.stderr
+    assert path.read_bytes() == edited
+    assert _apm_state(scenario.isolated) == apm_state

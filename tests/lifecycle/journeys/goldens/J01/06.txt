@@ -7,10 +7,6 @@ $ apm install
   [+] github.com/github/awesome-copilot/skills/review-and-refactor @<SHA8> (cached)
   |-- (files unchanged)
   [+] microsoft/apm-sample-package #v1.0.0 @<SHA8> (cached)
-  |-- 2 prompts adopted -> .github/prompts/
-  |-- 2 agents adopted -> .claude/agents/, .github/agents/
-  |-- 2 commands adopted -> .claude/commands/
-  |-- 2 instruction(s) adopted -> .claude/rules/, .github/instructions/
   |-- (files unchanged)
 
 [i] No changes -- install state already up to date in <DUR>.

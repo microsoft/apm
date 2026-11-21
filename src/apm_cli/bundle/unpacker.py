@@ -248,9 +248,8 @@ def unpack_bundle(
                 f"Blocked: bundle contains {len(affected)} file(s) "
                 f"with critical hidden characters\n\n"
                 f"Affected files:\n" + "\n".join(affected) + "\n\n"
-                "Next steps:\n"
-                "  - Extract the bundle and run: apm audit --file <path> to inspect\n"
-                f"  - {UNPACK_CRITICAL_FINDINGS.sentence()}\n\n"
+                # Review, never bypass: no --force hint (RA-008).
+                f"Next step: {UNPACK_CRITICAL_FINDINGS.sentence()}\n\n"
                 "Learn more: https://apm.github.io/apm/enterprise/security/"
             )
 

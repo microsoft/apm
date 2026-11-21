@@ -60,6 +60,9 @@ first matching rung decides:
 7. (no match)                -> gated pending approval (denied but approvable)
 ```
 
+The ladder applies once the gate is on (see [The gate opt-in](#the-gate-opt-in)).
+Without an opt-in, rung 7 items deploy.
+
 Deny always wins. The org layer is the ceiling on deny -- personal consent
 cannot widen past an org or project deny. The default (rung 7) is **gated
 pending approval**, not a hard deny: a package with executables and no opinion
@@ -218,7 +221,10 @@ unreachable policy under `policy.fetch_failure_default: block`); run
 prints `Teammates need APM 0.37 or later to read pinned approvals.`
 
 `--pending` marks each item `[approved]`, `[approved, any content]`,
-`[changed since approval]`, `[denied]`, or `[not approved]`. `--list` labels
+`[changed since approval]`, `[denied]`, or `[not approved]`. Before any layer
+turns the gate on, an item that would need approval is marked
+`[deployed: no executables policy]`: it deploys today and is listed so you can
+review it before opting in. `--list` labels
 `hooks` and `mcp` grants `pinned` or `any content`, for example
 `hooks[+:project-allow, pinned]`.
 
@@ -292,9 +298,26 @@ ignores the personal store when it checks MCP consent, so CI and laptops agree.
 
 Existing `owner/repo#1.2.0` keys still match the package regardless of the
 installed version; `apm approve` folds them into the version-blind key. Local
-bundle grants are different: copy the full `name#version@sha256:<digest>` key
-from the install diagnostic. A changed local bundle does not inherit the prior
-grant.
+bundle grants are different: they bind the full `name#version@sha256:<digest>`
+key the install diagnostic prints. A changed local bundle does not inherit the
+prior grant.
+
+### Local bundles
+
+`apm install <bundle>` parks a local bundle's hooks, MCP, and LSP servers until
+its exact content key is approved, and prints that key. Approve it with:
+
+```bash
+apm approve "hookpkg#1.0.0@sha256:<digest>"   # the key the install printed
+apm install ./hookpkg-1.0.0                  # rerun the install to deploy
+```
+
+This writes the same grant as adding the key under `executables.allow` in
+`apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
+installed with `apm install -g`). Either path works. `apm approve --pending`
+lists parked bundles with their keys. A key with a wrong digest, or a key
+printed before the bundle's bytes changed, is refused: `apm approve` exits 1
+with an `[x]` line and writes nothing.
 
 ## Examples
 

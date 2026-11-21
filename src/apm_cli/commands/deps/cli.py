@@ -11,15 +11,16 @@ import click
 from apm_cli.core.remediation import (
     DEPENDENCIES_NOT_INSTALLED,
     DEPENDENCY_UNPLACED,
-    DEPS_UPDATE_DEPRECATED,
     ORPHANED_PACKAGES_PRUNE,
 )
 from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle, serialized_lifecycle_unless
 
 # Import existing APM components
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
+from ...core.deprecations import deprecation_message
 from ...core.project_name import DEFAULT_BOOTSTRAP_PROJECT_NAME
 from ...core.target_catalog import target_all_exclusion_help, target_help_fragment
 from ...core.target_detection import TargetParamType
@@ -57,7 +58,7 @@ def _format_primitive_counts(primitives):
     return ", ".join(parts)
 
 
-_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab"}
+_PROVIDER_SOURCE_LABELS = {"ado": "azure-devops", "gitlab": "gitlab", "generic": "git"}
 
 
 def _deps_list_source_label(
@@ -70,7 +71,8 @@ def _deps_list_source_label(
     """Map a dependency's provider to the ``apm deps list`` Source column.
 
     Remote hosts classify through the canonical provider registry, so a
-    declared or locked ``host_type`` labels a self-hosted GitLab correctly.
+    declared or locked ``host_type`` labels a self-hosted GitLab correctly,
+    and an unrecognized host is labeled ``git`` rather than ``github``.
     """
     from ...core.host_providers import classify_host_provider
 
@@ -1089,6 +1091,7 @@ def clean(dry_run: bool, yes: bool):
     ),
 )
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.UPDATE)
 def update(packages, verbose, force, target, parallel_downloads, global_, legacy_skill_paths):
     """Update APM dependencies to latest git refs.
 
@@ -1115,13 +1118,7 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     # Soft-deprecation (issue #1525): `apm update` is now a strict superset
     # of this command. Kept working for one release; removed in the next
     # breaking release.
-    _rich_warning(
-        f"'apm deps update' is deprecated. {DEPS_UPDATE_DEPRECATED.sentence()} "
-        "'apm update' now supports -g/--global, [PACKAGES]..., --force, "
-        "--parallel-downloads, --target, and --legacy-skill-paths, plus an "
-        "interactive plan, --dry-run, and --yes.",
-        symbol="warning",
-    )
+    _rich_warning(deprecation_message("deps-update"), symbol="warning")
 
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
 

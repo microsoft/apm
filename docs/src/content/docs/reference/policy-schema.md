@@ -37,7 +37,7 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 Discovery order, in priority:
 
 1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
-2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read.
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github-private`, `.github`, `.apm`, `_apm`; Azure DevOps uses repository `apm-policy` in project `apm`, then falls back to legacy `_apm/_apm` only after a 404). When no candidate has a policy, the install proceeds silently; `apm policy status` reports outcome `absent` (see [output fields](../cli/policy/#output-fields)). On GitHub, if `.github-private` returned 404, the status adds a hint that the credential may lack read access, because GitHub also answers 404 for private repositories you cannot read. Offline, an unreachable earlier candidate does not hide a policy cached from a later one: a cached policy up to 7 days old is applied, and output names it as stale. An authentication error still fails closed.
 
 The `<ref>` accepts:
 
@@ -69,6 +69,7 @@ possible.
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `security`         | object              | see section      | no       | Rules over APM's security checks: install-time audit and external scanners (require the `external-scanners` flag), lockfile hashes and drift. |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `marketplace`      | object              | see section      | no       | Restrict the marketplace catalogs a project `apm.yml` may declare. See [marketplace](#marketplace). |
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, LSP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
@@ -140,9 +141,9 @@ Diagnostic shape (ASCII-only, ``[x]`` for block, ``[!]`` for warn):
 
 ```text
 [x] Policy violation: acme/lib -- bare branch 'main' tracks a moving tip
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/lib` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint). Nothing was changed. Pin `acme/lib` to a semver range, tag, or SHA in apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 [x] Policy violation: acme/skills -- no ref; resolves to default branch
-  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint) -- pin `acme/skills` to a semver range, tag, or SHA in apm.yml, contact admin to update policy, or use `--no-policy` for one-off bypass
+  Blocked by org policy at org:contoso/.github (dependency-pinned-constraint). Nothing was changed. Pin `acme/skills` to a semver range, tag, or SHA in apm.yml, or contact your policy admin to allow it. Run `apm policy status` to see the active policy.
 ```
 
 `apm audit --ci` lists the same dependencies under `dependency-pinned-constraint details:`.
@@ -162,7 +163,7 @@ dependencies:
 
 `required-packages` (declared in `apm.yml`) and `required-packages-deployed` (present in `apm.lock.yaml`) compare the same identity. An entry that matches no declared package fails both checks; when the package is declared on another host, the message names that host and the policy entry that would match it, so you can either move the dependency or, for a trusted host, change the entry.
 
-A dependency written as an explicit registry-proxy path (`host/artifactory/...`) is identified by the proxy host; set `PROXY_REGISTRY_URL` and keep plain shorthand so default-host entries keep matching.
+A dependency written as an explicit registry-proxy path (`art.example.com/artifactory/github/acme/tools`) is identified by the proxy host: require it as `art.example.com/acme/tools`. Both checks pass, because `apm.lock.yaml` records that package under the same host. To keep default-host entries matching instead, set `PROXY_REGISTRY_URL` and keep plain shorthand.
 
 A project's `default_host:` does not change what a hostless entry names, and `GITHUB_HOST` can differ between machines: for an org-wide policy, write every `require` entry with its host. Ports are ignored, as for `deny`.
 
@@ -452,6 +453,28 @@ registry_source:
   require:
     - jf-skills
   allow_non_registry: false
+```
+
+## marketplace
+
+Restrict the marketplace catalogs a root project `apm.yml` may declare under
+[`marketplaces:`](../manifest-schema/#314-marketplaces), and the catalogs its
+marketplace packages are installed from: the catalog origin `apm.lock.yaml`
+records (`source_url`) and that of each fresh resolution, whether it came
+through the map or a registration. A locked package with no recorded origin
+is refused. Checked by the install policy gate and `apm audit --ci`. To clear
+a refused package, remove its `apm.yml` entry and run `apm install`, then add
+it back from an allowed catalog (`apm update` keeps the recorded catalog).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `allow` | `list<string>` or null | `null` | Catalog origins every declared marketplace and every locked or resolved marketplace package must match, as `host/path` globs (`*` = one segment, `**` = any depth). A scheme, userinfo, `.git` and host case are ignored. `null` = no opinion; `[]` = no project may declare or install from a marketplace. A local-path catalog never matches. |
+
+```yaml
+marketplace:
+  allow:
+    - github.com/contoso/*
+    - gitlab.example.com/platform/agent-marketplace
 ```
 
 ## executables

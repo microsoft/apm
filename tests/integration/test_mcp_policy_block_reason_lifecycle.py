@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import catalog
 from tests.integration._policy_scope_kit import PolicyScopeWorld, output, run_step
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.local_github_https_fixture import local_github_https_fixture
@@ -76,10 +77,10 @@ def test_unfetchable_policy_block_prints_the_reason(apm_binary_path: Path, tmp_p
         "",
     )
     assert refusal.startswith("[x] "), text
-    # The way out of an org-enforced block never advertises a bypass.
-    assert (
-        "Check that the org policy source is reachable (apm policy status) "
-        "and retry, or ask your org admin." in refusal
-    ), text
+    # The way out of an org-enforced block comes from the remediation catalog
+    # and never advertises a bypass.
+    # An absent policy has no source to name.
+    remedy = catalog()["policy-fetch-failure-blocked"].bind(source="")
+    assert refusal.rstrip().endswith(remedy.sentence()), text
     assert "--no-policy" not in refusal, text
     assert (project / "apm.yml").read_bytes() == manifest

@@ -19,12 +19,14 @@ The deny-wins precedence is resolved by
 from __future__ import annotations
 
 import sys
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
 
 from apm_cli.core.remediation import (
+    BUNDLE_EXECUTABLES_ALLOW,
     EXECUTABLES_APPROVED,
     EXECUTABLES_DENIED,
     EXECUTABLES_UNAPPROVED,
@@ -179,19 +181,33 @@ def _store_label(user_scope: bool) -> str:
     return "apm.yml"
 
 
+_ORG_POLICY_PER_COMMAND: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
 def _load_org_policy(project_root: Path, logger: CommandLogger | None = None) -> ApmPolicy:
     """Return the merged org policy, routed as every other policy reader routes it.
+
+    One command resolves its policy once (#4178): the result is memoized per
+    command logger, so a miss is reported once however many trust readers ask.
 
     A blocking outcome raises :class:`PolicyViolationError`; an outcome that
     leaves no usable policy is reported and yields an empty policy.
     """
+    root = Path(project_root).resolve()
+    if logger is not None:
+        cached = _ORG_POLICY_PER_COMMAND.get(logger)
+        if cached is not None and cached[0] == root:
+            return cached[1]
     policy = resolve_trust_policy(project_root, logger=logger)
-    return policy if policy is not None else ApmPolicy()
+    policy = policy if policy is not None else ApmPolicy()
+    if logger is not None:
+        _ORG_POLICY_PER_COMMAND[logger] = (root, policy)
+    return policy
 
 
 def _report_policy_block(exc: PolicyViolationError) -> None:
     """Announce a blocking policy outcome; nothing was written."""
-    _rich_error(str(exc))
+    _rich_error(str(exc), symbol="error")
     _rich_info(
         "Nothing was written. Run 'apm policy status --no-cache' to diagnose "
         "the org policy source, fix it, then re-run the command.",
@@ -262,8 +278,14 @@ def approve_cmd(
 
         apm approve -g owner/repo
     """
+    if not (packages or pending or approve_all or recommended or list_decisions):
+        # A missing package is a usage error (exit 2), like `apm deny` (#4262).
+        raise click.UsageError(
+            "Specify at least one package, or use --pending / --all / --recommended."
+        )
     logger = CommandLogger("approve")
     try:
+        _reject_quoted_specs(packages, "approve", user_store=user_scope, global_scope=global_scope)
         manifest = _find_manifest(user_scope, global_scope)
 
         if list_decisions:
@@ -284,13 +306,17 @@ def approve_cmd(
             _approve_all_pending(manifest, user_scope, allow, deny, logger=logger)
             return
 
-        if not packages:
-            logger.refusal(
-                "Specify at least one package, or use --pending / --all / --recommended."
-            )
-            sys.exit(1)
+        from ..security.executables import _is_content_bound_key
 
-        packages = _canonical_specs(manifest, packages)
+        bundle_keys = tuple(pkg for pkg in packages if _is_content_bound_key(pkg))
+        packages = tuple(pkg for pkg in packages if not _is_content_bound_key(pkg))
+        bundles = _resolve_bundle_keys(manifest, bundle_keys)
+        packages = _canonical_specs(manifest, packages) if packages else ()
+        if bundle_keys:
+            _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
+            if not packages:
+                return
+            allow, deny = _load_store(manifest, user_scope)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
@@ -325,6 +351,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
 
         apm deny owner/repo
     """
+    _reject_quoted_specs(packages, "deny", user_store=user_scope, global_scope=global_scope)
     manifest = _find_manifest(user_scope, global_scope)
     packages = _canonical_specs(manifest, packages)
     allow, deny = _load_store(manifest, user_scope)
@@ -344,7 +371,7 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool, global_scope: bool) ->
     if unmatched:
         # Never record a deny that matches no installed package (#4189).
         for pkg in unmatched:
-            _report_not_found(declarations, pkg, manifest)
+            _report_not_found(declarations, pkg, manifest, verb="deny")
         sys.exit(1)
 
     changed = 0
@@ -637,6 +664,10 @@ def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str |
     return None
 
 
+# An item no trust layer admits while no layer enables the gate: it deploys today.
+UNGATED_STATE = "deployed: no executables policy"
+
+
 def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     """List installed packages whose executables no trust layer admits.
 
@@ -647,19 +678,64 @@ def _show_pending(manifest: Path, *, logger: CommandLogger) -> None:
     from dataclasses import replace
 
     pending = _pending_declarations(manifest, logger=logger)
-    if not pending:
+    effective = _effective_trust_context(manifest, logger=logger)
+    ctx = replace(effective, gate_enabled=True)
+    bundles = _pending_bundles(manifest, ctx)
+    if not pending and not bundles:
         _rich_success("All packages with executables are approved.")
         return
 
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
-    for decl in pending:
-        pins = _pins_for(decl)
-        _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
-        _echo_pins(decl, pins, _item_states(ctx, decl, pins))
+    if pending:
+        _rich_warning(f"{len(pending)} package(s) with unapproved or changed executables:")
+        for decl in pending:
+            pins = _pins_for(decl)
+            _rich_echo(f"  {_identity(decl)}: {decl.summary_line()}")
+            states = _item_states(ctx, decl, pins)
+            if not effective.gate_enabled:
+                # No layer opts in, so these deploy today; the review is ahead of the opt-in.
+                states = {
+                    key: UNGATED_STATE if state == "not approved" else state
+                    for key, state in states.items()
+                }
+            _echo_pins(decl, pins, states)
+        _rich_echo("")
+        _rich_info(EXECUTABLES_UNAPPROVED.sentence(), symbol="info")
+    if bundles:
+        _show_pending_bundles(manifest, bundles)
+
+
+def _pending_bundles(manifest: Path, ctx) -> list:
+    """Installed local bundles whose parked executables are still not approved (#4221)."""
+    from ..install.local_bundle_pending import pending_bundles
+    from ..security.executables import materialize_exec_map, package_type_approved
+
+    allow_map = materialize_exec_map(ctx)
+    return pending_bundles(
+        manifest.parent,
+        lambda key, exec_type: package_type_approved(allow_map, (key,), exec_type),
+    )
+
+
+def _show_pending_bundles(manifest: Path, bundles: list) -> None:
+    from ..security.trust import approve_command
+
+    user_scope = _install_command(manifest).endswith("-g")
+    _rich_warning(f"{len(bundles)} local bundle(s) with parked executables:")
+    for bundle in bundles:
+        _rich_echo(
+            f"  local bundle '{bundle.slug}': {', '.join(bundle.exec_types)} not approved; "
+            "approval key:"
+        )
+        # The key is copied into apm.yml, so it is never wrapped.
+        _rich_echo(f'    "{bundle.approval_key}"', soft_wrap=True)
+        _rich_echo(
+            f"    {approve_command(bundle.approval_key, user_scope=user_scope)}", soft_wrap=True
+        )
     _rich_echo("")
     _rich_info(
-        EXECUTABLES_UNAPPROVED.sentence(),
+        BUNDLE_EXECUTABLES_ALLOW.bind(manifest=manifest.name)
+        .with_command(f"{_install_command(manifest)} <bundle>")
+        .sentence(),
         symbol="info",
     )
 
@@ -739,7 +815,140 @@ def _approve_packages(
         sys.exit(1)
 
 
-def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
+def _resolve_bundle_keys(manifest: Path, keys: Sequence[str]) -> list:
+    """Match each content-bound key to the bundle its install recorded, or exit 1 (#4437).
+
+    The key the install printed binds the bundle's exact content digest. A key
+    with a wrong digest, or one a later install of changed bundle bytes
+    replaced, matches no recorded bundle and is refused before any write.
+    """
+    from ..install.local_bundle_pending import recorded_bundle
+    from ..security.trust import approve_command
+
+    resolved = []
+    unmatched = []
+    for key in dict.fromkeys(keys):
+        bundle = recorded_bundle(manifest.parent, key)
+        if bundle is None:
+            unmatched.append(key)
+        else:
+            resolved.append(bundle)
+    if unmatched:
+        review = approve_command("--pending", user_scope=_install_command(manifest).endswith("-g"))
+        for key in unmatched:
+            _rich_error(
+                f"{key}: no installed local bundle has this exact content (wrong digest, "
+                f"or the bundle changed since the key was printed). Nothing written. Review: {review}",
+                symbol="error",
+            )
+        sys.exit(1)
+    return resolved
+
+
+def _approve_bundles(
+    manifest: Path,
+    user_scope: bool,
+    allow: dict,
+    deny: dict,
+    bundles: list,
+    *,
+    logger: CommandLogger,
+) -> None:
+    """Grant parked bundle executables under their exact key: the executables.allow entry."""
+    from dataclasses import replace
+
+    if not bundles:
+        return
+    cleared = []
+    for bundle in bundles:
+        entry = allow.get(bundle.approval_key)
+        grant = dict(entry) if isinstance(entry, dict) else {}
+        grant.update(dict.fromkeys(bundle.exec_types, True))
+        allow[bundle.approval_key] = grant
+        if deny.pop(bundle.approval_key, None) is not None:
+            cleared.append(bundle.approval_key)
+    _save_store(manifest, user_scope, allow, deny)
+    for key in cleared:
+        _rich_info(f"Cleared deny for {key} in {_store_label(user_scope)}.", symbol="info")
+    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
+    blocked = {bundle.approval_key for bundle in _pending_bundles(manifest, ctx)}
+    for bundle in bundles:
+        if bundle.approval_key in blocked:
+            _rich_error(
+                f"{bundle.approval_key} is still denied by another trust layer; the approval "
+                "has no effect until that deny is lifted.",
+                symbol="error",
+            )
+        else:
+            _rich_success(
+                f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
+                symbol="check",
+            )
+    approved = len([b for b in bundles if b.approval_key not in blocked])
+    if approved:
+        _rich_info(
+            f"Updated {_store_label(user_scope)} ({approved} approved). "
+            f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
+            symbol="info",
+        )
+    if blocked & {bundle.approval_key for bundle in bundles}:
+        sys.exit(1)
+
+
+def _trust_command(
+    verb: str, argument: str, *, global_scope: bool = False, user_store: bool = False
+) -> str:
+    """Return the runnable ``apm approve`` / ``apm deny`` command for *argument*."""
+    import shlex
+
+    from ..security.trust import approve_command
+
+    if verb == "approve":
+        return approve_command(argument, user_scope=global_scope, user_store=user_store)
+    flags = ("-g " if global_scope else "") + ("--user " if user_store else "")
+    return f"apm {verb} {flags}{shlex.quote(argument)}"
+
+
+def _reject_quoted_specs(
+    specs: Sequence[str], verb: str, *, user_store: bool = False, global_scope: bool = False
+) -> None:
+    """Refuse a package argument that still carries literal quotes, before any write.
+
+    No package identity or approval key starts or ends with a quote, so such
+    an argument would only record a key that matches nothing.
+    """
+    quoted = [spec for spec in specs if spec[:1] in "\"'" or spec[-1:] in "\"'"]
+    for spec in quoted:
+        bare = spec.strip("\"'")
+        rerun = (
+            f" Run: {_trust_command(verb, bare, global_scope=global_scope, user_store=user_store)}"
+            if bare
+            else ""
+        )
+        _rich_error(
+            f"{spec}: the package argument contains literal quote characters. "
+            f"Nothing written.{rerun}",
+            symbol="error",
+        )
+    if quoted:
+        sys.exit(1)
+
+
+def _local_bundle_keys(manifest: Path, pkg: str) -> list[str]:
+    """Exact-content keys of the installed local bundles *pkg* (or ``_local/<pkg>``) names."""
+    from ..install.local_bundle_pending import pending_bundles
+
+    name = pkg.split("#", 1)[0].removeprefix("_local/")
+    # Treating nothing as approved lists every bundle an install recorded.
+    recorded = pending_bundles(manifest.parent, lambda _key, _type: False)
+    return sorted(
+        bundle.approval_key
+        for bundle in recorded
+        if name in (bundle.slug, bundle.approval_key.split("#", 1)[0])
+    )
+
+
+def _report_not_found(declarations, pkg: str, manifest: Path, *, verb: str = "approve") -> None:
     """Explain why *pkg* matched nothing and name the command that works."""
     from ..security.trust import approve_command
 
@@ -749,6 +958,18 @@ def _report_not_found(declarations, pkg: str, manifest: Path) -> None:
     if decl is not None:
         command = approve_command(_identity(decl), user_scope=user_scope)
         _rich_error(f"{pkg}: approve the installed package by identity, not a ref: {command}")
+        return
+    bundle_keys = _local_bundle_keys(manifest, pkg)
+    if bundle_keys:
+        # A bundle grant binds its exact content, so name the key rather than guess.
+        commands = " or ".join(
+            _trust_command(verb, key, global_scope=user_scope) for key in bundle_keys
+        )
+        _rich_error(
+            f"{pkg}: not found in installed packages; it is a local bundle whose key "
+            f"binds its exact content. Run: {commands}",
+            symbol="error",
+        )
         return
     review = approve_command("--pending", user_scope=user_scope)
     _rich_error(f"{_not_found_message(declarations, pkg, user_scope=user_scope)}. Review: {review}")

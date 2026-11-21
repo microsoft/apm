@@ -41,7 +41,7 @@ steps:
   - n: 4
     run: [apm audit --ci, apm install --frozen]
     exit: 0
-    key_lines: ["[*] All 11 check(s) passed", "[+] No drift detected", "[i] No changes -- install state already up to date"]
+    key_lines: ["[*] All 15 check(s) passed", "[+] No drift detected", "[i] No changes -- install state already up to date"]
   - n: 5
     run: [apm unpack ./build/my-pkg-1.0.0.zip]
     exit: 0
@@ -49,11 +49,6 @@ steps:
       page: reference/cli/unpack.md
       commands: [apm unpack ./build/my-pkg-1.0.0.zip]
     key_lines:
-      - "[!] 'apm unpack' is deprecated and will be removed in a future release. Repack with the default plugin format and use 'apm install <bundle-path>'."
+      - "[!] 'apm unpack' is deprecated and will be removed in a future release. Repack with the default plugin format, then run 'apm install <bundle-path>' to install the bundle."
     forbidden_lines: ["[!] No files were unpacked"]
 known_cells:
-  - id: J11-legacy-pack-drops-agents-skills
-    law: FORBID
-    tracking: "#4202"
-    step: 5
-    match: "No files were unpacked"

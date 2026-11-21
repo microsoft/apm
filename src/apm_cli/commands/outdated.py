@@ -6,7 +6,6 @@ For marketplace-sourced deps, checks available versions in the marketplace.
 """
 
 import logging
-import os
 import re
 import sys
 from collections.abc import Iterable
@@ -513,20 +512,13 @@ def outdated(global_, verbose, parallel_checks):
     # which is exactly the duplicate-resolution workload the L0 cache +
     # coalesce lock are designed to collapse.
     try:
-        from ..cache.git_cache import GitCache
-        from ..cache.paths import get_cache_root
+        from ..cache.git_cache import attach_persistent_git_cache
         from ..deps.tiered_ref_resolver import (
             RefFreshnessPolicy,
             build_tiered_ref_resolver,
         )
 
-        _git_cache = None
-        if not os.environ.get("APM_NO_CACHE"):
-            try:
-                _git_cache = GitCache(get_cache_root(), refresh=False)
-                downloader.persistent_git_cache = _git_cache
-            except (OSError, ValueError):
-                pass
+        _git_cache = attach_persistent_git_cache(downloader)
         _tiered = build_tiered_ref_resolver(
             downloader=downloader,
             git_cache=_git_cache,
@@ -573,10 +565,23 @@ def outdated(global_, verbose, parallel_checks):
 
     downloader = OutdatedRefCache(downloader)
 
-    # Check deps with progress feedback and optional parallelism
-    rows = _check_deps_with_progress(
-        checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+    from ..marketplace.project_marketplaces import (
+        bind_project_marketplaces,
+        read_project_marketplaces,
     )
+
+    # Marketplace rows compare against the root ``marketplaces:`` map (#2903).
+    try:
+        declared_marketplaces = read_project_marketplaces(project_root)
+    except ValueError as exc:
+        logger.error(f"Failed to parse apm.yml: {exc}")
+        sys.exit(1)
+
+    # Check deps with progress feedback and optional parallelism
+    with bind_project_marketplaces(declared_marketplaces, user_scope=global_):
+        rows = _check_deps_with_progress(
+            checkable, downloader, verbose, parallel_checks, logger, registry_ctx
+        )
 
     if not rows:
         logger.success("No remote dependencies to check")
@@ -692,11 +697,10 @@ def outdated(global_, verbose, parallel_checks):
         from ..deps.egress_route import EgressSurface, is_refused
 
         if is_refused(EgressSurface.SOURCE_ENUMERATION):
+            # State the enterprise policy only; never advise lifting it (RA-014).
             logger.info(
-                "PROXY_REGISTRY_ONLY is set: git dependencies cannot be checked for "
-                "newer versions because APM does not list versions through the registry proxy. "
-                "Exact pins still install through the proxy; unset PROXY_REGISTRY_ONLY "
-                "to check against the source host."
+                "Source-host checks are disabled because PROXY_REGISTRY_ONLY is set "
+                "(enterprise proxy policy)."
             )
     if any(row.status == "not-comparable" for row in rows):
         logger.progress("Local replacement sources are not remotely comparable")

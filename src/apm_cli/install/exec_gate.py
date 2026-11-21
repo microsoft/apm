@@ -9,12 +9,23 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from apm_cli.core.remediation import (
     BIN_EXECUTABLES_NOT_RETRUSTED,
     BIN_EXECUTABLES_UNTRUSTED,
+)
+from apm_cli.install.plan_admission import (  # noqa: F401 -- re-exported for callers
+    _declared_exec_types,
+    _is_transitive,
+    _recorded_deployed_types,
+    bin_deploy_denial,
+    hook_file_admission,
+    native_plugin_verdict,
+    plugin_admission,
+    resolve_bin_skip,
 )
 
 if TYPE_CHECKING:
@@ -203,17 +214,6 @@ def _native_approval(
     return (verdict.allowed,) * 5
 
 
-def _is_transitive(package_info: Any, ctx: InstallContext | None) -> bool:
-    """Whether the resolved graph places this package below a direct dependency."""
-    dep_ref = getattr(package_info, "dependency_ref", None)
-    graph = getattr(ctx, "dependency_graph", None)
-    tree = getattr(graph, "dependency_tree", None)
-    if dep_ref is None or tree is None:
-        return False
-    depth = getattr(tree.get_node(dep_ref.get_unique_key()), "depth", 1)
-    return isinstance(depth, int) and depth > 1
-
-
 def native_install(package_info: Any) -> bool:
     """Whether install loads this package intact as a native plugin.
 
@@ -227,89 +227,6 @@ def native_install(package_info: Any) -> bool:
     if isinstance(getattr(package, "codex_plugin", None), CodexCompatibilityPlugin):
         return True
     return admits_native_plugin(package_info)
-
-
-def plugin_admission(
-    package_name: str,
-    package_info: Any,
-    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
-    *,
-    ctx: InstallContext | None = None,
-):
-    """The trust owner's verdict for a native install, else ``None`` (gate off)."""
-    from apm_cli.security.executables import exec_map_authorizes_all
-
-    if not native_install(package_info) or exec_map_authorizes_all(allow_executables):
-        return None
-    return native_plugin_verdict(package_name, package_info, allow_executables, ctx=ctx)
-
-
-def native_plugin_verdict(
-    package_name: str,
-    package_info: Any,
-    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
-    *,
-    ctx: InstallContext | None = None,
-):
-    """Whole-plugin verdict on the ``apm_modules`` source, else ``None`` (local).
-
-    Claude's user-scope route (#3290) asks this directly: whether that route
-    applies depends on targets and scope, which :func:`native_install` cannot see.
-    With the gate off the trust owner still refuses a transitive plugin with
-    MCP servers unless ``--trust-transitive-mcp`` is set, as it refuses a
-    loose transitive server.
-    """
-    from apm_cli.security.executables import (
-        AUTHORIZED_GATE_DISABLED,
-        FIRST_PARTY_PACKAGE,
-        closed_exec_map,
-        exec_map_authorizes_all,
-    )
-
-    if package_name == FIRST_PARTY_PACKAGE:
-        return None
-    from apm_cli.security.trust import admit_native_plugin
-
-    # A gate-off map still asks the owner (transitive MCP needs trust); replay
-    # of already-authorized content has no context; a missing map admits nothing.
-    if exec_map_authorizes_all(allow_executables):
-        source = (
-            getattr(ctx, "exec_trust_ctx", None)
-            if getattr(allow_executables, "authorized_by", None) == AUTHORIZED_GATE_DISABLED
-            else None
-        )
-    else:
-        source = closed_exec_map(allow_executables)
-
-    pkg_key = resolve_package_key(package_info, package_name)
-    keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
-    return admit_native_plugin(
-        source,
-        keys,
-        Path(package_info.install_path),
-        transitive=_is_transitive(package_info, ctx),
-        one_off=bool(getattr(ctx, "trust_transitive_mcp", False)),
-    )
-
-
-def hook_file_admission(
-    package_name: str,
-    package_info: Any,
-    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
-):
-    """Return the per-hook-file admission predicate for pinned hook grants.
-
-    ``None`` means every hook file follows the package-level decision.
-    """
-    from apm_cli.security.executables import FIRST_PARTY_PACKAGE, exec_map_authorizes_all
-
-    if package_name == FIRST_PARTY_PACKAGE or exec_map_authorizes_all(allow_executables):
-        return None
-    from apm_cli.security.trust import hook_file_filter
-
-    pkg_key = resolve_package_key(package_info, package_name)
-    keys = tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0])))
-    return hook_file_filter(allow_executables, keys, Path(package_info.install_path))
 
 
 def _candidate_keys(pkg_key: str) -> list[str]:
@@ -336,23 +253,106 @@ def current_exec_decision(
     are not, as the lock records them (``exec_allowed_types``, #3991).
     *trust_ctx_provider* is called only for a package that declares some.
     """
-    from apm_cli.security.executables import scan_package_executables
-    from apm_cli.security.trust import native_plugin_exec_types, package_exec_decision
+    from apm_cli.security.trust import package_exec_decision
 
-    pkg_key = resolve_package_key(package_info, package_name)
-    install = Path(package_info.install_path)
-    native = native_install(package_info)
-    if native:
-        exec_types = native_plugin_exec_types(install)
-    else:
-        exec_types = scan_package_executables(
-            install, package_name, "", approval_identity=pkg_key
-        ).exec_types
+    pkg_key, install, native, exec_types = _declared_exec_types(package_info, package_name)
     if not exec_types:
         return None, ()
     return package_exec_decision(
         trust_ctx_provider(), tuple(_candidate_keys(pkg_key)), install, exec_types, native=native
     )
+
+
+_ORG_DENY_LAYERS = frozenset({"org-deny-all", "org-deny"})
+_LOCAL_DENY_LAYERS = frozenset({"user-deny", "project-deny"})
+
+
+@dataclass(frozen=True)
+class WithheldExecutables:
+    """Why the gate withholds one locked package's executables, and which ones.
+
+    ``types`` pairs each withheld declared type with the gate's verdict state
+    (``denied`` or ``gated_pending_approval``).
+    """
+
+    source: str
+    types: tuple[tuple[str, str], ...]
+
+
+def withheld_executables(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> builtins.dict[str, WithheldExecutables]:
+    """Say why the gate now withholds each locked package's executables (#4043).
+
+    Keys are dependency keys; each value names the deciding source (``org
+    policy denies <pkg>``, ``<pkg> is denied locally`` or ``<pkg> is no
+    longer approved locally``) and the withheld types with their verdicts
+    (#4454). Only the types the lock records as deployed are judged, so a
+    partially admitted package counts when an approved type is revoked.
+    Packages the gate still allows are absent, as are packages whose decision
+    cannot be read now (an unreadable package, or *policy_provider* raising
+    :class:`ExecPolicyUnavailable`). ``install --frozen`` names retired files
+    with it and ``--dry-run`` previews them.
+    """
+    from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import TRUST_ABSENT, exec_trust_context_for_project
+    from apm_cli.security.trust import package_withheld_verdicts
+
+    trust: list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            trust.append(
+                exec_trust_context_for_project(
+                    manifest_path,
+                    policy=policy_provider(),
+                    fallback_allow_executables=fallback_allow_executables,
+                    migrate_user_legacy=False,
+                )
+            )
+        return trust[0]
+
+    withheld: builtins.dict[str, WithheldExecutables] = {}
+    with native_registration_scope(targets):
+        for key, dep in sorted((getattr(lockfile, "dependencies", None) or {}).items()):
+            if key == "." or dep.exec_status == TRUST_ABSENT:
+                continue
+            install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+            if not install_path.is_dir():
+                continue
+            try:
+                package_key, install, native, declared = _declared_exec_types(
+                    _build_package_info(dep, install_path), key
+                )
+                exec_types = _recorded_deployed_types(dep, declared)
+                verdicts = package_withheld_verdicts(
+                    _trust_ctx() if exec_types else None,
+                    tuple(_candidate_keys(package_key)),
+                    install,
+                    exec_types,
+                    native=native,
+                )
+            except (ExecPolicyUnavailable, OSError, ValueError):
+                continue
+            layers = {verdict.layer for verdict in verdicts.values()}
+            if layers & _ORG_DENY_LAYERS:
+                source = f"org policy denies {key}"
+            elif layers & _LOCAL_DENY_LAYERS:
+                source = f"{key} is denied locally"
+            elif layers:
+                source = f"{key} is no longer approved locally"
+            else:
+                continue
+            types = tuple((exec_type, verdicts[exec_type].state) for exec_type in sorted(verdicts))
+            withheld[key] = WithheldExecutables(source, types)
+    return withheld
 
 
 def recorded_exec_status_is_stale(
@@ -379,7 +379,191 @@ def recorded_exec_status_is_stale(
     return recorded != current or tuple(recorded_allowed) != tuple(current_allowed)
 
 
-def lock_exec_decisions_stale(
+def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
+    """Return lock key -> reason for each locked dependency the org policy now denies.
+
+    The same dependency check the install policy gate applies
+    (:func:`~apm_cli.policy.matcher.check_dependency_allowed`).
+    """
+    from apm_cli.policy.matcher import check_dependency_allowed
+
+    dependency_policy = getattr(policy, "dependencies", None)
+    if dependency_policy is None:
+        return {}
+    denied: dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == ".":
+            continue
+        allowed, reason = check_dependency_allowed(dep.to_dependency_ref(), dependency_policy)
+        if not allowed:
+            denied[key] = f"org policy: {reason}"
+    return denied
+
+
+class GateRetirements(NamedTuple):
+    """What the current gates no longer allow, by surface (see gate_retirements)."""
+
+    denied_packages: dict[str, str]
+    parked_servers: dict[str, str]
+    hook_pins: dict[str, str]
+    # Lock key -> why the hooks it recorded as deployed are no longer allowed.
+    hook_packages: dict[str, str]
+
+
+def gate_retirements(
+    lockfile: Any, modules_dir: Path, apm_package: Any, project_root: Path, *, user_scope: bool
+) -> GateRetirements | None:
+    """What the current gates no longer allow on a path that skips install's gate.
+
+    The one owner of gate monotonicity for ``apm update`` and ``apm uninstall``
+    (#4444, #4445, #4446): locked dependencies the org policy denies, recorded
+    MCP servers that install's own MCP admission
+    (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
+    revoked approval or a changed definition -- recorded hook files whose
+    pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
+    the ``--frozen`` and audit owner), and the packages whose recorded hooks
+    install's executables gate no longer deploys (:func:`locked_hooks_retired`).
+    ``None`` when the org policy blocks or is unresolved: install's policy
+    preflight owns that outcome.
+    """
+    from apm_cli.core.scope import manifest_root, scope_manifest_path
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+    from apm_cli.policy.outcome_routing import classify_project_policy
+    from apm_cli.security.executables import exec_trust_context_for_project
+    from apm_cli.security.trust import McpAdmission
+
+    if lockfile is None:
+        return GateRetirements({}, {}, {}, {})
+    route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
+    if route.blocks or route.unresolved:
+        return None
+    denied = policy_denied_locked_packages(lockfile, route.policy)
+    # recorded=None, as install selects: folding recorded omissions in first
+    # would put each parked server's locked config back and hide the problem.
+    view = CurrentMcpConfigView.select(
+        apm_package,
+        lockfile,
+        modules_dir,
+        admission=McpAdmission.for_project(project_root, user_scope=user_scope),
+        recorded=None,
+    )
+
+    trust: builtins.list[Any] = []
+
+    def _trust_ctx() -> Any:
+        if not trust:
+            # Reuse the policy routed above: a second resolution would report
+            # the same policy miss twice (I9).
+            trust.append(
+                exec_trust_context_for_project(
+                    scope_manifest_path(project_root, user_scope=user_scope),
+                    policy=route.policy,
+                    fallback_allow_executables=getattr(apm_package, "allow_executables", None),
+                )
+            )
+        return trust[0]
+
+    pins = locked_hook_pin_mismatches(lockfile, modules_dir, _trust_ctx)
+    hooks = {f"{item.package}/{item.item}": item.describe() for item in pins}
+    retired = locked_hooks_retired(
+        lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
+    )
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+
+
+def locked_hooks_retired(
+    lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], *, pinned: set[str]
+) -> builtins.dict[str, str]:
+    """Return lock key -> reason for each package whose recorded hooks the gate now refuses.
+
+    A row recorded as deploying hooks (ungated, or ``hooks`` among
+    ``exec_allowed_types``) is judged with :func:`current_exec_decision`, the
+    install gate's own verdict: a deny, a revoked approval or a newly
+    enabled gate leaves hooks out of the types it allows. A package named in
+    *pinned* (its pinned hook approval no longer admits a file) is retired
+    too. A package that cannot be read is left to install, which reports it.
+    """
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import (
+        EXEC_TYPE_HOOKS,
+        TRUST_ABSENT,
+        TRUST_DENIED,
+        TRUST_DEPLOYED,
+        _strip_version,
+    )
+
+    ungated = {None, TRUST_DEPLOYED}
+    retired: builtins.dict[str, str] = {}
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        recorded_allowed = tuple(dep.exec_allowed_types or ())
+        if dep.exec_status not in ungated and EXEC_TYPE_HOOKS not in recorded_allowed:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+            status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
+        except (ExecPolicyUnavailable, OSError, ValueError):
+            continue
+        if _strip_version(resolve_package_key(package_info, dep.get_unique_key())) in pinned:
+            retired[key] = "hook definition changed since approval"
+        elif status not in ungated and EXEC_TYPE_HOOKS not in allowed:
+            retired[key] = "denied" if status == TRUST_DENIED else "not approved"
+    return retired
+
+
+@dataclass(frozen=True)
+class StaleExecDecision:
+    """A locked package whose recorded ``exec_status`` the gate no longer makes."""
+
+    package: str
+    recorded: str | None
+    current: str | None
+    recorded_allowed: tuple[str, ...] = ()
+    current_allowed: tuple[str, ...] = ()
+
+    def describe(self) -> str:
+        recorded = self.recorded or "ungated"
+        current = self.current or "ungated"
+        if self.recorded_allowed != self.current_allowed:
+            # A partial package: the worst-case status hides a per-type change.
+            recorded += f" ({', '.join(self.recorded_allowed) or 'none'} allowed)"
+            current += f" ({', '.join(self.current_allowed) or 'none'} allowed)"
+        return f"{self.package}: recorded {recorded}, now {current}"
+
+
+def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
+    """Return the org policy a discovery call resolved for the gate.
+
+    Raises :class:`ExecPolicyUnavailable` when discovery fails or reports a
+    resolution failure (for example no cache and an unreachable source), so
+    callers fail toward the install gate's fetch-failure posture instead of
+    deciding as if there were no org policy.
+    """
+    from apm_cli.policy.outcome_routing import classify_discovery_outcome
+
+    try:
+        fetch = discover()
+    except Exception as exc:
+        raise ExecPolicyUnavailable(str(exc)) from exc
+    route = classify_discovery_outcome(fetch, fetch_failure_default="warn")
+    # A blocking or unresolved outcome is indeterminate, never "no policy".
+    if route.blocks or route.unresolved:
+        raise ExecPolicyUnavailable(route.outcome)
+    return getattr(fetch, "policy", None)
+
+
+def discovered_exec_policy(deploy_root: Path) -> Any:
+    """Return the org policy the gate applies at *deploy_root* (see above)."""
+    from apm_cli.policy.discovery import discover_policy_with_chain
+
+    return exec_policy_from_discovery(lambda: discover_policy_with_chain(deploy_root))
+
+
+def stale_exec_decisions(
     lockfile: Any,
     modules_dir: Path,
     manifest_path: Path,
@@ -387,20 +571,20 @@ def lock_exec_decisions_stale(
     policy_provider: Callable[[], Any],
     targets: list[Any] | None = None,
     fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
-) -> bool:
-    """Return whether any lock row's executables decision may no longer hold.
+    first_only: bool = False,
+) -> tuple[list[StaleExecDecision], bool]:
+    """Return the lock rows whose executables decision no longer holds.
 
-    ``apm update`` short-circuits when no ref moved; this tells it that an
-    ``apm approve`` / ``apm deny`` or an org policy change still needs the
-    install gate to deploy or retire executables and rewrite the lock. A row
-    recorded while the gate was off is compared against the effective gate,
-    org policy included, so a policy that newly gates executables re-gates
-    it as ``apm install`` does (#3990). Org policy is fetched only when a
-    locked package declares executables. Packages are read the way audit replay reads them, under the *targets*'
-    native registration capability. Trust (and *policy_provider*) resolve
-    only when a package declares executables. An unreadable package or a
-    provider raising :class:`ExecPolicyUnavailable` fails toward running
-    the gate, which applies the policy fetch-failure posture.
+    The second value is true when the answer is indeterminate: an unreadable
+    package, or *policy_provider* raising :class:`ExecPolicyUnavailable`.
+    ``apm update`` treats that as stale and runs the gate; ``apm install
+    --frozen`` and ``apm audit --ci`` report only determinate rows (#4053).
+    A row recorded while the gate was off is compared against the effective
+    gate, org policy included, so a policy that newly gates executables is
+    stale as ``apm install`` would re-gate it (#3990). Packages are read the
+    way audit replay reads them, under the *targets*' native registration
+    capability. Trust (and *policy_provider*) resolve only when a package
+    declares executables.
     """
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.install.drift import _build_package_info
@@ -425,29 +609,68 @@ def lock_exec_decisions_stale(
         for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
         if key != "." and dep.exec_status != TRUST_ABSENT
     ]
+    stale: list[StaleExecDecision] = []
     with native_registration_scope(targets):
         for dep in rows:
             install_path = dep.to_dependency_ref().get_install_path(modules_dir)
             if not install_path.is_dir():
                 continue
+            key = dep.get_unique_key()
             try:
                 package_info = _build_package_info(dep, install_path)
-                status, allowed_types = current_exec_decision(
-                    _trust_ctx, package_info, dep.get_unique_key()
-                )
+                status, allowed_types = current_exec_decision(_trust_ctx, package_info, key)
             except ExecPolicyUnavailable:
-                return True
+                return stale, True
             except (OSError, ValueError):
                 # An unreadable package: let install, which reports it, decide.
-                return True
+                return stale, True
             if recorded_exec_status_is_stale(
                 dep.exec_status,
                 status,
                 recorded_allowed=dep.exec_allowed_types,
                 current_allowed=allowed_types,
             ):
-                return True
-    return False
+                stale.append(
+                    StaleExecDecision(
+                        key,
+                        dep.exec_status,
+                        status,
+                        tuple(dep.exec_allowed_types or ()),
+                        tuple(allowed_types),
+                    )
+                )
+                if first_only:
+                    break
+    return stale, False
+
+
+def lock_exec_decisions_stale(
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    *,
+    policy_provider: Callable[[], Any],
+    targets: list[Any] | None = None,
+    fallback_allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+) -> bool:
+    """Return whether any lock row's executables decision may no longer hold.
+
+    ``apm update`` short-circuits when no ref moved; this tells it that an
+    ``apm approve`` / ``apm deny`` or an org policy change still needs the
+    install gate to deploy or retire executables and rewrite the lock (#3990).
+    An indeterminate answer fails toward running the gate, which applies the
+    policy fetch-failure posture.
+    """
+    stale, indeterminate = stale_exec_decisions(
+        lockfile,
+        modules_dir,
+        manifest_path,
+        policy_provider=policy_provider,
+        targets=targets,
+        fallback_allow_executables=fallback_allow_executables,
+        first_only=True,
+    )
+    return indeterminate or bool(stale)
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:
@@ -470,18 +693,6 @@ def resolve_package_key(package_info: Any, package_name: str) -> str:
         return build_approval_key(name, version)
 
     return package_name
-
-
-def resolve_bin_skip(
-    bin_approved: bool,
-    trust_bin: bool | None,
-    *,
-    non_interactive: bool,
-) -> tuple[bool, str | None]:
-    """Combine executable approval with the ``--trust-bin`` posture (trust owner)."""
-    from apm_cli.security.executables import compose_trust_bin
-
-    return compose_trust_bin(bin_approved, trust_bin, non_interactive=non_interactive)
 
 
 def plugin_bin_deployable(
@@ -511,20 +722,6 @@ def plugin_bin_deployable(
     ):
         return False
     return bin_deploy_denial(package_info, policy) is None
-
-
-def bin_deploy_denial(package_info: Any, policy: Any) -> str | None:
-    """Name the org ``bin_deploy`` rule that blocks this package's bin/, else ``None``."""
-    from apm_cli.security.executables import normalize_bin_deploy_deny_key
-
-    bin_policy = getattr(policy, "bin_deploy", None)
-    if bin_policy is None:
-        return None
-    if bin_policy.deny_all:
-        return "bin_deploy.deny_all"
-    package_key = normalize_bin_deploy_deny_key(package_info.get_canonical_dependency_string())
-    denied = {normalize_bin_deploy_deny_key(item) for item in bin_policy.deny}
-    return "bin_deploy.deny" if package_key in denied else None
 
 
 def executable_skip_reason(

@@ -51,8 +51,7 @@
   "rows": 17,
   "status": {
    "baseline": 1468,
-   "known-failing": 1,
-   "required": 1022
+   "required": 1023
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -22384,9 +22383,8 @@
    "rules": [
     "U8"
    ],
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e-evidence",
-   "tracking": "#4318",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-17-local-bundle-refusals]"
   },
   "rule|U9|approve-list-read-only": {
@@ -23632,7 +23630,7 @@
   "generated_cover-14-refusals.yaml": "670950509c0f185887feb8e014bced0c85b8b3a9b89ba01d1521b7dcdd3bb763",
   "generated_cover-15-refusals.yaml": "6bfca20083437cf5708ee57a4467837d456a0526dac39ab373a40e0730d17c57",
   "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
-  "generated_cover-17-local-bundle-refusals.yaml": "4298a661270a635e1ba043dafe52ba8405605815bbc9e84f055914c86ef58c4b"
+  "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
  },
  "rules": {
   "E1": {
@@ -23643,23 +23641,23 @@
   },
   "E2": {
    "evidence": [
-    "src/apm_cli/install/mcp/retired_destinations.py:84",
-    "src/apm_cli/install/mcp/retired_destinations.py:163"
+    "src/apm_cli/install/mcp/retired_destinations.py:93",
+    "src/apm_cli/install/mcp/retired_destinations.py:195"
    ],
    "text": "targets are equivalent except MCP ownership (MCPOWN)"
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:822",
-    "src/apm_cli/install/services.py:1024"
+    "src/apm_cli/install/services.py:827",
+    "src/apm_cli/install/services.py:1030"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:497",
-    "src/apm_cli/install/exec_gate.py:498",
-    "src/apm_cli/install/exec_gate.py:501"
+    "src/apm_cli/install/exec_gate.py:713",
+    "src/apm_cli/install/exec_gate.py:714",
+    "src/apm_cli/install/exec_gate.py:717"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -23669,73 +23667,73 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:694",
-    "src/apm_cli/commands/compile/cli.py:728"
+    "src/apm_cli/commands/compile/cli.py:695",
+    "src/apm_cli/commands/compile/cli.py:729"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
   "U2": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:240",
+    "src/apm_cli/commands/approve.py:263",
     "src/apm_cli/policy/install_preflight.py:220"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:596"
+    "src/apm_cli/core/deployment_ledger.py:879"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
   "U4": {
    "evidence": [
-    "src/apm_cli/install/manifest_reconcile.py:756"
+    "src/apm_cli/install/manifest_reconcile.py:775"
    ],
    "text": "a declared target change without a receipt is reachable; only receipt-backed contraction needs a prior lock"
   },
   "U5": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:171"
+    "src/apm_cli/commands/pack.py:177"
    ],
    "text": "pack -g is a syntactic refusal"
   },
   "U6": {
    "evidence": [
-    "src/apm_cli/commands/pack.py:41",
-    "src/apm_cli/commands/pack.py:42"
+    "src/apm_cli/commands/pack.py:43",
+    "src/apm_cli/commands/pack.py:44"
    ],
    "text": "pack provenance is the dependencies / marketplace block, not SRC"
   },
   "U7": {
    "evidence": [
-    "src/apm_cli/commands/install.py:966"
+    "src/apm_cli/commands/install.py:969"
    ],
    "text": "mcp-install acts on the requested server; other primitives keep no-collateral-write"
   },
   "U8": {
    "evidence": [
-    "src/apm_cli/commands/install.py:1245",
-    "src/apm_cli/commands/install.py:1010",
-    "src/apm_cli/commands/install.py:984",
+    "src/apm_cli/commands/install.py:1249",
+    "src/apm_cli/commands/install.py:1013",
+    "src/apm_cli/commands/install.py:987",
     "src/apm_cli/models/dependency/reference.py:860",
     "src/apm_cli/marketplace/registration.py:45",
-    "src/apm_cli/commands/uninstall/engine.py:734",
-    "src/apm_cli/commands/uninstall/engine.py:881",
-    "src/apm_cli/commands/uninstall/engine.py:726",
-    "src/apm_cli/commands/update.py:456",
-    "src/apm_cli/commands/prune.py:208",
+    "src/apm_cli/commands/uninstall/engine.py:727",
+    "src/apm_cli/commands/uninstall/engine.py:890",
+    "src/apm_cli/commands/uninstall/engine.py:719",
+    "src/apm_cli/commands/update.py:559",
+    "src/apm_cli/core/command_logger.py:297",
     "src/apm_cli/integration/canvas_integrator.py:5"
    ],
    "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [
-    "src/apm_cli/commands/approve.py:262",
-    "src/apm_cli/commands/approve.py:266"
+    "src/apm_cli/commands/approve.py:291",
+    "src/apm_cli/commands/approve.py:295"
    ],
    "text": "approve/deny with no prior decision is reachable; --list and --pending are read-only"
   }
  },
  "schema_version": 1,
- "sha256": "8d4c09ac0751031d193dc96df172bb28eb8cf5001d1f704542d4a45668d40502"
+ "sha256": "3f822aa713828f811f9f55383310a207b57fbef488b7c68d313cd6d1a9532706"
 }

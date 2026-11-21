@@ -59,6 +59,15 @@ class TestCommandLogger:
         logger.start("Starting operation...")
         mock_info.assert_called_once_with("Starting operation...", symbol="running")
 
+    @patch("apm_cli.core.command_logger._rich_info")
+    def test_targets_are_announced_once_per_command(self, mock_info):
+        logger = CommandLogger("install")
+        logger.announce_targets("Targets: claude, copilot  (source: apm.yml)")
+        logger.announce_targets("Targets: copilot  (source: apm.yml)")
+        mock_info.assert_called_once_with(
+            "Targets: claude, copilot  (source: apm.yml)", symbol="info"
+        )
+
     @patch("apm_cli.core.command_logger._rich_success")
     def test_success(self, mock_success):
         logger = CommandLogger("test")

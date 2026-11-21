@@ -25,7 +25,7 @@ import posixpath
 import sys
 from pathlib import Path
 
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.json_config import write_json_config
 
 from ...core.remediation import JETBRAINS_MCP_CONFIG_UNUSABLE
 from ...utils.path_security import PathTraversalError, ensure_path_within
@@ -267,7 +267,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
         try:
             self._validate_owned_config_path(path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_text(path, json.dumps(config, indent=2) + "\n")
+            write_json_config(path, config, default_trailing_newline=True)
         except OSError as exc:
             raise IntelliJConfigError(
                 f"Cannot write JetBrains Copilot MCP config at '{path}'. "

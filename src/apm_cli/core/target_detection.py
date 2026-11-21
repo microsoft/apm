@@ -30,6 +30,7 @@ from typing import Literal, Union
 
 import click
 
+from apm_cli.core.deprecations import deprecation_message
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -39,6 +40,7 @@ from apm_cli.core.target_catalog import (
     expand_all,
     first_deprecated_target_alias,
     get_target_capability,
+    is_vendor_target_id,
     normalize_target_name,
     target_error_values,
 )
@@ -533,6 +535,18 @@ VALID_TARGET_VALUES: frozenset[str] = accepted_target_values()
 TARGET_VALUES_HELP = ", ".join(sorted(accepted_target_values()))
 
 
+class UnknownTargetValueError(ValueError):
+    """A target value holds a token outside the accepted vocabulary.
+
+    ``token`` is that one token, so a multi-target error names it rather
+    than the whole list (RA-040).
+    """
+
+    def __init__(self, token: str, message: str) -> None:
+        super().__init__(message)
+        self.token = token
+
+
 def parse_target_field(
     value: str | list[str] | None,
     *,
@@ -622,13 +636,14 @@ def parse_target_field(
 
     # ---- validate every token ----
     for p in raw_parts:
-        if p not in accepted_target_values():
-            raise ValueError(
+        if p not in accepted_target_values() and not is_vendor_target_id(p):
+            raise UnknownTargetValueError(
+                p,
                 _target_error(
                     f"'{p}' is not a valid target. "
                     f"Choose from: {', '.join(sorted(accepted_target_values()))}",
                     source_path,
-                )
+                ),
             )
 
     # ---- deprecation warning for legacy "agents" alias (once per call) ----
@@ -637,9 +652,7 @@ def parse_target_field(
     if "agents" in raw_parts and source_path is None:
         _agents_alias_detected = True
         warnings.warn(
-            "'--target agents' is deprecated -- it maps to 'copilot' (.github/), "
-            "not '.agents/'. Use '--target copilot' or '--target agent-skills' "
-            "(.agents/skills/). Removal in v1.0.",
+            deprecation_message("target-agents"),
             AgentsTargetDeprecationWarning,
             stacklevel=2,
         )
@@ -763,7 +776,6 @@ class TargetParamType(click.ParamType):
         try:
             parsed = parse_target_field(value)
             warn_deprecated_target_alias_flag(value)
-            return parsed
         except ValueError as e:
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
@@ -771,11 +783,10 @@ class TargetParamType(click.ParamType):
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
 
             err_msg = str(e)
-            if "is not a valid target" in err_msg:
-                target_name = value if isinstance(value, str) else ",".join(value or [])
+            if isinstance(e, UnknownTargetValueError):
                 command = ctx.command.name if ctx is not None and ctx.command.name else "install"
                 rendered = render_unknown_target_error(
-                    target_name,
+                    e.token,
                     list(target_error_values(command)),
                     command=command,
                 )
@@ -784,6 +795,16 @@ class TargetParamType(click.ParamType):
             # user sees a clean "Invalid value for '--target': ..." message
             # rather than a Python traceback.
             self.fail(err_msg, param, ctx)
+        tokens = parsed if isinstance(parsed, list) else [parsed] if parsed else []
+        vendor = [token for token in tokens if is_vendor_target_id(token)]
+        if vendor:
+            # A vendor target parses, but no vendor handler is registered (#4251).
+            self.fail(
+                f"vendor target '{vendor[0]}' has no registered handler in this APM version",
+                param,
+                ctx,
+            )
+        return parsed
 
 
 # ---------------------------------------------------------------------------
@@ -1297,5 +1318,9 @@ def format_provenance(resolved: ResolvedTargets) -> str:
     # Double-space between target list and metadata is intentional and
     # canonical. Test assertions match this exact spacing. Do not collapse.
     """
-    targets_csv = ", ".join(resolved.targets)
-    return f"Targets: {targets_csv}  (source: {resolved.source})"
+    return provenance_line(resolved.targets, resolved.source)
+
+
+def provenance_line(targets: Iterable[str], source: str) -> str:
+    """Render the canonical ``Targets: X  (source: Y)`` line for any caller."""
+    return f"Targets: {', '.join(targets)}  (source: {source})"

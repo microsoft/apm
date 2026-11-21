@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from apm_cli.copilot_plugins.registrar import catalog_path_for
+from apm_cli.core.cache_drift import PACKAGE_CACHE_DRIFT
 from tests.unit.copilot_plugins._builders import write_agent_plugin
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
@@ -131,7 +132,7 @@ def test_native_cache_tamper_fails_installed_audit(
     assert changed.returncode != 0, changed.stdout + changed.stderr
     # Failed-check details follow their header to stderr (RA-004).
     message = " ".join(changed.stderr.split())
-    assert "Native Agent Plugin cache differs from its replay baseline" in message
+    assert "Native Agent Plugin " in message and f": {PACKAGE_CACHE_DRIFT};" in message
     assert "run 'apm install' to restore the package" in message
     assert "Traceback" not in changed.stderr
     assert (source / relative).read_bytes() == original

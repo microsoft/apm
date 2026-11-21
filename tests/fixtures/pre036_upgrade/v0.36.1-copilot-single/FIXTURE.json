@@ -1,0 +1,6 @@
+{
+  "apm_version": "0.36.1",
+  "apm_version_output": "Agent Package Manager (APM) CLI version 0.36.1 (784d778)",
+  "case": "copilot-single",
+  "provenance": "GitHub release v0.36.1 asset apm-darwin-arm64.tar.gz, sha256 49334cff638a12b8cf49874e0ca681a25f641ec7602819507018e842e33852fb verified against the published .sha256"
+}

@@ -379,6 +379,35 @@ def run(ctx: InstallContext) -> InstallResult:
     elif ctx.scope is InstallScope.PROJECT:
         _hint_project_compile_needed(ctx)
 
+    _report_kept_overwrites(ctx)
+
     from apm_cli.install.outcome import result_from_install_context
 
     return result_from_install_context(ctx)
+
+
+def _report_kept_overwrites(ctx: InstallContext) -> None:
+    """Fail on managed files install kept without deployment evidence (#4360).
+
+    The lockfile already keeps their prior entries; the files written this
+    run are recorded, so the lockfile matches the project.
+    """
+    if not ctx.kept_overwrites:
+        return
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    user_scope = ctx.scope is InstallScope.USER
+    kinds = getattr(ctx, "kept_overwrite_kinds", {})
+    blocking = 0
+    for owner, entry in ctx.kept_overwrites:
+        kind = kinds.get(entry)
+        message = kept_edit_message(entry, user_scope=user_scope, proven_edit=kind is not None)
+        if kind == "drift":
+            # A user edit with nothing new to deploy: kept and reported, not a failure.
+            ctx.diagnostics.warn(message, package=owner)
+            continue
+        blocking += 1
+        ctx.diagnostics.error(message, package=owner)
+    if blocking and ctx.logger is not None:
+        ctx.logger.kept_overwrites(blocking, ctx.kept_overwrite_written)

@@ -14,6 +14,7 @@ from apm_cli.core.remediation import (
 from apm_cli.core.scope import manifest_file
 
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
 from ..install.locking import serialized_lifecycle
 from ..utils.credential_rendering import redact_secrets, render_config_value
 from ..version import get_version
@@ -93,10 +94,7 @@ def _get_config_getters():
 # Keys still accepted by get/set so existing scripts keep working, but no
 # longer advertised. Each maps to the warning shown when it is used.
 _DEPRECATED_CONFIG_KEYS = {
-    "auto-integrate": (
-        "'auto-integrate' is deprecated and has no effect: no command reads it. "
-        "It will be removed in a future release."
-    ),
+    "auto-integrate": deprecation_message("config-auto-integrate"),
 }
 
 
@@ -227,6 +225,33 @@ def _show_all_user_config(logger: CommandLogger) -> None:
                 _echo_setting(f"registry.{reg_name}.token", body["token"], indent="  ")
             if body.get("default") is True:
                 _echo_setting(f"registry.{reg_name}.default", True, indent="  ")
+
+
+def _set_registry_key(logger: CommandLogger, reg_name: str, field: str, value: str) -> None:
+    """Apply ``apm config set registry.<name>.<field> <value>``."""
+    from ..config import set_registry_default, set_registry_token, set_registry_url
+
+    if field == "url":
+        try:
+            set_registry_url(reg_name, value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        logger.success(f"registry.{reg_name}.url set")
+    elif field == "token":
+        set_registry_token(reg_name, value)
+        logger.success(f"registry.{reg_name}.token set")
+    else:
+        try:
+            is_default = _parse_bool_value(value)
+        except ValueError as exc:
+            logger.error(redact_secrets(str(exc)))
+            sys.exit(1)
+        set_registry_default(reg_name, is_default)
+        if is_default:
+            logger.success(f"registry.{reg_name}.default set")
+        else:
+            logger.success(f"registry.{reg_name}.default cleared")
 
 
 def _require_external_scanners(logger, key: str) -> None:
@@ -452,26 +477,7 @@ def set(key, value):  # noqa: F811
                 f"{EXPERIMENTAL_FLAG_DISABLED.bind(flag='registries').sentence()}"
             )
             sys.exit(1)
-        reg_name, field = registry_match.group(1), registry_match.group(2)
-        from ..config import set_registry_default, set_registry_token, set_registry_url
-
-        if field == "url":
-            set_registry_url(reg_name, value)
-            logger.success(f"registry.{reg_name}.url set")
-        elif field == "token":
-            set_registry_token(reg_name, value)
-            logger.success(f"registry.{reg_name}.token set")
-        else:
-            try:
-                is_default = _parse_bool_value(value)
-            except ValueError as exc:
-                logger.error(redact_secrets(str(exc)))
-                sys.exit(1)
-            set_registry_default(reg_name, is_default)
-            if is_default:
-                logger.success(f"registry.{reg_name}.default set")
-            else:
-                logger.success(f"registry.{reg_name}.default cleared")
+        _set_registry_key(logger, registry_match.group(1), registry_match.group(2), value)
         return
 
     external_match = _EXTERNAL_SCANNER_KEY_RE.match(key)

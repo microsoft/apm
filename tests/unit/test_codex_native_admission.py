@@ -250,7 +250,7 @@ def test_parked_bundle_already_reported_gets_no_second_notice(tmp_path):
     ctx = SimpleNamespace(scope=InstallScope.USER, diagnostics=diagnostics, codex_native_plugins={})
     plan = _admit(tmp_path, approvals={}, parked_reported=True)
     assert plan.parked and plan.parked_reported
-    assert finalize_codex_native({}, plan, None, None, ctx, None) == {}
+    assert finalize_codex_native({}, plan, None, None, ctx, None) == {"parked_native": True}
     assert warned == [] and ctx.codex_native_plugins == {}
     plain = _admit(tmp_path, approvals={})
     finalize_codex_native({}, plain, None, None, ctx, None)

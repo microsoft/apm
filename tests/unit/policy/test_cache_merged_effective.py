@@ -53,6 +53,7 @@ from apm_cli.policy.schema import (
     BinDeployPolicy,
     DependencyPolicy,
     IntegrityPolicy,
+    MarketplacePolicy,
     SecurityPolicy,
     UnmanagedFilesPolicy,
 )
@@ -405,6 +406,26 @@ class TestBackdatedMetaOutcomes(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(result.outcome, "empty")
 
+    def test_marketplace_allow_only_policy_survives_cache_round_trip(self):
+        """#2903: a policy whose only rule is marketplace.allow is cached, not dropped."""
+        for allow in (("github.com/contoso/*",), ()):
+            with self.subTest(allow=allow):
+                policy = ApmPolicy(marketplace=MarketplacePolicy(allow=allow))
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    _write_cache("mkt/.github", policy, root)
+                    cache_dir = _get_cache_dir(root)
+                    cached = "".join(
+                        path.read_text(encoding="utf-8")
+                        for path in cache_dir.rglob("*")
+                        if path.is_file()
+                    )
+                    result = _read_cache("mkt/.github", root)
+                self.assertIn("marketplace", cached)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.outcome, "found")
+                self.assertEqual(result.policy.marketplace.allow, allow)
+
     def test_no_cache_fallback_outcome(self):
         """No cache + fetch error -> cache_miss_fetch_fail."""
         result = _stale_fallback_or_error(
@@ -569,6 +590,8 @@ unmanaged_files:
 registry_source:
   require: [corp-main]
   allow_non_registry: false
+marketplace:
+  allow: [github.com/contoso/*]
 security:
   audit:
     on_install: block
@@ -1217,6 +1240,22 @@ def test_extends_only_leaf_resolves_strict_parent(tmp_path: Path) -> None:
     assert result.policy is not None
     assert result.policy.dependencies.require_pinned_constraint is True
     assert transport.call_count == 2
+
+
+def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
+    """#4218: a cached document that no longer matches its record is never applied."""
+    repo_ref = "contoso/.github"
+    pin = "sha256:" + "a" * 64
+    _write_cache(repo_ref, ApmPolicy(name="org"), tmp_path, raw_bytes_hash=pin)
+    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is not None
+
+    document = _get_cache_dir(tmp_path) / f"{_cache_key(repo_ref)}.yml"
+    altered = document.read_text(encoding="utf-8") + "dependencies:\n  deny: [contoso/pkg-a]\n"
+    document.write_text(altered, encoding="utf-8")
+
+    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is None
+    assert _read_cache_entry(repo_ref, tmp_path) is None
+    assert document.read_text(encoding="utf-8") == altered
 
 
 if __name__ == "__main__":

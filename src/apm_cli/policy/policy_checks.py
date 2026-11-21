@@ -12,6 +12,7 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
 from apm_cli.core.scope import manifest_file
 
@@ -302,8 +303,13 @@ def _check_required_packages_deployed(
     policy: DependencyPolicy,
     *,
     dep_names: set[str] | DependencyPolicyIndex | None = None,
+    installing: bool = False,
 ) -> CheckResult:
     """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
+
+    *installing* means the caller is the install that locks *deps*: a declared
+    required package it is about to record is not absent, or the check would
+    block the very install that satisfies it.
 
     Asserts package PRESENCE, not materialised ``deployed_files``. A package
     can be legitimately present-but-parked -- resolved and locked, with its
@@ -329,7 +335,7 @@ def _check_required_packages_deployed(
         if match is None:
             # Never skip: the entry cannot locate its lock row by identity.
             unresolved.append(_unresolved_required_subject(index, pkg_name))
-        elif match.locked_in(lock) is None:
+        elif match.locked_in(lock) is None and not installing:
             # PRESENCE, not deployment: the package must appear in the lockfile.
             absent.append(
                 PolicySubject(
@@ -1289,6 +1295,116 @@ def _check_registry_source(
     )
 
 
+class MarketplaceOrigins(NamedTuple):
+    """Marketplace catalog origins ``marketplace.allow`` judges (#2903).
+
+    *declared* holds the root ``marketplaces:`` entries; *resolved* holds
+    ``(label, catalog origin)`` per marketplace-resolved dependency
+    (:func:`marketplace_resolution_origins`).
+    """
+
+    declared: Sequence | None = None
+    resolved: Sequence[tuple[str, str]] = ()
+
+
+def marketplace_resolution_origins(
+    lockfile,
+    *,
+    keys: Iterable[str] | None = None,
+    provenance: Mapping[str, Mapping[str, str]] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Return ``(label, catalog origin)`` for each marketplace-resolved dependency.
+
+    Reads the lock rows' ``source_url`` and, for an install, the fresh
+    resolutions in *provenance* (which replace the row they re-resolve).
+    *keys* limits the set to the dependencies being installed; ``None``
+    means every lock row (``apm audit --ci``). An empty origin means none
+    was recorded (a local catalog or an older lock).
+    """
+    wanted = None if keys is None else set(keys)
+    origins: dict[str, tuple[str, str]] = {}
+
+    def _record(key: str, via: str | None, plugin: str | None, origin: str | None) -> None:
+        if via and plugin and (wanted is None or key in wanted):
+            origins[key] = (f"{plugin}@{via} ({key})", origin or "")
+
+    for key, dep in getattr(lockfile, "dependencies", {}).items():
+        _record(key, dep.discovered_via, dep.marketplace_plugin_name, dep.source_url)
+    for key, prov in (provenance or {}).items():
+        _record(
+            key,
+            prov.get("discovered_via"),
+            prov.get("marketplace_plugin_name"),
+            prov.get("source_url"),
+        )
+    return tuple(origins[key] for key in sorted(origins))
+
+
+def _check_marketplace_allow(origins: MarketplaceOrigins, policy: MarketplacePolicy) -> CheckResult:
+    """Check marketplace catalog origins against ``marketplace.allow`` (#2903).
+
+    Covers the root ``marketplaces:`` entries and the origins resolved
+    marketplace dependencies were taken from (lock rows and fresh
+    resolutions, :func:`marketplace_resolution_origins`), so a committed
+    lock cannot install from a catalog the list does not name. A local
+    catalog, an unparseable source and a row with no recorded origin are
+    refused: an allow-list must never pass an origin it cannot name.
+    """
+    from ..core.remediation import MARKETPLACE_ALLOW_READD
+    from ..marketplace.project_marketplaces import declared_marketplace_origin
+    from ..marketplace.source_identity import marketplace_policy_subject
+    from .matcher import first_matching_pattern
+
+    check_name = "marketplace-allow"
+    patterns = tuple(marketplace_policy_subject(p) for p in policy.allow or ())
+
+    def _disallowed(origin: str) -> str | None:
+        subject = marketplace_policy_subject(origin) if origin else ""
+        if subject and first_matching_pattern(subject, patterns) is not None:
+            return None
+        return subject
+
+    subjects: list[PolicySubject] = []
+    for entry in origins.declared or ():
+        try:
+            origin = declared_marketplace_origin(entry)
+        except ValueError:
+            origin = ""
+        subject = _disallowed(origin)
+        if subject is None:
+            continue
+        reason = (
+            f"origin '{subject or entry.source}' is not in the org policy marketplace.allow "
+            "list; remove it from 'marketplaces:' in apm.yml or ask your org admin to allow it"
+        )
+        subjects.append(PolicySubject(f"marketplace '{entry.name}'", reason, remedy=None))
+    for label, origin in origins.resolved:
+        subject = _disallowed(origin)
+        if subject is None:
+            continue
+        # The lock carries a package's catalog provenance forward on every
+        # write, so only dropping its apm.yml entry (which prunes the row)
+        # and adding it back clears it; 'apm update' never does.
+        problem = (
+            f"resolved from catalog '{subject}', which is not in the org policy "
+            "marketplace.allow list"
+            if subject
+            else "has no recorded catalog origin, so the org policy marketplace.allow list "
+            "cannot admit it"
+        )
+        reason = f"{problem}; {MARKETPLACE_ALLOW_READD.clause()}, or ask your org admin to allow the catalog"
+        subjects.append(PolicySubject(label, reason, remedy=None))
+    if subjects:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=f"{len(subjects)} marketplace origin(s) not allowed by org policy",
+            details=[f"{s.ref}: {s.reason}" for s in subjects],
+            subjects=tuple(subjects),
+        )
+    return CheckResult(name=check_name, passed=True, message="All marketplace origins are allowed")
+
+
 def _check_pinned_constraints(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
@@ -1404,11 +1520,16 @@ def _check_dependency_content_hashes(
             enabled=True,
         )
     except RuntimeError as exc:
+        from apm_cli.install.integrity import unhashed_dependencies, unhashed_dependency_names
+
+        names = unhashed_dependency_names(
+            unhashed_dependencies(lockfile.get_package_dependencies())
+        )
         return CheckResult(
             name=check_name,
             passed=False,
             message=(
-                "Locked dependencies are missing required content hashes -- "
+                f"Locked dependencies are missing required content hashes ({names}) -- "
                 f"{CONTENT_HASHES_MISSING.clause()}"
             ),
             details=[str(exc)],
@@ -1423,7 +1544,7 @@ def _check_dependency_content_hashes(
 # -- Aggregate runners ---------------------------------------------
 
 
-def run_dependency_policy_checks(
+def run_dependency_policy_checks(  # noqa: PLR0913
     deps_to_install,
     *,
     lockfile=None,
@@ -1439,6 +1560,8 @@ def run_dependency_policy_checks(
     direct_dep_keys: set[str] | None = None,
     source_deps: Iterable[DependencyReference] | None = None,
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
+    installing: bool = False,
+    marketplace_origins: MarketplaceOrigins | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1506,6 +1629,15 @@ def run_dependency_policy_checks(
         the install-pipeline callers pass the declarations they captured
         beforehand and ``require_pinned_constraint`` judges the authored
         constraint rather than the selected tag (#3224).
+    installing:
+        ``True`` for the install gate, which is about to lock
+        *deps_to_install*: a declared required package missing only from
+        the previous lockfile does not block the install that records it.
+    marketplace_origins:
+        The root manifest's ``marketplaces:`` entries and the catalog
+        origins of marketplace-resolved dependencies (lock rows and fresh
+        resolutions), checked against ``marketplace.allow`` when the policy
+        sets it, so a lock cannot bypass it.
 
     Returns
     -------
@@ -1549,7 +1681,7 @@ def run_dependency_policy_checks(
         return result
     if _run(
         _check_required_packages_deployed(
-            deps_list, lockfile, policy.dependencies, dep_names=dep_names
+            deps_list, lockfile, policy.dependencies, dep_names=dep_names, installing=installing
         )
     ):
         return result
@@ -1582,6 +1714,8 @@ def run_dependency_policy_checks(
             deps_list, policy.dependencies, direct_dep_keys, declared_refs=declared_refs
         ),
     ]
+    if policy.marketplace.allow is not None and marketplace_origins is not None:
+        remaining_checks.append(_check_marketplace_allow(marketplace_origins, policy.marketplace))
     # MCP checks -- when mcp_deps is None (not provided), skip entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
@@ -1729,6 +1863,9 @@ def run_policy_checks(
         source_deps=source_deps,
         # Judge the same source-selected declarations as the install gate.
         declared_refs=collect_manifest_declarations(manifest),
+        marketplace_origins=MarketplaceOrigins(
+            manifest.marketplaces, marketplace_resolution_origins(lock)
+        ),
     )
     result.checks.extend(dep_result.checks)
 
