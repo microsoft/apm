@@ -2,7 +2,7 @@
  "counts": {
   "baseline_by_lane": {
    "T-1": 133,
-   "T-2": 410,
+   "T-2": 418,
    "T-3": 243,
    "T-6a": 201,
    "T-6b": 141,
@@ -50,9 +50,9 @@
   "row_steps": 204,
   "rows": 17,
   "status": {
-   "baseline": 1245,
+   "baseline": 1253,
    "known-failing": 1,
-   "required": 1245
+   "required": 1237
   }
  },
  "description": "Lifecycle interaction obligations (#4099): t=2 pairs of OP, SRC, PRIM, SCOPE, LOCK, DEPLOYED, GATE, TGT, NET and the modifiers, the exception factors crossed with the factors they refine, and the named triples T1-T5, after the refusal, definition and partial-equivalence rules of tests/lifecycle/generator/rules.py. required ids are credited by oracles.check_obligation in their witness (a covering row, or a machine spine whose credited_by ids imply the cell); known-failing ids name the strict known cell's tracking issue; baseline ids name the lane and issue that must discharge them. Regenerate with `python -m tests.lifecycle.generator`; `--check` fails on drift.",
@@ -7199,15 +7199,11 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=bin": {
-   "credited_by": [
-    "T3|compile|bundle|bin"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -7839,15 +7835,11 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
-   "credited_by": [
-    "T3|lock|bundle|bin"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -7857,37 +7849,25 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
-   "credited_by": [
-    "T3|lock|bundle|hook"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=lsp": {
-   "credited_by": [
-    "T3|lock|bundle|lsp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=mcp": {
-   "credited_by": [
-    "T3|lock|bundle|mcp"
-   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=skill": {
    "family": "T3",
@@ -10171,15 +10151,11 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-bundle|DRYRUN=on": {
-   "credited_by": [
-    "T5|dry-run|compile|bundle"
-   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "T5|OP=compile|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -14272,20 +14248,11 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=compile|SRC=local-bundle": {
-   "credited_by": [
-    "T3|compile|bundle|bin",
-    "T3|compile|bundle|hook",
-    "T3|compile|bundle|lsp",
-    "T3|compile|bundle|mcp",
-    "T5|dry-run|compile|bundle",
-    "T5|real|compile|bundle"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=compile|SRC=local-path": {
    "family": "pair",
@@ -15199,19 +15166,11 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|SRC=local-bundle": {
-   "credited_by": [
-    "T3|lock|bundle|bin",
-    "T3|lock|bundle|hook",
-    "T3|lock|bundle|lsp",
-    "T3|lock|bundle|mcp",
-    "T5|real|lock|bundle"
-   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=lock|SRC=local-path": {
    "family": "pair",
@@ -20162,7 +20121,6 @@
   },
   "pair|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
-    "T5|dry-run|compile|bundle",
     "T5|dry-run|install|bundle"
    ],
    "family": "pair",
@@ -20291,9 +20249,7 @@
   },
   "pair|SRC=local-bundle|PRIM=bin": {
    "credited_by": [
-    "T3|compile|bundle|bin",
-    "T3|install|bundle|bin",
-    "T3|lock|bundle|bin"
+    "T3|install|bundle|bin"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -20311,9 +20267,7 @@
   },
   "pair|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
-    "T3|compile|bundle|hook",
-    "T3|install|bundle|hook",
-    "T3|lock|bundle|hook"
+    "T3|install|bundle|hook"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -20324,9 +20278,7 @@
   },
   "pair|SRC=local-bundle|PRIM=lsp": {
    "credited_by": [
-    "T3|compile|bundle|lsp",
-    "T3|install|bundle|lsp",
-    "T3|lock|bundle|lsp"
+    "T3|install|bundle|lsp"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -20337,9 +20289,7 @@
   },
   "pair|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
-    "T3|compile|bundle|mcp",
-    "T3|install|bundle|mcp",
-    "T3|lock|bundle|mcp"
+    "T3|install|bundle|mcp"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -24936,5 +24886,5 @@
   }
  },
  "schema_version": 1,
- "sha256": "2f096b3d697f9a62cd0f0aba2ad01f2b31758c678326ef8b971e0fdd1ca790af"
+ "sha256": "74d4c98dc02f655aeb71f79466b9f08a726c67c8d483c55a70e408022709ab00"
 }

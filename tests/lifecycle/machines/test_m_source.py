@@ -14,8 +14,8 @@ LSP, canvas), marketplace object, ``plugin@marketplace``, local bundle, native
 Claude plugin, package registry object (experimental ``registries``), MCP
 registry server and inline MCP server. ``apm lock`` has no ``--dry-run`` flag,
 so its T5 cells are ``real`` only; the local bundle is a side door with no
-manifest entry, so install, compile and lock apply to it (update, prune and
-uninstall of a bundle are U8 rule cells of the covering replay); an MCP server
+manifest entry, so only ``install`` applies to it (update, prune and uninstall
+of a bundle are U8 rule cells of the covering replay); an MCP server
 is removed by editing ``apm.yml`` (``apm uninstall`` refuses it: a U8 refusal
 cell of the covering replay).
 
@@ -131,7 +131,6 @@ INLINE_SERVER = "p-inline"
 _MCP_SERVERS = {"p-registry": REGISTRY_SERVER, INLINE_SERVER: INLINE_SERVER}
 _CLOSED_PROXY = "http://127.0.0.1:9"
 _NO_DRY_RUN = frozenset({"lock"})
-_BUNDLE_OPS = frozenset({"install", "compile", "lock"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
 _KEEPING = frozenset({"lock", "compile"})
 _MARKET_CACHE = ".apm/cache/marketplace"
@@ -205,7 +204,9 @@ KINDS: Mapping[str, frozenset[str]] = {
     "p-skill": _SKILL,
     "p-exec": _EXEC,
     "p-child": _SKILL,
-    **{c.package: c.kinds for c in CHOICES if c.form in ("local-path", "native")},
+    # A native plugin is gated as one unit; its carried skill and MCP server are observed
+    # too, so an unapproved native deployment is an I4 violation (bin/ has no surface here).
+    **{c.package: c.kinds | c.prims for c in CHOICES if c.form in ("local-path", "native")},
 }
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
@@ -213,7 +214,7 @@ _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 def applies(op: str, form: str) -> bool:
     """Whether *op* acts on a dependency of *form* (see the module docstring)."""
     if form == "bundle":
-        return op in _BUNDLE_OPS
+        return op == "install"
     return not (form in _MCP_FORMS and op == "uninstall")
 
 
@@ -376,8 +377,9 @@ class SourceMachine(MachineBase):
         self.network = "online"
         self.converged = False
         self.registered = False
-        # Targets of the last resolving step: a step under the same targets is "unchanged".
-        self.resolved_targets = self.model.targets
+        # Slot -> targets of the last resolving step that handled it: a later step under
+        # the same targets is "unchanged" for that slot.
+        self.resolved_targets: dict[str, frozenset[str]] = {}
 
     # -- model -----------------------------------------------------------------
 
@@ -413,7 +415,7 @@ class SourceMachine(MachineBase):
         found = {f"SCOPE={self.bench.scope}"}
         if self.network == "online":
             found.add("NET=online")
-        if self.model.targets == self.resolved_targets:
+        if self.model.targets == self.resolved_targets.get(choice.slot, self.model.targets):
             shape = "single" if len(self.model.targets) == 1 else "multi"
             found.add(f"TGT={shape}-unchanged")
         found |= {context for flag, context in _FLAG_CONTEXT.items() if flag in args}
@@ -498,7 +500,8 @@ class SourceMachine(MachineBase):
             self.model = requested
             self.converged = op not in _KEEPING or self.converged
             if op not in _KEEPING:
-                self.resolved_targets = self.model.targets
+                for choice in choices:
+                    self.resolved_targets[choice.slot] = self.model.targets
         return step
 
     def preview(
@@ -667,8 +670,7 @@ class SourceMachine(MachineBase):
     )
     def reconcile(self, op: str, dry_run: bool) -> None:
         args = ("--yes",) if op == "update" else ()
-        # A bundle has no manifest entry: only compile and lock read what it deployed.
-        choices = [c for c in self._choices() if c.form != "bundle" or op in ("compile", "lock")]
+        choices = [c for c in self._choices() if c.form != "bundle"]
         self.command(op, args, choices, dry_run)
 
     def context_pass(self) -> None:
@@ -681,6 +683,8 @@ class SourceMachine(MachineBase):
         self.command("install", ("--frozen",), manifest, False)
         bundle = next((c for c in self._choices() if c.form == "bundle"), None)
         if bundle is not None:
+            # The first install under the new targets widens them; the second is unchanged.
+            self.declare_by_cli(bundle, False)
             self.declare_by_cli(bundle, False, ("--force", *selected))
         self.retarget(TARGET_SETS[0])
         self.reconcile("install", False)
