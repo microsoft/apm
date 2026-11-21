@@ -2906,7 +2906,7 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert "schedule" in workflow["on"]
     assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
     job = workflow_job(workflow, "architecture-cache-full-matrix")
-    assert job["steps"][0]["with"]["ref"] == "${{ inputs.ref }}"
+    assert job["steps"][0]["with"]["ref"] == JOURNEYS_RESOLVED_REF
     assert all(key not in job for key in ("if", "continue-on-error"))
     step = workflow_step(job, "Replay the full owner mutation matrix through the session cache")
     assert "if" not in step and "continue-on-error" not in step
@@ -2936,3 +2936,176 @@ def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
                 assert with_block.get("enable-cache") is False, (job_id, step.get("name"))
             if uses.startswith(("actions/setup-python", "actions/setup-node")):
                 assert "cache" not in with_block, (job_id, step.get("name"))
+
+
+JOURNEYS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml"
+JOURNEYS_RESOLVE_JOB = "resolve-ref"
+JOURNEYS_RESOLVE_STEP = "Resolve the requested ref to a tracked commit"
+JOURNEYS_RESOLVED_REF = "${{ needs.resolve-ref.outputs.sha }}"
+JOURNEYS_CHECKOUT_JOBS = ("journeys", "lifecycle-full", "architecture-cache-full-matrix")
+_DISPATCH_REF = re.compile(r"inputs\s*\.\s*ref\b|inputs\[\s*['\"]ref['\"]\s*\]")
+
+
+def _job_needs(job: WorkflowNode) -> list[str]:
+    needs = job.get("needs") or []
+    return [needs] if isinstance(needs, str) else list(needs)
+
+
+def _assert_journeys_ref_gate(workflow: WorkflowNode) -> None:
+    """Every checkout tests the commit resolve-ref vetted; nothing else reads the input."""
+    assert workflow.get("permissions") == {"contents": "read"}, workflow.get("permissions")
+    resolve = workflow_job(workflow, JOURNEYS_RESOLVE_JOB)
+    assert resolve.get("permissions") == {"contents": "read"}, resolve.get("permissions")
+    assert not _job_needs(resolve), resolve.get("needs")
+    assert resolve.get("outputs", {}).get("sha") == "${{ steps.resolve.outputs.sha }}"
+    resolve_step = workflow_step(resolve, JOURNEYS_RESOLVE_STEP)
+    assert resolve_step.get("id") == "resolve"
+    assert (resolve_step.get("env") or {}).get("REQUESTED_REF") == "${{ inputs.ref }}"
+    checkout_jobs: list[str] = []
+    for job_id, job in workflow["jobs"].items():
+        if job_id == "signal":
+            assert job.get("permissions") == {"issues": "write"}, job.get("permissions")
+            assert "github.event_name == 'schedule'" in str(job.get("if", ""))
+        else:
+            assert job.get("permissions", {"contents": "read"}) == {"contents": "read"}, job_id
+        for step in job.get("steps") or []:
+            scrubbed = deepcopy(step)
+            if step is resolve_step:
+                scrubbed["env"].pop("REQUESTED_REF")
+            assert not _DISPATCH_REF.search(json.dumps(scrubbed)), (job_id, step.get("name"))
+            if not str(step.get("uses", "")).startswith("actions/checkout@"):
+                continue
+            with_block = step.get("with") or {}
+            assert with_block.get("persist-credentials") is False, (job_id, step.get("name"))
+            if job_id == JOURNEYS_RESOLVE_JOB:
+                assert "ref" not in with_block, with_block
+                continue
+            checkout_jobs.append(job_id)
+            assert JOURNEYS_RESOLVE_JOB in _job_needs(job), (job_id, job.get("needs"))
+            assert with_block.get("ref") == JOURNEYS_RESOLVED_REF, (job_id, with_block)
+    assert checkout_jobs, "no job checks out the resolved commit"
+
+
+def test_lifecycle_journeys_checks_out_only_the_resolved_commit() -> None:
+    _assert_journeys_ref_gate(load_workflow(JOURNEYS_WORKFLOW))
+
+
+@pytest.mark.parametrize("job_id", JOURNEYS_CHECKOUT_JOBS)
+@pytest.mark.parametrize("mutation", ["checkout-input", "drop-needs", "run-input"])
+def test_lifecycle_journeys_ref_gate_drift_fails(job_id: str, mutation: str) -> None:
+    workflow = load_workflow(JOURNEYS_WORKFLOW)
+    job = workflow_job(workflow, job_id)
+    if mutation == "checkout-input":
+        job["steps"][0]["with"]["ref"] = "${{ inputs.ref }}"
+    elif mutation == "drop-needs":
+        job.pop("needs")
+    else:
+        job["steps"][-1]["run"] += "\ngit checkout ${{ github.event.inputs.ref }}\n"
+    with pytest.raises(AssertionError):
+        _assert_journeys_ref_gate(workflow)
+
+
+@pytest.mark.parametrize("mutation", ["write-permission", "persisted-credentials", "env-alias"])
+def test_lifecycle_journeys_resolve_job_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(JOURNEYS_WORKFLOW)
+    resolve = workflow_job(workflow, JOURNEYS_RESOLVE_JOB)
+    if mutation == "write-permission":
+        resolve["permissions"] = {"contents": "write"}
+    elif mutation == "persisted-credentials":
+        resolve["steps"][0]["with"]["persist-credentials"] = True
+    else:
+        workflow_step(resolve, JOURNEYS_RESOLVE_STEP)["env"]["SECOND"] = "${{ inputs.ref }}"
+    with pytest.raises(AssertionError):
+        _assert_journeys_ref_gate(workflow)
+
+
+def _git(cwd: Path, *args: str) -> str:
+    command = ["git", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args]
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
+    done = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
+@pytest.fixture(scope="module")
+def journeys_clone(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, str]]:
+    """A clone whose origin has main, release/1.0 (tagged v1.0.0) and an untracked side branch."""
+    origin = tmp_path_factory.mktemp("journeys-origin")
+    _git(origin, "init", "-q", "-b", "main")
+    _git(origin, "commit", "-q", "--allow-empty", "-m", "main")
+    commits = {"main": _git(origin, "rev-parse", "HEAD")}
+    for branch in ("release/1.0", "side"):
+        _git(origin, "checkout", "-q", "-b", branch, commits["main"])
+        _git(origin, "commit", "-q", "--allow-empty", "-m", branch)
+        commits[branch] = _git(origin, "rev-parse", "HEAD")
+    _git(origin, "tag", "v1.0.0", commits["release/1.0"])
+    _git(origin, "checkout", "-q", "main")
+    clone = tmp_path_factory.mktemp("journeys-clone") / "repo"
+    _git(origin.parent, "clone", "-q", str(origin), str(clone))
+    return clone, commits
+
+
+def _resolve_dispatch(clone: Path, requested: str, tmp_path: Path) -> tuple[int, str, str]:
+    step = workflow_step(
+        workflow_job(load_workflow(JOURNEYS_WORKFLOW), JOURNEYS_RESOLVE_JOB),
+        JOURNEYS_RESOLVE_STEP,
+    )
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    result = run_bash(
+        f"cd {shlex.quote(clone.as_posix())}\n{step['run']}",
+        env={"REQUESTED_REF": requested, "DEFAULT_SHA": "d" * 40, "GITHUB_OUTPUT": str(output)},
+    )
+    resolved = dict(
+        line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines() if line
+    )
+    return result.returncode, resolved.get("sha", ""), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("", "default"),
+        ("main", "main"),
+        ("release/1.0", "release/1.0"),
+        ("v1.0.0", "release/1.0"),
+        ("<main-sha>", "main"),
+        ("<release/1.0-sha>", "release/1.0"),
+    ],
+)
+def test_lifecycle_journeys_resolve_admits_tracked_commits(
+    journeys_clone: tuple[Path, dict[str, str]], tmp_path: Path, requested: str, expected: str
+) -> None:
+    clone, commits = journeys_clone
+    if requested.startswith("<"):
+        requested = commits[requested[1:].removesuffix("-sha>")]
+    code, sha, output = _resolve_dispatch(clone, requested, tmp_path)
+    assert code == 0, output
+    assert sha == ("d" * 40 if expected == "default" else commits[expected]), output
+
+
+@pytest.mark.parametrize(
+    ("requested", "message"),
+    [
+        ("side", "is not on main or a release/* branch"),
+        ("<side-sha>", "is not on main or a release/* branch"),
+        ("0" * 40, "does not resolve to a commit"),
+        ("--output=x", "is not a commit SHA, branch or tag name"),
+        ("main;id", "is not a commit SHA, branch or tag name"),
+    ],
+)
+def test_lifecycle_journeys_resolve_refuses_untracked_refs(
+    journeys_clone: tuple[Path, dict[str, str]], tmp_path: Path, requested: str, message: str
+) -> None:
+    clone, commits = journeys_clone
+    if requested.startswith("<"):
+        requested = commits[requested[1:].removesuffix("-sha>")]
+    code, sha, output = _resolve_dispatch(clone, requested, tmp_path)
+    assert code == 1, output
+    assert sha == "", output
+    assert message in output and "Allowed: a commit on main or a release/* branch" in output

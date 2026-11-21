@@ -352,12 +352,12 @@ def test_s12_empty_repo_errors_no_silent_copilot(tmp_path):
     _assert_error_three_sections(result.output)
 
 
-@pytest.mark.xfail(
-    reason="#4544 bare 'apm install -g' without a user manifest exits 1 (after #650)",
-    strict=True,
-)
 def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch, apm_binary_path: Path):
-    """S13: Closes #650 - 'apm install -g --target copilot' must not silently skip."""
+    """S13: Closes #650, #4544 - bare 'apm install -g' with no user manifest is a user error.
+
+    Like S14 at project scope, it exits 1, names the missing user manifest and
+    the 'apm install -g <org/repo>' next step, and deploys nothing.
+    """
     project = _setup(tmp_path, "s13_global_copilot")
     fakehome = tmp_path / "fakehome"
     fakehome.mkdir()
@@ -373,10 +373,23 @@ def test_s13_global_copilot_no_silent_skip(tmp_path, monkeypatch, apm_binary_pat
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    # Either the user-scope copilot path or a clear deploy line must appear.
-    combined = result.stdout + result.stderr
-    assert "copilot" in combined.lower()
+    combined = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, combined
+    user_manifest = fakehome / ".apm" / "apm.yml"
+    assert f"No {user_manifest} found" in combined
+    assert "'apm install -g <org/repo>'" in combined
+    assert not user_manifest.exists()
+    assert not (fakehome / ".apm" / "apm.lock.yaml").exists()
+    assert not (fakehome / ".copilot").exists()
+    # Only APM's own lock files and the update-check cache may appear.
+    written = [
+        path.relative_to(fakehome).as_posix()
+        for path in fakehome.rglob("*")
+        if path.is_file()
+        and path.name != ".apm-lifecycle.lock"
+        and path.relative_to(fakehome).parts[0] != ".cache"
+    ]
+    assert written == [], written
 
 
 def test_s14_no_manifest_errors_not_silent(tmp_path):
