@@ -219,7 +219,8 @@ def _logger() -> Mock:
     return Mock(spec=["policy_resolved", "policy_discovery_miss", "warning"])
 
 
-def test_found_announces_the_resolved_policy() -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+def test_found_announces_the_resolved_policy(explicit: bool) -> None:
     policy = ApmPolicy(enforcement="warn")
     logger = _logger()
     result = _result(
@@ -229,6 +230,7 @@ def test_found_announces_the_resolved_policy() -> None:
         cache_age_seconds=42,
         subgroup_scoped=True,
         chain_sources=["a", "b"],
+        explicit=explicit,
     )
 
     assert route_discovery_outcome(result, logger=logger, fetch_failure_default="block") is policy
@@ -239,6 +241,7 @@ def test_found_announces_the_resolved_policy() -> None:
         age_seconds=42,
         subgroup_scoped=True,
         chain=["a", "b"],
+        explicit=explicit,
     )
     logger.policy_discovery_miss.assert_not_called()
     logger.warning.assert_not_called()
