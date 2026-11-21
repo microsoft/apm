@@ -3,8 +3,9 @@
 PROMISE: P-INV-I7 -- a refused command leaves durable state as it found it.
 A local bundle whose package the org policy denies is refused by
 ``apm install <bundle>`` like a denied git dependency, before any file is
-written. ``apm pack`` (``--dry-run`` and ``--archive`` too) refuses a project
-whose lockfile holds a denied package, so its content never ships. With no
+written, and so is a bundle whose embedded lockfile records a denied package.
+``apm pack`` (``--dry-run`` and ``--archive`` too) refuses a project whose
+lockfile holds a denied package, so its content never ships. With no
 deny in force, an approved dependency's attested hooks file packs and pack
 does not claim otherwise.
 """
@@ -117,4 +118,12 @@ def test_pack_refuses_denied_dependency_and_packs_attested_hooks(
         assert "Pack blocked by org policy" in text, text
         assert _HOOK_FILE not in text, text
     assert not out.exists() or not any(out.iterdir())
+    assert _state(world) == before
+
+    # The bundle packed before the deny records the denied package, so a
+    # local install of it is refused although its own name is allowed.
+    install = _apm(world, "install", str(archive))
+    text = _text(install)
+    assert install.returncode == 1, _evidence(install)
+    assert denied in text, text
     assert _state(world) == before

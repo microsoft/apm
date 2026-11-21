@@ -139,7 +139,7 @@ def apm_bundle_admission(
         from ..deps.registry.auth import dependency_ref_with_registry_name_from_lockfile
 
         prepare_unpack_record(output_dir)
-        registries = project_registries(output_dir)
+        registries = _project_registries(output_dir)
         admit_bundle(
             policy_root=output_dir,
             apm_deps=(
@@ -196,7 +196,7 @@ def _bundle_target_decision(candidate: UnpackCandidate) -> EffectiveTargetDecisi
     return decision
 
 
-def project_registries(output_dir: Path) -> dict[str, str] | None:
+def _project_registries(output_dir: Path) -> dict[str, str] | None:
     """The ``registries:`` map of the project at *output_dir*, if any."""
     from ..core.scope import manifest_file
     from ..models.apm_package import APMPackage

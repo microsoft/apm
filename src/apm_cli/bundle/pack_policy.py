@@ -1,9 +1,10 @@
 """Org dependency policy for ``apm pack``.
 
 A pack ships the content of every package its lockfile records. Before it
-does, the project's declared dependencies meet the install policy preflight
-and every locked package meets ``dependencies.deny``, so a pack never moves
-content that install, update or lock would refuse.
+does, the project's declared dependencies and every locked package meet the
+org ``dependencies.deny`` list, so a pack never moves content of a package
+install, update or lock would refuse. Allow, require and pin rules judge what
+a project installs, not what it packs, so they do not apply here.
 """
 
 from __future__ import annotations
@@ -16,27 +17,27 @@ if TYPE_CHECKING:
 
 
 def pack_policy_preflight(project_root: Path, logger: Any) -> None:
-    """Refuse to pack when org policy refuses a package whose content would ship.
+    """Refuse to pack when org policy denies a package whose content would ship.
 
-    A project with no locked packages ships only its own content and is not
-    checked. Raises ``ValueError`` naming each refused package.
+    A project with no declared or locked package ships only its own content
+    and is not checked. Raises ``ValueError`` naming each denied package.
     """
     from ..core.command_logger import InstallLogger
     from ..deps.lockfile import resolve_lockfile_path_for_read
-    from ..install.bundle_admission import locked_package_refs, project_registries
+    from ..install.bundle_admission import locked_package_refs
     from ..install.errors import PolicyViolationError
-    from ..policy.install_preflight import run_policy_preflight
+    from ..policy.install_preflight import DenyOnlySubjects, run_policy_preflight
 
+    declared = _declared_dependencies(project_root)
     bundled = locked_package_refs(resolve_lockfile_path_for_read(project_root, read_only=True))
-    if not bundled:
+    if not declared and not bundled:
         return
     try:
         run_policy_preflight(
             project_root=project_root,
-            apm_deps=_declared_dependencies(project_root),
+            apm_deps=declared,
             logger=InstallLogger(verbose=bool(getattr(logger, "verbose", False)), command="pack"),
-            registries=project_registries(project_root),
-            bundled_deps=bundled,
+            bundled_deps=DenyOnlySubjects(tuple(bundled)),
         )
     except PolicyViolationError as exc:
         if exc.audit_result is None:

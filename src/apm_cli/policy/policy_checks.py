@@ -1552,6 +1552,24 @@ def _check_dependency_content_hashes(
 # -- Aggregate runners ---------------------------------------------
 
 
+def run_dependency_deny_check(
+    deps: Iterable[DependencyReference],
+    policy: ApmPolicy,
+    bundled_deps: Iterable[DependencyReference] = (),
+) -> CIAuditResult:
+    """Judge *deps* and *bundled_deps* against ``dependencies.deny`` alone.
+
+    For a command that ships content rather than installing it (``apm pack``):
+    allow, require and pin rules judge what a project installs, not what it
+    may hand on.
+    """
+    result = CIAuditResult()
+    result.checks.append(
+        _check_dependency_denylist(list(deps), policy.dependencies, list(bundled_deps))
+    )
+    return result
+
+
 def run_dependency_policy_checks(  # noqa: PLR0913
     deps_to_install,
     *,

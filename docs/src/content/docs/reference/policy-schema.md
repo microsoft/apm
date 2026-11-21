@@ -102,7 +102,7 @@ Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` 
 
 When a dependency matches `deny`, `apm install` will **not download or deploy that artifact**. With `enforcement: block`, the install aborts before the denied package is downloaded or deployed. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
 
-`deny` also covers local bundles and `apm pack`. `apm install <bundle>` checks the bundle's own package name as `_local/<name>` (so `**/<name>` matches it) and every package its embedded `apm.lock.yaml` records. `apm pack` refuses when a package in the project's `apm.lock.yaml` is denied. The allow list does not apply to a bundle's own name.
+`deny` also covers local bundles and `apm pack`. `apm install <bundle>` checks the bundle's own package name as `_local/<name>` (so `**/<name>` matches it) and every package its embedded `apm.lock.yaml` records. `apm pack` refuses when a declared dependency or a package in the project's `apm.lock.yaml` is denied; pack applies no other dependency rule. The allow list does not apply to a bundle's own name.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|

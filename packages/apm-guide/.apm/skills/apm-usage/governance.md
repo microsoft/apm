@@ -119,8 +119,10 @@ dependencies:
   `replace` sources, plus lockfile transitives).
 - `deny` also applies to `apm install <bundle>` (the bundle's own name as
   `_local/<name>`, so `**/<name>` matches, plus every package its embedded
-  lockfile records) and to `apm pack`, which refuses to ship a denied
-  locked package (`Pack blocked by org policy: <pkg>`, exit 1).
+  lockfile records; an unreadable embedded lockfile is refused) and to
+  `apm pack`, which refuses to ship a denied declared or locked package
+  (`Pack blocked by org policy: <pkg>`, exit 1). Pack applies deny only:
+  allow, require and pin rules do not apply to it.
 
 `dependencies.require` entries are exact and name ONE host: a hostless
 entry (`contoso/baseline`) names the default host only; write other hosts
