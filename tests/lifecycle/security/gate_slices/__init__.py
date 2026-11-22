@@ -18,6 +18,8 @@ import pkgutil
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from tests.lifecycle.known import KnownFailure
+
 
 @dataclass(frozen=True)
 class GateRow:
@@ -32,7 +34,7 @@ class GateRow:
     announce: str | None = None
     smoke: bool = False
     # Strict expected failure: "#<open issue> <neutral text>".
-    xfail: str = ""
+    xfail: KnownFailure | None = None  # strict expected failure
     # World package and target that replace the slice's for this row.
     package: str | None = None
     target: str | None = None

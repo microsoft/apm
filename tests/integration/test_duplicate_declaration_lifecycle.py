@@ -19,7 +19,7 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.integration._dependency_graph_world import GENERIC_HOST, NO_POLICY, World, remote
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _C = f"{GENERIC_HOST}/test/c"
 

@@ -20,7 +20,7 @@ import yaml
 from tests.integration._mcp_chain_kit import Chain, stdio_server
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _DENY_POLICY = (
     "name: acme\nversion: 1.0.0\nenforcement: block\n"

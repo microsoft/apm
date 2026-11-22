@@ -61,6 +61,8 @@ TRACKED_GLOBALS: tuple[TrackedGlobal, ...] = (
     TrackedGlobal("apm_cli.utils.console", "_console_stderr"),
     TrackedGlobal("apm_cli.config", "_config_cache"),
     TrackedGlobal("apm_cli.marketplace.registry", "_registry_cache"),
+    # A module global tests patch from threads; a leaked mock reaches every later test (#4830).
+    TrackedGlobal("apm_cli.core.azure_cli", "get_bearer_provider"),
     # Executable lookups memoised by their owner.
     TrackedGlobal("apm_cli.utils.git_env", "_git_executable", lazy=True),
     TrackedGlobal("apm_cli.utils.git_env", "_gh_executable", lazy=True),

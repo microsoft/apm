@@ -297,3 +297,24 @@ def _entries_to_ir(entries: list, event: str = "") -> HookDocument:
 def _escape_json_pointer(value: str) -> str:
     """Escape one RFC 6901 JSON pointer segment."""
     return value.replace("~", "~0").replace("/", "~1")
+
+
+def summarize_hook_command(entry: dict) -> str:
+    """Return a human-readable summary for a single hook command entry."""
+    command = ""
+    for key in HOOK_COMMAND_KEYS:
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            command = value.strip()
+            break
+    if not command:
+        return "runs hook command"
+    # Collapse any internal whitespace (including embedded newlines) so the
+    # summary is always single-line: a hook command containing a newline must
+    # not break install-log formatting or enable log-spoofing.
+    command = " ".join(command.split())
+    for token in command.split():
+        cleaned = token.strip("\"'")
+        if "/" in cleaned or cleaned.startswith("."):
+            return f"runs {cleaned}"
+    return f"runs {command}"
