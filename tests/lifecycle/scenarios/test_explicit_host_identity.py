@@ -134,7 +134,12 @@ def mixed_hosts(lifecycle_world) -> MixedHosts:
     world.services.script(GITHUB_HOST, "/acme/", 404)
     world.services.script(API_HOST, "/repos/acme/", 404)
     world.services.script(RAW_HOST, "/acme/", 404)
-    return MixedHosts(factory, repositories, tagged)
+    mixed = MixedHosts(factory, repositories, tagged)
+    # main moves past the tag (GHES) and SHA (Kotlin) pins, so a default-branch
+    # fetch would lock a different commit than the pin.
+    for slug in (INTERNAL, KOTLIN):
+        assert mixed.advance(slug).sha != tagged[slug].sha
+    return mixed
 
 
 def _with_env(world, **values: str | None):
