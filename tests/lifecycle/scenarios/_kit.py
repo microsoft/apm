@@ -94,6 +94,8 @@ def _skill_root(target: str) -> str | None:
 MCP_CONFIGS: Mapping[tuple[str, str], str] = {
     ("project", "copilot"): ".mcp.json",
     ("project", "claude"): ".mcp.json",
+    # The retired vscode alias resolves to copilot, which owns .mcp.json (#4100).
+    ("project", "vscode"): ".mcp.json",
     ("user", "copilot"): ".copilot/mcp-config.json",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
