@@ -143,8 +143,13 @@ class _GitCheckout:
 
 
 @pytest.fixture
-def git_checkout(tmp_path):
-    """Serve the generic-git fallback from a real checkout holding ``_MANIFEST``."""
+def git_checkout(tmp_path, monkeypatch):
+    """Serve the generic-git fallback from a real checkout holding ``_MANIFEST``.
+
+    ``_fetch_git`` constructs a real ``GitCache``, which prunes staging
+    directories, so the cache root is pinned to this test's directory.
+    """
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "apm-cache"))
     checkout = _GitCheckout(tmp_path / "git", _MANIFEST)
     with patch(
         "apm_cli.cache.git_cache.GitCache.get_checkout", autospec=True, side_effect=checkout
