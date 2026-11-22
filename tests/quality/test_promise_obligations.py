@@ -512,6 +512,33 @@ def test_generated_witnesses_match_the_collected_tables_and_journeys() -> None:
     assert "[+] up to date:" in result.stdout, f"{fix}\n{result.stdout}"
 
 
+def collected_scenario_nodes(run=subprocess.run) -> set[str]:
+    """Node ids of ``tests/lifecycle/scenarios``, from a collection that succeeded.
+
+    pytest still prints the node ids of the modules it could collect when another
+    module fails to import, then exits nonzero; trusting that partial list would
+    hide every credit of the broken module. Exit 5 (nothing collected) is a
+    failure too: the scenario directory is never empty.
+    """
+    root = Path(__file__).parents[2]
+    result = run(
+        [sys.executable, "-m", "pytest", "tests/lifecycle/scenarios", "--collect-only", "-q"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    tail = "\n".join(f"{result.stdout}\n{result.stderr}".strip().splitlines()[-20:])
+    assert result.returncode == 0, (
+        f"scenario collection failed (exit {result.returncode}); fix it before "
+        f"trusting its node ids:\n{tail}"
+    )
+    collected = {line.strip() for line in result.stdout.splitlines() if "::" in line}
+    assert collected, f"collection found no scenario nodes\n{tail}"
+    return collected
+
+
 def test_every_scenario_credit_names_a_collected_node() -> None:
     """A CREDITS key that matches no collected node id credits nothing real (#4586).
 
@@ -520,16 +547,25 @@ def test_every_scenario_credit_names_a_collected_node() -> None:
     """
     from tests.lifecycle.generator.witnesses import scenario_credits
 
-    root = Path(__file__).parents[2]
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/lifecycle/scenarios", "--collect-only", "-q"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=300,
-    )
-    collected = {line.strip() for line in result.stdout.splitlines() if "::" in line}
-    assert collected, f"collection found no scenario nodes\n{result.stdout}{result.stderr}"
+    collected = collected_scenario_nodes()
     stray = sorted({credit.node for credit in scenario_credits()} - collected)
     assert not stray, f"CREDITS name nodes pytest never collects: {stray[:5]}"
+
+
+def test_a_partial_scenario_collection_is_never_trusted() -> None:
+    """Node ids printed by a collection that exited nonzero fail the guard."""
+    calls: list[list[str]] = []
+
+    def partial(args, **kwargs):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(
+            args,
+            2,
+            stdout="tests/lifecycle/scenarios/test_a.py::test_one\n1 error\n",
+            stderr="ImportError while importing test module test_b.py\n",
+        )
+
+    with pytest.raises(AssertionError, match=r"scenario collection failed \(exit 2\)") as failed:
+        collected_scenario_nodes(run=partial)
+    assert "ImportError while importing test module test_b.py" in str(failed.value)
+    assert calls and "--collect-only" in calls[0], calls
