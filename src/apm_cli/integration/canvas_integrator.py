@@ -410,7 +410,8 @@ class CanvasIntegrator(BaseIntegrator):
                 target_paths.append(dest)
             return "adopted"
 
-        if self._keeps_edited_bundle(planned, force, diagnostics, target_paths):
+        dropped = self._dropped_members(planned, canvas_root, project_root, managed)
+        if self._keeps_edited_bundle(planned, dropped, force, diagnostics, target_paths):
             return "skipped"
 
         for src, dest, _rel in planned:
@@ -433,6 +434,7 @@ class CanvasIntegrator(BaseIntegrator):
     def _keeps_edited_bundle(
         self,
         planned: list[tuple[Path, Path, str]],
+        dropped: list[tuple[Path, str]],
         force: bool,
         diagnostics,
         target_paths: list[Path],
@@ -441,19 +443,57 @@ class CanvasIntegrator(BaseIntegrator):
 
         Each member goes through the shared overwrite gate, which names a kept
         member and carries its prior lock entry; the bundle's other deployed
-        members stay as they are, so a half-updated extension never runs.
+        members stay as they are, so a half-updated extension never runs. A
+        kept edit that holds back other new content (a changed, new or
+        dropped member) blocks the install, and a member the new version drops
+        is retained with its prior claim.
         """
+        held_back = bool(dropped) or any(
+            self._brings_new_content(dest, src) for src, dest, _rel in planned
+        )
         kept = [
             dest
             for src, dest, rel in planned
-            if self.keeps_edited_output(dest, src, rel, force, diagnostics, target_paths)
+            if self.keeps_edited_output(
+                dest, src, rel, force, diagnostics, target_paths, held_back=held_back
+            )
         ]
         if not kept:
             return False
         target_paths.extend(
             dest for _src, dest, _rel in planned if dest not in kept and dest.is_file()
         )
+        for path, rel in dropped:
+            # Its own bytes are the render: proven ones stay as they are, an
+            # edited or unproven one is kept and named, both with the prior claim.
+            if not self.keeps_unproven_file(
+                path, path, rel, force, diagnostics, target_paths, held_back=True
+            ):
+                target_paths.append(path)
         return True
+
+    def _brings_new_content(self, dest: Path, src: Path) -> bool:
+        """Whether *src* differs from what APM last deployed at *dest* (its receipt)."""
+        if not dest.is_file():
+            return True
+        baseline = self._receipted_hash(dest) or self._file_hash(dest)
+        return baseline != self._file_hash(src)
+
+    @staticmethod
+    def _dropped_members(
+        planned: list[tuple[Path, Path, str]],
+        canvas_root: Path,
+        project_root: Path,
+        managed: set[str],
+    ) -> list[tuple[Path, str]]:
+        """Managed members of this bundle on disk that the new version no longer ships."""
+        prefix = portable_relpath(canvas_root, project_root) + "/"
+        shipped = {rel for _src, _dest, rel in planned}
+        return [
+            (project_root / rel, rel)
+            for rel in sorted(managed)
+            if rel.startswith(prefix) and rel not in shipped and (project_root / rel).is_file()
+        ]
 
     def _plan_bundle_files(
         self,

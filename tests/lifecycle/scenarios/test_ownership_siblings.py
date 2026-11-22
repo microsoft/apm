@@ -275,10 +275,13 @@ _LSP_SERVER = f"{EDITED_LSP}-server"
 _EXEC_KINDS = ("hook", "canvas", "lsp")
 
 
-def _author_exec(world, revision: str = "v1", *, lsp: str | None = None) -> dict[str, str]:
+def _author_exec(
+    world, revision: str = "v1", *, lsp: str | None = None, icon: str | None = ""
+) -> dict[str, str]:
     """Author ``o-exec`` (hook + copied script, two-member canvas) at *revision*.
 
-    ``o-lsp`` is authored at *lsp* (default: *revision*).
+    ``o-lsp`` is authored at *lsp* and the canvas icon at *icon* (default:
+    *revision*; ``None`` ships no icon).
     """
     owned = world.root / "owned"
     for name in (EDITED, EDITED_LSP):
@@ -292,8 +295,8 @@ def _author_exec(world, revision: str = "v1", *, lsp: str | None = None) -> dict
     script = f"#!/bin/sh\necho {revision}\n"
     factory.add_hook_asset(package, "session", PurePosixPath("run.sh"), script, executable=True)
     extension = f"export default function render() {{\n  return '{revision}';\n}}\n"
-    icon = {PurePosixPath("icon.txt"): f"{revision}\n".encode()}
-    factory.add_canvas(package, EDITED, extension, assets=icon)
+    assets = {} if icon is None else {PurePosixPath("icon.txt"): f"{icon or revision}\n".encode()}
+    factory.add_canvas(package, EDITED, extension, assets=assets)
     server = {
         "name": _LSP_SERVER,
         "command": "apm-lifecycle-inert-server",
@@ -432,6 +435,32 @@ def test_edited_outputs_block_an_update_and_unedited_ones_update(lifecycle_world
     _kept(blocked, f"LSP server '{_LSP_SERVER}' in {_LSP}")
     assert scenario.lock().lsp_configs[_LSP_SERVER] == locked, "a kept entry became the baseline"
     tree.assert_intact("blocked LSP update")
+    scenario.finish()
+
+
+def test_a_kept_canvas_edit_holds_back_its_other_members(lifecycle_world) -> None:
+    """An edit to an unchanged member blocks the bundle's other updates (exit 1).
+
+    The upgrade first changes only icon.txt, then drops it: the bundle stays
+    whole, icon.txt keeps its bytes and its prior lock claim both times.
+    """
+    scenario, tree = _exec_scenario(lifecycle_world)
+    world = lifecycle_world
+    scenario.user_write(_CANVAS_ENTRY, _edit(world, _CANVAS_ENTRY, "// mine\n"))
+    claims = _claims(scenario)
+    icon = (world.project / _CANVAS_ICON).read_bytes()
+
+    for label, upgrade in (("icon changed", {"icon": "v2"}), ("icon dropped", {"icon": None})):
+        _author_exec(world, **upgrade)
+        scenario.source_moved()
+        scenario.run(f"approve {EDITED} {EDITED_LSP}")
+        step = scenario.run("install", exit=1)
+        _kept(step, _CANVAS_ENTRY)
+        assert (world.project / _CANVAS_ICON).read_bytes() == icon, f"{label}: icon changed"
+        after = _claims(scenario)
+        for relative in (_CANVAS_ENTRY, _CANVAS_ICON):
+            assert after[relative] == claims[relative], f"{label}: {relative} claim moved"
+        tree.assert_intact(label)
     scenario.finish()
 
 

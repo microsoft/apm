@@ -912,6 +912,7 @@ class BaseIntegrator:
         target_paths: list,
         *,
         expected_content: str | None = None,
+        held_back: bool = False,
     ) -> bool:
         """Gate one executable output (hook file or script, canvas file) like any file (#4626).
 
@@ -936,6 +937,7 @@ class BaseIntegrator:
             diagnostics,
             target_paths,
             expected_content=expected_content,
+            held_back=held_back,
         )
 
     def keeps_unproven_file(
@@ -948,6 +950,7 @@ class BaseIntegrator:
         target_paths: list,
         *,
         expected_content: str | None = None,
+        held_back: bool = False,
     ) -> bool:
         """Whether install keeps an existing managed file that differs from the render.
 
@@ -956,7 +959,8 @@ class BaseIntegrator:
         receipt, legacy ownership or the locked render); the lockfile hash
         alone never authorizes it. A kept file stays in *target_paths* with its
         prior lock entry and finalize names it. While planning (#4381) nothing
-        is written and every blocking keep goes to the plan.
+        is written and every blocking keep goes to the plan. *held_back*: keeping
+        this file holds back other new content, so even a drift edit blocks.
         """
         gate = self._overwrite_gate
         plan = self._overwrite_plan
@@ -979,6 +983,8 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
+        if held_back and edit == "drift":
+            edit = "blocked"
         if plan is not None:
             # Planning writes nothing; a blocking keep refuses the whole plan (#4381).
             if edit != "drift":
