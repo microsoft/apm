@@ -3623,6 +3623,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm config echoes a stored registry token outside the owner's mask.",
     ),
     MutationCase(
+        guard_id="transport-platform-deploy-store-verified-reads",
+        rule_id="transport-platform-deploy-store-verified-reads",
+        path="src/apm_cli/cache/deploy_store.py",
+        old="if canonical_digest(data) != key:",
+        new="if not data:",
+        intent="A deploy store read returns bytes without re-hashing them against the key.",
+    ),
+    MutationCase(
         guard_id="transport-platform-egress-route-policy",
         rule_id="transport-platform-egress-route-policy",
         path="src/apm_cli/install/pipeline.py",

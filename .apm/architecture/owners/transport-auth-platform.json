@@ -84,6 +84,13 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore)",
+      "selectors": ["src/apm_cli/cache/deploy_store.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
+    },
+    {
       "id": "git-cache-key-normalization",
       "decision": "Git repository cache-key normalization",
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",

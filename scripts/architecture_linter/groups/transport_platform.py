@@ -24,6 +24,7 @@ from scripts.architecture_linter.checks.transport_cache_identity import RULES as
 from scripts.architecture_linter.checks.transport_credential_value_rendering import (
     RULES as _CREDENTIAL_RENDERING_RULES,
 )
+from scripts.architecture_linter.checks.transport_deploy_store import RULES as _DEPLOY_STORE_RULES
 from scripts.architecture_linter.checks.transport_egress_route import (
     RULES as _EGRESS_ROUTE_RULES,
 )
@@ -74,6 +75,7 @@ RULES = (
     + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _DEPLOY_STORE_RULES
     + _SPARSE_RULES
     + _GITLAB_SPARSE_RULES
     + _REVISION_PIN_RULES
