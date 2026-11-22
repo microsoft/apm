@@ -173,7 +173,7 @@ def _manifest_entries(scenario: Scenario) -> list[object]:
 
 
 def _assert_host_isolation(world) -> None:
-    """Every request for a repository went to that repository's own host."""
+    """Every request went to its repository's own host, carrying only that host's token."""
     misrouted = [
         entry
         for entry in world.services.egress_log()
@@ -181,6 +181,8 @@ def _assert_host_isolation(world) -> None:
         or ("/example/" in entry["path"] and entry["host"] not in GITHUB_HOSTS)
     ]
     assert not misrouted, f"requests reached the wrong host: {misrouted}"
+    assert _carriers(world, GHES_TOKEN) <= {GHES}, "the GHES credential left its host"
+    assert GHES not in _carriers(world, GITHUB_TOKEN), "the github.com credential reached GHES"
 
 
 def _carriers(world, secret: str) -> set[str]:
@@ -223,7 +225,6 @@ def test_mixed_host_global_lifecycle_keeps_each_package_host(lifecycle_world, mi
     assert _lock_rows(scenario) == locked
     _assert_host_isolation(world)
     assert _carriers(world, GHES_TOKEN) == {GHES}, "the GHES credential left its host"
-    assert GHES not in _carriers(world, GITHUB_TOKEN), "the github.com credential reached GHES"
     world.services.proxy.clear()
 
     # Manifest and lock reload: a converged install changes nothing.
@@ -246,7 +247,6 @@ def test_mixed_host_global_lifecycle_keeps_each_package_host(lifecycle_world, mi
     assert _lock_rows(scenario) == locked
     assert {entry["host"] for entry in world.services.egress_log()} >= {GHES, GITHUB_HOST}
     _assert_host_isolation(world)
-    assert _carriers(world, GHES_TOKEN) <= {GHES}
     world.services.proxy.clear()
 
     # Update moves the branch-pinned package only.
@@ -259,7 +259,6 @@ def test_mixed_host_global_lifecycle_keeps_each_package_host(lifecycle_world, mi
     locked[f"github.com/{ANDROID}"] = (SUBPATHS[ANDROID], "main", revised.sha)
     assert _lock_rows(scenario) == locked
     _assert_host_isolation(world)
-    assert _carriers(world, GHES_TOKEN) <= {GHES}
     world.services.proxy.clear()
 
     # Removal drops one github.com package and keeps the others on their hosts.
@@ -286,6 +285,9 @@ def test_strict_host_credentials_keep_the_ghes_token_on_ghes(lifecycle_world, mi
         GITHUB_HOST=GHES,
         GITHUB_APM_PAT=GHES_TOKEN,
         APM_STRICT_HOST_CREDENTIALS="1",
+        # Resolve github.com credentials before the anonymous attempt, so the
+        # carrier check sees strict mode withhold the GHES token there.
+        APM_GITHUB_AUTH_FIRST="1",
     )
     scenario = _scenario(world, mixed_hosts)
     step = scenario.run(f"install {' '.join(mixed_hosts.specs())}")
