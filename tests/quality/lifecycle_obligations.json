@@ -11682,8 +11682,9 @@
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_dry_run_inline_mcp_install_writes_nothing"
   },
   "T5|OP=mcp-install|SRC=mcp-registry|DRYRUN=on": {
    "family": "T5",
