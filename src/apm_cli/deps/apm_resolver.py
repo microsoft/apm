@@ -522,6 +522,46 @@ class APMDependencyResolver:
             return anchored.resolve().as_posix()
         return portable_relpath(anchored, base)
 
+    @staticmethod
+    def root_local_dirs(
+        root_refs: Iterable[DependencyReference], consumer_root: Path
+    ) -> dict[Path, DependencyReference]:
+        """Map each root-declared local package's resolved directory to its ref."""
+        dirs: dict[Path, DependencyReference] = {}
+        for ref in root_refs:
+            if ref.is_local and ref.local_path and ref.replacement is None:
+                raw = Path(ref.local_path).expanduser()
+                anchored = raw.resolve() if raw.is_absolute() else (consumer_root / raw).resolve()
+                dirs.setdefault(anchored, ref)
+        return dirs
+
+    @classmethod
+    def transitive_local_identity(
+        cls,
+        sub_dep: DependencyReference,
+        *,
+        declaring_parent: str,
+        anchored: Path,
+        root: Path | None,
+        root_local_dirs: dict[Path, DependencyReference],
+    ) -> DependencyReference:
+        """Return the node identity of a local edge a package declares.
+
+        One anchored directory is one dependency (#4731): when the root
+        manifest also declares that directory, the edge takes the root
+        declaration's identity and spelling, however the declaring package
+        spells its relative path (``../lib`` vs ``./packages/lib``).
+        Otherwise the edge is keyed by its anchored directory.
+        """
+        root_ref = root_local_dirs.get(anchored)
+        if root_ref is not None:
+            return replace(sub_dep, repo_url=root_ref.repo_url, local_path=root_ref.local_path)
+        return replace(
+            sub_dep,
+            declaring_parent=declaring_parent,
+            anchored_local_path=cls._portable_anchor_identity(anchored, root),
+        )
+
     def _remote_source_paths_for_parent(
         self,
         parent_dep: DependencyReference,
@@ -965,6 +1005,9 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
+        root_local_dirs = self.root_local_dirs(
+            [item[0] for item in processing_queue], consumer_root
+        )
         if self._reject_nested_root_declarations(
             tree, [item[0] for item in processing_queue], modules_dir
         ):
@@ -1179,12 +1222,12 @@ class APMDependencyResolver:
                                 if local_path.is_absolute()
                                 else (node.package.source_path / local_path).resolve()
                             )
-                            sub_dep = replace(
+                            sub_dep = self.transitive_local_identity(
                                 sub_dep,
                                 declaring_parent=node.get_id(),
-                                anchored_local_path=self._portable_anchor_identity(
-                                    anchored, root_package.source_path
-                                ),
+                                anchored=anchored,
+                                root=root_package.source_path,
+                                root_local_dirs=root_local_dirs,
                             )
                             ancestor: DependencyNode | None = node
                             while ancestor is not None:
