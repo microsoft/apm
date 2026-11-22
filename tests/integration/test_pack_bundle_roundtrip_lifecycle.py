@@ -24,7 +24,7 @@ from tests.integration._marketplace_pack_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 
 def _producer(world: MarketplacePackWorld) -> Path:

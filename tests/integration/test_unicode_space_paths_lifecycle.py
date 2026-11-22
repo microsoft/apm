@@ -23,7 +23,7 @@ from tests.integration._path_corner_world_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 TARGETS = ("claude", "copilot", "cursor", "codex", "opencode")
 EDITED = (

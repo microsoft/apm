@@ -47,6 +47,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX credential helper launcher"),
+    pytest.mark.e2e,
 ]
 
 _PAT = "ado-pat-precedence-sentinel-91c2"
