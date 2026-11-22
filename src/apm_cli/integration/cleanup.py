@@ -614,7 +614,7 @@ def _safe_remove_skill_directory(
     diagnostics,
     dep_key: str,
     failed_path_retained: bool,
-    protected: frozenset[str] = frozenset(),
+    protected: Callable[[str], bool] = lambda _rel: False,
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -628,7 +628,8 @@ def _safe_remove_skill_directory(
 
     When the directory contains user-created or user-edited files, removal
     is skipped with a diagnostic listing the blocking entries. A member in
-    *protected* (a surviving dependency still deploys it) is never removed:
+    *protected* (a surviving dependency still deploys it, in any spelling
+    naming the same file) is never removed:
     the directory's other proven members are removed one by one and the
     directory stays (#4750).
     """
@@ -679,7 +680,7 @@ def _safe_remove_skill_directory(
             continue
         if child.is_dir():
             continue
-        if child_rel in protected:
+        if protected(child_rel):
             # A surviving dependency still deploys it: never this removal's to delete.
             shared.append(child_rel)
             continue
@@ -722,7 +723,7 @@ def _safe_remove_skill_directory(
 
     if shared:
         # The survivor's members stay; this owner's proven members go one by one.
-        if _remove_proven_members(proven, evidence, result, diagnostics, dep_key):
+        if _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key):
             result.released.append(rel_path)
         else:
             result.skipped_unmanaged.append(rel_path)
@@ -741,6 +742,7 @@ def _safe_remove_skill_directory(
 
 
 def _remove_proven_members(
+    skill_dir: Path,
     proven: list[tuple[str, Path]],
     evidence: DeploymentEvidence,
     result: CleanupResult,
@@ -750,11 +752,22 @@ def _remove_proven_members(
     """Remove each proven member of a skill directory that must itself stay.
 
     The deletion gates run again immediately before each unlink, so a file
-    changed since the directory scan is kept and named, never removed.
-    Returns whether every member was removed.
+    changed since the directory scan is kept and named, never removed: the
+    member must still be a regular file, reached through no symlinked
+    directory and contained in *skill_dir*, and its evidence must still
+    authorize its bytes. Returns whether every member was removed.
     """
     complete = True
     for member_rel, member in proven:
+        if not _member_still_safe(skill_dir, member):
+            result.skipped_unmanaged.append(member_rel)
+            diagnostics.warn(
+                f"Skipped removing {member_rel}: it was replaced or moved since APM "
+                "checked it. Inspect it and delete it manually if no longer needed.",
+                package=dep_key,
+            )
+            complete = False
+            continue
         verdict = evidence.verdict(member_rel, member)
         if verdict != AUTHORIZED:
             _keep_without_evidence(result, diagnostics, member_rel, verdict, dep_key)
@@ -772,6 +785,24 @@ def _remove_proven_members(
                 package=dep_key,
             )
     return complete
+
+
+def _member_still_safe(skill_dir: Path, member: Path) -> bool:
+    """Return whether *member* is still a regular file inside *skill_dir*, via no link."""
+    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+    try:
+        if skill_dir.is_symlink() or member.is_symlink() or not member.is_file():
+            return False
+        parent = member.parent
+        while parent != skill_dir:
+            if parent.is_symlink() or parent == parent.parent:
+                return False
+            parent = parent.parent
+        ensure_path_within(member, skill_dir)
+    except (OSError, PathTraversalError):
+        return False
+    return True
 
 
 def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained):
@@ -939,7 +970,11 @@ def remove_stale_deployed_files(
     absent_targets: list[Path] = []
     live_paths = list(live_paths)
     live_index = SpellingAliasIndex(live_paths)
-    protected = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
+    live_set = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
+
+    def protected(rel_path: str) -> bool:
+        # A survivor's claim may spell the same file differently on this filesystem.
+        return rel_path in live_set or live_index.alias(rel_path, project_root) is not None
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
