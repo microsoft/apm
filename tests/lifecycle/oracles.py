@@ -748,13 +748,20 @@ def _i7_x2_retirement(
 
 
 def _i7_x2_written(path: str, before: Observation, kept_writes: frozenset[str] | None) -> bool:
-    """I7-X2: *path* is a listed write, or a directory created only to hold one."""
+    """I7-X2: *path* is a listed write, or a directory created only to hold one.
+
+    Listed writes are relative to the deploy root; the same relative path
+    under another snapshot root is never covered.
+    """
     if not kept_writes:
         return False
     root, relative = path.split(":", 1)
+    snapshot = before.artifacts.snapshot(root)
+    if snapshot.root.resolve() != before.deploy_root.resolve():
+        return False
     if relative in kept_writes:
         return True
-    created = relative not in before.artifacts.snapshot(root).paths
+    created = relative not in snapshot.paths
     return created and any(write.startswith(relative + "/") for write in kept_writes)
 
 

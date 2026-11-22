@@ -1393,6 +1393,27 @@ def test_a_kept_canvas_edit_holds_back_its_other_members(lifecycle_world) -> Non
     scenario.finish()
 
 
+def test_an_edited_member_the_upgrade_drops_keeps_the_bundle_whole(lifecycle_world) -> None:
+    """The upgrade drops an edited icon.txt and changes extension.mjs: exit 1, bundle whole."""
+    scenario, tree = _exec_scenario(lifecycle_world)
+    world = lifecycle_world
+    scenario.user_write(_CANVAS_ICON, _edit(world, _CANVAS_ICON, "mine\n"))
+    claims = _claims(scenario)
+    extension = (world.project / _CANVAS_ENTRY).read_bytes()
+    _author_exec(world, "v2", icon=None)
+    scenario.source_moved()
+    scenario.run(f"approve {EDITED} {EDITED_LSP}")
+
+    step = scenario.run("install", exit=1)
+    _kept(step, _CANVAS_ICON)
+    assert (world.project / _CANVAS_ENTRY).read_bytes() == extension, "half-updated canvas"
+    after = _claims(scenario)
+    for relative in (_CANVAS_ENTRY, _CANVAS_ICON):
+        assert after[relative] == claims[relative], f"{relative}: the kept claim moved"
+    tree.assert_intact("dropped edited member")
+    scenario.finish()
+
+
 def test_unproven_mismatch_is_kept(lifecycle_world) -> None:
     """Without a receipt or locked render proving APM wrote it, a mismatch is kept; exit 1."""
     scenario, tree = _exec_scenario(lifecycle_world)

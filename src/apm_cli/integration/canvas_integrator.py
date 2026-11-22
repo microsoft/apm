@@ -236,6 +236,7 @@ class CanvasIntegrator(BaseIntegrator):
         managed = self.normalize_managed_files(managed_files) or set()
         effective_root = mapping.deploy_root or target.root_dir
         extensions_dir = project_root / effective_root / mapping.subdir
+        prior_members = self._prior_members_by_bundle(extensions_dir, project_root, managed)
 
         files_integrated = 0
         files_skipped = 0
@@ -253,6 +254,7 @@ class CanvasIntegrator(BaseIntegrator):
                 package_name=package_name,
                 target_paths=target_paths,
                 source_plan=source_plan,
+                prior_members=prior_members.get(bundle.name, ()),
             )
             if outcome == "integrated":
                 files_integrated += 1
@@ -326,6 +328,7 @@ class CanvasIntegrator(BaseIntegrator):
         package_name: str,
         target_paths: list[Path],
         source_plan=None,
+        prior_members: tuple[str, ...] | list[str] = (),
     ) -> str:
         """Deploy one canvas bundle atomically.
 
@@ -403,16 +406,17 @@ class CanvasIntegrator(BaseIntegrator):
             )
             return "skipped"
 
+        # A kept member (planned or dropped) leaves the whole bundle as it is.
+        dropped = self._dropped_members(planned, project_root, prior_members)
+        if self._keeps_edited_bundle(planned, dropped, force, diagnostics, target_paths):
+            return "skipped"
+
         # Adopt when every planned file already exists byte-identical: keep
         # tracking the files in deployed_files without rewriting them.
         if all(self.is_content_identical_to_source(dest, src) for src, dest, _rel in planned):
             for _src, dest, _rel in planned:
                 target_paths.append(dest)
             return "adopted"
-
-        dropped = self._dropped_members(planned, canvas_root, project_root, managed)
-        if self._keeps_edited_bundle(planned, dropped, force, diagnostics, target_paths):
-            return "skipped"
 
         for src, dest, _rel in planned:
             write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
@@ -445,12 +449,23 @@ class CanvasIntegrator(BaseIntegrator):
         member and carries its prior lock entry; the bundle's other deployed
         members stay as they are, so a half-updated extension never runs. A
         kept edit that holds back other new content (a changed, new or
-        dropped member) blocks the install, and a member the new version drops
-        is retained with its prior claim.
+        dropped member) blocks the install. A member the new version drops is
+        judged too (its own bytes are its render) and is retained with its
+        prior claim whenever the bundle is kept.
         """
+        if self._overwrite_gate is None:
+            return False
         held_back = bool(dropped) or any(
-            self._brings_new_content(dest, src) for src, dest, _rel in planned
+            self._brings_new_content(dest, src, rel) for src, dest, rel in planned
         )
+        kept_dropped = [
+            path
+            for path, rel in dropped
+            if not force
+            and self.keeps_unproven_file(
+                path, path, rel, force, diagnostics, target_paths, held_back=True
+            )
+        ]
         kept = [
             dest
             for src, dest, rel in planned
@@ -458,41 +473,52 @@ class CanvasIntegrator(BaseIntegrator):
                 dest, src, rel, force, diagnostics, target_paths, held_back=held_back
             )
         ]
-        if not kept:
+        if not kept and not kept_dropped:
             return False
         target_paths.extend(
             dest for _src, dest, _rel in planned if dest not in kept and dest.is_file()
         )
-        for path, rel in dropped:
-            # Its own bytes are the render: proven ones stay as they are, an
-            # edited or unproven one is kept and named, both with the prior claim.
-            if not self.keeps_unproven_file(
-                path, path, rel, force, diagnostics, target_paths, held_back=True
-            ):
-                target_paths.append(path)
+        target_paths.extend(path for path, _rel in dropped if path not in kept_dropped)
         return True
 
-    def _brings_new_content(self, dest: Path, src: Path) -> bool:
-        """Whether *src* differs from what APM last deployed at *dest* (its receipt)."""
+    def _brings_new_content(self, dest: Path, src: Path, rel: str) -> bool:
+        """Whether *src* differs from what APM last deployed at *dest*.
+
+        The deployed bytes are this checkout's receipt, else a pre-0.37 lock's
+        recorded hash (#4398), else the bytes on disk.
+        """
         if not dest.is_file():
             return True
-        baseline = self._receipted_hash(dest) or self._file_hash(dest)
+        gate = self._overwrite_gate
+        legacy = gate.session.legacy_recorded_hash(rel) if gate and gate.session else None
+        baseline = self._receipted_hash(dest) or legacy or self._file_hash(dest)
         return baseline != self._file_hash(src)
+
+    @staticmethod
+    def _prior_members_by_bundle(
+        extensions_dir: Path, project_root: Path, managed: set[str]
+    ) -> dict[str, list[str]]:
+        """Partition the managed canvas claims by bundle name once per call."""
+        prefix = portable_relpath(extensions_dir, project_root) + "/"
+        members: dict[str, list[str]] = {}
+        for rel in managed:
+            if rel.startswith(prefix):
+                name = rel[len(prefix) :].split("/", 1)[0]
+                members.setdefault(name, []).append(rel)
+        return members
 
     @staticmethod
     def _dropped_members(
         planned: list[tuple[Path, Path, str]],
-        canvas_root: Path,
         project_root: Path,
-        managed: set[str],
+        prior_members: tuple[str, ...] | list[str],
     ) -> list[tuple[Path, str]]:
-        """Managed members of this bundle on disk that the new version no longer ships."""
-        prefix = portable_relpath(canvas_root, project_root) + "/"
+        """This bundle's managed members on disk that the new version no longer ships."""
         shipped = {rel for _src, _dest, rel in planned}
         return [
             (project_root / rel, rel)
-            for rel in sorted(managed)
-            if rel.startswith(prefix) and rel not in shipped and (project_root / rel).is_file()
+            for rel in sorted(prior_members)
+            if rel not in shipped and (project_root / rel).is_file()
         ]
 
     def _plan_bundle_files(

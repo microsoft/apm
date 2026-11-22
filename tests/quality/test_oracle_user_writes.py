@@ -278,3 +278,34 @@ def test_a_new_surface_not_listed_as_written_still_fails(tmp_path: Path) -> None
     violations = _i7(tmp_path, output, writes=(_HOOK, _CANVAS), surface=(_CANVAS_CELL, _CANVAS))
 
     assert "failed install changed deployed surfaces" in violations
+
+
+def test_a_listed_write_never_covers_the_same_path_in_another_root(tmp_path: Path) -> None:
+    """I7-X2 resolves listed writes under the deploy root only (#4626 review)."""
+    project, home = tmp_path / "project", tmp_path / "home"
+    for root in (project, home):
+        (root / _HOOK).parent.mkdir(parents=True)
+        (root / _HOOK).write_text("v1\n", encoding="ascii")
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\n", encoding="ascii")
+
+    def observe() -> object:
+        return oracles.Observation(
+            LifecycleStateSnapshot.capture(project),
+            ArtifactSnapshotSet.capture({"project": project, "home": home}),
+            frozenset(),
+            project,
+            None,
+        )
+
+    before = observe()
+    (project / "apm.lock.yaml").write_text("lockfile_version: '1'\n# v2\n", encoding="ascii")
+    for root in (project, home):
+        (root / _HOOK).write_text("v2\n", encoding="ascii")
+    output = _KEPT_BLOCKED + _wrote(_HOOK)
+    result = SimpleNamespace(returncode=1, stdout=output, stderr="", command=("install",))
+    op = oracles.operation_for(("install",))
+    violations = oracles._CHECKS["I7"](before, observe(), result, _Allowed(frozenset()), op)
+
+    assert [v.message for v in violations] == [
+        f"failed install changed durable files: ['home:{_HOOK}']"
+    ]

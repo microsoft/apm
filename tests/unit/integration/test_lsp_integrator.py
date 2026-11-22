@@ -587,6 +587,37 @@ class TestKeptEntryHoldsEveryTarget:
         assert record.kept_edits == {"pyright": "blocked"}
 
 
+class TestKeptEntryKindsSurviveTheHold:
+    """Holding one server on every target keeps each target's own keep kind (#4626)."""
+
+    def test_two_blocked_edits_on_two_targets_both_stay_blocked(self, tmp_path):
+        v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        both = ["copilot", "claude"]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=both)
+        for path, server in (
+            (tmp_path / ".github" / "lsp.json", "pyright"),
+            (tmp_path / _CLAUDE_PROJECT_PLUGIN, "ruff"),
+        ):
+            data = json.loads(path.read_text())
+            data["lspServers"][server]["command"] = "mine"
+            path.write_text(json.dumps(data), encoding="utf-8")
+
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(v1))
+        diagnostics = MagicMock()
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2"), _make_dep("ruff", command="r-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright", "ruff"}, "claude": {"pyright", "ruff"}},
+            record=record,
+            diagnostics=diagnostics,
+        )
+
+        assert record.kept_edits == {"pyright": "blocked", "ruff": "blocked"}
+        assert diagnostics.error.call_count == 2
+        diagnostics.warn.assert_not_called()
+
+
 class TestResolveLspTargets:
     def test_targets_copilot_when_binary_present(self, tmp_path):
         with patch(
