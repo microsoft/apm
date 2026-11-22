@@ -23,7 +23,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
 from apm_cli.core.receipt_history import ReceiptHistory
 from apm_cli.core.receipt_history import is_canonical_bundle_hash as _is_canonical_bundle_hash
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
@@ -877,7 +877,7 @@ def trusted_receipt_baselines(
     return baselines
 
 
-class DeploymentLedgerCodec:
+class DeploymentLedgerCodec(RowProjection):
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod

@@ -10,6 +10,12 @@ hosts.
 
 ``git_smart_http`` serves a bare repository through ``git http-backend`` so
 real ``git clone`` / ``ls-remote`` traffic can be answered behind an auth gate.
+
+``rtt_ms`` injects a simulated network round-trip time (perf fixtures,
+``tests/fixtures/perf``): an accepted CONNECT tunnel costs
+``HANDSHAKE_ROUND_TRIPS`` round trips (TCP + TLS) and every tunnelled request
+one more. ``traffic()`` counts tunnels, requests and round trips whatever the
+RTT. The default ``rtt_ms=0`` sleeps nowhere, so existing callers are unchanged.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import socket
 import ssl
 import subprocess
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -83,6 +90,28 @@ class ScriptedResponse:
 
 
 Handler = Callable[[ScriptedRequest], ScriptedResponse]
+
+# Round trips a new HTTPS connection costs before its first request: TCP + TLS 1.3.
+HANDSHAKE_ROUND_TRIPS = 2
+
+
+@dataclass(frozen=True)
+class Traffic:
+    """Counts of what the proxy carried since the last ``reset_traffic``."""
+
+    connects: int = 0
+    requests: int = 0
+
+    @property
+    def round_trips(self) -> int:
+        return self.connects * HANDSHAKE_ROUND_TRIPS + self.requests
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "connects": self.connects,
+            "requests": self.requests,
+            "round_trips": self.round_trips,
+        }
 
 
 def basic_authorization(username: str, password: str) -> str:
@@ -165,6 +194,13 @@ class _ScriptedServer(ThreadingHTTPServer):
     handlers: Mapping[str, Handler]
     observations: list[ScriptedRequest]
     observations_lock: threading.Lock
+    rtt_ms: float = 0.0
+    connects: int = 0
+    requests: int = 0
+
+    def simulate_round_trips(self, count: int) -> None:
+        if self.rtt_ms > 0:
+            time.sleep(self.rtt_ms * count / 1000.0)
 
 
 class _OriginHandler(BaseHTTPRequestHandler):
@@ -196,6 +232,9 @@ class _OriginHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _answer(self) -> None:
+        with self.server.observations_lock:
+            self.server.requests += 1
+        self.server.simulate_round_trips(1)
         request = ScriptedRequest(
             host=self.target_host,
             method=self.command,
@@ -239,6 +278,9 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                 )
             self.send_error(502, "Hermetic fixture does not proxy external hosts")
             return
+        with self.server.observations_lock:
+            self.server.connects += 1
+        self.server.simulate_round_trips(HANDSHAKE_ROUND_TRIPS)
         self.send_response(200, "Connection Established")
         self.end_headers()
         self.wfile.flush()
@@ -281,6 +323,26 @@ class ScriptedHttpsProxy:
     def observations(self) -> tuple[ScriptedRequest, ...]:
         with self._server.observations_lock:
             return tuple(self._server.observations)
+
+    @property
+    def rtt_ms(self) -> float:
+        return self._server.rtt_ms
+
+    @rtt_ms.setter
+    def rtt_ms(self, value: float) -> None:
+        if value < 0:
+            raise ValueError(f"rtt_ms must be >= 0, got {value}")
+        self._server.rtt_ms = float(value)
+
+    def traffic(self) -> Traffic:
+        """Tunnels and requests carried since the last ``reset_traffic``."""
+        with self._server.observations_lock:
+            return Traffic(self._server.connects, self._server.requests)
+
+    def reset_traffic(self) -> None:
+        with self._server.observations_lock:
+            self._server.connects = 0
+            self._server.requests = 0
 
     def requests_to(self, host: str) -> tuple[ScriptedRequest, ...]:
         return tuple(o for o in self.observations if o.host == host and o.method != "CONNECT")
@@ -330,8 +392,13 @@ class ScriptedHttpsProxy:
 def local_scripted_https_proxy(
     directory: Path,
     handlers: Mapping[str, Handler],
+    *,
+    rtt_ms: float = 0.0,
 ) -> Iterator[ScriptedHttpsProxy]:
-    """Serve each host in *handlers* over a recording HTTPS proxy."""
+    """Serve each host in *handlers* over a recording HTTPS proxy.
+
+    *rtt_ms* simulates a network round-trip time (see the module docstring).
+    """
     hosts = tuple(sorted(host.lower() for host in handlers))
     ca_pem, leaf_pem, leaf_key = _mint_certificates(directory, hosts)
     with _stdlib_server_tls():
@@ -346,6 +413,7 @@ def local_scripted_https_proxy(
     thread = threading.Thread(target=server.serve_forever, name="scripted-https", daemon=True)
     thread.start()
     proxy = ScriptedHttpsProxy(server, thread, ca_pem)
+    proxy.rtt_ms = rtt_ms
     try:
         yield proxy
     finally:

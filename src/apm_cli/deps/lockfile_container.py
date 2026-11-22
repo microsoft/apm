@@ -6,7 +6,46 @@ Checks the version and the shape of every top-level list and mapping before
 
 from __future__ import annotations
 
+import copy
+import threading
+from collections import OrderedDict
 from typing import Any
+
+# One install reads the same lockfile text many times (about 19 call sites).
+# The bounded YAML parse is a pure function of that text, so its result is
+# memoized by exact content; every caller still gets a private copy and still
+# runs container validation and construction.
+_PARSED_TEXT_LIMIT = 4
+_parsed_texts: OrderedDict[tuple[object, str], object] = OrderedDict()
+_parsed_texts_lock = threading.Lock()
+
+
+def parse_lockfile_text(yaml_str: str) -> object:
+    """Return a private copy of the bounded YAML parse of *yaml_str*.
+
+    Raises whatever ``load_yaml_str`` raises; failed parses are not memoized.
+    """
+    from ..utils import yaml_io
+
+    key = (yaml_io.load_yaml_str, yaml_str)
+    with _parsed_texts_lock:
+        parsed = _parsed_texts.get(key, _parsed_texts)
+        if parsed is not _parsed_texts:
+            _parsed_texts.move_to_end(key)
+    if parsed is _parsed_texts:
+        parsed = yaml_io.load_yaml_str(yaml_str)
+        with _parsed_texts_lock:
+            _parsed_texts[key] = parsed
+            while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
+                _parsed_texts.popitem(last=False)
+    try:
+        return copy.deepcopy(parsed)
+    except RecursionError:
+        # A merge-reordered alias chain can nest deeper than deepcopy recurses
+        # though the bounded loader accepted it; such text is parsed per read.
+        with _parsed_texts_lock:
+            _parsed_texts.pop(key, None)
+        return yaml_io.load_yaml_str(yaml_str)
 
 
 def validate_lockfile_container(data: object) -> dict[str, Any]:
