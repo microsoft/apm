@@ -44,6 +44,8 @@ FIXTURE_036 = FIXTURES / "v0.36.1"
 RE_RENDERED = (".codex/agents/editor.toml", ".cursor/rules/everywhere.mdc")
 # A file whose 0.37 render equals the bytes 0.35.1 wrote.
 UNCHANGED_RENDER = ".cursor/rules/python.mdc"
+# An always-on rule both fixtures deployed; 0.38 routes it to AGENTS.md (#3939).
+ROUTED_CLAUDE_RULE = ".claude/rules/everywhere.md"
 _IGNORED = {"apm_modules", ".git", ".apm-local"}
 _DEPLOY_ROOTS = (".agents/", ".claude/", ".codex/", ".cursor/")
 _USER_EDIT = "\n# local note\n"
@@ -233,6 +235,10 @@ def test_c4_frozen_install_of_untouched_pre036_project_writes_nothing(
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     assert _kept_lines(result.stdout + result.stderr) == []
     assert world.snapshot() == before
+    # A file this version no longer renders keeps its lock claim under --frozen.
+    squeezed = " ".join((result.stdout + result.stderr).split())
+    assert "no longer deploys, because --frozen does not change apm.lock.yaml: " in squeezed
+    assert ROUTED_CLAUDE_RULE in squeezed, squeezed
 
 
 def _forge_lock_hash(world: _World, path: str) -> bytes:
@@ -539,7 +545,10 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_036)
     world = _World(tmp_path / "c5", apm_binary_path, FIXTURE_036)
     before = world.snapshot()
-    deployed = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    recorded = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    # The always-on rule Claude now loads from AGENTS.md is the only file 0.38 drops (#3939).
+    assert sorted(set(recorded) - set(expected)) == [ROUTED_CLAUDE_RULE]
+    deployed = [p for p in recorded if p != ROUTED_CLAUDE_RULE]
     assert deployed and all(before[p] == expected[p] for p in deployed)
 
     code, out, err = world.run("install")
@@ -548,7 +557,7 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     assert _kept_lines(out + err) == []
     after = world.snapshot()
     assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
-    assert set(after) == set(before)
+    assert set(after) == set(before) - {ROUTED_CLAUDE_RULE}
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after
