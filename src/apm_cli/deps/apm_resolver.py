@@ -1227,17 +1227,28 @@ class APMDependencyResolver:
         self._apply_edge_selections(tree)
         return tree
 
-    @staticmethod
-    def _propagate_production(tree: DependencyTree) -> None:
-        """Mark every descendant of a production node production (prod wins over dev).
+    def _propagate_production(self, tree: DependencyTree) -> None:
+        """Mark every node a production node declares production (prod wins over dev).
 
-        A production edge can reach a node first loaded as dev (a root
-        devDependency a production sibling also declares); promoting only that
-        node would leave its already-queued descendants dev (#4731).
+        Follows materialized children and every recorded declaring edge, so a
+        node first loaded as dev (a root devDependency a production sibling also
+        declares) promotes its whole subtree, including children whose edges the
+        queue dedup dropped, independent of declaration order (#4731).
         """
+        declared: dict[int, list[str]] = {}
+        for key, parents in self._edge_parents.items():
+            for parent in parents:
+                declared.setdefault(id(parent), []).append(key)
+        by_key: dict[str, list[DependencyNode]] = {}
+        for node in tree.nodes.values():
+            by_key.setdefault(node.dependency_ref.get_unique_key(), []).append(node)
         pending = [node for node in tree.nodes.values() if not node.is_dev]
         while pending:
-            for child in pending.pop().children:
+            node = pending.pop()
+            declared_children = (
+                c for key in declared.get(id(node), ()) for c in by_key.get(key, ())
+            )
+            for child in [*node.children, *declared_children]:
                 if child.is_dev:
                     child.is_dev = False
                     pending.append(child)

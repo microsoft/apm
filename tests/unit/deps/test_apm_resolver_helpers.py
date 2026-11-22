@@ -557,3 +557,36 @@ class TestOneAnchoredDirectoryNode:
         assert not tree.resolution_errors, tree.resolution_errors
         assert (tmp_path / "packages" / "sib" / "packages" / "lib") not in calls, calls
         assert (tmp_path / "packages" / "lib").resolve() in calls, calls
+
+
+@pytest.mark.parametrize("dev_order", [("a", "lib"), ("lib", "a")], ids=["a-first", "lib-first"])
+def test_production_reaches_a_shared_leaf_in_either_dev_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dev_order: tuple[str, str]
+) -> None:
+    """A leaf both dev roots declare is production once a production edge reaches lib."""
+    monkeypatch.chdir(tmp_path)
+    graph = {"sib": ["../lib"], "a": ["../leaf"], "lib": ["../leaf"], "leaf": []}
+    for name, deps in graph.items():
+        package = tmp_path / "packages" / name
+        package.mkdir(parents=True)
+        listed = "".join(f"    - {dep}\n" for dep in deps)
+        apm = f"dependencies:\n  apm:\n{listed}" if deps else ""
+        (package / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n{apm}", encoding="utf-8")
+    dev = "".join(f"    - ./packages/{name}\n" for name in dev_order)
+    (tmp_path / "apm.yml").write_text(
+        "name: mono\nversion: 1.0.0\ndependencies:\n  apm:\n    - ./packages/sib\n"
+        f"devDependencies:\n  apm:\n{dev}",
+        encoding="utf-8",
+    )
+    resolver = APMDependencyResolver(
+        apm_modules_dir=tmp_path / "apm_modules", download_callback=_copy_local([])
+    )
+    resolver._project_root = tmp_path
+
+    tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
+
+    assert not tree.resolution_errors, tree.resolution_errors
+    dev_flags = {node.dependency_ref.get_unique_key(): node.is_dev for node in tree.nodes.values()}
+    assert dev_flags["./packages/lib"] is False, dev_flags
+    assert dev_flags["local:packages/leaf"] is False, dev_flags
+    assert dev_flags["./packages/a"] is True, dev_flags

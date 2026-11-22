@@ -15,6 +15,7 @@
     "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryIsOneDependency::test_lockfile_parents_anchoring_to_one_directory_are_one_parent",
     "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryIsOneDependency::test_root_declared_directory_wins_its_spelling",
     "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryNode::test_production_sibling_promotes_a_dev_library_and_its_descendants",
-    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryNode::test_targeted_sibling_update_rechecks_the_library_at_its_own_anchor"
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryNode::test_targeted_sibling_update_rechecks_the_library_at_its_own_anchor",
+    "tests/unit/deps/test_apm_resolver_helpers.py::test_production_reaches_a_shared_leaf_in_either_dev_order"
   ]
 }
