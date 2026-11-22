@@ -78,6 +78,7 @@ class ScriptRunner:
         discovered_prompt = self._discover_prompt_file(script_name)
 
         if discovered_prompt:
+            self._require_dependency_policy([discovered_prompt])
             # Print discovery message early to allow E2E tests to validate
             # This message appears before runtime detection, which may fail in test environments
             print(f"[i] Auto-discovered: {discovered_prompt.as_posix()}")
@@ -96,6 +97,7 @@ class ScriptRunner:
                 # Retry discovery after install
                 discovered_prompt = self._discover_prompt_file(script_name)
                 if discovered_prompt:
+                    self._require_dependency_policy([discovered_prompt])
                     # Signal successful install before attempting runtime detection
                     # This allows E2E tests to validate auto-install without requiring runtime
                     print(f"\n* Package installed and ready to run\n")  # noqa: F541
@@ -243,6 +245,7 @@ class ScriptRunner:
         """
         # Find all .prompt.md files in the command using regex
         prompt_files = re.findall(r"(\S+\.prompt\.md)", command)
+        self._require_dependency_policy([Path(prompt_file) for prompt_file in prompt_files])
         compiled_prompt_files = []
         runtime_content = None
 
@@ -801,6 +804,53 @@ class ScriptRunner:
         except Exception:
             return False
 
+    def _require_dependency_policy(
+        self, paths: list[Path], *, extra: list[tuple[str, object]] | None = None
+    ) -> None:
+        """Refuse to read prompts from, or install, a package the org policy denies.
+
+        A prompt under ``apm_modules`` or a file the lock records as deployed
+        belongs to its installed package; that package (and any *extra*
+        reference about to be installed) meets the dependency check install
+        applies. ``enforcement: warn`` warns and continues.
+        """
+        from ..install.errors import PolicyViolationError
+        from ..install.exec_gate import installed_dependency_subjects, policy_denied_dependencies
+        from ..policy.outcome_routing import resolve_trust_policy
+        from ..utils.console import _rich_warning
+        from ..utils.paths import portable_relpath
+        from .remediation import RUN_DEPENDENCY_DENIED
+
+        root = Path.cwd()
+        subjects: dict[str, object] = dict(extra or ())
+        if paths:
+            resolved = [path.resolve() for path in paths]
+            relative = {portable_relpath(path, root) for path in paths}
+            for installed in installed_dependency_subjects(root, user_scope=False):
+                owned_root = installed.root.resolve()
+                if relative & installed.deployed or any(
+                    path.is_relative_to(owned_root) for path in resolved
+                ):
+                    subjects.setdefault(installed.key, installed.ref)
+        if not subjects:
+            return
+        try:
+            policy = resolve_trust_policy(root)
+        except PolicyViolationError as exc:
+            raise RuntimeError(str(exc)) from exc
+        denied = policy_denied_dependencies(subjects.items(), policy) if policy else {}
+        enforcement = getattr(policy, "enforcement", "block")
+        if not denied or enforcement == "off":
+            return
+        lines = [f"{key}: {reason}" for key, reason in sorted(denied.items())]
+        if enforcement == "warn":
+            for line in lines:
+                _rich_warning(line)
+            return
+        raise RuntimeError(
+            "\n".join([*lines, f"Blocked by org policy -- {RUN_DEPENDENCY_DENIED.sentence()}"])
+        )
+
     def _auto_install_virtual_package(self, package_ref: str) -> bool:
         """Auto-install a virtual package.
 
@@ -823,7 +873,14 @@ class ScriptRunner:
 
             if not dep_ref.is_virtual:
                 return False
+        except Exception as e:
+            from ..utils.console import _rich_echo
 
+            _rich_echo(f"  [x] Auto-install failed: {e}", color="red")
+            return False
+        # Judged like any install, before anything is downloaded or declared.
+        self._require_dependency_policy([], extra=[(dep_ref.get_unique_key(), dep_ref)])
+        try:
             # Ensure apm_modules exists
             apm_modules = Path("apm_modules")
             apm_modules.mkdir(parents=True, exist_ok=True)
