@@ -155,6 +155,8 @@ def test_uninstall_forgets_a_package_whose_files_are_gone(lifecycle_world) -> No
     _remove_deployed(scenario)
     scenario.run("uninstall p-skill", credit=[{**_ABSENT, "OP": "uninstall"}])
     assert not scenario.lock_names(), scenario.lock_names()
+    lock = scenario.lock_path
+    assert not lock.exists() or "p-skill" not in lock.read_text("utf-8"), lock.read_text("utf-8")
     scenario.finish()
 
 

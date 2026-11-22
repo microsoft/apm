@@ -37,6 +37,7 @@ from tests.lifecycle.generator.rules import (
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
     REFUSAL_EVIDENCE,
+    RETIRED_MCP_OWNERS,
     RULE_CELL_REFUSALS,
     RULES,
     U_BIN_PIN,
@@ -736,3 +737,6 @@ def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) 
     assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
     user = claims(user_scope=True)
     assert not any(user.names.values()) and not any(user.hashes.values()), user
+    removed = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["removed"]
+    recorded = {key for key, rules in removed.items() if "U-MCPOWN-USER" in rules}
+    assert recorded == {f"pair|SCOPE=user|MCPOWN={owner}" for owner in RETIRED_MCP_OWNERS}, recorded
