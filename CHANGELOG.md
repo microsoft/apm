@@ -38,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
 - Catalog entries routed to a package registry install by name in registry form and replay with `--frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
-- `apm install -g` records files deployed from user-root primitives (`~/.apm/agents`) in the user lockfile, so a later install deploys source edits instead of skipping them. (closes #3772, #4684)
 
 ### Security
 
