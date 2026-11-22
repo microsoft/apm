@@ -71,6 +71,7 @@ _RAW_MODULE_CALLS = frozenset(
 # Writer helpers that must come from the seam, never from their utils module.
 _WRITER_HELPERS = frozenset(
     {
+        "atomic_copy",
         "atomic_write_bytes",
         "atomic_write_text",
         "robust_rmtree",

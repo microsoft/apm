@@ -247,6 +247,24 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
         (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
     ),
+    "U-MKT": (
+        "marketplace commands act on catalogs, never on deployed primitives: add, list, "
+        "browse, update, remove and validate read or refresh the catalog cache, and the "
+        "authoring commands edit the marketplace block; a primitive reaches a project only "
+        "through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every "
+        "OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto "
+        "one rule cell witnessed at the allowed and the revoked GATE level (deployed "
+        "surfaces and the lock byte-identical)",
+        (
+            Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
+            Ev("docs/src/content/docs/reference/cli/marketplace.md", 292, "apm marketplace update"),
+            Ev(
+                "docs/src/content/docs/consumer/installing-from-marketplaces.md",
+                124,
+                "refreshes the cached",
+            ),
+        ),
+    ),
     "U-FIRST-PARTY-MCP": (
         "an MCP server the project declares in its own apm.yml is first-party: the "
         "executables gate governs servers from dependencies and never parks it, so every "
@@ -257,6 +275,20 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
             Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+        ),
+    ),
+    "U11": (
+        "--frozen refuses any declared-target change before it changes anything: a dropped "
+        "target (#4517) and an added one. A changed TGT with FROZEN maps to one refusal cell, "
+        "witnessed by the T-6a history scenario",
+        (
+            Ev("src/apm_cli/install/service.py", 659, "no longer declares target(s)"),
+            Ev(
+                "src/apm_cli/install/frozen_withdrawal.py",
+                273,
+                "does not record everything this install deploys",
+            ),
+            Ev("src/apm_cli/install/service.py", 133, "cannot replay the selected native services"),
         ),
     ),
     "E1": (
@@ -339,15 +371,38 @@ RULE_CELL_REFUSALS: Mapping[str, tuple[int, str]] = {
     # One canonical no-op line (#4460); the retired wordings must not match.
     LOCAL_BUNDLE_REFUSALS["prune"]: (0, r"No orphaned packages found\. Nothing to prune\."),
 }
+# U11: --frozen after a declared-target change. Its pinned messages (H2) and its
+# witness: the T-6a history scenario, since a replay row cannot change targets.
+FROZEN_TARGET_CHANGE = "refusal|TGT=changed|FROZEN=on"
+FROZEN_TARGET_CHANGE_MESSAGES = (
+    # narrowed: a dropped target's files are still recorded (#4517).
+    r"--frozen: apm\.yml no longer declares target\(s\) .+, but apm\.lock\.yaml still"
+    r" records their files\.",
+    # widened: the lock records neither the added target's files nor its native
+    # (MCP/LSP) ownership; whichever check runs first refuses.
+    r"--frozen: apm\.lock\.yaml does not record everything this install deploys\."
+    r"|--frozen cannot replay the selected native services\.",
+)
+# Refusal cells a scenario (not a generated replay row) witnesses.
+SCENARIO_REFUSALS: Mapping[str, str] = {
+    FROZEN_TARGET_CHANGE: (
+        "tests/lifecycle/scenarios/test_history_upgrade.py::"
+        "test_frozen_refuses_a_target_change[multi-narrowed]"
+    ),
+}
 # Refusal rule cells whose current message is a defect: (tracking issue, a regex
 # the fixed output matches). The cell is known-failing until that output appears.
 RULE_CELL_KNOWN: Mapping[str, tuple[str, str]] = {}
+
+# U-MKT: every OP=marketplace x PRIM cell maps here (Q&L ruling 2026-11-21).
+MARKETPLACE_UNTOUCHED = "rule|U-MKT|marketplace-never-touches-deployed"
 
 # U-FIRST-PARTY-MCP: the one cell every executable-gate level of an MCP source maps to.
 FIRST_PARTY_MCP_CELL = "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated"
 
 # Rule cells: must-cover singletons a rule names on its own.
 RULE_CELLS: Mapping[str, str] = {
+    MARKETPLACE_UNTOUCHED: "U-MKT",
     FIRST_PARTY_MCP_CELL: "U-FIRST-PARTY-MCP",
     "rule|U9|approve-list-read-only": "U9",
     "rule|U9|approve-pending-read-only": "U9",
@@ -358,6 +413,7 @@ RULE_CELLS: Mapping[str, str] = {
 # Rule cells whose evidence is a state fact (nothing written).
 STATE_FACT_RULE_CELLS = frozenset(
     {
+        MARKETPLACE_UNTOUCHED,
         FIRST_PARTY_MCP_CELL,
         "rule|U9|approve-list-read-only",
         "rule|U9|approve-pending-read-only",
@@ -379,6 +435,8 @@ class Verdict:
 
 def refusal_cell(cell: Mapping[str, str]) -> tuple[str, int] | None:
     """The refusal cell id (and its exit) a cell falls into, or None."""
+    if "FROZEN" in cell and cell.get("TGT", "").endswith(("widened", "narrowed")):
+        return FROZEN_TARGET_CHANGE, 1
     op = cell.get("OP")
     if "FROZEN" in cell and "UPDATE" in cell and op in (None, "install"):
         return cell_id("refusal", {"OP": "install", "FROZEN": ON, "UPDATE": ON}), 2
@@ -448,6 +506,24 @@ def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str]
     return None
 
 
+def _rule_cell_target(cell: Mapping[str, str]) -> tuple[str, str] | None:
+    """The rule cell (and rule) U-MKT or U10 maps *cell* onto, or None.
+
+    An org-policy GATE level is never mapped (U2 no-collapse: a dependency
+    deny stays its own cell), and OP x SRC x PRIM (T3) stays with the source lane.
+    """
+    op, prim = cell.get("OP"), cell.get("PRIM")
+    if GATE_AUTHORITY.get(cell.get("GATE")) == "org-policy":
+        return None
+    if op == "marketplace" and prim is not None and "SRC" not in cell:
+        return MARKETPLACE_UNTOUCHED, "U-MKT"
+    if op == "compile" and prim in ("hook", "lsp"):
+        return "rule|U10|compile-render-only-non-mutation", "U10"
+    if op == "compile" and prim == "mcp":
+        return "rule|U10|compile-validate-reads-mcp", "U10"
+    return None
+
+
 def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
     """(target cell or rule cell id, rule) of a partial equivalence, or None.
 
@@ -461,13 +537,11 @@ def mapped_cell(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | N
     source = _source_mapping(cell)
     if source is not None:
         return source
-    policy_level = GATE_AUTHORITY.get(gate) == "org-policy"
-    if op == "compile" and prim in ("hook", "lsp", "mcp") and policy_level:
-        return None
-    if op == "compile" and prim in ("hook", "lsp"):
-        return "rule|U10|compile-render-only-non-mutation", "U10"
-    if op == "compile" and prim == "mcp":
-        return "rule|U10|compile-validate-reads-mcp", "U10"
+    rule_target = _rule_cell_target(cell)
+    if rule_target is not None:
+        return rule_target
+    if op == "compile" and prim in ("hook", "lsp", "mcp"):
+        return None  # an org-policy level stays its own cell (U2 no-collapse)
     if (
         prim in PLAIN_PRIMS
         and GATE_AUTHORITY.get(gate) == "executable-gate"
@@ -501,6 +575,7 @@ def classify(family: str, cell: Mapping[str, str]) -> Verdict:
     refusal = refusal_cell(cell)
     if refusal:
         rule = "U5" if cell.get("OP") == "pack" and cell.get("SCOPE") == "user" else "U1"
+        rule = "U11" if refusal[0] == FROZEN_TARGET_CHANGE else rule
         return Verdict("mapped", (rule,), refusal[0])
     mapped = mapped_cell(cell)
     if mapped:

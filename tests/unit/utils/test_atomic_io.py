@@ -352,3 +352,71 @@ class TestWriteTextLf:
         target = tmp_path / "u.md"
         write_text_lf(target, "café ☕ 日本語\r\n")
         assert target.read_text(encoding="utf-8") == "café ☕ 日本語\n"
+
+
+@pytest.mark.parametrize("writer", ["copy2", "copyfile"])
+def test_seam_copies_never_expose_a_partial_destination(tmp_path: Path, writer: str) -> None:
+    """#4691: a reader sees the old bytes until a rename, then the new ones, mode kept."""
+    import os
+
+    from apm_cli.integration import write_seam
+
+    source = tmp_path / "new.sh"
+    source.write_bytes(b"#!/bin/sh\necho new\n")
+    destination = tmp_path / "deployed.sh"
+    destination.write_bytes(b"#!/bin/sh\necho old\n")
+    if hasattr(os, "fchmod"):
+        os.chmod(source, 0o700)
+        os.chmod(destination, 0o700)
+    old_inode = destination.stat().st_ino
+    seen: list[bytes] = []
+    real_replace = os.replace
+
+    def observing_replace(src: str, dst: object) -> None:
+        seen.append(destination.read_bytes())
+        real_replace(src, dst)
+
+    with patch("os.replace", side_effect=observing_replace):
+        getattr(write_seam, writer)(source, destination)
+
+    assert seen == [b"#!/bin/sh\necho old\n"]
+    assert destination.read_bytes() == b"#!/bin/sh\necho new\n"
+    assert destination.stat().st_ino != old_inode or os.name == "nt"
+    if hasattr(os, "fchmod"):
+        assert stat.S_IMODE(destination.stat().st_mode) & 0o100
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["deployed.sh", "new.sh"]
+
+
+def test_a_failed_atomic_copy_leaves_the_destination_and_no_temp(tmp_path: Path) -> None:
+    from apm_cli.utils.atomic_io import atomic_copy
+
+    destination = tmp_path / "deployed.sh"
+    destination.write_bytes(b"old\n")
+
+    with pytest.raises(OSError):
+        atomic_copy(tmp_path / "missing", destination)
+
+    assert destination.read_bytes() == b"old\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["deployed.sh"]
+
+
+def test_a_failed_replacement_removes_a_read_only_staging_file(tmp_path: Path) -> None:
+    """#4691: staging made read-only by the source mode is still cleaned up."""
+    import os
+
+    from apm_cli.utils.atomic_io import atomic_copy
+
+    source = tmp_path / "source.md"
+    source.write_bytes(b"new\n")
+    os.chmod(source, stat.S_IREAD)
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    destination = deploy / "deployed.md"
+    destination.write_bytes(b"old\n")
+
+    with patch("os.replace", side_effect=PermissionError("replace refused")):
+        with pytest.raises(PermissionError, match="replace refused"):
+            atomic_copy(source, destination)
+
+    assert destination.read_bytes() == b"old\n"
+    assert [p.name for p in deploy.iterdir()] == ["deployed.md"]

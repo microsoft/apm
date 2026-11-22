@@ -302,6 +302,55 @@ class TestRunLspIntegration:
         assert "bundle:vendor/tool" in str(exc_info.value)
         assert "--force does not transfer ownership" in str(exc_info.value)
 
+    @pytest.mark.parametrize(
+        ("wrote", "options", "refused"),
+        [
+            (False, {}, True),
+            (True, {}, False),
+            # Uninstall reconciles survivors in memory and must finish its cleanup.
+            (False, {"persist": False}, False),
+            # An MCP write this command staged must stay recorded.
+            (False, {"refuse_unwritten_conflict": False}, False),
+        ],
+        ids=["nothing-written", "others-written", "uninstall", "mcp-written"],
+    )
+    @patch(_PATCH_TARGET)
+    def test_user_entry_conflict_refuses_only_an_install_that_wrote_nothing(
+        self, mock_integrator, tmp_path, wrote, options, refused
+    ):
+        """#4697: a conflict that wrote nothing refuses the commit; else it records (#4628)."""
+        from apm_cli.deps.lockfile_write_authority import commits_on_failure
+        from apm_cli.install.errors import LSPUserEntryConflictError
+
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("mine")]
+        mock_integrator.resolve_target_runtimes.return_value = ["copilot"]
+        mock_integrator.get_server_names.return_value = {"mine"}
+        mock_integrator.collect_transitive.return_value = []
+        mock_integrator.install.side_effect = LSPUserEntryConflictError(
+            "LSP installation incomplete: mine (copilot)",
+            preserved={"copilot": {"mine"}},
+            wrote_servers=wrote,
+        )
+        modules = tmp_path / "apm_modules"
+        modules.mkdir()
+
+        with pytest.raises(LSPUserEntryConflictError) as exc_info:
+            run_lsp_integration(
+                apm_package=package,
+                apm_modules_path=modules,
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+                **options,
+            )
+
+        assert commits_on_failure(exc_info.value) is not refused
+        assert mock_integrator.update_lockfile.called is not refused
+
     @patch(_PATCH_TARGET)
     def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):
         """An explicit executable gate blocks LSP servers until approved."""

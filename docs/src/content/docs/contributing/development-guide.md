@@ -226,6 +226,14 @@ Archive parsing and canonical dependency matching retain their existing costs.
 Deferring a direct import does not prove a cold-start speedup: other modules may
 still load the same dependency transitively.
 
+To measure end-to-end user journeys (install cold, warm and `--frozen`, update,
+compile, audit, pack) on realistic dependency trees and monorepos, use the
+seeded fixtures and the harness described in
+[`tests/fixtures/perf/README.md`](https://github.com/microsoft/apm/blob/main/tests/fixtures/perf/README.md).
+For example, `uv run python -m tests.benchmarks.journeys run --fixtures tree-10 --runs 1 --rtt 0`.
+The harness runs offline against a local mirror with an injectable round-trip
+time and counts requests per command.
+
 Without `uv`, use a standard Python venv and pip:
 
 ```bash
@@ -278,51 +286,61 @@ Gates only move upward. When actual coverage exceeds the gate by at least
 CI's coverage summaries include a "Lowest-coverage files" section, rendered by
 `scripts/coverage-summary.py`, to identify where new tests would help.
 
-### Running the bounded mutation pilot
+### Mutation testing owner modules
 
-The advisory mutation pilot covers five stable owners: dependency subset
-selection, update-plan construction, cached-policy serialization, canonical
-in-package link projection, and lockfile field normalization (the fail-closed
-`host_type`/`exec_status` normalizers, not the `@dataclass` reconstruction
-methods `to_dict`/`from_dict`/`to_dependency_ref` -- mutmut cannot mutate
-`@dataclass` methods; those are defended by PR #2246's manual mutation-break
-twins instead). It runs nightly or by manual workflow
-dispatch, not as required PR CI, and has a 20-minute hosted job budget.
+`scripts/run_mutation_pilot.py` mutation-tests canonical owner modules. Each
+owner names one source file, the functions to mutate and the unit-test seams
+that must kill them (`OWNERS`). The five original pilot owners (subset
+selection, update plans, policy serialization, link projection, lockfile
+normalization) are joined by the 0.37 owner moves: policy-outcome routing,
+executable trust context, install entry routing, install commit order,
+lockfile write authority, APM home resolution, egress routing and
+remediation advice (#4121). mutmut 3.6.0 cannot mutate a method of a
+`@dataclass` or any function with a decorator other than `staticmethod` or
+`classmethod`, so those owners cover the plain functions their decorated
+entry points call.
 
-Run the exact-function allowlist locally:
-
-```bash
-uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --output mutation-pilot-report.json
-```
-
-The command fails on new survivors, timeouts, suspicious results, unchecked
-mutants, and incomplete outcomes. It writes a sorted, timestamp-free JSON
-report even when survivor comparison fails. Pass `--reuse-cache` only when
-the allowlisted source, test seams, configuration, runner, and lockfile
-are unchanged.
-
-To inspect existing mutmut metadata without executing mutants:
+`.github/workflows/mutation-pilot.yml` runs nightly, or by manual dispatch,
+with one shard per owner. It is not required PR CI. Run one owner locally:
 
 ```bash
 uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --report-only --output mutation-pilot-report.json
+  --owner egress-route-policy --negative-control --output mutation-report.json
 ```
 
-The reviewed survivor allowlist lives in
-[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
-Do not update it to make a run green. Review every surviving diff with
-`mutmut show` and add behavioral tests for real contract gaps.
-Mutant numbers can shift when a function changes. Compare the old and new
-diffs before replacing an accepted ID; a renamed survivor is not a newly
-killed behavior. Add missing coverage to the owner's configured test seam,
-not only to tests outside the pilot.
-Use `--update-baseline` only when the baseline change itself has been reviewed:
+Omit `--owner` to run every owner. A run fails on a mutant that survives
+without being recorded, on a kill rate below the owner's floor, and on
+timeouts, suspicious results, unchecked mutants or other incomplete outcomes.
+`--negative-control` also proves that losing one killed mutant would fail
+the floor. The report is sorted and timestamp-free, and it is written even
+when the comparison fails. Use `--report-only` to read existing mutmut
+metadata, and `--reuse-cache` only when the owner source, seams,
+configuration, runner and lockfile are unchanged.
+
+[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json)
+records, per owner, its `kill_rate_floor` and its survivors:
+
+- `equivalent_survivors` maps each mutant no test can kill to the reason it
+  behaves like the original code.
+- `accepted_survivors` is an unexplained allowlist kept only for the five
+  original pilot owners; every other owner must leave it empty.
+
+Do not update the baseline to make a run green. Review each surviving diff
+with `mutmut show <name>`, then add a behavioral test to the owner's seam, or
+record the mutant as equivalent with its reason. Seams must not `chdir`: mutmut
+resolves its source paths against the process working directory, so patch
+`Path.cwd` and `HOME` instead. Mutant numbers shift when a function changes;
+compare old and new diffs before replacing an ID. `--update-baseline` runs
+every owner, keeps recorded reasons, refuses a new owner's survivor that has
+neither a test nor a reason, and resets each floor to the measured rate:
 
 ```bash
 uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --update-baseline --output mutation-pilot-report.json
+  --update-baseline --output mutation-report.json
 ```
+
+Other fault-injection harnesses (#4514) reuse `run_owners()` with their own
+`Owner` entries.
 
 ## Coding Style
 
