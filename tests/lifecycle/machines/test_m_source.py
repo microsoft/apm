@@ -616,6 +616,10 @@ class SourceMachine(MachineBase):
         # Slot -> targets of the last resolving step that handled it: a later step under
         # the same targets is "unchanged" for that slot.
         self.resolved_targets: dict[str, frozenset[str]] = {}
+        # Bundle slot -> targets its files were copied into: ``apm install <bundle>`` is
+        # imperative (reference/cli/install.md), so a manifest install after a target
+        # widening deploys nothing new for it; a dropped target stays dropped.
+        self.bundle_targets: dict[str, frozenset[str]] = {}
         self.lock_before = "absent"
         self.proxy = False
         # Local catalog form -> its marketplace.json (the file ``marketplace update`` reads).
@@ -822,6 +826,8 @@ class SourceMachine(MachineBase):
             if op not in _KEEPING:
                 for choice in choices:
                     self.resolved_targets[choice.slot] = self.model.targets
+            for slot in self.bundle_targets:
+                self.bundle_targets[slot] &= self.model.targets
         return step
 
     def preview(
@@ -903,7 +909,10 @@ class SourceMachine(MachineBase):
         for choice in docs:
             # A local bundle deploys its source package's instruction (p-pack-bundle -> p-pack).
             name = _MODELED_BUNDLES.get(choice.package, choice.package)
-            for target in sorted(self.model.targets):
+            targets = self.model.targets
+            if choice.form == "bundle":
+                targets &= self.bundle_targets.get(choice.slot, targets)
+            for target in sorted(targets):
                 mapping = KNOWN_TARGETS[target].primitives.get("instructions")
                 if mapping is None:
                     continue
@@ -1069,8 +1078,15 @@ class SourceMachine(MachineBase):
         before = self._apm_entries()
         self.slots[choice.slot] = choice
         self.converged = False
+        copied = self.bundle_targets.get(choice.slot)
+        if choice.form == "bundle":
+            self.bundle_targets[choice.slot] = self.model.targets
         step = self.command("install", args, (choice,), dry_run and choice.form not in _MCP_FORMS)
         if step.result.returncode != 0:
+            if choice.form == "bundle":
+                self.bundle_targets.pop(choice.slot)
+                if copied is not None:
+                    self.bundle_targets[choice.slot] = copied
             if had is None:
                 self.slots.pop(choice.slot)
             return
