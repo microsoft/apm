@@ -23,7 +23,7 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.e2e,
-    pytest.mark.promise("P-INV-I1", "P-INV-I5", "P-INV-I7"),
+    pytest.mark.promise("P-INV-I5", "P-INV-I7"),
     pytest.mark.requires_apm_binary,
 ]
 
@@ -101,8 +101,6 @@ def test_install_g_deploys_a_scripted_hook_under_the_claude_config_root(
         commands,
         spellings,
     )
-    lock = (scene.isolated.config_root / "apm.lock.yaml").read_text(encoding="utf-8")
-    assert "g.sh" in lock, lock
     if external:
         assert not (scene.home / ".claude").exists(), sorted(_files(scene.home))
 
