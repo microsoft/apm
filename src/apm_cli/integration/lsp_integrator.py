@@ -744,13 +744,15 @@ class LSPIntegrator:
         force: bool = False,
         legacy_server_names: builtins.set | None = None,
         locked_servers: dict[str, dict] | None = None,
+        held: builtins.set | frozenset = frozenset(),
     ) -> _PreparedTargetConfig:
         """Validate and render one target config without writing it.
 
         *locked_servers* holds the entries APM renders for this target from
         the locked server configs: a managed entry that differs from both the
         new render and the locked one is kept, never rewritten (#4626).
-        ``None`` (a caller without lock evidence) judges no entry.
+        ``None`` (a caller without lock evidence) judges no entry. A *held*
+        server, kept on another target, stays at its locked render here too.
         """
         config_path = LSPIntegrator._target_config_path(
             spec,
@@ -845,6 +847,11 @@ class LSPIntegrator:
         matching: list[str] = []
         kept: dict[str, str] = {}
         for name, server_config in servers.items():
+            if name in held:
+                # One recorded baseline per server: hold every target at it (#4626).
+                server_config = (locked_servers or {}).get(name)
+                if server_config is None:
+                    continue
             # A same-name entry APM does not manage is user content: never
             # overwrite it (and so never claim it).
             foreign = name in existing and name not in managed_names
@@ -923,6 +930,27 @@ class LSPIntegrator:
         return LSPIntegrator._render_plugin_roots(
             servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
         )
+
+    @staticmethod
+    def _hold_kept_servers(prepared_targets: list, inputs: dict) -> list:
+        """Re-prepare targets so a server kept on one target is held on all (#4626).
+
+        The lock records one config per server: writing a new render to one
+        target while another keeps an edit would leave that target past the
+        recorded baseline.
+        """
+        kept = builtins.set().union(*(prepared.kept for _r, _s, prepared in prepared_targets))
+        if not kept:
+            return prepared_targets
+        held = []
+        for runtime, spec, prepared in prepared_targets:
+            servers, options = inputs[runtime]
+            if kept & (builtins.set(servers) - builtins.set(prepared.kept)):
+                prepared = LSPIntegrator._prepare_target_config(
+                    spec, servers, **options, held=frozenset(kept)
+                )
+            held.append((runtime, spec, prepared))
+        return held
 
     @staticmethod
     def _report_kept_entries(
@@ -1231,6 +1259,7 @@ class LSPIntegrator:
             return 0
 
         prepared_targets: list[tuple[str, _LSPTargetSpec, _PreparedTargetConfig]] = []
+        inputs: dict[str, tuple[dict[str, dict], dict]] = {}
         for runtime in runtimes:
             spec = _LSP_TARGET_SPECS[runtime]
             runtime_deps = LSPIntegrator.deps_for_runtime(lsp_deps, runtime)
@@ -1252,23 +1281,23 @@ class LSPIntegrator:
                 managed_names = managed_server_names
                 if managed_target_servers is not None:
                     managed_names = managed_target_servers.get(runtime, set())
-                prepared = LSPIntegrator._prepare_target_config(
-                    spec,
-                    servers,
-                    project_root=project_root_path,
-                    user_scope=user_scope,
-                    managed_server_names=managed_names,
-                    force=force,
-                    legacy_server_names=legacy_server_names,
-                    locked_servers=LSPIntegrator._locked_target_servers(
+                options = {
+                    "project_root": project_root_path,
+                    "user_scope": user_scope,
+                    "managed_server_names": managed_names,
+                    "force": force,
+                    "legacy_server_names": legacy_server_names,
+                    "locked_servers": LSPIntegrator._locked_target_servers(
                         record.locked_configs if record is not None else None,
                         runtime_deps,
                         spec,
                         project_root=project_root_path,
                         user_scope=user_scope,
                     ),
-                )
+                }
+                prepared = LSPIntegrator._prepare_target_config(spec, servers, **options)
                 prepared_targets.append((runtime, spec, prepared))
+                inputs[runtime] = (servers, options)
             except Exception as exc:
                 _log.debug(
                     "Failed to write LSP config to %s",
@@ -1290,6 +1319,7 @@ class LSPIntegrator:
                         "only for a reviewed ownership collision."
                     ) from exc
 
+        prepared_targets = LSPIntegrator._hold_kept_servers(prepared_targets, inputs)
         LSPIntegrator._report_kept_entries(
             prepared_targets,
             user_scope=user_scope,

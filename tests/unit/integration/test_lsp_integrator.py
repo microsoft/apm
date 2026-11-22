@@ -558,6 +558,35 @@ class TestManagedEntryKeptEdits:
         assert outcome["kept"] == {}
 
 
+class TestKeptEntryHoldsEveryTarget:
+    """A server kept on one target stays at its locked render on every target (#4626)."""
+
+    def test_unedited_target_is_not_upgraded_past_the_shared_baseline(self, tmp_path):
+        v1 = _make_dep("pyright", command="pyright-v1")
+        both = ["copilot", "claude"]
+        LSPIntegrator.install([v1], project_root=tmp_path, target_runtimes=both)
+        copilot = tmp_path / ".github" / "lsp.json"
+        claude = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        claude_v1 = json.loads(claude.read_text())["lspServers"]["pyright"]
+        data = json.loads(copilot.read_text())
+        data["lspServers"]["pyright"]["command"] = "my-pyright"
+        copilot.write_text(json.dumps(data), encoding="utf-8")
+
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs([v1]))
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="pyright-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright"}, "claude": {"pyright"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        assert json.loads(claude.read_text())["lspServers"]["pyright"] == claude_v1
+        assert json.loads(copilot.read_text())["lspServers"]["pyright"]["command"] == "my-pyright"
+        assert record.kept_edits == {"pyright": "blocked"}
+
+
 class TestResolveLspTargets:
     def test_targets_copilot_when_binary_present(self, tmp_path):
         with patch(
