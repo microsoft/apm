@@ -53,8 +53,8 @@ jobs:
     - name: Parity tests from L7
       run: |
         set -euo pipefail
-        git -C harness fetch --quiet --no-tags origin danielmeppiel-perf-engine-parity
-        git -C new checkout FETCH_HEAD -- tests/lifecycle/scenarios/_deploy_diff.py tests/lifecycle/scenarios/test_engine_parity.py
+        git -C harness fetch --quiet --no-tags origin danielmeppiel-perf-engine-parity:refs/remotes/origin/ep
+        git -C new checkout refs/remotes/origin/ep -- tests/lifecycle/scenarios/_deploy_diff.py tests/lifecycle/scenarios/test_engine_parity.py
     - name: Lifecycle cells
       working-directory: new
       run: |
