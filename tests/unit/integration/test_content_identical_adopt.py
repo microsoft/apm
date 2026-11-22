@@ -320,6 +320,7 @@ class TestOverwritePlanSkipsReceiptOnIdentical:
         assert lookups == []
         assert plan == []
         assert target_paths == [target]
+        assert target.read_bytes() == b"rendered\n"
 
     def test_the_real_run_still_reads_the_receipt_of_an_identical_file(
         self, tmp_path: Path
@@ -327,6 +328,7 @@ class TestOverwritePlanSkipsReceiptOnIdentical:
         decision, lookups, _, target = self._decide(tmp_path, "rendered\n", None)
         assert decision == (True, True)
         assert lookups == [target]
+        assert target.read_bytes() == b"rendered\n"
 
 
 # ---------------------------------------------------------------------------
