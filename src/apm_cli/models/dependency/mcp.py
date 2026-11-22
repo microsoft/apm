@@ -52,6 +52,7 @@ _KNOWN_DICT_KEYS = frozenset(
         # Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
         "resolved_by",
         "approval_keys",
+        "declared_depth",
         # Selects which install targets receive the server; never rendered (#2606).
         "targets",
     }
@@ -190,6 +191,9 @@ class MCPDependency:
     # Runtimes that load this server natively from its declaring plugin, so
     # APM never writes it there. Never serialized and not part of equality.
     native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
+    # Lock depth of the declaring package (0 for the root manifest), so org
+    # mcp.trust_transitive judges depth > 1 only. Never serialized, not compared.
+    declared_depth: int = field(default=0, compare=False)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":

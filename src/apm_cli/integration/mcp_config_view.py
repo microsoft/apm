@@ -1158,6 +1158,7 @@ def _collect_locked_dependencies(
                     resolved_by=declarer,
                     approval_keys=approval_keys,
                     native_runtimes=native_runtimes,
+                    declared_depth=dependency.depth or 1,
                 )
             )
             roots = direct_index.roots(package_key)

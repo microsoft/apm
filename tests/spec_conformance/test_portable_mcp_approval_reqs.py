@@ -200,10 +200,13 @@ def test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_
     allowed = McpAdmission(None, one_off=True, org_policy=lambda: listed)
     assert "leaf-server" in _view(tmp_path, root, lock, allowed).configs
 
-    transitive = replace(MCPDependency.from_dict(SERVER), resolved_by="leaf")
+    transitive = replace(MCPDependency.from_dict(SERVER), resolved_by="leaf", declared_depth=2)
+    direct = replace(transitive, declared_depth=1)
     verdicts = {check.name: check.passed for check in mcp_policy_checks([transitive], policy)}
     assert verdicts["mcp-trust-transitive"] is False
     listed_verdicts = {
         check.name: check.passed for check in mcp_policy_checks([transitive], listed)
     }
     assert listed_verdicts["mcp-trust-transitive"] is True
+    direct_verdicts = {check.name: check.passed for check in mcp_policy_checks([direct], policy)}
+    assert direct_verdicts["mcp-trust-transitive"] is True

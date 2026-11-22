@@ -756,15 +756,16 @@ def _trust_transitive_result(names: Sequence[str]) -> CheckResult:
 def _check_mcp_trust_transitive(mcp_deps: list, policy: McpPolicy) -> CheckResult:
     """Check 10b: with ``mcp.trust_transitive`` false, transitive servers need mcp.allow.
 
-    A transitive server (one ``resolved_by`` a dependency, not declared in the
-    root apm.yml) passes only when ``mcp.allow`` lists it (req-sc-016).
+    A transitive server (declared by a package at lock depth > 1, and not
+    re-declared by the root apm.yml) passes only when ``mcp.allow`` lists it
+    (req-sc-016). A direct dependency's server is not transitive.
     """
     from .matcher import check_mcp_allowed
 
     if policy.trust_transitive:
         return _trust_transitive_result(())
     root = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
-    transitive = sorted({m.name for m in mcp_deps if getattr(m, "resolved_by", None)} - root)
+    transitive = sorted({m.name for m in mcp_deps if getattr(m, "declared_depth", 0) > 1} - root)
     return _trust_transitive_result(
         [
             name

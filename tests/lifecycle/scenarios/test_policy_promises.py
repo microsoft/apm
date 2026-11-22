@@ -209,6 +209,20 @@ def test_trust_transitive_false_fails_audit_for_an_unlisted_transitive_server(
     assert name in _text(audit), _text(audit)
 
 
+def test_a_direct_dependency_server_is_not_transitive(lifecycle_world) -> None:
+    """mcp.trust_transitive judges depth > 1 only: a direct dependency's server installs."""
+    factory = LocalPackageFactory(lifecycle_world.root / "g1-direct")
+    package = factory.create("t-direct", version="1.0.0", mcp_dependencies=[REGISTRY_SERVER])
+    _skill(factory, package, "t-direct")
+    _gate_off(lifecycle_world)
+    _transitive_policy(lifecycle_world, "direct", trust_transitive=False)
+    result = driver.run(lifecycle_world, ["install", str(package.root)])
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-registry"), _text(result)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode == 0, _text(audit)
+
+
 # Policy activation (regent ruling): an explicit ``trust_transitive: false`` counts
 # as set; a policy that states nothing keeps no enforcement; any other non-default
 # field makes the default ``false`` apply. Shown on the registry path.
