@@ -584,6 +584,28 @@ def test_consent_pools_owners_across_path_spellings(tmp_path: Path) -> None:
     assert path.exists() and result.deleted == []
 
 
+@pytest.mark.req("req-lk-024")
+def test_consent_checks_the_enclosing_directory_owner_too(tmp_path: Path) -> None:
+    """A member claim's offline owner never hides its skill directory owner's render."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: render if owner == "owner/pkg" else None,
+        owners={_PATH: ("offline/pkg",), _PATH.rpartition("/")[0]: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
 _HOOK = ".github/hooks/pkg-apm.json"
 
 

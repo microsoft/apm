@@ -352,13 +352,17 @@ class DeploymentEvidence:
         return self._renders[owner]
 
     def _owners_of(self, claim: str) -> tuple[str, ...]:
-        """Return the locked owners of *claim* or of its claimed skill directory."""
+        """Return the locked owners of *claim* and of every claimed enclosing directory.
+
+        A member claim never hides its skill directory's owners: each render
+        that can show the file is checked before consent falls back (#4295).
+        """
+        owners: dict[str, None] = {}
         path = claim.replace("\\", "/").rstrip("/")
         while path:
-            if path in self._owners:
-                return self._owners[path]
+            owners.update(dict.fromkeys(self._owners.get(path, ())))
             path = path.rpartition("/")[0]
-        return ()
+        return tuple(owners)
 
     def _rendered_roots(self, claim: str) -> list[Path]:
         """Return the render trees that can show *claim*: the whole lock, else its owners."""

@@ -659,6 +659,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_checks_the_enclosing_directory_owner_too",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
@@ -693,8 +694,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 30,
+      "test_count": 31,
       "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_checks_the_enclosing_directory_owner_too",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
