@@ -793,6 +793,8 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
 
 
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
+    pins = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["pins"]
+    assert pins["U-USER-SCOPE-ORG-POLICY"] == U_USER_ORG_POLICY_PIN, pins
     cell = {"SCOPE": "user", "GATE": "denied-dependency", "FROZEN": "on"}
     assert classify("T2", cell) == Verdict("removed", ("U-USER-SCOPE-ORG-POLICY",))
     monkeypatch.setattr(bin_pin, "user_org_policy_digest", lambda *_: "0" * 64)
