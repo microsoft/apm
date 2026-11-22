@@ -1011,6 +1011,26 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     scenario.finish()
 
 
+def test_a_native_plugin_is_one_gated_cell_at_project_scope(lifecycle_world) -> None:
+    """A Claude plugin at project scope is one gated native cell per target (#4808).
+
+    Its root under .agents/plugins and each target's enabledPlugins declaration
+    are observed after every step: an approved install leaves both whole, and a
+    deny retires both (I4), so no loose copy and no stale declaration remain.
+    """
+    use_policy(lifecycle_world, "allow")
+    targets = ("claude", "copilot")
+    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
+    scenario.run("install p-native-claude")
+    scenario.run("approve p-native-claude")
+    scenario.run("install")
+    scenario.assert_deployed()
+    scenario.run("deny p-native-claude")
+    scenario.run("install")
+    scenario.assert_deployed()
+    scenario.finish()
+
+
 _PLUGIN_BIN = ".agents/plugins/p-native-claude-bin/bin/p-native-claude-bin"
 
 
