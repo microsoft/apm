@@ -44,6 +44,17 @@ from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
 SCOPES = ("project", "user")
+# User-scope surfaces of the copilot target under HOME (the project table is
+# rows._SURFACE_GLOBS); same conventions: a glob, or (glob, marker) for a shared file.
+USER_SURFACE_GLOBS: Mapping[tuple[str, str], str | tuple[str, str]] = {
+    ("skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
+    ("hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
+    ("mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
+    ("lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
+    ("canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
+    # bin/ of a Claude marketplace plugin (U-BIN: user scope only).
+    ("bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
+}
 LOCKFILE = "apm.lock.yaml"
 _EMPTY = b""
 
@@ -135,14 +146,19 @@ class Bench:
             return driver.run(self.world, (*args[:2], "-g", *args[2:]), scope="user")
         return driver.run(self.world, args, scope="user")
 
+    def surface_globs(self) -> Mapping[tuple[str, str], str | tuple[str, str]]:
+        """Where each (kind, target) surface lands under this scope's deploy root."""
+        return _SURFACE_GLOBS if self.scope == "project" else USER_SURFACE_GLOBS
+
     def observe(
         self, kinds: Mapping[str, Collection[str]], targets: Collection[str]
     ) -> Observation:
         deployed: set[str] = set()
         managed: set[str] = set()
+        globs = self.surface_globs()
         for package, package_kinds in kinds.items():
             for kind, target in itertools.product(package_kinds, targets):
-                surface = _SURFACE_GLOBS.get((kind, target))
+                surface = globs.get((kind, target))
                 if surface is None:
                     continue
                 pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
@@ -159,8 +175,9 @@ class Bench:
                             path.relative_to(self.deploy_root).as_posix() for path in hits
                         )
         state, lock = self._state()
-        if lock is None and (self.lock_path.exists() or self.lock_path.is_symlink()):
-            # An unreadable lockfile attributes nothing; I1 has no ledger to compare.
+        if lock is None:
+            # An absent or unreadable lockfile attributes nothing; I1 has no ledger
+            # to compare (deployed files have unknown provenance).
             managed.clear()
         return Observation(
             state=state,
@@ -169,6 +186,7 @@ class Bench:
             deploy_root=self.deploy_root,
             lock=lock,
             managed_paths=frozenset(managed),
+            user_scope=self.scope == "user",
         )
 
     def _state(self) -> tuple[LifecycleStateSnapshot, LockFile | None]:

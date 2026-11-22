@@ -1187,3 +1187,36 @@ def test_trust_lockfile_consent_needs_a_receipt_store_it_could_read(
     else:
         assert path.read_text(encoding="utf-8") == "rendered old\n" and result.deleted == []
         assert evidence.kept_under_consent() == frozenset({claim})
+
+
+def test_consent_never_waives_a_skill_directory_cleanup_failed_to_read(tmp_path: Path) -> None:
+    """Only evidence-based retention is waived; an I/O failure still stops the uninstall."""
+    from apm_cli.commands.uninstall.cli import _abort_if_retained_target_cleanup_paths
+    from apm_cli.core.command_logger import CommandLogger
+    from apm_cli.install.selected_cleanup import SelectedCleanupOutcome
+
+    skill = ".agents/skills/alpha"
+    outcome = SelectedCleanupOutcome(retained_paths={skill}, failed_paths={skill})
+    lock_path = tmp_path / "apm.lock.yaml"
+
+    with pytest.raises(SystemExit) as stopped:
+        _abort_if_retained_target_cleanup_paths(
+            outcome,
+            LockFile(),
+            lock_path,
+            CommandLogger("uninstall"),
+            frozenset({f"{skill}/SKILL.md"}),
+        )
+
+    assert stopped.value.code == 1
+    assert outcome.retained_paths == {skill}
+
+    evidence_only = SelectedCleanupOutcome(retained_paths={skill})
+    _abort_if_retained_target_cleanup_paths(
+        evidence_only,
+        LockFile(),
+        lock_path,
+        CommandLogger("uninstall"),
+        frozenset({f"{skill}/SKILL.md"}),
+    )
+    assert evidence_only.retained_paths == set()

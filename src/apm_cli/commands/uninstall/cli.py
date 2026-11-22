@@ -534,10 +534,18 @@ def _abort_if_retained_target_cleanup_paths(
     if evidence is not None:
         _report_consented_deletions(logger, evidence.take_consented_deletions())
         consent_kept = consent_kept | evidence.kept_under_consent()
+    # Every ancestor directory of a kept file, built once: lookups stay O(1).
+    kept_dirs = {
+        "/".join(parts[:index])
+        for parts in (kept.split("/") for kept in consent_kept)
+        for index in range(1, len(parts))
+    }
+    # Only evidence-based retention is waived; a path cleanup failed on stays.
+    failed = getattr(outcome, "failed_paths", set())
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
-        if path in consent_kept or any(kept.startswith(f"{path}/") for kept in consent_kept)
+        if path not in failed and (path in consent_kept or path in kept_dirs)
     }
     if not outcome.retained_paths:
         return

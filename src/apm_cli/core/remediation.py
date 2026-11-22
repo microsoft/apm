@@ -1257,6 +1257,15 @@ POLICY_FETCH_FAILURE_BLOCKED = _entry(
     "check that the org policy source{source} is reachable",
     then="retry, or ask your org admin",
 )
+# apm compile while org policy denies an installed dependency (its content
+# would be rendered into agent context).
+COMPILE_DEPENDENCY_DENIED = _entry(
+    "compile-dependency-denied",
+    "apm install",
+    "drop the denied package's installed content",
+    before="remove or replace the blocked dependencies in apm.yml",
+    then="re-run apm compile ('apm policy status' shows the active policy)",
+)
 FROZEN_KEPT_ADOPTED = _entry(
     "frozen-kept-adopted",
     "apm install --frozen",

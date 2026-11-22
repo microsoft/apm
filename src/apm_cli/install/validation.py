@@ -192,11 +192,24 @@ def _generic_host_ambiguous_subpath_hint(dep_ref) -> str | None:
     segments = repository_path_segments(dep_ref.repo_url)
     if len(segments) <= 2:
         return None
+    configured = default_host().strip().lower()
+    if configured and configured != "github.com":
+        # Switching GITHUB_HOST would re-home the existing shorthand entries.
+        ghes_clause = (
+            f"GITHUB_HOST already names {configured}; keep it and, if this is "
+            f"another GitHub Enterprise Server, add this package as an explicit "
+            f"'git:' + 'path:' entry in apm.yml."
+        )
+    else:
+        ghes_clause = (
+            f"If this is GitHub Enterprise Server, set GITHUB_HOST={host}, write "
+            f"github.com/ before apm.yml entries for packages on GitHub, and re-run."
+        )
     return (
         f"'{host}' was treated as a single repository path "
         f"('{dep_ref.repo_url}') because it isn't recognised as GitHub, "
-        f"Azure DevOps, or GitLab. If this is a self-hosted GitLab instance, "
-        f"set GITLAB_HOST={host} (or add it to the comma-separated "
+        f"Azure DevOps, or GitLab. {ghes_clause} If this is a self-hosted GitLab "
+        f"instance, set GITLAB_HOST={host} (or add it to the comma-separated "
         f"APM_GITLAB_HOSTS) and re-run to enable repo/subpath resolution for "
         f"nested groups. Otherwise, use an explicit 'git:' + 'path:' entry "
         f"in apm.yml."

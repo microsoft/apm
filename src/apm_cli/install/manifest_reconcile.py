@@ -539,6 +539,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
     user_scope: bool = False,
     completed_reintegration: CompletedReintegration | None = None,
     retained_values: frozenset[str] = frozenset(),
+    protected_values: frozenset[str] = frozenset(),
 ) -> tuple[list[str], dict[str, str]] | tuple[list[str], dict[str, str], DeploymentLedger]:
     """Reconcile one deployed-state block and safely remove dropped paths.
 
@@ -654,7 +655,7 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         evidence=evidence,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
-        live_paths=files,
+        live_paths=[*files, *protected_values],
         # A departing owner (selected removal) releases a skill directory left
         # holding only user content, as prune and install cleanup do (#4162).
         failed_path_retained=desired_owners is None,
@@ -857,11 +858,12 @@ def reconcile_target_deployed_files(
             diagnostics=diagnostics,
             evidence=evidence,
             prior_ledger=dependency_ledger,
-            on_cleanup=partial(surface_target_cleanup, logger, dep_key),
+            on_cleanup=SelectedCleanupOutcome.observer(selected_outcome, logger, dep_key),
             desired_owners=desired_owners,
             generic_governed_values=(
                 frozenset(prior_files) if selected_owner_removal else frozenset()
             ),
+            protected_values=frozenset(survivor_files) if selected_owner_removal else frozenset(),
             user_scope=user_scope,
         )
         if selected_owner_removal:

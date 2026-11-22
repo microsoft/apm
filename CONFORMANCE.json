@@ -659,6 +659,7 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
@@ -669,8 +670,10 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[symbolic-link]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[two-distinct-hashes]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[unreadable-receipts]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_deletes_a_member_a_remaining_dependency_still_deploys",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_overrides_a_render_that_lacks_the_path",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_bare_hex_recorded_hash_as_sha256",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_each_member_immediately_before_deleting_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_records_a_file_edited_after_the_preview_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
@@ -682,8 +685,9 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 19,
+      "test_count": 22,
       "tests": [
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_classifies_a_standalone_symlinked_file_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[False]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash[True]",
@@ -694,8 +698,10 @@
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[symbolic-link]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[two-distinct-hashes]",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_every_file_the_exception_does_not_cover[unreadable-receipts]",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_deletes_a_member_a_remaining_dependency_still_deploys",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_never_overrides_a_render_that_lacks_the_path",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reads_a_bare_hex_recorded_hash_as_sha256",
+        "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_rechecks_each_member_immediately_before_deleting_it",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_records_a_file_edited_after_the_preview_as_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_file_differing_from_its_evidence_is_kept",
         "tests/spec_conformance/test_deletion_evidence_reqs.py::test_forged_lockfile_hash_keeps_the_file_and_names_it",
@@ -1039,14 +1045,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_local_path_identity_reqs.py::test_consumer_recognises_two_relative_spellings_of_one_local_path"
+      ],
       "conformance_class": "consumer",
       "id": "req-mf-016",
       "keyword": "MUST",
       "section": "4.3.5",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_local_path_identity_reqs.py::test_consumer_recognises_two_relative_spellings_of_one_local_path",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
       ],
       "waivers": [
@@ -3377,9 +3386,9 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 110,
+      "active": 111,
       "partial": 1,
-      "skipped": 3,
+      "skipped": 2,
       "text-only": 3,
       "unbound": 0,
       "xfail": 0

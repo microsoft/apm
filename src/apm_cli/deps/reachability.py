@@ -286,6 +286,8 @@ def compute_forward_reachable_keys(
     """
     unverifiable: list[tuple[str, str]] = []
     from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.deps.local_identity import root_local_dirs as collect_root_local_dirs
+    from apm_cli.deps.local_identity import transitive_local_identity
     from apm_cli.deps.lockfile import lockfile_parent_identity
 
     replacement_index = build_replacement_index(parse_replace_block(lockfile.replacements))
@@ -310,6 +312,7 @@ def compute_forward_reachable_keys(
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
+    root_local_dirs = collect_root_local_dirs((*direct_refs, *dev_refs), project_root)
 
     while queue or dev_queue:
         ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
@@ -334,12 +337,12 @@ def compute_forward_reachable_keys(
             if real_dir is None:
                 continue
             if ref.replacement is None and parent_repo_url is not None:
-                ref = replace(
+                ref = transitive_local_identity(
                     ref,
                     declaring_parent=parent_repo_url,
-                    anchored_local_path=APMDependencyResolver._portable_anchor_identity(
-                        real_dir, project_root
-                    ),
+                    anchored=real_dir,
+                    root=project_root,
+                    root_local_dirs=root_local_dirs,
                 )
             visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
             matched_key = (

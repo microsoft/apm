@@ -286,3 +286,104 @@ def test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps(
     assert (tmp_path / kept).read_text(encoding="utf-8") == "my edit\n"
     assert evidence.consented_deletions() == [gone]
     assert evidence.kept_under_consent() == frozenset({kept})
+
+
+def _skill_world(root: Path, members: dict[str, str]) -> tuple[dict[str, str], DeploymentEvidence]:
+    """A legacy skill directory whose members match their recorded hashes, under consent."""
+    for member, text in members.items():
+        (root / member).parent.mkdir(parents=True, exist_ok=True)
+        (root / member).write_text(text, encoding="utf-8")
+    hashes = {member: compute_file_hash(root / member) for member in members}
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        owners={".agents/skills/alpha": ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={member: frozenset({value}) for member, value in hashes.items()},
+    )
+    evidence.consent_to_lockfile_hashes()
+    return hashes, evidence
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_never_deletes_a_member_a_remaining_dependency_still_deploys(
+    tmp_path: Path,
+) -> None:
+    """A survivor's member inside the departing directory is outside the exception."""
+    skill = ".agents/skills/alpha"
+    edited, gone, shared = f"{skill}/SKILL.md", f"{skill}/notes.md", f"{skill}/shared.md"
+    hashes, evidence = _skill_world(
+        tmp_path, {edited: "skill\n", gone: "notes\n", shared: "shared\n"}
+    )
+    (tmp_path / edited).write_text("my edit\n", encoding="utf-8")
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+        live_paths=[shared],
+    )
+
+    assert (tmp_path / shared).read_text(encoding="utf-8") == "shared\n"
+    assert shared not in result.deleted
+    assert not (tmp_path / gone).exists()
+    assert evidence.consented_deletions() == [gone]
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_rechecks_each_member_immediately_before_deleting_it(tmp_path: Path) -> None:
+    """A member edited after the directory scan proved it is kept, not deleted."""
+    skill = ".agents/skills/alpha"
+    edited, late = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    hashes, evidence = _skill_world(tmp_path, {edited: "skill\n", late: "notes\n"})
+    (tmp_path / edited).write_text("my edit\n", encoding="utf-8")
+    proven = evidence.verdict
+
+    def scan_then_user_edits(claim: str, physical: Path, **kwargs) -> str:
+        verdict = proven(claim, physical, **kwargs)
+        if claim == late and physical.read_text(encoding="utf-8") == "notes\n":
+            physical.write_text("edited during the scan\n", encoding="utf-8")
+        return verdict
+
+    evidence.verdict = scan_then_user_edits  # the user's edit lands right after the scan
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert (tmp_path / late).read_text(encoding="utf-8") == "edited during the scan\n"
+    assert late not in result.deleted and late in result.unproven
+    assert evidence.consented_deletions() == []
+    assert evidence.kept_under_consent() == frozenset({edited, late})
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_classifies_a_standalone_symlinked_file_as_kept(tmp_path: Path) -> None:
+    """A tracked file replaced by a link is outside the exception: kept, never a failure."""
+    target = tmp_path / "elsewhere.md"
+    target.write_text("outside\n", encoding="utf-8")
+    link = tmp_path / _PATH
+    link.parent.mkdir(parents=True)
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    evidence = _consent_evidence(tmp_path, target, render=_no_render)
+    evidence.consent_to_lockfile_hashes()
+
+    assert [claim for claim, _verdict in evidence.refusals([_PATH])] == [_PATH]
+    assert evidence.kept_under_consent() == frozenset({_PATH})
+    assert target.read_text(encoding="utf-8") == "outside\n"
