@@ -52,7 +52,8 @@ def _restore_after_failed_write(ctx: InstallContext, error: Exception) -> None:
     transaction still journals its deploys, so rolling back leaves deployed
     files, ``apm.lock.yaml``, ``apm.yml`` and the MCP configuration written so
     far (journaled at the write seam) as they were. An MCP or LSP collision
-    keeps the writes that reached disk, as documented (#4268).
+    the install preflight could not see keeps the writes that reached disk,
+    as documented (#4268).
     """
     if _keeps_writes(error) or ctx.transaction is None:
         return

@@ -452,6 +452,8 @@ pack:
     - .claude/skills/
   bundle_files:         # only for plugin bundles
     skills/my-skill/SKILL.md: "a1b2..."
+  renderings:           # only for plugin bundles: deploying target's extension per packed file
+    agents/reviewer.md: ".md"
 ```
 
 The pack block is read by `apm unpack` to verify bundle integrity and to

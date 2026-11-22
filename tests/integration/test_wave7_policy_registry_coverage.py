@@ -710,30 +710,26 @@ class TestCheckUnmanagedFiles:
 
 
 class TestLoadRawApmYml:
-    def test_file_absent_returns_none(self, tmp_path):
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
     def test_valid_yml_returns_dict(self, tmp_path):
         (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
         result = _load_raw_apm_yml(tmp_path)
         assert isinstance(result, dict)
         assert result["name"] == "test"
 
-    def test_malformed_yaml_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_text("name: [\nunot closed", encoding="utf-8")
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
-    def test_non_mapping_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
-    def test_non_utf8_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_bytes(b"\xff\xfe" + b"\x00" * 100)
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
+    @pytest.mark.parametrize(
+        "content",
+        [
+            None,
+            b"name: [\nunot closed",
+            b"- item1\n- item2\n",
+            b"\xff\xfe" + b"\x00" * 100,
+        ],
+        ids=["absent", "malformed_yaml", "non_mapping", "non_utf8"],
+    )
+    def test_unusable_file_returns_none(self, tmp_path, content):
+        if content is not None:
+            (tmp_path / "apm.yml").write_bytes(content)
+        assert _load_raw_apm_yml(tmp_path) is None
 
 
 class TestRunDependencyPolicyChecks:

@@ -29,22 +29,18 @@ class TestTLSHelpers:
 
         monkeypatch.setattr(tls, "_LAST_TLS_SELECTION", None)
 
-    def test_is_tls_failure_with_ssl_error(self) -> None:
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            requests.exceptions.SSLError("certificate verify failed"),
+            RuntimeError("CERTIFICATE_VERIFY_FAILED something"),
+            RuntimeError("TLS verification failed for host.example.com"),
+        ],
+        ids=["ssl_error", "cert_verify_msg", "tls_prefix"],
+    )
+    def test_is_tls_failure_detects_tls_errors(self, exc) -> None:
         from apm_cli.install.validation import _is_tls_failure
 
-        exc = requests.exceptions.SSLError("certificate verify failed")
-        assert _is_tls_failure(exc) is True
-
-    def test_is_tls_failure_with_cert_verify_msg(self) -> None:
-        from apm_cli.install.validation import _is_tls_failure
-
-        exc = RuntimeError("CERTIFICATE_VERIFY_FAILED something")
-        assert _is_tls_failure(exc) is True
-
-    def test_is_tls_failure_with_tls_prefix(self) -> None:
-        from apm_cli.install.validation import _is_tls_failure
-
-        exc = RuntimeError("TLS verification failed for host.example.com")
         assert _is_tls_failure(exc) is True
 
     def test_is_tls_failure_with_chained_cause(self) -> None:
