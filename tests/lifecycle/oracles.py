@@ -22,7 +22,7 @@ import itertools
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -679,6 +679,8 @@ def _i7_failure_preserves_state(
         if kept_writes is None:
             found.append(Violation("I7", message))
     retirement = _i7_x1_retirement(before, after, model)
+    if retirement is None and kept_writes:
+        retirement = _i7_x2_retirement(before, after, model, kept_writes)
     if retirement is None:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
         retirement = frozenset()
@@ -691,7 +693,7 @@ def _i7_failure_preserves_state(
         and path.split(":", 1)[1] != report
         and not _within_retirement(path, retirement)
         and not (retirement and _RETIREMENT_BOOKKEEPING in path)
-        and path.split(":", 1)[1] not in (kept_writes or ())
+        and not _i7_x2_written(path, before, kept_writes)
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -730,6 +732,30 @@ def _i7_x2_kept_writes(op: Operation, result: CommandResult) -> frozenset[str] |
         return frozenset()
     written = frozenset(line.strip() for line in match.group(2).splitlines() if line.strip())
     return written if len(written) == int(match.group(1)) else None
+
+
+def _i7_x2_retirement(
+    before: Observation, after: Observation, model, kept_writes: frozenset[str]
+) -> frozenset[str] | None:
+    """I7-X2: a kept-edit install may deploy a new surface whose every file it lists.
+
+    The rest of the surface change still meets I7-X1.
+    """
+    appeared = after.deployed - before.deployed
+    if any(not after.cell_paths.get(cell, frozenset()) <= kept_writes for cell in appeared):
+        return None
+    return _i7_x1_retirement(before, replace(after, deployed=after.deployed - appeared), model)
+
+
+def _i7_x2_written(path: str, before: Observation, kept_writes: frozenset[str] | None) -> bool:
+    """I7-X2: *path* is a listed write, or a directory created only to hold one."""
+    if not kept_writes:
+        return False
+    root, relative = path.split(":", 1)
+    if relative in kept_writes:
+        return True
+    created = relative not in before.artifacts.snapshot(root).paths
+    return created and any(write.startswith(relative + "/") for write in kept_writes)
 
 
 def _requested_report(command) -> str | None:
