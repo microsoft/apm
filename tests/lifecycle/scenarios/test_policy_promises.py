@@ -13,6 +13,7 @@ vacuously. Rows whose promise is under private tracking are strict xfail.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -162,9 +163,21 @@ def test_audit_ci_fails_a_lock_that_ships_a_disallowed_content_type(lifecycle_wo
     assert "content-types" in _text(audit) and "instruction" in _text(audit), _text(audit)
 
 
+def _hook_deployed(world) -> bool:
+    return any(
+        "apm_modules" not in path.parts and "t-first" in path.read_text(encoding="utf-8")
+        for path in world.project.rglob("*.json")
+        if ".github" in path.parts or ".claude" in path.parts
+    )
+
+
 def test_content_types_judge_a_local_source_not_its_stale_copy(lifecycle_world) -> None:
-    """A local dependency that gains a disallowed kind is refused on a targeted install of
-    another package, though its apm_modules copy predates the change."""
+    """A local dependency whose source gained a disallowed kind after its apm_modules copy.
+
+    Locked, a targeted install of another package leaves it untouched (nothing of it
+    deploys). Unlocked (#4198), the targeted install redeploys it from source, so the
+    install is refused and nothing deploys.
+    """
     _serve_policy(lifecycle_world, "policy-g2-stale-copy", _SKILLS_ONLY)
     factory = LocalPackageFactory(lifecycle_world.root / "g2-stale")
     first = factory.create("t-first", version="1.0.0")
@@ -172,10 +185,23 @@ def test_content_types_judge_a_local_source_not_its_stale_copy(lifecycle_world) 
     assert driver.run(lifecycle_world, ["install", str(first.root)]).returncode == 0
     hooks = Path(first.root) / ".apm" / "hooks"
     hooks.mkdir(parents=True)
-    (hooks / "h.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "t-first"}]}]}}
+    (hooks / "t-first.json").write_text(json.dumps(hook), encoding="utf-8")
     second = factory.create("t-second", version="1.0.0")
     _skill(factory, second, "t-second")
-    result = driver.run(lifecycle_world, ["install", str(second.root)])
+
+    locked = driver.run(lifecycle_world, ["install", str(second.root)])
+    assert locked.returncode == 0, _text(locked)
+    assert not _hook_deployed(lifecycle_world), _text(locked)
+
+    lock_path = lifecycle_world.project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    lock["dependencies"] = [d for d in lock["dependencies"] if d.get("name") != "t-first"]
+    lock_path.write_text(yaml.safe_dump(lock, sort_keys=False), encoding="utf-8")
+    third = factory.create("t-third", version="1.0.0")
+    _skill(factory, third, "t-third")
+    result = driver.run(lifecycle_world, ["install", str(third.root)])
     assert result.returncode == 1, _text(result)
     assert "content_types" in _text(result) and "hook" in _text(result), _text(result)
-    assert not (lifecycle_world.project / ".agents/skills/t-second").exists(), _text(result)
+    assert not _hook_deployed(lifecycle_world), _text(result)
+    assert not (lifecycle_world.project / ".agents/skills/t-third").exists(), _text(result)
