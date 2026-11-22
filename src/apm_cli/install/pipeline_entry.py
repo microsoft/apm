@@ -187,6 +187,14 @@ def install_pipeline_options(
     )
 
 
+def _lineage(ctx: Any) -> list[Any]:
+    out = []
+    while ctx is not None:
+        out.append(ctx)
+        ctx = ctx.parent
+    return out
+
+
 def stateless_noop(command: Any) -> Any:
     """Exit ``apm install`` early when nothing would change (install/noop_diff.py).
 
@@ -198,14 +206,19 @@ def stateless_noop(command: Any) -> Any:
     def install(*args: Any, **kwargs: Any) -> Any:
         from pathlib import Path
 
+        import click
+
         from apm_cli.install import diff_apply
+        from apm_cli.install.fast_entry import DECLINED
         from apm_cli.install.noop_diff import invocation_argv, try_noop
 
         root, argv = Path.cwd(), invocation_argv()
-        if try_noop(kwargs, argv, root) or diff_apply.try_apply(kwargs, argv, root):
+        current = click.get_current_context(silent=True)
+        declined = any(c.meta.get(DECLINED) for c in _lineage(current))
+        if not declined and (
+            try_noop(kwargs, argv, root) or diff_apply.try_apply(kwargs, argv, root)
+        ):
             return None
-        import click
-
         before = diff_apply.snapshot(root)
         try:
             result = command(*args, **kwargs)

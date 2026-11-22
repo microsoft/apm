@@ -171,18 +171,26 @@ def _within(root: Path, rel: str) -> Path:
     return path
 
 
-def _plan_files(project_root: Path, lock: Any, store: Path) -> list[tuple[Path, bytes]]:
-    writes: list[tuple[Path, bytes]] = []
-    for dep in lock.dependencies.values():
+def _plan_files(
+    project_root: Path, lock: Any, store: Path, ascii_ok: list[bool], receipts: dict[str, str]
+) -> list[tuple[Path, bytes, str, str]]:
+    writes: list[tuple[Path, bytes, str, str]] = []
+    for owner, dep in lock.dependencies.items():
         for rel, digest in (getattr(dep, "deployed_file_hashes", None) or {}).items():
             path = _within(project_root, rel)
             if path.is_symlink():
                 raise Decline("symlinked deployed file")
             if path.exists():
-                if not path.is_file() or _sha256(path.read_bytes()) != digest:
+                data = path.read_bytes() if path.is_file() else b""
+                if not path.is_file() or _sha256(data) != digest:
                     raise Decline("edited deployed file")
+                if receipts.get(path.resolve().as_posix()) != digest:
+                    raise Decline("deployed file without a receipt")
+                ascii_ok[0] = ascii_ok[0] and data.isascii()
                 continue
-            writes.append((path, _store_get(store, digest)))
+            data = _store_get(store, digest)
+            ascii_ok[0] = ascii_ok[0] and data.isascii()
+            writes.append((path, data, digest, owner))
     return writes
 
 
@@ -249,9 +257,25 @@ def _copy_package(checkout: Path, install_path: Path, sha: str) -> None:
         shutil.copytree(checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
         os.replace(staging, install_path)
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+        _discard_staging(staging)
         raise
     write_marker(install_path, sha)
+
+
+def _discard_staging(staging: Path) -> None:
+    """The only removal on this path: the engine's own fresh ``mkdtemp`` staging dir."""
+    shutil.rmtree(staging, ignore_errors=True)
+
+
+def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> None:
+    """APPLY never deletes: any receipted output the lock no longer claims runs the full pipeline."""
+    claimed = {
+        (project_root / rel).resolve().as_posix()
+        for dep in lock.dependencies.values()
+        for rel in (getattr(dep, "deployed_file_hashes", None) or {})
+    }
+    if any(physical not in claimed for physical in receipts):
+        raise Decline("orphaned output")
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -260,6 +284,26 @@ def _write(path: Path, data: bytes) -> None:
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
     os.replace(tmp, path)
+
+
+def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) -> bool:
+    """The ``apm audit --ci`` baseline owner on the applied state.
+
+    Every deployed byte was just re-hashed against the lockfile; when all of it
+    is ASCII the content scan cannot find anything (the scanner flags only
+    non-ASCII codepoints), so it is skipped as proven.
+    """
+    from apm_cli.install.exec_gate import exec_policy_from_discovery
+    from apm_cli.policy.ci_checks import run_baseline_checks
+
+    result = run_baseline_checks(
+        project_root,
+        fail_fast=True,
+        ci_mode=True,
+        policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
+        content_integrity=content_integrity,
+    )
+    return result.passed and not any(getattr(c, "warned", False) for c in result.checks)
 
 
 def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Path) -> bool:
@@ -285,20 +329,40 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         admits, fetch = noop_diff._policy_admits(project_root)
         if not admits:
             raise Decline("policy")
+        from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.ci_checks import resolve_audit_scope
+
+        _root, user_scope, targets = resolve_audit_scope(project_root, lock)
+        if user_scope or not targets:
+            raise Decline("scope")
+        session = DeploymentMaterializationSession(project_root, InstallScope.PROJECT, lock)
         store = _store_root()
         packages = _plan_packages(project_root, lock)
-        files = _plan_files(project_root, lock, store)
+        ascii_ok = [True]
+        receipts = session.receipt_hashes()
+        _refuse_orphans(project_root, lock, receipts)
+        files = _plan_files(project_root, lock, store, ascii_ok, receipts)
         extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
+        ascii_ok[0] = ascii_ok[0] and all(data.isascii() for _p, data in extras)
         for checkout, install_path, sha in packages:
             _copy_package(checkout, install_path, sha)
-        for path, data in (*files, *extras):
+        for path, data, _d, _o in files:
+            _write(path, data)
+        for path, data in extras:
             _write(path, data)
         if not (
             noop_diff._copies_valid(project_root, lock)
-            and noop_diff._audit_passes(project_root, fetch)
+            and _audit_passes(project_root, fetch, content_integrity=not ascii_ok[0])
             and noop_diff._policy_checks_pass(project_root, fetch)
         ):
             raise Decline("post-apply audit")
+        by_owner: dict[str, dict[Path, str]] = {}
+        for path, _data, digest, owner in files:
+            by_owner.setdefault(owner, {})[path] = digest
+        for owner, written in by_owner.items():
+            session.record(written, targets, owner)
+        session.flush()
     except Decline as exc:
         _trace(f"full run ({exc})")
         return False

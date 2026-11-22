@@ -1592,8 +1592,12 @@ def run_baseline_checks(
     replay_error_owner: str | None = None,
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    content_integrity: bool = True,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
+
+    *content_integrity* ``False`` skips the deployed-content scan; only a caller
+    that has itself proven every deployed byte (hash and scan) may pass it.
 
     When *fail_fast* is ``True`` (default), stops after the first
     failing check to skip expensive I/O (e.g. content integrity scan).
@@ -1753,6 +1757,8 @@ def run_baseline_checks(
     if (
         _run(
             _check_content_integrity(deployment_root, lock, resolved_targets, user_scope=user_scope)
+            if content_integrity
+            else CheckResult(name="content-integrity", passed=True, message="proven by the caller")
         )
         or _run(
             _check_local_bundle_hooks(
