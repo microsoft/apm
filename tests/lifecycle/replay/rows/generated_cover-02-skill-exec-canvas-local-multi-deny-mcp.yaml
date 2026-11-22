@@ -163,7 +163,6 @@ when:
   - pair|OP=lock|TGT=multi-unchanged
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=denied-executable
   - T1|OP=audit|PRIM=canvas|GATE=denied-executable
   - T1|OP=audit|PRIM=hook|GATE=denied-executable
   - T1|OP=audit|PRIM=mcp|GATE=denied-executable
@@ -184,7 +183,6 @@ when:
   - '*'
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=denied-executable
   - T1|OP=prune|PRIM=canvas|GATE=denied-executable
   - T1|OP=prune|PRIM=hook|GATE=denied-executable
   - T1|OP=prune|PRIM=mcp|GATE=denied-executable

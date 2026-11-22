@@ -36,7 +36,7 @@ import yaml
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.contract import PackageRef, World
-from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
+from tests.lifecycle.world.packages import GIT_PACK_ONLY, GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
     MARKETPLACE_NAME,
     MARKETPLACE_REPO,
@@ -82,7 +82,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
         factory.tag(repository, TAG, commit)
         served[f"{owner}/{repo}"] = repository.origin
 
-    for name in GIT_PUBLISHED:
+    for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY):
         publish(ORG, name, packages[name].root)
     trees = shared / "trees"
     for variant, document in policy_documents().items():
@@ -281,6 +281,10 @@ def build_template(base: Path) -> World:
         packages[f"{name}:git"] = PackageRef(name, f"{ORG}/{name}#{TAG}", kinds, "git")
         packages[f"{name}:marketplace"] = PackageRef(
             name, f"{name}@{MARKETPLACE_NAME}", kinds, "marketplace"
+        )
+    for name in GIT_PACK_ONLY:
+        packages[f"{name}:git"] = PackageRef(
+            name, f"{ORG}/{name}#{TAG}", authored[name].kinds, "git"
         )
     for name in registry.REGISTRY_PUBLISHED:
         version = registry.REGISTRY_PUBLISHED[name][0]

@@ -28,7 +28,13 @@ from pathlib import Path
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
-from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.oracles import (
+    Evidence,
+    ExpectedCell,
+    check_obligation,
+    partition_expected,
+    strict_misses,
+)
 from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.packages import INERT_COMMAND
@@ -261,34 +267,73 @@ def bundle_cells() -> frozenset[str]:
 
 # -- pack: what a project bundles of its gated dependencies -----------------------
 
-PACKED = ("p-exec", "p-lsp")
-PACK_KINDS: Mapping[str, frozenset[str]] = {
-    "p-exec": frozenset({"hook", "mcp"}),
-    "p-lsp": frozenset({"lsp"}),
+
+@dataclass(frozen=True)
+class PackSet:
+    """The git dependencies one pack project declares, and what pack ships of them."""
+
+    kinds: Mapping[str, frozenset[str]]
+    # Gate verdicts name only the packages that declare executables.
+    decided: tuple[str, ...]
+    # The bundle paths each deployed dependency executable packs to.
+    executables: Mapping[str, tuple[str, ...]]
+    # Plain dependency files ship at every gate level.
+    plain: tuple[str, ...] = ()
+
+    @property
+    def packed(self) -> tuple[str, ...]:
+        return tuple(self.kinds)
+
+
+# Pack never ships an MCP server ``apm install`` manages (only servers apm.yml defines).
+EXEC_PACK = PackSet(
+    kinds={
+        "p-exec": frozenset({"hook", "mcp"}),
+        "p-lsp": frozenset({"lsp"}),
+        "p-skill": frozenset({"skill"}),
+    },
+    decided=("p-exec", "p-lsp"),
+    executables={"hook": ("hooks/p-exec-session.json",), "lsp": (".lsp.json",)},
+    plain=("skills/p-skill/SKILL.md",),
+)
+# A canvas packs in a project of its own: while #4714 is open, a canvas the gate
+# parks makes the whole pack fail, which would hide the other kinds' cells.
+CANVAS_PACK = PackSet(
+    kinds={"p-canvas": frozenset({"canvas"})},
+    decided=("p-canvas",),
+    executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
+)
+PACK_SETS = (EXEC_PACK, CANVAS_PACK)
+# Strict known cells (R: pack must exit 0 and ship what the gate deploys).
+KNOWN_PACK: dict[str, str] = {
+    f"G1|pack|canvas|{level}|project": "#4714"
+    for level in ("unapproved-exec", "denied-executable", "revoked-after-deploy")
 }
-# The bundle path each deployed dependency executable packs to; pack never ships
-# an MCP server ``apm install`` manages (it ships only servers apm.yml defines).
-_PACKED_PATH = {"hook": "hooks/p-exec-session.json", "lsp": ".lsp.json"}
+_KNOWN_PACK_MATCH = r"pack exited 1: .*Cannot pack dependency lifecycle/p-canvas"
 
 
 class GatePack(StepRunner):
     """``apm pack --dry-run`` over git dependencies at five gate levels (project scope)."""
 
-    def __init__(self, bench: Bench | None) -> None:
-        super().__init__(bench, ModelState(), PACK_KINDS)
+    def __init__(self, bench: Bench | None, packs: PackSet = EXEC_PACK) -> None:
+        super().__init__(bench, ModelState(), packs.kinds)
+        self.packs = packs
         self.dry = bench is None
         self.level = "unapproved-exec"
         self.credited: set[str] = set()
 
     def specs(self) -> tuple[str, ...]:
-        return tuple(self.bench.world.packages[f"{name}:git"].spec for name in PACKED)
+        return tuple(self.bench.world.packages[f"{name}:git"].spec for name in self.packs.packed)
 
     def level_model(self) -> ModelState:
         allowed = self.level in ("none", "allowed")
         decisions = {
-            (name, kind): "allowed" for name in PACKED for kind in PACK_KINDS[name] if allowed
+            (name, kind): "allowed"
+            for name in self.packs.decided
+            for kind in self.packs.kinds[name]
+            if allowed
         }
-        return ModelState(declared=frozenset(PACKED), decisions=decisions)
+        return ModelState(declared=frozenset(self.packs.packed), decisions=decisions)
 
     def install(self, *names: str) -> None:
         if not self.dry:
@@ -296,7 +341,8 @@ class GatePack(StepRunner):
 
     def decide(self, verdict: str, level: str) -> None:
         if not self.dry:
-            result = self.bench.run((verdict, *(f"lifecycle/{name}" for name in PACKED)))
+            names = (f"lifecycle/{name}" for name in self.packs.decided)
+            result = self.bench.run((verdict, *names))
             assert result.returncode == 0, result.stdout + result.stderr
         self.level = level
 
@@ -313,20 +359,27 @@ class GatePack(StepRunner):
     def pack(self) -> None:
         """Pack ships exactly the executables the gate lets the project deploy."""
         cells = sorted(
-            f"G1|pack|{kind}|{self.level}|project" for name in PACKED for kind in PACK_KINDS[name]
+            f"G1|pack|{kind}|{self.level}|project"
+            for name in self.packs.packed
+            for kind in self.packs.kinds[name]
         )
         self.credited.update(cells)
         if self.dry:
             return
         step = self.step(
-            ("pack", "--dry-run"), exits={0}, cells=cells, read_only=True, mutating=False
+            ("pack", "--dry-run"), exits={0, 1}, cells=cells, read_only=True, mutating=False
         )
+        known = self._reference(step, cells)
         listed = {line.strip() for line in step.result.stdout.splitlines()}
         shipped = self.level in ("none", "allowed")
-        for path in _PACKED_PATH.values():
-            assert (path in listed) == shipped, f"{self.level}: {path} packed={path in listed}"
+        for path in (p for paths in self.packs.executables.values() for p in paths):
+            assert known or (path in listed) == shipped, f"{self.level}: {path} in {listed}"
+        for path in self.packs.plain:
+            assert path in listed, f"{self.level}: plain {path} not packed:\n{step.result.stdout}"
         assert not any("mcp" in line.lower() and line.endswith(".json") for line in listed), listed
         for cell in cells:
+            if cell in KNOWN_PACK:
+                continue
             check_obligation(
                 cell,
                 strength="e2e-evidence",
@@ -335,6 +388,22 @@ class GatePack(StepRunner):
                 result=step.result,
                 evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
             )
+
+    def _reference(self, step: Step, cells: list[str]) -> bool:
+        """R: pack exits 0; a strict known cell must fail on its step, and only it."""
+        result = step.result
+        output = f"{result.stdout}\n{result.stderr}"
+        error = next((line for line in output.splitlines() if "Error" in line), "")
+        problems = [f"pack exited {result.returncode}: {error}"] if result.returncode else []
+        expected = [ExpectedCell(cell, _KNOWN_PACK_MATCH) for cell in cells if cell in KNOWN_PACK]
+        unexpected, owners = partition_expected(problems, expected)
+        misses = strict_misses(expected, owners)
+        assert not unexpected and not misses, (
+            f"R: pack at {self.level}: {unexpected}; known cells that passed: {misses}\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+        self.expected_seen.update(owners)
+        return bool(owners)
 
 
 def replay_pack(machine: GatePack) -> None:
@@ -356,6 +425,9 @@ def replay_pack(machine: GatePack) -> None:
 
 
 def pack_cells() -> frozenset[str]:
-    machine = GatePack(None)
-    replay_pack(machine)
-    return frozenset(machine.credited)
+    credited: set[str] = set()
+    for packs in PACK_SETS:
+        machine = GatePack(None, packs)
+        replay_pack(machine)
+        credited |= machine.credited
+    return frozenset(credited)

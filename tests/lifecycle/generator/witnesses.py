@@ -89,6 +89,7 @@ GATE_SPINE = (
 GATE_BUNDLE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
 )
+MATRIX_RENDER = "G1|compile|other-file|"
 GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
 GATE_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
@@ -173,8 +174,8 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
-    from tests.lifecycle.machines._gate_bin import bin_cells
-    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
+    from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
@@ -207,12 +208,21 @@ def machine_cells() -> list[MachineCell]:
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
-            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
+            if witness == GATE_PACK_SPINE:
+                # A real pack over the primitive also proves the OP x PRIM pair.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
             assignment = _gate_assignment(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            if key.startswith(MATRIX_RENDER):
+                # The forced render is the matrix's only compile x instruction step.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, anchor="PRIM"))
     return cells
 
 

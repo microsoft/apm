@@ -542,7 +542,6 @@ when:
   - pair|OP=lock|SELECT=on
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=allowed
   - T1|OP=audit|PRIM=canvas|GATE=allowed
   - T1|OP=audit|PRIM=hook|GATE=allowed
   - T1|OP=audit|PRIM=lsp|GATE=allowed
@@ -700,7 +699,6 @@ when:
   - pair|OP=lock|GATE=revoked-after-deploy
 - run: apm audit
   cells:
-  - T1|OP=audit|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=audit|PRIM=lsp|GATE=revoked-after-deploy
@@ -718,7 +716,6 @@ when:
   - '*'
 - run: apm prune --dry-run
   cells:
-  - T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=lsp|GATE=revoked-after-deploy

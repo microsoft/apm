@@ -506,6 +506,7 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U6", _u6),
         ("U8", lambda cell: _u8(cell) is not None),
         ("U-BIN", lambda cell: _u_bin(cell)),
+        ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -548,7 +549,7 @@ def test_executable_gate_levels_of_an_mcp_source_map_to_the_first_party_rule_cel
         cell_id("pair", {"SRC": src, "GATE": gate})
         for src in ("inline-mcp", "mcp-registry")
         for gate in executable
-    }
+    } | {cell_id("T1", {"OP": "mcp-install", "PRIM": "mcp", "GATE": gate}) for gate in executable}
     assert all(data["mapped"][key]["maps_to"] == FIRST_PARTY_MCP_CELL for key in mapped)
     rule = data["obligations"][FIRST_PARTY_MCP_CELL]
     assert rule["must_cover"] and rule["status"] == "required", rule
@@ -611,6 +612,40 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
 def _u_bin(cell) -> bool:
     """bin/ deploys only at user scope (exec_gate.py:508 scope is not InstallScope.USER)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
+
+
+def _u_bin_ops(cell) -> bool:
+    """A gate level of bin/ under a command bin/ never reaches; an org deny stays a cell."""
+    return (
+        set(cell) == {"OP", "PRIM", "GATE"}
+        and cell["PRIM"] == "bin"
+        and cell["OP"] in ("audit", "prune", "pack", "marketplace", "bundle-install")
+        and cell["GATE"] != "denied-dependency"
+    )
+
+
+def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
+    """Tripwire: U-BIN-OPS lapses the moment a premise changes in the source.
+
+    audit, prune, pack and every marketplace subcommand must keep no user-scope
+    form, and plugin_bin_deployable must keep requiring a marketplace plugin at
+    user scope (the U-BIN pin hashes that predicate); the closed-world pin of the
+    bin/ writer (security/u_bin.py) keeps a local bundle from ever writing bin/.
+    """
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from tests.lifecycle.security import u_bin
+
+    subcommands = ("package", "add", "list", "browse", "update", "remove", "audit", "check")
+    commands = [("audit",), ("prune",), ("pack",)]
+    commands += [("marketplace", name) for name in subcommands]
+    for words in commands:
+        result = CliRunner().invoke(cli, [*words, "--help"])
+        assert result.exit_code == 0, (words, result.output)
+        assert "--global" not in result.output and "-g," not in result.output, words
+    assert bin_pin.predicate_digest() == U_BIN_PIN
+    assert u_bin.pin_holds()
 
 
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
