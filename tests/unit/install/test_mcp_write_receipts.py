@@ -342,3 +342,44 @@ def test_audit_reads_user_scope_evidence_from_the_deployment_root(project: Path)
     kept = [check for check in result.checks if check.name == "kept-mcp-entries"]
     assert kept and not kept[0].passed, [check.name for check in result.checks]
     assert SERVER in config.read_text(), "the kept user-scope entry stays configured"
+
+
+def test_a_self_defined_server_with_a_full_name_does_not_protect_the_short_key(
+    project: Path,
+) -> None:
+    """``owner/demo`` (under ``demo``) replaced by self-defined ``other/demo``: ``demo`` retires."""
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        _write_entries(project, {"demo": ENTRY, "other/demo": ENTRY})
+        note_mcp_write("copilot", "owner/demo", mcp_native_hash(ENTRY), None)
+
+    retire_undeclared_mcp_writes(
+        {"other/demo"},
+        declared_configs={"other/demo": {"name": "other/demo", "registry": False}},
+        project_root=project,
+        user_scope=False,
+        exclude=None,
+        logger=_Logger(),
+    )
+
+    assert set(json.loads(_config(project).read_text())["mcpServers"]) == {"other/demo"}
+
+
+def test_audit_reports_symlinked_evidence_without_following_it(
+    project: Path, tmp_path: Path
+) -> None:
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.policy.ci_checks import _kept_mcp_entries
+
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(path.read_text())
+    path.unlink()
+    path.symlink_to(elsewhere)
+    before = elsewhere.read_bytes()
+
+    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
+
+    assert not check.passed
+    assert any("Unusable MCP write evidence" in detail for detail in check.details)
+    assert elsewhere.read_bytes() == before

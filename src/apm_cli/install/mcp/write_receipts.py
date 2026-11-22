@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -290,7 +291,12 @@ class McpWriteReceipts:
             self._dirty = True
 
     def retire_undeclared(
-        self, declared: set[str], *, exclude: str | None, logger: Any
+        self,
+        declared: set[str],
+        *,
+        exclude: str | None,
+        logger: Any,
+        declared_configs: dict[str, Any] | None = None,
     ) -> set[str]:
         """Remove proven entries of undeclared servers; keep and report the rest.
 
@@ -305,7 +311,9 @@ class McpWriteReceipts:
         for _, write in sorted(self.writes.items()):
             if write.name in declared or write.runtime not in included:
                 continue
-            if write.key is not None and write.key in self._declared_keys(write.runtime, declared):
+            if write.key is not None and write.key in self._declared_keys(
+                write.runtime, declared, declared_configs or {}
+            ):
                 # A declared server now deploys to this exact native entry.
                 continue
             presence = self._presence(write)
@@ -328,15 +336,15 @@ class McpWriteReceipts:
         self.save()
         return removed
 
-    def _declared_keys(self, runtime: str, declared: set[str]) -> set[str]:
-        """Native keys a declared server may deploy to on *runtime* (full or short name)."""
+    def _declared_keys(self, runtime: str, declared: set[str], configs: dict[str, Any]) -> set[str]:
+        """The native keys the declared servers deploy to on *runtime*."""
+        from apm_cli.install.mcp.ownership import _native_config_key
+
         client = self._client(runtime)
         if client is None:
             return set()
         return {
-            key
-            for name in declared
-            for key in (name, client.determine_config_key(name, None, None))
+            _native_config_key(client, name, stored_config=configs.get(name)) for name in declared
         }
 
     def kept(self, managed: set[str]) -> list[tuple[McpWrite, str]]:
@@ -376,6 +384,7 @@ class McpWriteReceipts:
 def retire_undeclared_mcp_writes(
     declared: Iterable[str],
     *,
+    declared_configs: dict[str, Any] | None = None,
     project_root: Path,
     user_scope: bool,
     exclude: str | None,
@@ -396,7 +405,9 @@ def retire_undeclared_mcp_writes(
     except (OSError, ValueError):
         _log.debug("No usable installation binding; every MCP entry is kept", exc_info=True)
         return
-    removed = store.retire_undeclared(set(declared), exclude=exclude, logger=logger)
+    removed = store.retire_undeclared(
+        set(declared), exclude=exclude, logger=logger, declared_configs=declared_configs
+    )
     if removed:
         logger.record_mcp_removed(removed)
 
@@ -420,9 +431,24 @@ def unusable_mcp_evidence(project_root: Path, *, user_scope: bool) -> str | None
         McpWriteReceipts.open(project_root, user_scope=user_scope)
     except McpWriteEvidenceError as exc:
         return str(exc)
+    except (OSError, ValueError) as exc:
+        # Inaccessible or unsafe (symlinked) evidence is reported, never followed.
+        path = _evidence_path(project_root, user_scope=user_scope)
+        if path is not None and os.path.lexists(path):
+            return f"Unusable MCP write evidence at {path}: {exc}"
+    return None
+
+
+def _evidence_path(project_root: Path, *, user_scope: bool) -> Path | None:
+    from apm_cli.core.deployment_ledger import materialization_evidence_paths
+    from apm_cli.core.scope import InstallScope
+
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    try:
+        state_path, _ = materialization_evidence_paths(Path(project_root).resolve(), scope)
     except (OSError, ValueError):
         return None
-    return None
+    return state_path.parent / "mcp" / state_path.name
 
 
 def _parses(config: str | None) -> bool:
@@ -441,9 +467,9 @@ def _parses(config: str | None) -> bool:
 
             tomllib.loads(text)
         elif path.suffix in {".yaml", ".yml"}:
-            import yaml
+            from apm_cli.utils.yaml_io import load_yaml_str
 
-            yaml.safe_load(text)
+            load_yaml_str(text)
         elif path.suffix == ".json":
             json.loads(text)
     except Exception:

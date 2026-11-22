@@ -578,6 +578,7 @@ def run_mcp_integration(  # noqa: PLR0913
 
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
+    new_mcp_configs: builtins.dict = {}
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.models.apm_package import (
@@ -969,6 +970,7 @@ def run_mcp_integration(  # noqa: PLR0913
         # evidence retires the entries APM wrote and no longer deploys (#4737).
         retire_undeclared_mcp_writes(
             new_mcp_servers,
+            declared_configs=new_mcp_configs,
             project_root=project_root,
             user_scope=user_scope,
             exclude=exclude,
