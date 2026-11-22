@@ -13,6 +13,7 @@ another policy rule:
   no surviving package still reaches a denied one (forward reachability);
 * no removed entry, through its ``replace:`` source, satisfies a package the
   policy requires;
+* uninstall's path preflight accepts every recorded path it would remove;
 * every deployed file the uninstall would delete has deployment evidence
   (a user-edited file makes uninstall refuse), judged by uninstall's own
   candidate and refusal owner;
@@ -93,14 +94,14 @@ def _removal_roots(
     from ..integration.mcp_config_view import DirectDependencyIndex
 
     index = DirectDependencyIndex(lock)
-    roots: list[str] = []
+    roots: dict[str, None] = {}
     for dep in denied:
         key = dep.get_unique_key()
         found = (key,) if key in declared else tuple(sorted(index.roots(key) or ()))
         if not found or any(root not in declared for root in found):
             return None
-        roots.extend(root for root in found if root not in roots)
-    return roots
+        roots.update(dict.fromkeys(found))
+    return list(roots)
 
 
 def _selector(key: str, entry: object, selection: ManifestSelectionIndex) -> str | None:
@@ -217,8 +218,22 @@ def _uninstall_clears(
     if not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
-    return _deletions_have_evidence(cleanup_keys, removed, project) and (
-        _uninstall_policy_resolves(removed, project)
+    return (
+        _deployment_paths_validate(cleanup_keys, project)
+        and _deletions_have_evidence(cleanup_keys, removed, project)
+    ) and (_uninstall_policy_resolves(removed, project))
+
+
+def _deployment_paths_validate(cleanup_keys: set[str], project: AllowlistProject) -> bool:
+    """Whether uninstall's path preflight accepts every recorded path it would remove.
+
+    ``apm uninstall`` stops before any change when the lock records a path APM
+    does not manage (one outside the project, or not a deployable location).
+    """
+    from ..commands.uninstall.selection_shrink import uninstall_unvalidated_paths
+
+    return not uninstall_unvalidated_paths(
+        project.lock, cleanup_keys, project.project_root, user_scope=False
     )
 
 

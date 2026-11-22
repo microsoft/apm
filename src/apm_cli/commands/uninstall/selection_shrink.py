@@ -3,7 +3,9 @@
 The selection a survivor keeps is projected by ``engine.project_shrunk_selections``
 through the canonical selection-merge owner; this module applies it and names
 the deployed files the shrink retires, read from the deployment ledger, so the
-evidence preflight can refuse before any change.
+evidence preflight can refuse before any change. It also owns uninstall's
+read-only preflight decisions (unvalidated paths, deletion candidates and
+evidence refusals), which ``apm audit --ci``'s allow-list advice reuses.
 """
 
 from __future__ import annotations
@@ -111,16 +113,32 @@ def shrink_retired_paths(lockfile, shrunk: dict) -> set[str]:
     return shrink_path_split(lockfile, shrunk)[0]
 
 
-def _collect_deployed_cleanup_state(
-    lockfile,
-    dependency_keys: set[str],
-) -> tuple[set[str], dict[str, str]]:
-    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+def uninstall_unvalidated_paths(
+    lockfile, dependency_keys, deploy_root, *, user_scope: bool, kept_paths=frozenset()
+) -> list[str]:
+    """Return the recorded paths uninstalling *dependency_keys* refuses to touch (#4185).
+
+    Each path the uninstall removes goes through the deploy-path gate the
+    cleanup uses; rows another profile keeps on disk (*kept_paths*) and URI
+    rows (cowork://, copilot-app-db://, with their own owners) are skipped.
+    Read-only: uninstall's path preflight and ``apm audit --ci``'s allow-list
+    advice (#4570) share it.
+    """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...integration.base_integrator import BaseIntegrator
 
-    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
-    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+    if lockfile is None or not dependency_keys:
+        return []
+    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
+    return sorted(
+        path
+        for path in paths
+        if "://" not in path
+        and path not in kept_paths
+        and not BaseIntegrator.validate_deploy_path(
+            path, deploy_root, user_scope=user_scope, allow_final_symlink=True
+        )
+    )
 
 
 def uninstall_deletion_candidates(
@@ -135,6 +153,7 @@ def uninstall_deletion_candidates(
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...integration.base_integrator import BaseIntegrator
+    from .cli import _collect_deployed_cleanup_state
 
     if not lockfile or not cleanup_keys:
         return []

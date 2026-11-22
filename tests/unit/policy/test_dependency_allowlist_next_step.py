@@ -320,3 +320,20 @@ def test_the_advice_never_migrates_the_users_executable_consent(
     assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
     assert legacy.read_text(encoding="utf-8") == "contoso/keep:\n  hook: true\n"
     assert not config.exists()
+
+
+def test_an_unmanaged_recorded_path_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=["notes.txt"])],
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()

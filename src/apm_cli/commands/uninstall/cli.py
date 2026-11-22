@@ -62,10 +62,10 @@ from .engine import (
     project_shrunk_selections,
 )
 from .selection_shrink import (
-    _collect_deployed_cleanup_state,
     _shrink_surviving_selections,
     shrink_retired_paths,
     uninstall_evidence_refusals,
+    uninstall_unvalidated_paths,
 )
 
 
@@ -124,6 +124,18 @@ def _snapshot_compile_inputs(deploy_root, manifest_path, modules_dir, scope):
     with contextlib.suppress(Exception):
         manifest_target = package_target_selection(APMPackage.from_apm_yml(manifest_path))
     return snapshot_compile_inputs(deploy_root, manifest_target, modules_dir)
+
+
+def _collect_deployed_cleanup_state(
+    lockfile,
+    dependency_keys: set[str],
+) -> tuple[set[str], dict[str, str]]:
+    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.base_integrator import BaseIntegrator
+
+    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
+    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
 @dataclass(frozen=True)
@@ -274,25 +286,14 @@ def _refuse_unvalidated_paths(
     Each path this uninstall removes goes through the deploy-path gate the
     cleanup uses; rows another profile keeps on disk are not removed.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope
-    from ...integration.base_integrator import BaseIntegrator
 
-    if lockfile is None or not dependency_keys:
-        return
-    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
-    rejected = sorted(
-        path
-        for path in paths
-        # URI rows (cowork://, copilot-app-db://) have their own owners.
-        if "://" not in path
-        and path not in kept_paths
-        and not BaseIntegrator.validate_deploy_path(
-            path,
-            deploy_root,
-            user_scope=scope is InstallScope.USER,
-            allow_final_symlink=True,
-        )
+    rejected = uninstall_unvalidated_paths(
+        lockfile,
+        dependency_keys,
+        deploy_root,
+        user_scope=scope is InstallScope.USER,
+        kept_paths=kept_paths,
     )
     if not rejected:
         return

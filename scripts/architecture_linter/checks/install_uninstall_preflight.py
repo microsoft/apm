@@ -39,7 +39,9 @@ _ROUTES = (
     (_REMEDY, "_uninstall_policy_resolves", "resolve_trust_policy"),
     (_CLI, "_preflight_uninstall_writes", "_refuse_unvalidated_paths"),
     (_CLI, "_preflight_uninstall_writes", "resolve_project_exec_allow_map"),
-    (_CLI, "_refuse_unvalidated_paths", "validate_deploy_path"),
+    (_CLI, "_refuse_unvalidated_paths", "uninstall_unvalidated_paths"),
+    (_SHRINK, "uninstall_unvalidated_paths", "validate_deploy_path"),
+    (_REMEDY, "_deployment_paths_validate", "uninstall_unvalidated_paths"),
     (_ENGINE, "_sync_integrations_after_uninstall", "resolve_project_exec_allow_map"),
 )
 # The first writes uninstall performs; the preflight must precede them all.
