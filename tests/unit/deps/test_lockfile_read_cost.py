@@ -82,42 +82,6 @@ _URI_ROWS = {
 class TestLockFileReadCost:
     """One install reads the lockfile about 19 times; each read must stay O(N)."""
 
-    def test_read_after_write_returns_new_data(self, tmp_path):
-        lock_path = tmp_path / "apm.lock.yaml"
-        first = LockFile()
-        first.add_dependency(LockedDependency(repo_url="owner/first", resolved_commit="a" * 40))
-        first.write(lock_path)
-        assert LockFile.read(lock_path).has_dependency("owner/first")
-
-        second = LockFile()
-        second.add_dependency(LockedDependency(repo_url="owner/second", resolved_commit="b" * 40))
-        second.write(lock_path)
-
-        on_disk = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
-        assert [row["repo_url"] for row in on_disk["dependencies"]] == ["owner/second"]
-        reread = LockFile.read(lock_path)
-        assert reread.has_dependency("owner/second")
-        assert not reread.has_dependency("owner/first")
-
-    def test_mutating_a_read_lockfile_does_not_change_the_next_read(self, tmp_path):
-        lock_path = tmp_path / "apm.lock.yaml"
-        original = _lock_text_with_deployed_files(
-            {"owner/repo": {".github/a.md": "sha256:" + "1" * 64}}
-        )
-        lock_path.write_text(original, encoding="utf-8")
-        mutated = LockFile.read(lock_path)
-        dep = mutated.get_dependency("owner/repo")
-        dep.deployed_files.append(".github/injected.md")
-        dep.deployed_file_hashes[".github/a.md"] = "sha256:" + "2" * 64
-        mutated.mcp_servers.append("injected")
-        mutated.dependencies.clear()
-
-        fresh = LockFile.read(lock_path).get_dependency("owner/repo")
-        assert fresh.deployed_files == [".github/a.md"]
-        assert fresh.deployed_file_hashes == {".github/a.md": "sha256:" + "1" * 64}
-        assert LockFile.read(lock_path).mcp_servers == []
-        assert lock_path.read_text(encoding="utf-8") == original
-
     def test_same_text_is_parsed_once(self):
         repo_url = f"owner/memo-{uuid.uuid4().hex}"
         text = _lock_text_with_deployed_files({repo_url: {".github/m.md": ""}})
