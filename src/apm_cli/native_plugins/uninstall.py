@@ -129,7 +129,9 @@ def retire_gated_native_plugins(
     if retirements is None:
         return False
     if dry_run:
-        return _preview_gated_native_plugins(lockfile, retirements, deploy_root, logger)
+        return _preview_gated_native_plugins(
+            lockfile, retirements, modules_dir, deploy_root, logger
+        )
     before = {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
     hooks = dict(retirements.hook_packages)
     retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
@@ -140,10 +142,16 @@ def retire_gated_native_plugins(
 
 
 def _preview_gated_native_plugins(
-    lockfile: Any, retirements: Any, deploy_root: Path, logger: Any
+    lockfile: Any, retirements: Any, modules_dir: Path, deploy_root: Path, logger: Any
 ) -> bool:
-    """Report the native roots and declarations a real prune would retire."""
-    from apm_cli.claude_plugins.registrar import native_ownership, preview_project_retirement
+    """Report the native roots and settings files a real prune would change."""
+    import copy
+
+    from apm_cli.claude_plugins.registrar import (
+        native_ownership,
+        preview_project_root_retirement,
+        preview_project_settings_changes,
+    )
     from apm_cli.native_plugins.record import PLUGINS_RELATIVE
 
     owned = native_ownership(lockfile)
@@ -153,19 +161,29 @@ def _preview_gated_native_plugins(
         **retirements.denied_packages,
     }
     retiring = sorted(set(reasons) & set(owned))
+    if not retiring:
+        return False
     for key in retiring:
         record = owned[key].record
-        root_removed, settings = preview_project_retirement(record, deploy_root)
         root = f"{PLUGINS_RELATIVE}/{record.name}"
-        changes = []
+        root_removed = preview_project_root_retirement(record, deploy_root)
         if root_removed:
-            changes.append(f"remove {root}")
+            action = f"remove {root}"
         elif root_removed is False:
-            changes.append(f"keep {root} (changed since deploy; remove it manually)")
-        if settings:
-            changes.append(f"remove its declarations in {', '.join(settings)}")
-        logger.dry_run_notice(
-            f"retire native plugin {record.name} ({reasons[key]}): "
-            + ("; ".join(changes) or "nothing deployed")
+            action = f"keep {root} (changed since deploy; remove it manually)"
+        else:
+            action = f"{root} is not deployed"
+        logger.dry_run_notice(f"retire native plugin {record.name} ({reasons[key]}): {action}")
+    following = copy.deepcopy(lockfile)
+    for key in retiring:
+        following.dependencies[key].native_plugin = None
+    try:
+        settings = preview_project_settings_changes(
+            modules_dir=modules_dir, previous=owned, lockfile=following, deploy_root=deploy_root
         )
-    return bool(retiring)
+    except Exception as exc:
+        logger.warning(f"Cannot preview native plugin settings changes: {exc}")
+    else:
+        if settings:
+            logger.dry_run_notice(f"update native plugin declarations in {', '.join(settings)}")
+    return True

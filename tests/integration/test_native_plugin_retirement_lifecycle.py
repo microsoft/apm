@@ -207,8 +207,9 @@ def test_prune_dry_run_previews_a_native_plugin_the_gate_would_retire(
     assert f"[dry-run] retire native plugin {_PLUGIN}" in output, _evidence(preview)
     action = "keep" if edited else "remove"
     assert f"{action} .agents/plugins/{_PLUGIN}" in output, _evidence(preview)
-    # A Claude-only plugin is also switched off for Copilot; retirement drops both.
-    assert ".claude/settings.json, .github/copilot/settings.json" in output, _evidence(preview)
+    # A Claude-only plugin is also switched off for Copilot; retirement updates both.
+    declarations = "update native plugin declarations in .claude/settings.json, "
+    assert declarations + ".github/copilot/settings.json" in output, _evidence(preview)
     assert "Nothing to prune" not in output, _evidence(preview)
 
     result = _apm(lifecycle_world, "prune")

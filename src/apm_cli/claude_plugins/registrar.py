@@ -383,21 +383,9 @@ def reconcile_native_plugins(
         harnesses = _declared_harnesses(
             declared, lockfile, prepared or {}, settings_paths, marketplace, run_targets
         )
-        suppressed, managed = _suppression(
-            harnesses, prior_names, _observations(settings_paths, marketplace), user_scope
+        declarations = _settings_declarations(
+            harnesses, previous, settings_paths, marketplace, path, user_scope
         )
-        declarations = {
-            harness: SettingsDeclaration(
-                marketplace,
-                path,
-                frozenset(name for name, on in harnesses.items() if harness in on),
-                None if previous is None else frozenset(prior_names),
-                next(iter(prior_bindings)) if prior_bindings else None,
-                suppressed if harness == COPILOT else frozenset(),
-                managed if harness == COPILOT else frozenset(),
-            )
-            for harness in HARNESSES
-        }
         for harness, target in settings_paths.items():
             _refuse_binding(preview_declaration(target, declarations[harness]), target, marketplace)
         legacy = _migratable(legacy, harnesses, run_targets, logger, rejected)
@@ -553,32 +541,87 @@ def _retire(
         return False
 
 
-def preview_project_retirement(
-    record: NativePluginRecord, deploy_root: Path
-) -> tuple[bool | None, tuple[str, ...]]:
-    """What retiring *record* at project scope would change; changes nothing.
+def _settings_declarations(
+    harnesses: Mapping[str, frozenset[str]],
+    previous: Mapping[str, NativeOwnership] | None,
+    settings_paths: Mapping[str, Path],
+    marketplace: str,
+    path: str,
+    user_scope: bool,
+) -> dict[str, SettingsDeclaration]:
+    """The declaration each harness settings file converges onto."""
+    prior = previous or {}
+    prior_names = {own.record.name for own in prior.values()}
+    prior_bindings = {own.record.binding for own in prior.values()}
+    suppressed, managed = _suppression(
+        harnesses, prior_names, _observations(settings_paths, marketplace), user_scope
+    )
+    return {
+        harness: SettingsDeclaration(
+            marketplace,
+            path,
+            frozenset(name for name, on in harnesses.items() if harness in on),
+            None if previous is None else frozenset(prior_names),
+            next(iter(prior_bindings)) if prior_bindings else None,
+            suppressed if harness == COPILOT else frozenset(),
+            managed if harness == COPILOT else frozenset(),
+        )
+        for harness in HARNESSES
+    }
 
-    Returns ``(root_removed, settings_files)``. *root_removed* is ``None`` when
-    the deployed root is absent, ``False`` when retirement would keep it (its
-    bytes changed since deploy, or it cannot be fingerprinted), as
-    :func:`retire_plugin` does. *settings_files* are the project settings
-    files holding an entry for the plugin under its marketplace, including
-    the Copilot suppression of a Claude-only plugin.
+
+def preview_project_root_retirement(record: NativePluginRecord, deploy_root: Path) -> bool | None:
+    """Whether retiring *record* at project scope removes its root; changes nothing.
+
+    ``None`` when the deployed root is absent, ``False`` when retirement would
+    keep it (its bytes changed since deploy, or it cannot be fingerprinted),
+    as :func:`retire_plugin` decides.
     """
     destination = plugins_root(deploy_root) / record.name
-    root_removed: bool | None = None
-    if destination.exists():
-        try:
-            root_removed = _fingerprinter(False)(destination) == record.fingerprint
-        except (OSError, ValueError, RuntimeError):
-            root_removed = False
-    files = []
-    for harness in HARNESSES:
-        target = settings_path(harness, user_scope=False, project_root=deploy_root)
-        with contextlib.suppress(NativeSettingsError, OSError):
-            if record.name in _observed(target, record.marketplace):
-                files.append(_display_path(target, Path(deploy_root), False))
-    return root_removed, tuple(files)
+    if not destination.exists():
+        return None
+    try:
+        return _fingerprinter(False)(destination) == record.fingerprint
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def preview_project_settings_changes(
+    *,
+    modules_dir: Path,
+    previous: Mapping[str, NativeOwnership] | None,
+    lockfile: Any,
+    deploy_root: Path,
+) -> tuple[str, ...]:
+    """Project settings files :func:`reconcile_native_plugins` would change; read-only.
+
+    Plans the same declarations the reconcile writes for *lockfile* (the lock
+    after the command) against *previous*, and previews each file with the
+    settings owner. Raises the errors the reconcile would raise reading them.
+    """
+    deploy_root = Path(deploy_root).absolute()
+    modules_dir = Path(modules_dir).absolute()
+    following = native_ownership(lockfile) if lockfile is not None else {}
+    if not following and not previous:
+        return ()
+    settings_paths = {
+        harness: settings_path(harness, user_scope=False, project_root=deploy_root)
+        for harness in HARNESSES
+    }
+    marketplace, path = scope_binding(
+        user_scope=False, modules_dir=modules_dir, deploy_root=deploy_root, previous=previous
+    )
+    declared = {own.record.name: (key, own, None) for key, own in following.items()}
+    harnesses = _declared_harnesses(declared, lockfile, {}, settings_paths, marketplace, None)
+    declarations = _settings_declarations(
+        harnesses, previous, settings_paths, marketplace, path, False
+    )
+    changed = []
+    for harness, target in settings_paths.items():
+        change = preview_declaration(target, declarations[harness])
+        if change.changed or change.flipped:
+            changed.append(_display_path(target, deploy_root, False))
+    return tuple(changed)
 
 
 def _observed(settings: Path, marketplace: str) -> dict[str, Any]:
