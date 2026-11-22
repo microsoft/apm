@@ -32,6 +32,16 @@ def _record_path(scope_dir: Path) -> Path:
     return Path(scope_dir) / _RECORD
 
 
+def pending_record_blocker(scope_dir: Path) -> str | None:
+    """Return why the scope's pending record cannot be safely written, else ``None``."""
+    from ..utils.path_security import has_symlink_component
+
+    path = _record_path(scope_dir)
+    if has_symlink_component(Path(scope_dir), path):
+        return f"{_RECORD.as_posix()} (linked path)"
+    return None
+
+
 def _read(scope_dir: Path) -> dict[str, dict]:
     path = _record_path(scope_dir)
     try:
@@ -55,6 +65,10 @@ def record_bundle_executables(
     else:
         return
     path = _record_path(scope_dir)
+    if blocker := pending_record_blocker(scope_dir):
+        from ..utils.path_security import PathTraversalError
+
+        raise PathTraversalError(f"Refusing to write the local bundle record through {blocker}")
     if not bundles:
         path.unlink(missing_ok=True)
         return

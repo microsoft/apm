@@ -470,10 +470,14 @@ def retire_bundle_hooks(
     configs = tuple(sorted(state.hook_files)) if state else ()
     item = UnadmittedBundleHooks(slug, reason or "", configs)
     kept = _retire_per_file(project_root, targets, item)
-    recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
-    _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
-    # A hook file left on disk keeps its lock claim as well as its record.
     kept = {_relative_value(value, project_root) for value in kept}
+    if kept:
+        # A retained hook config still points at the scripts: they and every
+        # retained claim stay until the config itself can be removed.
+        rows -= scripts
+    else:
+        recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
+        _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
     rows -= {value for value in rows if _relative_value(value, project_root) in kept}
     if rows and lock_dir is not None:
         _drop_lock_rows(lock_dir, rows)
@@ -509,11 +513,12 @@ def bundle_hook_cleanup_targets(targets: Any, *, user_scope: bool) -> list[Any]:
     manifest's targets; retirement only touches what the bundle owns, so the
     cleanup set covers every target that can hold hooks in this scope.
     """
-    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     found = {target.name: target for target in targets or ()}
     for profile in KNOWN_TARGETS.values():
-        scoped = profile.for_scope(user_scope=user_scope)
+        # An unresolvable user root (relative CODEX_HOME) only drops that target.
+        scoped = scoped_profile_or_none(profile, user_scope=user_scope)
         if scoped is not None and scoped.name not in found and scoped.supports("hooks"):
             found[scoped.name] = scoped
     return list(found.values())

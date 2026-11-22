@@ -186,8 +186,11 @@ def _refuse_unsafe_cleanup(bundle_scope: _BundleScope, *, logger: Any, dry_run: 
     """Refuse before any write when hook configs or the lockfile cannot be safely rewritten."""
     from ...deps.lockfile import LockFile, get_lockfile_path, refuse_lockfile_before_mutation
     from ...install.local_bundle_hook_trust import bundle_hook_cleanup_blockers, local_bundle_paths
+    from ...install.local_bundle_pending import pending_record_blocker
 
     blockers = bundle_hook_cleanup_blockers(bundle_scope.root, bundle_scope.targets)
+    if pending := pending_record_blocker(bundle_scope.lock_dir):
+        blockers.append(pending)
     if blockers:
         logger.error(
             f"Local bundle hooks were not removed: {', '.join(blockers)} cannot be safely "

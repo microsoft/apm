@@ -21,6 +21,8 @@
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_linked_hook_config_root",
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_symlinked_lockfile_before_removing",
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_when_a_hook_config_is_unreadable",
-    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_leaves_an_unrelated_sidecar_byte_identical"
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_leaves_an_unrelated_sidecar_byte_identical",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_refuses_a_linked_pending_record",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_user_bundle_ignores_an_unrelated_invalid_user_root"
   ]
 }

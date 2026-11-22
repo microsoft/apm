@@ -687,7 +687,12 @@ def test_uninstall_bundle_keeps_ownership_of_a_hook_it_could_not_remove(
     assert sidecar.count("local-bundle::hookpkg") == (
         (consumer / ".github" / "apm-hooks.json").read_text().count("local-bundle::hookpkg")
     )
-    assert f".github/hooks/{hook_name}" in world.lock(consumer)["local_deployed_files"]
+    claims = world.lock(consumer)["local_deployed_files"]
+    assert f".github/hooks/{hook_name}" in claims
+    # The retained hook still runs its scripts, so they and their claims stay too.
+    scripts = [claim for claim in claims if claim.endswith("/x.sh")]
+    assert scripts, claims
+    assert all((consumer / claim).is_file() for claim in scripts), scripts
     assert (consumer / "apm_modules" / ".local-bundle-pending.json").is_file()
 
 
@@ -808,3 +813,43 @@ def test_uninstall_bundle_leaves_an_unrelated_sidecar_byte_identical(
     world.apm(consumer, "uninstall", str(bundle))
     assert _hook_entries(consumer) == {}
     assert sidecar.read_bytes() == b'{"local-bundle-hooks":[]}'
+
+
+def test_uninstall_bundle_refuses_a_linked_pending_record(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a symlinked pending record is refused before any hook is removed."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "linked-pending-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    record = consumer / "apm_modules" / ".local-bundle-pending.json"
+    outside = tmp_path / "outside-pending.json"
+    shutil.move(str(record), outside)
+    record.symlink_to(outside)
+    before, outside_bytes = tree_bytes(consumer), outside.read_bytes()
+
+    refused = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+    assert "apm_modules/.local-bundle-pending.json (linked path)" in refused, refused
+    assert tree_bytes(consumer) == before
+    assert outside.read_bytes() == outside_bytes
+
+
+def test_uninstall_user_bundle_ignores_an_unrelated_invalid_user_root(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a relative COPILOT_HOME does not block a Claude-only user-scope uninstall."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    home = world.isolated.home
+    (home / ".claude").mkdir(exist_ok=True)
+    write(home / ".apm" / "apm.yml", "name: user\nversion: 0.1.0\ntargets: [claude]\n")
+    _allow(home / ".apm", key)
+    world.apm(world.isolated.work_root, "install", "-g", str(bundle))
+    assert _hook_entries(home) == {"PreToolUse": ["Bash"]}
+
+    world.env = {**world.env, "COPILOT_HOME": "relative-copilot-home"}
+    text = output(world.apm(world.isolated.work_root, "uninstall", "-g", "hookpkg"))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert _hook_entries(home) == {}
