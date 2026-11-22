@@ -745,13 +745,13 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
     [
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.journal_deploy_writes()\n",
+            "        transaction.journal_deploy_writes(ctx)\n",
             "",
             id="commit-order-journal-never-opened",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.journal_deploy_writes()\n",
+            "        transaction.journal_deploy_writes(ctx)\n",
             "        DeployJournal(ctx.apm_modules_dir)\n",
             id="commit-order-journal-outside-transaction",
         ),
@@ -763,8 +763,8 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._restore_deploy_targets()\n",
-            "                    pass\n",
+            "        self._restore_deploy_targets()\n",
+            "        pass\n",
             id="commit-order-rollback-skips-restore",
         ),
         pytest.param(
@@ -775,9 +775,21 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._remove_created_target_roots()\n",
-            "                    pass\n",
+            "        self._remove_created_target_roots()\n",
+            "        pass\n",
             id="commit-order-rollback-keeps-created-roots",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "                    self._undo_deploys()\n",
+            "                    pass\n",
+            id="commit-order-rollback-skips-undo",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "        return unless_lockfile_commits(self._undo_deploys)\n",
+            "        return unless_lockfile_commits(lambda: None)\n",
+            id="commit-order-uncommitted-update-skips-undo",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
@@ -841,6 +853,33 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "            write_seam.listen(self._record_deploy_write)\n",
             "            pass\n",
             id="transaction-not-listening",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            "            with write_seam.private_scratch():\n                write_seam.unlink(stale_target)\n",
+            id="scratch-outside-the-locked-render",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    with write_seam.planning():\n                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-outside-the-commit-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    seam = write_seam\n"
+            "                    with seam.planning():\n"
+            "                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-through-a-module-alias",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "from apm_cli.integration import write_seam\n",
+            "from apm_cli.integration import write_seam\n"
+            "from apm_cli.integration.write_seam import private_scratch\n",
+            id="scratch-imported-directly",
         ),
     ],
 )
@@ -2401,7 +2440,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-install-commit-order",
         rule_id="install-deployment-install-commit-order",
         path="src/apm_cli/install/phases/integrate.py",
-        old="        check_before_deploy(ctx)\n",
+        old="        check_before_deploy(ctx, _write_plan(ctx, materialized, deployment_plans, local_plan))\n",
         new="        pass\n",
         intent="Integration deploys before the commit gate checks the install.",
     ),

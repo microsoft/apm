@@ -602,7 +602,9 @@ def test_direct_file_symlink_retarget_preserves_owned_state(
 
 
 @pytest.mark.parametrize(("kind", "directory"), _KINDS)
-@pytest.mark.parametrize("escape", ["absolute", "parent-traversal"])
+@pytest.mark.parametrize(
+    "escape", ["absolute", "parent-traversal", "backslash-traversal", "mixed-traversal"]
+)
 def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
     tmp_path: Path, apm_binary_path: Path, kind: str, directory: str, escape: str
 ) -> None:
@@ -617,9 +619,16 @@ def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
     personal.write_bytes(b"User-owned content.\n")
     outside = scenario.isolated.home / f"private.{kind}.md"
     outside.write_bytes(_content("consumer-only bytes"))
-    child = outside.as_posix() if escape == "absolute" else f"../../../../../home/{outside.name}"
+    traversal = f"../../../../../home/{outside.name}"
+    child = {
+        "absolute": outside.as_posix(),
+        "parent-traversal": traversal,
+        # #4699: backslash forms normalise to the / form and hit the same guard.
+        "backslash-traversal": traversal.replace("/", "\\"),
+        "mixed-traversal": "..\\..\\../../../home/" + outside.name,
+    }[escape]
     remote_root = root / "apm_modules" / "fixture-local-file" / "remote-parent"
-    assert (remote_root / child).resolve() == outside.resolve()
+    assert (remote_root / child.replace("\\", "/")).resolve() == outside.resolve()
     parent = LocalPackageFactory(scenario.isolated.package_root).create(
         "remote-parent", dependencies=({"path": child},), targets=("copilot",)
     )
@@ -672,6 +681,8 @@ def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
         assert "absolute paths inside remote packages are not allowed" in diagnostic
     else:
         assert "outside" in diagnostic
+        # Parity (#4699): every traversal spelling is refused naming its / form.
+        assert f"Refusing to install local_path dependency '{traversal}'" in diagnostic
     assert token not in result.stdout + result.stderr
     assert scenario.project.manifest_path.read_bytes() == manifest_before
     current = load_yaml(root / "apm.lock.yaml")
