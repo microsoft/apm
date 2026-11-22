@@ -358,7 +358,7 @@ def test_pack_refuses_a_claude_dependency_whose_cache_directory_is_missing(
         scenario, producer, source.environment, tmp_path / "missing-out"
     ):
         assert "apm_modules/guard-kit is missing" in output, output
-        assert "run 'apm install'" in output, output
+        assert "Run 'apm install'" in output, output
 
 
 def test_pack_keeps_packing_a_dependency_that_excludes_claude_without_its_cache(
