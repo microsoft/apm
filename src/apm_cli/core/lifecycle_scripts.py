@@ -564,6 +564,7 @@ class LifecycleScriptRunner:
         Returns a list of daemon threads started by HTTP scripts so
         callers can optionally join them (e.g. for test/dry-run).
         """
+        from apm_cli.core.invocation_memo import forget_invocation_memos
         from apm_cli.core.script_executors import dispatch_http_batch, execute_script
 
         self._emit_skip_notice()
@@ -603,6 +604,10 @@ class LifecycleScriptRunner:
                     self._logger.verbose_detail(
                         f"[i] Lifecycle script failed: {script.script_type} for {event_name}"
                     )
+            finally:
+                # The script may have changed credentials or the git remote,
+                # whether it succeeded, failed or raised.
+                forget_invocation_memos()
 
         return dispatch_http_batch(
             http_scripts,

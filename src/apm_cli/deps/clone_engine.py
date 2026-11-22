@@ -29,8 +29,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
-from git.exc import GitCommandError
-
 from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.auth_outcome import (
     RepositoryNotFoundError,
@@ -44,6 +42,7 @@ from ..utils.github_host import (
     is_github_hostname,
 )
 from .bare_cache import build_clone_failure_message
+from .git_lazy import git_command_error
 from .transport_selection import (
     TransportAttempt,
     TransportPlan,
@@ -52,6 +51,8 @@ from .transport_selection import (
 )
 
 if TYPE_CHECKING:
+    from git.exc import GitCommandError
+
     from ..core.auth import AuthResolver
 
 
@@ -74,7 +75,7 @@ def _is_connect_failure(error: GitCommandError | subprocess.CalledProcessError, 
         stderr = stderr.decode("utf-8", errors="replace")
     if not isinstance(stderr, str):
         return False
-    if isinstance(error, GitCommandError):
+    if isinstance(error, git_command_error()):
         if error.status != 128:
             return False
         stderr = stderr.removeprefix("\n  stderr: '").removesuffix("'")
@@ -198,7 +199,7 @@ class CloneEngine:
             """Retry one failed connection without changing transport or credentials."""
             try:
                 clone_action(url, env, target)
-            except (GitCommandError, subprocess.CalledProcessError) as exc:
+            except (git_command_error(), subprocess.CalledProcessError) as exc:
                 if not _is_connect_failure(exc, url):
                     raise
                 _debug("HTTPS connection failed; retrying the same Git action once in 1s")
@@ -457,7 +458,7 @@ class CloneEngine:
                     verbose_callback(f"Cloned from: {display}")
                 return
             except (
-                GitCommandError,
+                git_command_error(),
                 subprocess.CalledProcessError,
                 subprocess.TimeoutExpired,
                 AdoAuthChainExhaustedError,
