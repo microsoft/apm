@@ -46,7 +46,8 @@ def from_source(world, src: str, *, scope: str = "project") -> tuple[Scenario, s
     """(scenario, package name) with *src* reachable and nothing installed yet."""
     use_policy(world, "allow")
     if src == "pkg-registry":
-        use_registry(world)
+        # The registry is the default of the manifest the install reads (APM_HOME at -g).
+        use_registry(world, scope)
     name, spec = SOURCES[src]
     spec = world.packages[spec].spec if spec in world.packages else spec
     targets = ("claude",) if src == "native-plugin" else ("copilot",)

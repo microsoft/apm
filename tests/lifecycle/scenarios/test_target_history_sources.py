@@ -20,7 +20,12 @@ import json
 import pytest
 
 from tests.lifecycle import driver
-from tests.lifecycle.scenarios._kit import PROJECT_HOME_ALLOWED, Scenario, credits
+from tests.lifecycle.scenarios._kit import (
+    PROJECT_HOME_ALLOWED,
+    Scenario,
+    credits,
+    mcp_server_problems,
+)
 from tests.lifecycle.world import use_policy, use_registry
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
@@ -163,6 +168,13 @@ def _register_marketplaces(world) -> dict[str, str]:
     return {package: f"{package}@{name}" for name, package in _MARKETPLACES.values()}
 
 
+_BUNDLE_KINDS = ("hook", "mcp", "bin")
+# The server each MCP row requests, by every name it may be keyed under.
+_MCP_NAMES = {
+    "mcp-registry": frozenset({REGISTRY_SERVER, REGISTRY_SERVER.rsplit("/", 1)[-1]}),
+    "inline-mcp": frozenset({"p-inline"}),
+}
+
 # install --mcp, install <bundle> and marketplace list are side doors: they do not
 # reconcile the declared packages to the new targets; the next install does.
 _RECONCILING_ROWS = frozenset({"kinds-offline", "gates", "marketplace-install"})
@@ -216,13 +228,19 @@ def _deploy(world, row: str, before) -> tuple[Scenario, object, dict]:
         if row == "marketplace-list":
             return scenario, "marketplace list", {"read_only": True}
         return scenario, "install", {"allowed": home}
-    scenario = Scenario(world, ("p-skill:git",), targets=before, policy="allow")
+    specs = {"p-skill:git": world.packages["p-skill:git"].spec}
+    kinds = {"p-skill:git": ("skill",)}
+    if row == "bundle":
+        # The bundle packs p-exec: model it, so I4 observes its hook and MCP server.
+        specs["p-exec"] = world.packages["p-exec:bundle"].spec
+        kinds["p-exec"] = _BUNDLE_KINDS
+    scenario = Scenario(world, specs, kinds=kinds, targets=before, policy="allow")
     scenario.run("install p-skill:git")
     if row == "mcp-registry":
         return scenario, ("install", "--mcp", REGISTRY_SERVER), {}
     if row == "inline-mcp":
         return scenario, _INLINE, {}
-    return scenario, ("install", world.packages["p-exec:bundle"].spec), {}
+    return scenario, ("install", specs["p-exec"]), {}
 
 
 # Every row runs after each target change; the unchanged shapes run only for the
@@ -249,6 +267,13 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     assert step.result.returncode == 0, step.output
     if row in _RECONCILING_ROWS:
         scenario.assert_deployed()
+    if row in _MCP_NAMES:
+        problems = mcp_server_problems(scenario, _MCP_NAMES[row])
+        assert not problems, f"{problems}\n{step.output}"
+    if row == "bundle":
+        observed, _, _ = scenario.deployed()
+        parked = {cell for cell in observed if cell.startswith("p-exec/")}
+        assert not parked, f"unapproved bundle executables deployed: {sorted(parked)}"
     scenario.finish()
 
 

@@ -44,6 +44,7 @@ import pytest
 from hypothesis import strategies as st
 from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
+from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle.generator.rules import FIRST_PARTY_MCP_CELL
 from tests.lifecycle.machines._kit import (
     Bench,
@@ -823,6 +824,7 @@ class SourceMachine(MachineBase):
             if "*incomplete" not in named:
                 unnamed |= removed - named
             observed, expected = sorted(unnamed), []
+        self.instructions_witnessed(step, op, choices)
         cells = self.cells(op, "real", choices)
         for choice in choices:
             if applies(op, choice.form):
@@ -843,6 +845,34 @@ class SourceMachine(MachineBase):
                     observed=observed,
                 ),
             )
+
+    def instructions_witnessed(self, step: Step, op: str, choices: Collection[Choice]) -> None:
+        """An other-file credit needs its evidence: each package's instruction under every
+        current target that deploys instructions, with its text, recorded in the lock."""
+        docs = [c for c in choices if "other-file" in c.prims and acts(op, c)]
+        if not docs or op == "uninstall":
+            return
+        lock = step.after.lock
+        recorded = (
+            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
+            if lock is not None
+            else set()
+        )
+        for choice in docs:
+            for target in sorted(self.model.targets):
+                mapping = KNOWN_TARGETS[target].primitives.get("instructions")
+                if mapping is None:
+                    continue
+                relative = (
+                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/"
+                    f"{choice.package}{mapping.extension}"
+                )
+                path = step.after.deploy_root / relative
+                where = f"{op} {choice.form} {choice.package}: {relative}"
+                assert path.is_file(), f"{where} is not deployed"
+                text = path.read_text(encoding="utf-8")
+                assert f"Follow the {choice.package} conventions." in text, f"{where}: {text!r}"
+                assert relative in recorded, f"{where} is not recorded in the lock"
 
     def egress(self, step: Step) -> None:
         """Proxy-only law: online, every request reaches a world host through the proxy."""

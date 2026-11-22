@@ -66,6 +66,9 @@ def test_a_first_install_from_each_source_deploys_under_home(lifecycle_world, sr
     assert not any(item.startswith("project:") for item in step.changed), step.changed
     if src != "native-plugin":
         assert (lifecycle_world.home / _SKILL).is_file(), step.output
+    if src == "pkg-registry":
+        sources = {dep.source for dep in scenario.lock().get_package_dependencies()}
+        assert sources == {"registry"}, f"SRC=pkg-registry resolved through {sources}"
     scenario.finish()
 
 

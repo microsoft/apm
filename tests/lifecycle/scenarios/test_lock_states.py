@@ -31,7 +31,12 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
-from tests.lifecycle.scenarios._kit import PROJECT_HOME_ALLOWED, Scenario, credits
+from tests.lifecycle.scenarios._kit import (
+    PROJECT_HOME_ALLOWED,
+    Scenario,
+    credits,
+    mcp_server_problems,
+)
 from tests.lifecycle.scenarios.test_network_offline import go_offline
 from tests.lifecycle.scenarios.test_target_history_sources import (
     _CATALOG_CACHE,
@@ -425,6 +430,10 @@ def test_sources_under_a_drifted_lock(lifecycle_world, world, lock) -> None:
     play(scenario, (row,), **fields)
     if lock != NEWER:
         scenario.assert_deployed()
+        if world == "direct":
+            # The root inline server apm.yml declares comes back with the rest.
+            problems = mcp_server_problems(scenario, {"p-inline"})
+            assert not problems, problems
     scenario.finish()
 
 

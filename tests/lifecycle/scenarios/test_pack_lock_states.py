@@ -39,15 +39,30 @@ def _installed(world) -> Scenario:
     return scenario
 
 
+def _packed(step) -> set[str]:
+    return {line.strip() for line in step.result.stdout.splitlines()}
+
+
 def test_pack_builds_from_a_stale_lock(lifecycle_world) -> None:
     scenario = _installed(lifecycle_world)
+    # Control: an approved, locked LSP package is packed (.lsp.json ships).
+    scenario.run("install p-lsp")
+    scenario.run("approve p-lsp")
+    scenario.run("install")
+    control = scenario.run("pack --dry-run", exit=0)
+    assert ".lsp.json" in _packed(control), control.output
     manifest = lifecycle_world.project / "apm.yml"
+    approvals = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]
+    scenario.run("uninstall p-lsp")
+    # The user declares p-lsp again, still approved, without locking it: the manifest
+    # alone would ship .lsp.json, so its absence proves pack reads the lock.
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     data["dependencies"]["apm"].append(scenario.specs["p-lsp"])
+    data["executables"] = approvals
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
-    scenario.model = scenario.model.with_lock("stale")
+    scenario.model = scenario.model.approve("p-lsp", scenario.kinds["p-lsp"]).with_lock("stale")
     step = scenario.run("pack --dry-run", exit=0, credit=[{**_PACK, "LOCK": "stale"}])
-    listed = {line.strip() for line in step.result.stdout.splitlines()}
+    listed = _packed(step)
     assert "skills/p-skill/SKILL.md" in listed, step.output
     assert ".lsp.json" not in listed, "a dependency the lock does not record is not packed"
     assert_changes(step.changed, (), label="pack --dry-run")

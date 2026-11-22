@@ -67,12 +67,20 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
+    ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
     ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
     ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
     # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
+}
+# The file each declared target reads the scope's MCP servers from (Gemini's
+# project-scope file is opt-in: adapters/client/gemini.py).
+MCP_CONFIGS: Mapping[tuple[str, str], str] = {
+    ("project", "copilot"): ".mcp.json",
+    ("project", "claude"): ".mcp.json",
+    ("user", "copilot"): ".copilot/mcp-config.json",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
 PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
@@ -188,6 +196,40 @@ def assert_changes(changed: Iterable[str], patterns: Iterable[str], *, label: st
     assert not extra and not missing, (
         f"{label}: changed set differs\n  unexpected: {extra}\n  missing: {missing}"
     )
+
+
+def mcp_server_problems(scenario: Scenario, names: Iterable[str]) -> list[str]:
+    """Why a requested MCP server (any of its *names*) is not fully installed.
+
+    It must be declared in apm.yml, recorded in the lockfile and configured in
+    the MCP file of every declared target that has one.
+    """
+    names = frozenset(names)
+    shown = sorted(names)[0]
+    manifest = yaml.safe_load((scenario.manifest_root / "apm.yml").read_text(encoding="utf-8"))
+    declared = {
+        str(entry.get("name") if isinstance(entry, Mapping) else entry)
+        for entry in ((manifest.get("dependencies") or {}).get("mcp") or [])
+    }
+    problems = []
+    if not names & declared:
+        problems.append(f"{shown} is not declared in apm.yml")
+    lock = scenario.lock()
+    if lock is None or not names & set(lock.mcp_servers):
+        problems.append(f"{shown} is not recorded in the lockfile")
+    for target in sorted(scenario.model.targets):
+        relative = MCP_CONFIGS.get((scenario.scope, target))
+        if relative is None:
+            continue
+        path = scenario.deploy_root / relative
+        servers = (
+            json.loads(path.read_text(encoding="utf-8")).get("mcpServers") or {}
+            if path.is_file()
+            else {}
+        )
+        if not names & set(servers):
+            problems.append(f"{shown} is not configured in {relative} ({target})")
+    return problems
 
 
 @contextmanager
@@ -341,24 +383,50 @@ class Scenario:
                     surface = SURFACE_GLOBS.get((self.scope, kind, target))
                     if surface is None:
                         continue
-                    pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
-                    name = package.split(":")[0]
-                    marker = marker.format(pkg=name)
-                    hits = [
-                        path
-                        for path in root.glob(pattern.format(pkg=name))
-                        if path.is_file()
-                        and marker in path.read_text(encoding="utf-8")
-                        and path.relative_to(root).as_posix() not in users
-                    ]
+                    shared = isinstance(surface, tuple)  # a shared file names its entry
+                    hits = self._hits(package, surface, users)
                     if hits:
                         cell = f"{package}/{kind}/{target}"
                         deployed.add(cell)
                         found = frozenset(path.relative_to(root).as_posix() for path in hits)
                         cell_paths[cell] = found
-                        if not marker:
+                        if not shared:
                             managed.update(found)
         return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _hits(self, package: str, surface: str | tuple[str, str], users) -> list[Path]:
+        """Files at *surface* that carry *package*, minus the user's own files."""
+        root = self.deploy_root
+        pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
+        name = package.split(":")[0]
+        marker = marker.format(pkg=name)
+        return [
+            path
+            for path in root.glob(pattern.format(pkg=name))
+            if path.is_file()
+            and marker in path.read_text(encoding="utf-8")
+            and path.relative_to(root).as_posix() not in users
+        ]
+
+    def undeclared_target_cells(self) -> frozenset[str]:
+        """``pkg/kind/target`` cells deployed for a target apm.yml no longer declares.
+
+        Only surfaces exclusive to that target count: a path a declared target
+        shares (the same glob for the same kind) belongs to the declared one.
+        """
+        users = self._user_files()
+        found = set()
+        for package, kinds in self.kinds.items():
+            for kind in kinds:
+                live = {SURFACE_GLOBS.get((self.scope, kind, t)) for t in self.model.targets}
+                for (scope, surface_kind, target), surface in SURFACE_GLOBS.items():
+                    if scope != self.scope or surface_kind != kind:
+                        continue
+                    if target in self.model.targets or surface in live:
+                        continue
+                    if self._hits(package, surface, users):
+                        found.add(f"{package}/{kind}/{target}")
+        return frozenset(found)
 
     def _user_files(self) -> frozenset[str]:
         """I1-X2: declared user writes the lock does not record: the user's files.
@@ -413,9 +481,12 @@ class Scenario:
         )
 
     def assert_deployed(self) -> None:
+        """The model's cells are deployed, and no target apm.yml dropped keeps any."""
         observed, _, _ = self.deployed()
         wanted = self.expected_cells()
         assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
+        left = self.undeclared_target_cells()
+        assert not left, f"an undeclared target keeps {sorted(left)}"
 
     # -- steps -------------------------------------------------------------------
 
