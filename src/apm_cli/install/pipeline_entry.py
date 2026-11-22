@@ -198,10 +198,15 @@ def stateless_noop(command: Any) -> Any:
     def install(*args: Any, **kwargs: Any) -> Any:
         from pathlib import Path
 
+        from apm_cli.install import diff_apply
         from apm_cli.install.noop_diff import invocation_argv, try_noop
 
-        if try_noop(kwargs, invocation_argv(), Path.cwd()):
+        root, argv = Path.cwd(), invocation_argv()
+        if try_noop(kwargs, argv, root) or diff_apply.try_apply(kwargs, argv, root):
             return None
-        return command(*args, **kwargs)
+        before = diff_apply.snapshot(root)
+        result = command(*args, **kwargs)
+        diff_apply.harvest(root, before)
+        return result
 
     return install
