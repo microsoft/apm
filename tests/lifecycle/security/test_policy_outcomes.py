@@ -810,44 +810,47 @@ SITE_SLICES["audit-ci"] = SiteSlice(
     },
 )
 
-# commands/approve.py -- approval loads the org policy best-effort.
-_APPROVE_UNRESOLVED = r"Org policy could not be resolved; approval is proceeding"
-_APPROVE_TWICE = "#4178 approve prints its org policy warning twice"
+# commands/approve.py -- approval routes the org policy once per command (#4178):
+# an unresolved outcome under the block knob refuses and writes nothing; under
+# warn it is reported once ("not applied") and the approval proceeds.
+_APPROVE_MISS = r"Org policy not applied"
 _NOTHING_WRITTEN = r"Nothing was written"
 SITE_SLICES["approve"] = SiteSlice(
     arrange=_installed_parked_exec,
     command=lambda world: "apm approve p-exec",
     classes={
-        "cache_miss_fetch_fail/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "cache_miss_fetch_fail/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "hash_mismatch": Expect(0, (r"Policy hash verification failed",), xfail=_APPROVE_TWICE),
+        "cache_miss_fetch_fail/block": Expect(
+            1, (*_routed_block("cache_miss_fetch_fail"), _NOTHING_WRITTEN)
+        ),
+        "cache_miss_fetch_fail/warn": Expect(0, (_not_applied("cache_miss_fetch_fail"),)),
+        "hash_mismatch": Expect(1, (TRUST_BLOCK + "policy hash mismatch", _NOTHING_WRITTEN)),
         "absent/block": Expect(
-            1, (*_routed_block("absent"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+            1, (*_routed_block("absent"), _NOTHING_WRITTEN), forbids=(_APPROVE_MISS,)
         ),
-        "absent/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "absent/warn": Expect(0, forbids=(_APPROVE_MISS,)),
         "no_git_remote/block": Expect(
-            1, (*_routed_block("no_git_remote"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+            1, (*_routed_block("no_git_remote"), _NOTHING_WRITTEN), forbids=(_APPROVE_MISS,)
         ),
-        "no_git_remote/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
+        "no_git_remote/warn": Expect(0, forbids=(_APPROVE_MISS,)),
         "empty/block": Expect(
-            1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+            1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_MISS,)
         ),
-        "empty/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "found": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "disabled": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "malformed/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "malformed/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "garbage_response/block": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "garbage_response/warn": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
-        "incomplete_chain": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "empty/warn": Expect(0, (_not_applied("empty"),)),
+        "found": Expect(0, forbids=(_APPROVE_MISS,)),
+        "disabled": Expect(0, forbids=(_APPROVE_MISS,)),
+        "malformed/block": Expect(1, (*_routed_block("malformed"), _NOTHING_WRITTEN)),
+        "malformed/warn": Expect(0, (_not_applied("malformed"),)),
+        "garbage_response/block": Expect(1, (*_routed_block("garbage_response"), _NOTHING_WRITTEN)),
+        "garbage_response/warn": Expect(0, (_not_applied("garbage_response"),)),
+        "incomplete_chain": Expect(1, (_CHAIN_BLOCK, _NOTHING_WRITTEN)),
         "cached_stale/org-block": Expect(
-            1, (_STALE_BLOCK, _NOTHING_WRITTEN), forbids=(_APPROVE_UNRESOLVED,)
+            1, (_STALE_BLOCK, _NOTHING_WRITTEN), forbids=(_APPROVE_MISS,)
         ),
-        "cached_stale/warn": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "cache=cold": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=True),
-        "cache=warm-fresh": Expect(0, forbids=(_APPROVE_UNRESOLVED,), policy_fetch=False),
-        "cache=stale<7d": Expect(0, forbids=(_APPROVE_UNRESOLVED,)),
-        "cache=stale>7d-or-expired": Expect(0, (_APPROVE_UNRESOLVED,), xfail=_APPROVE_TWICE),
+        "cached_stale/warn": Expect(0, forbids=(_APPROVE_MISS,)),
+        "cache=cold": Expect(0, forbids=(_APPROVE_MISS,), policy_fetch=True),
+        "cache=warm-fresh": Expect(0, forbids=(_APPROVE_MISS,), policy_fetch=False),
+        "cache=stale<7d": Expect(0, forbids=(_APPROVE_MISS,)),
+        "cache=stale>7d-or-expired": Expect(0, (_not_applied("cache_miss_fetch_fail"),)),
     },
 )
 
