@@ -15,6 +15,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from tests.lifecycle.known import KnownFailure
+
 
 @dataclass(frozen=True)
 class EgressRow:
@@ -27,8 +29,7 @@ class EgressRow:
     # False when the host is served anonymously and APM may not send it.
     presented: bool = True
     smoke: bool = False
-    # Strict expected failure: "#<open issue> <neutral phrase>".
-    xfail: str = ""
+    xfail: KnownFailure | None = None  # strict expected failure
     # Exit(s) the decisive command may end with (a refused anonymous request is 1).
     exit: int | tuple[int, ...] = 0
     # The host refuses anonymous requests (Azure DevOps: ``require_ado_auth``).
