@@ -28,7 +28,11 @@ its outputs; a run whose inputs are byte-identical repeats it exactly.
 Replay (a hit) additionally re-runs, every time: org policy discovery with
 its unchanged cache-freshness rules, and the lockfile's deployed-file
 content-hash verification (``verify_deployed_file_hashes``). It writes
-nothing. ``APM_INSTALL_FAST_PATH=0`` disables the fast path.
+nothing. Off by default: ``APM_INSTALL_FAST_PATH=1`` turns it on.
+
+Trust boundary: stamps live in the user's cache root, like the cached
+package contents themselves; a same-user process that can write the cache
+can already alter what an install deploys.
 """
 
 from __future__ import annotations
@@ -413,6 +417,11 @@ class _Recorder:
             return None
         if text.startswith("/") and "/." not in text and "//" not in text:
             return text.rstrip("/") or "/"  # already absolute and normal: skip normpath
+        if ".." in text.replace("\\", "/").split("/"):
+            # abspath would collapse '..' before symlinks resolve, so the
+            # fingerprinted file could differ from the one read: refuse.
+            self.violate(f"parent-component path:{text}"[:200])
+            return None
         return os.path.abspath(text)
 
     def _excluded(self, path: str) -> bool:
@@ -676,14 +685,20 @@ class _Recording:
         excluded.add(str(stamp.parent))
         excluded.update(_policy_cache_roots())
         expiring, immutable = _cache_roots()
+        protected = _with_realpaths(_protected_roots(project_root))
+        excluded_roots = _with_realpaths(excluded)
         self.recorder = _Recorder(
-            _with_realpaths(excluded),
+            excluded_roots,
             _with_realpaths({tempfile.gettempdir()}),
-            _with_realpaths(_protected_roots(project_root)),
+            protected,
             _with_realpaths(expiring),
             _with_realpaths(immutable),
         )
         self._saved: dict[str, Any] = {}
+        if any(_under(root, excluded_roots) for root in protected):
+            # The project or user state lives inside an interpreter prefix,
+            # whose reads are not recorded: nothing there could be proven.
+            self.recorder.violate("protected root inside an excluded prefix")
 
     def __enter__(self) -> _Recording:
         global _ACTIVE, _HOOK_INSTALLED
@@ -804,6 +819,9 @@ class _Recording:
             "resolved": {key: _resolution(key) for key in sorted(recorder.resolved)},
             "output": output,
         }
+        if not self._inputs_held():
+            recorder.violations.append(f"input changed while stamping: {self._changed_input()}")
+            return False
         return self._write(stamp)
 
     def _write(self, stamp: dict[str, Any]) -> bool:

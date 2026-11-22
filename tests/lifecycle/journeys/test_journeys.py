@@ -1458,6 +1458,7 @@ def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
 _FAST_PATH_JOURNEYS = ("J12",)
 
 
+@pytest.mark.lifecycle_smoke  # PR CI proves J12 with the flag on at every head (QL H8)
 @pytest.mark.parametrize(
     "path",
     [p for p in _params() if p.id in _FAST_PATH_JOURNEYS],

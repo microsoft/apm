@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -136,9 +137,11 @@ def _ensure_dir(path: Path) -> None:
     """Create directory with mode 0o700 if it does not exist."""
     try:
         path.mkdir(parents=True, exist_ok=True)
-        # Set permissions (best-effort on Windows where modes are no-ops)
+        # Set permissions (best-effort on Windows where modes are no-ops). An
+        # existing 0o700 directory is left untouched: a converged command writes nothing.
         with contextlib.suppress(OSError):
-            os.chmod(str(path), 0o700)
+            if stat.S_IMODE(path.stat().st_mode) != 0o700:
+                os.chmod(str(path), 0o700)
     except OSError as exc:
         _log.warning("[!] Failed to create cache directory %s: %s", path, exc)
         raise
