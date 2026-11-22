@@ -1,0 +1,16 @@
+{
+  "issue": 4562,
+  "fixed_in": "Unreleased",
+  "summary": "An install narrowed with --target (for example install -g --only mcp --target codex after a codex,cursor install) removed still-declared MCP servers from runtimes it did not target; stale-entry cleanup is now scoped to the runtimes the flag names.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_a_narrowed_target_keeps_still_declared_servers_on_other_targets",
+    "tests/integration/test_mcp_dependency_targets_lifecycle.py::test_global_target_scoped_install_keeps_servers_declared_for_other_targets"
+  ]
+}

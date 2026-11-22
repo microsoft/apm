@@ -1,0 +1,4 @@
+{
+  "description": "Named removals of obligations that were required, for ids no generator rule expresses. Each entry: id -> the rule or ruling that removes it, with its issue. Read by scripts/check_obligation_status_ratchet.py (#4586).",
+  "removals": {}
+}

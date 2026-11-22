@@ -875,6 +875,11 @@ BUNDLE_EXECUTABLES_ALLOW = _entry(
 LOCKFILE_UNMANAGED_PATHS = _entry(
     "lockfile-unmanaged-paths", "apm install", "repair it", then="retry"
 )
+UNINSTALL_NEW_TARGET_UNDEPLOYED = _entry(
+    "uninstall-new-target-undeployed",
+    "apm install",
+    "deploy the remaining packages to {targets} and record them in apm.lock.yaml",
+)
 
 # -- end commands/** (W1) -----------------------------------------------------
 
@@ -1211,12 +1216,14 @@ DRIFT_CACHE_UNPOPULATED = _entry(
     "drift-cache-unpopulated", "apm install", "populate the install cache drift replay reads"
 )
 BUNDLE_HOOKS_UNADMITTED = _entry(
-    "bundle-hooks-unadmitted", "apm install", "retire the unadmitted bundle hooks"
+    "bundle-hooks-unadmitted",
+    "apm install",
+    "retire the unadmitted bundle hooks and canvas extensions",
 )
 BUNDLE_HOOKS_APPROVED = _entry(
     "bundle-hooks-approved",
     "apm install <bundle>",
-    "redeploy the bundle with its approved hooks",
+    "redeploy the bundle with its approved executables",
     before="approve the bundle",
 )
 REQUIRED_PACKAGE_UNLOCKED = _entry(
