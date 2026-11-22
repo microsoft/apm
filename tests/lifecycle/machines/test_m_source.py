@@ -230,6 +230,7 @@ CHOICES = (
     Choice("local-path", "p-canvas", frozenset({"canvas"})),
     Choice("native", "p-native-claude", _NATIVE, frozenset({"skill", "mcp"})),
     Choice("native", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
+    Choice("native", "p-native-claude-exec", _NATIVE, frozenset({"skill", "hook", "lsp"})),
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
@@ -238,16 +239,21 @@ CHOICES = (
         for form, (_, package) in LOCAL_CATALOGS.items()
     ),
     Choice("inline-mcp", INLINE_SERVER, frozenset({"mcp"})),
-    # The LSP package from git and from the world's git catalog (one identity with the
-    # local p-lsp: declaring either replaces it; see lsp_source_pass).
-    Choice("shorthand", "p-lsp", frozenset({"lsp"})),
-    Choice("marketplace-object", "p-lsp", frozenset({"lsp"})),
+    # The LSP and canvas packages from git, from the world's git catalog and from the
+    # package registry (one identity with the local package: declaring any of them
+    # replaces it; see remote_source_pass).
+    *(
+        Choice(form, package, frozenset({kind}))
+        for package, kind in (("p-lsp", "lsp"), ("p-canvas", "canvas"))
+        for form in ("shorthand", "marketplace-object", "pkg-registry")
+    ),
 )
 _BY_FORM: dict[str, Choice] = {}
 for _choice in CHOICES:
     _BY_FORM.setdefault(_choice.form, _choice)
-_REMOTE_LSP = tuple(c for c in CHOICES if c.package == "p-lsp" and c.form != "local-path")
-_LOCAL_LSP = next(c for c in CHOICES if c.package == "p-lsp" and c.form == "local-path")
+_SWAPPED = ("p-lsp", "p-canvas")
+_REMOTE_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form != "local-path")
+_LOCAL_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form == "local-path")
 _REMOTE_FORMS = frozenset(
     {
         "shorthand",
@@ -258,7 +264,10 @@ _REMOTE_FORMS = frozenset(
         "mcp-registry",
     }
 )
-_REGISTRY_SKILL, _REGISTRY_EXEC = (c for c in CHOICES if c.form == "pkg-registry")
+_REGISTRY_SKILL, _REGISTRY_EXEC = (
+    next(c for c in CHOICES if c.form == "pkg-registry" and c.package == name)
+    for name in ("p-skill", "p-exec")
+)
 _MCP_FORMS = frozenset({"mcp-registry", "inline-mcp"})
 _CLI_FORMS = frozenset({"plugin-at-mkt", "bundle", *_MCP_FORMS})
 _DIAMOND = frozenset({"p-parent", "p-parent2"})
@@ -1165,16 +1174,16 @@ class SourceMachine(MachineBase):
         self.reinstall(manifest, refresh=refresh)
         self.model = replace(self.model, decisions=decisions, revoked=frozenset())
 
-    def lsp_source_pass(self) -> None:
-        """The LSP package from git and from the git catalog, through every op.
+    def remote_source_pass(self) -> None:
+        """The LSP and canvas packages from git, the git catalog and the registry.
 
-        Each remote form replaces the local p-lsp (one identity), is reconciled, audited,
-        approved by name and installed (allowed), has that approval withdrawn and is
-        installed again (revoked-after-deploy, I4), then is uninstalled; the local p-lsp
-        is declared again.
+        Each remote form replaces the local package (one identity), is reconciled,
+        audited, approved by name and installed (allowed), has that approval withdrawn
+        and is installed again (revoked-after-deploy, I4), then is uninstalled; the
+        local packages are declared again.
         """
         approved = r"\[\+\] Approved \S*{name} at these exact"
-        for choice in _REMOTE_LSP:
+        for choice in _REMOTE_SWAPS:
             self.declare(choice, False)
             for op in ("install", "update", "prune", "compile", "lock"):
                 self.reconcile(op, False)
@@ -1200,7 +1209,8 @@ class SourceMachine(MachineBase):
             self.reinstall(manifest, refresh=False)
             self.model = replace(self.model, decisions=decisions, revoked=frozenset())
             self.uninstall(choice.slot, True)
-        self.declare(_LOCAL_LSP, False)
+        for choice in _LOCAL_SWAPS:
+            self.declare(choice, False)
         self.reconcile("install", False)
 
     def deploys_what_the_model_allows(self, step: Step) -> None:
@@ -1396,7 +1406,7 @@ def replay_spine(machine: SourceMachine) -> None:
             machine.context_pass()
             machine.gate_off_pass()
             machine.decide_pass()
-    machine.lsp_source_pass()
+    machine.remote_source_pass()
     # p-lsp still survives this uninstall (#4214).
     machine.uninstall("remote-skill", False)
     for slot in ("remote-exec", "p-lsp"):
@@ -1412,7 +1422,13 @@ def replay_spine(machine: SourceMachine) -> None:
         machine.reconcile("install", False)
         machine.uninstall("remote-skill", True)
     machine.uninstall_together([c for c in CHOICES if c.form in LOCAL_CATALOGS], True)
-    for slot in ("p-parent", "p-canvas", "p-native-claude", "p-native-claude-bin"):
+    for slot in (
+        "p-parent",
+        "p-canvas",
+        "p-native-claude",
+        "p-native-claude-bin",
+        "p-native-claude-exec",
+    ):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:
         machine.undeclare(slot)
