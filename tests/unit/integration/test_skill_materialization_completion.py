@@ -12,7 +12,6 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
-from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.skill_support import SkillIntegrationResult
@@ -157,7 +156,8 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
     shutil.copytree(source, destination)
     written = []
     diagnostics = DiagnosticCollector()
-    with patch("apm_cli.integration.write_seam.copy2", wraps=write_seam.copy2) as copy:
+    # Each member copy publishes with one os.replace (#4691).
+    with patch("os.replace", wraps=os.replace) as copy:
         copied = BaseIntegrator().copy_directory_files(
             source,
             destination,
@@ -232,7 +232,7 @@ def test_post_discovery_failures_never_publish_success(tmp_path: Path, stage: st
     package, project, plan = _fixture(tmp_path)
     integrator = SkillIntegrator()
     target = {
-        "copy": "apm_cli.integration.write_seam.copy2",
+        "copy": "os.replace",
         "rewrite": "apm_cli.integration.skill_integrator.SkillIntegrator._resolve_markdown_links_in_skill_bundle",
         "hash": "apm_cli.utils.content_hash.compute_file_hash",
     }[stage]
@@ -303,15 +303,15 @@ def test_member_disappearing_before_rewrite_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, removed: str
 ) -> None:
     package, project, plan = _fixture(tmp_path)
-    copy_file = write_seam.copy2
+    source_asset = package.install_path / "skills/s/asset.md"
+    real_replace = os.replace
 
-    def copy_then_remove(source: Path, target: Path) -> Path:
-        copied = copy_file(source, target)
-        if source.name == "asset.md":
-            (source if removed == "source" else target).unlink()
-        return Path(copied)
+    def replace_then_remove(staged: str, target: Path) -> None:
+        real_replace(staged, target)
+        if Path(target).name == "asset.md":
+            (source_asset if removed == "source" else Path(target)).unlink()
 
-    monkeypatch.setattr(write_seam, "copy2", copy_then_remove)
+    monkeypatch.setattr(os, "replace", replace_then_remove)
     with pytest.raises(OSError, match="Cannot finalize copied skill member"):
         _integrate(package, project, plan)
     assert (project / ".claude/skills/s/SKILL.md").is_file()
