@@ -29,6 +29,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle.generator.rules import MARKETPLACE_UNTOUCHED
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
@@ -264,7 +265,11 @@ class GateMatrix(StepRunner):
             state.exec_deployed -= set(named)
             state.revoked -= set(named)
         if verb == "approve":
-            state.gate_on = True
+            # A project approval writes apm.yml's executables block, which opts the
+            # project into the gate; a user approval (APM_HOME/config.json) never
+            # does (security/executables.py gate_enabled).
+            if self.scope == "project":
+                state.gate_on = True
             for package in named:
                 state.decisions[package] = "allowed"
                 state.revoked.discard(package)
@@ -375,6 +380,31 @@ class GateMatrix(StepRunner):
 
         self.edit_inputs("gate-off", change, lambda state: setattr(state, "gate_on", False))
 
+    def gate_on(self) -> None:
+        """Opt the scope manifest into the gate; at user scope an allow alone never
+        does (security/executables.py: a manifest block, a user deny or an org signal)."""
+
+        def change() -> None:
+            data = self.bench.manifest()
+            data.setdefault("executables", {"allow": {}})
+            self.bench.write_manifest(data)
+
+        self.edit_inputs("gate-on", change, lambda state: setattr(state, "gate_on", True))
+
+    def assert_gate_enforced(self, packages: Sequence[str]) -> None:
+        """The CLI ran the gate: the lock records each package's executable trust
+        state, which package_exec_decision (security/trust.py) omits while it is off."""
+        if self.dry:
+            return
+        lock = LockFile.read(self.bench.lock_path)
+        status = {
+            package: sorted(
+                str(dep.exec_status) for key, dep in lock.dependencies.items() if package in key
+            )
+            for package in packages
+        }
+        assert all(values and set(values) == {"deployed"} for values in status.values()), status
+
     def revoke(self, packages: Sequence[str]) -> None:
         """Drop every decision on *packages* from the scope's approval store."""
 
@@ -479,7 +509,11 @@ def replay_user_matrix(machine: GateMatrix, exits: Mapping[str, int] = USER_FROZ
     machine.run("install", "install", packages=PACKAGES)
     frozen("none")
     machine.run("approve", "approve", packages=exec_and_mixed)
+    # A user allow leaves the gate off; opt in as the bin spine does, so the
+    # allowed level below is the gate's verdict, not an open gate.
+    machine.gate_on()
     machine.probes("install")
+    machine.assert_gate_enforced(exec_and_mixed)
     frozen("allowed")
     machine.run("deny", "deny", packages=exec_and_mixed)
     frozen("revoked-after-deploy")
