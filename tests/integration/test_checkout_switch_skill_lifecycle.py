@@ -721,23 +721,28 @@ def test_user_edit_after_branch_round_trip_is_still_refused(
     assert (world.project / "apm.lock.yaml").read_bytes() == lock_before
 
 
-def test_dropped_member_after_branch_round_trip_needs_todays_deletion_evidence(
-    tmp_path: Path, apm_binary_path: Path
+@pytest.mark.parametrize("removed", ["member", "skill"])
+def test_removal_after_branch_round_trip_needs_todays_deletion_evidence(
+    tmp_path: Path, apm_binary_path: Path, removed: str
 ) -> None:
-    """History is never deletion evidence: a dropped member is kept without it (#4428).
+    """History is never deletion evidence: removed content is kept without it (#4428).
 
     After the round trip the receipt holds branch B's bytes and the deployed
-    member holds main's bytes; only the history proves those, and cleanup
-    does not consult it, so the member stays on disk.
+    files hold main's bytes; only the history proves those, and cleanup does
+    not consult it. Removing one member, or the whole local skill (the
+    uninstall of local content), leaves the deployed bytes on disk.
     """
     world = _new_world(tmp_path, apm_binary_path)
     _branch_round_trip(world)
-    (world.project / ".apm/skills/x/references/a.md").unlink()
-    _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "No references.\n")
-    member = world.project / _X / "references/a.md"
-    member_bytes = member.read_bytes()
+    if removed == "member":
+        (world.project / ".apm/skills/x/references/a.md").unlink()
+        _write(world.project / ".apm/skills/x/SKILL.md", _LOCAL_SKILL + "No references.\n")
+        kept = {"references/a.md": (world.project / _X / "references/a.md").read_bytes()}
+    else:
+        shutil.rmtree(world.project / ".apm/skills/x")
+        kept = {path[len(_X) + 1 :]: data for path, data in _deployed(world).items()}
 
     result = world.apm("install")
     output = _output(result)
-    assert member.read_bytes() == member_bytes, output
+    assert {name: (world.project / _X / name).read_bytes() for name in kept} == kept, output
     assert "Cleaned" not in output, output
