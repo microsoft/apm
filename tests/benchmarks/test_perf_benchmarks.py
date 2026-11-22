@@ -242,15 +242,20 @@ def _write_bench_record(
     (directory / "journeys-abc.json").write_text(json.dumps({"results": [record]}))
 
 
-def test_paired_ratio_cancels_a_slower_runner(tmp_path: Path) -> None:
+def test_paired_ratio_cancels_a_slower_runner(tmp_path: Path, capsys) -> None:
     # Runner 2 is twice as slow on both sides; new is exactly half of base everywhere.
     for shard, scale in ((1, 1.0), (2, 2.0)):
         for pair in range(2):
             _write_bench_record(tmp_path, shard, "base", pair, 3.0 * scale)
             _write_bench_record(tmp_path, shard, "new", pair, 1.5 * scale)
+    result = tmp_path / "result.json"
+    args = argparse.Namespace(
+        root=str(tmp_path), json=str(result), base="a", new="b", shards="2", pairs="2"
+    )
 
-    (row,) = ci_bench.summarize(tmp_path)
-
+    assert ci_bench.report(args) == 0
+    (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
+    assert "| 0.500 | 4->0 | 8->0 | 4/4 | 0/0 |" in capsys.readouterr().out
     assert row["paired_new_over_base"] == 0.5
     assert row["base"]["samples"] == row["new"]["samples"] == 4
     assert (row["base"]["requests"], row["new"]["requests"]) == (4, 0)
