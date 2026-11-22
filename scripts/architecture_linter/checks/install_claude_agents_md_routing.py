@@ -61,6 +61,17 @@ _CONTRACTS = (
         "AgentsCompiler._compile_claude_md",
         "claude_formatter.format_agents_md_imports",
     ),
+    # Compiled coverage: compile records what it wrote, install compares (#4787).
+    (
+        "src/apm_cli/compilation/agents_compiler.py",
+        "AgentsCompiler._compile_distributed",
+        "record_compiled_instructions",
+    ),
+    (
+        "src/apm_cli/integration/instruction_integrator.py",
+        "InstructionIntegrator._claude_rule_sources",
+        "CompiledCoverage",
+    ),
 )
 _ROUTING_CONSUMER = "src/apm_cli/integration/instruction_integrator.py"
 _ROUTING_FUNCTION = "InstructionIntegrator._claude_rule_sources"
