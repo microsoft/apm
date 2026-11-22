@@ -1,4 +1,4 @@
-"""CLI output / error-ergonomics folds for PR #2705.
+"""CLI output / error-ergonomics folds for PR #2705, on the #3921 route.
 
 Each test pins one user-facing string guard added while folding the
 cli-logging-expert + devx-ux-expert advisory. They are hermetic: admission is
@@ -15,11 +15,17 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.copilot_plugins.constants import EXTRA_MARKETPLACES_KEY
+from apm_cli.native_plugins.scopes import project_marketplace_name
 
-from ._builders import write_agent_plugin
+from ._builders import (
+    copilot_project_settings,
+    native_plugins_root,
+    write_agent_plugin,
+)
 
 pytestmark = pytest.mark.component
+
+_JSONC = '{\n  // a hand-authored comment\n  "enabledPlugins": {}\n}\n'
 
 
 def _flat(text: str) -> str:
@@ -57,8 +63,12 @@ def _install(monkeypatch, project: Path, *args: str):
     )
 
 
-def _settings_path(project: Path) -> Path:
-    return project / ".github" / "copilot" / "settings.local.json"
+def _sentinel_project(tmp_path: Path) -> Path:
+    project = tmp_path / "project"
+    source = tmp_path / "source" / "sentinel"
+    write_agent_plugin(source, name="sentinel")
+    _write_project(project, [str(source)])
+    return project
 
 
 # ---------------------------------------------------------------------------
@@ -66,69 +76,74 @@ def _settings_path(project: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_settings_collision_renders_verbatim_without_double_prefix(
+def _foreign_marketplace_project(tmp_path: Path) -> tuple[Path, str, str]:
+    """A project whose Copilot settings hold APM's marketplace name with another source."""
+    project = _sentinel_project(tmp_path)
+    marketplace = project_marketplace_name(project, None, None)
+    settings_path = copilot_project_settings(project)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    foreign = json.dumps(
+        {"extraKnownMarketplaces": {marketplace: {"source": {"source": "git", "url": "x"}}}}
+    )
+    settings_path.write_text(foreign, encoding="ascii")
+    return project, marketplace, foreign
+
+
+def test_settings_collision_fails_closed_with_an_actionable_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A foreign 'apm' marketplace collision is shown once, un-nested.
-
-    Dependency resolution succeeded and the lockfile was written; only the
-    Copilot settings merge collided. The message must NOT be prefixed with
-    'Failed to install APM dependencies' or 'Failed to resolve APM
-    dependencies', which mis-attribute the failure to dependency resolution.
-    """
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-    settings_path = _settings_path(project)
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        json.dumps({EXTRA_MARKETPLACES_KEY: {"apm": {"source": {"source": "git", "url": "x"}}}}),
-        encoding="ascii",
-    )
+    """A foreign marketplace under APM's name is refused, named once, and kept."""
+    project, marketplace, foreign = _foreign_marketplace_project(tmp_path)
 
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0, result.output
     flat = _flat(result.output)
-    assert "does not own it" in flat or "already defines" in flat
-    assert "Failed to install APM dependencies" not in flat
+    assert flat.count("Native plugin declaration failed") == 1
+    assert f"already declares extraKnownMarketplaces.{marketplace}" in flat
     assert "Failed to resolve APM dependencies" not in flat
+    assert copilot_project_settings(project).read_text(encoding="ascii") == foreign
+    assert not native_plugins_root(project).exists()
 
 
-# ---------------------------------------------------------------------------
-# Item 3: --dry-run announces the settings write it would perform.
-# ---------------------------------------------------------------------------
-
-
-def test_dry_run_announces_the_settings_write(
+def test_settings_collision_renders_verbatim_without_double_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``apm prune --dry-run`` names the settings file it would register in.
+    """Dependency resolution succeeded; only the settings declaration collided.
 
-    Prune's native resync is the reachable dry-run surface for the registration
-    write: it rebuilds the APM-owned rows from surviving locked state and, in
-    dry-run, must announce the settings file it would touch instead of
-    returning silently.
+    The message must NOT be prefixed with 'Failed to install APM dependencies',
+    which mis-attributes the failure to dependency installation.
     """
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-    assert _install(monkeypatch, project).exit_code == 0
-    assert _settings_path(project).exists()
+    project, _marketplace, _foreign = _foreign_marketplace_project(tmp_path)
 
-    monkeypatch.chdir(project)
-    result = CliRunner().invoke(cli, ["prune", "--dry-run"], catch_exceptions=False)
+    result = _install(monkeypatch, project)
 
-    assert result.exit_code == 0, result.output
-    assert "Would register 1 Agent Plugin with GitHub Copilot in" in _flat(result.output)
-    # CommandLogger word-wraps long paths, so compare with whitespace stripped.
-    assert str(_settings_path(project)) in "".join(result.output.split())
+    assert result.exit_code != 0, result.output
+    assert "Failed to install APM dependencies" not in _flat(result.output)
 
 
 # ---------------------------------------------------------------------------
-# Item 7: a malformed settings file yields a human line, not a decoder dump.
+# Item 3: --dry-run writes no activation state.
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_writes_no_activation_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm install --dry-run`` deploys nothing and touches no settings file."""
+    project = _sentinel_project(tmp_path)
+
+    result = _install(monkeypatch, project, "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert not native_plugins_root(project).exists()
+    assert not copilot_project_settings(project).exists()
+    assert not (project / ".github" / "copilot" / "settings.local.json").exists()
+    assert not (project / "apm.lock.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# Item 7: a malformed settings file yields a human line and is not changed.
 # ---------------------------------------------------------------------------
 
 
@@ -136,58 +151,29 @@ def test_malformed_settings_json_reports_human_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A hand-authored JSONC settings file gives an actionable message."""
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-    settings_path = _settings_path(project)
+    project = _sentinel_project(tmp_path)
+    settings_path = copilot_project_settings(project)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        '{\n  // a hand-authored comment\n  "enabledPlugins": {}\n}\n',
-        encoding="ascii",
-    )
+    settings_path.write_text(_JSONC, encoding="ascii")
 
     result = _install(monkeypatch, project)
 
     assert result.exit_code != 0, result.output
     flat = _flat(result.output)
-    assert "is not valid JSON" in flat
-    assert "no packages were installed" in flat
-    # The reassurance must be truthful: nothing landed on disk.
-    assert not (project / "apm_modules").exists()
-    # The raw decoder message stays behind --verbose.
+    assert "Native plugin declaration failed" in flat
+    assert "as JSON; APM did not change it" in flat
+    # The raw decoder message never reaches the user.
     assert "Expecting property name" not in flat
-
-
-def test_malformed_settings_json_keeps_decoder_detail_under_verbose(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``--verbose`` still exposes the raw decoder detail for debugging."""
-    project = tmp_path / "project"
-    source = tmp_path / "source" / "sentinel"
-    write_agent_plugin(source, name="sentinel")
-    _write_project(project, [str(source)])
-    settings_path = _settings_path(project)
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(
-        '{\n  // a hand-authored comment\n  "enabledPlugins": {}\n}\n',
-        encoding="ascii",
-    )
-
-    result = _install(monkeypatch, project, "--verbose")
-
-    assert result.exit_code != 0, result.output
-    flat = _flat(result.output)
-    assert "is not valid JSON" in flat
-    assert "Expecting property name" in flat
+    assert settings_path.read_text(encoding="ascii") == _JSONC
+    assert not native_plugins_root(project).exists()
 
 
 # ---------------------------------------------------------------------------
-# Item 6b: the install summary caps the inline plugin roster.
+# Item 6b: the native plugin roster is capped inline.
 # ---------------------------------------------------------------------------
 
 
-def test_install_summary_caps_the_inline_plugin_roster(
+def test_deps_list_caps_the_inline_plugin_roster(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Four plugins collapse to three names plus 'and 1 more' on one line."""
@@ -198,13 +184,15 @@ def test_install_summary_caps_the_inline_plugin_roster(
         write_agent_plugin(source, name=name)
         deps.append(str(source))
     _write_project(project, deps)
+    assert _install(monkeypatch, project).exit_code == 0
 
-    result = _install(monkeypatch, project)
+    result = CliRunner().invoke(cli, ["deps", "list"], catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
     flat = _flat(result.output)
-    assert "Registered 4 Agent Plugins with GitHub Copilot" in flat
-    assert "and 1 more" in flat
     # The fourth name is pushed to verbose_detail, not the summary line.
-    summary = flat.split("Registered 4 Agent Plugins with GitHub Copilot", 1)[1]
-    assert "delta" not in summary.split("[")[0]
+    assert (
+        "4 native plugin(s) activated from .agents/plugins: alpha, bravo, charlie, and 1 more"
+        in flat
+    )
+    assert "plugins: alpha, bravo, charlie, delta" not in flat

@@ -29,6 +29,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.windows_compat,
+    pytest.mark.e2e,
 ]
 
 _REFUSAL = "no trustworthy local deployment baseline"

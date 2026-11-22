@@ -16,6 +16,8 @@ import pytest
 
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
+pytestmark = pytest.mark.component
+
 COMMA_APPLY_TO = "**/src/**,**/api/**,**/services/**"
 SEGMENTS = ["**/src/**", "**/api/**", "**/services/**"]
 

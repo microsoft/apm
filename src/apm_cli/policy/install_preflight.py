@@ -26,6 +26,7 @@ from typing import Any
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
+from .models import LocalBundleSubjects
 from .outcome_routing import route_discovery_outcome
 from .policy_checks import run_dependency_deny_check, run_dependency_policy_checks
 
@@ -108,7 +109,7 @@ def run_policy_preflight(
     effective_target: tuple[str, ...] | None = None,
     effective_target_source: str = "effective target",
     fetch_result: PolicyFetchResult | None = None,
-    bundled_deps: Iterable | DenyOnlySubjects = (),
+    bundled_deps: Iterable | DenyOnlySubjects | LocalBundleSubjects = (),
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -133,8 +134,10 @@ def run_policy_preflight(
     fetch_result:
         A discovery the caller already holds, so one install discovers once.
     bundled_deps:
-        Packages a local bundle or a pack ships without an apm.yml entry
-        here; checked against ``dependencies.deny`` only. A
+        Packages a pack ships without an apm.yml entry here; checked
+        against ``dependencies.deny`` only. A local bundle's
+        :class:`~apm_cli.policy.models.LocalBundleSubjects` also meets
+        ``dependencies.allow`` through its recorded packages (#4646). A
         :class:`DenyOnlySubjects` judges *apm_deps* and its packages against
         ``dependencies.deny`` alone (``apm pack``): no other check runs.
     no_policy:

@@ -1,4 +1,14 @@
 {
   "description": "Named removals of obligations that were required, for ids no generator rule expresses. Each entry: id -> the rule or ruling that removes it, with its issue. Read by scripts/check_obligation_status_ratchet.py (#4586).",
-  "removals": {}
+  "removals": {
+    "J|E02|4|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|E02|4|O8a (O8a, required)",
+    "J|E06|5|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|E06|5|O8a (O8a, required)",
+    "J|J03|4|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J03|4|O8a (O8a, required)",
+    "J|J03|5|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J03|5|O8a (O8a, required)",
+    "J|J03|7|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J03|7|O8a (O8a, required)",
+    "J|J04|3|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J04|3|O8a (O8a, required)",
+    "J|J12|1|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J12|1|O8a (O8a, required)",
+    "J|J13|4|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J13|4|O8b (O8b, required)",
+    "J|J14|5|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J14|5|O8a (O8a, required)"
+  }
 }
