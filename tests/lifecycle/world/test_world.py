@@ -900,6 +900,7 @@ _POLICY_EXIT = {
     "garbage_response": 0,
     "cached_stale": 1,
     "deny-all-deps": 1,
+    "allow-list": 1,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
@@ -910,6 +911,7 @@ _POLICY_ANNOUNCE = {
     "garbage_response": "is not a YAML mapping",
     "cached_stale": "Using stale cached policy",
     "deny-all-deps": "denied by pattern",
+    "allow-list": "not in allowed sources",
 }
 
 

@@ -470,7 +470,11 @@ extensions never removes another bundle's or anything outside the target's
 extensions directory, and an extension you edited is kept.
 Org policy `dependencies.deny` applies to the bundle's package
 name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
-denied bundle is refused before any file is written. A bundle whose
+denied bundle is refused before any file is written. `dependencies.allow`
+judges the bundle only by the packages its `apm.lock.yaml` records, never by its
+name; under an allow list, a bundle that records no packages is a violation.
+With `enforcement: block` a violating bundle is refused before any file is
+written; `warn` reports it and installs. A bundle whose
 `apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
 remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:

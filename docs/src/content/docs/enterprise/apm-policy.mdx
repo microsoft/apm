@@ -51,7 +51,12 @@ Priya, on the Contoso platform team, starts in `warn` so nothing breaks on day o
    `*` matches one path segment, `**` any depth. A host-qualified pattern such as
    `github.com/contoso/**` matches that host and no other, which closes the gap where a
    same-named repository on another host would also match. `deny` always wins over
-   `allow`, and both apply to transitive dependencies too.
+   `allow`, and both apply to transitive dependencies too. For a local bundle
+   (`apm install <bundle>`), both judge the packages its embedded `apm.lock.yaml`
+   records. `deny` also matches the bundle's own name (`_local/<name>`); `allow` never
+   does, because the bundle author picks that name. Under an allow list, a bundle that
+   records no packages is a violation: `warn` reports it, `block` refuses the install
+   before any file is written.
 
 2. **Test the draft** from a member repository before you commit it:
 

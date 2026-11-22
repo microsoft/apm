@@ -174,7 +174,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "revoked executable must survive; an org policy dependency deny removes it",
         (
             Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
-            Ev("src/apm_cli/policy/install_preflight.py", 233, "Install blocked by org policy"),
+            Ev("src/apm_cli/policy/install_preflight.py", 236, "Install blocked by org policy"),
         ),
     ),
     "U3": (
