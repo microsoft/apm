@@ -5159,18 +5159,26 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|mcp|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=mcp|GATE=none": {
+   "credited_by": [
+    "G1|mcp-install|mcp|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=skill|GATE=denied-dependency": {
    "credited_by": [
@@ -19971,6 +19979,7 @@
     "G1|install|mcp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
     "G1|marketplace|mcp|denied-dependency|project",
+    "G1|mcp-install|mcp|denied-dependency|project",
     "G1|prune|mcp|denied-dependency|project",
     "G1|uninstall|mcp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project"
@@ -20570,6 +20579,7 @@
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
+    "G1|mcp-install|mcp|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project",
     "G1|prune|canvas|denied-dependency|project",
     "G1|prune|hook|denied-dependency|project",

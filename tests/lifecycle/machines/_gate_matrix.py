@@ -70,6 +70,9 @@ _NON_MCP = (
     ".github/extensions",
     ".github/instructions",
 )
+# The levels the requested registry server shares with p-exec-mcp: the gate is
+# off, or the org policy denies every dependency (the server too).
+_MCP_LEVELS = frozenset({"none", "denied-dependency"})
 _DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".mcp.json")
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo mixed"}]}]}}
 _INSTRUCTION = '---\napplyTo: "**"\n---\n\nKeep the lifecycle world mixed.\n'
@@ -173,9 +176,9 @@ class GateMatrix(StepRunner):
             # U-MKT: below an org deny every marketplace cell maps onto one rule cell.
             return [MARKETPLACE_UNTOUCHED]
         unobserved = _UNOBSERVED
-        if command.op == "mcp-install":
-            # U7 credits the collateral primitives only: the MCP level would be
-            # the requested registry server's, which the spine never gates.
+        if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
+            # U7 credits the collateral primitives only: a first-party server
+            # requested by name is never gated (U-FIRST-PARTY-MCP).
             unobserved = unobserved | {"mcp"}
         return sorted(
             {
@@ -309,10 +312,10 @@ class GateMatrix(StepRunner):
         if command.op == "marketplace":
             # A catalog command leaves every project byte, deployed or locked, alone.
             unchanged["project"] = ("*",)
-        elif command.op == "mcp-install":
-            unchanged["project"] = _NON_MCP
         elif exit_code != 0:
             unchanged["project"] = _DURABLE
+        elif command.op == "mcp-install":
+            unchanged["project"] = _NON_MCP
         if (
             MIXED in command.packages
             and MIXED in self.state.revoked
@@ -502,7 +505,14 @@ def replay_project_matrix(machine: GateMatrix) -> None:
     # denied-dependency: the org policy denies every package of the project.
     machine.run("install", "install", packages=exec_and_mixed)
     machine.deny_by_policy()
-    refused = {"install": 1, "install-frozen": 1, "update": 1, "lock": 1, "audit-ci": 1}
+    refused = {
+        "install": 1,
+        "install-frozen": 1,
+        "update": 1,
+        "lock": 1,
+        "audit-ci": 1,
+        "mcp-install": 1,
+    }
     probes = ("install", "install-frozen", "update", "lock", "audit-ci", "compile", "prune")
     machine.probes(*probes, "mcp-install", exits=refused)
     machine.marketplace("update")
