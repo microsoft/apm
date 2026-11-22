@@ -373,12 +373,28 @@ _BUNDLE_HOOK_TRUST_REQUIRED: dict[str, tuple[str, ...]] = {
         '_retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))',
         "_drop_lock_rows(lock_dir, rows)",
         "            retire_bundle_hooks(",
+        # The scope re-check retires bundle canvas through the same pass.
+        "    retire_unadmitted_bundle_canvas(",
+        # Committed records and rows are acted on only inside a target root.
+        "hook_file = contained_bundle_path(project_root, value, prefixes)",
+        "    path = contained_bundle_path(project_root, value, prefixes)",
+    ),
+    "src/apm_cli/install/local_bundle_canvas.py": (
+        "package_type_approved(allow_map, (key,), EXEC_TYPE_CANVAS)",
+        "if None in holding.keys:",
+        "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
+        "retire_recorded_bundle_canvas(",
+        "path = contained_bundle_path(root, value, prefixes)",
+    ),
+    "src/apm_cli/install/services.py": (
+        "record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)",
     ),
     _INSTALL_COMMAND: ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/update.py": ("reconcile_scope_bundle_hooks(",),
     "src/apm_cli/commands/prune.py": ("reconcile_scope_bundle_hooks(",),
     _CI_CHECKS: (
         "unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)",
+        "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
     ),
     "src/apm_cli/install/local_bundle_hooks.py": (
         "package_info.local_bundle_approval = approval_key",
@@ -435,6 +451,7 @@ _BUNDLE_DEPLOY_PRIMITIVES = frozenset({"integrate_local_bundle", "unpack_bundle"
 _BUNDLE_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
     (_LOCAL_BUNDLE, "install_local_bundle"): (
         "admit_bundle",
+        "bundle_policy_subjects",
         "DeploymentLedgerCodec.record_local_bundle_files",
     ),
     (_PACK_COMMAND, "unpack_cmd"): ("apm_bundle_admission", "record_unpacked_files"),
@@ -447,6 +464,14 @@ _ADMISSION_ROUTES: dict[str, tuple[str, ...]] = {
     "prepare_unpack_record": ("ensure_lockfile_writable",),
     "_bundle_target_decision": ("pack_target_prefixes",),
     "record_unpacked_files": ("DeploymentLedgerCodec.record_local_bundle_files",),
+}
+# Pack ships dependency content only after the same org dependency policy.
+_PACK_ENTRY_POINTS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("src/apm_cli/bundle/packer.py", "pack_bundle"): ("pack_policy_preflight",),
+    ("src/apm_cli/bundle/pack_policy.py", "pack_policy_preflight"): (
+        "locked_package_refs",
+        "run_policy_preflight",
+    ),
 }
 
 
@@ -475,7 +500,7 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
             if call.qualname.rsplit(".", 1)[-1] in _BUNDLE_DEPLOY_PRIMITIVES
             and (path, call.scope) not in _BUNDLE_ENTRY_POINTS
         )
-    for (path, function), required in _BUNDLE_ENTRY_POINTS.items():
+    for (path, function), required in (*_BUNDLE_ENTRY_POINTS.items(), *_PACK_ENTRY_POINTS.items()):
         facts, failures = _facts_for(provider, path, GUARD_BUNDLE_ADMISSION)
         findings.extend(failures)
         if failures:
@@ -486,7 +511,7 @@ def check_bundle_admission_owner(provider: FactsProvider) -> tuple[Violation, ..
                 _summary(
                     GUARD_BUNDLE_ADMISSION,
                     path,
-                    f"{function} must admit and record the bundle through the shared "
+                    f"{function} must admit, record or pack the bundle through the shared "
                     "owners; missing " + ", ".join(missing),
                 )
             )

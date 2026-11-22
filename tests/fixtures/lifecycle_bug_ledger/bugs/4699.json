@@ -1,0 +1,17 @@
+{
+  "issue": 4699,
+  "fixed_in": "Unreleased",
+  "summary": "On POSIX, local dependency paths written with Windows separators (.\\x, ..\\x, ~\\x) were recognised as local but failed install with a misleading traversal or home-directory error; they are now normalised to POSIX form on read and install, lock and deploy like ./x, ../x and ~/x.",
+  "failure_modes": [
+    "portability",
+    "reference"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_path_backslash_lifecycle.py::test_backslash_local_path_installs_like_its_slash_form",
+    "tests/integration/test_local_single_file_matrix.py::test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership"
+  ]
+}

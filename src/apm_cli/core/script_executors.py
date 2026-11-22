@@ -386,6 +386,20 @@ def _get_scripts_log_path() -> Path:
     return get_apm_home() / "logs" / "scripts.log"
 
 
+def _bind_scripts_log_path() -> Path | None:
+    """Resolve the scripts log path when a script is FIRED (#4706).
+
+    HTTP dispatch logs from a background thread. Resolving ``APM_HOME`` at
+    write time would let a late write land in whatever home is current then,
+    not the one the script fired under. ``None`` (unresolvable home) defers to
+    the write-time resolution, which swallows the error like any log failure.
+    """
+    try:
+        return _get_scripts_log_path()
+    except Exception:
+        return None
+
+
 _LINE_BREAK_ESCAPES = {
     "\r": "\\r",
     "\n": "\\n",
@@ -519,6 +533,7 @@ def _append_to_script_log(
     stderr: str = "",
     status: str = "ok",
     exit_code: int | None = None,
+    log_path: Path | None = None,
 ) -> None:
     """Append a timestamped entry to the scripts log file.
 
@@ -526,10 +541,12 @@ def _append_to_script_log(
     log ``0600`` with ``O_NOFOLLOW`` so it cannot be world-readable nor
     redirected through a pre-planted symlink. Per-entry output is truncated
     and the file is size-rotated. Errors are silently swallowed -- logging
-    must never break the CLI.
+    must never break the CLI. *log_path* is the path bound when the script
+    fired (see :func:`_bind_scripts_log_path`); ``None`` resolves it now.
     """
     try:
-        log_path = _get_scripts_log_path()
+        if log_path is None:
+            log_path = _get_scripts_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         _rotate_log_if_large(log_path)
 
@@ -1260,6 +1277,7 @@ def _dispatch_http_request(
     timeout: float,
     event_name: str,
     safe_url: str,
+    log_path: Path | None = None,
 ) -> None:
     """Send the prepared POST synchronously and log the outcome.
 
@@ -1291,6 +1309,7 @@ def _dispatch_http_request(
             safe_url,
             stderr="too many in-flight http dispatches; entry dropped",
             status="error",
+            log_path=log_path,
         )
         return
 
@@ -1393,13 +1412,21 @@ def _dispatch_http_request(
             safe_url,
             stderr=f"request exceeded total deadline {total_deadline:g}s",
             status="error",
+            log_path=log_path,
         )
         return
 
     exc = holder.get("exc")
     if exc is not None:
         _logger.debug("HTTP POST failed for %s", safe_url, exc_info=True)
-        _append_to_script_log(event_name, "http", safe_url, stderr=str(exc), status="error")
+        _append_to_script_log(
+            event_name,
+            "http",
+            safe_url,
+            stderr=str(exc),
+            status="error",
+            log_path=log_path,
+        )
         return
 
     resp = holder.get("resp")
@@ -1409,6 +1436,7 @@ def _dispatch_http_request(
         safe_url,
         stdout=f"HTTP {resp.status_code}",
         status="ok" if resp.ok else "error",
+        log_path=log_path,
     )
     with contextlib.suppress(Exception):
         resp.close()
@@ -1434,6 +1462,8 @@ def _execute_http(
     - Configurable timeout (default 10s)
     - Header values support ``$ENV_VAR`` expansion (credential vars blocked)
     """
+    # Bind before preparation: the SSRF guard can block in DNS resolution.
+    log_path = _bind_scripts_log_path()
     prepared = _prepare_http(script, event, logger=logger, verbose=verbose)
     if prepared is None:
         return None
@@ -1443,6 +1473,7 @@ def _execute_http(
     thread = threading.Thread(
         target=_dispatch_http_request,
         args=(url, payload, request_headers, timeout, event_name, safe_url),
+        kwargs={"log_path": log_path},
         daemon=True,
     )
     thread.start()
@@ -1476,6 +1507,7 @@ def dispatch_http_batch(
     work: queue.Queue[ScriptEntry] = queue.Queue()
     for script in scripts:
         work.put(script)
+    log_path = _bind_scripts_log_path()
 
     def _worker() -> None:
         while True:
@@ -1487,7 +1519,9 @@ def dispatch_http_batch(
                 prepared = _prepare_http(script, event, logger=logger, verbose=verbose)
                 if prepared is not None:
                     url, payload, headers, timeout, event_name, safe_url, _host = prepared
-                    _dispatch_http_request(url, payload, headers, timeout, event_name, safe_url)
+                    _dispatch_http_request(
+                        url, payload, headers, timeout, event_name, safe_url, log_path=log_path
+                    )
             except Exception:
                 _logger.debug("HTTP dispatch worker failed", exc_info=True)
             finally:

@@ -667,6 +667,14 @@ release qualification or change required checks.
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
 
+### Tier 1 and Tier 2 on every push to main
+
+`main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
+Lifecycle Smoke shard) and the full integration suite (`ci-integration.yml`,
+every shard) on each push to `main`. Its `main-push-gate` job fails the run
+when any tier job fails, so a red `main` shows on the commit. It is
+not a required check and never saves caches to the `main` scope.
+
 ### Merge-train proof
 
 `merge-train.yml` proves one exact merge result before it lands. Push the
@@ -714,6 +722,18 @@ the merges API, publishes the prefix refs, and logs `would-land` events:
 python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
 python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
 ```
+
+Landing is off by default. `--land` (`scripts/merge_queue/landing.py`) also
+admin-merges proven trains in launch order with
+`gh pr merge --merge --admin --match-head-commit`. It does so only when main's
+tree is the tree the member was proven on, and the merge commit must carry the
+proven tree. Any drift, or a merge to main that the runner did not make, HALTs
+landing and records the reason in `landing.json`; trains keep testing. Two
+failed admin probes in a row pause landing until elevation returns.
+Before merging, `closure.py` requires the issues GitHub will close
+(`closingIssuesReferences` plus closing keywords in commit messages) to equal the
+ticket's `fixes`; a mismatch ejects the train unmerged. After the merge it closes
+any fix GitHub left open and retargets stacked PRs.
 
 ### Windows unit hang diagnostics
 

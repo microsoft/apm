@@ -63,10 +63,12 @@ from tests.lifecycle.security.gate_paths import Step, paths
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice, slices
 from tests.lifecycle.snapshot import LifecycleSurfaceRoots
 from tests.lifecycle.world import use_policy
+from tests.lifecycle.world.packages import _SESSION_HOOK, INERT_COMMAND
 from tests.lifecycle.world.services import DENIED_PACKAGE, ORG, policy_org
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
+from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
     pytest.mark.integration,
@@ -834,3 +836,58 @@ def test_user_scope_deny_by_identity_retires_hook_and_mcp(lifecycle_world) -> No
         assert result.returncode == 0, result.stdout + result.stderr
     assert not (world.home / _USER_HOOK).exists(), "deny -g by identity must retire the hook"
     assert _MCP_SERVER not in _user_mcp_servers(world), "deny -g must retire the MCP server"
+
+
+# -- #4658: one approved package with a hook and an LSP server ---------------------
+# The trusted-LSP graph check (install/lsp/integration.py) asked the approval owner
+# about a package declaring LSP servers. Pinned-hook admission then read the package's
+# install path from a stand-in that had none, so the install crashed after approval.
+
+
+def _hook_and_lsp_package(world, name: str) -> Path:
+    factory = LocalPackageFactory(world.root / "hook-lsp-packages")
+    package = factory.create(
+        name,
+        version="1.0.0",
+        lsp_dependencies=[
+            {
+                "name": f"{name}-server",
+                "command": INERT_COMMAND,
+                "args": ["--stdio"],
+                "extensionToLanguage": {".fixture": "fixture"},
+            }
+        ],
+    )
+    factory.add_hook(package, "session", _SESSION_HOOK)
+    return package.root
+
+
+def test_approved_package_with_hook_and_lsp_installs_both(lifecycle_world) -> None:
+    """PROMISE P-INV-I7: after `apm approve`, `apm install` deploys the approved hook and
+    LSP server of one package (#4658), and repeats as a byte no-op (I2)."""
+    world = lifecycle_world
+    name = "p-hook-lsp"
+    root = _hook_and_lsp_package(world, name)
+    hook = world.project / ".github" / "hooks" / f"{name}-session.json"
+    lsp = world.project / ".github" / "lsp.json"
+    parked = driver.run(world, ("install", str(root)))
+    assert parked.returncode == 0, parked.stdout + parked.stderr
+    assert not hook.exists(), "an unapproved hook must park"
+    assert not lsp.is_file() or f'"{name}-server"' not in lsp.read_text(encoding="utf-8")
+    approved = driver.run(world, ("approve", str(root)))
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    installed = driver.run(world, ("install",))
+    output = installed.stdout + installed.stderr
+    assert installed.returncode == 0, output
+    assert "Traceback" not in output and "has no attribute" not in output, output
+    assert hook.is_file(), f"the approved hook must deploy\n{output}"
+    assert f'"{name}-server"' in lsp.read_text(encoding="utf-8"), output
+    lock = LockFile.from_yaml((world.project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    rows = [d for d in lock.get_package_dependencies() if name in (d.repo_url or "")]
+    assert len(rows) == 1, [d.repo_url for d in lock.get_package_dependencies()]
+    deployed = set(rows[0].deployed_files or ())
+    assert f".github/hooks/{name}-session.json" in deployed, sorted(deployed)
+    before = {p: p.read_bytes() for p in (hook, lsp, world.project / "apm.lock.yaml")}
+    again = driver.run(world, ("install",))
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert {p: p.read_bytes() for p in before} == before, "a converged install changed bytes"

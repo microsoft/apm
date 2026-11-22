@@ -43,6 +43,8 @@ pytestmark = [
 ]
 
 _DELTA_SKILL = ".claude/skills/delta-skill-0/SKILL.md"
+_NEW_TARGET = "opencode"
+_NEW_ROOT = ".opencode"
 _TARGET_ROOTS = (".github", ".claude", ".cursor", ".agents")
 
 
@@ -233,6 +235,66 @@ def test_a_failure_after_deploy_leaves_every_byte_as_it_was(
     assert retry.returncode == 0, evidence(retry)
     assert (world.project / _DELTA_SKILL).is_file(), evidence(retry)
     world.assert_converges()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [("update", "--yes"), ("deps", "update")],
+    ids=["update", "deps-update"],
+)
+def test_a_failed_lockfile_write_after_an_update_restores_deploys_and_the_lock(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    """#4664: update entry points keep the deploy journal until their lockfile commits."""
+    world, lock, before = _declare_delta_and_a_new_target(tmp_path, apm_binary_path)
+
+    failed = world.runner.run(
+        command,
+        cwd=world.project,
+        env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
+    )
+
+    output = failed.stdout + failed.stderr
+    assert failed.returncode != 0, evidence(failed)
+    assert "apm.lock.yaml" in output, evidence(failed)
+    _assert_update_left_nothing(world, before, lock, output)
+
+
+def _declare_delta_and_a_new_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> tuple[FaultWorld, bytes | None, list[ArtifactSnapshot]]:
+    """Declare a new package and a new target whose root the update must create."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    manifest = world.project / "apm.yml"
+    text = manifest.read_text(encoding="ascii").replace("cursor]", f"cursor, {_NEW_TARGET}]")
+    manifest.write_text(text + f"    - {delta}\n", encoding="ascii")
+    assert not (world.project / _NEW_ROOT).exists()
+    return world, world.lockfile_bytes(), _target_state(world)
+
+
+def _assert_update_left_nothing(
+    world: FaultWorld, before: list[ArtifactSnapshot], lock: bytes | None, output: str
+) -> None:
+    _assert_pre_command_state(world, before, lock, output)
+    assert not (world.project / _DELTA_SKILL).exists(), output
+    assert not (world.project / _NEW_ROOT).exists(), output
+    world.assert_converges()
+    assert (world.project / _DELTA_SKILL).is_file()
+    assert (world.project / _NEW_ROOT).is_dir()
+
+
+@pytest.mark.parametrize("interrupt", ["SIGINT", "SIGTERM"])
+def test_an_update_interrupted_at_the_commit_point_restores_deploys_and_the_lock(
+    tmp_path: Path, apm_binary_path: Path, interrupt: str
+) -> None:
+    """#4664: the restore also runs when the update is interrupted before its lockfile commits."""
+    world, lock, before = _declare_delta_and_a_new_target(tmp_path, apm_binary_path)
+    process = _held_at_commit(world, apm_binary_path, tmp_path / "held", "update", "--yes")
+    os.killpg(process.pid, getattr(signal, interrupt))
+    output, _ = process.communicate(timeout=120)
+    assert process.returncode != 0, output
+    _assert_update_left_nothing(world, before, lock, output)
 
 
 @pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])

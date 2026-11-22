@@ -1426,7 +1426,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
+  content_hash: sha256:1ee84491c66dd741f452a2fb14bebfc52d38a4879c27b81da19b449c93d317a3
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/scripts/verify-lint-mirror.sh
@@ -3190,7 +3190,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:2dc80fef2339b2b35498c78ee393f6090ff9cae5852d7ebaf71a0f5b6d51621b
+  content_hash: sha256:1a92bb37801bf2fc621354595c390a08874a3734b2ad78eac963cd11c82124da
 - kind: project-relative
   target: copilot
   value: .github/instructions/cli.instructions.md
@@ -3490,7 +3490,7 @@ local_deployed_file_hashes:
   .agents/skills/cut-release/evals/evals.json: sha256:bfe097eed3f636215556e3ed3068a0dec684ef06c8eb8349f1e4daf8aac4753d
   .agents/skills/cut-release/scripts/bump-version.sh: sha256:bc382b5024f415998a3d66689a36596f0458e0a3c79370e96705477a5672a1d4
   .agents/skills/cut-release/scripts/changelog_fragments.py: sha256:d6310a5a2f196e731e0b29df6e95b95be999e2b1ad4a3165694bb22d28e378c8
-  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:5b0e9ba67540127b2da16ec1a7fd5f81d630322af8804fa693c75a5bcf7e3c80
+  .agents/skills/cut-release/scripts/list-changes-since-tag.sh: sha256:1ee84491c66dd741f452a2fb14bebfc52d38a4879c27b81da19b449c93d317a3
   .agents/skills/cut-release/scripts/verify-lint-mirror.sh: sha256:ab3f4a9ebc8f2b8c357c4cf81e0ada3be093cfc94c06703805d56c87f6fd7ecc
   .agents/skills/devx-ux/SKILL.md: sha256:e66de2f844eebbfccf641b1a6fdf0ff9bb8c476364bda87266ce47f7ebfa7e5a
   .agents/skills/docs-corpus-audit/SKILL.md: sha256:d20498ee8c1a38553303e23fc2f184c59fab624d1f701839f00dc7b291db3afb
@@ -3733,7 +3733,7 @@ local_deployed_file_hashes:
   .github/agents/test-coverage-expert.agent.md: sha256:6754110c0c19ad9e787febd92a6e326670b90bf21e39cf4f017002c2638616e0
   .github/instructions/architecture.instructions.md: sha256:71c0da596267f223b6a536234c3ac8e8c565fa7f289bbf23d0fe568bd9681859
   .github/instructions/changelog.instructions.md: sha256:36e968e8cd087501f8933a649ee3c4ae8c1116620c35572bdc61866285f54aac
-  .github/instructions/cicd.instructions.md: sha256:2dc80fef2339b2b35498c78ee393f6090ff9cae5852d7ebaf71a0f5b6d51621b
+  .github/instructions/cicd.instructions.md: sha256:1a92bb37801bf2fc621354595c390a08874a3734b2ad78eac963cd11c82124da
   .github/instructions/cli.instructions.md: sha256:8e39e8d5047ce88575cb02f87c2bcede584dfef258bd86f7466c7badf136541a
   .github/instructions/doc-sync.instructions.md: sha256:bb3816254f8df6bffc6faacd556871f36903e9d7f348982f1e2de0339384c696
   .github/instructions/encoding.instructions.md: sha256:93db7377dc896f6efecf2c5d8c5d89255a555562f468d034d64c42edd5cf46d5

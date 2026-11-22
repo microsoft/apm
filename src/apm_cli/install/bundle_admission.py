@@ -4,7 +4,8 @@
 file is written: org policy is discovered and enforced through the shared
 install preflight (outcome routing, dependency allow/deny, MCP and target
 checks), then the bundle's integrity is checked under the policy's
-``security.integrity.require_hashes`` setting.
+``security.integrity.require_hashes`` setting. A local bundle and the
+packages it records meet ``dependencies.deny`` (:func:`bundle_policy_subjects`).
 
 Each bundle format brings its own integrity check; the policy gate and the
 ``require_hashes`` decision stay here.
@@ -40,8 +41,12 @@ def admit_bundle(
     dry_run: bool,
     fetch_result: Any = None,
     registries: dict[str, str] | None = None,
+    bundled_deps: Iterable[DependencyReference] = (),
 ) -> ApmPolicy | None:
     """Admit a bundle for deployment, or raise before anything is written.
+
+    *bundled_deps* (see :func:`bundle_policy_subjects`) meet the org
+    ``dependencies.deny`` list as a declared dependency would.
 
     Raises :class:`~apm_cli.install.errors.PolicyViolationError` when org
     policy blocks the bundle or cannot be verified under
@@ -62,10 +67,62 @@ def admit_bundle(
         effective_target_source=target_decision.source,
         fetch_result=fetch_result,
         registries=registries,
+        bundled_deps=list(bundled_deps),
     )
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
     return policy
+
+
+def bundle_policy_subjects(bundle_info: Any) -> list[DependencyReference]:
+    """The package identities a local bundle presents to org dependency policy.
+
+    The bundle itself, named by its ``plugin.json`` id and name as a local
+    package (``_local/<name>``, as a local-path dependency is keyed), plus
+    every package its embedded ``apm.lock.yaml`` records. A bundle without
+    one presents its names only; one it cannot read is refused with
+    ``ValueError``, never judged as recording nothing.
+    """
+    from ..models.dependency.reference import DependencyReference
+
+    names = {
+        str(value).strip()
+        for value in (bundle_info.package_id, bundle_info.plugin_json.get("name"))
+        if value and str(value).strip()
+    }
+    subjects = [
+        DependencyReference(repo_url=f"_local/{name}", is_local=True, source="local")
+        for name in sorted(names)
+    ]
+    root = bundle_info.source_dir
+    try:
+        locked = locked_package_refs(root / "apm.lock.yaml" if root is not None else None)
+    except ValueError as exc:
+        raise ValueError(
+            f"Bundle apm.lock.yaml cannot be read ({exc.__cause__ or exc}), so org policy "
+            "cannot check the packages it records. Repack the bundle with 'apm pack' "
+            "and retry."
+        ) from exc
+    return subjects + locked
+
+
+def locked_package_refs(path: Path | None) -> list[DependencyReference]:
+    """Every package the lockfile at *path* records; none when it is absent.
+
+    Read without side effects. A lockfile that exists but cannot be read
+    raises ``ValueError``: org policy cannot judge packages it cannot list.
+    """
+    from ..deps.lockfile import LockFile
+
+    if path is None or not (path.exists() or path.is_symlink()):
+        return []
+    try:
+        lockfile = LockFile.from_yaml(path.read_text(encoding="utf-8"))
+        return [dep.to_dependency_ref() for dep in lockfile.get_package_dependencies()]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(
+            f"Cannot read {path.name} to check its packages against org policy: {exc}"
+        ) from exc
 
 
 def apm_bundle_admission(
