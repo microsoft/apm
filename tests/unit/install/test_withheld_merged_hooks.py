@@ -250,9 +250,12 @@ def test_a_user_config_root_outside_home_is_scanned(tmp_path: Path) -> None:
     for path in external.rglob("apm-hooks.json"):
         path.unlink()
 
+    before = (external / "settings.json").read_bytes()
+
     found = withheld_merged_hook_entries(info, home, [claude], user_scope=True)
 
     assert found == [f"{(external / 'settings.json').as_posix()}: SessionStart"]
+    assert (external / "settings.json").read_bytes() == before
 
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions")
