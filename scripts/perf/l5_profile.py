@@ -25,6 +25,13 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
     print("== OUTPUT rc", plain.returncode, "\n", plain.stdout[-3000:], plain.stderr[-3000:])
     full = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0"), capture_output=True, text=True)
     print("== FULL OUTPUT rc", full.returncode, "\n" + full.stdout + "\n--- stderr\n" + full.stderr)
+    import yaml as _yaml
+    _lock = _yaml.safe_load((root / "apm.lock.yaml").read_text())
+    print("== LOCK ORDER")
+    for _d in _lock.get("dependencies", []):
+        print(_d.get("repo_url"), "depth", _d.get("depth"), "by", _d.get("resolved_by"), "ref", _d.get("resolved_ref"), _d.get("resolved_commit", "")[:8])
+    print("== MANIFEST\n" + (root / "apm.yml").read_text())
+    print("== MCP lock", _lock.get("mcp_servers"), list((_lock.get("mcp_configs") or {}).keys()))
     trace = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="trace"), capture_output=True, text=True)
     print("== TRACE\n" + trace.stderr[-2000:])
     log = work / "argv.log"
