@@ -102,7 +102,7 @@ def check_noop_replay_owner(provider: FactsProvider) -> tuple[Violation, ...]:
         _banned(
             provider,
             rule_id=rule_id,
-            paths=others,
+            paths=_tree_python_paths(provider, _SOURCE_TREE, excluded=(_RECORDER,)),
             pattern=_AUDIT_HOOK,
             message="Only install/noop_recorder.py installs a process-wide audit hook",
             configured=False,

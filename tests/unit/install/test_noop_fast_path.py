@@ -210,12 +210,17 @@ def test_an_unreadable_stamp_runs_the_full_install(project) -> None:
 
 
 @_POSIX_ONLY
-def test_a_malformed_stamp_runs_the_full_install(project) -> None:
+@pytest.mark.parametrize(
+    "output",
+    [[[1, 7]], [], [[1, "[*] Installing\n"]]],
+    ids=["mistyped-row", "no-output", "no-summary"],
+)
+def test_a_malformed_stamp_runs_the_full_install(project, output) -> None:
     run = _Install(project)
     _converge(run)
     for stamp in _stamps():
         data = json.loads(stamp.read_text(encoding="utf-8"))
-        data["output"] = [[1, 7]]
+        data["output"] = output
         stamp.write_text(json.dumps(data), encoding="utf-8")
     _install(run)
     assert run.calls == 3
@@ -405,3 +410,33 @@ def test_a_run_that_lists_directories_is_recorded_and_replayed(project) -> None:
     (project / "new-entry.txt").write_text("x", encoding="utf-8")
     _install(run)
     assert run.calls == 3, "a new entry in a listed directory runs the full install"
+
+
+@_POSIX_ONLY
+def test_a_failed_pending_fingerprint_still_runs_the_install(project, monkeypatch) -> None:
+    run = _Install(project)
+    _install(run)
+
+    def unreadable_tree(*_args, **_kwargs):
+        raise PermissionError("source tree unreadable")
+
+    monkeypatch.setattr(os, "walk", unreadable_tree)
+    _install(run)
+    assert run.calls == 2, "the optimization never fails an install"
+
+
+@_POSIX_ONLY
+def test_a_local_source_under_an_unrecorded_root_records_no_stamp(project, capsys) -> None:
+    import sysconfig
+
+    hidden = Path(sysconfig.get_paths()["purelib"]) / "apm-local-source"
+    (project / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\ndependencies:\n"
+        f"- repo_url: _local/hidden\n  source: local\n  local_path: {hidden}\n",
+        encoding="utf-8",
+    )
+    run = _Install(project)
+    _converge(run)
+    _install(run)
+    assert run.calls == 3, "a local source whose reads are unrecorded is never replayed"
+    assert "local source under an unrecorded root" in capsys.readouterr().err

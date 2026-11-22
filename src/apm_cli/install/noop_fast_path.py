@@ -59,6 +59,7 @@ from apm_cli.install.noop_recorder import (
     _probe,
     _Recording,
     _resolution,
+    _under,
 )
 
 _SCHEMA = 1
@@ -211,17 +212,24 @@ def deployed_hashes_intact(project_root: Path) -> bool:
     return not mismatches and not unresolved
 
 
+def _unrecordable(self: _Recording, project_root: Path) -> str | None:
+    """Why this run's no-op must not be stamped, or ``None`` when it may be."""
+    text = "".join(chunk for _, chunk in self.output)
+    if len(_SUMMARY.findall(text)) != 1:
+        return f"summary seen {len(_SUMMARY.findall(text))} times"
+    if not self.inputs_held():
+        return f"input changed during the run: {self.changed_input()}"
+    return _hidden_local_source(project_root, self.recorder.excluded_roots)
+
+
 def _save_stamp(self: _Recording, project_root: Path) -> bool:
     """Persist the stamp when the recorded run qualifies; return whether it did."""
     recorder = self.recorder
     if recorder.violations:
         return False
-    text = "".join(chunk for _, chunk in self.output)
-    if len(_SUMMARY.findall(text)) != 1:
-        recorder.violations.append(f"summary seen {len(_SUMMARY.findall(text))} times")
-        return False
-    if not self.inputs_held():
-        recorder.violations.append(f"input changed during the run: {self.changed_input()}")
+    refusal = _unrecordable(self, project_root)
+    if refusal:
+        recorder.violations.append(refusal)
         return False
     if self.policy is None:
         # This run was a no-op but carried no live policy view: mark the
@@ -254,6 +262,28 @@ def _save_stamp(self: _Recording, project_root: Path) -> bool:
         recorder.violations.append(f"input changed while stamping: {self.changed_input()}")
         return False
     return _write_stamp(self.stamp, stamp)
+
+
+def _hidden_local_source(project_root: Path, excluded_roots: tuple[str, ...]) -> str | None:
+    """Why a local dependency's reads may be unrecorded, or ``None``.
+
+    Reads under interpreter roots are not recorded, so a local source there
+    could change without invalidating the stamp; any doubt refuses it.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.path_anchoring import resolve_local_dep_dirs
+
+    try:
+        lockfile = LockFile.read(project_root / "apm.lock.yaml")
+        if lockfile is None:
+            return "lockfile unreadable"
+        for source in resolve_local_dep_dirs(lockfile, project_root).values():
+            for path in {os.path.abspath(source), os.path.realpath(source)}:
+                if _under(path, excluded_roots):
+                    return f"local source under an unrecorded root: {path}"[:200]
+    except Exception as error:
+        return f"local sources unresolved: {type(error).__name__}"
+    return None
 
 
 def _write_stamp(path: Path, stamp: dict[str, Any]) -> bool:
@@ -346,6 +376,8 @@ def _load(path: Path) -> dict[str, Any] | None:
         for row in output
     ):
         return None
+    if sum(chunk.count(_SUMMARY_PLACEHOLDER) for _, chunk in output) != 1:
+        return None  # a replay must print the no-op summary exactly once
     return data
 
 
@@ -373,8 +405,11 @@ def run_with_fast_path(
     elif stamp.get("pending"):
         # The previous run was a no-op: record this one with the live policy view.
         reason = "pending"
-        policy = policy_fingerprint(root)
-        code = _code_identity()
+        try:
+            policy = policy_fingerprint(root)
+            code = _code_identity()
+        except Exception:
+            return run()  # the optimization never fails an install
     else:
         try:
             reason = _stamp_mismatch(stamp, key, lambda: policy_fingerprint(root), root)
