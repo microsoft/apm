@@ -249,8 +249,14 @@ def _check_dependency_allowlist(
 def _check_dependency_denylist(
     deps: list[DependencyReference],
     policy: DependencyPolicy,
+    bundled: Sequence[DependencyReference] = (),
 ) -> CheckResult:
-    """Check 2: no dependency matches policy deny list."""
+    """Check 2: no dependency matches policy deny list.
+
+    *bundled* are packages a local bundle or a pack ships without an apm.yml
+    entry in this project; they meet the deny list only, and their
+    violations suggest no apm.yml edit. One declared in *deps* is judged once.
+    """
     from .matcher import check_dependency_allowed, dependency_policy_subject
 
     if not policy.effective_deny:
@@ -261,10 +267,12 @@ def _check_dependency_denylist(
         )
 
     subjects: list[PolicySubject] = []
-    for dep in deps:
+    keys = {dep.get_unique_key() for dep in deps}
+    extra = [(dep, None) for dep in bundled if dep.get_unique_key() not in keys]
+    for dep, remedy in (*((dep, PolicyRemedy.REMOVE) for dep in deps), *extra):
         allowed, reason = check_dependency_allowed(dep, policy)
         if not allowed and "denied by pattern" in reason:
-            subjects.append(PolicySubject(dependency_policy_subject(dep), reason))
+            subjects.append(PolicySubject(dependency_policy_subject(dep), reason, remedy))
 
     if not subjects:
         return CheckResult(
@@ -1296,6 +1304,7 @@ def _check_registry_source(
     deps: list[DependencyReference],
     policy: RegistrySourcePolicy,
     registries_map: dict[str, str] | None,
+    lockfile=None,
 ) -> CheckResult:
     """Check registry source policy (require / allow_non_registry).
 
@@ -1324,6 +1333,15 @@ def _check_registry_source(
         key = dep.get_canonical_dependency_string()
         is_registry = getattr(dep, "source", None) == "registry"
         registry_name = getattr(dep, "registry_name", None)
+        if is_registry and registry_name is None and lockfile is not None:
+            # A replayed row (for example a registry-routed catalog entry,
+            # #4009) names no registry; judge it by the configured registry
+            # that owns its locked URL, as its download does.
+            from ..deps.registry.auth import dependency_ref_with_registry_name_from_lockfile
+
+            registry_name = dependency_ref_with_registry_name_from_lockfile(
+                dep, registries_map or {}, existing_lockfile=lockfile
+            ).registry_name
 
         reason = None
         if not policy.allow_non_registry and not is_registry:
@@ -1603,6 +1621,24 @@ def _check_dependency_content_hashes(
 # -- Aggregate runners ---------------------------------------------
 
 
+def run_dependency_deny_check(
+    deps: Iterable[DependencyReference],
+    policy: ApmPolicy,
+    bundled_deps: Iterable[DependencyReference] = (),
+) -> CIAuditResult:
+    """Judge *deps* and *bundled_deps* against ``dependencies.deny`` alone.
+
+    For a command that ships content rather than installing it (``apm pack``):
+    allow, require and pin rules judge what a project installs, not what it
+    may hand on.
+    """
+    result = CIAuditResult()
+    result.checks.append(
+        _check_dependency_denylist(list(deps), policy.dependencies, list(bundled_deps))
+    )
+    return result
+
+
 def run_dependency_policy_checks(  # noqa: PLR0913
     deps_to_install,
     *,
@@ -1621,6 +1657,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     declared_refs: Mapping[str, Sequence[DependencyReference]] | None = None,
     installing: bool = False,
     marketplace_origins: MarketplaceOrigins | None = None,
+    bundled_deps: Iterable[DependencyReference] = (),
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -1697,6 +1734,11 @@ def run_dependency_policy_checks(  # noqa: PLR0913
         origins of marketplace-resolved dependencies (lock rows and fresh
         resolutions), checked against ``marketplace.allow`` when the policy
         sets it, so a lock cannot bypass it.
+    bundled_deps:
+        Packages a local bundle or a pack ships without an apm.yml entry in
+        this project (the bundle itself and the packages it carries). They
+        meet ``dependencies.deny`` only: the allow list, require and pin
+        checks judge the project's own declarations.
 
     Returns
     -------
@@ -1729,7 +1771,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     # -- Dependency checks (1-6) -----------------------------------
     if _run(_check_dependency_allowlist(source_list, policy.dependencies)):
         return result
-    if _run(_check_dependency_denylist(source_list, policy.dependencies)):
+    if _run(_check_dependency_denylist(source_list, policy.dependencies, list(bundled_deps))):
         return result
     dep_names = None
     if policy.dependencies.effective_require or (
@@ -1763,7 +1805,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     # Collect all remaining checks into a single loop so the function
     # stays within the max-returns threshold.
     remaining_checks: list[CheckResult] = [
-        _check_registry_source(deps_list, policy.registry_source, registries),
+        _check_registry_source(deps_list, policy.registry_source, registries, lockfile),
         # Pinned-constraint: property check on declared refs. Cheap
         # (O(N) string classification, no I/O) so it always runs.
         # When direct_dep_keys is supplied, restrict to direct deps -- a

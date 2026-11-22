@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.service import FrozenDisposition
+    from apm_cli.models.results import InstallResult
 
 
 class ServiceCommandContext(Protocol):
@@ -176,6 +178,12 @@ def run_service_integrations(  # noqa: PLR0913
             mcp_targets=mcp_targets or [],
             lsp_target_servers={
                 target: LSPIntegrator.expressible_server_names(prepared_lsp.dependencies, target)
+                - LSPIntegrator.matching_entry_names(
+                    prepared_lsp.dependencies,
+                    target,
+                    project_root=ctx.project_root,
+                    user_scope=ctx.scope is InstallScope.USER,
+                )
                 for target in prepared_lsp.target_runtimes or []
             },
             current_mcp=prepared_mcp.current_view,
@@ -196,8 +204,10 @@ def run_service_integrations(  # noqa: PLR0913
                 if getattr(dep, "native_runtimes", None)
             },
         )
+    from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs
 
+    lock_before_mcp = staged_lockfile_text(lock_path)
     with frozen_unrecorded_mcp_pairs(frozen_unrecorded):
         mcp_count, mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
@@ -257,5 +267,64 @@ def run_service_integrations(  # noqa: PLR0913
         force=ctx.force,
         no_policy=ctx.no_policy,
         prepared=prepared_lsp,
+        # MCP writes are recorded only by this command's lockfile (#4697).
+        refuse_unwritten_conflict=staged_lockfile_text(lock_path) == lock_before_mcp,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
+
+
+class ServiceReconciliation:
+    """One install's MCP/LSP reconciliation, rendered as the install reports it.
+
+    ``apm install`` hands it to the package pipeline, which calls it with the
+    pre-commit result before native Claude registration commits the lockfile,
+    so the install writes the lockfile once (#4329). When no pipeline ran it,
+    the command calls it with the pipeline's result, or ``None``.
+    """
+
+    def __init__(
+        self,
+        ctx: Any,
+        call_options: Callable[[InstallResult | None], dict[str, Any]],
+        **options: Any,
+    ) -> None:
+        self._ctx = ctx
+        # Options read from the pipeline's result at call time.
+        self._call_options = call_options
+        self._options = options
+        self.result: ServiceIntegrationResult | None = None
+        self.failure: Exception | None = None
+
+    def settle(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        """Return the reconciliation result, raising the failure the pipeline deferred."""
+        if self.failure is not None:
+            raise self.failure
+        return self.result or self(install_result)
+
+    def __call__(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        try:
+            self.result = self._reconcile(install_result)
+        except Exception as error:
+            self.failure = error
+            raise
+        return self.result
+
+    def _reconcile(self, install_result: InstallResult | None) -> ServiceIntegrationResult:
+        from apm_cli.install.commit_gate import refuse_blocked_mcp
+        from apm_cli.install.errors import InstallFailureAlreadyRendered, RequiredIntegrationError
+        from apm_cli.policy.install_preflight import PolicyBlockError
+
+        ctx = self._ctx
+        call_options = self._call_options(install_result)
+        if ctx.update:
+            from apm_cli.models.apm_package import clear_apm_yml_cache
+
+            clear_apm_yml_cache()
+        try:
+            return run_service_integrations(ctx, **call_options, **self._options)
+        except PolicyBlockError as exc:
+            refuse_blocked_mcp(ctx.logger, exc)
+        except RequiredIntegrationError as exc:
+            ctx.logger.error(str(exc))
+            ctx.logger.render_summary()
+            raise InstallFailureAlreadyRendered(str(exc)) from exc

@@ -8,7 +8,10 @@ import pytest
 
 from scripts.architecture_linter.runner import run_selected_rules
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.promise("P-LAW-transaction.failed_command_preserves_state"),
+]
 
 _ROOT = Path(__file__).resolve().parents[3]
 _RULE_ID = "install-deployment-lifecycle-serialization"

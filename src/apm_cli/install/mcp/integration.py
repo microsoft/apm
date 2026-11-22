@@ -275,18 +275,125 @@ def run_owned_mcp_integration(
     for name in retired:
         lockfile.mcp_configs.pop(name, None)
         lockfile.mcp_config_provenance.pop(name, None)
-    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | new_names)
-    lockfile.mcp_configs.update(_OwnedMCPIntegrator.get_server_configs(dependencies))
-    lockfile.mcp_config_provenance.update(dict.fromkeys(new_names, owner_token))
     DeploymentLedgerCodec.replace_mcp_target_servers(
         lockfile,
         {target: sorted(names) for target, names in managed_targets.items() if names},
         native_hashes=native_hashes,
     )
+    claimed = {name for names in managed_targets.values() for name in names}
+    recorded = _record_bundle_servers(
+        lockfile, dependencies, new_names & claimed, retired, owner_token
+    )
+    if conflict is None:
+        _report_unrecorded_bundle_servers(
+            logger,
+            owner,
+            dependencies,
+            new_names - recorded,
+            target_runtimes,
+            project_root=project_root,
+            user_scope=user_scope,
+        )
     lockfile.write(lock_path)
     if conflict is not None:
         raise conflict
     return count
+
+
+def _record_bundle_servers(
+    lockfile, dependencies: list, claimed: set[str], retired: set[str], owner_token: str
+) -> set[str]:
+    """Record the bundle servers this install claims on at least one runtime (#4634).
+
+    A local bundle is not in apm.yml, so the lock is its servers' only
+    declaration, and the MCP view keeps a ``bundle:`` claim only as a
+    deployment (``mcp_config_view._bundle_owned_baseline``). A server left to
+    an identical entry APM does not manage (equality never establishes
+    ownership) is therefore not recorded: ``audit --ci`` and
+    ``install --frozen`` would reject a provenance claim with no deployment.
+    """
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    lockfile.mcp_servers = sorted((set(lockfile.mcp_servers) - retired) | claimed)
+    configs = MCPIntegrator.get_server_configs(dependencies)
+    lockfile.mcp_configs.update({name: configs[name] for name in claimed if name in configs})
+    lockfile.mcp_config_provenance.update(dict.fromkeys(claimed, owner_token))
+    return claimed
+
+
+def _report_unrecorded_bundle_servers(
+    logger,
+    owner: str,
+    dependencies: list,
+    unrecorded: set[str],
+    target_runtimes: list[str],
+    *,
+    project_root: Path,
+    user_scope: bool,
+) -> None:
+    """Name each unrecorded bundle server left to an existing entry APM does not manage.
+
+    A server can also stay unclaimed because a runtime skipped it (for example
+    an unsupported transport); the integrator reports that itself, so only a
+    server whose entry is present in a selected runtime's config is named.
+    """
+    if logger is None or not unrecorded:
+        return
+    foreign = _unmanaged_entry_names(
+        unrecorded, dependencies, target_runtimes, project_root=project_root, user_scope=user_scope
+    )
+    for name in sorted(foreign):
+        logger.warning(
+            f"Skipping MCP server '{name}' from bundle {owner} -- an entry with that name "
+            "exists that APM does not manage. Remove the entry, then reinstall the bundle "
+            "to manage it.",
+            symbol="warning",
+        )
+
+
+def _unmanaged_entry_names(
+    names: set[str],
+    dependencies: list,
+    target_runtimes: list[str],
+    *,
+    project_root: Path,
+    user_scope: bool,
+) -> set[str]:
+    """The *names* a selected runtime's native MCP config already holds an entry for."""
+    from apm_cli.core.conflict_detector import MCPConflictDetector
+    from apm_cli.factory import ClientFactory
+    from apm_cli.install.mcp.ownership import _native_config_key
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
+
+    configs = MCPIntegrator.get_server_configs(dependencies)
+    found: set[str] = set()
+    for runtime in target_runtimes:
+        wanted = names & mcp_servers_for_runtime(dependencies, runtime)
+        if not wanted:
+            continue
+        client = ClientFactory.create_client(
+            runtime, project_root=project_root, user_scope=user_scope
+        )
+        existing = MCPConflictDetector(client).get_existing_server_configs()
+        found |= {
+            name
+            for name in wanted
+            if _native_config_key(client, name, stored_config=configs.get(name)) in existing
+        }
+    return found
+
+
+def _declared_manifest_runtimes(apm_package, *, user_scope: bool) -> builtins.set | None:
+    """MCP runtimes the manifest's own ``targets:`` select, or None when it declares none."""
+    from apm_cli.core.target_detection import MANIFEST_TARGET_SOURCE, EffectiveTargetDecision
+    from apm_cli.models.apm_package import package_target_selection
+
+    selection = package_target_selection(apm_package)
+    if not selection:
+        return None
+    decision = EffectiveTargetDecision(selection, MANIFEST_TARGET_SOURCE)
+    return builtins.set(decision.runtime_targets_for_scope(user_scope=user_scope) or ())
 
 
 def _legacy_cleanup_runtimes(
@@ -675,6 +782,14 @@ def run_mcp_integration(  # noqa: PLR0913
             if runtime is None and target_decision is not None and target_decision.from_manifest
             else None
         )
+        # A run narrowed by --target leaves every other runtime's entries alone
+        # while they stay declared and admitted there and the manifest's own
+        # targets: still select that runtime (#4562).
+        flag_narrowed = (
+            runtime is None and target_decision is not None and target_decision.from_flag
+        )
+        if flag_narrowed:
+            manifest_runtimes = _declared_manifest_runtimes(apm_package, user_scope=user_scope)
         retired_by_target: builtins.dict[str, builtins.set] = {}
         retained_names: builtins.set = builtins.set()
         for owned_target, owned in sorted(old_mcp_target_servers.items()):
@@ -689,9 +804,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 continue
             # A runtime this run does not select keeps the servers that name it,
             # and the servers a local bundle wired there (#3955).
-            kept = builtins.set(owned) & (
-                mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned
-            )
+            admitted = mcp_servers_for_runtime(mcp_deps, owned_target, named_only=not flag_narrowed)
+            kept = builtins.set(owned) & (admitted | bundle_owned)
             if manifest_runtimes is not None and owned_target not in manifest_runtimes:
                 kept = builtins.set()
             if kept:

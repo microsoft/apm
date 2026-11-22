@@ -375,9 +375,10 @@ def test_managed_package_root_override_and_target_narrowing(
     before = tuple(scenario.path(target).read_bytes() for target in ("claude", "codex"))
     _success(scenario.install("--trust-transitive-mcp"))
     assert tuple(scenario.path(target).read_bytes() for target in ("claude", "codex")) == before
+    # A narrowed --target leaves claude's still-declared entry alone (#4562).
     _success(scenario.install("--trust-transitive-mcp", targets="codex"))
-    assert scenario.servers("claude") == {}
-    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+    assert tuple(scenario.path(target).read_bytes() for target in ("claude", "codex")) == before
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])

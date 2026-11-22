@@ -28,6 +28,8 @@ from tests.workflow_contracts import (
     assert_exact_command,
     assert_unconditional,
     effective_env,
+    expand_local_actions,
+    load_action_steps,
     load_workflow,
     run_bash,
     shell_commands,
@@ -40,6 +42,12 @@ pytest_plugins = ["pytester"]
 
 RATCHET_TEST_SCOPE = "repository"
 
+# setup-uv saves a cache only on pull_request ('auto' keeps merge_group
+# restore-only); push, dispatch and workflow_call runs never save (S28).
+UV_SAVE_ON_PR_ONLY = (
+    "${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') "
+    "&& 'auto' || 'false' }}"
+)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RATCHET_JOB = "test-architecture"
 RATCHET_CHECK = "Test Architecture Ratchets"
@@ -197,7 +205,7 @@ def _workflow_uv_environment_commands(
             if not isinstance(job, dict):
                 continue
             frozen_sync_seen = False
-            for step in _run_steps(job):
+            for step in _run_steps(expand_local_actions(job, root)):
                 step_name = str(step.get("name", "<unnamed>"))
                 run = step.get("run")
                 if not isinstance(run, str):
@@ -326,7 +334,7 @@ def _assert_ratchet_execution(ci: WorkflowNode, job_id: str) -> None:
     assert steps[1]["with"] == {"python-version": "${{ env.PYTHON_VERSION }}"}
     assert ci["env"]["PYTHON_VERSION"] == "3.12"
     assert steps[2]["uses"].startswith("astral-sh/setup-uv@")
-    assert steps[2]["with"] == {"enable-cache": True}
+    assert steps[2]["with"] == {"enable-cache": True, "save-cache": UV_SAVE_ON_PR_ONLY}
     assert list(shell_commands(steps[3])) == [["uv", "sync", "--frozen", "--extra", "dev"]]
     assert all(step.get("env", {}) == {} for step in steps[:4])
     prefix = ["uv", "run", "--frozen", "--extra", "dev", "pytest", "-p", "no:cacheprovider", "-q"]
@@ -417,8 +425,10 @@ def _assert_topology(root: Path, inventory: dict[str, str]) -> None:
     assert ratchet_callers == [
         ("ci.yml", RATCHET_CONTRACT_JOB),
         (MAIN_PUSH_RATCHET_WORKFLOW, RATCHET_CONTRACT_JOB),
+        (MERGE_TRAIN_WORKFLOW, TRAIN_GUARD_JOB),
     ]
     _assert_main_push_ratchets(load_workflow(workflows / MAIN_PUSH_RATCHET_WORKFLOW), ci)
+    _assert_train_guard_ratchets(load_workflow(workflows / MERGE_TRAIN_WORKFLOW), ci, root)
 
 
 def _assert_main_push_ratchets(main_push: WorkflowNode, ci: WorkflowNode) -> None:
@@ -2252,7 +2262,10 @@ def test_shard_file_list_drift_fails(drift: str) -> None:
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 MERGE_GATE_WAIT_STEP = "Wait for all required checks"
 MERGE_GROUP_EVENT = "merge_group"
-MERGE_TIME_TRIGGERS = frozenset({MERGE_GROUP_EVENT, "workflow_dispatch", "pull_request"})
+# workflow_call: merge-train.yml runs Tier 2 on write-access queue/* refs (#4574).
+MERGE_TIME_TRIGGERS = frozenset(
+    {MERGE_GROUP_EVENT, "workflow_dispatch", "pull_request", "workflow_call"}
+)
 MERGE_TIME_PLAN_JOB = "integration-plan"
 MERGE_TIME_NETWORK_JOB = "integration-network"
 MERGE_TIME_FAN_IN_JOB = "integration-tests"
@@ -2512,7 +2525,8 @@ SPEC_REQUIRED_CHECKS = (
     "Spec tests (3/3)",
 )
 NEVER_REQUIRED_CHECKS = ("Check conformance statement", "Architecture Scaling (Linux)")
-SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT})
+# workflow_call: merge-train.yml runs the spec checks on queue/* refs (#4574).
+SPEC_EVENTS = frozenset({"pull_request", MERGE_GROUP_EVENT, "workflow_call"})
 
 
 def _with_expected_checks(merge_gate: WorkflowNode, contexts: dict[str, tuple[str, ...]]) -> None:
@@ -2862,7 +2876,7 @@ def _integration_triggers(workflow: WorkflowNode) -> dict:
 
 def _assert_full_integration_opt_in(integration: WorkflowNode, merge_gate: WorkflowNode) -> None:
     triggers = _integration_triggers(integration)
-    assert set(triggers) == {"merge_group", "workflow_dispatch", "pull_request"}, sorted(triggers)
+    assert set(triggers) == MERGE_TIME_TRIGGERS, sorted(triggers)
     assert triggers["pull_request"] == {
         "branches": ["main"],
         "types": ["labeled", "synchronize", "reopened"],
@@ -3113,6 +3127,19 @@ def test_cache_full_matrix_replay_runs_in_the_nightly_and_rc_lane() -> None:
     assert "needs.architecture-cache-full-matrix.result" in result
 
 
+def _assert_no_shared_cache(steps_by_owner: dict[str, list[WorkflowNode]]) -> None:
+    """No step restores or saves a shared cache (#4531)."""
+    for owner, steps in steps_by_owner.items():
+        for step in steps:
+            uses = str(step.get("uses", ""))
+            assert not uses.startswith("actions/cache"), (owner, step.get("name"))
+            with_block = step.get("with") or {}
+            if uses.startswith("astral-sh/setup-uv"):
+                assert with_block.get("enable-cache") is False, (owner, step.get("name"))
+            if uses.startswith(("actions/setup-python", "actions/setup-node")):
+                assert "cache" not in with_block, (owner, step.get("name"))
+
+
 def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
     """A workflow that checks out an arbitrary dispatched ref never touches a shared cache.
 
@@ -3120,15 +3147,9 @@ def test_dispatched_ref_lifecycle_workflow_uses_no_shared_cache() -> None:
     """
     workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml")
     assert "ref" in workflow["on"]["workflow_dispatch"]["inputs"]
-    for job_id, job in workflow["jobs"].items():
-        for step in job.get("steps") or []:
-            uses = str(step.get("uses", ""))
-            assert not uses.startswith("actions/cache"), (job_id, step.get("name"))
-            with_block = step.get("with") or {}
-            if uses.startswith("astral-sh/setup-uv"):
-                assert with_block.get("enable-cache") is False, (job_id, step.get("name"))
-            if uses.startswith(("actions/setup-python", "actions/setup-node")):
-                assert "cache" not in with_block, (job_id, step.get("name"))
+    _assert_no_shared_cache(
+        {job_id: job.get("steps") or [] for job_id, job in workflow["jobs"].items()}
+    )
 
 
 JOURNEYS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lifecycle-journeys.yml"
@@ -3304,6 +3325,895 @@ def test_lifecycle_journeys_resolve_refuses_untracked_refs(
     assert message in output and "Allowed: a commit on main or a release/* branch" in output
 
 
+# Merge train (#4574): merge-train.yml proves one exact speculative SHA on a
+# queue/* ref and reports a single `train-gate` check. Full scope runs Tier 1
+# and Tier 2 as reusable workflows; the guard runs the lint chain (one owner,
+# shared with ci.yml's Lint job) and every tests/quality module.
+MERGE_TRAIN_WORKFLOW = "merge-train.yml"
+TRAIN_BRANCHES = ["queue/t*/p*", "queue/b*/p*"]
+TRAIN_SCOPE_JOB = "scope"
+TRAIN_GUARD_JOB = "guard"
+TRAIN_GATE_JOB = "train-gate"
+TRAIN_GATE_STEP = "Require every train job"
+TRAIN_SCOPE_STEP = "Parse scope"
+TRAIN_RATCHET_STEP = "Run ratchet contract tests"
+TRAIN_TIERS = {
+    "tier1": "ci.yml",
+    "tier2": "ci-integration.yml",
+    "spec": "spec-conformance.yml",
+    "owner": "owner-surface.yml",
+}
+# A branch deletion fires `push` with deleted true on the default branch SHA.
+TRAIN_NOT_DELETED = "github.event.deleted != true"
+TRAIN_FULL_SCOPE = f"{TRAIN_NOT_DELETED} && needs.scope.outputs.scope == 'full'"
+TRAIN_CLEANUP_JOB = "cleanup"
+TRAIN_CLEANUP_STEP = "Delete the train branch"
+TRAIN_BASE_STEP = "Resolve train base"
+TRAIN_BASE = "${{ needs.scope.outputs.base_sha }}"
+TRAIN_GATE_RESULTS = (
+    "SCOPE_RESULT",
+    "GUARD_RESULT",
+    "TIER1_RESULT",
+    "TIER2_RESULT",
+    "SPEC_RESULT",
+    "OWNER_RESULT",
+)
+LINT_CHAIN_ACTION = "./.github/actions/lint-chain"
+LINT_CHAIN_BASE = (
+    "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha "
+    "|| inputs.base_sha }}"
+)
+_PERMISSION_LEVELS = {"none": 0, "read": 1, "write": 2}
+
+
+def _train_workflows() -> dict[str, WorkflowNode]:
+    return {name: deepcopy(workflow) for name, workflow in _load_workflows().items()}
+
+
+def _lint_chain_steps(root: Path = REPO_ROOT) -> list[WorkflowNode]:
+    return load_action_steps(root / LINT_CHAIN_ACTION / "action.yml")
+
+
+def _assert_train_guard_ratchets(train: WorkflowNode, ci: WorkflowNode, root: Path) -> None:
+    """The guard re-runs ci.yml's exact contract selection, never provisional,
+    and every other tests/quality module exactly once."""
+    from apm_cli.utils.paths import portable_relpath
+
+    guard = workflow_job(train, TRAIN_GUARD_JOB)
+    assert workflow_step(guard, TRAIN_RATCHET_STEP)["run"] == _ratchet_step(ci)["run"]
+    for step in _run_steps(guard):
+        assert all(key not in step for key in ("if", "continue-on-error")), step.get("name")
+    assert ALLOW_PROVISIONAL_KEY not in str(guard)
+    targets = Counter(_pytest_targets(guard))
+    quality = {
+        portable_relpath(path, root) for path in (root / "tests" / "quality").glob("test_*.py")
+    }
+    assert {target for target in targets if target.startswith(f"{REPOSITORY_ROOT}/")} == quality
+    assert all(targets[module] == 1 for module in quality), targets
+
+
+def _assert_merge_train_triggers(train: WorkflowNode) -> None:
+    """Only write-access queue/* pushes and manual dispatch start a train."""
+    triggers = train["on"]
+    assert isinstance(triggers, dict)
+    assert set(triggers) == {"push", "workflow_dispatch"}, sorted(triggers)
+    assert triggers["push"] == {"branches": TRAIN_BRANCHES}
+    # A probe dispatches the queue branch itself; no input may name another commit.
+    assert not triggers["workflow_dispatch"], triggers["workflow_dispatch"]
+    assert train["permissions"] == {"contents": "read"}
+    # One group per run: a shared group still replaces a pending run.
+    assert train["concurrency"] == {
+        "group": "merge-train-${{ github.ref }}-${{ github.run_id }}",
+        "cancel-in-progress": False,
+    }
+    for job_id, job in train["jobs"].items():
+        assert TRAIN_NOT_DELETED in str(job.get("if", "")).split(" && "), (
+            f"{job_id} must skip the push a branch deletion fires"
+        )
+
+
+def _assert_train_checkouts_default_ref(train: WorkflowNode) -> None:
+    """Every train job tests the triggering commit, never a requested one (CodeQL
+    cache poisoning)."""
+    checkouts = [
+        (job_id, step)
+        for job_id, job in train["jobs"].items()
+        for step in _run_steps(job)
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert checkouts
+    for job_id, step in checkouts:
+        with_block = step.get("with") or {}
+        assert "ref" not in with_block and "repository" not in with_block, job_id
+
+
+def _permission_union(workflow: WorkflowNode) -> dict[str, str]:
+    """The widest GITHUB_TOKEN scope any job of a called workflow requests."""
+    union: dict[str, str] = {}
+    nodes = [workflow, *workflow["jobs"].values()]
+    for node in nodes:
+        permissions = node.get("permissions")
+        if not isinstance(permissions, dict):
+            continue
+        for scope, level in permissions.items():
+            if _PERMISSION_LEVELS[level] > _PERMISSION_LEVELS.get(union.get(scope, "none"), 0):
+                union[scope] = level
+    return union
+
+
+def _train_guard_commands(train: WorkflowNode) -> list[list[str]]:
+    guard = expand_local_actions(workflow_job(train, TRAIN_GUARD_JOB), REPO_ROOT)
+    return [
+        command for step in _run_steps(guard) if "run" in step for command in shell_commands(step)
+    ]
+
+
+def _merge_group_commands(job: WorkflowNode) -> list[list[str]]:
+    """The commands a job runs on merge_group (steps gated to pull_request are skipped)."""
+    return [
+        command
+        for step in _run_steps(job)
+        if "run" in step
+        and not str(step.get("if", "")).startswith("github.event_name == 'pull_request'")
+        for command in shell_commands(step)
+    ]
+
+
+def _assert_merge_train_full_scope(workflows: dict[str, WorkflowNode]) -> None:
+    """A full train runs every merge_group check: Tier 1 and Tier 2 whole, and the
+    guard replays any merge_group check produced outside them."""
+    train = workflows[MERGE_TRAIN_WORKFLOW]
+    called: dict[str, str] = {}
+    for job_id, job in train["jobs"].items():
+        uses = job.get("uses")
+        if uses is None:
+            continue
+        assert str(uses).startswith("./.github/workflows/"), (job_id, uses)
+        called[str(uses).removeprefix("./.github/workflows/")] = job_id
+        assert job["needs"] == [TRAIN_SCOPE_JOB], job_id
+        assert job["if"] == TRAIN_FULL_SCOPE, job_id
+        assert job["with"] == {"base_sha": TRAIN_BASE}, job_id
+    for name, job_id in called.items():
+        callee = workflows[name]
+        tier = train["jobs"][job_id]
+        call = callee["on"].get("workflow_call")
+        assert isinstance(call, dict), f"{name} must be callable"
+        assert call["inputs"]["base_sha"]["required"] is False
+        for callee_job_id, callee_job in callee["jobs"].items():
+            # These conditions are all true on a push, so the job runs on the train.
+            assert _runs_on_merge_group(callee_job), f"{name}:{callee_job_id} skips on a train"
+        assert tier["permissions"] == _permission_union(callee), job_id
+        uses_secrets = "secrets." in json.dumps(callee["jobs"])
+        assert (tier.get("secrets") == "inherit") is uses_secrets, job_id
+    guard_commands = _train_guard_commands(train)
+    merge_time = _expected_checks(workflows["merge-gate.yml"])[MERGE_GROUP_EVENT]
+    producers = _merge_group_producers(workflows)
+    uncovered = []
+    for check in merge_time:
+        for producer in producers.get(check, ["<none>:<none>"]):
+            workflow_name, _, job_id = producer.partition(":")
+            if workflow_name in called:
+                continue
+            job = workflows.get(workflow_name, {}).get("jobs", {}).get(job_id)
+            commands = _merge_group_commands(job) if isinstance(job, dict) else []
+            if not commands or any(command not in guard_commands for command in commands):
+                uncovered.append(check)
+    assert not uncovered, f"a full train does not run these merge_group checks: {uncovered}"
+    assert {job_id: name for name, job_id in called.items()} == TRAIN_TIERS
+
+
+def _assert_train_gate(train: WorkflowNode) -> None:
+    """train-gate always runs, needs every other job and reads every result."""
+    gate = workflow_job(train, TRAIN_GATE_JOB)
+    assert gate["name"] == TRAIN_GATE_JOB
+    assert gate["if"] == f"always() && {TRAIN_NOT_DELETED}"
+    assert "continue-on-error" not in gate
+    # The verdict never depends on cleanup, which runs after it.
+    others = [
+        job_id for job_id in train["jobs"] if job_id not in (TRAIN_GATE_JOB, TRAIN_CLEANUP_JOB)
+    ]
+    assert sorted(gate["needs"]) == sorted(others), gate["needs"]
+    step = workflow_step(gate, TRAIN_GATE_STEP)
+    assert all(key not in step for key in ("if", "continue-on-error"))
+    for job_id, name in zip(others, TRAIN_GATE_RESULTS, strict=True):
+        assert step["env"].get(name) == f"${{{{ needs.{job_id}.result }}}}", name
+
+
+def _run_train_gate(step: WorkflowNode, tmp_path: Path, env: dict[str, str]) -> int:
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env={"PATH": os.environ["PATH"], "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md"), **env},
+    )
+    return result.returncode
+
+
+def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> None:
+    """ci.yml's Lint job and the train guard run the one lint-chain action."""
+    lint = workflow_job(ci, "lint")
+    assert lint["name"] == "Lint"
+    lint_steps = _run_steps(lint)
+    assert [str(step.get("uses", "")).partition("@")[0] for step in lint_steps] == [
+        "actions/checkout",
+        "astral-sh/setup-uv",
+        LINT_CHAIN_ACTION,
+    ]
+    assert lint_steps[2]["with"] == {"base-sha": LINT_CHAIN_BASE}
+    guard = workflow_job(train, TRAIN_GUARD_JOB)
+    chain = [step for step in _run_steps(guard) if step.get("uses") == LINT_CHAIN_ACTION]
+    assert len(chain) == 1 and chain[0]["with"] == {"base-sha": TRAIN_BASE}
+    action_steps = _lint_chain_steps()
+    assert action_steps and all(step.get("shell") == "bash" for step in action_steps)
+    # Each action step's first command identifies it; a job may not run one itself.
+    owned = [shell_commands(step)[0] for step in action_steps]
+    for job in (lint, guard):
+        inlined = [
+            command
+            for step in _run_steps(job)
+            if "run" in step
+            for command in shell_commands(step)
+            if command in owned
+        ]
+        assert not inlined, f"lint-chain commands inlined outside the action: {inlined}"
+
+
+def test_merge_train_triggers_only_on_queue_refs() -> None:
+    _assert_merge_train_triggers(_train_workflows()[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "pull-request-target",
+        "push-main",
+        "drop-pattern",
+        "dispatch-input",
+        "shared-group",
+        "scope-runs-on-deletion",
+    ],
+)
+def test_merge_train_trigger_drift_fails(mutation: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    if mutation == "shared-group":
+        train["concurrency"]["group"] = "merge-train-${{ github.ref }}"
+    elif mutation == "scope-runs-on-deletion":
+        del train["jobs"][TRAIN_SCOPE_JOB]["if"]
+    elif mutation == "dispatch-input":
+        train["on"]["workflow_dispatch"] = {"inputs": {"ref": {"type": "string"}}}
+    elif mutation == "pull-request-target":
+        train["on"]["pull_request_target"] = {"branches": ["main"]}
+    elif mutation == "push-main":
+        train["on"]["push"]["branches"].append("main")
+    else:
+        train["on"]["push"]["branches"].pop()
+    with pytest.raises(AssertionError):
+        _assert_merge_train_triggers(train)
+
+
+def test_merge_train_full_scope_covers_the_merge_group_gate() -> None:
+    _assert_merge_train_full_scope(_train_workflows())
+
+
+@pytest.mark.parametrize(
+    "mutation", ["drop-tier2", "drop-secrets", "narrow-permissions", "gated-callee", "drop-notice"]
+)
+def test_merge_train_full_scope_drift_fails(mutation: str) -> None:
+    workflows = _train_workflows()
+    train = workflows[MERGE_TRAIN_WORKFLOW]
+    if mutation == "drop-tier2":
+        del train["jobs"]["tier2"]
+    elif mutation == "drop-secrets":
+        del train["jobs"]["tier2"]["secrets"]
+    elif mutation == "narrow-permissions":
+        train["jobs"]["tier2"]["permissions"] = {"contents": "read"}
+    elif mutation == "gated-callee":
+        workflows["ci.yml"]["jobs"]["lint"]["if"] = "github.event_name == 'merge_group'"
+    else:
+        steps = train["jobs"][TRAIN_GUARD_JOB]["steps"]
+        steps[:] = [step for step in steps if step.get("name") != "Verify NOTICE is up to date"]
+    with pytest.raises(AssertionError):
+        _assert_merge_train_full_scope(workflows)
+
+
+def test_train_gate_needs_every_job_and_always_runs() -> None:
+    _assert_train_gate(_train_workflows()[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize(
+    "mutation", ["drop-need", "drop-always", "ignore-result", "need-cleanup", "drop-deleted-guard"]
+)
+def test_train_gate_drift_fails(mutation: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    gate = train["jobs"][TRAIN_GATE_JOB]
+    if mutation == "drop-need":
+        gate["needs"].remove("tier2")
+    elif mutation == "drop-always":
+        gate["if"] = TRAIN_NOT_DELETED
+    elif mutation == "need-cleanup":
+        gate["needs"].append(TRAIN_CLEANUP_JOB)
+    elif mutation == "drop-deleted-guard":
+        gate["if"] = "always()"
+    else:
+        del workflow_step(gate, TRAIN_GATE_STEP)["env"]["GUARD_RESULT"]
+    with pytest.raises(AssertionError):
+        _assert_train_gate(train)
+
+
+@pytest.mark.parametrize(
+    ("scope", "baseline"),
+    [
+        ("full", ("success", "success", "success", "success", "success", "success")),
+        ("guard", ("success", "success", "skipped", "skipped", "skipped", "skipped")),
+    ],
+)
+def test_train_gate_passes_only_when_every_job_is_green(
+    tmp_path: Path, scope: str, baseline: tuple[str, ...]
+) -> None:
+    step = workflow_step(
+        workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_GATE_JOB), TRAIN_GATE_STEP
+    )
+    cases = [baseline]
+    for index in range(len(baseline)):
+        for outcome in RESULT_OUTCOMES:
+            values = list(baseline)
+            values[index] = outcome
+            cases.append(tuple(values))
+    for values in cases:
+        env = {
+            name: value
+            for name, value in zip(TRAIN_GATE_RESULTS, values, strict=True)
+            if value is not None
+        }
+        code = _run_train_gate(step, tmp_path, {"SCOPE": scope, **env})
+        assert (code == 0) == (values == baseline), (scope, values)
+    assert (
+        _run_train_gate(step, tmp_path, dict(zip(TRAIN_GATE_RESULTS, baseline, strict=True))) != 0
+    )
+    assert "| ref | sha | scope | base |" in (tmp_path / "s.md").read_text(encoding="utf-8")
+
+
+def test_train_gate_excuses_failed_jobs_only_when_every_failure_is_inherited(
+    tmp_path: Path,
+) -> None:
+    """INHERITED_ONLY (the baseline step's output, #4704) turns a failed full-scope job
+    green; it never excuses a scope failure, a cancelled or skipped job, or guard scope."""
+    gate = workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_GATE_JOB)
+    step = workflow_step(gate, TRAIN_GATE_STEP)
+    assert step["env"]["INHERITED_ONLY"] == "${{ steps.baseline.outputs.inherited_only }}"
+    green = ("success",) * len(TRAIN_GATE_RESULTS)
+    for index in range(1, len(TRAIN_GATE_RESULTS)):
+        for outcome, excused in (("failure", True), ("cancelled", False), ("skipped", False)):
+            env = dict(zip(TRAIN_GATE_RESULTS, green, strict=True))
+            env[TRAIN_GATE_RESULTS[index]] = outcome
+            for inherited in ("true", "false"):
+                code = _run_train_gate(
+                    step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": inherited, **env}
+                )
+                assert (code == 0) == (excused and inherited == "true"), (index, outcome)
+    scope_failed = dict(zip(TRAIN_GATE_RESULTS, green, strict=True)) | {"SCOPE_RESULT": "failure"}
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": "true", **scope_failed}
+    )
+    guard_only = dict(
+        zip(TRAIN_GATE_RESULTS, ("success", "success") + ("failure",) * 4, strict=True)
+    )
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "guard", "INHERITED_ONLY": "true", **guard_only}
+    )
+
+
+def test_train_gate_excusable_steps_match_the_workflows() -> None:
+    """gate.py excuses an id-less failure only in a step that re-checks needed jobs'
+    results, and attributes a guard failure only to a guard check step. Both lists
+    must match the workflows exactly."""
+    from scripts.merge_queue import gate, proof
+
+    workflows = _train_workflows()
+    aggregation = {}
+    for name in TRAIN_TIERS.values():
+        for job in workflows[name]["jobs"].values():
+            if not (job.get("needs") and "always()" in str(job.get("if", ""))):
+                continue
+            steps = {
+                step["name"]
+                for step in job.get("steps", [])
+                if "needs." in str(step.get("run", "")) + str(step.get("env", ""))
+            }
+            if steps:
+                aggregation[job["name"]] = steps
+    assert aggregation == {name: set(steps) for name, steps in gate.AGGREGATION_STEPS.items()}
+    guard_steps = [
+        step.get("name")
+        for step in workflow_job(workflows[MERGE_TRAIN_WORKFLOW], TRAIN_GUARD_JOB)["steps"]
+    ]
+    checks = guard_steps[guard_steps.index("Install dependencies") + 1 :]
+    assert set(checks) == set(proof.GUARD_CHECKS)
+
+
+TRAIN_SCOPE_CASES = [
+    ("queue/t0001/p1-guard", "guard"),
+    ("queue/t0001/p3-full", "full"),
+    ("queue/b0123456789ab/p0-full", "full"),
+    ("queue/b0123456789ab/p1-full", None),
+    ("queue/b0123456789ab/p0-guard", None),
+    ("queue/t0001/p1", None),
+    ("queue/t0001/p1-fast", None),
+    ("queue/tx/p1-full", None),
+    ("main", None),
+    ("feature/queue/t0001/p1-full", None),
+]
+
+
+@pytest.mark.parametrize(("ref", "expected"), TRAIN_SCOPE_CASES)
+def test_train_scope_parses_only_train_refs(tmp_path: Path, ref: str, expected: str | None) -> None:
+    """Push or dispatch, only a queue branch name sets a scope."""
+    step = workflow_step(
+        workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_SCOPE_JOB), TRAIN_SCOPE_STEP
+    )
+    output = tmp_path / "output"
+    result = run_bash(step["run"], env={"REF_NAME": ref, "GITHUB_OUTPUT": str(output)})
+    if expected is None:
+        assert result.returncode != 0, result.stdout
+        assert not output.exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text(encoding="utf-8").splitlines() == [f"scope={expected}"]
+
+
+@pytest.fixture(scope="module")
+def train_repo(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, str]]:
+    """main: old -> base (origin/main); the train head is one commit on base."""
+    repo = tmp_path_factory.mktemp("train-repo")
+    _git(repo, "init", "-q", "-b", "main")
+    commits: dict[str, str] = {}
+    for name in ("old", "base"):
+        (repo / "f.txt").write_text(name, encoding="utf-8")
+        _git(repo, "add", "f.txt")
+        _git(repo, "commit", "-q", "-m", name)
+        commits[name] = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", "refs/remotes/origin/main", commits["base"])
+    return repo, commits
+
+
+@pytest.mark.parametrize(
+    ("trailer", "accepted"),
+    [("", True), ("<base>", True), ("<old>", False), ("not-a-sha", False)],
+)
+def test_train_base_trailer_must_equal_the_merge_base(
+    train_repo: tuple[Path, dict[str, str]], tmp_path: Path, trailer: str, accepted: bool
+) -> None:
+    """An older ancestor as Queue-Base would weaken the baseline-growth ratchets."""
+    repo, commits = train_repo
+    if trailer.startswith("<"):
+        trailer = commits[trailer.strip("<>")]
+    message = f"train\n\nQueue-Base: {trailer}" if trailer else "train"
+    _git(repo, "checkout", "-q", "-B", "train", commits["base"])
+    _git(repo, "commit", "-q", "--allow-empty", "-m", message)
+    step = workflow_step(
+        workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_SCOPE_JOB), TRAIN_BASE_STEP
+    )
+    output = tmp_path / "output"
+    result = run_bash(
+        f"cd {shlex.quote(str(repo))}\n{step['run']}", env={"GITHUB_OUTPUT": str(output)}
+    )
+    if not accepted:
+        assert result.returncode != 0, result.stdout
+        assert not output.exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text(encoding="utf-8").splitlines() == [f"base_sha={commits['base']}"]
+
+
+def test_merge_train_checks_out_only_the_triggering_commit() -> None:
+    _assert_train_checkouts_default_ref(_train_workflows()[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize("job_id", [TRAIN_SCOPE_JOB, TRAIN_GUARD_JOB])
+def test_merge_train_checkout_ref_fails(job_id: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    checkout = next(
+        step
+        for step in train["jobs"][job_id]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    checkout.setdefault("with", {})["ref"] = "${{ github.event.inputs.ref }}"
+    with pytest.raises(AssertionError):
+        _assert_train_checkouts_default_ref(train)
+
+
+def _assert_train_caches_restore_only(steps_by_owner: dict[str, list[WorkflowNode]]) -> None:
+    """Train steps may restore caches (main's included) but never save one."""
+    for owner, steps in steps_by_owner.items():
+        for step in steps:
+            uses = str(step.get("uses", "")).partition("@")[0]
+            label = (owner, step.get("name", uses))
+            with_block = step.get("with") or {}
+            assert uses not in ("actions/cache", "actions/cache/save"), label
+            if uses == "astral-sh/setup-uv":
+                assert with_block.get("enable-cache") is False or (
+                    with_block.get("save-cache") is False
+                ), label
+            if uses in ("actions/setup-python", "actions/setup-node"):
+                assert "cache" not in with_block, label
+            if uses == "actions/setup-node":
+                assert with_block.get("package-manager-cache") is False, label
+
+
+def _train_cache_steps(train: WorkflowNode) -> dict[str, list[WorkflowNode]]:
+    return {
+        **{job_id: job.get("steps") or [] for job_id, job in train["jobs"].items()},
+        LINT_CHAIN_ACTION: _lint_chain_steps(),
+    }
+
+
+def test_merge_train_and_lint_chain_never_save_a_cache() -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    install = workflow_step(train["jobs"][TRAIN_GUARD_JOB], "Install uv")
+    assert install["with"] == {"enable-cache": True, "save-cache": False}
+    _assert_train_caches_restore_only(_train_cache_steps(train))
+
+
+@pytest.mark.parametrize("mutation", ["save-true", "drop-save", "cache-save", "python-cache"])
+def test_merge_train_cache_save_fails(mutation: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    guard = train["jobs"][TRAIN_GUARD_JOB]
+    install = workflow_step(guard, "Install uv")
+    if mutation == "save-true":
+        install["with"]["save-cache"] = True
+    elif mutation == "drop-save":
+        del install["with"]["save-cache"]
+    elif mutation == "cache-save":
+        guard["steps"].append(
+            {"uses": "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "with": {}}
+        )
+    else:
+        workflow_step(guard, "Set up Python")["with"]["cache"] = "pip"
+    with pytest.raises(AssertionError):
+        _assert_train_caches_restore_only(_train_cache_steps(train))
+
+
+def _assert_train_cleanup(train: WorkflowNode) -> None:
+    """cleanup deletes the train branch after the verdict and alone may write."""
+    cleanup = workflow_job(train, TRAIN_CLEANUP_JOB)
+    assert cleanup["needs"] == [TRAIN_SCOPE_JOB, TRAIN_GATE_JOB]
+    conditions = str(cleanup.get("if", "")).split(" && ")
+    assert "always()" in conditions and TRAIN_NOT_DELETED in conditions, cleanup.get("if")
+    assert "startsWith(github.ref, 'refs/heads/queue/')" in conditions
+    assert train["permissions"] == {"contents": "read"}
+    writers = [
+        job_id
+        for job_id, job in train["jobs"].items()
+        if "write" in (job.get("permissions") or {}).values()
+        or job.get("permissions") == "write-all"
+    ]
+    assert writers == [TRAIN_CLEANUP_JOB], writers
+    assert cleanup["permissions"] == {"contents": "write"}
+    step = workflow_step(cleanup, TRAIN_CLEANUP_STEP)
+    assert "${{" not in step["run"], "pass refs through env, never interpolate"
+    assert TRAIN_CLEANUP_JOB not in workflow_job(train, TRAIN_GATE_JOB)["needs"]
+
+
+def test_train_cleanup_deletes_only_after_the_verdict() -> None:
+    _assert_train_cleanup(_train_workflows()[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize(
+    "mutation", ["drop-always", "second-writer", "drop-ref-guard", "interpolate", "gate-needs"]
+)
+def test_train_cleanup_drift_fails(mutation: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    cleanup = train["jobs"][TRAIN_CLEANUP_JOB]
+    if mutation == "drop-always":
+        cleanup["if"] = cleanup["if"].replace("always() && ", "")
+    elif mutation == "second-writer":
+        train["jobs"][TRAIN_GUARD_JOB]["permissions"] = {"contents": "write"}
+    elif mutation == "drop-ref-guard":
+        cleanup["if"] = f"always() && {TRAIN_NOT_DELETED}"
+    elif mutation == "interpolate":
+        step = workflow_step(cleanup, TRAIN_CLEANUP_STEP)
+        step["run"] = step["run"].replace("$GITHUB_REF_NAME", "${{ github.ref_name }}")
+    else:
+        train["jobs"][TRAIN_GATE_JOB]["needs"].append(TRAIN_CLEANUP_JOB)
+    with pytest.raises(AssertionError):
+        _assert_train_cleanup(train)
+
+
+def _run_cleanup(step: WorkflowNode, tmp_path: Path, ref_name: str, reply: str) -> tuple[int, str]:
+    """Run the cleanup step with a fake gh that records calls and prints `reply`."""
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    calls = tmp_path / "calls"
+    gh = fake / "gh"
+    gh.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{calls}"\n{reply}\n', encoding="utf-8")
+    gh.chmod(0o755)
+    result = run_bash(
+        step["run"],
+        env={
+            "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
+            "GITHUB_REF": f"refs/heads/{ref_name}",
+            "GITHUB_REF_NAME": ref_name,
+            "REPO": "microsoft/apm",
+            "GH_TOKEN": "x",
+        },
+    )
+    return result.returncode, calls.read_text(encoding="utf-8") if calls.exists() else ""
+
+
+@pytest.mark.parametrize("ref", [case[0] for case in TRAIN_SCOPE_CASES])
+def test_train_cleanup_deletes_exactly_the_refs_scope_accepts(tmp_path: Path, ref: str) -> None:
+    train = _train_workflows()[MERGE_TRAIN_WORKFLOW]
+    step = workflow_step(train["jobs"][TRAIN_CLEANUP_JOB], TRAIN_CLEANUP_STEP)
+    scope = workflow_step(train["jobs"][TRAIN_SCOPE_JOB], TRAIN_SCOPE_STEP)
+    accepted = (
+        run_bash(
+            scope["run"], env={"REF_NAME": ref, "GITHUB_OUTPUT": str(tmp_path / "out")}
+        ).returncode
+        == 0
+    )
+    code, calls = _run_cleanup(step, tmp_path, ref, "exit 0")
+    assert code == 0
+    assert calls == (
+        f"api -X DELETE repos/microsoft/apm/git/refs/heads/{ref}\n" if accepted else ""
+    )
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected"),
+    [
+        ('echo \'{"message":"Reference does not exist"}\'; exit 1', 0),
+        ("echo 'HTTP 403: Resource not accessible'; exit 1", 1),
+    ],
+)
+def test_train_cleanup_tolerates_only_an_already_deleted_branch(
+    tmp_path: Path, reply: str, expected: int
+) -> None:
+    step = workflow_step(
+        _train_workflows()[MERGE_TRAIN_WORKFLOW]["jobs"][TRAIN_CLEANUP_JOB], TRAIN_CLEANUP_STEP
+    )
+    assert _run_cleanup(step, tmp_path, "queue/t0001/p1-full", reply)[0] == expected
+
+
+def test_train_cleanup_without_the_ref_guard_deletes_main(tmp_path: Path) -> None:
+    step = deepcopy(
+        workflow_step(
+            _train_workflows()[MERGE_TRAIN_WORKFLOW]["jobs"][TRAIN_CLEANUP_JOB],
+            TRAIN_CLEANUP_STEP,
+        )
+    )
+    lines = step["run"].splitlines()
+    guard_end = next(i for i, line in enumerate(lines) if line.strip() == "fi")
+    step["run"] = "\n".join(lines[guard_end + 1 :])
+    assert "refs/heads/main" in _run_cleanup(step, tmp_path, "main", "exit 0")[1]
+
+
+def test_lint_chain_has_one_owner() -> None:
+    workflows = _train_workflows()
+    _assert_lint_chain_single_owner(workflows["ci.yml"], workflows[MERGE_TRAIN_WORKFLOW])
+
+
+@pytest.mark.parametrize("mutation", ["inline-lint", "inline-guard", "drop-action", "base"])
+def test_lint_chain_owner_drift_fails(mutation: str) -> None:
+    workflows = _train_workflows()
+    ci, train = workflows["ci.yml"], workflows[MERGE_TRAIN_WORKFLOW]
+    ruff = deepcopy(_lint_chain_steps()[0])
+    if mutation == "inline-lint":
+        ci["jobs"]["lint"]["steps"].append(ruff)
+    elif mutation == "inline-guard":
+        train["jobs"][TRAIN_GUARD_JOB]["steps"].append(ruff)
+    elif mutation == "drop-action":
+        steps = train["jobs"][TRAIN_GUARD_JOB]["steps"]
+        steps[:] = [step for step in steps if step.get("uses") != LINT_CHAIN_ACTION]
+    else:
+        ci["jobs"]["lint"]["steps"][2]["with"]["base-sha"] = (
+            "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"
+        )
+    with pytest.raises(AssertionError):
+        _assert_lint_chain_single_owner(ci, train)
+
+
+# Main push gate (S28): every push to main runs ci.yml (Tier 1) and
+# ci-integration.yml (Tier 2) through workflow_call, and one aggregate fails the
+# run when any tier job fails. It must add no cache save to the default-branch
+# scope.
+MAIN_PUSH_GATE_WORKFLOW = "main-push-gate.yml"
+MAIN_PUSH_GATE_JOB = "main-push-gate"
+MAIN_PUSH_GATE_STEP = "Require every Tier 1 and Tier 2 job"
+MAIN_PUSH_CALLEES = {"tier1": "ci.yml", "tier2": "ci-integration.yml"}
+MAIN_PUSH_BASE = "${{ needs.base.outputs.base_sha }}"
+_NO_SAVE_VALUES = (False, "false", UV_SAVE_ON_PR_ONLY)
+# A cache save step that never runs on push (main-push-gate and merge-train).
+CACHE_SAVE_OFF_PUSH = "github.event_name != 'push'"
+
+
+def _main_push_workflows() -> dict[str, WorkflowNode]:
+    return {name: deepcopy(workflow) for name, workflow in _load_workflows().items()}
+
+
+def _assert_main_push_gate(workflows: dict[str, WorkflowNode]) -> None:
+    """Every push to main runs every Tier 1 and Tier 2 job and one aggregate turns main red."""
+    caller = workflows[MAIN_PUSH_GATE_WORKFLOW]
+    triggers = caller["on"]
+    assert set(triggers) == {"push", "workflow_dispatch"}, sorted(triggers)
+    assert triggers["push"] == {"branches": ["main"]}
+    assert not triggers["workflow_dispatch"]
+    assert caller["permissions"] == {"contents": "read"}
+    assert caller["concurrency"] == {
+        "group": "main-push-gate-${{ github.run_id }}",
+        "cancel-in-progress": False,
+    }
+    called = {
+        job_id: str(job["uses"]).removeprefix("./.github/workflows/")
+        for job_id, job in caller["jobs"].items()
+        if "uses" in job
+    }
+    assert called == MAIN_PUSH_CALLEES, called
+    for job_id, name in called.items():
+        tier, callee = caller["jobs"][job_id], workflows[name]
+        assert "workflow_call" in _workflow_events(callee), name
+        assert all(key not in tier for key in ("if", "continue-on-error")), job_id
+        assert tier["needs"] == ["base"] and tier["with"] == {"base_sha": MAIN_PUSH_BASE}
+        assert tier["permissions"] == _permission_union(callee), job_id
+        assert ("secrets." in json.dumps(callee["jobs"])) is ("secrets" in tier), job_id
+        # Called jobs see the caller's push: these conditions all run on it.
+        skipped = [jid for jid, job in callee["jobs"].items() if not _runs_on_merge_group(job)]
+        assert not skipped, f"{name} jobs skip on a push to main: {skipped}"
+        _assert_pr_runs_cancel_superseded_pushes_only(callee, name)
+    lifecycle_shards = [
+        job_id
+        for job_id in workflows["ci.yml"]["jobs"]
+        if job_id.startswith("lifecycle-smoke-shard-")
+    ]
+    assert lifecycle_shards, "the main push gate must cover the Lifecycle Smoke shards"
+    assert MERGE_GROUP_INTEGRATION_JOB in workflows["ci-integration.yml"]["jobs"]
+    gate = workflow_job(caller, MAIN_PUSH_GATE_JOB)
+    assert gate["name"] == MAIN_PUSH_GATE_JOB and gate["if"] == "always()"
+    assert "continue-on-error" not in gate
+    others = [job_id for job_id in caller["jobs"] if job_id != MAIN_PUSH_GATE_JOB]
+    assert sorted(gate["needs"]) == sorted(others), gate["needs"]
+    step = workflow_step(gate, MAIN_PUSH_GATE_STEP)
+    assert all(key not in step for key in ("if", "continue-on-error"))
+    names = tuple(f"{job_id.upper()}_RESULT" for job_id in others)
+    for job_id, name in zip(others, names, strict=True):
+        assert step["env"].get(name) == f"${{{{ needs.{job_id}.result }}}}", name
+    _assert_success_results(step, names)
+
+
+def _main_push_reachable_steps(
+    workflows: dict[str, WorkflowNode],
+) -> dict[str, list[WorkflowNode]]:
+    """Every step a push to main executes, through called workflows and local actions."""
+    steps: dict[str, list[WorkflowNode]] = {}
+    for job_id, job in workflows[MAIN_PUSH_GATE_WORKFLOW]["jobs"].items():
+        uses = job.get("uses")
+        if uses is None:
+            steps[f"{MAIN_PUSH_GATE_WORKFLOW}:{job_id}"] = _run_steps(
+                expand_local_actions(job, REPO_ROOT)
+            )
+            continue
+        name = str(uses).removeprefix("./.github/workflows/")
+        for callee_id, callee_job in workflows[name]["jobs"].items():
+            steps[f"{name}:{callee_id}"] = _run_steps(expand_local_actions(callee_job, REPO_ROOT))
+    return steps
+
+
+def _saves_cache(step: WorkflowNode) -> bool:
+    """Would this step save a cache on a push? Restore-only and disabled steps do not."""
+    uses = str(step.get("uses", "")).partition("@")[0]
+    with_block = step.get("with") or {}
+    if uses == "actions/cache":
+        return True
+    if uses == "actions/cache/save":
+        condition = _job_condition(step)
+        return CACHE_SAVE_OFF_PUSH not in condition or "||" in condition
+    if uses == "astral-sh/setup-uv":
+        return with_block.get("enable-cache") is not False and (
+            with_block.get("save-cache") not in _NO_SAVE_VALUES
+        )
+    if uses == "actions/setup-node":
+        return "cache" in with_block or with_block.get("package-manager-cache") is not False
+    return uses == "actions/setup-python" and "cache" in with_block
+
+
+def _cache_saving_steps(steps_by_owner: dict[str, list[WorkflowNode]]) -> list[str]:
+    return [
+        f"{owner}:{step.get('name', step.get('uses'))}"
+        for owner, steps in steps_by_owner.items()
+        for step in steps
+        if _saves_cache(step)
+    ]
+
+
+def test_main_push_gate_runs_every_tier1_job() -> None:
+    _assert_main_push_gate(_main_push_workflows())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "pull-request-target",
+        "other-branch",
+        "drop-need",
+        "drop-always",
+        "cancel",
+        "skip-lifecycle-shard",
+        "gate-tier1",
+        "dispatch-input",
+        "drop-tier2",
+    ],
+)
+def test_main_push_gate_drift_fails(mutation: str) -> None:
+    workflows = _main_push_workflows()
+    caller = workflows[MAIN_PUSH_GATE_WORKFLOW]
+    gate = caller["jobs"][MAIN_PUSH_GATE_JOB]
+    if mutation == "pull-request-target":
+        caller["on"]["pull_request_target"] = {"branches": ["main"]}
+    elif mutation == "other-branch":
+        caller["on"]["push"]["branches"].append("release/*")
+    elif mutation == "drop-need":
+        gate["needs"].remove("tier1")
+    elif mutation == "drop-always":
+        gate["if"] = "success()"
+    elif mutation == "cancel":
+        caller["concurrency"]["cancel-in-progress"] = True
+    elif mutation == "skip-lifecycle-shard":
+        workflows["ci.yml"]["jobs"]["lifecycle-smoke-shard-4"]["if"] = (
+            "github.event_name == 'pull_request'"
+        )
+    elif mutation == "gate-tier1":
+        caller["jobs"]["tier1"]["if"] = "github.event_name == 'workflow_dispatch'"
+    elif mutation == "drop-tier2":
+        del caller["jobs"]["tier2"]
+        gate["needs"].remove("tier2")
+    else:
+        caller["on"]["workflow_dispatch"] = {"inputs": {"ref": {"type": "string"}}}
+    with pytest.raises(AssertionError):
+        _assert_main_push_gate(workflows)
+
+
+def test_main_push_adds_no_default_branch_cache_save() -> None:
+    steps = _main_push_reachable_steps(_main_push_workflows())
+    assert any(owner.startswith("ci.yml:lifecycle-smoke-shard-") for owner in steps)
+    assert f"ci-integration.yml:{MERGE_GROUP_INTEGRATION_JOB}" in steps
+    assert _cache_saving_steps(steps) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "uv-save",
+        "actions-cache",
+        "python-cache",
+        "node-cache",
+        "integration-save-on-push",
+        "integration-uv-save",
+    ],
+)
+def test_main_push_cache_save_fails(mutation: str) -> None:
+    workflows = _main_push_workflows()
+    shard = workflows["ci.yml"]["jobs"]["lifecycle-smoke-shard-4"]
+    integration = workflows["ci-integration.yml"]["jobs"][MERGE_GROUP_INTEGRATION_JOB]
+    if mutation == "integration-save-on-push":
+        save = workflow_step(integration, "Save APM resolved git/HTTP fetches")
+        save["if"] = "success() && steps.apm-cache.outputs.cache-hit != 'true'"
+    elif mutation == "integration-uv-save":
+        del workflow_step(integration, "Install uv")["with"]["save-cache"]
+    elif mutation == "uv-save":
+        del workflow_step(shard, "Install uv")["with"]["save-cache"]
+    elif mutation == "actions-cache":
+        shard["steps"] = [
+            *shard["steps"],
+            {"uses": "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "with": {}},
+        ]
+    elif mutation == "python-cache":
+        workflow_step(shard, "Set up Python")["with"]["cache"] = "pip"
+    else:
+        del workflow_step(shard, "Set up Node.js")["with"]["package-manager-cache"]
+    assert _cache_saving_steps(_main_push_reachable_steps(workflows))
+
+
 _EARLY_STOP_FLAGS = ("--maxfail", "-x", "--exitfirst")
 # Env vars whose value reaches pytest as arguments: PYTEST_ADDOPTS is read by
 # pytest itself, PYTEST_EXTRA_ARGS by scripts/test-integration.sh.
@@ -3380,3 +4290,57 @@ def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
         step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
 
     assert _early_stopping_in("ci-integration.yml", workflow)
+
+
+MUTATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "mutation-pilot.yml"
+MUTATION_STEP = "Mutate one owner and enforce its baseline"
+
+
+def _assert_mutation_shards_enforce_every_owner(workflow: WorkflowNode) -> None:
+    """One scheduled shard per owner, each enforcing its floor with a negative control (#4121)."""
+    assert "schedule" in workflow["on"], "the floors must be enforced on a schedule"
+    owners = workflow_job(workflow, "owners")
+    listing = " ".join(str(step.get("run", "")) for step in owners["steps"])
+    assert "scripts/run_mutation_pilot.py --list-owners" in listing
+    shard = workflow_job(workflow, "mutation-pilot")
+    assert "continue-on-error" not in shard and "if" not in shard
+    assert shard["needs"] == "owners"
+    strategy = shard["strategy"]
+    assert strategy["fail-fast"] is False
+    assert strategy["matrix"] == {"owner": "${{ fromJSON(needs.owners.outputs.keys) }}"}
+    step = workflow_step(shard, MUTATION_STEP)
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"]["OWNER"] == "${{ matrix.owner }}"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert ("--owner", '"$OWNER"') in set(pairwise(tokens))
+    assert "--negative-control" in tokens
+    assert not {"--update-baseline", "--report-only", "--reuse-cache"} & set(tokens)
+    for job in workflow["jobs"].values():
+        for job_step in job.get("steps") or []:
+            assert not str(job_step.get("uses", "")).startswith("actions/cache")
+
+
+def test_mutation_shards_enforce_every_owner_floor() -> None:
+    _assert_mutation_shards_enforce_every_owner(load_workflow(MUTATION_WORKFLOW))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["no-negative-control", "soft-shard", "static-matrix", "no-schedule", "baseline-write"],
+)
+def test_mutation_shard_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(MUTATION_WORKFLOW)
+    shard = workflow_job(workflow, "mutation-pilot")
+    step = workflow_step(shard, MUTATION_STEP)
+    if mutation == "no-negative-control":
+        step["run"] = step["run"].replace("--negative-control", "")
+    elif mutation == "soft-shard":
+        shard["continue-on-error"] = True
+    elif mutation == "static-matrix":
+        shard["strategy"]["matrix"] = {"owner": ["update-plan"]}
+    elif mutation == "no-schedule":
+        del workflow["on"]["schedule"]
+    else:
+        step["run"] += " --update-baseline"
+    with pytest.raises(AssertionError):
+        _assert_mutation_shards_enforce_every_owner(workflow)

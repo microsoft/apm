@@ -130,9 +130,12 @@ Build a bundle on a connected machine, carry it across, and install it.
    `security.integrity.require_hashes: true` refuses bundles without hashes.
 
 To enforce org policy on a disconnected CI runner, vendor the policy file and pass it
-explicitly. An explicit source that fails to load fails the check:
+explicitly to both steps: `apm install --policy` blocks at install
+([Enforce a policy discovery cannot reach](../apm-policy/#enforce-a-policy-discovery-cannot-reach)),
+and the audit fails when the source does not load:
 
 ```bash frame="terminal"
+apm install --policy ./vendor/apm-policy.yml
 apm audit --ci --policy ./vendor/apm-policy.yml
 ```
 
@@ -143,6 +146,7 @@ apm audit --ci --policy ./vendor/apm-policy.yml
 | `PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured` | Set `PROXY_REGISTRY_URL`, or the dependency is on a host the proxy does not carry |
 | HTTP 401 or 403 from the proxy | Check `PROXY_REGISTRY_TOKEN` has read access to the upstream path |
 | `Invalid zip archive`, body starts with `<!DOCTYPE html>` | The upstream returned a sign-in page and the proxy cached it. Fix the remote's credentials and purge its cache |
+| `Archive error: Unsafe zip archive from <url>: Refusing to extract symlink: ...` | The proxy served an archive APM refuses (here a symlink member). The error names that archive even when later fallback URLs return HTTP 404; APM does not install the package |
 | TLS verification failed | Set `APM_EXTRA_CA_BUNDLE`; see [SSL / TLS issues](../../troubleshooting/ssl-issues/) |
 
 The legacy names `ARTIFACTORY_BASE_URL`, `ARTIFACTORY_APM_TOKEN` and `ARTIFACTORY_ONLY`

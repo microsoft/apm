@@ -23,9 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 - An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
+- Nightly mutation testing covers 13 owner modules, one shard each, and fails when an owner's kill rate drops below its recorded floor. (#4121, #4585)
+- A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (#4612)
 
 ### Fixed
 
+- `apm install` with a native Claude plugin and MCP or LSP servers writes `apm.lock.yaml` once: MCP/LSP reconciliation now runs before native plugin registration commits the lockfile. (#4579)
 - `apm outdated` keys its per-run ref listing on the host type and resolved provider, so dependencies on one host and path with different providers each resolve their own listing. (closes #4560, #4622)
 - A rebound marketplace refusal under `apm install -g` no longer says to restore `~/.apm/apm.lock.yaml` from version control; it prints runnable re-record steps. (#4555)
 - `apm install` (including `--frozen`) replays a registry package after its registry moves, fetching from the configured registry when the locked hash matches; mismatches fail before extraction. (closes #4013, #4022)
@@ -33,12 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content, so restores keep tracked files clean. (closes #4556, #4580)
 - The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
+- Catalog entries routed to a package registry install by name in registry form and replay with `--frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
 
 ### Security
 
 - A dispatched nightly lifecycle run tests only a commit on `main` or a `release/*` branch and refuses any other `ref` before checkout. (closes #4551, #4563)
 - Release CI refuses to publish a `v*` tag whose commit is not on `main` or a `release/*` branch, and fails closed when it cannot check. (closes #3778, #4568)
+- `apm pack`, `apm marketplace check` and `outdated` now print `marketplace.outputs` list-form and output-path conflict warnings, once each. (#4062)
 
 ## [0.37.0] - 2026-11-21
 

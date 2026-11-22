@@ -38,8 +38,6 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import os
-import shutil
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +48,7 @@ from apm_cli.core.remediation import (
     UNINSTALL_EVIDENCE_REINSTALL,
     UNINSTALL_EVIDENCE_REMOVE,
 )
+from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
 from apm_cli.utils.paths import SpellingAliasIndex
 
@@ -57,6 +56,7 @@ from .base_integrator import BaseIntegrator
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.targets import TargetProfile
 
 AUTHORIZED = "authorized"
 EDITED = "edited"
@@ -88,8 +88,10 @@ class DeploymentEvidence:
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
+        owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._owned_receipts = owned_receipts
         self.user_scope = user_scope
         self._kept: frozenset[str] = frozenset()
         self._kept_parents: frozenset[str] = frozenset()
@@ -127,8 +129,11 @@ class DeploymentEvidence:
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+        owned_receipts = None
         try:
-            receipts = DeploymentMaterializationSession(deploy_root, scope, None).receipt_hashes()
+            session = DeploymentMaterializationSession(deploy_root, scope, None)
+            receipts = session.receipt_hashes()
+            owned_receipts = session.receipt_hashes
         except (OSError, ValueError) as exc:
             diagnostics.warn(f"Ignored local deployment receipts: {exc}")
             receipts = {}
@@ -139,6 +144,7 @@ class DeploymentEvidence:
                 render=None,
                 user_scope=user_scope,
                 kept=kept,
+                owned_receipts=owned_receipts,
             )
         # Freeze the pre-transition lock: callers mutate theirs before rendering.
         locked = copy.deepcopy(lockfile)
@@ -157,7 +163,34 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
             kept=kept,
+            owned_receipts=owned_receipts,
         )
+
+    def receipted_claims(self, owner: str, targets: Iterable[TargetProfile]) -> dict[str, str]:
+        """Map each lock value this installation receipted for *owner* to the hash APM wrote.
+
+        Stands in for a package's prior ``deployed_files`` and hashes when the
+        lock has no record of it (for example after the lockfile was lost), so
+        stale-file cleanup still retires what the package no longer deploys.
+        Each receipt is spelled by the canonical deployment-path codec for
+        *targets* (``cowork://`` for an external root), as current claims are;
+        a receipt no target can spell is left to the lock. Deletion stays
+        gated by :meth:`verdict`.
+        """
+        from apm_cli.install.deployed_paths import deployed_path_entry
+        from apm_cli.utils.path_security import PathTraversalError
+
+        if self._owned_receipts is None:
+            return {}
+        targets = list(targets)
+        claims: dict[str, str] = {}
+        for physical, content_hash in sorted(self._owned_receipts(owner).items()):
+            try:
+                value = deployed_path_entry(Path(physical), self._deploy_root, targets)
+            except (PathTraversalError, RuntimeError, ValueError):
+                continue
+            claims[value] = content_hash
+        return claims
 
     def add_rendered(self, rendered: Mapping[Path, str]) -> None:
         """Add hashes this install rendered from the source it holds (#4360).
@@ -439,13 +472,13 @@ def _render_locked(
         include_recorded_targets=True,
     )
     try:
-        snapshot.parent.mkdir()
+        snapshot.parent.mkdir()  # write-seam-exempt: private scratch tree
         from apm_cli.deps.lockfile_write_authority import lockfile_scratch_writes
 
         with lockfile_scratch_writes():
             (lockfile if owner is None else _locked_subset(lockfile, owner)).write(snapshot)
         with contextlib.redirect_stdout(io.StringIO()):
-            with contextlib.redirect_stderr(io.StringIO()):
+            with contextlib.redirect_stderr(io.StringIO()), write_seam.private_scratch():
                 return run_replay(config, CheckLogger(verbose=False))
     except Exception as exc:
         if owner is not None:
@@ -610,7 +643,7 @@ def _safe_remove_skill_directory(
 
     if not remaining:
         try:
-            skill_dir.rmdir()
+            write_seam.rmdir(skill_dir)
             result.deleted.append(rel_path)
             result.deleted_targets.append(skill_dir)
             result.deleted_directories.append(rel_path)
@@ -678,7 +711,7 @@ def _safe_remove_skill_directory(
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
     try:
-        shutil.rmtree(skill_dir)
+        write_seam.rmtree(skill_dir)
         result.deleted.append(rel_path)
         result.deleted_targets.append(skill_dir)
         result.deleted_directories.append(rel_path)
@@ -931,7 +964,7 @@ def remove_stale_deployed_files(
         live_alias = live_index.alias(stale_path, project_root)
         if live_alias is not None:
             try:
-                os.rename(stale_target, project_root / live_alias)
+                write_seam.rename(stale_target, project_root / live_alias)
                 result.aliased.append(stale_path)
                 absent_targets.append(stale_target)
             except OSError as exc:
@@ -991,7 +1024,7 @@ def remove_stale_deployed_files(
 
         # All gates passed -- safe to delete.
         try:
-            stale_target.unlink()
+            write_seam.unlink(stale_target)
             result.deleted.append(stale_path)
             result.deleted_targets.append(stale_target)
         except Exception as exc:

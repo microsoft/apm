@@ -530,6 +530,12 @@ shorthand_form  = [host [":" port] "/"] owner "/" repo ["/" virtual_path] ["#" r
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
+A `local_path_form` that begins with `.\`, `..\` or `~\` is normalised to POSIX
+form on read: `.\pkg`, `..\pkg` and `~\pkg` resolve, lock and deploy exactly
+like `./pkg`, `../pkg` and `~/pkg` on every platform, and pass the same checks.
+Windows drive-letter (`C:\pkg`) and UNC (`\\server\share`) paths are not
+normalised.
+
 The `host:port` shorthand resolves as HTTPS. SSH custom ports require the
 `ssh://` URL form.
 
@@ -688,7 +694,7 @@ Marketplace dependency (resolved at install time):
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
 | `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity; `apm install plugin@catalog` writes it to `apm.yml` in registry form (`id`, `registry`, `version`), and its lock row replays from the exact `version`, `resolved_url` and `resolved_hash`, with no commit. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
 When `version` is a semver range or bare version number (for example
 `~2.1.0`, `^2.0`, or `2.1.0`), the resolver uses the plugin source's
@@ -1100,7 +1106,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
 | `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Shorthand for `claude.output`; the `claude` block wins when both are set. |
-| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses with a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
+| `outputs` | `map` | OPTIONAL | `{claude: {}}` | Marketplace formats to emit: `claude`, `codex`, `copilot`. Each entry may set `path`. The list form (`[claude, codex]`) still parses; `apm pack` and `apm marketplace check` print a deprecation warning. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/). |
 | `claude` / `codex` / `copilot` | `{output: string}` | OPTIONAL | `.claude-plugin/marketplace.json` / `.agents/plugins/marketplace.json` / `.github/plugin/marketplace.json` | Per-format output path. Wins over `outputs.<name>.path`. |
 | `versioning` | `{strategy: enum}` | OPTIONAL | `lockstep` | `lockstep`, `tag_pattern`, or `per_package`. See [Versioning strategies](../../producer/release-a-version/). |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |
