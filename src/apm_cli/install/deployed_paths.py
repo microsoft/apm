@@ -62,27 +62,19 @@ def deployed_path_entry(
     target_path: Path,
     project_root: Path,
     targets: Any,
-    *,
-    project_root_resolved: bool = False,
 ) -> str:
-    """Return the compatibility path view produced by the canonical codec.
-
-    ``project_root_resolved`` declares *project_root* already resolved (a
-    deployment session resolves its root once per run); *target_path* is
-    still resolved live for every containment check.
-    """
+    """Return the compatibility path view produced by the canonical codec."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
     resolved: list[Path] = []
 
-    def _resolved_pair() -> tuple[Path, Path]:
-        # Resolved lazily, once per call: external-root targets never need it.
+    def _resolved_candidate() -> Path:
+        # Resolved lazily, once per call (external-root targets never need it).
         if not resolved:
-            root = project_root if project_root_resolved else resolve_for_containment(project_root)
-            resolved.extend((resolve_for_containment(target_path), root))
-        return resolved[0], resolved[1]
+            resolved.append(resolve_for_containment(target_path))
+        return resolved[0]
 
     def _try_target(tgts) -> str | None:
         for _t in tgts:
@@ -105,14 +97,13 @@ def deployed_path_entry(
                 else:
                     resolved_target = ensure_path_within(target_path, deploy_root)
                     return portable_relpath(resolved_target, project_root)
-            resolved_path, resolved_root = _resolved_pair()
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
-                    resolved_path,
-                    project_root=resolved_root,
+                    _resolved_candidate(),
+                    project_root=project_root,
                     target=_t,
                     scope=InstallScope.PROJECT,
-                    inputs_resolved=True,
+                    candidate_resolved=True,
                 )
             except RuntimeError:
                 continue

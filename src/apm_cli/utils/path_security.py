@@ -239,23 +239,6 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
         return None
 
 
-class ResolvedRoots:
-    """Trusted roots, each resolved once for the owner's lifetime (one install run).
-
-    Only bases go here, never candidates: every candidate is still resolved
-    live per check, so a stale base can only refuse a path, never admit one.
-    """
-
-    def __init__(self) -> None:
-        self._resolved: dict[Path, Path] = {}
-
-    def __call__(self, root: Path) -> Path:
-        resolved = self._resolved.get(root)
-        if resolved is None:
-            resolved = self._resolved[root] = resolve_for_containment(root)
-        return resolved
-
-
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
     resolved = _strip_extended_prefix(path.resolve())
