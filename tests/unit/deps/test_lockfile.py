@@ -337,10 +337,6 @@ class TestLockFile:
         assert written["dependencies"] == []
         assert written["generated_at"] == next_write.isoformat()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="#4742: the no-op check (_same_document) parses the on-disk lockfile again",
-    )
     def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io
 
