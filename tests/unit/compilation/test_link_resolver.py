@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
 from apm_cli.compilation.link_resolver import (
     LinkResolutionContext,
     UnifiedLinkResolver,
@@ -1275,3 +1277,38 @@ class TestResolvePath:
     def test_relative_path_resolved_against_base(self, base_dir: Path) -> None:
         result = _resolve_path("sub/file.md", base_dir)
         assert result == base_dir / "sub" / "file.md"
+
+
+class TestCompileValidatesSuffixedLinks:
+    """#3255: ``apm compile`` validates the file path, not ``file.md#fragment``."""
+
+    def test_compile_dry_run_validates_suffixed_links_by_path(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: test-project\nversion: 0.1.0\n", encoding="utf-8")
+        instruction = tmp_path / ".apm" / "instructions" / "test.instructions.md"
+        instruction.parent.mkdir(parents=True)
+        instruction.write_text(
+            """---
+description: suffixed link fixture
+applyTo: "**/*.py"
+---
+See [template](references/standards.md#template),
+[query](references/standards.md?view=full),
+[combined](references/standards.md?view=full#template), and
+[missing](references/missing.md#template).
+""",
+            encoding="utf-8",
+        )
+        references = instruction.parent / "references"
+        references.mkdir()
+        (references / "standards.md").write_text("# Template\n", encoding="utf-8")
+
+        result = CliRunner().invoke(cli, ["compile", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        output = " ".join(result.output.split())
+        assert "Referenced file not found: references/standards.md" not in output
+        assert "Referenced file not found: references/missing.md (in link 'missing')" in output
+        assert not (tmp_path / "AGENTS.md").exists()

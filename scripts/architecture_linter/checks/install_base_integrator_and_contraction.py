@@ -193,7 +193,7 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
 _SPELLING_ALIAS_CALLERS = {
     "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
-    "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/install/manifest_reconcile.py": "live_paths=[*files, *protected_values]",
     "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
 }
 
@@ -1465,6 +1465,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "removed_paths=removed_skill_paths",
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
+        ),
+        # MCP write evidence (#4737) borrows the session's binding and paths only.
+        "src/apm_cli/install/mcp/write_receipts.py": (
+            "session = DeploymentMaterializationSession(Path(project_root), scope, None)",
+            "if not session.binds(data):",
+            "data = self._session.binding()",
         ),
         "src/apm_cli/commands/uninstall/cli.py": (
             "_persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)",

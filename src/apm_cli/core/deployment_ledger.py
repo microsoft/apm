@@ -29,8 +29,9 @@ from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
+    resolve_for_containment,
+    resolved_relative_within,
 )
-from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -126,8 +127,10 @@ def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) 
                     and recorded.is_absolute()
                     and not os.path.lexists(recorded)
                     and recorded.parent.is_dir()
+                    and not has_symlink_component(directory, directory / "mcp" / path.name)
                 ):
                     path.unlink()
+                    (directory / "mcp" / path.name).unlink(missing_ok=True)
                     removed += 1
             except (OSError, ValueError, KeyError, TypeError):
                 continue
@@ -178,8 +181,8 @@ class DeploymentMaterializationSession:
         self.root = project_root.resolve()
         self.scope = scope
         self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
-        # Containment is anchored one level above APM_HOME (``$HOME`` by
-        # default); for a shallow custom root the symlink check is the guard.
+        self.mcp_state_path = self.state_path.parent / "mcp" / self.state_path.name
+        # Containment anchors above APM_HOME ($HOME by default); else the symlink check guards.
         self._receipts_base = self.state_path.parent.parent.parent
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
@@ -218,6 +221,7 @@ class DeploymentMaterializationSession:
     def _validate_paths(self) -> None:
         for base, path in (
             (self._receipts_base, self.state_path),
+            (self._receipts_base, self.mcp_state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
         ):
@@ -283,16 +287,7 @@ class DeploymentMaterializationSession:
             if not self.state_path.exists():
                 return
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            if (
-                data["version"] != 1
-                or data["root"] != self.root.as_posix()
-                or data["scope"] != self.scope.value
-                or data["installation"] != installation
-                or (
-                    data["root_identity"] != self._root_identity()
-                    and not self._root_device_changed_only(data)
-                )
-            ):
+            if not self.binds(data):
                 raise ValueError("installation binding does not match")
             # A device-only change is rebound by the next writing session's flush.
             rebind = self._root_identity() != data["root_identity"]
@@ -330,17 +325,34 @@ class DeploymentMaterializationSession:
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
 
+    def binds(self, data: Mapping[str, Any]) -> bool:
+        """Whether receipt *data* is bound to this root, scope and installation identity."""
+        installation, moved = self._installation, self._root_device_changed_only
+        recorded = [data["version"], data["root"], data["scope"]]
+        return not (
+            installation is None
+            or recorded != [1, self.root.as_posix(), self.scope.value]
+            or data["installation"] != installation
+            or (data["root_identity"] != self._root_identity() and not moved(data))
+        )
+
+    def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
+        return DeploymentLedgerCodec.locator_for_path(
+            candidate,
+            project_root=self.root,
+            target=target,
+            scope=self.scope,
+            candidate_resolved=True,
+        )
+
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
+        candidate = resolve_for_containment(path)
         for target in targets:
             if not target.supports("skills"):
                 continue
-            try:
-                ensure_path_within(path, target.skills_deploy_path(self.root))
-            except PathTraversalError:
-                continue
-            return DeploymentLedgerCodec.locator_for_path(
-                path, project_root=self.root, target=target, scope=self.scope
-            )
+            skills_root = resolve_for_containment(target.skills_deploy_path(self.root))
+            if resolved_relative_within(candidate, skills_root) is not None:
+                return self._encode(candidate, target)
         return None
 
     def _write_locator(
@@ -358,14 +370,10 @@ class DeploymentMaterializationSession:
                     for mapping in target.primitives.values()
                     if mapping.deploy_root
                 )
+            candidate = resolve_for_containment(path)
             for root in roots:
-                try:
-                    ensure_path_within(path, root)
-                except PathTraversalError:
-                    continue
-                return DeploymentLedgerCodec.locator_for_path(
-                    path, project_root=self.root, target=target, scope=self.scope
-                )
+                if resolved_relative_within(candidate, resolve_for_containment(root)) is not None:
+                    return self._encode(candidate, target)
         return None
 
     @staticmethod
@@ -597,7 +605,8 @@ class DeploymentMaterializationSession:
             committed._dirty = True
         committed.flush()
 
-    def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
+    def binding(self) -> dict[str, Any]:
+        """The binding fields of a receipt for this installation, creating its identity once."""
         from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         self._validate_paths()
@@ -618,21 +627,20 @@ class DeploymentMaterializationSession:
                 self.identity_path, installation + "\n", new_file_mode=0o600, create_only=True
             )
             self._installation = installation
+        data: dict[str, Any] = dict(version=1, root=self.root.as_posix(), scope=self.scope.value)
+        data.update(root_identity=self._root_identity(), installation=self._installation)
+        if (birth_time := self._root_birth_time()) is not None:
+            data["root_birth_time"] = birth_time
+        return data
+
+    def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+
+        data = {**self.binding(), "destinations": destinations}
         mkdir(self.state_path.parent, mode=0o700, parents=True, exist_ok=True)
         self._validate_paths()
-        data = {
-            "version": 1,
-            "root": self.root.as_posix(),
-            "root_identity": self._root_identity(),
-            "scope": self.scope.value,
-            "installation": self._installation,
-            "records": DeploymentLedgerCodec.rows(DeploymentLedger(records)),
-            "destinations": destinations,
-            "bindings": {key: self._bindings[key] for key in records},
-        }
-        birth_time = self._root_birth_time()
-        if birth_time is not None:
-            data["root_birth_time"] = birth_time
+        data["records"] = DeploymentLedgerCodec.rows(DeploymentLedger(records))
+        data["bindings"] = {key: self._bindings[key] for key in records}
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
@@ -652,15 +660,10 @@ class DeploymentMaterializationSession:
         }
         if keys:
             records = {key: record for key, record in self._records.items() if key not in keys}
-            destinations = {
-                key: value for key, value in self._destinations.items() if key not in keys
-            }
+            destinations = {k: v for k, v in self._destinations.items() if k not in keys}
             self._persist(records, destinations)
-            self._records = records
-            self._destinations = destinations
-            self._bindings = {
-                key: value for key, value in self._bindings.items() if key not in keys
-            }
+            self._records, self._destinations = records, destinations
+            self._bindings = {k: v for k, v in self._bindings.items() if k not in keys}
             self._physical_keys = {path: key for key, path in destinations.items()}
 
     @classmethod
@@ -1708,8 +1711,12 @@ class DeploymentLedgerCodec(RowProjection):
         target: TargetProfile,
         runtime: str | None = None,
         scope: InstallScope,
+        candidate_resolved: bool = False,
     ) -> DeploymentLocator:
-        """Encode a path without forcing external roots into project strings."""
+        """Encode a path without forcing external roots into project strings.
+
+        ``candidate_resolved``: *path* was just resolved; roots are always resolved live.
+        """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
             return DeploymentLocator(
@@ -1720,33 +1727,26 @@ class DeploymentLedgerCodec(RowProjection):
                 scope=scope_value,
             )
 
-        candidate = Path(path).resolve()
-        root = project_root.resolve()
-        try:
-            project_path = ensure_path_within(candidate, root)
-        except PathTraversalError:
-            project_path = None
-        if project_path is not None:
+        root = resolve_for_containment(project_root)
+        candidate = Path(path) if candidate_resolved else resolve_for_containment(Path(path))
+        relative = resolved_relative_within(candidate, root)
+        if relative is not None:
             return DeploymentLocator(
                 kind=LocatorKind.PROJECT_RELATIVE,
                 target=target.name,
-                value=portable_relpath(project_path, root),
+                value=relative,
                 runtime=runtime,
                 scope=scope_value,
             )
 
         deploy_root = target.managed_deploy_root
         if deploy_root is not None:
-            resolved_deploy_root = deploy_root.resolve()
-            try:
-                target_path = ensure_path_within(candidate, resolved_deploy_root)
-            except PathTraversalError:
-                target_path = None
-            if target_path is not None:
+            relative = resolved_relative_within(candidate, resolve_for_containment(deploy_root))
+            if relative is not None:
                 return DeploymentLocator(
                     kind=LocatorKind.TARGET_RELATIVE,
                     target=target.name,
-                    value=portable_relpath(target_path, resolved_deploy_root),
+                    value=relative,
                     runtime=runtime,
                     scope=scope_value,
                 )

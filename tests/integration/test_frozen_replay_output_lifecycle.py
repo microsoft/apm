@@ -104,8 +104,10 @@ def _marketplace_world(root: Path, binary: Path) -> _World:
     repositories = LocalGitRepositoryFactory(world.isolated.repository_root, env=world.env)
     repository = repositories.create("plugins-official")
     plugin = repository.worktree / "plugins" / _PLUGIN
-    (plugin / ".claude-plugin").mkdir(parents=True)
-    (plugin / ".claude-plugin" / "plugin.json").write_text(
+    # A root plugin.json keeps the split route that deploys the loose command;
+    # a .claude-plugin manifest installs whole at project scope (#3921).
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
         json.dumps({"name": _PLUGIN, "version": "1.0.0", "description": "Replay fixture"}),
         encoding="utf-8",
     )

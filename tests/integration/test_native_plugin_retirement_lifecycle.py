@@ -2,12 +2,13 @@
 
 PROMISE: P-INV-I4 -- deny, revoke and tightening never widen what is deployed.
 Once a gate change stops allowing the approved local native Claude plugin
-``p-native-claude``, the next mutating command removes its native surface (the
-plugin's MCP server in the project ``.mcp.json``) or refuses, as install does:
+``p-native-claude``, the next mutating command removes its native surface (its
+deployed root under ``.agents/plugins/`` and its ``enabledPlugins`` entry in
+``.claude/settings.json``, #3921) or refuses, as install does:
 
 - #4446: uninstalling another package rebuilds the integration and retires it,
-  for a changed definition, a local deny, an org deny, a revoked approval and a
-  policy dependency deny;
+  for a changed definition, a local deny, an org deny, a revoked approval, a
+  policy dependency deny and an org MCP policy that blocks its server (#3921);
 - #4445: ``apm update`` under an org policy that denies the plugin exits 1 and
   names it;
 - #4444: ``apm update`` after the plugin's definition changed since approval
@@ -41,7 +42,17 @@ pytestmark = [
 
 _PLUGIN = "p-native-claude"
 _SIBLING = "p-skill"
-_SERVER = f'"{_PLUGIN}-mcp"'
+
+
+def _native_surface(world: World, plugin: str = _PLUGIN) -> bool:
+    """Whether Claude would load the plugin: its deployed root, or APM's true for it."""
+    if (world.project / ".agents/plugins" / plugin).exists():
+        return True
+    settings = world.project / ".claude/settings.json"
+    if not settings.is_file():
+        return False
+    enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+    return any(key.startswith(f"{plugin}@") and value is True for key, value in enabled.items())
 
 
 def _evidence(result: CommandResult) -> str:
@@ -59,21 +70,21 @@ def _spec(world: World, key: str) -> str:
     return world.packages[key].spec
 
 
-def _arrange(world: World) -> None:
+def _arrange(world: World, plugin: str = _PLUGIN, *flags: str) -> None:
     """Install the sibling and the approved native plugin for the claude target."""
     manifest = world.project / "apm.yml"
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
     data["targets"] = ["claude"]
     manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
     for args in (
-        ("install", _spec(world, _PLUGIN)),
-        ("install", _spec(world, _SIBLING)),
-        ("approve", _spec(world, _PLUGIN)),
-        ("install",),
+        ("install", _spec(world, plugin), *flags),
+        ("install", _spec(world, _SIBLING), *flags),
+        ("approve", _spec(world, plugin)),
+        ("install", *flags),
     ):
         result = _apm(world, *args)
         assert result.returncode == 0, _evidence(result)
-    assert _SERVER in (world.project / ".mcp.json").read_text(encoding="utf-8")
+    assert _native_surface(world, plugin)
 
 
 def _redefine(world: World) -> None:
@@ -110,13 +121,22 @@ def _change(world: World, change: str) -> None:
         _revoke(world)
     elif change == "policy-dep-deny":
         use_policy(world, "deny-native")
+    elif change == "policy-mcp-deny":
+        use_policy(world, "mcp-deny")
     else:
         raise ValueError(change)
 
 
 @pytest.mark.parametrize(
     "change",
-    ("definition-changed", "local-deny", "org-deny", "revoke-approval", "policy-dep-deny"),
+    (
+        "definition-changed",
+        "local-deny",
+        "org-deny",
+        "revoke-approval",
+        "policy-dep-deny",
+        "policy-mcp-deny",
+    ),
 )
 def test_uninstalling_another_package_retires_a_disallowed_native_plugin(
     lifecycle_world: World,  # noqa: F811
@@ -128,10 +148,7 @@ def test_uninstalling_another_package_retires_a_disallowed_native_plugin(
 
     result = _apm(lifecycle_world, "uninstall", _spec(lifecycle_world, _SIBLING))
 
-    config = lifecycle_world.project / ".mcp.json"
-    assert _SERVER not in (config.read_text(encoding="utf-8") if config.is_file() else ""), (
-        _evidence(result)
-    )
+    assert not _native_surface(lifecycle_world), _evidence(result)
     assert not (lifecycle_world.project / ".claude" / "skills" / _SIBLING).exists()
 
 
@@ -150,7 +167,7 @@ def test_update_refuses_a_native_plugin_the_org_policy_denies(
     output = " ".join(f"{result.stdout}\n{result.stderr}".split())
     assert _PLUGIN in output, _evidence(result)
     assert "denied by pattern" in output, _evidence(result)
-    assert _SERVER in (lifecycle_world.project / ".mcp.json").read_text(encoding="utf-8")
+    assert _native_surface(lifecycle_world), "a refused update keeps the deployed state"
 
 
 def test_update_retires_a_native_plugin_whose_definition_changed(
@@ -162,8 +179,5 @@ def test_update_retires_a_native_plugin_whose_definition_changed(
 
     result = _apm(lifecycle_world, "update", "--yes")
 
-    config = lifecycle_world.project / ".mcp.json"
-    assert _SERVER not in (config.read_text(encoding="utf-8") if config.is_file() else ""), (
-        _evidence(result)
-    )
+    assert not _native_surface(lifecycle_world), _evidence(result)
     assert result.returncode == 0, _evidence(result)
