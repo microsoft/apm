@@ -14,16 +14,6 @@ if TYPE_CHECKING:
     from ..bundle.local_bundle import LocalBundleInfo
     from ..integration.targets import TargetProfile
 
-_APM_PRIMITIVE_SUFFIXES = (
-    ".instructions.md",
-    ".prompt.md",
-    ".agent.md",
-    ".mdc",
-    ".toml",
-    ".json",
-    ".md",
-)
-
 # Target formats that need a primitive renderer; an opaque bundle copy would
 # write plugin-native Markdown under their extension (#3706).
 _UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
@@ -185,6 +175,33 @@ def bundle_render_format_id(
     return route[3].format_id
 
 
+def bundle_rule_format_id(
+    rel_path: str,
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile,
+) -> str | None:
+    """Return the rule format a packed APM instruction must be converted to.
+
+    Plugin bundles carry instructions in the APM source rendering
+    (``x.instructions.md`` with ``applyTo``, #3686). A target whose rule
+    format transforms instructions (``claude_rules`` and the other
+    ``RULE_FORMATS``) gets that rendering converted, exactly as ``apm install``
+    converts it from source; any other packed file is copied as is.
+    """
+    from ..bundle.plugin_layout import PLUGIN_LAYOUT, primitive_file_suffix
+    from ..integration.targets import RULE_FORMATS
+
+    deploy_rel = _deploy_relative_candidate(rel_path, allowed_prefixes, known_deploy_prefixes)
+    route = _plugin_layout_route(deploy_rel, target) if deploy_rel else None
+    if route is None or route[2] is not PLUGIN_LAYOUT["instructions"]:
+        return None
+    if primitive_file_suffix(deploy_rel) != ".instructions.md":
+        return None
+    return route[3].format_id if route[3].format_id in RULE_FORMATS else None
+
+
 def _renders_from_markdown(deploy_rel: str, mapping: Any) -> bool:
     return mapping.format_id in _RENDERED_PLUGIN_FORMAT_IDS and deploy_rel.endswith(".md")
 
@@ -318,12 +335,11 @@ def _retarget_basename(name: str, mapping: Any, apm_basename_fn: Callable[[str],
         return name
     if not extension.startswith("."):
         return extension
+    from ..bundle.plugin_layout import primitive_file_suffix
+
     apm_name = apm_basename_fn(name)
-    base_name = apm_name
-    for suffix in _APM_PRIMITIVE_SUFFIXES:
-        if base_name.endswith(suffix):
-            base_name = base_name[: -len(suffix)]
-            break
+    suffix = primitive_file_suffix(apm_name)
+    base_name = apm_name[: -len(suffix)] if suffix else apm_name
     return f"{base_name}{extension}"
 
 
@@ -350,3 +366,40 @@ def declared_bundle_exec_types(
     ):
         declared.append("canvas")
     return tuple(declared)
+
+
+def superseded_bundle_renderings(
+    rel_paths: list[str],
+    allowed_prefixes: frozenset[str],
+    known_deploy_prefixes: frozenset[str],
+    *,
+    target: TargetProfile,
+) -> dict[str, str]:
+    """Map each bundle path that another path lowering to the same file replaces.
+
+    Bundles packed before #3686 can carry one primitive in several target
+    renderings (``instructions/py.md`` and ``instructions/py.instructions.md``)
+    that lower to the same file. The rendering whose suffix is *target*'s own
+    extension is kept, then the rendering a plugin bundle prefers. Returns
+    ``{skipped: kept}``; callers name every skipped path.
+    """
+    from ..bundle.plugin_layout import PLUGIN_RENDERING_PREFERENCE, primitive_file_suffix
+
+    groups: dict[str, list[tuple[bool, int, str]]] = {}
+    for rel in sorted(rel_paths):
+        deploy_rel = _deploy_relative_candidate(rel, allowed_prefixes, known_deploy_prefixes)
+        preference = PLUGIN_RENDERING_PREFERENCE.get((deploy_rel or "").partition("/")[0])
+        route = _plugin_layout_route(deploy_rel, target) if preference else None
+        if route is None or _is_unsupported_route(deploy_rel, route[3]):
+            continue
+        lowered = _lower_to_target(deploy_rel, target)
+        if lowered is None:
+            continue
+        suffix = primitive_file_suffix(deploy_rel)
+        rank = preference.index(suffix) if suffix in preference else len(preference)
+        groups.setdefault(lowered, []).append((suffix != route[3].extension, rank, rel))
+    superseded: dict[str, str] = {}
+    for members in groups.values():
+        kept = min(members)[2]
+        superseded.update({rel: kept for *_rank, rel in members if rel != kept})
+    return superseded

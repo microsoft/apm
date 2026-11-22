@@ -1288,6 +1288,98 @@ class TestLocalBundlePathRouting:
             == "prompts/review.prompt.md"
         )
 
+    @pytest.mark.parametrize(
+        ("target_name", "superseded"),
+        [
+            (
+                "claude",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.mdc",
+                },
+            ),
+            (
+                "copilot",
+                {"agents/rv.md", "agents/rv.toml", "instructions/py.md", "instructions/py.mdc"},
+            ),
+            (
+                "cursor",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.instructions.md",
+                    "instructions/py.md",
+                },
+            ),
+            ("codex", {"agents/rv.agent.md"}),
+        ],
+    )
+    def test_duplicated_bundle_keeps_the_target_own_rendering(
+        self, target_name: str, superseded: set[str]
+    ) -> None:
+        """#3686: a pre-fix bundle deploys one rendering per primitive and target."""
+        from apm_cli.install.local_bundle_paths import (
+            known_bundle_deploy_prefixes,
+            superseded_bundle_renderings,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        rels = [
+            "agents/rv.agent.md",
+            "agents/rv.md",
+            "agents/rv.toml",
+            "agents/solo.md",
+            "instructions/py.instructions.md",
+            "instructions/py.md",
+            "instructions/py.mdc",
+            "skills/s/SKILL.md",
+        ]
+        assert (
+            superseded_bundle_renderings(
+                rels,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            ).keys()
+            == superseded
+        )
+
+    @pytest.mark.parametrize(
+        ("target_name", "rel", "rule_format"),
+        [
+            ("claude", "instructions/py.instructions.md", "claude_rules"),
+            ("claude", "instructions/py.md", None),
+            ("cursor", "instructions/py.instructions.md", "cursor_rules"),
+            ("copilot", "instructions/py.instructions.md", None),
+            ("claude", "agents/rv.agent.md", None),
+        ],
+    )
+    def test_packed_apm_instructions_render_to_the_target_rule_format(
+        self, target_name: str, rel: str, rule_format: str | None
+    ) -> None:
+        """#3686: bundles carry applyTo instructions; rule targets convert them."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_rule_format_id,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        assert (
+            bundle_rule_format_id(
+                rel,
+                target_bundle_deploy_prefixes(target),
+                known_bundle_deploy_prefixes(),
+                target=target,
+            )
+            == rule_format
+        )
+
     def test_rejects_traversal_before_prefix_routing(self) -> None:
         from apm_cli.install.local_bundle_paths import bundle_deploy_relative_path
         from apm_cli.utils.path_security import PathTraversalError

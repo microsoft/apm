@@ -38,13 +38,18 @@ from ..utils.archive import (
     write_zip_archive,
 )
 from ..utils.atomic_io import write_text_lf
-from ..utils.console import _rich_warning
+from ..utils.console import _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
 from .credential_files import refuse_credential_files
 from .packer import PackResult
-from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
+from .plugin_layout import (
+    PLUGIN_ROOT_DIRS,
+    deployed_rendering_extension,
+    duplicate_plugin_renderings,
+    find_plugin_root_sources,
+)
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -1093,6 +1098,7 @@ def export_plugin_bundle(
     #    file_map: output_rel_posix -> (source_abs, owner_name)
     file_map: dict[str, tuple[Path, str]] = {}
     collisions: list[str] = []
+    dropped_renderings: list[str] = []
     merged_hooks: dict = {}
     merged_mcp: dict = {}
 
@@ -1147,6 +1153,9 @@ def export_plugin_bundle(
             # shared settings is not surprised by the exclusion.
             _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
+            dep_components = _drop_duplicate_renderings(
+                dep_components, project_root, dropped_renderings
+            )
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
@@ -1194,6 +1203,7 @@ def export_plugin_bundle(
     ):
         _warn_no_local_primitives(logger)
 
+    own_components = _drop_duplicate_renderings(own_components, project_root, dropped_renderings)
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
     hook_resources.validate_outputs(
         file_map,
@@ -1228,7 +1238,8 @@ def export_plugin_bundle(
         else:
             _rich_warning(message, symbol="warning")
 
-    # 7. Emit collision warnings
+    # 7. Name the dropped renderings, then emit collision warnings
+    _report_dropped_renderings(dropped_renderings, logger)
     for msg in collisions:
         if logger:
             logger.warning(msg)
@@ -1349,8 +1360,41 @@ def export_plugin_bundle(
 
 
 # ---------------------------------------------------------------------------
-# Collision handling
+# Rendering selection and collision handling
 # ---------------------------------------------------------------------------
+
+
+def _drop_duplicate_renderings(
+    components: list[tuple[Path, str]], project_root: Path, dropped: list[str]
+) -> list[tuple[Path, str]]:
+    """Keep one rendering per primitive of one package (#3686).
+
+    A multi-target install deploys a primitive once per target (for example
+    ``.claude/agents/rv.md`` and ``.github/agents/rv.agent.md``); the bundle
+    carries only the rendering :mod:`.plugin_layout` prefers. Each file's
+    deployed path names the target that rendered it.
+    """
+    duplicates = duplicate_plugin_renderings(
+        {
+            rel: deployed_rendering_extension(portable_relpath(source, project_root))
+            for source, rel in components
+        }
+    )
+    dropped.extend(sorted(duplicates))
+    return [component for component in components if component[1] not in duplicates]
+
+
+def _report_dropped_renderings(dropped: list[str], logger=None) -> None:
+    """Name every per-target duplicate rendering pack left out, on one line."""
+    if not dropped:
+        return
+    message = "Packed one rendering per primitive; dropped per-target duplicates: " + ", ".join(
+        dict.fromkeys(dropped)
+    )
+    if logger:
+        logger.info(message)
+    else:
+        _rich_info(message, symbol="info")
 
 
 def _merge_file_map(

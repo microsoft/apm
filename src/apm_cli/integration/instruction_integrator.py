@@ -202,14 +202,23 @@ class InstructionIntegrator(BaseIntegrator):
         is copied verbatim (identity transform).
         """
         content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
-        if fmt in RULE_FORMATS:
-            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            try:
-                content = converter(content)
-            except yaml.YAMLError as exc:
-                self._raise_frontmatter_error(source, exc)
+        try:
+            content = self.convert_rule_content(content, fmt)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    @classmethod
+    def convert_rule_content(cls, content: str, fmt: str) -> str:
+        """Convert APM instruction *content* to rule format *fmt*.
+
+        Formats outside :data:`targets.RULE_FORMATS` are returned unchanged.
+        Raises :class:`yaml.YAMLError` on malformed frontmatter.
+        """
+        if fmt not in RULE_FORMATS:
+            return content
+        return getattr(cls, cls._FORMAT_CONVERTERS[fmt])(content)
 
     @staticmethod
     def _plan_key(

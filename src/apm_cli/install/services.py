@@ -29,9 +29,13 @@ from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
+from .local_bundle_paths import bundle_rule_format_id as _bundle_rule_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
+from .local_bundle_paths import superseded_bundle_renderings as _superseded_renderings
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
+from .local_bundle_renderings import render_bundle_rule as _render_bundle_rule
+from .local_bundle_renderings import warn_superseded_renderings as _warn_superseded
 from .project_package import build_project_local_package_info
 from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
 from .target_warnings import log_canvas_skip as _log_canvas_skip
@@ -968,7 +972,13 @@ def integrate_local_bundle(
             if getattr(prim_mapping, "deploy_root", None) and resolved_root is None:
                 _primitive_roots[prim_name] = project_root / prim_mapping.deploy_root
 
-        for rel, expected_hash in sorted(pack_files.items()):
+        # #3686: an older bundle may hold several renderings of one primitive.
+        _superseded = _superseded_renderings(
+            list(pack_files), _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+        )
+        _warn_superseded(target.name, _superseded, diagnostics=diagnostics, logger=logger)
+        for rel in sorted(pack_files.keys() - _superseded.keys()):
+            expected_hash = pack_files[rel]
             # CR1: bundle_files keys come from untrusted lockfile YAML
             # inside the bundle.  Reject traversal sequences before
             # constructing any filesystem path, then assert the resolved
@@ -1096,7 +1106,18 @@ def integrate_local_bundle(
                 )
                 continue
 
-            normalized_text = _normalized_bundle_text(src)
+            normalized_text, _unrenderable = _render_bundle_rule(
+                _normalized_bundle_text(src),
+                _bundle_rule_format(
+                    _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+                ),
+                record=record,
+                diagnostics=diagnostics,
+                logger=logger,
+            )
+            if _unrenderable:
+                skipped += 1
+                continue
             if normalized_text is None:
                 desired_hash = expected_hash
             else:
