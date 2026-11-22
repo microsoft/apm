@@ -26969,7 +26969,7 @@
    "evidence": [
     "src/apm_cli/commands/marketplace/__init__.py:372",
     "docs/src/content/docs/reference/cli/marketplace.md:292",
-    "docs/src/content/docs/consumer/installing-from-marketplaces.md:112"
+    "docs/src/content/docs/consumer/installing-from-marketplaces.md:124"
    ],
    "text": "marketplace commands act on catalogs, never on deployed primitives: add, list, browse, update, remove and validate read or refresh the catalog cache, and the authoring commands edit the marketplace block; a primitive reaches a project only through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto one rule cell witnessed at the allowed and the revoked GATE level (deployed surfaces and the lock byte-identical)"
   },

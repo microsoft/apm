@@ -260,7 +260,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("docs/src/content/docs/reference/cli/marketplace.md", 292, "apm marketplace update"),
             Ev(
                 "docs/src/content/docs/consumer/installing-from-marketplaces.md",
-                112,
+                124,
                 "refreshes the cached",
             ),
         ),
