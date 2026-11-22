@@ -233,6 +233,11 @@ class _Remote:
         return result.stdout.strip()
 
 
+def _shard_dirs(root: Path) -> list[str]:
+    """Directories under a cache root: landed shards and any staged ``.inc.`` leftovers."""
+    return sorted(entry.name for entry in root.iterdir() if entry.is_dir())
+
+
 def _git_dir_has(bare_dir: Path, sha: str) -> bool:
     probe = ["git", "--git-dir", str(bare_dir), "cat-file", "-e", f"{sha}^{{commit}}"]
     return _REAL_RUN(probe, capture_output=True).returncode == 0
@@ -423,7 +428,7 @@ class TestEnsureBareRepo:
         assert result == cache._db_root / shard_key
         assert _git_dir_has(result, remote.main)
         # Only the landed shard remains: no staged sibling is left behind.
-        assert [entry.name for entry in cache._db_root.iterdir()] == [shard_key]
+        assert _shard_dirs(cache._db_root) == [shard_key]
 
     def test_clone_failure_cleans_staged_directory(self, cache: GitCache, tmp_path: Path) -> None:
         gone = (tmp_path / "gone.git").as_uri()
@@ -431,7 +436,7 @@ class TestEnsureBareRepo:
         with pytest.raises(RuntimeError, match="Failed to clone"):
             cache._ensure_bare_repo(gone, cache_shard_key(gone), "d" * 40)
 
-        assert list(cache._db_root.iterdir()) == []
+        assert _shard_dirs(cache._db_root) == [], "the staged clone is removed"
 
     @staticmethod
     def _race(winner_argv: list[str]):
@@ -455,7 +460,7 @@ class TestEnsureBareRepo:
 
         assert result == winner
         assert _git_dir_has(winner, remote.main), "the empty winner must be fetched to the sha"
-        assert [entry.name for entry in cache._db_root.iterdir()] == [shard_key]
+        assert _shard_dirs(cache._db_root) == [shard_key]
 
     def test_atomic_land_false_skips_fetch_when_winner_has_sha(
         self, cache: GitCache, remote: _Remote, monkeypatch: pytest.MonkeyPatch

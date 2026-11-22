@@ -710,7 +710,7 @@
       "tests/integration/test_frozen_host_qualified_git_e2e.py": 8,
       "tests/integration/test_generic_https_credential_env_e2e.py": 3,
       "tests/integration/test_ghe_marketplace_install_e2e.py": 1,
-      "tests/integration/test_git_cache_hermetic.py": 66,
+      "tests/integration/test_git_cache_hermetic.py": 16,
       "tests/integration/test_git_cache_materialization.py": 2,
       "tests/integration/test_git_hook_env_isolation.py": 1,
       "tests/integration/test_git_sparse.py": 2,
