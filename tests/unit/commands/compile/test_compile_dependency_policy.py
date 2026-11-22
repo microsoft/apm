@@ -382,3 +382,18 @@ def test_warn_enforcement_reports_each_package_once_per_command(tmp_path: Path) 
     warned = [line for line in logger.lines if line[0] == "warning"]
     assert warned == [("warning", "acme/denied: org policy: denied by pattern")]
     assert (project / "apm.lock.yaml").is_file()
+
+
+def test_the_policy_is_resolved_once_per_command(tmp_path: Path) -> None:
+    """The recheck under the lock re-reads the inventory, not the policy."""
+    project = _project(tmp_path)
+    logger = _Logger()
+    with (
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="block")) as resolve,
+        patch("apm_cli.install.exec_gate.policy_denied_dependencies", return_value={}),
+    ):
+        assert _dependency_policy_allows(logger, [project]) is True
+        assert _dependency_policy_allows(logger, [project]) is True
+
+    assert resolve.call_count == 1
+    assert (project / "apm.lock.yaml").is_file()

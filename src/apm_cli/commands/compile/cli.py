@@ -803,20 +803,29 @@ def _dependency_policy_allows(
     subjects = _policy_subjects(unique_roots, user_scope=user_scope)
     if not subjects:
         return True
-    try:
-        policy = resolve_trust_policy(
-            manifest_root(unique_roots[0], user_scope=user_scope), logger=logger
-        )
-    except PolicyViolationError as exc:
-        logger.error(str(exc))
-        return False
+    # One resolution per command: the recheck under the lock re-reads the
+    # inventory, not the policy (resolving reports its outcome once).
+    resolved = getattr(logger, "_apm_compile_policy", None)
+    if not isinstance(resolved, tuple):
+        try:
+            resolved = (
+                resolve_trust_policy(
+                    manifest_root(unique_roots[0], user_scope=user_scope), logger=logger
+                ),
+            )
+        except PolicyViolationError as exc:
+            logger.error(str(exc))
+            return False
+        logger._apm_compile_policy = resolved
+    policy = resolved[0]
     denied = policy_denied_dependencies(subjects.items(), policy) if policy is not None else {}
     enforcement = getattr(policy, "enforcement", "block")
     if not denied or enforcement == "off":
         return True
     blocking = enforcement != "warn"
     # The command judges twice (before and under its lock); warn once per package.
-    warned: set[str] = getattr(logger, "_apm_policy_warned", set())
+    warned = getattr(logger, "_apm_policy_warned", None)
+    warned = warned if isinstance(warned, set) else set()
     for key, reason in sorted(denied.items()):
         message = f"{key}: {reason}"
         if blocking:
