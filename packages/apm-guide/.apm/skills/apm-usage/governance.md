@@ -623,12 +623,15 @@ relax an ancestor that requires an explicit `includes:` list.
 - **Registry source:** require, allow_non_registry
 - **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
 - **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
-- **Manifest:** require_explicit_includes
+- **Manifest:** require_explicit_includes, scripts (`deny` refuses a `scripts:` block before any deploy)
+- **Unmanaged files:** `action: deny` refuses an install that would leave a governed file no lockfile row claims; deployed files are restored
 - **Integrity:** security.integrity.require_hashes
 
-`manifest.required_fields`, `manifest.scripts`, `compilation.strategy`,
-`compilation.source_attribution` and `unmanaged_files` are checked only by
-`apm audit --ci`; `manifest.content_types` is not enforced.
+Each install refusal names the policy field and the fix; under
+`enforcement: warn` it is a warning. `manifest.required_fields`,
+`compilation.strategy` and `compilation.source_attribution` are checked only
+by `apm audit --ci`; `manifest.content_types` is not enforced. `apm run` does
+not consult `manifest.scripts`.
 
 ### 5. When enforcement runs
 

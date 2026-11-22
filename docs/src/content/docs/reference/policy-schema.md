@@ -199,7 +199,7 @@ Rules over MCP server references, including transitive ones declared by deep dep
 | Field                       | Type                    | Default | Notes                                                                  |
 |-----------------------------|-------------------------|---------|------------------------------------------------------------------------|
 | `required_fields`           | list of strings         | `[]`    | Top-level keys every `apm.yml` must declare (e.g. `description`, `license`). |
-| `scripts`                   | enum                    | `allow` | `allow` / `deny` -- whether `scripts:` blocks are permitted.            |
+| `scripts`                   | enum                    | `allow` | `allow` / `deny` -- whether `scripts:` blocks are permitted. `apm install` refuses (`block`) or warns (`warn`) on a `scripts:` block before deploying anything; `apm audit --ci` fails it too. |
 | `content_types`             | object or null          | `null`  | `{allow: [...]}`. Restricts primitive content types (e.g. `skill`, `prompt`). |
 | `require_explicit_includes` | boolean                 | `false` | When `true`, manifests must declare an explicit `includes:` list rather than rely on directory globs. |
 
@@ -209,7 +209,7 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 
 | Field         | Type           | Default  | Notes                                                                            |
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
-| `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
+| `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift: `apm install` refuses (`enforcement: block`) when a governed directory would hold a file no lockfile row claims, and restores everything it deployed; `apm audit --ci` fails the same state. |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
 | `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
 

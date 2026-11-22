@@ -292,6 +292,21 @@ def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage
             _refuse_native_mcp_collisions(ctx, prospective, write_plan)
     if write_plan and not ctx.dry_run and not ctx.force:
         _refuse_unproven_overwrites(ctx, write_plan)
+    _check_manifest_policy(ctx)
+
+
+def _check_manifest_policy(ctx: InstallContext) -> None:
+    """Judge ``manifest.scripts: deny`` on apm.yml before the first deployed byte (#4826)."""
+    policy = _enforced_install_policy(ctx)
+    if policy is None or policy.manifest.scripts != "deny":
+        return
+    from apm_cli.policy.policy_checks import _check_scripts_policy, _load_raw_apm_yml
+
+    _enforce_install_policy_checks(
+        ctx,
+        policy,
+        [_check_scripts_policy(_load_raw_apm_yml(ctx.project_root), policy.manifest)],
+    )
 
 
 def _refuse_native_mcp_collisions(
@@ -438,7 +453,79 @@ def _planned_keeps(
 
 
 def check_before_lockfile(ctx: InstallContext, lockfile: LockFile | None) -> None:
-    """Run every check on the built lockfile before it is written."""
+    """Run every check on the built lockfile before it is written.
+
+    ``unmanaged_files.action: deny`` is judged here, on the lockfile that
+    records every file this install deployed: a governed file no row claims
+    is one this install would leave unmanaged. A refusal fails the install,
+    and the transaction restores every file it deployed (#4826).
+    """
     from apm_cli.install.integrity import enforce_installed_hash_policy
 
     enforce_installed_hash_policy(ctx, lockfile)
+    policy = _enforced_install_policy(ctx)
+    if policy is not None and policy.unmanaged_files.effective_action == "deny":
+        from apm_cli.policy.policy_checks import _check_unmanaged_files
+
+        _enforce_install_policy_checks(
+            ctx,
+            policy,
+            [_check_unmanaged_files(ctx.project_root, lockfile, policy.unmanaged_files)],
+        )
+
+
+# Install-time refusals name the org policy field and the fix (#4826); the
+# checks themselves are the ones ``apm audit --ci`` runs, unchanged.
+_INSTALL_POLICY_FIELDS: dict[str, tuple[str, str]] = {
+    "scripts-policy": (
+        "manifest.scripts: deny",
+        "Remove the scripts: block from apm.yml, or ask your policy admin to allow scripts.",
+    ),
+    "unmanaged-files": (
+        "unmanaged_files.action: deny",
+        "Move or delete each listed file, or ask your policy admin to exclude it.",
+    ),
+    "transitive-depth": (
+        "dependencies.max_depth",
+        "Reduce the dependency nesting, or ask your policy admin to raise dependencies.max_depth.",
+    ),
+}
+
+
+def _enforced_install_policy(ctx: InstallContext) -> Any:
+    """The org policy the install's policy gate enforces, or ``None``."""
+    if not getattr(ctx, "policy_enforcement_active", False):
+        return None
+    return getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+
+
+def _enforce_install_policy_checks(ctx: InstallContext, policy: Any, checks: list[Any]) -> None:
+    """Refuse (``block``) or warn (``warn``) on failed org-policy *checks*.
+
+    A ``--dry-run`` previews the verdict and never stops.
+    """
+    failed = [check for check in checks if not check.passed]
+    if not failed:
+        return
+    logger = ctx.logger
+    block = policy.enforcement == "block" and not ctx.dry_run
+    for check in failed:
+        field, fix = _INSTALL_POLICY_FIELDS[check.name]
+        lines = [f"Org policy {field}: {check.message}."]
+        lines += [f"  - {detail}" for detail in check.details or ()]
+        lines.append(f"  {fix}")
+        text = "\n".join(lines)
+        if logger is None:
+            continue
+        if block:
+            logger.refusal(text)
+        elif ctx.dry_run:
+            logger.warning(f"Would be blocked by policy: {text}")
+        else:
+            logger.warning(f"Policy warning: {text}")
+    if block:
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+        if logger is not None:
+            logger.render_summary()
+        raise InstallFailureAlreadyRendered("Install blocked by org policy")

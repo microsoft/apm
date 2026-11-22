@@ -106,6 +106,8 @@ POLICY_VARIANTS = (
     "deny-all-deps",
     "mcp-deny-all",
     "allow-list",
+    "scripts-deny",
+    "unmanaged-deny",
 )
 DENIED_PACKAGE = "p-exec"
 # allow-list: only this package is allowed; ``**/`` also matches a bundle named after it.
@@ -175,6 +177,12 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
                     f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
                 ]
             },
+        },
+        "scripts-deny": {"name": "scripts-deny", **base, "manifest": {"scripts": "deny"}},
+        "unmanaged-deny": {
+            "name": "unmanaged-deny",
+            **base,
+            "unmanaged_files": {"action": "deny"},
         },
         "allow-list": {
             "name": "allow-list",

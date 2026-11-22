@@ -912,6 +912,8 @@ _POLICY_EXIT = {
     "cached_stale": 1,
     "deny-all-deps": 1,
     "allow-list": 1,
+    "scripts-deny": 0,
+    "unmanaged-deny": 0,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
