@@ -823,6 +823,12 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         "P-LAW-ownership.preserve_unowned",
         "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
     ),
+    "pair|SRC=inline-mcp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-INV-I7",
+        "install/mcp/collision_preflight.py: install --mcp refuses before any write (#4759)",
+    ),
     "pair|SRC=mcp-registry|DEPLOYED=edited": ExpectedRefusal(
         1,
         r"conflicts with the existing copilot connection .* Preserved that connection",
