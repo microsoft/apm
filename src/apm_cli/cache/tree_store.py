@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import stat
 import sys
 from collections.abc import Callable
@@ -149,6 +150,13 @@ def _validated_rel(value: object) -> str:
     return value
 
 
+def _refuse_linked_seal(entry: Path) -> None:
+    """The seal and its ``.git`` parent must be real entries inside *entry*."""
+    for path in (entry / _GIT_DIR, seal_path(entry)):
+        if path.is_symlink():
+            raise TreeIntegrityError(f"cache entry {entry} has a linked seal path: {path}")
+
+
 def read_seal(entry: Path) -> TreeSeal | None:
     """Return the parsed seal of *entry*, or ``None`` when it has none.
 
@@ -156,6 +164,7 @@ def read_seal(entry: Path) -> TreeSeal | None:
     trusted (unreadable, malformed, or naming a path outside the entry).
     """
     path = seal_path(entry)
+    _refuse_linked_seal(entry)
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -172,6 +181,10 @@ def read_seal(entry: Path) -> TreeSeal | None:
         )
         dirs = tuple(_validated_rel(path) for path in data["dirs"])
         failures = data.get("link_failures")
+        if failures is not None and not isinstance(failures, list):
+            raise ValueError("link_failures must be a list or null")
+        if not isinstance(data["files"], list) or not isinstance(data["dirs"], list):
+            raise ValueError("files and dirs must be lists")
         link_failures = (
             None if failures is None else tuple(_validated_rel(path) for path in failures)
         )
@@ -183,6 +196,7 @@ def read_seal(entry: Path) -> TreeSeal | None:
 def write_seal(entry: Path, seal: TreeSeal) -> None:
     from ..utils.atomic_io import atomic_write_text
 
+    _refuse_linked_seal(entry)
     payload = {
         "version": _SEAL_VERSION,
         "files": [[r.path, r.sha256, r.size, r.executable] for r in seal.files],
@@ -207,6 +221,7 @@ def verified_seal(entry: Path, *, read_only: bool = False) -> TreeSeal | None:
 
     Raises :class:`TreeIntegrityError` when the content no longer matches.
     """
+    _refuse_linked_seal(entry)
     if not (entry / _GIT_DIR).is_dir():
         return None
     current = scan_tree(entry)
@@ -253,6 +268,9 @@ def _clone_item(source: Path, destination: Path, stats: MaterializeStats) -> Non
     # clonefile(2) clones a whole directory; other platforms clone per file
     # inside robust_copytree.
     if (sys.platform == "darwin" or not source.is_dir()) and clone_file(source, destination):
+        if sys.platform != "darwin":
+            # FICLONE clones data only; clonefile(2) keeps the metadata.
+            shutil.copystat(source, destination)
         stats.clones += 1
         return
     if destination.exists():

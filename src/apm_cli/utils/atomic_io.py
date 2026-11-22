@@ -142,7 +142,18 @@ def write_text_lf(path: Path, data: str) -> None:
     ``path.parent`` exists. ``newline=""`` disables the platform newline
     translation that ``Path.write_text`` performs in text mode, so the on-disk
     bytes (and therefore their content hash) are identical on every OS.
+
+    A file with other hard links (``APM_MATERIALIZE=link`` installs) is
+    unlinked first, keeping its mode, so the write never reaches the other
+    names of that inode, such as the git cache.
     """
+    with contextlib.suppress(FileNotFoundError):
+        info = os.lstat(path)
+        if stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
+            os.unlink(path)
+            path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
+            os.chmod(path, stat.S_IMODE(info.st_mode))
+            return
     path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
 
 

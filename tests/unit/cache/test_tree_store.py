@@ -19,6 +19,7 @@ from apm_cli.cache.tree_store import (
     seal_path,
     verified_seal,
 )
+from apm_cli.utils import reflink
 from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 from apm_cli.utils.reflink import reflink_supported
 
@@ -275,3 +276,87 @@ def test_read_only_reader_never_writes_the_cache(tmp_path, monkeypatch):
     assert read_seal(entry) is None
     assert sorted(p.name for p in entry.parent.iterdir()) == before
     assert _tree(tmp_path / "dest") == _tree(entry)
+
+
+def test_pipeline_rewrite_of_a_linked_file_does_not_reach_the_cache(tmp_path, monkeypatch):
+    """stamp_plugin_version and plugin normalization rewrite apm.yml with write_text_lf."""
+    from apm_cli.utils.atomic_io import write_text_lf
+
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "link")
+    entry = _entry(tmp_path / "cache" / "full")
+    dest = tmp_path / "apm_modules" / "pkg"
+    _materialize(entry, dest)
+
+    write_text_lf(dest / "apm.yml", "name: pkg\nversion: abc1234\n")
+    write_text_lf(dest / "bin" / "run.sh", "#!/bin/sh\necho stamped\n")
+
+    assert (dest / "apm.yml").read_text(encoding="utf-8") == "name: pkg\nversion: abc1234\n"
+    assert (entry / "apm.yml").read_bytes() == _FILES["apm.yml"]
+    assert (entry / "bin" / "run.sh").read_bytes() == _FILES["bin/run.sh"]
+    if sys.platform != "win32":
+        assert os.stat(dest / "bin" / "run.sh").st_mode & 0o100
+    assert verified_seal(entry) is not None
+
+
+def test_linux_clone_keeps_the_source_mode(tmp_path, monkeypatch):
+    """FICLONE copies data only; a cloned root-level executable must stay executable."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX mode bits")
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "clone")
+    fcntl = pytest.importorskip("fcntl")
+    monkeypatch.delenv("APM_NO_REFLINK", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    reflink._reset_capability_cache()
+
+    def _ficlone(dst_fd, _request, src_fd):
+        """The kernel clones data only: the new file keeps its 0600 creation mode."""
+        os.lseek(src_fd, 0, os.SEEK_SET)
+        while chunk := os.read(src_fd, 1 << 16):
+            os.write(dst_fd, chunk)
+
+    monkeypatch.setattr(fcntl, "ioctl", _ficlone)
+    entry = _entry(tmp_path / "cache" / "full")
+    (entry / "tool.sh").write_bytes(b"#!/bin/sh\n")
+    (entry / "tool.sh").chmod(0o755)
+    dest = tmp_path / "apm_modules" / "pkg"
+
+    _materialize(entry, dest)
+
+    assert os.stat(dest / "tool.sh").st_mode & 0o777 == 0o755
+    assert (dest / "tool.sh").read_bytes() == b"#!/bin/sh\n"
+
+
+def test_linked_git_dir_never_receives_the_seal(tmp_path, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("symlink creation needs privileges on Windows")
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "copy")
+    entry = _entry(tmp_path / "cache" / "full")
+    outside = tmp_path / "outside-git"
+    (entry / ".git").rename(outside)
+    (entry / ".git").symlink_to(outside, target_is_directory=True)
+    dest = tmp_path / "dest"
+
+    with pytest.raises(TreeIntegrityError, match="linked seal path"):
+        _materialize(entry, dest)
+
+    assert not (outside / tree_store.SEAL_NAME).exists()
+    assert list(dest.iterdir()) == []
+    assert not entry.exists()
+
+
+@pytest.mark.parametrize("bad", ["", {}, "docs/x"])
+def test_seal_with_a_malformed_link_verdict_is_evicted(tmp_path, monkeypatch, bad):
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "copy")
+    entry = _entry(tmp_path / "cache" / "full")
+    _materialize(entry, tmp_path / "seed")
+    data = json.loads(seal_path(entry).read_text(encoding="utf-8"))
+    data["link_failures"] = bad
+    seal_path(entry).write_text(json.dumps(data), encoding="utf-8")
+    calls: list[int] = []
+
+    with pytest.raises(TreeIntegrityError, match="malformed seal"):
+        _materialize(entry, tmp_path / "dest", calls)
+
+    assert calls == []
+    assert not entry.exists()
+    assert list((tmp_path / "dest").iterdir()) == []
