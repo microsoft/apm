@@ -378,7 +378,8 @@
       "selectors": [
         "src/apm_cli/integration/mcp_transport_resolution.py",
         "src/apm_cli/policy/parser.py",
-        "src/apm_cli/policy/policy_checks.py"
+        "src/apm_cli/policy/policy_checks.py",
+        "src/apm_cli/policy/content_types_check.py"
       ],
       "guards": ["install-deployment-policy-mcp-transport-projection"]
     },

@@ -310,13 +310,16 @@ def enforce_content_types(ctx: InstallContext) -> None:
         or getattr(ctx, "dry_run", False) is True
     ):
         return
+    from apm_cli.policy.content_types_check import check_content_types, package_content_roots
     from apm_cli.policy.install_preflight import emit_check_violations
     from apm_cli.policy.models import CIAuditResult
-    from apm_cli.policy.policy_checks import check_content_types, package_content_roots
 
     base = getattr(getattr(ctx, "apm_package", None), "package_path", None) or ctx.project_root
     roots = package_content_roots(
-        ctx.deps_to_install, base_dir=Path(base), modules_dir=ctx.apm_modules_dir
+        ctx.deps_to_install,
+        base_dir=Path(base),
+        modules_dir=ctx.apm_modules_dir,
+        source_first=True,
     )
     check = check_content_types(roots, policy.manifest)
     if check.passed:

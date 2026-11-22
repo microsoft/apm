@@ -779,7 +779,7 @@ class TestContentTypes:
         return root
 
     def test_kinds_come_from_the_shipped_primitive_files(self, tmp_path):
-        from apm_cli.policy.policy_checks import package_content_kinds
+        from apm_cli.policy.content_types_check import package_content_kinds
 
         root = self._package(
             tmp_path,
@@ -792,14 +792,14 @@ class TestContentTypes:
         assert package_content_kinds(root) == {"instruction", "prompt", "skill", "hook"}
 
     def test_plugin_root_and_unnamed_apm_dirs_fail_closed(self, tmp_path):
-        from apm_cli.policy.policy_checks import check_content_types, package_content_kinds
+        from apm_cli.policy.content_types_check import check_content_types, package_content_kinds
 
         root = self._package(
             tmp_path, "SKILL.md", "agents/reviewer.md", "commands/c.md", ".apm/rules/r.md"
         )
         assert package_content_kinds(root) == {"skill", "agent", "command", "rules"}
         policy = ManifestPolicy(content_types={"allow": ["skill", "agents", "commands"]})
-        (subject,) = check_content_types({"p": root}, policy).violation_subjects()
+        (subject,) = check_content_types({"p": (root,)}, policy).violation_subjects()
         assert "rules" in subject.reason
 
     @pytest.mark.parametrize(
@@ -813,11 +813,11 @@ class TestContentTypes:
         ids=["unrestricted", "skill-only", "aliases", "empty-allows-nothing"],
     )
     def test_a_package_passes_only_when_every_kind_is_allowed(self, tmp_path, allow, passed):
-        from apm_cli.policy.policy_checks import check_content_types
+        from apm_cli.policy.content_types_check import check_content_types
 
         root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
         policy = ManifestPolicy(content_types=None if allow is None else {"allow": allow})
-        check = check_content_types({"acme/pkg": root}, policy)
+        check = check_content_types({"acme/pkg": (root,)}, policy)
         assert check.passed is passed
         if not passed:
             (subject,) = check.violation_subjects()

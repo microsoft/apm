@@ -925,125 +925,6 @@ def _check_required_manifest_fields(
     )
 
 
-# manifest.content_types names primitive kinds; singular and plural spellings agree.
-_CONTENT_KINDS = {
-    **dict.fromkeys(("instruction", "instructions"), "instruction"),
-    **dict.fromkeys(("prompt", "prompts"), "prompt"),
-    **dict.fromkeys(("command", "commands"), "command"),
-    **dict.fromkeys(("skill", "skills"), "skill"),
-    **dict.fromkeys(("agent", "agents", "chatmode", "chatmodes"), "agent"),
-    **dict.fromkeys(("hook", "hooks"), "hook"),
-    **dict.fromkeys(("extension", "extensions", "canvas"), "extension"),
-    **dict.fromkeys(("workflow", "workflows"), "workflow"),
-    **dict.fromkeys(("context", "contexts", "memory"), "context"),
-}
-_KIND_SUFFIXES = (
-    (".instructions.md", "instruction"),
-    (".prompt.md", "prompt"),
-    (".agent.md", "agent"),
-    (".chatmode.md", "agent"),
-    (".context.md", "context"),
-    (".memory.md", "context"),
-)
-_NOT_PACKAGE_CONTENT = frozenset({"apm_modules", ".git", "node_modules"})
-
-
-def content_types_allow(policy: ManifestPolicy) -> frozenset[str] | None:
-    """The primitive kinds ``manifest.content_types.allow`` admits; None when unrestricted."""
-    allow = (policy.content_types or {}).get("allow")
-    if allow is None:
-        return None
-    entries = allow if isinstance(allow, list | tuple) else [allow]
-    return frozenset(
-        _CONTENT_KINDS[entry.strip().lower()]
-        for entry in entries
-        if isinstance(entry, str) and entry.strip().lower() in _CONTENT_KINDS
-    )
-
-
-def _directory_kind(name: str) -> str:
-    """The kind a primitive source directory holds; an unnamed one is its own kind."""
-    return _CONTENT_KINDS.get(name, name)
-
-
-def package_content_kinds(package_path: Path) -> frozenset[str]:
-    """The primitive kinds a package directory ships, as ``content_types`` names them.
-
-    Every primitive source directory APM deploys from counts: ``.apm/<dir>/`` and
-    the plugin root directories (``bundle/plugin_layout.PLUGIN_ROOT_DIRS``). A
-    directory with no ``content_types`` name is its own kind, so an allow list
-    that does not name it refuses it.
-    """
-    from ..bundle.plugin_layout import PLUGIN_HOOKS_CONFIG, PLUGIN_ROOT_DIRS
-
-    kinds: set[str] = set()
-    for path in package_path.rglob("*"):
-        relative = path.relative_to(package_path).parts
-        if _NOT_PACKAGE_CONTENT.intersection(relative) or not path.is_file():
-            continue
-        name = path.name
-        kinds.update(kind for suffix, kind in _KIND_SUFFIXES if name.endswith(suffix))
-        if name == "SKILL.md":
-            kinds.add("skill")
-        if relative == (PLUGIN_HOOKS_CONFIG,):
-            kinds.add("hook")
-        elif relative[0] == ".apm" and len(relative) > 2:
-            kinds.add(_directory_kind(relative[1]))
-        elif relative[0] in PLUGIN_ROOT_DIRS and len(relative) > 1:
-            kinds.add(_directory_kind(relative[0]))
-    return frozenset(kinds)
-
-
-def package_content_roots(deps: Iterable, *, base_dir: Path, modules_dir: Path) -> dict[str, Path]:
-    """Display name -> content directory of each package (the apm_modules copy, else local source).
-
-    The one resolver install and ``audit --ci`` share for ``content_types``.
-    """
-    roots: dict[str, Path] = {}
-    for dep in deps:
-        path = dep.get_install_path(modules_dir)
-        if not path.is_dir() and dep.is_local and dep.local_path:
-            local = Path(dep.local_path).expanduser()
-            path = local if local.is_absolute() else base_dir / local
-        if path.is_dir():
-            roots[dep.get_display_name()] = path.resolve()
-    return roots
-
-
-def check_content_types(packages: Mapping[str, Path], policy: ManifestPolicy) -> CheckResult:
-    """Each resolved package ships only primitive kinds ``manifest.content_types`` allows."""
-    allow = content_types_allow(policy)
-    if allow is None:
-        return CheckResult(
-            name="content-types", passed=True, message="No content type restriction configured"
-        )
-    allowed = ", ".join(sorted(allow)) or "none"
-    subjects = [
-        PolicySubject(
-            ref=name,
-            reason=(
-                f"ships {', '.join(sorted(blocked))}; org policy manifest.content_types "
-                f"allows only: {allowed}"
-            ),
-        )
-        for name, path in sorted(packages.items())
-        if (blocked := package_content_kinds(path) - allow)
-    ]
-    if not subjects:
-        return CheckResult(
-            name="content-types",
-            passed=True,
-            message="All packages ship allowed content types",
-        )
-    return CheckResult(
-        name="content-types",
-        passed=False,
-        message=f"{len(subjects)} package(s) ship content types the policy does not allow",
-        details=[f"{subject.ref}: {subject.reason}" for subject in subjects],
-        subjects=tuple(subjects),
-    )
-
-
 _INCLUDES_NOT_PROVIDED = object()
 
 
@@ -2071,17 +1952,11 @@ def run_policy_checks(
     # Manifest checks (14-15)
     if _run(_check_required_manifest_fields(raw_yml, policy.manifest)):
         return result
-    if lock is not None and _run(
-        check_content_types(
-            package_content_roots(
-                (locked.to_dependency_ref() for locked in lock.get_package_dependencies()),
-                base_dir=project_root,
-                modules_dir=modules_root or project_root / "apm_modules",
-            ),
-            policy.manifest,
-        )
-    ):
-        return result
+    if lock is not None and policy.manifest.content_types is not None:
+        from .content_types_check import audit_content_types
+
+        if _run(audit_content_types(lock, policy.manifest, project_root, modules_root)):
+            return result
     if _run(_check_scripts_policy(raw_yml, policy.manifest)):
         return result
 

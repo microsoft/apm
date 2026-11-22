@@ -160,3 +160,22 @@ def test_audit_ci_fails_a_lock_that_ships_a_disallowed_content_type(lifecycle_wo
     audit = driver.run(lifecycle_world, ["audit", "--ci"])
     assert audit.returncode != 0, _text(audit)
     assert "content-types" in _text(audit) and "instruction" in _text(audit), _text(audit)
+
+
+def test_content_types_judge_a_local_source_not_its_stale_copy(lifecycle_world) -> None:
+    """A local dependency that gains a disallowed kind is refused on a targeted install of
+    another package, though its apm_modules copy predates the change."""
+    _serve_policy(lifecycle_world, "policy-g2-stale-copy", _SKILLS_ONLY)
+    factory = LocalPackageFactory(lifecycle_world.root / "g2-stale")
+    first = factory.create("t-first", version="1.0.0")
+    _skill(factory, first, "t-first")
+    assert driver.run(lifecycle_world, ["install", str(first.root)]).returncode == 0
+    hooks = Path(first.root) / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "h.json").write_text('{"hooks": {}}\n', encoding="utf-8")
+    second = factory.create("t-second", version="1.0.0")
+    _skill(factory, second, "t-second")
+    result = driver.run(lifecycle_world, ["install", str(second.root)])
+    assert result.returncode == 1, _text(result)
+    assert "content_types" in _text(result) and "hook" in _text(result), _text(result)
+    assert not (lifecycle_world.project / ".agents/skills/t-second").exists(), _text(result)
