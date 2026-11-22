@@ -604,25 +604,15 @@
       "test_registry_picker_range_grammar_gaps",
       "test_revision_pin_update_rejects_malformed_tag_records"
     ],
-    "tests/test_codex_empty_string_and_defaults.py": [
+    "tests/unit/adapters/test_codex_empty_string_and_defaults.py": [
       "TestCodexEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults",
       "TestCodexEmptyStringAndDefaults::test_codex_no_overrides_gets_defaults",
       "TestCodexEmptyStringAndDefaults::test_whitespace_only_treated_as_empty"
     ],
-    "tests/test_empty_string_and_defaults.py": [
+    "tests/unit/adapters/test_empty_string_and_defaults.py": [
       "TestEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults",
       "TestEmptyStringAndDefaults::test_codex_no_overrides_gets_defaults",
       "TestEmptyStringAndDefaults::test_whitespace_only_treated_as_empty"
-    ],
-    "tests/test_github_downloader.py": [
-      "TestErrorHandling::test_network_timeout_handling",
-      "TestWindowsCleanupHelpers::test_close_repo_none_is_safe"
-    ],
-    "tests/test_token_manager.py": [
-      "TestIsValidCredentialToken::test_empty_string_invalid",
-      "TestIsValidCredentialToken::test_exactly_1024_chars_valid",
-      "TestIsValidCredentialToken::test_over_1024_chars_invalid",
-      "TestResolveCredentialFromGit::test_file_not_found_returns_none"
     ],
     "tests/unit/core/test_auth_validation.py": [
       "TestDetectTokenType::test_token_prefixes"
@@ -632,10 +622,10 @@
       "TestNormaliseFlagName::test_hyphens_converted_to_underscores",
       "TestNormaliseFlagName::test_underscores_are_idempotent"
     ],
+    "tests/unit/core/test_token_manager.py": [
+      "TestResolveCredentialFromGit::test_file_not_found_returns_none"
+    ],
     "tests/unit/core/test_token_manager_lifecycle.py": [
-      "TestIsValidCredentialToken::test_empty_string_is_invalid",
-      "TestIsValidCredentialToken::test_token_exactly_1024_bytes_is_valid",
-      "TestIsValidCredentialToken::test_token_over_1024_bytes_is_invalid",
       "TestResolveCredentialFromGit::test_returns_none_on_file_not_found"
     ],
     "tests/unit/deps/test_download_strategies_selection.py": [
@@ -643,6 +633,10 @@
     ],
     "tests/unit/deps/test_git_remote_ops.py": [
       "TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected"
+    ],
+    "tests/unit/deps/test_github_downloader.py": [
+      "TestErrorHandling::test_network_timeout_handling",
+      "TestWindowsCleanupHelpers::test_close_repo_none_is_safe"
     ],
     "tests/unit/install/test_skill_path_migration.py": [
       "TestLegacySkillPattern::test_rejects_non_legacy",
@@ -1492,15 +1486,6 @@
       "TestValidationResult::test_initial_state",
       "TestValidationResult::test_summary_valid_with_warnings"
     ],
-    "tests/test_apm_package_models.py": [
-      "TestPackageContentType::test_from_string_case_insensitive",
-      "TestValidationResult::test_add_error",
-      "TestValidationResult::test_add_warning",
-      "TestValidationResult::test_initial_state"
-    ],
-    "tests/test_lockfile.py": [
-      "TestLockFile::test_read_nonexistent"
-    ],
     "tests/unit/commands/test_audit_error_handling.py": [
       "TestApplyStrip::test_skips_nonexistent_files",
       "TestApplyStrip::test_skips_outside_project_root",
@@ -1586,6 +1571,9 @@
       "TestSplitOwnerRepo::test_empty_owner_returns_none",
       "TestSplitOwnerRepo::test_empty_repo_returns_none",
       "TestSplitOwnerRepo::test_no_slash_returns_none"
+    ],
+    "tests/unit/deps/test_lockfile.py": [
+      "TestLockFile::test_read_nonexistent"
     ],
     "tests/unit/install/test_drift_detection.py": [
       "TestCheckLogger::test_scratch_root_emits_when_verbose",
@@ -1759,6 +1747,12 @@
     ],
     "tests/unit/marketplace/test_versioned_resolver.py": [
       "TestResolveMarketplacePlugin::test_plugin_not_found_raises"
+    ],
+    "tests/unit/models/test_apm_package_models.py": [
+      "TestPackageContentType::test_from_string_case_insensitive",
+      "TestValidationResult::test_add_error",
+      "TestValidationResult::test_add_warning",
+      "TestValidationResult::test_initial_state"
     ],
     "tests/unit/policy/test_discovery_logic.py": [
       "TestParseRemoteUrl::test_https_ghe"
