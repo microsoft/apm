@@ -252,3 +252,31 @@ def test_uninstall_tie_rule_spans_production_and_dev_parents(
     world.apm("uninstall", "test/e")
     assert not _rows(world)["test/e"].get("is_dev")
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4823: test/mono/d declares test/mono/e; both share the legacy identity test/mono."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+
+    def mono(root: Path, _name: str) -> None:
+        _skill_package(root / "d", "d", ("test/mono/e",))
+        _skill_package(root / "e", "e")
+
+    world.publish("mono", mono)
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["test/mono/d", "test/mono/e"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    world.apm("uninstall", "test/mono/e")
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    e_row = next(row for row in lock["dependencies"] if row.get("virtual_path") == "e")
+    assert e_row["depth"] == 2
+    _assert_install_rewrites_nothing(world)

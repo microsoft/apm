@@ -1,0 +1,14 @@
+{
+  "issue": 4823,
+  "fixed_in": "Unreleased",
+  "summary": "After apm uninstall kept a virtual subdirectory package that its sibling (same repository) still needed, the depth repair could take the package as its own parent through their shared legacy repo_url identity and record the wrong depth; parents now resolve by exact lock key, so the lock matches what a full apm install writes.",
+  "failure_modes": [
+    "idempotency"
+  ],
+  "properties": [
+    "idempotency.byte_stable"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself"
+  ]
+}
