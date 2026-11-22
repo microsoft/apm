@@ -1011,6 +1011,7 @@ def withheld_hook_files(
     deletes it; install announces it and ``apm audit --ci`` fails on it.
     Read-only.
     """
+    from apm_cli.integration.copilot_hook_paths import copilot_hook_destinations
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.utils.paths import portable_relpath
 
@@ -1020,7 +1021,7 @@ def withheld_hook_files(
         if getattr(target, "name", None) != "copilot":
             continue
         try:
-            destinations = integrator.copilot_hook_destinations(package_info, project_root, target)
+            destinations = copilot_hook_destinations(integrator, package_info, project_root, target)
         except (OSError, ValueError):
             continue
         for path in destinations:
