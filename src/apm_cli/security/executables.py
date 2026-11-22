@@ -71,17 +71,15 @@ EXEC_KIND_LABELS = {
 
 
 def _skill_roots() -> tuple[tuple[str, ...], ...]:
-    """Every static skills root a target deploys to, legacy layouts included."""
-    from ..integration.targets import (
-        KNOWN_TARGETS,
-        apply_legacy_skill_paths,
-        skills_root_prefixes,
-    )
+    """Every static skills root a target deploys to, in either skill layout."""
+    from ..integration.skill_layout import with_every_skill_layout
+    from ..integration.targets import KNOWN_TARGETS
 
-    roots = set(skills_root_prefixes())
-    for profile in apply_legacy_skill_paths(list(KNOWN_TARGETS.values())):
-        if profile.supports("skills") and profile.user_root_resolver is None:
-            roots.add(profile.skills_rel_root)
+    roots = {
+        profile.skills_rel_root
+        for profile in with_every_skill_layout(KNOWN_TARGETS.values())
+        if profile.supports("skills") and profile.user_root_resolver is None
+    }
     return tuple(tuple(root.split("/")) for root in roots)
 
 
