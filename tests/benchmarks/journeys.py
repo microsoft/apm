@@ -719,38 +719,73 @@ def _spawn_cell(spawns: dict | None) -> str:
     return f"{sum(spawns.values())} ({split})"
 
 
+_NORTH_STAR = ("no-op", "warm", "fresh", "frozen")
 SCOREBOARD_HEADER = (
     "| main SHA | measured | "
     + " | ".join(f"{mode} wall / CPU s" for mode, _ in SCOREBOARD_MODES)
     + " | requests (no-op/warm/fresh/frozen/empty) | spawns (no-op/warm/fresh/frozen/empty) "
-    "| modules no-op | load1 | worst gap to 1 s |"
+    "| modules no-op | load1 | worst gap to 1 s (wall / CPU) "
+    "| CPU vs previous row (no-op/warm/fresh/frozen) |"
 )
 
 
-def scoreboard_row(report: dict) -> str:
+def _previous_cpu(text: str) -> tuple[str, dict[str, float]]:
+    """The SHA and per-mode CPU p50 of the last scoreboard row in *text*."""
+    rows = [
+        line
+        for line in text.splitlines()
+        if line.startswith("| ") and " / " in line and line != SCOREBOARD_HEADER
+    ]
+    if not rows:
+        return "", {}
+    cells = [cell.strip() for cell in rows[-1].strip("|").split("|")]
+    cpu = {}
+    for (mode, _), cell in zip(SCOREBOARD_MODES, cells[2:], strict=False):
+        value = cell.rsplit("/", 1)[-1].strip()
+        if value not in ("-", ""):
+            cpu[mode] = float(value)
+    return cells[0], cpu
+
+
+def _delta(before: float | None, after: float | None) -> str:
+    """Speedup factor and change of the whole journey, e.g. ``2.00x -50%``."""
+    if not before or after is None:
+        return "-"
+    return f"{before / after:.2f}x {100 * (after - before) / before:+.0f}%"
+
+
+def scoreboard_row(report: dict, previous: tuple[str, dict[str, float]] = ("", {})) -> str:
     """One markdown row for the North Star scoreboard (wall and CPU p50 per mode)."""
     by_journey = {r["journey"]: r for r in report["results"] if r["fixture"] == "tree-10"}
-    cells, requests, spawns, gaps, loads = [], [], [], [], []
+    cells, requests, spawns, loads = [], [], [], []
+    wall_gaps, cpu_gaps, deltas = [], [], []
     for mode, journey in SCOREBOARD_MODES:
         r = by_journey.get(journey)
         if r is None:
             cells.append("-")
             continue
         loads += [s["load1"] for s in r["samples"]]
-        cells.append(f"{_cell(r['p50_s'])} / {_cell(r.get('cpu_p50_s'))}")
+        cpu = r.get("cpu_p50_s")
+        cells.append(f"{_cell(r['p50_s'])} / {_cell(cpu)}")
         if mode != "boot":
             requests.append(str(r["traffic"].get("requests", "-")))
             spawns.append(str(sum((r.get("spawns") or {}).values())))
-        if mode not in ("boot", "empty-cache") and r["p50_s"] is not None:
-            gaps.append(r["p50_s"] - 1.0)
+        if mode in _NORTH_STAR:
+            if r["p50_s"] is not None:
+                wall_gaps.append(r["p50_s"] - 1.0)
+            if cpu is not None:
+                cpu_gaps.append(cpu - 1.0)
+            deltas.append(_delta(previous[1].get(mode), cpu))
     noop = by_journey.get("install-noop") or {}
     load = f"{min(loads)}-{max(loads)}" if loads else "-"
-    gap = f"{max(gaps):+.2f} s" if gaps else "-"
+    wall_gap = f"{max(wall_gaps):+.2f}" if wall_gaps else "-"
+    cpu_gap = f"{max(cpu_gaps):+.2f}" if cpu_gaps else "-"
+    vs = f"vs {previous[0]}: " + " / ".join(deltas) if previous[0] else "first row"
     return (
         f"| {_cli_sha(report)} | {report['meta']['started']} | "
         + " | ".join(cells)
         + f" | {'/'.join(requests)} | {'/'.join(spawns)} | {noop.get('modules') or '-'} "
-        f"| {load} | {gap} |"
+        f"| {load} | {wall_gap} / {cpu_gap} s | {vs} |"
     )
 
 
@@ -758,10 +793,15 @@ def append_scoreboard(report: dict, path: Path) -> None:
     """Append this run's row to *path*, writing the header on first use."""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    previous = (
+        _previous_cpu(text[text.find(SCOREBOARD_HEADER) :])
+        if SCOREBOARD_HEADER in text
+        else ("", {})
+    )
     if SCOREBOARD_HEADER not in text:
         separator = "|" + "---|" * SCOREBOARD_HEADER.count(" | ") + "---|"
         text += f"\n{SCOREBOARD_HEADER}\n{separator}\n"
-    path.write_text(text + scoreboard_row(report) + "\n", encoding="utf-8")
+    path.write_text(text + scoreboard_row(report, previous) + "\n", encoding="utf-8")
 
 
 def render_markdown(report: dict) -> str:
@@ -894,7 +934,14 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--apm", default=None)
         p.add_argument("--work", default=str(REPO_ROOT / "build" / "perf-work"))
     run_parser.add_argument("--out", default=str(REPO_ROOT / "build" / "perf"))
+    board = sub.add_parser("scoreboard", help="append a North Star row from a journeys JSON")
+    board.add_argument("json", help="journeys-<sha>.json from a --preset scoreboard run")
+    board.add_argument("file", help="scoreboard markdown file to append to")
     args = parser.parse_args(argv)
+    if args.command == "scoreboard":
+        report = json.loads(Path(args.json).read_text(encoding="utf-8"))
+        append_scoreboard(report, Path(args.file))
+        return 0
     if args.command == "verify-real":
         return verify_real(args)
     if args.preset == "scoreboard":
