@@ -32,6 +32,7 @@ from apm_cli.install.services import (
     integrate_package_primitives,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS
+from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 
@@ -254,6 +255,46 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 scratch_root=scratch,
                 allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
             )
+
+    def test_invalid_scratch_root_fails_before_target_cleanup(self, tmp_path: Path) -> None:
+        """A replay-boundary error must leave live hook bytes untouched."""
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        cursor_dir = project_root / ".cursor"
+        cursor_dir.mkdir()
+        config = cursor_dir / "hooks.json"
+        original = b'{"version": 1, "hooks": {"Stop": []}}\n'
+        config.write_bytes(original)
+        package_root = project_root / "apm_modules" / "targeted-hooks"
+        package_root.mkdir(parents=True)
+        pkg_info = PackageInfo(
+            package=APMPackage(
+                name="targeted-hooks",
+                version="1.0.0",
+                target="claude",
+            ),
+            install_path=package_root,
+        )
+        integrators = _make_integrators()
+
+        with pytest.raises((RuntimeError, ValueError)):
+            integrate_package_primitives(
+                pkg_info,
+                project_root,
+                skill_subset=None,
+                targets=[KNOWN_TARGETS["cursor"]],
+                diagnostics=MagicMock(),
+                integrators=_to_bundle(integrators),
+                force=False,
+                managed_files=None,
+                scratch_root=scratch,
+                allow_executables=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+            )
+
+        assert config.read_bytes() == original
+        integrators["hook_integrator"].reconcile_package_target_restriction.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
