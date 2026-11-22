@@ -5,7 +5,6 @@ Provides deterministic, reproducible installs by capturing exact resolved versio
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import os
@@ -208,35 +207,6 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         for runtime, names in existing.mcp_target_servers.items()
     }
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
-
-
-def _document_snapshot(data: dict[str, Any]) -> dict[str, Any] | None:
-    """A private copy of a parsed lockfile for the no-op check, or None to re-parse.
-
-    A merge-reordered alias chain the bounded loader accepts can nest deeper
-    than deepcopy recurses; the no-op check then parses the text instead.
-    """
-    try:
-        return copy.deepcopy(data)
-    except RecursionError:
-        return None
-
-
-def _same_document(current: str | None, serialized: str, parsed_current: object = None) -> bool:
-    """Whether *current* holds the data *serialized* would write; only formatting may differ.
-
-    *parsed_current* is *current* already loaded, so the caller's parse is reused (#4742).
-    """
-    from ..utils.yaml_io import load_yaml_str
-
-    try:
-        if parsed_current is None:
-            if current is None:
-                return False
-            parsed_current = load_yaml_str(current)
-        return parsed_current == load_yaml_str(serialized)
-    except (UnicodeError, yaml.YAMLError, ValueError):
-        return False
 
 
 def recorded_generator(data: Mapping[str, Any]) -> object:
@@ -1783,6 +1753,7 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_document import document_snapshot, same_document
         from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
@@ -1797,9 +1768,8 @@ class LockFile:
             existing = None
             if isinstance(existing_data, dict):
                 legacy_timestamp_present = existing_data.get("generated_at") is not None
-                # Construction shares nested objects with the parsed mapping;
-                # snapshot it for the no-op check instead of parsing again.
-                existing_document = _document_snapshot(existing_data)
+                # Construction shares nested objects; snapshot for the no-op check.
+                existing_document = document_snapshot(existing_data)
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
@@ -1848,7 +1818,7 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document(existing_text, serialized, existing_document):
+        if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
         if not stage_lockfile(path, serialized):
