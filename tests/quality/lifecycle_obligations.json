@@ -4191,19 +4191,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "T1|OP=install|PRIM=bin|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|user",
-    "G1|install|bin|denied-dependency|user"
-   ],
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "known-failing",
-   "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
-  },
   "T1|OP=install|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
    "issue": "#4099",
@@ -4505,18 +4492,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
-  },
-  "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|lock|bin|denied-dependency|user"
-   ],
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "known-failing",
-   "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4886,22 +4861,6 @@
    ],
    "status": "required",
    "strength": "e2e-evidence",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
-  },
-  "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|mcp-install|bin|denied-dependency|user"
-   ],
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "must_cover": true,
-   "rules": [
-    "U7"
-   ],
-   "status": "known-failing",
-   "strength": "e2e-evidence",
-   "tracking": "#3703",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
@@ -6201,18 +6160,6 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "T1|OP=update|PRIM=bin|GATE=denied-dependency": {
-   "credited_by": [
-    "G1|update|bin|denied-dependency|user"
-   ],
-   "family": "T1",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "known-failing",
-   "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
-  },
   "T1|OP=update|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
    "issue": "#4099",
@@ -6570,18 +6517,6 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[user]"
-  },
-  "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": {
-   "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|user"
-   ],
-   "family": "T2",
-   "issue": "#4095",
-   "lane": "T-1",
-   "status": "known-failing",
-   "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T2|SCOPE=user|GATE=denied-executable|FROZEN=on": {
    "credited_by": [
@@ -27020,7 +26955,8 @@
   }
  },
  "pins": {
-  "U-BIN": "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
+  "U-BIN": "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851",
+  "U-USER-SCOPE-ORG-POLICY": "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
  },
  "removed": {
   "T1|OP=audit|PRIM=bin|GATE=allowed": [
@@ -27053,6 +26989,12 @@
   "T1|OP=bundle-install|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
   ],
+  "T1|OP=install|PRIM=bin|GATE=denied-dependency": [
+   "U-USER-SCOPE-ORG-POLICY"
+  ],
+  "T1|OP=lock|PRIM=bin|GATE=denied-dependency": [
+   "U-USER-SCOPE-ORG-POLICY"
+  ],
   "T1|OP=marketplace|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
   ],
@@ -27067,6 +27009,9 @@
   ],
   "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
+  ],
+  "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": [
+   "U-USER-SCOPE-ORG-POLICY"
   ],
   "T1|OP=pack|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
@@ -27097,6 +27042,12 @@
   ],
   "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
+  ],
+  "T1|OP=update|PRIM=bin|GATE=denied-dependency": [
+   "U-USER-SCOPE-ORG-POLICY"
+  ],
+  "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": [
+   "U-USER-SCOPE-ORG-POLICY"
   ],
   "T3|OP=approve-deny|SRC=inline-mcp|PRIM=bin": [
    "U8"
@@ -28358,6 +28309,17 @@
     "docs/src/content/docs/consumer/installing-from-marketplaces.md:124"
    ],
    "text": "marketplace commands act on catalogs, never on deployed primitives: add, list, browse, update, remove and validate read or refresh the catalog cache, and the authoring commands edit the marketplace block; a primitive reaches a project only through install of plugin@marketplace (OP=install, SRC=marketplace-*). Every OP=marketplace x PRIM cell but the org-policy GATE level (U2 no-collapse) maps onto one rule cell witnessed at the allowed and the revoked GATE level (deployed surfaces and the lock byte-identical)"
+  },
+  "U-USER-SCOPE-ORG-POLICY": {
+   "evidence": [
+    "src/apm_cli/core/scope.py:235",
+    "src/apm_cli/core/scope.py:242",
+    "src/apm_cli/policy/discovery.py:961",
+    "docs/src/content/docs/enterprise/apm-policy.mdx:18",
+    "docs/src/content/docs/enterprise/security.md:99",
+    "docs/src/content/docs/reference/cli/policy.md:56"
+   ],
+   "text": "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not a defect): user scope has no git remote, so policy_discovery_uses_git_remote is False at $APM_HOME and install, lock, update and install --mcp at -g discover no org policy; the local executables gate still parks bin/ there, and project scope refuses the denied plugin with exit 1. A user-scope cell whose GATE is denied-dependency under one of those commands is removed until #3703 lands; PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: generator/bin_pin.py hashes the predicate, and when the hash differs from U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails"
   },
   "U1": {
    "evidence": [],

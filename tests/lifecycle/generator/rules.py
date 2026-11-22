@@ -317,6 +317,37 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_RETIRED, 469, "return RetiredMcpClaims({}, {})"),
         ),
     ),
+    "U-USER-SCOPE-ORG-POLICY": (
+        "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not "
+        "a defect): user scope has no git remote, so policy_discovery_uses_git_remote is "
+        "False at $APM_HOME and install, lock, update and install --mcp at -g discover no "
+        "org policy; the local executables gate still parks bin/ there, and project scope "
+        "refuses the denied plugin with exit 1. A user-scope cell whose GATE is "
+        "denied-dependency under one of those commands is removed until #3703 lands; "
+        "PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: "
+        "generator/bin_pin.py hashes the predicate, and when the hash differs from "
+        "U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails",
+        (
+            Ev("src/apm_cli/core/scope.py", 235, "def policy_discovery_uses_git_remote"),
+            Ev("src/apm_cli/core/scope.py", 242, "return not is_user_scope_root(root)"),
+            Ev("src/apm_cli/policy/discovery.py", 961, "policy_discovery_uses_git_remote"),
+            Ev(
+                "docs/src/content/docs/enterprise/apm-policy.mdx",
+                18,
+                "Org policy does not govern user-scope (`-g`) installs",
+            ),
+            Ev(
+                "docs/src/content/docs/enterprise/security.md",
+                99,
+                "user-scope installs (`apm install -g`) are not governed by it",
+            ),
+            Ev(
+                "docs/src/content/docs/reference/cli/policy.md",
+                56,
+                "User scope has no git remote, so no org policy is discovered",
+            ),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -498,6 +529,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U-BIN"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
+    if u_user_org_policy_applies(cell) and u_user_org_policy_pinned():
+        return "U-USER-SCOPE-ORG-POLICY"
     if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
         return "U-MCPOWN-USER"
     if (deployed in ("clean", "edited") and lock == "absent") or (
@@ -606,6 +639,8 @@ def must_cover_rules(cell: Mapping[str, str]) -> tuple[str, ...]:
         rules.append("U9")
     if u_bin_applies(cell) and not u_bin_pinned():
         rules.append("U-BIN")
+    if u_user_org_policy_applies(cell) and not u_user_org_policy_pinned():
+        rules.append("U-USER-SCOPE-ORG-POLICY")
     return tuple(rules)
 
 
@@ -663,3 +698,28 @@ def u_bin_pinned() -> bool:
     from tests.lifecycle.generator.bin_pin import predicate_digest
 
     return predicate_digest() == U_BIN_PIN
+
+
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+# The approved digest of core/scope.policy_discovery_uses_git_remote. #3703 must
+# change that decision; the digest then differs, the cells return as must-cover
+# and the tripwire in test_generator_rules.py fails until the rule is dropped.
+U_USER_ORG_POLICY_PIN = "7839bf8d042c59baa029c1323413078d972eebb0c45edfd8e8b14106957fd513"
+# Commands an org dependency deny governs at project scope (FROZEN alone is install).
+ORG_DENY_OPS = frozenset({"install", "lock", "update", "mcp-install"})
+
+
+def u_user_org_policy_applies(cell: Mapping[str, str]) -> bool:
+    """A user-scope cell whose promise is that an org dependency deny governs it."""
+    if cell.get("GATE") != "denied-dependency":
+        return False
+    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    return user and op in ORG_DENY_OPS
+
+
+def u_user_org_policy_pinned() -> bool:
+    from tests.lifecycle.generator.bin_pin import user_org_policy_digest
+
+    return user_org_policy_digest() == U_USER_ORG_POLICY_PIN

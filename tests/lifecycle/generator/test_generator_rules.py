@@ -41,6 +41,7 @@ from tests.lifecycle.generator.rules import (
     RULE_CELL_REFUSALS,
     RULES,
     U_BIN_PIN,
+    U_USER_ORG_POLICY_PIN,
     UNINSTALL_MCP_REFUSALS,
     USER_SCOPE_EVIDENCE,
     Verdict,
@@ -514,6 +515,7 @@ def _raw() -> dict[str, dict[str, str]]:
         ("U-BIN", lambda cell: _u_bin(cell)),
         ("U-BIN-OPS", lambda cell: _u_bin_ops(cell)),
         ("U-MCPOWN-USER", _u_mcpown_user),
+        ("U-USER-SCOPE-ORG-POLICY", lambda cell: _u_user_org_policy(cell)),
     ],
 )
 def test_definition_rule_removes_exactly_the_cells_its_text_names(rule, holds) -> None:
@@ -693,7 +695,10 @@ def test_u_bin_ops_premises_hold_in_the_live_cli() -> None:
 def test_u_bin_pin_matches_the_predicate_and_is_recorded() -> None:
     assert bin_pin.predicate_digest() == U_BIN_PIN
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
-    assert data["pins"] == {"U-BIN": U_BIN_PIN}
+    assert data["pins"] == {
+        "U-BIN": U_BIN_PIN,
+        "U-USER-SCOPE-ORG-POLICY": U_USER_ORG_POLICY_PIN,
+    }
 
 
 def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatch) -> None:
@@ -701,6 +706,54 @@ def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatc
     assert classify("pair", cell) == Verdict("removed", ("U-BIN",))
     monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
     assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
+
+
+# -- U-USER-SCOPE-ORG-POLICY: user scope discovers no org policy (#3703) ----------
+
+
+def _u_user_org_policy(cell) -> bool:
+    """An org dependency deny under install/lock/update/mcp-install at user scope."""
+    op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
+    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
+    return (
+        cell.get("GATE") == "denied-dependency"
+        and user
+        and op in ("install", "lock", "update", "mcp-install")
+    )
+
+
+def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
+    """Tripwire: the rule removes the #3703 cells only while user scope discovers no
+    org policy. #3703 must change core/scope.policy_discovery_uses_git_remote, so
+    the digest differs and this test fails, as does the live check below: drop
+    the rule and restore the cells as strict obligations then.
+    """
+    from apm_cli.core.scope import get_apm_home, policy_discovery_uses_git_remote
+
+    assert bin_pin.user_org_policy_digest() == U_USER_ORG_POLICY_PIN, (
+        "#3703 changed the user-scope org-policy decision: drop U-USER-SCOPE-ORG-POLICY"
+    )
+    assert policy_discovery_uses_git_remote(get_apm_home()) is False
+    assert policy_discovery_uses_git_remote(tmp_path) is True
+    removed = _removed_by("U-USER-SCOPE-ORG-POLICY")
+    assert removed == {
+        "T1|OP=install|PRIM=bin|GATE=denied-dependency",
+        "T1|OP=lock|PRIM=bin|GATE=denied-dependency",
+        "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency",
+        "T1|OP=update|PRIM=bin|GATE=denied-dependency",
+        "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on",
+    }
+    kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
+
+
+def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
+    cell = {"SCOPE": "user", "GATE": "denied-dependency", "FROZEN": "on"}
+    assert classify("T2", cell) == Verdict("removed", ("U-USER-SCOPE-ORG-POLICY",))
+    monkeypatch.setattr(bin_pin, "user_org_policy_digest", lambda *_: "0" * 64)
+    assert classify("T2", cell) == Verdict(
+        "obligation", ("U-USER-SCOPE-ORG-POLICY",), must_cover=True
+    )
 
 
 def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
