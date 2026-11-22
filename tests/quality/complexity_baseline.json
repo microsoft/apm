@@ -224,9 +224,6 @@
       ]
     },
     "src/apm_cli/compilation/agents_compiler.py": {
-      "AgentsCompiler._compile_claude_md": [
-        "PLR0915"
-      ],
       "AgentsCompiler._maybe_emit_copilot_root_instructions": [
         "PLR0911"
       ]

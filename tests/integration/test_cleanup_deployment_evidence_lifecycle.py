@@ -428,13 +428,15 @@ def test_cowork_row_removed_only_with_valid_provenance(
     assert "cowork://skills/demo/SKILL.md" in output and expected in output, output
 
 
-def _local_world(tmp_path: Path, apm_binary_path: Path, targets: list[str]):
+def _local_world(tmp_path: Path, apm_binary_path: Path, targets: list[str], apply_to: str = "**"):
     isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
     source = project / "pkgs" / "a"
     source.mkdir(parents=True)
     dump_yaml({"name": "a", "version": "1.0.0"}, source / "apm.yml")
-    _write(source / ".apm/instructions/one.instructions.md", "---\napplyTo: '**'\n---\n# v1\n")
+    _write(
+        source / ".apm/instructions/one.instructions.md", f"---\napplyTo: '{apply_to}'\n---\n# v1\n"
+    )
     dump_yaml(
         {
             "name": "consumer",
@@ -477,7 +479,8 @@ def test_dropped_target_is_proven_by_the_render_of_recorded_targets(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """The locked render covers targets the lock recorded, not only current ones."""
-    world, _source = _local_world(tmp_path, apm_binary_path, ["copilot", "claude"])
+    # A file-type glob: Claude loads always-on instructions from AGENTS.md (#3939).
+    world, _source = _local_world(tmp_path, apm_binary_path, ["copilot", "claude"], "**/*.py")
     claude_rule = world.project / ".claude/rules/one.md"
     assert claude_rule.is_file()
     world.evict_machine_state()
