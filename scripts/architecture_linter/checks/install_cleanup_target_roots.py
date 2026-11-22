@@ -28,6 +28,9 @@ _DIRECTORY_REMOVALS = frozenset(
         ("src/apm_cli/integration/cleanup.py", "_safe_remove_skill_directory"),
         # LSP config directories the server spec created for its config file.
         ("src/apm_cli/integration/lsp_integrator.py", "_clean_target_config"),
+        # The deploy write seam's wrapper (#4282); each caller of
+        # write_seam.rmdir is still judged at its own call site.
+        ("src/apm_cli/integration/write_seam.py", "rmdir"),
     }
 )
 

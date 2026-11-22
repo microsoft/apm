@@ -1,12 +1,13 @@
 """Installed-CLI contracts for the lockfile commit point.
 
-A command that is interrupted (SIGINT or SIGTERM) after it deployed files and
-before it commits unwinds as a failure: the install transaction restores
-``apm.yml``, its staging and the audit-gated deploy snapshot, and the staged
-lockfile is discarded. A process
-killed at the same point leaves deployed files the lockfile does not record:
+A command that fails or is interrupted (SIGINT or SIGTERM) after it deployed
+files and before its lockfile commits unwinds as a failure: the install
+transaction restores ``apm.yml``, its staging and every path the integrators
+wrote (the lazy deploy journal, #4282), and the staged lockfile is discarded,
+so disk and ``apm.lock.yaml`` keep their pre-command bytes. A process killed
+at the same point leaves deployed files the lockfile does not record:
 ``apm audit --ci`` reports that state, and the next install adopts the
-matching bytes and converges. An install whose MCP write collides on one
+matching bytes, converges and reaps the killed install's journal. An install whose MCP write collides on one
 target records exactly what reached disk and reports the written and the
 colliding connections without claiming success.
 """
@@ -25,7 +26,7 @@ import pytest
 
 from apm_cli.deps.lockfile import LockFile
 from tests.integration._fault_injection_kit import FaultWorld, build_world, evidence
-from tests.utils.artifact_snapshot import assert_unchanged
+from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 from tests.utils.lifecycle_evidence import expect_output_violation
 from tests.utils.lockfile_write_counter import INOTIFY_AVAILABLE, count_lockfile_writes
 
@@ -42,6 +43,8 @@ pytestmark = [
 ]
 
 _DELTA_SKILL = ".claude/skills/delta-skill-0/SKILL.md"
+_NEW_TARGET = "opencode"
+_NEW_ROOT = ".opencode"
 _TARGET_ROOTS = (".github", ".claude", ".cursor", ".agents")
 
 
@@ -104,44 +107,64 @@ def test_interrupt_at_the_commit_point_restores_deploys_and_discards_the_lock(
     world.assert_converges()
 
 
-def _sigterm_after_an_unsnapshotted_deploy(
+def _target_state(world: FaultWorld) -> list[ArtifactSnapshot]:
+    return [world.snapshot(root) for root in _TARGET_ROOTS]
+
+
+def _assert_pre_command_state(
+    world: FaultWorld, before: list[ArtifactSnapshot], lock: bytes | None, output: str
+) -> None:
+    """Deployed files and ``apm.lock.yaml`` hold their pre-command bytes."""
+    assert "Deployed files restored to their previous state." in output, output
+    assert world.lockfile_bytes() == lock, output
+    for snapshot, after in zip(before, _target_state(world), strict=True):
+        assert_unchanged(snapshot, after)
+    world.assert_user_file_intact()
+
+
+def _sigterm_after_an_unaudited_deploy(
     tmp_path: Path, apm_binary_path: Path
-) -> tuple[FaultWorld, str, str]:
-    """SIGTERM a plain install (no deploy snapshot) at its commit point."""
+) -> tuple[FaultWorld, str, str, list[ArtifactSnapshot], bytes | None]:
+    """SIGTERM a plain install (install-time audit off) at its commit point."""
     world = build_world(tmp_path, apm_binary_path)
     agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
     agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
     deployed = ".github/agents/alpha.agent.md"
+    before, lock = _target_state(world), world.lockfile_bytes()
     process = _held_at_commit(world, apm_binary_path, tmp_path / "held", "install", "--no-policy")
     assert (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
     os.killpg(process.pid, signal.SIGTERM)
     output, _ = process.communicate(timeout=120)
     assert process.returncode != 0, output
-    return world, deployed, output
+    return world, deployed, output, before, lock
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4282: SIGTERM after a deploy without a snapshot leaves files the lock does not record",
-)
 def test_sigterm_without_a_deploy_snapshot_keeps_the_lock_equal_to_disk(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    world, _deployed, output = _sigterm_after_an_unsnapshotted_deploy(tmp_path, apm_binary_path)
+    world, _deployed, output, _before, _lock = _sigterm_after_an_unaudited_deploy(
+        tmp_path, apm_binary_path
+    )
+    # Undo the source edit made before the command, so audit judges lock vs disk only.
+    agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
+    agent.write_text(agent.read_text(encoding="ascii").removesuffix("v2\n"), encoding="ascii")
     audit = world.apm("audit", "--ci", "--no-policy")
     assert audit.returncode == 0, f"{output}\n{evidence(audit)}"
 
 
-def test_sigterm_without_a_deploy_snapshot_is_reported_by_audit_and_converged(
+def test_sigterm_without_an_audit_restores_deploys_and_the_lock(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    world, deployed, _output = _sigterm_after_an_unsnapshotted_deploy(tmp_path, apm_binary_path)
+    """#4282: every install journals its writes, not only an audit-gated one."""
+    world, deployed, output, before, lock = _sigterm_after_an_unaudited_deploy(
+        tmp_path, apm_binary_path
+    )
 
-    audit = world.apm("audit", "--ci", "--no-policy")
-    assert audit.returncode != 0, evidence(audit)
-    assert f"hash-drift: {deployed}" in audit.stdout + audit.stderr, evidence(audit)
+    _assert_pre_command_state(world, before, lock, output)
+    assert not (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
 
     world.assert_converges()
+    assert (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
     converged = [world.snapshot(root) for root in _TARGET_ROOTS]
     lock = world.lockfile_bytes()
     repeat = world.install()
@@ -151,32 +174,127 @@ def test_sigterm_without_a_deploy_snapshot_is_reported_by_audit_and_converged(
         assert_unchanged(snapshot, world.snapshot(root))
 
 
-def test_a_failed_lockfile_write_is_reported_by_audit_and_converged(
+def test_a_failed_lockfile_write_restores_deploys_and_the_lock(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#4164: a lockfile write that fails after deploy leaves state audit reports."""
+    """#4164, #4282: a lockfile write that fails after deploy restores the deploys."""
     world = build_world(tmp_path, apm_binary_path)
     lock = world.lockfile_bytes()
     agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
     agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
     deployed = ".github/agents/alpha.agent.md"
+    before = _target_state(world)
 
     failed = world.runner.run(
         ("install", "--no-policy"),
         cwd=world.project,
         env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
     )
+    output = failed.stdout + failed.stderr
     assert failed.returncode != 0, evidence(failed)
-    assert "apm.lock.yaml" in failed.stdout + failed.stderr, evidence(failed)
-    assert world.lockfile_bytes() == lock
-    assert (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
+    assert "apm.lock.yaml" in output, evidence(failed)
+    _assert_pre_command_state(world, before, lock, output)
+    assert not (world.project / deployed).read_text(encoding="ascii").endswith("v2\n")
 
     audit = world.apm("audit", "--ci", "--no-policy")
-    assert audit.returncode != 0, evidence(audit)
-    assert f"hash-drift: {deployed}" in audit.stdout + audit.stderr, evidence(audit)
+    assert f"hash-drift: {deployed}" not in audit.stdout + audit.stderr, evidence(audit)
 
     world.assert_converges()
     assert world.lockfile_bytes() != lock
+
+
+def test_a_failure_after_deploy_leaves_every_byte_as_it_was(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4282: a new package deploys, then the lockfile write fails; nothing changed."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    manifest = (world.project / "apm.yml").read_bytes()
+    lock = world.lockfile_bytes()
+    before = _target_state(world)
+    receipts = ArtifactSnapshot.capture(world.isolated.config_root / "deployment-receipts")
+
+    failed = world.runner.run(
+        ("install", "--no-policy", delta),
+        cwd=world.project,
+        env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
+    )
+
+    output = failed.stdout + failed.stderr
+    assert failed.returncode != 0, evidence(failed)
+    _assert_pre_command_state(world, before, lock, output)
+    assert (world.project / "apm.yml").read_bytes() == manifest, output
+    assert not (world.project / _DELTA_SKILL).exists(), output
+    assert_unchanged(
+        receipts, ArtifactSnapshot.capture(world.isolated.config_root / "deployment-receipts")
+    )
+    snapshots = world.isolated.config_root / "install-snapshots"
+    assert not any(snapshots.glob("deploy-*")), output
+
+    retry = world.install(delta)
+    assert retry.returncode == 0, evidence(retry)
+    assert (world.project / _DELTA_SKILL).is_file(), evidence(retry)
+    world.assert_converges()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [("update", "--yes"), ("deps", "update")],
+    ids=["update", "deps-update"],
+)
+def test_a_failed_lockfile_write_after_an_update_restores_deploys_and_the_lock(
+    tmp_path: Path, apm_binary_path: Path, command: tuple[str, ...]
+) -> None:
+    """#4664: update entry points keep the deploy journal until their lockfile commits."""
+    world, lock, before = _declare_delta_and_a_new_target(tmp_path, apm_binary_path)
+
+    failed = world.runner.run(
+        command,
+        cwd=world.project,
+        env=dict(world.env, APM_TEST_FAIL_LOCK_REPLACE="1"),
+    )
+
+    output = failed.stdout + failed.stderr
+    assert failed.returncode != 0, evidence(failed)
+    assert "apm.lock.yaml" in output, evidence(failed)
+    _assert_update_left_nothing(world, before, lock, output)
+
+
+def _declare_delta_and_a_new_target(
+    tmp_path: Path, apm_binary_path: Path
+) -> tuple[FaultWorld, bytes | None, list[ArtifactSnapshot]]:
+    """Declare a new package and a new target whose root the update must create."""
+    world = build_world(tmp_path, apm_binary_path)
+    delta = world.write_package("delta")
+    manifest = world.project / "apm.yml"
+    text = manifest.read_text(encoding="ascii").replace("cursor]", f"cursor, {_NEW_TARGET}]")
+    manifest.write_text(text + f"    - {delta}\n", encoding="ascii")
+    assert not (world.project / _NEW_ROOT).exists()
+    return world, world.lockfile_bytes(), _target_state(world)
+
+
+def _assert_update_left_nothing(
+    world: FaultWorld, before: list[ArtifactSnapshot], lock: bytes | None, output: str
+) -> None:
+    _assert_pre_command_state(world, before, lock, output)
+    assert not (world.project / _DELTA_SKILL).exists(), output
+    assert not (world.project / _NEW_ROOT).exists(), output
+    world.assert_converges()
+    assert (world.project / _DELTA_SKILL).is_file()
+    assert (world.project / _NEW_ROOT).is_dir()
+
+
+@pytest.mark.parametrize("interrupt", ["SIGINT", "SIGTERM"])
+def test_an_update_interrupted_at_the_commit_point_restores_deploys_and_the_lock(
+    tmp_path: Path, apm_binary_path: Path, interrupt: str
+) -> None:
+    """#4664: the restore also runs when the update is interrupted before its lockfile commits."""
+    world, lock, before = _declare_delta_and_a_new_target(tmp_path, apm_binary_path)
+    process = _held_at_commit(world, apm_binary_path, tmp_path / "held", "update", "--yes")
+    os.killpg(process.pid, getattr(signal, interrupt))
+    output, _ = process.communicate(timeout=120)
+    assert process.returncode != 0, output
+    _assert_update_left_nothing(world, before, lock, output)
 
 
 @pytest.mark.parametrize("audited", [False, True], ids=["plain", "audited"])
@@ -224,10 +342,6 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
     assert world.lockfile_bytes() != lock
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#4282: a killed audit-gated install leaves its deploy snapshot under APM_HOME",
-)
 def test_the_next_install_reaps_a_killed_installs_deploy_snapshot(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

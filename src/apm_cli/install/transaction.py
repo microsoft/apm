@@ -20,7 +20,7 @@ from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
-    from apm_cli.install.deploy_snapshot import DeployTargetSnapshot
+    from apm_cli.install.deploy_snapshot import DeployJournal
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
@@ -87,11 +87,15 @@ class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
     The resolution journal is limited to paths prepared below ``apm_modules``.
-    Native target integrations are inside this transaction only while the
-    install-time audit can block: :meth:`snapshot_deploy_targets` then
-    captures their paths before integration, rollback restores them, and
-    :meth:`release_deploy_targets` discards the copy once the audit passed.
-    On every rollback, target roots the attempt created
+    From :meth:`journal_deploy_writes` on, the transaction listens at the
+    integrator write seam (``integration/write_seam.py``) and records the
+    prior state of each path the first time it is written (#4282). A rollback
+    restores the recorded paths and discards the staged lockfile, so disk and
+    ``apm.lock.yaml`` keep their pre-command state. After
+    :meth:`release_deploy_targets` (every gate that scans deployed bytes
+    passed) the journal is discarded as soon as the staged lockfile reaches
+    disk: from then on the lockfile records what was written. On every
+    rollback, target roots the attempt created
     (:meth:`track_created_target_roots`) are removed when left empty.
     """
 
@@ -126,7 +130,9 @@ class InstallTransaction:
             self._release_workspace_lock()
             raise
         self._lock = threading.RLock()
-        self._deploy_snapshot: DeployTargetSnapshot | None = None
+        self._deploy_journal: DeployJournal | None = None
+        self._journal_released = False
+        self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
@@ -158,7 +164,8 @@ class InstallTransaction:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             try:
                 if not self.committed:
-                    self.release_deploy_targets()
+                    if not self._settle_at_lockfile_commit():
+                        self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
@@ -200,7 +207,7 @@ class InstallTransaction:
                     # A preview whose staging already rolled back changed nothing.
                     return result
                 try:
-                    self.release_deploy_targets()
+                    self._settle_deploy_journal()
                     self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -217,13 +224,37 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
-    def snapshot_deploy_targets(self, ctx: Any) -> None:
-        """Capture the paths integration can write when the install-time audit can block."""
-        from apm_cli.install.deploy_snapshot import capture_audit_gated_snapshot
+    def journal_deploy_writes(self, ctx: Any = None) -> None:
+        """Record, at the integrator write seam, the prior state of every path written from now on.
+
+        ``--frozen`` withholds the lockfile, so its no-rewrite check runs after
+        the pipeline: the journal is then kept until this install commits and
+        a refusal there rolls back every journaled path (#4638).
+        """
+        from apm_cli.core.scope import get_apm_home
+        from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+        from apm_cli.integration import write_seam
 
         with self._lock:
-            if self._deploy_snapshot is None and not (self.committed or self._rolled_back):
-                self._deploy_snapshot = capture_audit_gated_snapshot(ctx)
+            if self._deploy_journal is not None or self.committed or self._rolled_back:
+                return
+            if ctx is not None:
+                from apm_cli.install.service import InstallService
+
+                frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+                self._journal_held_until_commit = frozen
+            store_parent = get_apm_home() / "install-snapshots"
+            if self._workspace_lock is not None:
+                # Under the lifecycle lock no other install owns a journal here.
+                reap_abandoned_journals(store_parent)
+            self._deploy_journal = DeployJournal(store_parent)
+            write_seam.listen(self._record_deploy_write)
+
+    def _record_deploy_write(self, path: Path, contents: bool) -> None:
+        """Keep *path*'s prior state the first time this attempt touches it."""
+        journal = self._deploy_journal
+        if journal is not None:
+            journal.record(path, contents=contents)
 
     def track_created_target_roots(self, roots: list[Path]) -> None:
         """Follow the target roots this attempt creates; rollback removes empty ones."""
@@ -237,22 +268,76 @@ class InstallTransaction:
 
     @property
     def restores_deploy_targets(self) -> bool:
-        """Whether rollback will restore the snapshotted deploy paths."""
-        return self._deploy_snapshot is not None
+        """Whether rollback will restore the paths the deploy journal recorded."""
+        journal = self._deploy_journal
+        return journal is not None and bool(journal.units)
 
     def release_deploy_targets(self) -> None:
-        """Discard the deploy snapshot: every gate that scans deployed bytes passed."""
+        """Every gate that scans deployed bytes passed: keep the journal until the lock commits."""
+        from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+
         with self._lock:
-            snapshot, self._deploy_snapshot = self._deploy_snapshot, None
-        if snapshot is not None:
-            snapshot.discard()
+            if self._deploy_journal is None or self._journal_released:
+                return
+            self._journal_released = True
+            if self._journal_held_until_commit:
+                return
+        # Settle at the durable commit, before receipt binding or any other
+        # fallible post-commit action: the lockfile then records the deploys.
+        after_lockfile_commit(self._settle_deploy_journal, first=True)
+
+    def _settle_at_lockfile_commit(self) -> bool:
+        """Keep a released journal until the staged lockfile reaches disk (#4664).
+
+        A command that runs the pipeline inside its own lockfile writer (``apm
+        update``, ``apm deps update``) completes this transaction before the
+        writer commits. The journal then still restores every deployed path if
+        that commit fails or the command is abandoned; a successful commit
+        settles it (:meth:`release_deploy_targets`).
+        """
+        from apm_cli.deps.lockfile_write_authority import unless_lockfile_commits
+
+        if not self._journal_released or self._deploy_journal is None:
+            return False
+        return unless_lockfile_commits(self._undo_deploys)
+
+    def _undo_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created.
+
+        Rollback and an uncommitted completed transaction (#4664) both undo here.
+        """
+        self._restore_deploy_targets()
+        self._remove_created_target_roots()
+
+    def _take_deploy_journal(self) -> DeployJournal | None:
+        """Stop listening at the write seam and hand over the journal."""
+        from apm_cli.integration import write_seam
+
+        with self._lock:
+            journal, self._deploy_journal = self._deploy_journal, None
+        write_seam.stop_listening(self._record_deploy_write)
+        return journal
+
+    def _settle_deploy_journal(self) -> None:
+        """The lockfile records what was written: drop the pre-write copies."""
+        journal = self._take_deploy_journal()
+        if journal is not None:
+            journal.discard()
 
     def _restore_deploy_targets(self) -> None:
-        """Put every snapshotted deploy path back to its pre-install bytes."""
-        snapshot, self._deploy_snapshot = self._deploy_snapshot, None
-        if snapshot is None:
+        """Put every journaled path back and discard the lockfile this attempt staged."""
+        from apm_cli.deps.lockfile_write_authority import discard_staged_lockfile_writes
+
+        journal = self._take_deploy_journal()
+        if journal is None:
             return
-        issues = snapshot.restore()
+        # Even with nothing deployed (a lockfile-only attempt) the staged
+        # lockfile of a rolled-back attempt must not be published.
+        discard_staged_lockfile_writes()
+        if not journal.units:
+            journal.discard()
+            return
+        issues = journal.restore()
         if self._logger is None:
             return
         if not issues:
@@ -266,15 +351,14 @@ class InstallTransaction:
             self._logger.warning(f"Deploy restore path {path}: {reason}")
 
     def rollback(self) -> None:
-        """Restore the manifest, snapshotted deploy paths and resolution paths."""
+        """Restore the manifest, journaled deploy paths and resolution paths."""
         with self._lock:
             if self.committed or self._rolled_back:
                 return
             try:
                 self._ref_pins.discard()
                 try:
-                    self._restore_deploy_targets()
-                    self._remove_created_target_roots()
+                    self._undo_deploys()
                 finally:
                     try:
                         cleanup_issues = self._resolution.rollback() or []

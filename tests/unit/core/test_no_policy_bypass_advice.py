@@ -22,6 +22,7 @@ _DECLARES_THE_ESCAPE_HATCH = frozenset(
     {
         ("commands/audit.py", "audit"),
         ("commands/audit.py", "_audit_ci_gate"),
+        ("commands/_helpers.py", "explicit_policy_option"),
         ("commands/install.py", "install"),
         ("commands/lock.py", "lock"),
         ("install/phases/policy_gate.py", "_is_policy_disabled"),

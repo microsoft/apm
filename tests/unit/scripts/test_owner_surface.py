@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -190,33 +192,53 @@ def test_plugin_deselects_items_outside_the_slice(
     assert items == [keep] and deselected == [drop]
 
 
-def test_workflow_always_reports_a_stable_check() -> None:
-    """No paths filter, PR and merge_group triggers, one always() aggregate."""
+MERGE_GATE = ROOT / ".github/workflows/merge-gate.yml"
+MERGE_TRAIN = ROOT / ".github/workflows/merge-train.yml"
+RUN_GATE = "needs.select.outputs.run == 'true'"
+
+
+def test_workflow_always_reports_a_stable_required_check() -> None:
+    """No paths filter; every job runs on every event and only slice steps are gated."""
     workflow = load_workflow(WORKFLOW)
     triggers = workflow["on"]
-    assert set(triggers) == {"pull_request", "merge_group"}
+    assert set(triggers) == {"pull_request", "merge_group", "workflow_call"}
     for config in triggers.values():
         assert not {"paths", "paths-ignore"} & set(config or {})
+    assert triggers["workflow_call"]["inputs"]["base_sha"]["required"] is False
     gate = workflow_job(workflow, "owner-surface")
     assert gate["name"] == "Owner Surface Check"
     assert gate["if"] == "always()" and gate["needs"] == ["select", "slice"]
-    assert workflow_job(workflow, "slice")["if"] == "needs.select.outputs.run == 'true'"
+    slice_job = workflow_job(workflow, "slice")
+    assert "if" not in slice_job and "if" not in workflow_job(workflow, "select")
+    assert all(step.get("if") == RUN_GATE for step in slice_job["steps"])
+
+
+def test_check_is_required_everywhere_and_run_by_every_full_train() -> None:
+    """merge-gate requires it in all three contexts; a full train calls it as a tier."""
+    wait = workflow_step(
+        workflow_job(load_workflow(MERGE_GATE), "gate"), "Wait for all required checks"
+    )
+    contexts = re.findall(r"'([^']*,[^']*)'", str(wait["env"]["EXPECTED_CHECKS"]))
+    assert len(contexts) == 3
+    assert all("Owner Surface Check" in context.split(",") for context in contexts)
+    tier = workflow_job(load_workflow(MERGE_TRAIN), "owner")
+    assert tier["uses"] == "./.github/workflows/owner-surface.yml"
+    assert "owner" in workflow_job(load_workflow(MERGE_TRAIN), "train-gate")["needs"]
 
 
 @pytest.mark.parametrize(
     ("select", "run", "slice_result", "passes"),
     [
-        ("success", "false", "skipped", True),
+        ("success", "false", "success", True),
         ("success", "true", "success", True),
         ("success", "true", "failure", False),
-        ("success", "true", "skipped", False),
+        ("success", "false", "skipped", False),
         ("success", "true", "cancelled", False),
-        ("success", "false", "success", False),
         ("failure", "", "skipped", False),
-        ("cancelled", "", "skipped", False),
+        ("cancelled", "", "success", False),
     ],
 )
-def test_aggregate_passes_on_skipped_or_green_slice_only(
+def test_aggregate_passes_only_when_select_and_slice_succeed(
     select: str, run: str, slice_result: str, passes: bool
 ) -> None:
     step = workflow_step(
@@ -286,3 +308,36 @@ def test_parametrized_rule_tests_match_their_body_and_rule_constants(function, k
     item = _item(owner_surface.MUTATION_TESTS, params={"old": "x"}, function=function)
     selection = {**SELECTION, "keys": ["hooks-merge-guard", "hooks-merge-rule"]}
     assert owner_surface.keep_item(item, selection, {}.__getitem__) is kept
+
+
+def test_each_run_reads_its_own_selection_and_removes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Concurrent runs never share a selection file (review: shared temp name)."""
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setattr(
+        owner_surface,
+        "build_selection",
+        lambda base, changed, root: {
+            "keys": [base],
+            "changed": [],
+            "install": False,
+            "targets": [],
+        },
+    )
+    seen: list[tuple[Path, list[str]]] = []
+
+    def fake_main(args: list[str]) -> int:
+        location = Path(os.environ[owner_surface.SELECTION_ENV])
+        seen.append((location, json.loads(location.read_text(encoding="utf-8"))["keys"]))
+        return 0
+
+    monkeypatch.setattr(owner_surface.pytest, "main", fake_main)
+    changed = tmp_path / "changed.txt"
+    changed.write_text("", encoding="utf-8")
+    assert owner_surface.run("base-a", changed, []) == 0
+    assert owner_surface.run("base-b", changed, []) == 0
+    (first, keys_a), (second, keys_b) = seen
+    assert first != second and (keys_a, keys_b) == (["base-a"], ["base-b"])
+    assert not first.exists() and not second.exists()
+    assert owner_surface.SELECTION_ENV not in os.environ

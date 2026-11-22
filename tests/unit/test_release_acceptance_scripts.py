@@ -340,6 +340,51 @@ class TestLedger:
             {"ledger": "abc1234", "requested": "def5678"},
         )
 
+    def test_gate_is_pending_on_an_unbound_ledger(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No walk recorded for any SHA: never GO (#4586)."""
+        ledger = tmp_path / "findings.json"
+        ledger.write_text(json.dumps({"sha": None, "findings": []}), encoding="utf-8")
+        assert findings.main(["gate-row", "--ledger", str(ledger), "--sha", "abc1234"]) == 0
+        row = json.loads(capsys.readouterr().out)
+        assert (row["verdict"], row["unbound_ledger"]) == ("PENDING-VERIFICATION", True)
+
+    def test_gate_is_pending_on_a_missing_ledger(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        missing = tmp_path / "findings.json"
+        assert findings.main(["gate-row", "--ledger", str(missing), "--sha", "abc1234"]) == 2
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["verdict"] == "PENDING-VERIFICATION"
+        assert f"findings: ledger not found: {missing}" in captured.err
+
+    def test_add_with_sha_binds_a_walk_without_findings(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ledger, empty = tmp_path / "findings.json", tmp_path / "none.jsonl"
+        empty.write_text("", encoding="utf-8")
+        add = ["add", "--ledger", str(ledger), "--findings", str(empty)]
+        assert findings.main([*add, "--sha", "abc1234"]) == 0
+        assert json.loads(ledger.read_text(encoding="utf-8"))["sha"] == "abc1234"
+        capsys.readouterr()
+        for sha, verdict in (("abc1234", "GO"), ("def5678", "PENDING-VERIFICATION")):
+            assert findings.main(["gate-row", "--ledger", str(ledger), "--sha", sha]) == 0
+            assert json.loads(capsys.readouterr().out)["verdict"] == verdict
+        assert findings.main([*add, "--sha", "def5678"]) != 0
+        assert "bound to abc1234" in capsys.readouterr().err
+
+    def test_add_with_sha_refuses_findings_of_another_walk(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Old-walk findings cannot bind a ledger to a new SHA and yield GO for it."""
+        ledger, old = tmp_path / "findings.json", tmp_path / "old.jsonl"
+        old.write_text(json.dumps(_finding(sha="abc1234")) + "\n", encoding="utf-8")
+        argv = ["add", "--ledger", str(ledger), "--findings", str(old), "--sha", "def5678"]
+        assert findings.main(argv) != 0
+        assert "cannot be merged into a walk of def5678" in capsys.readouterr().err
+        assert not ledger.exists()
+
     def test_recheck_must_cover_every_unresolved_finding(self) -> None:
         ledger = {"sha": None, "findings": []}
         findings.add(

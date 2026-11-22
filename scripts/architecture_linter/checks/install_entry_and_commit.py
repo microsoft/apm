@@ -11,11 +11,10 @@ integrator write and on the staged lockfile before its writer scope commits
 it (#4086); merged MCP policy is enforced
 from a closed list of sites; the frozen pre-deploy check runs before the
 pipeline; ``install --mcp`` judges policy through the commit gate;
-``InstallTransaction`` has one definition. While the install-time
-audit can block after deploy, only the transaction snapshots the deploy
-targets: before the integrate phase, released only after the audit, and
-restored by its rollback. Every rollback also removes the target roots the
-attempt created and left empty (#4159).
+``InstallTransaction`` has one definition. Only the transaction journals the
+deploy writes (#4282): it starts before the integrate phase, is released only
+after the install-time audit, and is restored by its rollback. Every rollback
+also removes the target roots the attempt created and left empty (#4159).
 """
 
 from __future__ import annotations
@@ -65,6 +64,8 @@ _POLICY_PREFLIGHT_SITES = frozenset(
         _ENTRY_OWNER,
         _COMMIT_GATE,
         "src/apm_cli/install/bundle_admission.py",
+        # apm pack judges the packages it ships before any output is written.
+        "src/apm_cli/bundle/pack_policy.py",
     }
 )
 # install --mcp judges its server through the commit gate and refuses it as
@@ -84,7 +85,7 @@ _PIPELINE_CALL = re.compile(r"\brun_install_pipeline\(")
 _ENTRY_CALL = re.compile(r"\b_install_apm_dependencies\(")
 _POLICY_PREFLIGHT = re.compile(r"\brun_policy_preflight\b")
 _TRANSACTION_CLASS = re.compile(r"^class InstallTransaction\b")
-_SNAPSHOT_CAPTURE = re.compile(r"\bcapture_audit_gated_snapshot\(")
+_JOURNAL_CREATE = re.compile(r"\bDeployJournal\(")
 
 
 def _source_lines(provider: FactsProvider, path: str) -> tuple[str, ...]:
@@ -200,14 +201,14 @@ def _ordered(facts: object, first: str, then: str) -> bool:
 
 
 def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[Violation]:
-    """The audit-gated deploy snapshot is taken and restored only by the transaction."""
+    """The deploy journal is opened, released and restored only by the transaction."""
     rule_id = GUARD_COMMIT_ORDER
     pipeline = loaded[_PIPELINE]
     found: list[Violation] = []
     if not (
         _ordered(
             pipeline,
-            "transaction.snapshot_deploy_targets(ctx)",
+            "transaction.journal_deploy_writes(ctx)",
             "materialization_session = _run_integration_phase(ctx)",
         )
         and _ordered(pipeline, '_run_phase("audit"', "transaction.release_deploy_targets()")
@@ -225,7 +226,7 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
                 rule_id,
                 _PIPELINE,
                 "the transaction tracks created target roots before the targets phase, "
-                "snapshots deploy targets before the integrate phase "
+                "journals deploy writes before the integrate phase "
                 "and releases them only after the install-time audit",
             )
         )
@@ -233,21 +234,23 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
     if not all(
         needle in transaction_text
         for needle in (
-            "self._deploy_snapshot = capture_audit_gated_snapshot(ctx)",
+            "self._deploy_journal = DeployJournal(store_parent)",
             "self._restore_deploy_targets()",
             "self._remove_created_target_roots()",
+            "self._undo_deploys()\n                finally:",
+            "return unless_lockfile_commits(self._undo_deploys)",
         )
     ):
         found.append(
-            _summary(rule_id, _TRANSACTION, "InstallTransaction owns the deploy snapshot rollback")
+            _summary(rule_id, _TRANSACTION, "InstallTransaction owns the deploy journal rollback")
         )
     found += _closed_list_violations(
         provider,
         rule_id,
-        _SNAPSHOT_CAPTURE,
-        frozenset({_TRANSACTION}),
-        "only InstallTransaction captures the audit-gated deploy snapshot",
-        skip_def="capture_audit_gated_snapshot",
+        _JOURNAL_CREATE,
+        frozenset({_TRANSACTION, "src/apm_cli/install/deploy_snapshot.py"}),
+        "only InstallTransaction opens the deploy journal",
+        skip_def="DeployJournal",
     )
     return found
 
@@ -265,7 +268,7 @@ def check_install_commit_order(provider: FactsProvider) -> tuple[Violation, ...]
     if failures:
         return tuple(failures)
     found: list[Violation] = []
-    if not _ordered(loaded[_INTEGRATE], "check_before_deploy(ctx)", "run_integration_template("):
+    if not _ordered(loaded[_INTEGRATE], "check_before_deploy(ctx", "run_integration_template("):
         found.append(
             _summary(rule_id, _INTEGRATE, "check_before_deploy must run before any deploy")
         )
