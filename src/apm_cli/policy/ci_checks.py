@@ -1535,11 +1535,16 @@ def _check_hook_approval_pins(
 
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
+    except PolicyViolationError as exc:
+        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    try:
         withheld = locked_withheld_hook_files(
             lock, modules_root, trust_ctx, deployment_root, targets, user_scope=user_scope
         )
-    except PolicyViolationError as exc:
-        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    except PolicyViolationError:
+        # The org policy blocks this audit; its outcome route reports that one
+        # finding and fails, rather than this check repeating the cause (#4821).
+        withheld = []
     if withheld:
         entries = [row for row in withheld if row[0] and ENTRY_REASON in row[2]]
         files = [row for row in withheld if row[0] and ENTRY_REASON not in row[2]]
