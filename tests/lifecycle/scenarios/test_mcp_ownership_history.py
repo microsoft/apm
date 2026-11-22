@@ -138,6 +138,15 @@ def test_one_command_on_an_mcp_owner(lifecycle_world, row, owner) -> None:
     if row == "mcp-install":
         problems = mcp_server_problems(scenario, {"p-inline"})
         assert not problems, f"{problems}\n{step.output}"
+    if row in ("lock-absent", "lock-stale"):
+        # The install repairs the drift: pkg's lock row is back, and the server the
+        # stale lock never recorded is installed.
+        lock = scenario.lock()
+        rows = {dep.repo_url for dep in lock.get_package_dependencies()} if lock else set()
+        assert any(url.rstrip("/").endswith("pkg") for url in rows), f"{rows}\n{step.output}"
+        if row == "lock-stale" and owner == "copilot":
+            problems = mcp_server_problems(scenario, {"srv2"})
+            assert not problems, f"{problems}\n{step.output}"
     scenario.finish()
 
 
