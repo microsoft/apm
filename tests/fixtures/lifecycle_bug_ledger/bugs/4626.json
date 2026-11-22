@@ -16,6 +16,8 @@
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_unproven_mismatch_is_kept",
     "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_drift_edit_is_kept_with_a_warning_and_other_servers_update",
     "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_edit_that_blocks_a_new_render_fails",
-    "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_entry_without_a_locked_render_is_an_unproven_keep"
+    "tests/unit/integration/test_lsp_integrator.py::TestManagedEntryKeptEdits::test_entry_without_a_locked_render_is_an_unproven_keep",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_kept_canvas_edit_holds_back_its_other_members",
+    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryHoldsEveryTarget::test_unedited_target_is_not_upgraded_past_the_shared_baseline"
   ]
 }
