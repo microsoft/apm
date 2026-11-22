@@ -582,7 +582,9 @@ class InstructionIntegrator(BaseIntegrator):
                 self.agents_md_stale.add(source.name)
         return [source for source in instruction_files if source not in routed]
 
-    def render_agents_md_routed_rules(self, package_info, project_root: Path) -> dict[str, str]:
+    def render_agents_md_routed_rules(
+        self, package_info, project_root: Path, source_plan
+    ) -> dict[str, str]:
         """Render the ``.claude/rules/`` files Claude routing left undeployed.
 
         ``apm pack --format apm`` ships deployed files, and bundle consumers do
@@ -596,7 +598,8 @@ class InstructionIntegrator(BaseIntegrator):
         target = KNOWN_TARGETS["claude"]
         mapping = target.primitives["instructions"]
         package_path = Path(package_info.install_path)
-        sources = self.find_instruction_files(package_path, _instruction_source_plan(package_info))
+        # Only the sources install admits (the canonical source plan, #4787).
+        sources = self.find_instruction_files(package_path, source_plan)
         if not sources:
             return {}
         self.init_link_resolver(package_info, project_root)
@@ -968,26 +971,6 @@ class InstructionIntegrator(BaseIntegrator):
         )
 
 
-def _instruction_source_plan(package_info):
-    """The instructions install admits from *package_info* for Claude (#4787).
-
-    The routed-rule projection selects sources through the canonical
-    deployment source plan, so a pack never ships an instruction install
-    did not admit (only ``.apm/instructions/`` sources deploy).
-    """
-    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
-    from apm_cli.integration.targets import KNOWN_TARGETS
-
-    return DeployableSourcePlan.create(
-        package_info,
-        [KNOWN_TARGETS["claude"]],
-        skill_subset=None,
-        hooks_approved=False,
-        canvas_approved=False,
-        skip_bin=True,
-    )
-
-
 def routed_claude_rule_renders(
     lockfile,
     project_root: Path,
@@ -1014,6 +997,7 @@ def routed_claude_rule_renders(
     does not already record as deployed.
     """
     from apm_cli.core.scope import manifest_file
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.target_filter import resolve_effective_package_targets
     from apm_cli.integration.targets import KNOWN_TARGETS
@@ -1038,9 +1022,10 @@ def routed_claude_rule_renders(
             if manifest.is_file()
             else APMPackage(name=dep.name or install_path.name, version=dep.version or "0.0.0")
         )
+        dependency_selection = effective_dependency_selection(dep_ref)
         selection = resolve_effective_package_targets(
             [KNOWN_TARGETS["claude"]],
-            effective_dependency_selection(dep_ref).target_subset,
+            dependency_selection.target_subset,
             package,
             None,
             dep.get_unique_key(),
@@ -1050,7 +1035,17 @@ def routed_claude_rule_renders(
         package_info = PackageInfo(
             package=package, install_path=install_path, dependency_ref=dep_ref
         )
-        rendered = InstructionIntegrator().render_agents_md_routed_rules(package_info, project_root)
+        source_plan = DeployableSourcePlan.create(
+            package_info,
+            [KNOWN_TARGETS["claude"]],
+            skill_subset=dependency_selection.skill_subset,
+            hooks_approved=False,
+            canvas_approved=False,
+            skip_bin=True,
+        )
+        rendered = InstructionIntegrator().render_agents_md_routed_rules(
+            package_info, project_root, source_plan
+        )
         if verified:
             deployed = set(dep.deployed_files)
             rendered = {path: text for path, text in rendered.items() if path not in deployed}

@@ -468,13 +468,6 @@ def instruction_fingerprint(apply_to: object, body: str) -> str:
     return "sha256:" + hashlib.sha256(encoded.encode("ascii")).hexdigest()
 
 
-def _coverage_record_path(project_root: Path) -> Path:
-    from ..core.scope import get_apm_home
-
-    key = hashlib.sha256(project_root.resolve().as_posix().encode("utf-8")).hexdigest()[:32]
-    return get_apm_home() / "compiled-agents-md" / f"{key}.json"
-
-
 def _file_digest(path: Path) -> str | None:
     try:
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -489,7 +482,7 @@ def record_compiled_instructions(base_dir: Path, written: dict) -> None:
     carries. The record (APM home, keyed by the output root) also pins each
     file's bytes, so a later rewrite of that file by anything else is stale.
     """
-    from ..integration.write_seam import atomic_write_text, mkdir
+    from ..core.agents_md_compile_record import write_record
 
     files = {}
     for agents_md, instructions in sorted(written.items()):
@@ -502,12 +495,7 @@ def record_compiled_instructions(base_dir: Path, written: dict) -> None:
                 {instruction_fingerprint(i.apply_to, i.content) for i in instructions}
             ),
         }
-    path = _coverage_record_path(base_dir)
-    try:
-        mkdir(path.parent, parents=True, exist_ok=True)
-        atomic_write_text(path, json.dumps({"version": 1, "files": files}, indent=2) + "\n")
-    except OSError:
-        return  # install then asks for apm compile again, which is safe
+    write_record(base_dir, files)
 
 
 class CompiledCoverage:
@@ -525,14 +513,9 @@ class CompiledCoverage:
 
     def _record(self) -> dict:
         if self._files is None:
-            try:
-                data = json.loads(
-                    _coverage_record_path(self.project_root).read_text(encoding="utf-8")
-                )
-                files = data.get("files") if isinstance(data, dict) else None
-            except (OSError, ValueError):
-                files = None
-            self._files = files if isinstance(files, dict) else {}
+            from ..core.agents_md_compile_record import read_record
+
+            self._files = read_record(self.project_root)
         return self._files
 
     def _entry(self, agents_md: Path) -> dict | None:

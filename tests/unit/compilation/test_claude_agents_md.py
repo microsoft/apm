@@ -598,11 +598,11 @@ class TestRoutingFollowUps:
 
         assert self._stale(project, package) == {"style.instructions.md"}
 
-    def test_one_install_reads_the_compiled_agents_md_once(self, tmp_path, monkeypatch):
-        """Many routed instructions share one read of AGENTS.md (item 4)."""
-        project = tmp_path / "project"
+    @staticmethod
+    def _agents_md_reads(tmp_path, monkeypatch, rules: int) -> int:
+        project = tmp_path / f"project{rules}"
         (project / ".claude").mkdir(parents=True)
-        package = _package(tmp_path, {f"rule{index}": "**" for index in range(20)})
+        package = _package(tmp_path / f"pkg{rules}", {f"rule{i}": "**" for i in range(rules)})
         assert _compile_package(project, package).success
         agents_md = project / "AGENTS.md"
         reads: list[Path] = []
@@ -618,11 +618,20 @@ class TestRoutingFollowUps:
                 reads.append(self)
             return real_read_bytes(self)
 
-        monkeypatch.setattr(Path, "open", counting_open)
-        monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+        with monkeypatch.context() as patched:
+            patched.setattr(Path, "open", counting_open)
+            patched.setattr(Path, "read_bytes", counting_read_bytes)
+            integrator = InstructionIntegrator()
+            integrator.integrate_instructions_for_target(KNOWN_TARGETS["claude"], package, project)
+        assert integrator.agents_md_stale == set()
+        return len(reads)
 
-        assert self._stale(project, package) == set()
-        assert len(reads) == 1
+    def test_one_install_reads_the_compiled_agents_md_a_fixed_number_of_times(
+        self, tmp_path, monkeypatch
+    ):
+        """Twenty routed instructions read AGENTS.md as often as one does (item 4)."""
+        one = self._agents_md_reads(tmp_path, monkeypatch, 1)
+        assert self._agents_md_reads(tmp_path, monkeypatch, 20) == one
 
     def test_compile_root_places_directory_guidance_from_the_source_tree(self, tmp_path):
         """``--root <empty dir>`` still writes src/AGENTS.md and its shim (item 5)."""
