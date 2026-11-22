@@ -242,6 +242,7 @@ def test_a_clean_shard_is_validated_on_hit_without_listing_its_tree(
 
     validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for=sha)
     assert calls == []
+    assert (checkout / ".git" / "apm-links-clean").read_text(encoding="ascii") == f"{sha}\n"
 
     validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for="0" * 40)
     validate_materialized_symlinks("git", checkout, ["pkg"], env=neutral_git_env(), clean_for=sha)
@@ -252,6 +253,7 @@ def test_a_shard_with_an_unresolvable_link_is_never_recorded_clean(tmp_path: Pat
     origin, sha = build_link_origin(tmp_path, {"pkg/escape.md": "../../outside.md"})
     checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), sha, locked_sha=sha)
 
+    assert not (checkout / ".git" / "apm-links-clean").exists()
     with pytest.raises(ValueError, match=r"pkg/escape\.md.*outside the repository"):
         validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for=sha)
 
@@ -285,3 +287,4 @@ def test_a_pinned_hit_refuses_a_shard_that_fails_verification(tmp_path: Path) ->
     (checkout / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="ascii")
 
     assert cache.pinned_checkout(str(origin), sha) is None
+    assert (checkout / ".git" / "HEAD").read_text(encoding="ascii") == "0" * 40 + "\n"

@@ -52,6 +52,13 @@ def test_one_command_run_reads_each_remote_once(git_calls) -> None:
     assert len(git_calls) == 3, "the next command run must read the remote live again"
 
 
+def test_equivalent_relative_and_absolute_roots_share_one_read(git_calls) -> None:
+    with invocation_scope():
+        _remote._git_remote_origin_url(Path("app"))
+        _remote._git_remote_origin_url(Path.cwd() / "app")
+    assert git_calls == [("remote", "get-url", "origin")], "one root, one read"
+
+
 def test_the_memo_key_keeps_parent_components(git_calls) -> None:
     """'..' is not collapsed: when 'link' is a symlink, link/.. is not its parent."""
     with invocation_scope():
