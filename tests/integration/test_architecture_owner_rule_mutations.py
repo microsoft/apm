@@ -2144,6 +2144,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Plugin-root hook command vocabulary loses its canonical constant.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-hook-containment-root",
+        rule_id="mutation_writes.hook_containment_root",
+        path="src/apm_cli/integration/hook_bundle.py",
+        old="    containment = hook_containment_root(target, project_root)",
+        new="    containment = project_root",
+        intent="Hook bundle copies re-decide their containment root instead of asking the owner.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-jetbrains-mcp-path",
         rule_id="mutation_writes.jetbrains_mcp_path",
         path="src/apm_cli/adapters/client/intellij.py",
