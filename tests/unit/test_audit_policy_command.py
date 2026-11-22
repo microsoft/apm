@@ -15,8 +15,6 @@ from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy
 
-pytestmark = pytest.mark.unit
-
 # -- Fixtures -------------------------------------------------------
 
 

@@ -21,7 +21,7 @@ from click.testing import CliRunner
 
 from apm_cli.policy._help_text import POLICY_SOURCE_FORMS_HELP
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 EXPECTED_FORM_TOKENS = ("'org'", "owner/repo", "https://", "file path")
 

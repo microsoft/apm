@@ -26,8 +26,6 @@ from apm_cli.install.service import FrozenDisposition
 from apm_cli.models.dependency.lsp import LSPDependency
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

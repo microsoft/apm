@@ -16,8 +16,6 @@ from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Config injection fixture (mirrors tests/unit/core/test_experimental.py)
 # ---------------------------------------------------------------------------

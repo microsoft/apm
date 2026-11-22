@@ -8,8 +8,6 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from tests.utils.unpack_admission import unpack_bundle
 
-pytestmark = pytest.mark.unit
-
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
     """Create a bundle directory with an enriched lockfile and the listed files."""

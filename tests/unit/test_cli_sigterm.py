@@ -10,7 +10,7 @@ import textwrap
 
 import pytest
 
-pytestmark = [pytest.mark.skipif(os.name == "nt", reason="POSIX signals"), pytest.mark.unit]
+pytestmark = [pytest.mark.skipif(os.name == "nt", reason="POSIX signals"), pytest.mark.component]
 
 _PROBE = textwrap.dedent(
     """

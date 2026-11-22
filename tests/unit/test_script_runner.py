@@ -10,8 +10,6 @@ import pytest
 
 from apm_cli.core.script_runner import PromptCompiler, ScriptRunner
 
-pytestmark = pytest.mark.unit
-
 
 class TestScriptRunner:
     """Test ScriptRunner functionality."""

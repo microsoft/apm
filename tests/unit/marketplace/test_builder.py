@@ -34,8 +34,6 @@ from apm_cli.marketplace.semver import (
 )
 from tests.utils.metadata_transport import patch_metadata_urlopen
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

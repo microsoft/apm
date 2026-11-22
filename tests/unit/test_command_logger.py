@@ -13,8 +13,6 @@ from apm_cli.core.command_logger import (
 from apm_cli.core.remediation import DRY_RUN_INCOMPLETE
 from apm_cli.integration.cleanup import CleanupResult
 
-pytestmark = pytest.mark.unit
-
 
 class TestValidationOutcome:
     def test_all_failed(self):

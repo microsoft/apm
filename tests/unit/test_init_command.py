@@ -12,8 +12,6 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
-pytestmark = pytest.mark.unit
-
 
 class TestInitCommand:
     """Test cases for apm init command."""

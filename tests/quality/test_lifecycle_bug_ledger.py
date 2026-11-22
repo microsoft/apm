@@ -5,11 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 from scripts.lifecycle_ledger import read_ledger
-
-pytestmark = pytest.mark.unit
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _FAILURE_MODES = frozenset(

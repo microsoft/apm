@@ -8,12 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
 from apm_cli.factory import ClientFactory
-
-pytestmark = pytest.mark.unit
 
 
 class TestGeminiClientFactory:

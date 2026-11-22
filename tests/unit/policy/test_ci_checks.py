@@ -20,8 +20,6 @@ from apm_cli.policy.ci_checks import (
 )
 from apm_cli.policy.models import CheckResult, CIAuditResult
 
-pytestmark = pytest.mark.unit
-
 # -- Helpers --------------------------------------------------------
 
 

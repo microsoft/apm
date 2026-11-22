@@ -31,8 +31,6 @@ from tests.quality.taxonomy import (
 )
 from tests.quality.taxonomy_inventory_plugin import spawns_processes
 
-pytestmark = pytest.mark.unit
-
 RATCHET_TEST_SCOPE = "repository"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

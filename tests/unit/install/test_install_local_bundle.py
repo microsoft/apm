@@ -33,13 +33,10 @@ except ImportError:
 
 _MODULE_READY = _LOCAL_BUNDLE_EXISTS and _INTEGRATE_EXISTS
 
-pytestmark = [
-    pytest.mark.skipif(
-        not _MODULE_READY,
-        reason="local-bundle production modules not yet implemented (TDD stub)",
-    ),
-    pytest.mark.unit,
-]
+pytestmark = pytest.mark.skipif(
+    not _MODULE_READY,
+    reason="local-bundle production modules not yet implemented (TDD stub)",
+)
 
 
 # ---------------------------------------------------------------------------

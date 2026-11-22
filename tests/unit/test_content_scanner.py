@@ -3,15 +3,13 @@
 import tempfile  # noqa: F401
 from pathlib import Path  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.security.content_scanner import (
     ContentScanner,
     ScanFinding,
     _combine_surrogate_pairs,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class TestScanText:

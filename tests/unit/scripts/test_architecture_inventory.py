@@ -15,8 +15,6 @@ from scripts.architecture_linter.inventory import (
     build_inventory,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _write_minimal_repo(
     root: Path,

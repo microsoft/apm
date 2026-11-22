@@ -17,8 +17,6 @@ import tomlkit
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------

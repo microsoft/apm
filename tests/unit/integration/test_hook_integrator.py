@@ -33,8 +33,6 @@ from apm_cli.integration.hook_ownership import dependency_hook_sources
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from tests.utils.deployment_evidence import receipted_evidence
 
-pytestmark = pytest.mark.unit
-
 
 def _make_package_info(install_path: Path, name: str = "test-pkg") -> PackageInfo:
     """Create a minimal PackageInfo for testing."""

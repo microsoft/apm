@@ -20,8 +20,6 @@ import pytest
 import apm_cli.version as version_mod
 from apm_cli.version import get_build_sha, get_version
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # get_version()
 # ---------------------------------------------------------------------------

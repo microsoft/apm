@@ -20,7 +20,7 @@ from click.testing import CliRunner
 
 from apm_cli.commands.lifecycle import lifecycle
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 
 @pytest.fixture

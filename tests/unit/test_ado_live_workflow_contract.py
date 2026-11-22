@@ -19,8 +19,6 @@ from tests.workflow_contracts import (
     workflow_step,
 )
 
-pytestmark = pytest.mark.unit
-
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "build-release.yml"
 AUTH_WORKFLOW = ROOT / ".github" / "workflows" / "auth-acceptance.yml"

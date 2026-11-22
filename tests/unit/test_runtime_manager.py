@@ -12,8 +12,6 @@ from click.testing import CliRunner
 from apm_cli.commands.runtime import runtime as runtime_group
 from apm_cli.runtime.manager import RuntimeManager
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # RuntimeManager unit tests
 # ---------------------------------------------------------------------------

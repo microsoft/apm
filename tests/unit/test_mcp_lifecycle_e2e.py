@@ -10,13 +10,11 @@ import os
 import tempfile  # noqa: F401
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401
 import yaml
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_integrator import MCPIntegrator
-
-pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers — mirror the per-file convention used across the test suite.

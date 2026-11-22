@@ -7,12 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.factory import ClientFactory
-
-pytestmark = pytest.mark.unit
 
 
 class TestCursorClientFactory(unittest.TestCase):

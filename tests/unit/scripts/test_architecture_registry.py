@@ -18,8 +18,6 @@ from scripts.architecture_linter.registry import (
     load_registry_documents,
 )
 
-pytestmark = pytest.mark.unit
-
 ROOT = Path(__file__).parents[3]
 REGISTRY_DIR = ROOT / ".apm/architecture/owners"
 OWNER_GATE = ROOT / "packages/autopilot/autopilot-pr-merge-worker/scripts/owner_touch_gate.py"

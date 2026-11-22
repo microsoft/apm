@@ -10,7 +10,7 @@ import pytest
 
 from apm_cli.deps.bare_cache import materialize_from_bare
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 
 def _build_local_bare_repo(tmp_path: Path) -> tuple[Path, str]:

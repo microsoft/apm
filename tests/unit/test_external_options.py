@@ -24,8 +24,6 @@ from apm_cli.security.external.options import (
     validate_value_arity,
 )
 
-pytestmark = pytest.mark.unit
-
 _ALLOWED = frozenset({"--model", "--severity"})
 _VALUE_REQUIRED = frozenset({"--baseline"})
 

@@ -13,8 +13,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
@@ -24,8 +22,6 @@ from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
-
-pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # 1. Adapter supports_user_scope attribute

@@ -11,8 +11,6 @@ from apm_cli.bundle.unpacker import UnpackResult  # noqa: F401
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from tests.utils.unpack_admission import unpack_bundle
 
-pytestmark = pytest.mark.unit
-
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: dict[str, str | bytes]) -> Path:
     """Create a bundle directory with a lockfile and file contents.

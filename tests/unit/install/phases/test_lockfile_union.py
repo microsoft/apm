@@ -31,8 +31,6 @@ from apm_cli.integration.cleanup import CleanupResult
 from apm_cli.utils.content_hash import compute_file_hash
 from tests.utils.deployment_evidence import receipted_evidence
 
-pytestmark = pytest.mark.unit
-
 
 def _target(name, root_dir=None, deploy_roots=None):
     """Build a minimal target-profile stand-in for governance computation."""

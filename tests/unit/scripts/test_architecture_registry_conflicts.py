@@ -13,7 +13,7 @@ import pytest
 from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
 from scripts.architecture_linter.registry import load_registry
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 ROOT = Path(__file__).parents[3]
 STABLE_PATHS = (

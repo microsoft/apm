@@ -27,8 +27,6 @@ from apm_cli.install.errors import PolicyViolationError
 from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

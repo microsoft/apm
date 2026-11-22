@@ -24,8 +24,6 @@ import apm_cli.security.external.skillspector as mod
 from apm_cli.security.external.base import ExternalScanError
 from apm_cli.security.external.options import ScannerOptions
 
-pytestmark = pytest.mark.unit
-
 _SARIF_EMPTY = '{"version": "2.1.0", "runs": [{"results": []}]}'
 
 

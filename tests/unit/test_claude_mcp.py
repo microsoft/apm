@@ -17,8 +17,6 @@ from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.mark.parametrize("cwd", ["/fixture-cwd", "./relative", r"C:\fixture", "/with spaces"])
 def test_managed_projection_is_nonmutating(tmp_path: Path, cwd: str) -> None:

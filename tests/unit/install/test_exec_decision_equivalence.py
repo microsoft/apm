@@ -25,7 +25,7 @@ from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 from apm_cli.security.executables import build_exec_trust_context, materialize_exec_map
 from apm_cli.security.trust_fingerprint import hook_file_fingerprint, native_plugin_fingerprint
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 PKG = "acme/tools"
 ALL = (True, True, True, True, True)

@@ -16,14 +16,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-
 from apm_cli.core.deployment_state import DeploymentReconciler
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.phases.lockfile import LockfileBuilder
 from tests.utils.deployment_evidence import no_evidence
-
-pytestmark = pytest.mark.unit
 
 
 def _target(name, root_dir=".claude"):

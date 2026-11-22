@@ -24,7 +24,7 @@ from apm_cli.models.apm_package import (
 )
 from tests.utils.deployment_evidence import receipted_evidence
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 
 def _sync(integrator, target: str, package, project_root: Path, managed: set[str]) -> dict:

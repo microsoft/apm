@@ -10,8 +10,6 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.core.safe_installer import SafeMCPInstaller
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def raw_stdio_servers() -> dict[str, dict]:

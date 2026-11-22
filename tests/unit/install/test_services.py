@@ -20,8 +20,6 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 from apm_cli.utils.paths import portable_relpath
 
-pytestmark = pytest.mark.unit
-
 # ---------------------------------------------------------------------------
 # Helper: convert legacy integrators dict to IntegratorBundle
 # ---------------------------------------------------------------------------

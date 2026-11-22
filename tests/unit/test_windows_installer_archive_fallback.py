@@ -25,7 +25,7 @@ import pytest
 
 from apm_cli.commands import self_update
 
-pytestmark = [pytest.mark.windows_compat, pytest.mark.unit]
+pytestmark = [pytest.mark.windows_compat, pytest.mark.component]
 
 ROOT = Path(__file__).resolve().parents[2]
 POWERSHELL_HOSTS = ("powershell", "pwsh")

@@ -23,8 +23,6 @@ from apm_cli.security.gate import SecurityGate
 from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.utils.deployment_evidence import receipted_evidence
 
-pytestmark = pytest.mark.unit
-
 
 def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
     return PackageInfo(

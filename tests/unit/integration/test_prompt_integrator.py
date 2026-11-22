@@ -6,12 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
-import pytest
+import pytest  # noqa: F401
 
 from apm_cli.integration import PromptIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
-
-pytestmark = pytest.mark.unit
 
 
 class TestPromptIntegrator:
