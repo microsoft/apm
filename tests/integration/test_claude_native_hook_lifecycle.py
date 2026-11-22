@@ -297,7 +297,7 @@ def test_installed_hook_source_reinstall_and_removal(
         (isolated.config_root / "apm.lock.yaml").unlink(missing_ok=True)
         before = corrupt_settings()
         output = run("install", "--global", "--target", "claude", "--only", "apm", expected=1)
-        assert "Claude native plugin declaration failed" in output
+        assert "Native plugin declaration failed" in output
         assert "Failed to resolve APM dependencies" not in output
         assert scenario.settings.read_bytes() == before
         # One rollback unit: a first install that cannot declare keeps no lock or roots.
@@ -367,7 +367,7 @@ def test_installed_hook_source_reinstall_and_removal(
         scenario.settings.unlink()
         run("install", "--global", "--target", "claude", "--only", "apm")
     else:
-        assert "native Claude plugin(s) removed" in output
+        assert "native plugin(s) removed" in output
     assert scenario.declared().get("enabledPlugins", {}) == {}
     assert not deployed.exists()
     assert personal_skill.read_bytes() == personal_before
@@ -928,7 +928,7 @@ def test_frozen_install_verifies_native_plugin_files_like_audit(
         return " ".join((result.stdout + result.stderr).split())
 
     audit = refused("audit", "--ci", cwd=isolated.config_root)
-    assert "Native Claude plugin 'skills-bin-tool' deployed copy differs" in audit, audit
+    assert "Native plugin 'skills-bin-tool' deployed copy differs" in audit, audit
     frozen = refused("install", "--frozen", "--global", cwd=isolated.work_root)
     assert "--frozen: deployed files do not match the hashes recorded in apm.lock.yaml" in frozen
     assert "native plugin 'skills-bin-tool' (.agents/plugins/skills-bin-tool)" in frozen, frozen

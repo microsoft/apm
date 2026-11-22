@@ -155,6 +155,39 @@ def test_prepared_native_plan_preserves_unmanaged_loose_skill(tmp_path: Path) ->
     assert not (tmp_path / ".claude/settings.json").exists()
 
 
+@pytest.mark.parametrize("scope", [InstallScope.PROJECT, InstallScope.USER])
+def test_a_per_target_skill_pairing_is_never_widened_to_a_whole_plugin(
+    tmp_path: Path, scope: InstallScope
+) -> None:
+    """A diamond selects only `review` for Claude while the flat subset is all (req-rs-018).
+
+    A whole-plugin load cannot honor that: the plugin keeps its selected loose
+    route at project scope and is parked at user scope; Claude never gets `lint`.
+    """
+    from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+    source = tmp_path / "apm_modules/owned"
+    for name in ("review", "lint"):
+        skill = source / f"skills/{name}/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(f"---\nname: {name}\ndescription: {name}\n---\n{name}\n")
+    info = _fixture(source)
+    pairing = merge_edge_pairings([(["review"], ["claude"]), (None, ["copilot"])])
+    ctx = InstallContext(project_root=tmp_path, apm_dir=tmp_path / ".apm", scope=scope)
+    _integrate(
+        tmp_path,
+        info,
+        ctx=ctx,
+        scope=scope,
+        targets=[KNOWN_TARGETS["claude"], KNOWN_TARGETS["copilot"]],
+        skill_pairing=pairing,
+    )
+    claude_skills = tmp_path / ".claude/skills"
+    assert not (claude_skills / "lint").exists()
+    assert (claude_skills / "review/SKILL.md").is_file() is (scope is InstallScope.PROJECT)
+    assert "owner/hooks" not in ctx.claude_native_plugins
+
+
 @pytest.mark.parametrize("native_target", ["claude", "codex"])
 def test_native_admission_keeps_selected_format_owner_with_both_targets(
     tmp_path: Path, native_target: str
@@ -219,7 +252,7 @@ def test_loose_hook_refusal_names_the_package_and_both_steps(tmp_path: Path) -> 
     HookIntegrator().integrate_package_hooks_claude(info, tmp_path, user_scope=True)
     with pytest.raises(ClaudeNativePluginError) as error:
         _integrate(tmp_path, info)
-    assert "Cannot switch owner/hooks to native Claude" in str(error.value)
+    assert "Cannot switch owner/hooks to a native plugin" in str(error.value)
     from apm_cli.core.remediation import CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS
 
     advice = CLAUDE_NATIVE_SWITCH_LOOSE_HOOKS.bind(package="owner/hooks").sentence()
@@ -306,11 +339,11 @@ def test_retained_loose_claude_files_block_native_registration(
     claude = KNOWN_TARGETS["claude"].for_scope(user_scope=True)
     ctx = SimpleNamespace(
         targets=[claude, KNOWN_TARGETS["codex"].for_scope(user_scope=True)],
-        claude_native_plugins={"owner/hooks": object()},
+        claude_native_plugins={"owner/hooks": SimpleNamespace(harnesses=frozenset({"claude"}))},
         package_cleanup_retained={"owner/hooks": retained, "owner/other": {".claude/x.md": None}},
     )
     if refused:
-        with pytest.raises(ClaudeNativePluginError, match="loose Claude files") as error:
+        with pytest.raises(ClaudeNativePluginError, match="package-owned loose files") as error:
             _refuse_retained_loose_claude_files(ctx)
         assert next(iter(retained)) in str(error.value)
     else:

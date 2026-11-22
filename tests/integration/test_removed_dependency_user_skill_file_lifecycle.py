@@ -18,6 +18,7 @@ from tests.integration._fault_injection_kit import build_world, evidence
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 _SKILL = ".claude/skills/alpha-skill-0"
