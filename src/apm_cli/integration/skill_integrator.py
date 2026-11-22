@@ -342,20 +342,6 @@ def copy_skill_to_target(
     return deployed
 
 
-def _managed_member_dirs(managed_files) -> frozenset[str]:
-    """Return every ancestor directory of a managed path, built once per inventory.
-
-    A pre-0.38 user-root receipt migrates per file (#3772), so a skill
-    directory can be owned through a verified member while its own entry is
-    absent; the copy still protects every unclaimed member.
-    """
-    dirs: set[str] = set()
-    for entry in managed_files:
-        parts = entry.split("/")
-        dirs.update("/".join(parts[:end]) for end in range(1, len(parts)))
-    return frozenset(dirs)
-
-
 class SkillIntegrator(BaseIntegrator):
     """Handles integration of native SKILL.md files for Claude Code, Cursor, and VS Code.
 
@@ -944,7 +930,6 @@ class SkillIntegrator(BaseIntegrator):
             candidates = [source_paths[name] for name in sorted(source_paths)]
 
         materialization_root = project_root or target_skills_root.parent.parent
-        member_dirs: frozenset[str] | None = None
 
         for sub_skill_path in candidates:
             if not sub_skill_path.is_dir():
@@ -968,12 +953,8 @@ class SkillIntegrator(BaseIntegrator):
             is_managed = False
             if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
-                entry = rel_path.replace("\\", "/")
-                if managed_files is not None and entry not in managed_files and member_dirs is None:
-                    member_dirs = _managed_member_dirs(managed_files)
                 is_managed = (
-                    managed_files is not None
-                    and (entry in managed_files or entry in (member_dirs or ()))
+                    managed_files is not None and rel_path.replace("\\", "/") in managed_files
                 ) or (
                     rewriter._ownership_snapshots is not None
                     and target.resolve() in rewriter._native_skill_session_owners

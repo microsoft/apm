@@ -167,6 +167,13 @@ def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> t
     return state_path, root / LOCAL_STATE_DIR / "installation"
 
 
+def _skill_dir_entry(value: str) -> tuple[str, ...]:
+    """Return the skill directory entry a normal lock records beside a member (#3772)."""
+    parts = value.split("/")
+    i = len(parts) - 1 - parts[::-1].index("skills") if "skills" in parts[:-2] else -1
+    return ("/".join(parts[: i + 2]),) if i >= 0 else ()
+
+
 class DeploymentMaterializationSession:
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
@@ -422,7 +429,7 @@ class DeploymentMaterializationSession:
                     self._claims[value] = [record]
                     self._bindings[key] = [".", self._claim_signature(value)]
                     self._migrated[key], self._dirty = value, True
-                    adopted.add(value)
+                    adopted.update((value, *_skill_dir_entry(value)))
         return sorted(adopted)
 
     def keep(self, path: Path, targets: Sequence[TargetProfile]) -> None:
