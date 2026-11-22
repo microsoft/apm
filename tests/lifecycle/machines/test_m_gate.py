@@ -20,6 +20,7 @@ from hypothesis.stateful import run_state_machine_as_test
 
 from tests.lifecycle.machines._gate_bin import BIN_PATH, KNOWN_DD, GateBin, bin_cells, replay_bin
 from tests.lifecycle.machines._gate_bundle import (
+    CANVAS_PACK,
     KNOWN_PACK,
     PACK_SETS,
     GateBundles,
@@ -225,17 +226,19 @@ def test_gate_bundle_spine_credits_bundle_install_cells(lifecycle_template, tmp_
 
 def test_gate_pack_spine_credits_pack_cells(lifecycle_template, tmp_path: Path) -> None:
     """``apm pack`` ships exactly the dependency executables each gate level deploys."""
-    pool, seen = WorldPool(lifecycle_template, tmp_path), set()
+    pool, seen, machines = WorldPool(lifecycle_template, tmp_path), set(), []
     for packs in PACK_SETS:
         machine = GatePack(Bench(pool.fresh(), "project"), packs)
         replay_pack(machine)
         seen |= machine.expected_seen
+        machines.append(machine)
     missing = pack_cells() - earned_cells(current_node(), "G1|pack|") - set(KNOWN_PACK)
     assert not missing, f"pack ids without an oracle receipt: {sorted(missing)}"
     # Every strict known cell failed on its step.
     assert seen == set(KNOWN_PACK)
     # The gate is off at the end: the canvas stays deployed in the project.
-    assert (machine.bench.deploy_root / ".github/extensions/p-canvas/extension.mjs").exists()
+    canvas = next(m for m in machines if m.packs is CANVAS_PACK).bench.deploy_root
+    assert (canvas / ".github/extensions/p-canvas/extension.mjs").exists()
 
 
 def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_path: Path) -> None:

@@ -5549,6 +5549,9 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
   },
   "T1|OP=pack|PRIM=skill|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|pack|skill|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -5556,8 +5559,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
    "family": "T1",

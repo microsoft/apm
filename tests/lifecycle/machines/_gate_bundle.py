@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import shutil
 import tarfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +44,7 @@ from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.scopes import use_policy
+from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
 MIX, LSP = "p-bmix", "p-lsp"
@@ -380,6 +381,9 @@ class PackSet:
     executables: Mapping[str, tuple[str, ...]]
     # Plain dependency files ship at every gate level.
     plain: tuple[str, ...] = ()
+    # Publishes the set's only dependency in the world and returns its spec; None
+    # means world git packages (``<name>:git``).
+    serve: Callable[[object], str] | None = None
 
     @property
     def packed(self) -> tuple[str, ...]:
@@ -404,7 +408,37 @@ CANVAS_PACK = PackSet(
     decided=("p-canvas",),
     executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
 )
-PACK_SETS = (EXEC_PACK, CANVAS_PACK)
+_MIXED = "p-mixgit"
+_MIXED_HOOK = {
+    "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo p-mixgit"}]}]}
+}
+
+
+def _served_mixed(world) -> str:
+    """Publish ``lifecycle/p-mixgit`` (a skill beside a hook) from git; pack refuses
+    local paths, and no world git package pairs a plain file with an executable."""
+    factory = LocalPackageFactory(world.root / "pack-mixed")
+    package = factory.create(_MIXED, version="1.0.0")
+    skill = f"---\nname: {_MIXED}\ndescription: A skill beside a hook.\n---\n\nUse {_MIXED}.\n"
+    factory.add_skill(package, _MIXED, skill)
+    factory.add_hook(package, "session", _MIXED_HOOK)
+    repos = LocalGitRepositoryFactory(world.root / "pack-mixed-repos", env=world.env)
+    repository = repos.create(_MIXED, source_tree=package.root)
+    repos.tag(repository, "v1.0.0", repos.commit(repository, message=f"{_MIXED} v1.0.0"))
+    world.services.serve(f"lifecycle/{_MIXED}", repository.origin)
+    return f"lifecycle/{_MIXED}#v1.0.0"
+
+
+# A skill beside a hook: its plain file reads the hook's gate level (U2), so this set
+# earns the plain-file pack ids at every level, revoked-after-deploy included.
+MIX_PACK = PackSet(
+    kinds={_MIXED: frozenset({"skill", "hook"})},
+    decided=(_MIXED,),
+    executables={"hook": (f"hooks/{_MIXED}-session.json",)},
+    plain=(f"skills/{_MIXED}/SKILL.md",),
+    serve=_served_mixed,
+)
+PACK_SETS = (EXEC_PACK, CANVAS_PACK, MIX_PACK)
 # Primitives a package ships that pack never deploys at project scope (U-BIN).
 _SHIPS_ALSO: Mapping[str, tuple[str, ...]] = {"p-exec": ("bin",)}
 # Strict known cells (R: pack must exit 0 and ship what the gate deploys); none
@@ -424,6 +458,8 @@ class GatePack(StepRunner):
         self.credited: set[str] = set()
 
     def specs(self) -> tuple[str, ...]:
+        if self.packs.serve is not None:
+            return (self.packs.serve(self.bench.world),)
         return tuple(self.bench.world.packages[f"{name}:git"].spec for name in self.packs.packed)
 
     def level_model(self) -> ModelState:
