@@ -839,6 +839,22 @@ class TestBuildErrorContextADO:
                 assert "tenant" in msg.lower()
                 assert "az account show" in msg
 
+    def test_ado_case2_ignores_a_hostile_credential_helper(self, tmp_path, credential_children):
+        """An ambient git credential helper cannot change the ADO guidance (#4762)."""
+        gitconfig = tmp_path / "gitconfig"
+        gitconfig.write_text("[credential]\n\thelper = !echo password=hostile\n", encoding="utf-8")
+        hostile_env = {"HOME": str(tmp_path), "GIT_CONFIG_GLOBAL": str(gitconfig)}
+        with patch.dict(os.environ, hostile_env, clear=True):
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_provider_cls:
+                mock_provider = mock_provider_cls.return_value
+                mock_provider.is_available.return_value = True
+                mock_provider.get_bearer_token.return_value = "eyJfake"
+                mock_provider.get_current_tenant_id.return_value = "abc-123"
+                msg = AuthResolver().build_error_context("dev.azure.com", "clone")
+        assert "tenant" in msg.lower()
+        assert "hostile" not in msg
+        assert all(fields.get("password") is None for fields in credential_children.fills)
+
     def test_ado_pat_set_az_available_case4(self):
         """Case 4: PAT set + az available -> both rejected."""
         with patch.dict(os.environ, {"ADO_APM_PAT": "expired-pat"}, clear=True):
