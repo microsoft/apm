@@ -29,8 +29,9 @@ from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
+    resolve_for_containment,
+    resolved_relative_within,
 )
-from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -176,6 +177,9 @@ class DeploymentMaterializationSession:
 
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
+        # Deploy roots under self.root, resolved once per session (one run);
+        # candidate paths are still resolved live for every containment check.
+        self._resolved_roots: dict[Path, Path] = {}
         self.scope = scope
         self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
         # Containment is anchored one level above APM_HOME (``$HOME`` by
@@ -330,16 +334,27 @@ class DeploymentMaterializationSession:
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
 
+    def _trusted_root(self, root: Path) -> Path:
+        """*root* resolved once per session; a stale entry can only refuse, never admit."""
+        resolved = self._resolved_roots.get(root)
+        if resolved is None:
+            resolved = self._resolved_roots[root] = resolve_for_containment(root)
+        return resolved
+
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
+        candidate = resolve_for_containment(path)
         for target in targets:
             if not target.supports("skills"):
                 continue
-            try:
-                ensure_path_within(path, target.skills_deploy_path(self.root))
-            except PathTraversalError:
+            skills_root = self._trusted_root(target.skills_deploy_path(self.root))
+            if resolved_relative_within(candidate, skills_root) is None:
                 continue
             return DeploymentLedgerCodec.locator_for_path(
-                path, project_root=self.root, target=target, scope=self.scope
+                candidate,
+                project_root=self.root,
+                target=target,
+                scope=self.scope,
+                inputs_resolved=True,
             )
         return None
 
@@ -358,13 +373,16 @@ class DeploymentMaterializationSession:
                     for mapping in target.primitives.values()
                     if mapping.deploy_root
                 )
+            candidate = resolve_for_containment(path)
             for root in roots:
-                try:
-                    ensure_path_within(path, root)
-                except PathTraversalError:
+                if resolved_relative_within(candidate, self._trusted_root(root)) is None:
                     continue
                 return DeploymentLedgerCodec.locator_for_path(
-                    path, project_root=self.root, target=target, scope=self.scope
+                    candidate,
+                    project_root=self.root,
+                    target=target,
+                    scope=self.scope,
+                    inputs_resolved=True,
                 )
         return None
 
@@ -392,7 +410,7 @@ class DeploymentMaterializationSession:
         """Record a declared member this run deliberately left on disk unwritten."""
         from apm_cli.install.deployed_paths import deployed_path_entry
 
-        self._kept.add(deployed_path_entry(path, self.root, targets))
+        self._kept.add(deployed_path_entry(path, self.root, targets, project_root_resolved=True))
 
     def kept_values(self) -> frozenset[str]:
         """Return lock values of declared members this run kept; cleanup retains them."""
@@ -479,7 +497,7 @@ class DeploymentMaterializationSession:
             return None
         if key in self._written:
             return record.content_hash
-        value = deployed_path_entry(path, self.root, targets)
+        value = deployed_path_entry(path, self.root, targets, project_root_resolved=True)
         if (
             not self._claims.get(value)
             or record.active_owner not in self._valid_owners
@@ -548,7 +566,7 @@ class DeploymentMaterializationSession:
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
                     path.resolve().as_posix(),
-                    deployed_path_entry(path, self.root, targets),
+                    deployed_path_entry(path, self.root, targets, project_root_resolved=True),
                 )
             )
         for record, physical, value in prepared:
@@ -1708,8 +1726,14 @@ class DeploymentLedgerCodec(RowProjection):
         target: TargetProfile,
         runtime: str | None = None,
         scope: InstallScope,
+        inputs_resolved: bool = False,
     ) -> DeploymentLocator:
-        """Encode a path without forcing external roots into project strings."""
+        """Encode a path without forcing external roots into project strings.
+
+        ``inputs_resolved`` declares that *path* and *project_root* were both
+        just produced by :func:`resolve_for_containment`, so they are not
+        resolved a second time.
+        """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
             return DeploymentLocator(
@@ -1720,33 +1744,31 @@ class DeploymentLedgerCodec(RowProjection):
                 scope=scope_value,
             )
 
-        candidate = Path(path).resolve()
-        root = project_root.resolve()
-        try:
-            project_path = ensure_path_within(candidate, root)
-        except PathTraversalError:
-            project_path = None
-        if project_path is not None:
+        # Resolve each side once: the containment verdict and the relative
+        # form both read these, so the filesystem is observed once per call.
+        if inputs_resolved:
+            candidate, root = Path(path), project_root
+        else:
+            candidate = resolve_for_containment(Path(path))
+            root = resolve_for_containment(project_root)
+        relative = resolved_relative_within(candidate, root)
+        if relative is not None:
             return DeploymentLocator(
                 kind=LocatorKind.PROJECT_RELATIVE,
                 target=target.name,
-                value=portable_relpath(project_path, root),
+                value=relative,
                 runtime=runtime,
                 scope=scope_value,
             )
 
         deploy_root = target.managed_deploy_root
         if deploy_root is not None:
-            resolved_deploy_root = deploy_root.resolve()
-            try:
-                target_path = ensure_path_within(candidate, resolved_deploy_root)
-            except PathTraversalError:
-                target_path = None
-            if target_path is not None:
+            relative = resolved_relative_within(candidate, resolve_for_containment(deploy_root))
+            if relative is not None:
                 return DeploymentLocator(
                     kind=LocatorKind.TARGET_RELATIVE,
                     target=target.name,
-                    value=portable_relpath(target_path, resolved_deploy_root),
+                    value=relative,
                     runtime=runtime,
                     scope=scope_value,
                 )

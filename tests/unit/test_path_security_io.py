@@ -1,6 +1,7 @@
 """Tests for path security utilities (CVE path traversal fix) (filesystem, process and CLI boundary cases)."""
 
 import shutil  # noqa: F401
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    resolve_for_containment,
+    resolved_relative_within,
     safe_rmtree,
 )
 
@@ -191,3 +194,29 @@ class TestGetInstallPathContainment:
         # Path(".").name is "" which is in our reject set
         with pytest.raises(PathTraversalError):
             dep.get_install_path(base)
+
+
+class TestResolvedContainment:
+    """One resolution per side, then a pure containment verdict (rt-06)."""
+
+    def test_relative_path_or_none(self, tmp_path: Path) -> None:
+        base = resolve_for_containment(tmp_path / "base")
+        inside = resolve_for_containment(tmp_path / "base" / "a" / "b.md")
+        outside = resolve_for_containment(tmp_path / "other" / "b.md")
+
+        assert resolved_relative_within(inside, base) == "a/b.md"
+        assert resolved_relative_within(outside, base) is None
+        assert resolved_relative_within(base, base) == "."
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_link_out_of_the_base_is_outside(self, tmp_path: Path) -> None:
+        (tmp_path / "base").mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (tmp_path / "base" / "link").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+        base = resolve_for_containment(tmp_path / "base")
+        escaped = resolve_for_containment(tmp_path / "base" / "link" / "f.md")
+
+        assert resolved_relative_within(escaped, base) is None
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")

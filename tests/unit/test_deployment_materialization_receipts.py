@@ -1141,3 +1141,26 @@ def _receipt_evidence_for(root: Path):
         diagnostics=DiagnosticCollector(),
         kept=(),
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_locator_resolves_candidates_live_after_roots_are_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Session roots resolve once per run; a link planted later still cannot pass."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    skills_root = TARGET.skills_deploy_path(root)
+    assert session._locator(path, [TARGET]) is not None
+    outside = tmp_path / "outside"
+    (outside / "SKILL.md").parent.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("planted\n", encoding="utf-8")
+    (skills_root / "planted").symlink_to(outside, target_is_directory=True)
+
+    planted = skills_root / "planted" / "SKILL.md"
+    assert session._locator(planted, [TARGET]) is None
+    with pytest.raises(RuntimeError, match="outside"):
+        DeploymentLedgerCodec.locator_for_path(
+            planted, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+        )
+    assert planted.read_text(encoding="utf-8") == "planted\n"
