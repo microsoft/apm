@@ -472,7 +472,9 @@ class LockfileBuilder:
         """Record each admitted native Claude plugin as its dependency's ownership.
 
         A run whose targets exclude Claude did not evaluate Claude admission, so
-        an existing record is carried forward instead of retiring the plugin.
+        an existing record is carried forward instead of retiring the plugin,
+        unless apm.yml dropped claude: then the record goes and native
+        registration retires the plugin root (#4744).
         """
         from apm_cli.claude_plugins.registrar import marketplace_binding
         from apm_cli.native_plugins.record import NativePluginRecord
@@ -488,6 +490,8 @@ class LockfileBuilder:
         existing = getattr(self.ctx, "existing_lockfile", None)
         if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
             return
+        if self._claude_dropped(existing):
+            return
         for dep_key, locked in lockfile.dependencies.items():
             prior = existing.dependencies.get(dep_key)
             if (
@@ -498,6 +502,18 @@ class LockfileBuilder:
                 == (locked.resolved_commit, locked.content_hash)
             ):
                 locked.native_plugin = prior.native_plugin
+
+    def _claude_dropped(self, existing: LockFile) -> bool:
+        """Whether apm.yml no longer declares claude though *existing* recorded it."""
+        from apm_cli.install.manifest_reconcile import declared_target_dropped
+
+        package_path = getattr(getattr(self.ctx, "apm_package", None), "package_path", None)
+        return package_path is not None and declared_target_dropped(
+            Path(package_path),
+            existing,
+            "claude",
+            user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
+        )
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

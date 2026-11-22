@@ -196,6 +196,50 @@ def test_target_narrow_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
     _survives(scenario, tree, "target narrow")
 
 
+_PLUGIN_ROOT = ".agents/plugins/p-native-claude-bin"
+_PLUGIN_BIN = f"{_PLUGIN_ROOT}/bin/p-native-claude-bin"
+
+
+def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world) -> None:
+    """#4744: dropping claude retires the plugin bin/ only claude received; the rest stays."""
+    use_policy(lifecycle_world, "allow")
+    specs = {"p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec}
+    scenario = Scenario(
+        lifecycle_world, specs, scope="user", targets=("copilot", "claude"), policy="allow"
+    )
+    scenario.run("install p-native-claude-bin")
+    scenario.run("approve p-native-claude-bin")
+    scenario.run("install --trust-bin")
+    home = lifecycle_world.home
+    assert (home / _PLUGIN_BIN).is_file()
+    kept = sorted(
+        path.relative_to(home).as_posix()
+        for path in (home / ".agents/skills").rglob("*")
+        if path.is_file()
+    )
+
+    scenario.set_targets("copilot")
+    step = scenario.run("install --trust-bin")
+    assert not (home / _PLUGIN_BIN).exists(), f"dropping claude left the plugin bin\n{step.output}"
+    lock = scenario.lock_path.read_text(encoding="utf-8")
+    assert _PLUGIN_ROOT not in lock, "the lock still claims the retired plugin files"
+    # The plugin root and its Claude registration (catalog and settings) retire together.
+    assert_changes(
+        step.changed,
+        (
+            "home:.apm/apm.lock.yaml",
+            "home:.agents/plugins/*",
+            "home:.claude/settings.json",
+        ),
+        label="narrow",
+    )
+    settings = json.loads((home / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert not settings.get("enabledPlugins"), settings
+    for path in kept:
+        assert (home / path).is_file(), f"narrowing removed the copilot output {path}"
+    scenario.finish()
+
+
 def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
     factory = LocalPackageFactory(lifecycle_world.root / "owned")
     server = {

@@ -744,15 +744,35 @@ def dropped_target_files(
         *(path for dep in lockfile.dependencies.values() for path in dep.deployed_files),
         *lockfile.local_deployed_files,
     ]
-    dropped = {path: name for path in recorded if (name := classify(path)) is not None}
-    # A target apm.yml declared when the lock was written and no longer does is
-    # dropped; one only an explicit --target deployed is precedence (#4517).
-    # Without a recorded declaration (an older lock), every undeclared target counts.
-    if lockfile.manifest_targets:
-        dropped = {
-            path: name for path, name in dropped.items() if name in lockfile.manifest_targets
-        }
-    return dropped
+    return {
+        path: name
+        for path in recorded
+        if (name := classify(path)) is not None and _was_declared(name, lockfile)
+    }
+
+
+def _was_declared(name: str, lockfile: LockFile) -> bool:
+    """Whether the lock's recorded declaration named target *name*.
+
+    A target apm.yml declared when the lock was written and no longer does is
+    dropped; one only an explicit --target deployed is precedence (#4517).
+    Without a recorded declaration (an older lock), every target counts.
+    """
+    return not lockfile.manifest_targets or name in lockfile.manifest_targets
+
+
+def declared_target_dropped(
+    project_root: Path, lockfile: LockFile, name: str, *, user_scope: bool = False
+) -> bool:
+    """Whether apm.yml dropped target *name* since *lockfile* was written (#4517, #4744).
+
+    False under auto-detect (no declaration) and for a one-shot ``--target``
+    run, so state of a target apm.yml still declares is never retired.
+    """
+    profiles = _declared_manifest_profiles(project_root, user_scope=user_scope)
+    if profiles is None or name in {profile.name for profile in profiles}:
+        return False
+    return _was_declared(name, lockfile)
 
 
 def reconcile_target_deployed_files(
