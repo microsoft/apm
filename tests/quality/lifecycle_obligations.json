@@ -11454,8 +11454,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
   },
   "pair|DEPLOYED=absent|GATE=denied-dependency": {
    "family": "pair",
@@ -19166,8 +19167,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
   },
   "pair|PRIM=bin|SELECT=on": {
    "family": "pair",
@@ -19689,8 +19691,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_approved_executables_deploy_under_home"
   },
   "pair|PRIM=hook|SELECT=on": {
    "family": "pair",
@@ -19960,8 +19963,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_approved_executables_deploy_under_home"
   },
   "pair|PRIM=lsp|SELECT=on": {
    "family": "pair",
@@ -20224,8 +20228,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_approved_executables_deploy_under_home"
   },
   "pair|PRIM=mcp|SELECT=on": {
    "family": "pair",
@@ -20524,8 +20529,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[git]"
   },
   "pair|PRIM=skill|SELECT=on": {
    "family": "pair",
@@ -20938,50 +20944,57 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[git]"
   },
   "pair|SCOPE=user|DEPLOYED=clean": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_converged_user_scope_install_works_offline"
   },
   "pair|SCOPE=user|DEPLOYED=edited": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_keeps_the_users_skill_under_home[edited]"
   },
   "pair|SCOPE=user|DEPLOYED=present-provenance-unknown": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_keeps_the_users_skill_under_home[present-provenance-unknown]"
   },
   "pair|SCOPE=user|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_keeps_the_users_skill_under_home[unowned]"
   },
   "pair|SCOPE=user|DRYRUN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_dry_run_at_user_scope_writes_nothing"
   },
   "pair|SCOPE=user|FORCE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_modifiers_at_user_scope[force]"
   },
   "pair|SCOPE=user|FROZEN=on": {
    "credited_by": [
@@ -21011,8 +21024,10 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_plugin_with_bin_is_refused_at_user_scope"
   },
   "pair|SCOPE=user|GATE=denied-executable": {
    "credited_by": [
@@ -21178,22 +21193,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_converged_user_scope_install_works_offline"
   },
   "pair|SCOPE=user|NET=online": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[git]"
   },
   "pair|SCOPE=user|NOPOLICY=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_modifiers_at_user_scope[no-policy]"
   },
   "pair|SCOPE=user|SELECT=on": {
    "credited_by": [
@@ -21211,50 +21229,57 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_at_user_scope_redeploys_under_home[multi-narrowed]"
   },
   "pair|SCOPE=user|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_at_user_scope_redeploys_under_home[multi-unchanged]"
   },
   "pair|SCOPE=user|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_at_user_scope_redeploys_under_home[multi-widened]"
   },
   "pair|SCOPE=user|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_at_user_scope_redeploys_under_home[single-narrowed]"
   },
   "pair|SCOPE=user|TGT=single-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[git]"
   },
   "pair|SCOPE=user|TGT=single-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_at_user_scope_redeploys_under_home[single-widened]"
   },
   "pair|SCOPE=user|UPDATE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_modifiers_at_user_scope[update]"
   },
   "pair|SELECT=on|NOPOLICY=on": {
    "family": "pair",
@@ -21550,8 +21575,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[git]"
   },
   "pair|SRC=git|SELECT=on": {
    "family": "pair",
@@ -21621,8 +21647,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_mcp_configures_a_user_scope_server[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DEPLOYED=clean": {
    "family": "pair",
@@ -21789,8 +21816,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_mcp_configures_a_user_scope_server[inline-mcp]"
   },
   "pair|SRC=inline-mcp|SELECT=on": {
    "credited_by": [
@@ -22420,8 +22448,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[local-path]"
   },
   "pair|SRC=local-path|SELECT=on": {
    "family": "pair",
@@ -22491,8 +22520,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-file]"
   },
   "pair|SRC=marketplace-file|DEPLOYED=clean": {
    "credited_by": [
@@ -22789,8 +22819,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-file]"
   },
   "pair|SRC=marketplace-file|SELECT=on": {
    "credited_by": [
@@ -22868,8 +22899,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-git]"
   },
   "pair|SRC=marketplace-git|DEPLOYED=clean": {
    "credited_by": [
@@ -23186,8 +23218,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-git]"
   },
   "pair|SRC=marketplace-git|SELECT=on": {
    "credited_by": [
@@ -23268,8 +23301,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-local]"
   },
   "pair|SRC=marketplace-local|DEPLOYED=clean": {
    "credited_by": [
@@ -23566,8 +23600,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[marketplace-local]"
   },
   "pair|SRC=marketplace-local|SELECT=on": {
    "credited_by": [
@@ -23809,8 +23844,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_install_mcp_configures_a_user_scope_server[mcp-registry]"
   },
   "pair|SRC=mcp-registry|SELECT=on": {
    "family": "pair",
@@ -23879,8 +23915,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[native-plugin]"
   },
   "pair|SRC=native-plugin|DEPLOYED=clean": {
    "family": "pair",
@@ -24133,8 +24170,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[native-plugin]"
   },
   "pair|SRC=native-plugin|SELECT=on": {
    "credited_by": [
@@ -24212,8 +24250,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[pkg-registry]"
   },
   "pair|SRC=pkg-registry|DEPLOYED=clean": {
    "credited_by": [
@@ -24486,8 +24525,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_first_install_from_each_source_deploys_under_home[pkg-registry]"
   },
   "pair|SRC=pkg-registry|SELECT=on": {
    "credited_by": [

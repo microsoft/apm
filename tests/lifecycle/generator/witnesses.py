@@ -288,6 +288,7 @@ SCENARIO_MODULES = (
     "test_ownership_siblings",
     "test_platform",
     "test_policy_pairs",
+    "test_user_scope",
 )
 
 
