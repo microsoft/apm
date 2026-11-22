@@ -276,6 +276,7 @@ def test_frozen_refuses_a_target_change(lifecycle_world, tgt) -> None:
     if tgt.endswith("widened"):
         step = scenario.run("install --frozen", exit=1)
         assert re.search(widened, " ".join(step.output.split())), step.output
+        assert_changes(step.changed, (), label=f"frozen after {tgt}")
         scenario.finish()
         return
     step = scenario.run("install --frozen", exit=1)
