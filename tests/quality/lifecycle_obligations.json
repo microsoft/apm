@@ -28257,8 +28257,8 @@
   },
   "U-BIN-OPS": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:713",
-    "src/apm_cli/install/exec_gate.py:714"
+    "src/apm_cli/install/exec_gate.py:725",
+    "src/apm_cli/install/exec_gate.py:726"
    ],
    "text": "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses"
   },
