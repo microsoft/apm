@@ -524,7 +524,6 @@
       "tests/unit/scripts/test_architecture_skills_root_guard.py": 5,
       "tests/unit/scripts/test_contracts_strip_charset.py": 2,
       "tests/unit/scripts/test_lifecycle_evidence.py": 3,
-      "tests/unit/scripts/test_run_mutation_pilot.py": 10,
       "tests/unit/security/test_exec_vocab_unification.py": 17,
       "tests/unit/security/test_trust_admission.py": 58,
       "tests/unit/test_add_mcp_to_apm_yml.py": 12,
