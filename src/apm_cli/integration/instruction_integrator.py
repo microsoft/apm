@@ -75,7 +75,9 @@ class InstructionIntegrator(BaseIntegrator):
             dict[Path, tuple[Path, str, int]],
         ] = {}
         self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
-        self._claude_blocker_warned: set[Path] = set()
+        # (collector, root) pairs: a planning pass reports into its own
+        # throwaway collector and must not silence the real run's warning.
+        self._claude_blocker_warned: set[tuple[object, Path]] = set()
         # Instruction sources this install routed to compiled AGENTS.md (#3939).
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
@@ -562,8 +564,9 @@ class InstructionIntegrator(BaseIntegrator):
             return instruction_files
         blocker = claude_agents_md_blocker(live_root)
         if blocker is not None:
-            if diagnostics is not None and live_root not in self._claude_blocker_warned:
-                self._claude_blocker_warned.add(live_root)
+            warned = (diagnostics, live_root)
+            if diagnostics is not None and warned not in self._claude_blocker_warned:
+                self._claude_blocker_warned.add(warned)
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
         self.agents_md_routed.update(source.name for source in routed)
