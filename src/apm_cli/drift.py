@@ -166,6 +166,20 @@ def _registry_marketplace_mismatch(spec: str | None, locked_dep: Any) -> str | N
     return None
 
 
+def _non_git_marketplace_mismatch(
+    spec: str | None, locked_dep: LockedDependency
+) -> tuple[bool, str | None]:
+    """Route registry-locked (#4009) and local-catalog (#4639) entries to their evidence checks.
+
+    Returns ``(True, mismatch)`` when the entry is not Git-locked, else ``(False, None)``.
+    """
+    if getattr(locked_dep, "source", None) == "registry":
+        return True, _registry_marketplace_mismatch(spec, locked_dep)
+    if locked_dep.is_local_source:
+        return True, _local_catalog_mismatch(spec, locked_dep)
+    return False, None
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -181,10 +195,9 @@ def marketplace_ref_mismatch(
     from apm_cli.marketplace.version_resolver import is_version_constraint
 
     spec = dep_ref.marketplace_version_spec
-    if getattr(locked_dep, "source", None) == "registry":
-        return _registry_marketplace_mismatch(spec, locked_dep)
-    if locked_dep.is_local_source:
-        return _local_catalog_mismatch(spec, locked_dep)
+    handled, mismatch = _non_git_marketplace_mismatch(spec, locked_dep)
+    if handled:
+        return mismatch
     if not is_full_revision_pin(locked_dep.resolved_commit):
         return "missing locked commit evidence"
     if not spec:
