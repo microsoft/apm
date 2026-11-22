@@ -40,7 +40,11 @@ from ..models.dependency.replacement import (
     parse_replace_block,
     project_effective_reference,
 )
-from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
+from ..models.dependency.subsets import (
+    SkillTargetSelection,
+    canonical_target_subset,
+    copy_subset_pairings,
+)
 from ..native_plugins import record as native_rec
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 from .lockfile_container import parse_lockfile_text
@@ -83,24 +87,6 @@ def _copy_extension_map(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or not value:
         return {}
     return {str(key): item for key, item in value.items()}
-
-
-def _copy_subset_pairings(value: object) -> Any:
-    """Copy raw ``subset_pairings`` records without validating them.
-
-    Malformed values survive the round trip so audit and frozen install can
-    reject them through ``LockedDependency.selection()`` (req-rs-018).
-    """
-    if value is None or value == []:
-        return None
-    if isinstance(value, list):
-        return [
-            {key: list(item) if isinstance(item, list) else item for key, item in record.items()}
-            if isinstance(record, dict)
-            else record
-            for record in value
-        ]
-    return value
 
 
 def _replay_pairing(
@@ -488,6 +474,9 @@ class LockedDependency:
     # Exact per-edge skills x targets pairing (req-rs-018), recorded only when
     # skill_subset x target_subset would over-select. Decode via ``selection()``.
     subset_pairings: list[dict[str, list[str]]] | None = None
+    # The package's own ``targets:`` restriction, recorded at install so pack can
+    # tell a self-excluded dependency from a missing cache (#4850).
+    package_targets: list[str] = field(default_factory=list)
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -692,7 +681,9 @@ class LockedDependency:
         if self.target_subset:
             result["target_subset"] = sorted(self.target_subset)
         if self.subset_pairings:
-            result["subset_pairings"] = _copy_subset_pairings(self.subset_pairings)
+            result["subset_pairings"] = copy_subset_pairings(self.subset_pairings)
+        if self.package_targets:
+            result["package_targets"] = sorted(self.package_targets)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -790,6 +781,7 @@ class LockedDependency:
             "skill_subset",
             "target_subset",
             "subset_pairings",
+            "package_targets",
             "resolved_url",
             "resolved_hash",
             "constraint",
@@ -846,7 +838,8 @@ class LockedDependency:
             skill_subset=list(data.get("skill_subset") or []),
             # Locks written before canonical recording may hold ``vscode``.
             target_subset=canonical_target_subset(data.get("target_subset")),
-            subset_pairings=_copy_subset_pairings(data.get("subset_pairings")),
+            subset_pairings=copy_subset_pairings(data.get("subset_pairings")),
+            package_targets=sorted(str(t) for t in data.get("package_targets") or ()),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),

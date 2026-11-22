@@ -291,6 +291,23 @@ def record_declared_license(ctx: Any, dep_key: str, install_path: Path) -> None:
         ctx.package_declared_licenses[dep_key] = declared
 
 
+def record_package_targets(ctx: Any, dep_key: str, install_path: Path) -> None:
+    """Record the package's own ``targets:`` restriction for the lockfile (#4850).
+
+    An unreadable manifest records nothing, so pack keeps failing closed.
+    """
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.install.target_filter import recorded_package_targets
+    from apm_cli.models.apm_package import APMPackage
+
+    try:
+        recorded = recorded_package_targets(APMPackage.from_apm_yml(manifest_file(install_path)))
+    except Exception:
+        return
+    if recorded:
+        ctx.package_targets[dep_key] = recorded
+
+
 def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
     """Return this run's carried licence records for *dep_key*, else the lock's (#3556)."""
     if dep_key in ctx.package_carried_licenses:
