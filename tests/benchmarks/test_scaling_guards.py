@@ -139,29 +139,59 @@ class _CountingLockfile:
         return list(self._dependencies)
 
 
+def _index_by_repo_url(index) -> dict[str, list[str]]:
+    return {parent: [dep.repo_url for dep in deps] for parent, deps in index.items()}
+
+
+def _children_index_operation_counts(build) -> dict[int, int]:
+    """Count the work *build* does at 50 and 500 deps, checking its output."""
+    from apm_cli.install.orphans import _build_children_index
+
+    counts = {}
+    for n in (50, 500):
+        lockfile = _make_lockfile(n)
+        counting = _CountingLockfile(lockfile)
+        index = build(counting)
+        assert _index_by_repo_url(index) == _index_by_repo_url(_build_children_index(lockfile))
+        counts[n] = counting.ops[0]
+    assert counts[50] > 0
+    return counts
+
+
+def _grows_linearly(counts: dict[int, int]) -> bool:
+    # Linear work gives exactly 10x for 10x input; quadratic gives ~100x.
+    return counts[500] <= 10 * counts[50]
+
+
+def _seeded_quadratic_children_index(lockfile):
+    """Same index as the owner, rebuilt by rescanning every dependency per edge."""
+    children = {}
+    for dep in lockfile.get_package_dependencies():
+        for parent in dep.parent_keys:
+            if parent is not None:
+                children[parent] = [
+                    other
+                    for other in lockfile.get_package_dependencies()
+                    if parent in other.parent_keys
+                ]
+    return children
+
+
 class TestChildrenIndexScaling:
     """_build_children_index must stay O(n), counted rather than timed (#4753)."""
 
     def test_operation_count_grows_linearly(self):
         from apm_cli.install.orphans import _build_children_index
 
-        counts = {}
-        for n in (50, 500):
-            lockfile = _make_lockfile(n)
-            counting = _CountingLockfile(lockfile)
-            index = _build_children_index(counting)
-            expected = _build_children_index(lockfile)
-            assert {parent: [d.repo_url for d in deps] for parent, deps in index.items()} == {
-                parent: [d.repo_url for d in deps] for parent, deps in expected.items()
-            }
-            counts[n] = counting.ops[0]
-
-        # Linear work gives exactly 10x for 10x input; quadratic gives ~100x.
-        assert counts[50] > 0
-        assert counts[500] <= 10 * counts[50], (
+        counts = _children_index_operation_counts(_build_children_index)
+        assert _grows_linearly(counts), (
             f"_build_children_index did {counts[500]} operations for 500 deps and "
             f"{counts[50]} for 50, an O(n^2) regression"
         )
+
+    def test_a_seeded_quadratic_index_fails_the_guard(self):
+        counts = _children_index_operation_counts(_seeded_quadratic_children_index)
+        assert not _grows_linearly(counts), counts
 
 
 # ---------------------------------------------------------------------------
