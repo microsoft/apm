@@ -1012,14 +1012,17 @@
       ]
     },
     {
-      "behavioral_tests": [],
+      "behavioral_tests": [
+        "tests/spec_conformance/test_local_path_identity_reqs.py::test_consumer_recognises_two_relative_spellings_of_one_local_path"
+      ],
       "conformance_class": "consumer",
       "id": "req-mf-016",
       "keyword": "MUST",
       "section": "4.3.5",
-      "status": "skipped",
-      "test_count": 1,
+      "status": "active",
+      "test_count": 2,
       "tests": [
+        "tests/spec_conformance/test_local_path_identity_reqs.py::test_consumer_recognises_two_relative_spellings_of_one_local_path",
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_rejects_absolute_paths_in_apm_source"
       ],
       "waivers": [
@@ -3356,9 +3359,9 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 110,
+      "active": 111,
       "partial": 1,
-      "skipped": 3,
+      "skipped": 2,
       "text-only": 3,
       "unbound": 0,
       "xfail": 0

@@ -1871,11 +1871,10 @@ def gate_retired_hook_survivors(
         for k, why in retirements.denied_packages.items()
         if k not in removed_keys and survivor_ships_hooks(lockfile, k, modules_dir)
     }
-    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    hooks = {k: v for k, v in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
-    for key, why in sorted(hooks.items()):
-        kinds = retirements.retired_kinds.get(key, ())
+    for key, (why, kinds) in sorted(hooks.items()):
         # No kind the rebuild removes (e.g. MCP only): MCP admission reports it.
         if key not in denied and kinds:
             logger.warning(
