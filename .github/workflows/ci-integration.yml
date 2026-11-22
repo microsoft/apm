@@ -129,6 +129,7 @@ jobs:
           include-hidden-files: true
           retention-days: 7
           if-no-files-found: error
+          overwrite: true
 
   # Plans duration-balanced hermetic shards while the binary builds. Same
   # planner and durations as build-release.yml's integration-plan: the
@@ -202,6 +203,7 @@ jobs:
           path: shard-plan/*.json
           retention-days: 7
           if-no-files-found: error
+          overwrite: true
 
   smoke-test:
     name: Smoke Test (Linux)
@@ -407,6 +409,7 @@ jobs:
           include-hidden-files: true
           retention-days: 7
           if-no-files-found: ignore
+          overwrite: true
 
   # Network-dependent tests (GitHub tokens, live registries) in one small
   # lane. A failure re-runs only the failed tests, at most twice.
@@ -484,6 +487,7 @@ jobs:
           include-hidden-files: true
           retention-days: 7
           if-no-files-found: ignore
+          overwrite: true
 
   # Fan-in job that preserves the gate-required check name
   # "Integration Tests (Linux)". merge-gate.yml requires this exact name;
