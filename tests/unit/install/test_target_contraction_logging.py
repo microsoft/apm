@@ -172,6 +172,37 @@ def test_contraction_removes_only_selected_removed_target_ownership(tmp_path):
     assert not removed_abs.exists()
 
 
+def test_selected_ownership_cleanup_keeps_a_file_shared_with_project_content(tmp_path):
+    """A file the project's own content still claims survives its co-owner's removal (#4703)."""
+    shared_rel = ".config/opencode/agents/shared.md"
+    shared_abs = tmp_path / shared_rel
+    shared_abs.parent.mkdir(parents=True, exist_ok=True)
+    shared_abs.write_text("# shared\n", encoding="utf-8")
+
+    lockfile = LockFile()
+    lockfile.local_deployed_files = [shared_rel]
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[shared_rel],
+        deployed_file_hashes={shared_rel: compute_file_hash(shared_abs)},
+    )
+    lockfile.add_dependency(removed)
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["opencode"]],
+        declared_targets=[KNOWN_TARGETS["opencode"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+        user_scope=True,
+    )
+
+    assert shared_abs.read_text(encoding="utf-8") == "# shared\n"
+
+
 def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
     """Removing one owner deletes its file even when the target remains active."""
     survivor_rel = ".config/opencode/agents/survivor.md"
