@@ -622,3 +622,112 @@ def test_uninstall_bundle_removes_its_hooks_and_claims(
     assert not (home / ".claude" / "hooks" / "hookpkg").exists()
     user_lock = load_yaml(home / ".apm" / "apm.lock.yaml")
     assert not [p for p in user_lock.get("local_deployed_files") or [] if "/hooks/" in p]
+
+
+def _approved_consumer(world: MarketplacePackWorld, name: str, key: str) -> Path:
+    consumer = world.consumer(name, targets=("claude",))
+    _allow(consumer, key)
+    return consumer
+
+
+def _copilot_hook_files(project: Path) -> list[str]:
+    hooks = project / ".github" / "hooks"
+    return sorted(p.name for p in hooks.glob("*.json")) if hooks.is_dir() else []
+
+
+def test_uninstall_bundle_reaches_targets_outside_the_manifest(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: hooks deployed with an explicit --target leave with the bundle."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "override-consumer", key)
+    (consumer / ".github").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,copilot")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    assert _copilot_hook_files(consumer), "copilot hooks were not deployed"
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert _hook_entries(consumer) == {}
+    assert _copilot_hook_files(consumer) == []
+    assert _bundle_hook_claims(world, consumer) == []
+
+    # A copilot-only deployment is found too, not refused as missing.
+    world.apm(consumer, "install", str(bundle), "--target", "copilot")
+    assert _copilot_hook_files(consumer)
+    world.apm(consumer, "uninstall", str(bundle))
+    assert _copilot_hook_files(consumer) == []
+
+
+def test_uninstall_bundle_keeps_ownership_of_a_hook_it_could_not_remove(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a hook file replaced by a symlink fails the uninstall and stays owned."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("symlink-consumer", targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    (hook_name,) = _copilot_hook_files(consumer)
+    hook = consumer / ".github" / "hooks" / hook_name
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_bytes(hook.read_bytes())
+    hook.unlink()
+    hook.symlink_to(elsewhere)
+    sidecar = (consumer / ".github" / "apm-hooks.json").read_text()
+
+    result = world.apm(consumer, "uninstall", str(bundle), expect=1)
+    text = output(result)
+    assert "Removed hooks from local bundle" not in text, text
+    assert "could not all be removed" in text, text
+    assert f".github/hooks/{hook_name}" in text, text
+    assert hook.is_symlink() and elsewhere.is_file()
+    assert "local-bundle::hookpkg" in (consumer / ".github" / "apm-hooks.json").read_text()
+    assert sidecar.count("local-bundle::hookpkg") == (
+        (consumer / ".github" / "apm-hooks.json").read_text().count("local-bundle::hookpkg")
+    )
+    assert f".github/hooks/{hook_name}" in world.lock(consumer)["local_deployed_files"]
+    assert (consumer / "apm_modules" / ".local-bundle-pending.json").is_file()
+
+
+def test_uninstall_bundle_path_selects_its_installed_alias(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a bundle installed with --as is uninstalled by its path; twins are refused."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "alias-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'team-hooks'" in text, text
+    assert _hook_entries(consumer) == {}
+
+    # The same bundle installed twice (default name and alias) is ambiguous by path.
+    world.apm(consumer, "install", str(bundle))
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    before = tree_bytes(consumer)
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "matches 2 installed local bundles (hookpkg, team-hooks)" in refused, refused
+    assert tree_bytes(consumer) == before
+    # The printed remedy: uninstall one by its installed name.
+    world.apm(consumer, "uninstall", "team-hooks")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+
+
+def test_uninstall_bundle_path_without_dot_slash(tmp_path: Path, apm_binary_path: Path) -> None:
+    """#3700 review: uninstall accepts the bundle path spellings install accepts."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "relpath-consumer", key)
+    local = consumer / "build" / bundle.name
+    shutil.copytree(bundle, local)
+    rel = f"build/{bundle.name}"
+    world.apm(consumer, "install", rel)
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+
+    text = output(world.apm(consumer, "uninstall", rel))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert _hook_entries(consumer) == {}

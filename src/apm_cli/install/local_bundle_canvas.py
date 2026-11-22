@@ -308,10 +308,10 @@ def retire_unadmitted_bundle_canvas(
 ) -> list[UnadmittedBundleCanvas]:
     """Retire every local-bundle canvas extension trust no longer admits."""
     from ..core.remediation import BUNDLE_HOOKS_APPROVED
-    from .local_bundle_hook_trust import _lock_bundle_paths
+    from .local_bundle_hook_trust import local_bundle_paths
 
     unadmitted = _unadmitted(
-        project_root, targets, allow_executables, lambda: _lock_bundle_paths(lock_dir)
+        project_root, targets, allow_executables, lambda: local_bundle_paths(lock_dir)
     )
     for holding, reason in unadmitted:
         if not dry_run:
@@ -343,10 +343,10 @@ def retire_recorded_bundle_canvas(
     any lockfile row retired.
     """
     from ..core.scope import InstallScope, get_apm_dir
-    from .local_bundle_hook_trust import _lock_bundle_paths
+    from .local_bundle_hook_trust import local_bundle_paths
 
     lock_dir = get_apm_dir(InstallScope.USER) if user_scope else Path(project_root)
-    holdings = deployed_bundle_canvas(project_root, targets, _lock_bundle_paths(lock_dir))
+    holdings = deployed_bundle_canvas(project_root, targets, local_bundle_paths(lock_dir))
     holding = next((h for h in holdings if h.recorded and h.slug == slug), None)
     if holding is None:
         return False
@@ -373,7 +373,7 @@ def _retire(
     from ..utils.content_hash import compute_file_hash
     from .local_bundle_hook_trust import (
         _drop_lock_rows,
-        _lock_bundle_paths,
+        local_bundle_paths,
         _relative_value,
         contained_bundle_path,
     )
@@ -391,7 +391,7 @@ def _retire(
     hashes = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
     dropped: set[str] = set()
     removed: list[Path] = []
-    for value in _lock_bundle_paths(lock_dir):
+    for value in local_bundle_paths(lock_dir):
         rel = _relative_value(value, root)
         path = contained_bundle_path(root, value, prefixes)
         if rel not in wanted or path is None or not hashes.get(value):
