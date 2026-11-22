@@ -33,3 +33,43 @@ def test_cleanup_claims_exclude_paths_the_local_owner_still_holds() -> None:
     assert paths == {skill}
     assert hashes == {skill: "sha256:skill"}
     assert local_paths == {shared, skill}
+
+
+def test_shrink_retired_path_a_local_bundle_holds_is_never_a_deletion_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A survivor's shrinking selection never re-adds a path a local bundle holds (#4703)."""
+    import apm_cli.commands.uninstall.cli as uninstall_cli
+
+    shared = ".github/instructions/f-doc.instructions.md"
+    lockfile = LockFile(
+        dependencies={
+            "removed": LockedDependency(repo_url="removed", deployed_files=[]),
+            "shrinking": LockedDependency(repo_url="shrinking", deployed_files=[shared]),
+        },
+        local_deployed_files=[shared],
+        local_deployed_file_hashes={shared: "sha256:shared"},
+    )
+    monkeypatch.setattr(
+        uninstall_cli, "shrink_path_split", lambda _lock, _shrunk: ({shared}, set())
+    )
+    judged: list[list[str]] = []
+
+    class _Evidence:
+        def refusals(self, claims):
+            judged.append(list(claims))
+            return []
+
+    uninstall_cli._refuse_uninstall_without_evidence(
+        _Evidence(),
+        lockfile,
+        {"removed"},
+        (),
+        (),
+        None,
+        logger=None,
+        user_scope=False,
+        shrunk={"shrinking": object()},
+    )
+
+    assert judged == [[]]

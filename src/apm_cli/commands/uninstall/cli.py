@@ -642,6 +642,11 @@ def _refuse_uninstall_without_evidence(
         # A path another shrinking survivor keeps deploying is not deleted.
         retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
         candidates |= retired - others - builtins.set(other_hashes) - retained
+    # Neither survivor snapshot covers project-local claims; a local bundle keeps them (#4703).
+    candidates -= (
+        BaseIntegrator.normalize_managed_files(builtins.set(lockfile.local_deployed_files))
+        or builtins.set()
+    )
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
     if not refused:
