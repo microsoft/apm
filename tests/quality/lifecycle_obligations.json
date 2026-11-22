@@ -11676,10 +11676,11 @@
   },
   "T5|OP=mcp-install|SRC=inline-mcp|DRYRUN=on": {
    "family": "T5",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
   },
   "T5|OP=mcp-install|SRC=mcp-registry|DRYRUN=on": {
    "family": "T5",
@@ -22596,19 +22597,12 @@
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {
-   "credited_by": [
-    "T5|dry-run|audit|inline-mcp",
-    "T5|dry-run|compile|inline-mcp",
-    "T5|dry-run|install|inline-mcp",
-    "T5|dry-run|prune|inline-mcp",
-    "T5|dry-run|update|inline-mcp"
-   ],
    "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
+   "issue": "#4099",
+   "lane": "T-5",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-16-source-refusals]"
   },
   "pair|SRC=inline-mcp|FORCE=on": {
    "credited_by": [
@@ -28296,7 +28290,7 @@
   "generated_cover-13-refusals.yaml": "c35ed662b974894b4b82346ffcb345ed3379c230b0783dbd0dfcb72ce246a72c",
   "generated_cover-14-refusals.yaml": "2668f5641e39462b11e3f3366c0d1681113945255df1cad9a6e65d4bc2cccba0",
   "generated_cover-15-refusals.yaml": "bb74265dd38bb0ef66bfcf59bcc51f2a30addd6ca53890071624e80b8e439a6f",
-  "generated_cover-16-source-refusals.yaml": "dabc3fdbb50c3b1dfcf110c5831e492e34dfce99da84fec4d815d9bb0e1bc473",
+  "generated_cover-16-source-refusals.yaml": "fabd22682df6432c232782f937512c1644f8f89e15734ea4cab3c3da24fdcfc2",
   "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
  },
  "rules": {
