@@ -23,7 +23,7 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
     env = dict(world.env)
     plain = subprocess.run([str(apm), "install"], cwd=root, env=env, capture_output=True, text=True)
     print("== OUTPUT rc", plain.returncode, "\n", plain.stdout[-3000:], plain.stderr[-3000:])
-    full = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0"), capture_output=True, text=True)
+    full = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0", APM_L5_DEBUG="1"), capture_output=True, text=True)
     print("== FULL OUTPUT rc", full.returncode, "\n" + full.stdout + "\n--- stderr\n" + full.stderr)
     import yaml as _yaml
     _lock = _yaml.safe_load((root / "apm.lock.yaml").read_text())
@@ -32,8 +32,8 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
         print(_d.get("repo_url"), "depth", _d.get("depth"), "by", _d.get("resolved_by"), "ref", _d.get("resolved_ref"), _d.get("resolved_commit", "")[:8])
     print("== MANIFEST\n" + (root / "apm.yml").read_text())
     print("== MCP lock", _lock.get("mcp_servers"), list((_lock.get("mcp_configs") or {}).keys()))
-    trace = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="trace"), capture_output=True, text=True)
-    print("== TRACE\n" + trace.stderr[-2000:])
+    trace = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="trace", APM_L5_DEBUG="1"), capture_output=True, text=True)
+    print("== TRACE\n" + trace.stderr[-12000:])
     log = work / "argv.log"
     env2 = dict(env, L5_ARGV_LOG=str(log), PYTHONPATH=str(Path(__file__).parent / "l5_argv"))
     subprocess.run([str(apm), "install"], cwd=root, env=env2, capture_output=True, text=True)
