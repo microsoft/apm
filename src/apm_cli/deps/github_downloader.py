@@ -1902,9 +1902,11 @@ class GitHubPackageDownloader:
         if _persistent_cache is not None:
             from ..agent_plugins.errors import AgentPluginError
             from ..bundle.local_bundle import route_agent_plugin_package
+            from .archive_checkout import try_archive_tree
 
             try:
-                _cached = self._persistent_cache_checkout(
+                _cached = try_archive_tree(self, _persistent_cache, dep_ref, resolved_ref)
+                _cached = _cached or self._persistent_cache_checkout(
                     _persistent_cache,
                     dep_ref,
                     dep_ref.to_github_url(),

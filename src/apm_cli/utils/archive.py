@@ -14,6 +14,7 @@ import shutil
 import tarfile
 import uuid
 import zipfile
+import zlib
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 from typing import IO, TypeVar
@@ -311,6 +312,185 @@ def safe_extract_tar(
     for directory in dirs:
         directory.mkdir(parents=True, exist_ok=True)
     return _write_planned(plan, size_limit, error_type=error_type)
+
+
+def _bounded_gunzip(data: bytes, limit: int, error_type: type[_ErrorT]) -> bytes:
+    """Decompress gzip *data* into memory, refusing more than *limit* bytes of tar stream.
+
+    Bounds the whole decompressed stream, tar headers and PAX/GNU extension
+    metadata included, before :mod:`tarfile` parses (and allocates) any of it.
+    Inflates in fixed-size steps, so memory follows the output, not *limit*.
+    """
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    out = bytearray()
+    pending = data
+    try:
+        while not inflater.eof:
+            chunk = inflater.decompress(pending, _INFLATE_STEP_BYTES)
+            pending = inflater.unconsumed_tail
+            out += chunk
+            if len(out) > limit:
+                _raise(error_type, "Archive uncompressed size exceeds size limit")
+            if not chunk and not pending:
+                break  # input exhausted before the end of the gzip stream
+    except zlib.error as exc:
+        _raise(error_type, f"Failed to read tar.gz archive: {type(exc).__name__}")
+    if not inflater.eof:
+        _raise(error_type, "Failed to read tar.gz archive: truncated gzip stream")
+    return bytes(out)
+
+
+# tarfile copies the global PAX record into every member it parses, so
+# global metadata is amplified by the member count: allow one small record
+# (git archive writes a single ``comment=<sha>``). Per-member extended
+# records (PAX ``x``, GNU long names) are bounded in aggregate.
+_INFLATE_STEP_BYTES = 1024 * 1024
+_MAX_GLOBAL_PAX_HEADERS = 1
+_MAX_GLOBAL_PAX_BYTES = 1024
+_MAX_EXTENDED_HEADER_BYTES = 1024 * 1024
+_EXTENDED_TYPES = (
+    tarfile.XHDTYPE,
+    tarfile.SOLARIS_XHDTYPE,
+    tarfile.GNUTYPE_LONGNAME,
+    tarfile.GNUTYPE_LONGLINK,
+)
+
+
+def _bound_tar_metadata(stream: bytes, error_type: type[_ErrorT]) -> None:
+    """Walk the raw tar headers of *stream* and bound metadata before tarfile parses it."""
+    offset = 0
+    global_headers = 0
+    extended = 0
+    block = tarfile.BLOCKSIZE
+    while offset + block <= len(stream):
+        header = stream[offset : offset + block]
+        if not header.strip(b"\0"):
+            return  # end-of-archive marker
+        try:
+            size = tarfile.nti(header[124:136])
+        except (ValueError, tarfile.HeaderError):
+            _raise(error_type, "Failed to read tar.gz archive: invalid header size")
+        if size < 0:
+            _raise(error_type, "Failed to read tar.gz archive: invalid header size")
+        kind = header[156:157]
+        if kind == tarfile.XGLTYPE:
+            global_headers += 1
+            if global_headers > _MAX_GLOBAL_PAX_HEADERS or size > _MAX_GLOBAL_PAX_BYTES:
+                _raise(error_type, "Archive global metadata exceeds its limit")
+        elif kind in _EXTENDED_TYPES:
+            extended += size
+            if extended > _MAX_EXTENDED_HEADER_BYTES:
+                _raise(error_type, "Archive extended metadata exceeds its limit")
+        offset += block + -(-size // block) * block
+
+
+def _raw_name_matches(member: tarfile.TarInfo, stream: bytes) -> bool:
+    """Whether the name *member* was written with is exactly its parsed name.
+
+    :mod:`tarfile` drops redundant trailing slashes from directory names (and
+    from any PAX ``path``) while parsing, so ``p/a//`` would read as ``p/a``.
+    The raw name comes from the PAX ``path`` record or the member's own ustar
+    header in *stream* (name plus prefix, the 512 bytes before its data); a
+    GNU long name keeps all but one trailing slash. A directory may carry
+    exactly one trailing slash, nothing else may differ.
+    """
+    parsed = member.name
+    if parsed.endswith("/"):
+        return False  # a GNU long name that had redundant trailing slashes
+    raw = member.pax_headers.get("path")
+    if raw is None:
+        start = member.offset_data - tarfile.BLOCKSIZE
+        buf = stream[start : member.offset_data] if start >= 0 else b""
+        name = tarfile.nts(buf[0:100], "utf-8", "surrogateescape")
+        prefix = tarfile.nts(buf[345:500], "utf-8", "surrogateescape")
+        raw = f"{prefix}/{name}" if prefix else name
+        if raw.rstrip("/") != parsed:
+            return True  # header name truncated (GNU long name): already checked above
+    if member.isdir():
+        return raw in (parsed, f"{parsed}/")
+    return raw == parsed
+
+
+def read_tar_gz_members(
+    data: bytes,
+    *,
+    max_entries: int | None = None,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ValueError,
+) -> tuple[dict[str, str], list[tuple[str, int, bytes | None]]]:
+    """Read an in-memory gzip tarball under the shared archive limits; write nothing.
+
+    Returns the pax global headers and ``(name, mode, data)`` for every member
+    in archive order (``data`` is None for a directory). Refuses links and
+    special files, caps the entry count and counts uncompressed bytes as read.
+    Member paths are returned as is: extract with :func:`safe_extract_tar`.
+    """
+    entry_limit = MAX_ZIP_ENTRIES if max_entries is None else max_entries
+    size_limit = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    members: list[tuple[str, int, bytes | None]] = []
+    total = 0
+    raw = _bounded_gunzip(data, size_limit, error_type)
+    _bound_tar_metadata(raw, error_type)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
+            declared = 0
+            for count, member in enumerate(tar, start=1):
+                if count > entry_limit:
+                    _raise(error_type, f"Archive has more than {entry_limit} entries")
+                if not _raw_name_matches(member, raw):
+                    _raise(error_type, f"non-canonical archive path: {member.name!r}")
+                # Every member's declared size counts, directories included.
+                declared += max(member.size, 0)
+                if declared > size_limit:
+                    _raise(error_type, "Archive uncompressed size exceeds size limit")
+                if member.isdir():
+                    members.append((member.name, member.mode, None))
+                    continue
+                if not member.isreg():
+                    _raise(error_type, f"Refusing archive member type: {member.name!r}")
+                handle = tar.extractfile(member)
+                # Read exactly the declared size (already counted against the
+                # bound); a read(n) larger than that would preallocate n bytes.
+                content = handle.read(member.size) if handle is not None else b""
+                total += len(content)
+                if total > size_limit:
+                    _raise(error_type, "Archive uncompressed size exceeds size limit")
+                members.append((member.name, member.mode, content))
+            headers = {str(k): str(v) for k, v in tar.pax_headers.items()}
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        _raise(error_type, f"Failed to read tar.gz archive: {type(exc).__name__}")
+    return headers, members
+
+
+def safe_extract_tar_gz_bytes(
+    data: bytes,
+    dest_root: Path,
+    *,
+    max_entries: int | None = None,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ValueError,
+) -> list[str]:
+    """Extract an in-memory gzip tarball with :func:`safe_extract_tar`.
+
+    The decompressed tar stream, metadata included, is bounded first.
+    """
+    size_limit = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    raw = _bounded_gunzip(data, size_limit, error_type)
+    _bound_tar_metadata(raw, error_type)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
+            return safe_extract_tar(
+                tar,
+                dest_root,
+                max_entries=max_entries,
+                max_uncompressed=max_uncompressed,
+                error_type=error_type,
+            )
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        if isinstance(exc, error_type):
+            raise
+        _raise(error_type, f"Failed to read tar.gz archive: {type(exc).__name__}")
+    return []
 
 
 def safe_extract_zip(

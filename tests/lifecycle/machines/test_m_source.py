@@ -69,6 +69,7 @@ from tests.lifecycle.world.routes import PROXY_HOST, PROXY_PREFIX
 from tests.lifecycle.world.scopes import use_registry_proxy
 from tests.lifecycle.world.services import (
     API_HOST,
+    CODELOAD_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
     MARKETPLACE_NAME,
@@ -135,6 +136,7 @@ WORLD_HOSTS = frozenset(
     {
         GITHUB_HOST,
         API_HOST,
+        CODELOAD_HOST,
         RAW_HOST,
         REGISTRY_HOST,
         registry.HOST,

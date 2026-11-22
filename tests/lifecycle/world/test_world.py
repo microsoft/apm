@@ -44,6 +44,7 @@ from tests.lifecycle.world.services import (
     ADO_HOST,
     ADO_PAT,
     API_HOST,
+    CODELOAD_HOST,
     GITHUB_HOST,
     HOST_ALIASES,
     ORG,
@@ -365,6 +366,8 @@ def test_git_source_installs_through_the_local_https_server(
     lifecycle_world: World, package: str, scope: str
 ) -> None:
     world = lifecycle_world
+    # This cell proves the git transport; the archive route has its own test.
+    world.env["APM_ARCHIVE_TRANSPORT"] = "0"
     _install_and_approve(world, f"{package}:git", scope)
     assert package in _locked(world, scope)
     _assert_surfaces(world, package, scope)
@@ -373,6 +376,48 @@ def test_git_source_installs_through_the_local_https_server(
         (entry["host"], entry["path"]) for entry in requests
     }, requests
     assert all(entry["status"] == 200 for entry in requests), requests
+
+
+def _lock_rows(world: World) -> dict[str, tuple]:
+    lock = yaml.safe_load((world.project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    return {
+        d["repo_url"]: (
+            d.get("resolved_commit"),
+            d.get("content_hash"),
+            d.get("deployed_file_hashes"),
+        )
+        for d in lock["dependencies"]
+    }
+
+
+@pytest.mark.parametrize("package", _APM_GIT_PACKAGES)
+def test_cold_github_source_installs_through_the_verified_archive(
+    lifecycle_world: World, package: str
+) -> None:
+    """Same package, cold cache: the archive route lands the lock rows git lands."""
+    world = lifecycle_world
+    world.env["APM_ARCHIVE_TRANSPORT"] = "0"
+    _install_and_approve(world, f"{package}:git", "project")
+    through_git = _lock_rows(world)
+    commit = next(row[0] for url, row in through_git.items() if url.endswith(f"/{package}"))
+    shutil.rmtree(world.project / "apm_modules")
+    shutil.rmtree(world.cache_root / "git")
+    world.services.proxy.clear()
+    world.env.pop("APM_ARCHIVE_TRANSPORT")
+
+    _ok(world, ["install"])
+
+    assert _lock_rows(world) == through_git
+    _assert_surfaces(world, package, "project")
+    fetched = {
+        (entry["host"], entry["path"], entry["status"])
+        for entry in world.services.egress_log()
+        if f"/{package}/" in entry["path"]
+    }
+    assert fetched == {
+        (CODELOAD_HOST, f"/lifecycle/{package}/tar.gz/{commit}", 200),
+        (API_HOST, f"/repos/lifecycle/{package}/git/trees/{commit}", 200),
+    }, fetched
 
 
 @pytest.mark.parametrize(("package", "scope"), _REMOTE_CELLS)

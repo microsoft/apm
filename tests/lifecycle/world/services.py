@@ -57,6 +57,7 @@ REGISTRY_REMOTE = "https://mcp.lifecycle.test/p-registry"
 GITHUB_HOST = "github.com"
 API_HOST = "api.github.com"
 RAW_HOST = "raw.githubusercontent.com"
+CODELOAD_HOST = "codeload.github.com"
 REGISTRY_HOST = "mcp-registry.lifecycle.test"
 # shape -> (git host, repository URL prefix under that host)
 HOST_ALIASES: Mapping[str, tuple[str, str]] = {
@@ -417,7 +418,11 @@ class WorldServices:
     # -- handlers ------------------------------------------------------------
 
     def handlers(self) -> dict[str, Handler]:
-        direct: dict[str, Handler] = {GITHUB_HOST: self._git, RAW_HOST: self._raw}
+        direct: dict[str, Handler] = {
+            GITHUB_HOST: self._git,
+            RAW_HOST: self._raw,
+            CODELOAD_HOST: self._codeload,
+        }
         for host in _API_HOSTS:
             direct[host] = self._api
         for host, _prefix in HOST_ALIASES.values():
@@ -604,7 +609,55 @@ class WorldServices:
             return self._api_commit(request, repository, parts[4])
         if len(parts) == 5 and parts[3] == "contents":
             return self._api_contents(request, repository, parts[4])
+        if len(parts) == 5 and parts[3] == "git" and parts[4].startswith("trees/"):
+            tree = self._rev_parse_tree(repository, parts[4][len("trees/") :])
+            return _json(200, {"sha": tree, "tree": []}) if tree else _not_found()
         return _not_found()
+
+    def _rev_parse_tree(self, repository: Path, ref: str) -> str | None:
+        sha = self._rev_parse(repository, ref)
+        if sha is None:
+            return None
+        git = shutil.which("git") or "git"
+        result = subprocess.run(
+            (git, "--git-dir", str(repository), "rev-parse", f"{sha}^{{tree}}"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def _codeload(self, request: ScriptedRequest) -> ScriptedResponse:
+        """``codeload.github.com/{owner}/{repo}/tar.gz/{ref}``: a GitHub-shaped tarball.
+
+        Like GitHub: prefix ``{owner}-{repo}-{sha7}/`` and the commit id in the
+        pax global header (``git archive`` of a commit writes it).
+        """
+        owner, _, rest = unquote(request.path).lstrip("/").partition("/")
+        repo, _, rest = rest.partition("/tar.gz/")
+        repository = self._slug_repository(owner, repo) if rest else None
+        sha = self._rev_parse(repository, rest) if repository is not None else None
+        if sha is None:
+            return _not_found()
+        git = shutil.which("git") or "git"
+        result = subprocess.run(
+            (
+                git,
+                "--git-dir",
+                str(repository),
+                "archive",
+                "--format=tar.gz",
+                f"--prefix={owner}-{repo}-{sha[:7]}/",
+                sha,
+            ),
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            return _not_found()
+        return ScriptedResponse(200, {"Content-Type": "application/x-gzip"}, result.stdout)
 
     def _api_commit(self, request: ScriptedRequest, repository: Path, ref: str) -> ScriptedResponse:
         sha = self._rev_parse(repository, ref)

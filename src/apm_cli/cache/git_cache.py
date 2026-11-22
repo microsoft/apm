@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
@@ -176,6 +177,45 @@ def _checkout_has_materialization_pins(checkout_dir: Path) -> bool:
     return all(
         values.get(key.lower()) == value.lower() for key, value in _checkout_materialization_pins()
     )
+
+
+def _write_tree_checkout_git_dir(git_dir: Path, sha: str, tree_sha: str) -> None:
+    """Write the minimal ``.git`` a verified tree shard needs to be a cache hit.
+
+    A detached ``HEAD`` at *sha* (read by ``verify_checkout_sha``) and a
+    local config carrying every materialization pin plus the verified tree
+    id. There is no index and no object: the shard holds no links, and the
+    files were verified against *tree_sha* before landing.
+    """
+    (git_dir / "objects").mkdir(parents=True)
+    (git_dir / "refs").mkdir()
+    (git_dir / "HEAD").write_text(f"{sha}\n", encoding="ascii")
+    sections: dict[str, list[tuple[str, str]]] = {
+        "core": [("repositoryformatversion", "0"), ("bare", "false")]
+    }
+    pins = (*_checkout_materialization_pins(), *_TREE_CHECKOUT_ENTRIES, ("apm.tree", tree_sha))
+    for key, value in pins:
+        section, _, name = key.rpartition(".")
+        sections.setdefault(section, []).append((name, value))
+    lines: list[str] = []
+    for section, values in sections.items():
+        lines.append(f"[{section}]")
+        lines.extend(f"\t{name} = {value}" for name, value in values)
+    (git_dir / "config").write_text("\n".join(lines) + "\n", encoding="ascii")
+
+
+# Shards landed from a verified archive instead of a clone carry this key.
+_TREE_CHECKOUT_ENTRIES = (("apm.materialization", "verified-tree"),)
+
+
+def is_verified_tree_checkout(checkout_dir: Path) -> bool:
+    """Whether *checkout_dir* was landed by ``land_tree_checkout``.
+
+    Such a shard holds no Git objects and, by construction, no links: its
+    files were verified against the commit's tree, which had none.
+    """
+    key, value = _TREE_CHECKOUT_ENTRIES[0]
+    return (_checkout_config_values(checkout_dir) or {}).get(key.lower()) == value
 
 
 def _unmaterialized_paths(
@@ -1002,6 +1042,63 @@ class GitCache:
                     int((time.monotonic() - remat_started) * 1000),
                 )
             return final_dir
+
+    @property
+    def cache_root(self) -> Path:
+        return self._cache_root
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    def has_full_checkout(self, url: str, sha: str) -> bool:
+        """Return whether a full-tree shard directory for *sha* exists (no git, no I/O beyond stat)."""
+        return (self._checkouts_root / cache_shard_key(url) / sha / _variant_key(None)).is_dir()
+
+    def land_tree_checkout(
+        self, url: str, sha: str, tree_sha: str, populate: Callable[[Path], None]
+    ) -> Path:
+        """Land a full-tree shard for *sha* from files verified against its git tree.
+
+        *populate* writes the commit's files into the staging directory; the
+        caller has verified them against *tree_sha*, the commit's tree. A
+        minimal ``.git`` (detached HEAD, the materialization pins and the
+        tree id) makes the shard a cache hit exactly like a cloned one.
+        Returns the checkout directory.
+        """
+        if self._read_only or not _SHA_RE.match(sha) or not _SHA_RE.match(tree_sha):
+            raise ValueError("land_tree_checkout needs a writable cache and full SHAs")
+        sha_parent = self._checkouts_root / cache_shard_key(url) / sha
+        ensure_path_within(sha_parent, self._checkouts_root)
+        sha_parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(sha_parent), 0o700)
+        final_dir = sha_parent / _variant_key(None)
+        lock = shard_lock(final_dir)
+        with lock:
+            if final_dir.is_dir() and verify_checkout_sha(final_dir, sha):
+                if _checkout_has_materialization_pins(final_dir):
+                    return self._record_checkout_access(final_dir)
+                self._evict_checkout(final_dir)
+            staged = stage_path(final_dir)
+            ensure_path_within(staged, self._checkouts_root)
+            try:
+                staged.mkdir(parents=True)
+                os.chmod(str(staged), 0o700)
+                populate(staged)
+                _write_tree_checkout_git_dir(staged / ".git", sha, tree_sha)
+                atomic_land(staged, final_dir, lock)
+            finally:
+                if staged.exists():
+                    from ..utils.file_ops import robust_rmtree
+
+                    robust_rmtree(staged, ignore_errors=True)
+        if not (
+            verify_checkout_sha(final_dir, sha) and _checkout_has_materialization_pins(final_dir)
+        ):
+            raise RuntimeError(
+                f"Tree checkout failed integrity for {_sanitize_url(url)} @ {sha[:12]}"
+            )
+        return final_dir
 
     def _bare_has_sha(self, bare_dir: Path, sha: str, *, env: dict[str, str] | None = None) -> bool:
         """Check if the bare repo contains the specified commit."""

@@ -538,7 +538,15 @@ def validate_materialized_symlinks(
     timeout: int = 30,
     extra_git_args: list[str] | None = None,
 ) -> None:
-    """Reject escaping, broken or cyclic tracked links in *paths* before copy."""
+    """Reject escaping, broken or cyclic tracked links in *paths* before copy.
+
+    A shard landed from a verified archive (``GitCache.land_tree_checkout``)
+    holds no Git objects and, by construction, no links: nothing to inspect.
+    """
+    from ..cache.git_cache import is_verified_tree_checkout  # git_cache imports this module
+
+    if is_verified_tree_checkout(repo_dir):
+        return
     _, failures = _plan_tracked_symlinks(
         git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
     )

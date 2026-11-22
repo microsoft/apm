@@ -13,6 +13,7 @@ SLICE = HostSlice(
     host="github",
     git_host="github.com",
     family=("github.com", "api.github.com"),
+    archive_host="codeload.github.com",
     base="https://github.com/lifecycle",
     spec="lifecycle/p-skill#v1.0.0",
     pat_env="GITHUB_APM_PAT",

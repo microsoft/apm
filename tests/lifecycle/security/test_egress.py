@@ -62,6 +62,7 @@ from tests.lifecycle.world import registry as world_registry
 from tests.lifecycle.world.services import (
     ADO_BEARER,
     ADO_PAT,
+    CODELOAD_HOST,
     POLICY_REPO,
     REGISTRY_HOST,
     REGISTRY_SERVER,
@@ -201,8 +202,13 @@ def _is_git(request: ScriptedRequest) -> bool:
     return request.path.endswith(("/info/refs", "/git-upload-pack", "/HEAD"))
 
 
+def _is_content(request: ScriptedRequest) -> bool:
+    """Package content: the git transport, or the verified archive that replaces a cold clone."""
+    return _is_git(request) or request.host == CODELOAD_HOST
+
+
 def _is_api(request: ScriptedRequest) -> bool:
-    return not _is_git(request)
+    return not _is_content(request)
 
 
 @dataclass(frozen=True)
@@ -215,7 +221,7 @@ class Operation:
 
 
 OPERATIONS: Mapping[str, Operation] = {
-    "clone": Operation(lambda w, h: ["install", h.spec], _is_git),
+    "clone": Operation(lambda w, h: ["install", h.spec], _is_content),
     "api-probe": Operation(
         lambda w, h: ["install", h.api_spec or h.spec],
         _is_api,
@@ -355,9 +361,12 @@ def run_egress_row(world: World, host: HostSlice, row: EgressRow) -> None:
         requests = [r for r in everything if r.method != "CONNECT"]
         reached = {request.host for request in requests}
     else:
-        assert host.git_host in touched or touched & set(host.family), (
-            f"{row.egress} never reached {host.host}: {sorted(reached)}"
-        )
+        origins = {
+            host.git_host,
+            *host.family,
+            *((host.archive_host,) if host.archive_host else ()),
+        }
+        assert touched & origins, f"{row.egress} never reached {host.host}: {sorted(reached)}"
     if fields.get("PROXY_ONLY") == "0":
         # Normal mode: every connection went to an origin the world's proxy serves.
         refused = sorted({r.host for r in everything if r.method == "CONNECT"})

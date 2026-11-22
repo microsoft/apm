@@ -30,7 +30,13 @@ import pytest
 import yaml
 
 from tests.lifecycle.scenarios._kit import Scenario, assert_changes, serve_repository
-from tests.lifecycle.world.services import API_HOST, GITHUB_HOST, HOST_ALIASES, RAW_HOST
+from tests.lifecycle.world.services import (
+    API_HOST,
+    CODELOAD_HOST,
+    GITHUB_HOST,
+    HOST_ALIASES,
+    RAW_HOST,
+)
 from tests.utils.local_git_repository import (
     GitCommit,
     LocalGitRepository,
@@ -55,7 +61,7 @@ GHES = HOST_ALIASES["ghes"][0]
 OTHER = HOST_ALIASES["generic"][0]
 OTHER_SLUG = "beta/team-skills"
 OTHER_SUBPATH = "skills/team-lint"
-GITHUB_HOSTS = frozenset({GITHUB_HOST, API_HOST, RAW_HOST})
+GITHUB_HOSTS = frozenset({GITHUB_HOST, API_HOST, RAW_HOST, CODELOAD_HOST})
 INTERNAL = "acme/internal-skills"
 ANDROID = "example/android-skills"
 KOTLIN = "example/kotlin-skills"

@@ -51,6 +51,9 @@ class HostSlice:
     # and a setup that authors and serves it in the world (receives the World).
     api_spec: str = ""
     api_setup: Callable[[Any], None] | None = None
+    # Host serving the verified package archive that replaces a cold clone
+    # ("" = none). Never a credential origin: no secret of this host may reach it.
+    archive_host: str = ""
     rows: tuple[EgressRow, ...] = ()
 
 

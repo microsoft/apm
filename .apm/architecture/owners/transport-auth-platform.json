@@ -10,10 +10,12 @@
     },
     {
       "id": "git-transport-selection",
-      "decision": "Initial Git scheme, ordered protocol attempts, and GitLab sparse-fetch plan consumption",
-      "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file)",
+      "decision": "Initial Git scheme, ordered protocol attempts, GitLab sparse-fetch plan consumption, and the verified-archive attempt before a github.com clone",
+      "owner": "deps/transport_selection.py (initial_transport_scheme, TransportSelector); deps/download_strategies.py (DownloadDelegate.download_gitlab_file); deps/archive_checkout.py (try_archive_tree eligibility); deps/archive_transport.py (fetch_verified_tree)",
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
+        "src/apm_cli/deps/archive_checkout.py",
+        "src/apm_cli/deps/archive_transport.py",
         "src/apm_cli/deps/git_reference_resolver.py",
         "src/apm_cli/deps/download_strategies.py",
         "src/apm_cli/install/validation.py",
@@ -244,7 +246,7 @@
     {
       "id": "archive-extraction-limits",
       "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
-      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member, read_tar_gz_members; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py, deps/archive_transport.py",
       "selectors": [
         "src/apm_cli/utils/archive.py",
         "src/apm_cli/deps/registry/extractor.py"
