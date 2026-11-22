@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -108,7 +108,17 @@ pytestmark = [
     ),
 ]
 
-OPS = ("install", "update", "uninstall", "prune", "compile", "lock", "marketplace", "audit", "approve-deny")
+OPS = (
+    "install",
+    "update",
+    "uninstall",
+    "prune",
+    "compile",
+    "lock",
+    "marketplace",
+    "audit",
+    "approve-deny",
+)
 FORMS = (
     "shorthand",
     "git-object",

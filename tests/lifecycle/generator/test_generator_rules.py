@@ -21,7 +21,7 @@ import yaml
 
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import oracles, receipts
-from tests.lifecycle.generator import bin_pin, emit, replay, witnesses
+from tests.lifecycle.generator import bin_pin, emit, replay
 from tests.lifecycle.generator.covering import refusal_line
 from tests.lifecycle.generator.factors import (
     FACTORS,
@@ -47,7 +47,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
-from tests.lifecycle.generator.witnesses import MachineCell, credits, machine_cells
+from tests.lifecycle.generator.witnesses import credits, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -696,16 +696,11 @@ def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatc
     assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
 
 
-def test_a_strict_only_spine_never_hides_a_passing_spine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first spine by node id holds only a strict known cell; another passes."""
-    assignment = {"OP": "install", "GATE": "denied-dependency"}
-    strict = MachineCell("G1|a", "a::spine", "T-1", assignment, "#1", "GATE")
-    passing = MachineCell("G1|b", "b::spine", "T-1", assignment, None, "GATE")
+def test_a_strict_only_spine_never_hides_a_passing_spine() -> None:
+    """The user-scope bin spine implies this pair only through strict #3703 cells and
+    sorts first by node id; the project matrix passes it, so it stays required."""
     key = "pair|OP=install|GATE=denied-dependency"
-    monkeypatch.setattr(witnesses, "machine_cells", lambda: [strict, passing])
-
-    found = witnesses.machine_witnesses({key: {}})
-
-    assert found[key] == witnesses.Witness("b::spine", "T-1", ("G1|b",))
-    monkeypatch.setattr(witnesses, "machine_cells", lambda: [strict])
-    assert witnesses.machine_witnesses({key: {}})[key].tracking == "#1"
+    entry = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"][key]
+    assert entry["status"] == "required", entry
+    assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]"), entry
+    assert "tracking" not in entry, entry
