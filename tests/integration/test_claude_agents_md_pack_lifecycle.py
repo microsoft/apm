@@ -285,3 +285,33 @@ def test_plugin_pack_never_renders_a_dev_dependency_it_does_not_ship(
     shipped = _files(bundle)
     assert "skills/helper/SKILL.md" in shipped, sorted(shipped)
     assert not any("guard" in path for path in shipped), sorted(shipped)
+
+
+def test_pack_refuses_when_the_cached_routed_instruction_was_deleted(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Deleting the routed instruction must not ship the skill without its guidance."""
+    scenario = _new_scenario(tmp_path / "deleted-pack", apm_binary_path)
+    source = _publish(scenario, "guard-kit", instruction="guard", skill="helper")
+    producer = scenario.consumers.create(
+        "producer", dependencies=(source.dependency,), targets=("claude",)
+    )
+    _run_success(
+        scenario, producer, _INSTALL_ARGS, environment=source.environment, scenario_id="install"
+    )
+    assert (producer.root / ".claude/skills/helper/SKILL.md").is_file()
+    (cached,) = (producer.root / "apm_modules").rglob("guard.instructions.md")
+    cached.unlink()
+    out = tmp_path / "bundles"
+
+    for args in (("--format", "apm"), ()):
+        result = scenario.runner.run(
+            ("pack", *args, "-o", str(out)),
+            scenario_id=f"pack-deleted{'-'.join(args)}",
+            cwd=producer.root,
+            env=source.environment,
+        )
+        output = " ".join((result.stdout + result.stderr).split())
+        assert result.returncode != 0, output
+        assert "does not match the content hash recorded in apm.lock.yaml" in output, output
+        assert not out.exists() or not any(out.iterdir())

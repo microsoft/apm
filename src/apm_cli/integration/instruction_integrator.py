@@ -984,8 +984,11 @@ def routed_claude_rule_renders(
     *dependency_keys*, when given, limits rendering to the dependencies the
     caller ships (the plugin pack skips dev dependencies). With *verified*
     (pack), only rules the lock does not already record as deployed are
-    returned, and they render only from a cached copy that matches its
-    locked ``content_hash``: ``apm_modules`` is not attested.
+    returned. ``apm_modules`` is not attested: a cached copy whose lock row
+    records a ``content_hash`` must match it before its manifest or its
+    instructions (or their absence) decide routing, so a deleted routed
+    instruction fails too. An older row without one renders nothing it
+    does not already record as deployed.
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.package_resolution import effective_dependency_selection
@@ -1003,6 +1006,9 @@ def routed_claude_rule_renders(
         install_path = dep_ref.get_install_path(modules_root)
         if not install_path.is_dir():
             continue
+        attested = bool(getattr(dep, "content_hash", None))
+        if verified and attested:
+            _require_locked_source(lockfile, dep, install_path, project_root)
         manifest = manifest_file(install_path)
         package = (
             APMPackage.from_apm_yml(manifest)
@@ -1025,7 +1031,7 @@ def routed_claude_rule_renders(
         if verified:
             deployed = set(dep.deployed_files)
             rendered = {path: text for path, text in rendered.items() if path not in deployed}
-            if rendered:
+            if rendered and not attested:
                 _require_locked_source(lockfile, dep, install_path, project_root)
         if rendered:
             rules[dep.get_unique_key()] = rendered
