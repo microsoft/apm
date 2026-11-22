@@ -230,12 +230,17 @@ def _save_stamp(self: _Recording, project_root: Path) -> bool:
     if policy_fingerprint(project_root) != self.policy:
         recorder.violations.append("org policy changed during the run")
         return False
+    code = getattr(self, "code", None)
+    if code is None or _code_identity() != code:
+        # The output came from the code loaded before the run; bind exactly that.
+        recorder.violations.append("APM code changed during the run")
+        return False
     output = [
         [channel, _SUMMARY.sub(_SUMMARY_PLACEHOLDER, chunk)] for channel, chunk in self.output
     ]
     stamp = {
         "key": self.key,
-        "code": _code_identity(),
+        "code": self.code,
         "policy": self.policy,
         "env": _env_digest(None if recorder.env_all else sorted(recorder.env), self.environ_start),
         "env_names": None if recorder.env_all else sorted(recorder.env),
@@ -295,6 +300,10 @@ def _stamp_mismatch(
         ("apm version", lambda: stamp.get("code") != _code_identity()),
         ("org policy", lambda: (lambda now: now is None or now != stamp.get("policy"))(policy())),
         ("deployed file hash", lambda: not deployed_hashes_intact(project_root)),
+        # Second pass: nothing recorded changed while the live checks ran.
+        ("content (recheck)", lambda: _first_changed(stamp.get("reads", {}), _file_digest)),
+        ("listing (recheck)", lambda: _first_changed(stamp.get("listed", {}), _listing)),
+        ("path (recheck)", lambda: _first_changed(stamp.get("probed", {}), _probe)),
     ]
     for reason, changed in checks:
         found = changed()
@@ -358,12 +367,14 @@ def run_with_fast_path(
     trace = os.environ.get(_DISABLE_ENV, "").strip().lower() == "trace"
     stamp = _load(stamp_path)
     policy: str | None = None
+    code: dict[str, Any] | None = None
     if stamp is None:
         reason = "no stamp"
     elif stamp.get("pending"):
         # The previous run was a no-op: record this one with the live policy view.
         reason = "pending"
         policy = policy_fingerprint(root)
+        code = _code_identity()
     else:
         try:
             reason = _stamp_mismatch(stamp, key, lambda: policy_fingerprint(root), root)
@@ -378,7 +389,9 @@ def run_with_fast_path(
     # cold, warm and changed installs pay only the recorder.
     if trace:
         sys.stderr.write(f"[i] install fast path: full run ({reason})\n")
-    return _run_recorded(run, _Recording(key, stamp_path, policy, started, root), root, trace)
+    recording = _Recording(key, stamp_path, policy, started, root)
+    recording.code = code
+    return _run_recorded(run, recording, root, trace)
 
 
 def _run_recorded(run: Callable[[], Any], recording: _Recording, root: Path, trace: bool) -> Any:

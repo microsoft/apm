@@ -223,6 +223,8 @@ class _Recorder:
         self.probed: set[str] = set()
         self.resolved: dict[str, str] = {}
         self.observed: dict[str, Any] = {}
+        # Entries of each listed directory as first observed (revalidated before stamping).
+        self.listings: dict[str, Any] = {}
         # Temp paths this invocation created: only these are scratch.
         self.created: set[str] = set()
         self.env: set[str] = set()
@@ -291,10 +293,14 @@ class _Recorder:
             if path is not None and not (self._excluded(path) or self._scratch(path)):
                 self.listed.add(path)
                 self._observe(path)
+                if path not in self.listings:
+                    self.listings[path] = _listing(path)
         elif event == "subprocess.Popen":
             argv = args[1] if len(args) > 1 else None
             if not (_allowed_subprocess(argv) or _within_policy_discovery()):
-                self.violate(f"subprocess:{argv!r}"[:200])
+                # Name the program only: a command line may carry credentials.
+                program = os.path.basename(os.fsdecode(argv[0])) if argv else "?"
+                self.violate(f"subprocess:{program}")
         elif event in _WRITE_EVENTS:
             self._on_write(event, args)
         elif event in _VIOLATION_EVENTS and not _within_policy_discovery():
@@ -334,7 +340,10 @@ class _Recorder:
             if path is not None and self._create(path):
                 return
         named = [arg for arg in args if isinstance(arg, (str, bytes, os.PathLike))]
-        if any(isinstance(arg, int) and not isinstance(arg, bool) for arg in args[1:]):
+        # CPython passes -1 for an unused dir_fd; only a real descriptor is unattributable.
+        if any(
+            isinstance(arg, int) and not isinstance(arg, bool) and arg != -1 for arg in args[1:]
+        ):
             if event not in ("os.chmod", "os.chown", "os.utime", "os.mkdir"):
                 self.violate(f"{event}:dir_fd")
                 return
@@ -510,7 +519,7 @@ class _Recording:
         self.policy = policy
         self.started = started
         self.output: list[tuple[int, str]] = []
-        excluded = {os.path.abspath(p) for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)}
+        excluded = _interpreter_roots()
         excluded.add(str(Path(__file__).resolve().parents[1]))
         excluded.add(str(stamp.parent))
         excluded.update(_policy_cache_roots())
@@ -552,9 +561,24 @@ class _Recording:
         os.environ.__class__ = _RecordingEnviron
         sys.stdout = _Tee(sys.stdout, self.output, 1)
         sys.stderr = _Tee(sys.stderr, self.output, 2)
+        self._redirect_log_streams()
         _ACTIVE = self.recorder
         self._canary()
         return self
+
+    def _redirect_log_streams(self) -> None:
+        """Logging handlers bound to the real streams must also reach the tee."""
+        import logging
+
+        self._log_streams: list[tuple[Any, Any]] = []
+        originals = {id(self._saved["stdout"]): sys.stdout, id(self._saved["stderr"]): sys.stderr}
+        loggers = [logging.getLogger(), *logging.Logger.manager.loggerDict.values()]
+        for logger in loggers:
+            for handler in getattr(logger, "handlers", ()):
+                stream = getattr(handler, "stream", None)
+                if isinstance(handler, logging.StreamHandler) and id(stream) in originals:
+                    self._log_streams.append((handler, stream))
+                    handler.stream = originals[id(stream)]
 
     def _canary(self) -> None:
         """Prove the probe hooks see this interpreter's stat calls, or record nothing."""
@@ -584,6 +608,9 @@ class _Recording:
         for path, seen in recorder.observed.items():
             if _snapshot(path) != seen:
                 return path
+        for path, entries in recorder.listings.items():
+            if _listing(path) != entries:
+                return f"listing {path}"
         for key, seen in recorder.resolved.items():
             if _resolution(key) != seen:
                 return key
@@ -593,6 +620,8 @@ class _Recording:
         """Every input still looks as it did when the run first observed it."""
         recorder = self.recorder
         if any(_snapshot(path) != seen for path, seen in recorder.observed.items()):
+            return False
+        if any(_listing(path) != entries for path, entries in recorder.listings.items()):
             return False
         return all(_resolution(key) == seen for key, seen in recorder.resolved.items())
 
@@ -612,6 +641,24 @@ class _Recording:
         os.environ.__class__ = self._saved["environ_class"]
         sys.stdout = self._saved["stdout"]
         sys.stderr = self._saved["stderr"]
+        for handler, stream in getattr(self, "_log_streams", ()):
+            handler.stream = stream
+
+
+def _interpreter_roots() -> set[str]:
+    """Where the interpreter and installed distributions live (not whole prefixes,
+    which may also hold project files or local dependencies)."""
+    import sysconfig
+
+    roots: set[str] = set()
+    for scheme_vars in (None, {"base": sys.base_prefix, "platbase": sys.base_exec_prefix}):
+        paths = sysconfig.get_paths(vars=scheme_vars) if scheme_vars else sysconfig.get_paths()
+        for name in ("stdlib", "platstdlib", "purelib", "platlib"):
+            if paths.get(name):
+                roots.add(os.path.abspath(paths[name]))
+    if getattr(sys, "frozen", False):
+        roots.add(os.path.abspath(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))))
+    return roots
 
 
 def _protected_roots(project_root: Path) -> set[str]:

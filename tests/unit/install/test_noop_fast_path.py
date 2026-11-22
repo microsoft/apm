@@ -365,3 +365,24 @@ def test_an_existing_cache_root_is_not_chmodded(tmp_path: Path, monkeypatch) -> 
     root.chmod(0o755)
     get_cache_root()
     assert (root.stat().st_mode & 0o777) == 0o700, "a loosened cache root is still tightened"
+
+
+@_POSIX_ONLY
+def test_a_same_source_policy_rule_change_runs_the_full_install(project, monkeypatch) -> None:
+    """Only the effective rules change: outcome, route, source and inputs are identical."""
+    from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+
+    def serve(policy: ApmPolicy) -> None:
+        monkeypatch.setattr(
+            "apm_cli.policy.outcome_routing.discover_trust_policy",
+            lambda _root: PolicyFetchResult(outcome="found", source="org:contoso", policy=policy),
+        )
+
+    serve(ApmPolicy(enforcement="block"))
+    run = _Install(project)
+    _converge(run)
+    _install(run)
+    assert run.calls == 2, "the unchanged policy replays"
+    serve(ApmPolicy(enforcement="block", executables=ExecutablesPolicy(deny_all=True)))
+    _install(run)
+    assert run.calls == 3, "a tightened rule under the same source must run the full install"
