@@ -8,7 +8,7 @@ import pytest
 from apm_cli.core import azure_cli
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-host-credential-resolution")]
 
 
 def test_overlapping_calls_restore_the_real_bearer_provider():
