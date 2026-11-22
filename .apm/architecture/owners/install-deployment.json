@@ -272,6 +272,7 @@
       "selectors": [
         "src/apm_cli/security/trust.py",
         "src/apm_cli/install/exec_gate.py",
+        "src/apm_cli/install/installed_dependencies.py",
         "src/apm_cli/install/plan_admission.py"
       ],
       "guards": [

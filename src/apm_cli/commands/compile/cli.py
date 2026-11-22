@@ -703,40 +703,10 @@ def _validate_project(
 
 
 def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, Any]]:
-    """``(key, DependencyReference)`` for every installed package compile renders from *root*.
+    """``(key, DependencyReference)`` for every installed package compile renders from *root*."""
+    from ...install.installed_dependencies import installed_dependency_subjects
 
-    Mirrors :func:`get_dependency_declaration_order`: locked packages, the
-    scope manifest's installed direct dependencies (a lost or partial lock
-    still renders them) and lockfile-proven local bundle staging.
-    """
-    from ...core.scope import scope_manifest_path
-    from ...deps.lockfile import LockFile, resolve_lockfile_path_for_read
-    from ...models.apm_package import APMPackage
-    from ...models.dependency.reference import DependencyReference
-
-    subjects: dict[str, Any] = {}
-    modules_root = root / "apm_modules"
-    lockfile = LockFile.read(resolve_lockfile_path_for_read(root, read_only=True))
-    if lockfile is not None:
-        for key, dep in lockfile.dependencies.items():
-            if key != ".":
-                subjects.setdefault(key, dep.to_dependency_ref())
-        for slug in lockfile.local_staging_slugs():
-            ref = DependencyReference(repo_url=f"_local/{slug}", is_local=True, source="local")
-            subjects.setdefault(ref.get_unique_key(), ref)
-    manifest = scope_manifest_path(root, user_scope=user_scope)
-    declared: list[Any] = []
-    if manifest.is_file() and modules_root.is_dir():
-        try:
-            declared = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
-        except ValueError:
-            # Compile reports an invalid manifest itself, before it renders anything.
-            declared = []
-        for dep in declared:
-            # Marketplace identities resolve at install; the lock names them.
-            if not dep.is_marketplace and dep.get_install_path(modules_root).is_dir():
-                subjects.setdefault(dep.get_unique_key(), dep)
-    return sorted(subjects.items())
+    return [(s.key, s.ref) for s in installed_dependency_subjects(root, user_scope=user_scope)]
 
 
 def _declared_across_roots(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
