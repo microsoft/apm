@@ -112,7 +112,10 @@ def lockless_bin_bundle(archive: Path, root: Path) -> Path:
     else:
         with tarfile.open(archive, mode="r:gz") as tar:
             tar.extractall(root, filter="data")
-    (bundle,) = {path.parent for path in root.rglob("plugin.json")}
+    # The archive holds one top-level bundle directory; its plugins carry their own
+    # plugin.json files deeper down.
+    (bundle,) = [path for path in root.iterdir() if path.is_dir()]
+    assert (bundle / "plugin.json").is_file(), sorted(p.name for p in bundle.iterdir())
     (bundle / "apm.lock.yaml").unlink()
     tool = bundle / _BIN_TOOL
     tool.parent.mkdir()
