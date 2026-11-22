@@ -23,7 +23,8 @@ from typing import TYPE_CHECKING
 import yaml
 
 from ...core.scope import manifest_file
-from ...utils.yaml_io import load_yaml
+from ...models.apm_package import APMPackage
+from ...models.manifest_io import load_manifest
 
 if TYPE_CHECKING:
     from ...agent_plugins.ir import AgentPlugin
@@ -93,6 +94,7 @@ class McpResult:
     """
 
     count: int | None
+    has_other_content: bool = False
 
 
 def package_targets(
@@ -182,11 +184,11 @@ def _manifest_mcp_count(manifest_path: Path) -> McpResult:
     """Count the servers declared by an installed ``apm.yml``."""
     from ...integration.mcp_config_view import authored_mcp_declarations
 
-    manifest = load_yaml(manifest_path)
+    manifest = load_manifest(manifest_path)
     if manifest is not None and not isinstance(manifest, dict):
         return McpResult(None)
     try:
-        return McpResult(len(authored_mcp_declarations(manifest or {})))
+        count = len(authored_mcp_declarations(manifest or {}))
     except (TypeError, AttributeError) as exc:
         # The canonical MCP model rejects most bad input with ``ValueError`` but
         # lets a wrongly typed field (``name: 5``, ``headers: 3``) surface as
@@ -194,12 +196,30 @@ def _manifest_mcp_count(manifest_path: Path) -> McpResult:
         # an inspection failure, and only the parser call is guarded this way.
         raise ValueError(f"invalid MCP declaration in {manifest_path}") from exc
 
+    dependencies = (manifest or {}).get("dependencies") or {}
+    if not dependencies.get("lsp"):
+        return McpResult(count)
+    try:
+        package = APMPackage.from_mapping(
+            manifest,
+            package_path=manifest_path.parent,
+            create_config=False,
+            warning_handler=None,
+            warn_deprecated=False,
+        )
+    except (ValueError, TypeError, AttributeError):
+        # A declared service whose manifest cannot be interpreted is not known empty.
+        return McpResult(count, has_other_content=True)
+    return McpResult(count, has_other_content=bool(package.get_lsp_dependencies()))
+
 
 def _plugin_mcp_count(plugin: AgentPlugin) -> McpResult:
     """Count the servers of a native Agent Plugin through its canonical loader."""
     if any(item.code in _MCP_DOCUMENT_UNREADABLE_CODES for item in plugin.diagnostics):
         return McpResult(None)
-    return McpResult(len(plugin.components.mcp_servers))
+    return McpResult(
+        len(plugin.components.mcp_servers), has_other_content=bool(plugin.components.skills)
+    )
 
 
 def _unmanifested_mcp_count(package_dir: Path) -> McpResult:

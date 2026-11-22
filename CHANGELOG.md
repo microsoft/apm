@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `APM_STRICT_HOST_CREDENTIALS=1` keeps GitHub token variables on the configured host; other `github.com` and `*.ghe.com` hosts need their own sign-in. (closes #4324, #4615)
 - Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
-- `apm deps list` shows read-only `MCPs` and `Targets` columns: declared MCP servers and recorded deployment targets, with a legend for unattributed records. -- by @xtong629 (closes #2976, #3747)
 
 ### Added
 

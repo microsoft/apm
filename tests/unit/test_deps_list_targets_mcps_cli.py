@@ -34,6 +34,7 @@ from tests.unit.test_deps_list_targets_mcps import (
     SKILLY,
     STDIO_SERVER,
     Rows,
+    _agent_plugin,
     _dep,
     _legend,
     _manifest,
@@ -413,7 +414,10 @@ def test_the_ledger_is_scanned_once_per_listing_not_once_per_package(
 def test_a_lockfile_entry_whose_path_cannot_be_resolved_does_not_affect_other_rows(
     cwd: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from apm_cli.models.dependency.materialization import installed_package_path
+    from apm_cli.models.dependency.materialization import (
+        CachedMaterializationPathReader,
+        installed_package_path,
+    )
     from apm_cli.utils.path_security import PathTraversalError
 
     names = ["bad", "good"]
@@ -422,16 +426,21 @@ def test_a_lockfile_entry_whose_path_cannot_be_resolved_does_not_affect_other_ro
     rows = _rows(*[("claude", f".claude/skills/{n}", [f"./pkgs/{n}"]) for n in names])
     _write_project(cwd, [_dep(f"./pkgs/{n}") for n in names], rows)
 
-    def _resolve(dependency: object, apm_modules_dir: Path) -> Path:
+    readers = []
+
+    def _resolve(dependency: object, apm_modules_dir: Path, *, reader) -> Path:
+        readers.append(reader)
         if "bad" in str(getattr(dependency, "local_path", "")):
             raise PathTraversalError("unresolvable")
-        return installed_package_path(dependency, apm_modules_dir)
+        return installed_package_path(dependency, apm_modules_dir, reader=reader)
 
     _patch(monkeypatch, "apm_cli.commands.deps.cli.installed_package_path", _resolve)
     result = _list(cwd, plain=True)
     assert result.exit_code == 0, result.output
     assert _row_text(result.output, "_local/good").endswith(" claude")
     assert _row_text(result.output, "_local/bad").endswith(" unknown")
+    assert len(readers) == 2 and readers[0] is readers[1]
+    assert isinstance(readers[0], CachedMaterializationPathReader)
 
 
 def test_listing_is_read_only_and_makes_no_network_calls(
@@ -514,3 +523,30 @@ def test_a_narrow_terminal_keeps_rows_aligned_and_the_legend_intact(
         cells = [ln for ln in table if ln.startswith("| ")]
         assert len(cells) == 1 + len(packages)
         assert all(ln.count(BOX_VERTICAL) == 11 for ln in cells)
+
+
+@pytest.mark.parametrize("bad_field", [{"name": 5}, {"headers": 3}])
+def test_malformed_mcp_fields_keep_package_version_and_unknown_count(cwd, bad_field):
+    _installed(cwd, "skilly", mcp=[{**GOOD_SERVER, **bad_field}])
+    _write_project(cwd, [_dep(SKILLY)], [])
+    row = _row_text(_list(cwd, plain=True).output, "_local/skilly")
+    assert row.split()[1] == "1.0.0"
+    assert row.endswith(" ? unknown")
+
+
+@pytest.mark.parametrize("kind", ["native-skill", "lsp"])
+def test_content_without_package_owned_rows_has_unknown_targets(cwd, kind):
+    pkg = _installed(cwd, "skilly")
+    if kind == "native-skill":
+        _agent_plugin(pkg)
+        (pkg / "apm.yml").write_text("name: native.plugin\nversion: 1.0.0\n")
+        skill = pkg / "skills" / "sample"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: sample\ndescription: A sample skill\n---\nBody\n"
+        )
+    else:
+        with (pkg / "apm.yml").open("a") as manifest:
+            manifest.write("dependencies:\n  lsp: [sample]\n")
+    _write_project(cwd, [_dep(SKILLY)], [])
+    assert _row_text(_list(cwd, plain=True).output, "_local/skilly").endswith(" 0 unknown")

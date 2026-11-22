@@ -453,7 +453,7 @@ COUNT_CASES = [
     pytest.param(lambda r: _manifest(r), 0, id="no mcp block counts zero"),
     pytest.param(lambda r: _manifest(r, []), 0, id="an empty mcp list counts zero"),
     pytest.param(
-        lambda r: _manifest(r, [GOOD_SERVER, GOOD_SERVER]),
+        lambda r: _manifest(r, [GOOD_SERVER, GOOD_SERVER.copy()]),
         1,
         id="identical declarations collapse the way install collapses them",
     ),
@@ -532,6 +532,14 @@ _POSIX_PERMISSIONS = pytest.mark.skipif(
 
 INSPECTION_FAILURES = [
     pytest.param(
+        lambda r: _manifest_text(r, "dependencies: {mcp: [first]}\ndependencies: {}\n"),
+        id="duplicate dependencies",
+    ),
+    pytest.param(
+        lambda r: _manifest_text(r, "servers: &servers [first]\ndependencies: {mcp: *servers}\n"),
+        id="YAML anchor and alias",
+    ),
+    pytest.param(
         _unreadable_manifest, id="unreadable manifest file (OSError)", marks=_POSIX_PERMISSIONS
     ),
     pytest.param(
@@ -609,7 +617,7 @@ def test_an_uninspectable_package_has_an_unavailable_mcp_count(
                 (root / "apm.yml").chmod(0o644)
 
 
-_LOAD_YAML = "apm_cli.commands.deps._inventory.load_yaml"
+_LOAD_MANIFEST = "apm_cli.commands.deps._inventory.load_manifest"
 _PARSER = "apm_cli.integration.mcp_config_view.authored_mcp_declarations"
 _ROUTE = "apm_cli.bundle.local_bundle.route_agent_plugin_package"
 _DETECT = "apm_cli.models.validation.detect_package_type"
@@ -618,7 +626,7 @@ _DETECT = "apm_cli.models.validation.detect_package_type"
 @pytest.mark.parametrize(
     ("target", "error", "has_manifest"),
     [
-        pytest.param(_LOAD_YAML, RuntimeError("bug"), True, id="load_yaml RuntimeError"),
+        pytest.param(_LOAD_MANIFEST, RuntimeError("bug"), True, id="load_manifest RuntimeError"),
         pytest.param(_PARSER, RuntimeError("bug"), True, id="parser RuntimeError"),
         pytest.param(_PARSER, KeyError("bug"), True, id="parser KeyError"),
         pytest.param(_ROUTE, TypeError("bug"), False, id="plugin routing TypeError"),

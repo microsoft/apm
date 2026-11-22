@@ -28,7 +28,10 @@ from ...core.target_detection import TargetParamType
 from ...deps.lock_parent_placement import installed_manifest_children, place_legacy_lock_parents
 from ...deps.lockfile import LockedDependency, LockfileConflictError
 from ...models.apm_package import APMPackage
-from ...models.dependency.materialization import installed_package_path
+from ...models.dependency.materialization import (
+    CachedMaterializationPathReader,
+    installed_package_path,
+)
 from ...models.manifest_io import InvalidManifestError
 from ...utils.path_security import PathTraversalError
 from .._helpers import (
@@ -350,10 +353,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             inventory_lockfile = lockfile
+            reader = CachedMaterializationPathReader()
             for dep in lockfile.get_package_dependencies():
                 owner_key = dep.get_unique_key()
                 try:
-                    installed = installed_package_path(dep.to_dependency_ref(), apm_modules_path)
+                    installed = installed_package_path(
+                        dep.to_dependency_ref(), apm_modules_path, reader=reader
+                    )
                     owner_by_path[installed.relative_to(apm_modules_path).as_posix()] = owner_key
                 except (ValueError, OSError):
                     # Read-only Targets lookup only: an entry whose path cannot be
@@ -494,17 +500,10 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
         try:
             version = "unknown"
             if has_apm_yml:
-                manifest_path = manifest_file(candidate)
-                try:
-                    version = APMPackage.from_apm_yml(manifest_path).version or "unknown"
-                except ValueError:
-                    # Display surface: a manifest whose YAML parses but that the strict
-                    # parser rejects (for example a bad MCP transport) is still listed.
-                    # Only YAML that cannot be parsed at all keeps the read-failure path.
-                    identity = _tolerant_identity(candidate, manifest_path)
-                    if identity is None:
-                        raise
-                    version = identity["version"]
+                identity = _tolerant_identity(candidate, manifest_file(candidate))
+                if identity is None:
+                    raise ValueError("unreadable package manifest")
+                version = identity["version"]
             else:
                 version = _agent_plugin_version(candidate) or version
             primitives = _count_primitives(candidate)
@@ -531,7 +530,7 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False, scope="project"):
                     "recorded_targets": package_targets(
                         owned_records,
                         mcp_count=mcps.count,
-                        has_primitives=any(count > 0 for count in primitives.values()),
+                        has_primitives=mcps.has_other_content or any(primitives.values()),
                     ),
                     "mcps": mcps,
                     "path": str(candidate),
