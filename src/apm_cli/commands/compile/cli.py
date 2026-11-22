@@ -751,6 +751,13 @@ def _policy_subjects(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
     return subjects
 
 
+def _forget_compile_policy(logger: CommandLogger) -> None:
+    """Start a new compilation: resolve the policy and report warnings afresh (watch mode)."""
+    for name in ("_apm_compile_policy", "_apm_policy_warned"):
+        if name in vars(logger):
+            delattr(logger, name)
+
+
 def _dependency_policy_allows(
     logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
 ) -> bool:

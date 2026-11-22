@@ -397,3 +397,42 @@ def test_the_policy_is_resolved_once_per_command(tmp_path: Path) -> None:
 
     assert resolve.call_count == 1
     assert (project / "apm.lock.yaml").is_file()
+
+
+def test_a_watch_session_sees_an_allow_to_deny_policy_change(tmp_path: Path, monkeypatch) -> None:
+    """Each watch recompile resolves the org policy again; a deny stops the next render."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.compile.watcher import APMFileHandler
+
+    monkeypatch.chdir(tmp_path)
+    _project(tmp_path)
+    logger = MagicMock()
+    handler = APMFileHandler(
+        output="AGENTS.md", chatmode=None, no_links=False, dry_run=True, logger=logger
+    )
+    policies = iter(
+        [SimpleNamespace(enforcement="block", deny=False)]
+        + [SimpleNamespace(enforcement="block", deny=True)] * 3
+    )
+    compiler = MagicMock()
+    compiler.return_value.compile.return_value = SimpleNamespace(
+        success=True, output_path="AGENTS.md", errors=[]
+    )
+    with (
+        patch(_RESOLVE, side_effect=lambda *_a, **_k: next(policies)),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            side_effect=lambda subjects, policy: (
+                {key: "org policy: denied by pattern" for key, _ in subjects} if policy.deny else {}
+            ),
+        ),
+        patch("apm_cli.commands.compile.watcher.CompilationConfig.from_apm_yml"),
+        patch("apm_cli.commands.compile.watcher.AgentsCompiler", compiler),
+    ):
+        handler._recompile("a.instructions.md")
+        handler._recompile("a.instructions.md")
+
+    assert compiler.return_value.compile.call_count == 1, "the second change is refused"
+    logger.error.assert_any_call("acme/denied: org policy: denied by pattern")
+    assert not (tmp_path / "AGENTS.md").exists()
