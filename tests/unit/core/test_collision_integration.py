@@ -16,7 +16,7 @@ def preserve_cwd():
     try:
         original = os.getcwd()
     except (FileNotFoundError, OSError):
-        original = Path(__file__).parent.parent
+        original = Path(__file__).resolve().parents[3]
         os.chdir(original)
 
     yield
@@ -25,7 +25,7 @@ def preserve_cwd():
         os.chdir(original)
     except (FileNotFoundError, OSError):
         try:
-            os.chdir(Path(__file__).parent.parent)
+            os.chdir(Path(__file__).resolve().parents[3])
         except (FileNotFoundError, OSError):
             os.chdir(Path.home())
 

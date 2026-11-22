@@ -69,7 +69,7 @@ def log_canvas_skip(
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:
-        from apm_cli.install.exec_gate import executable_skip_reason
+        from apm_cli.install.exec_skip_reasons import executable_skip_reason
         from apm_cli.security.executables import EXEC_TYPE_CANVAS
 
         reason = executable_skip_reason(

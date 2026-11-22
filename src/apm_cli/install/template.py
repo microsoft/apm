@@ -541,6 +541,9 @@ def _integrate_materialization(
         ctx.existing_lockfile, dep_key, dep_ref.target_subset, [t.name for t in ctx.targets]
     )
     if carried is not None:
+        from apm_cli.claude_plugins.admission import refuse_disallowed_carried_native
+
+        refuse_disallowed_carried_native(ctx, dep_key, m.package_info)
         # The run never reaches this native plugin: deploy nothing for it. Left
         # out of the outcome, its files and ledger records keep agreeing with
         # the row the lockfile phase keeps whole (#3921).

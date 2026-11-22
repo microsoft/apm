@@ -430,6 +430,11 @@ def integrate_package_primitives(  # noqa: PLR0913
                     reconcile_package_targets(package_info, project_root, targets),
                     "Could not fully remove hooks the executables gate no longer deploys",
                 )
+            from apm_cli.install.withheld_hooks import announce_withheld_hook_files
+
+            announce_withheld_hook_files(
+                package_name, package_info, project_root, targets, managed_files, logger
+            )
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.

@@ -17,7 +17,7 @@ def _h1_lines(path: Path) -> list[str]:
 def test_compile_claude_project_standards_is_not_duplicate_h1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CLAUDE.md keeps Project Standards below the file title."""
+    """CLAUDE.md and the AGENTS.md it imports each keep a single H1."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "apm.yml").write_text(
         (
@@ -51,12 +51,13 @@ def test_compile_claude_project_standards_is_not_duplicate_h1(
     assert _h1_lines(tmp_path / "CLAUDE.md") == ["# CLAUDE.md"]
     assert _h1_lines(tmp_path / "AGENTS.md") == ["# AGENTS.md"]
 
+    # CLAUDE.md imports AGENTS.md, which carries the constitution and every
+    # instruction (#3939); headings stay below each file's single title.
     claude_lines = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    assert "@AGENTS.md" in claude_lines
     assert "## Dependencies" in claude_lines
-    assert "## Constitution" in claude_lines
-    assert "## Project Standards" in claude_lines
-    assert "### Files matching `**/*.py`" in claude_lines
     assert "# Dependencies" not in claude_lines
-    assert "# Constitution" not in claude_lines
-    assert "# Project Standards" not in claude_lines
-    assert "## Files matching `**/*.py`" not in claude_lines
+    assert "## Project Standards" not in claude_lines
+    agents_text = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Be helpful and accurate." in agents_text
+    assert "Use type hints for Python code." in agents_text

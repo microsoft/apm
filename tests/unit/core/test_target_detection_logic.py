@@ -47,8 +47,8 @@ class TestShouldCompileAgentsMd:
         assert should_compile_agents_md("minimal") is True
 
     def test_claude_target(self):
-        """AGENTS.md not compiled for claude target."""
-        assert should_compile_agents_md("claude") is False
+        """AGENTS.md compiled for claude target (CLAUDE.md imports it)."""
+        assert should_compile_agents_md("claude") is True
 
     def test_gemini_target(self):
         """AGENTS.md compiled for gemini target (GEMINI.md imports it)."""

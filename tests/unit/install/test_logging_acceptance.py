@@ -37,14 +37,14 @@ class _InstallAcceptanceBase:
         try:
             self.original_dir = os.getcwd()
         except FileNotFoundError:
-            self.original_dir = str(Path(__file__).parent.parent.parent)
+            self.original_dir = str(Path(__file__).resolve().parents[3])
             os.chdir(self.original_dir)
 
     def teardown_method(self):
         try:
             os.chdir(self.original_dir)
         except (FileNotFoundError, OSError):
-            repo_root = Path(__file__).parent.parent.parent
+            repo_root = Path(__file__).resolve().parents[3]
             os.chdir(str(repo_root))
 
     @contextlib.contextmanager
@@ -61,6 +61,7 @@ class _InstallAcceptanceBase:
         """Write a minimal apm.yml."""
         data = {
             "name": "test-project",
+            "version": "1.0.0",
             "dependencies": {
                 "apm": deps or [],
                 "mcp": mcp_deps or [],

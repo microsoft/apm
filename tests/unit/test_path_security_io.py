@@ -1,6 +1,7 @@
 """Tests for path security utilities (CVE path traversal fix) (filesystem, process and CLI boundary cases)."""
 
 import shutil  # noqa: F401
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    resolve_for_containment,
+    resolved_relative_within,
     safe_rmtree,
 )
 
@@ -191,3 +194,47 @@ class TestGetInstallPathContainment:
         # Path(".").name is "" which is in our reject set
         with pytest.raises(PathTraversalError):
             dep.get_install_path(base)
+
+
+class TestResolvedContainment:
+    """One resolution per side, then a pure containment verdict (rt-06)."""
+
+    def test_relative_path_leads_back_to_the_same_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a" / "b.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("inside\n", encoding="utf-8")
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "b.md").write_text("outside\n", encoding="utf-8")
+        base = resolve_for_containment(tmp_path / "base")
+
+        relative = resolved_relative_within(resolve_for_containment(target), base)
+        outside = resolve_for_containment(tmp_path / "other" / "b.md")
+
+        assert relative == "a/b.md"
+        assert (base / relative).read_text(encoding="utf-8") == "inside\n"
+        assert resolved_relative_within(outside, base) is None
+        assert outside.read_text(encoding="utf-8") == "outside\n"
+
+    def test_extended_prefix_on_one_side_still_contains(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a.md"
+        target.parent.mkdir()
+        target.write_text("inside\n", encoding="utf-8")
+        prefixed_base = Path("\\\\?\\" + str(resolve_for_containment(tmp_path / "base")))
+
+        relative = resolved_relative_within(resolve_for_containment(target), prefixed_base)
+
+        assert relative == "a.md"
+        assert (tmp_path / "base" / relative).read_text(encoding="utf-8") == "inside\n"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_link_out_of_the_base_is_outside(self, tmp_path: Path) -> None:
+        (tmp_path / "base").mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (tmp_path / "base" / "link").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+        base = resolve_for_containment(tmp_path / "base")
+        escaped = resolve_for_containment(tmp_path / "base" / "link" / "f.md")
+
+        assert resolved_relative_within(escaped, base) is None
+        with pytest.raises(PathTraversalError):
+            ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")

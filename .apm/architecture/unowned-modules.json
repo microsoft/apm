@@ -84,7 +84,6 @@
     "src/apm_cli/commands/view.py",
     "src/apm_cli/commands/view_file.py",
     "src/apm_cli/compilation/__init__.py",
-    "src/apm_cli/compilation/claude_formatter.py",
     "src/apm_cli/compilation/constants.py",
     "src/apm_cli/compilation/constitution.py",
     "src/apm_cli/compilation/constitution_block.py",

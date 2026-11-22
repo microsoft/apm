@@ -193,15 +193,16 @@ def prospective_lockfile(ctx: InstallContext) -> LockFile:
     return prospective
 
 
-def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None:
-    """Collect the merged MCP set from acquired packages and enforce policy."""
+def _prepare_merged_mcp(
+    ctx: InstallContext, prospective: LockFile, native_keys: frozenset[str] = frozenset()
+) -> Any:
+    """The merged MCP set the acquired packages declare, prepared silently."""
     from apm_cli.core.scope import is_user_scope
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.mcp.integration import prepare_mcp_integration
     from apm_cli.install.template import effective_allow_map
 
-    user_scope = is_user_scope(ctx.scope)
-    prepared = prepare_mcp_integration(
+    return prepare_mcp_integration(
         apm_package=ctx.apm_package,
         mcp_deps=list(ctx.apm_package.get_all_mcp_dependencies()),
         apm_modules_path=ctx.apm_modules_dir,
@@ -210,13 +211,21 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
         trust_transitive_mcp=ctx.trust_transitive_mcp,
         logger=_SilentLogger(),
         active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
-        user_scope=user_scope,
+        user_scope=is_user_scope(ctx.scope),
         project_root=ctx.project_root,
         executable_context=(effective_allow_map(ctx), True),
         no_policy=ctx.no_policy,
-        claude_native_keys=frozenset(ctx.claude_native_keys),
+        claude_native_keys=frozenset(ctx.claude_native_keys) | native_keys,
         prospective_lock=prospective,
     )
+
+
+def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None:
+    """Collect the merged MCP set from acquired packages and enforce policy."""
+    from apm_cli.core.scope import is_user_scope
+
+    user_scope = is_user_scope(ctx.scope)
+    prepared = _prepare_merged_mcp(ctx, prospective)
     view = prepared.current_view
     ctx.preview_mcp_dependencies = tuple(prepared.dependencies)
     enforce_mcp_policy(
@@ -280,31 +289,48 @@ def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage
     if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
         _check_merged_mcp_policy(ctx, prospective)
         if not ctx.dry_run:
-            _refuse_native_mcp_collisions(ctx)
+            _refuse_native_mcp_collisions(ctx, prospective, write_plan)
     if write_plan and not ctx.dry_run and not ctx.force:
         _refuse_unproven_overwrites(ctx, write_plan)
 
 
-def _refuse_native_mcp_collisions(ctx: InstallContext) -> None:
-    """Refuse an MCP server that collides with a native connection, before any write (#4268).
+def _refuse_native_mcp_collisions(
+    ctx: InstallContext, prospective: LockFile, write_plan: Sequence[PlannedPackage]
+) -> None:
+    """Refuse an MCP server that collides with a native connection, before any write.
 
     The targets resolve as the later MCP stage resolves them, from the
     command's ``--runtime`` and ``--exclude`` (carried by ``lsp_preflight``);
     without them the MCP stage runs the same projection before its first write.
+    A package the plan routes to Claude natively has its servers loaded by
+    Claude, as the MCP stage will know once integration queued it (#4741).
     """
     from apm_cli.core.scope import is_user_scope
     from apm_cli.install.lsp.integration import lsp_target_config
-    from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+    from apm_cli.install.mcp.collision_preflight import refuse_projected_mcp_collisions
+    from apm_cli.install.service import InstallService
 
     filters = ctx.lsp_preflight
     if filters is None or ctx.target_decision is None or not ctx.preview_mcp_dependencies:
         return
-    refuse_unrecorded_mcp_collisions(
-        ctx.preview_mcp_dependencies,
+    native_keys = frozenset(
+        package_info.dependency_ref.get_unique_key()
+        for package_info, plan, _managed in write_plan
+        if getattr(plan, "claude_native", None) is not None
+        and getattr(package_info, "dependency_ref", None) is not None
+    )
+    dependencies = (
+        _prepare_merged_mcp(ctx, prospective, native_keys).dependencies
+        if native_keys - set(ctx.claude_native_keys)
+        else ctx.preview_mcp_dependencies
+    )
+    refuse_projected_mcp_collisions(
+        dependencies,
         lockfile=ctx.existing_lockfile,
         project_root=ctx.project_root,
         user_scope=is_user_scope(ctx.scope),
         logger=ctx.logger,
+        replay_claims=InstallService.frozen_disposition(ctx).withhold_lockfile_writes,
         runtime=filters.runtime,
         exclude=filters.exclude,
         apm_config=lsp_target_config(ctx.apm_package),
