@@ -509,7 +509,9 @@ KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
 def _instruction_text(package: str) -> str:
-    return f'---\napplyTo: "**"\n---\n\nFollow the {package} conventions.\n'
+    # A file-type glob keeps a per-file rule on every deployed target; Claude routes
+    # '**' instructions to AGENTS.md through compile instead (#3939, #4005).
+    return f'---\napplyTo: "**/*.py"\n---\n\nFollow the {package} conventions.\n'
 
 
 def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Path:
