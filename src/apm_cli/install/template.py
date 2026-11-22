@@ -215,6 +215,7 @@ def preflight_skill_materializations(
             logger=ctx.logger,
             scope=ctx.scope,
             skill_subset=selection.skill_subset,
+            skill_pairing=selection.skill_pairing,
             dep_target_subset=selection.target_subset,
             ctx=ctx,
             allow_executables=effective_allow_map(ctx),
@@ -532,6 +533,21 @@ def _integrate_materialization(
     # (signalled by package_info=None). Leave this dependency absent from the
     # integration outcome so cleanup does not treat every prior file as stale.
     if m.package_info is None or not ctx.targets:
+        return deltas
+
+    from apm_cli.native_plugins.scopes import carried_native_row
+
+    carried = carried_native_row(
+        ctx.existing_lockfile, dep_key, dep_ref.target_subset, [t.name for t in ctx.targets]
+    )
+    if carried is not None:
+        from apm_cli.claude_plugins.admission import refuse_disallowed_carried_native
+
+        refuse_disallowed_carried_native(ctx, dep_key, m.package_info)
+        # The run never reaches this native plugin: deploy nothing for it. Left
+        # out of the outcome, its files and ledger records keep agreeing with
+        # the row the lockfile phase keeps whole (#3921).
+        ctx.native_carried_keys.add(dep_key)
         return deltas
 
     try:

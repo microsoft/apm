@@ -97,14 +97,28 @@ def target_retired(
     return name not in {profile.name for profile in (*active_targets, *declared_targets)}
 
 
-def retired_native_roots(
+def retired_native_plugins(
     lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
-) -> dict[str, str]:
-    """``{root: "claude"}`` for each native Claude plugin root of a retired claude (#4744)."""
-    from apm_cli.native_plugins.record import lock_native_plugins
+) -> dict[str, tuple[str, str]]:
+    """``{dep_key: (root, harness)}`` for native plugins whose every harness is retired (#4744).
 
-    if not target_retired(
-        "claude", active_targets=active_targets, declared_targets=declared_targets
-    ):
+    A plugin another still-declared harness loads (#4559) keeps its record.
+    """
+    from apm_cli.native_plugins.scopes import record_harnesses
+
+    if declared_targets is None:
         return {}
-    return {record.root: "claude" for record in lock_native_plugins(lockfile).values()}
+    retired = {}
+    for key, locked in lockfile.dependencies.items():
+        record = locked.native_plugin
+        if record is None:
+            continue
+        harnesses = record_harnesses(locked.package_type, record.marketplace_path)
+        if locked.target_subset:
+            harnesses &= frozenset(locked.target_subset)
+        if harnesses and all(
+            target_retired(name, active_targets=active_targets, declared_targets=declared_targets)
+            for name in harnesses
+        ):
+            retired[key] = (record.root, min(harnesses))
+    return retired
