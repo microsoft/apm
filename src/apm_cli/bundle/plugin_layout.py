@@ -85,11 +85,19 @@ PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
 _DROP_ONLY_BESIDE: dict[str, str] = {"instructions": ".instructions.md"}
 
 
+# Pack renames these deployed suffixes in the plugin path (``review.prompt.md``
+# becomes ``commands/review.md``, see plugin_exporter._rename_prompt).
+_PLUGIN_EXPORT_SUFFIX: dict[str, str] = {".prompt.md": ".md"}
+
+
 def deployed_rendering_extension(deployed_rel: str) -> str | None:
-    """Return the target extension of a deployed agent, command or instruction.
+    """Return the extension a deployed agent, command or instruction carries in a bundle.
 
     *deployed_rel* is a project-relative deployed path such as
-    ``.github/agents/rv.agent.md``; ``None`` when no target deploys it.
+    ``.github/agents/rv.agent.md``; ``None`` when no target deploys it. The
+    extension is the one of the exported plugin filename, so a Copilot prompt
+    (``.github/prompts/review.prompt.md`` -> ``commands/review.md``) reports
+    ``.md``.
     """
     from ..integration.targets import KNOWN_TARGETS
 
@@ -103,7 +111,7 @@ def deployed_rendering_extension(deployed_rel: str) -> str | None:
             if kind not in kinds or not mapping.subdir or not mapping.extension:
                 continue
             if deployed_rel.startswith(prefix) and deployed_rel.endswith(mapping.extension):
-                return mapping.extension
+                return _PLUGIN_EXPORT_SUFFIX.get(mapping.extension, mapping.extension)
     return None
 
 

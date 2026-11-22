@@ -286,6 +286,14 @@ class TestDuplicatePluginRenderings:
                 },
                 set(),
             ),
+            # A Copilot prompt exports as commands/x.md and pairs with Gemini's TOML.
+            (
+                {
+                    ".github/prompts/review.prompt.md": "commands/review.md",
+                    ".gemini/commands/review.toml": "commands/review.toml",
+                },
+                {"commands/review.toml"},
+            ),
             # Own source primitives carry no target provenance.
             (
                 {".apm/agents/rv.agent.md": "agents/rv.agent.md", "agents/rv.md": "agents/rv.md"},
