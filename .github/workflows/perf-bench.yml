@@ -31,6 +31,9 @@ on:
       pairs:
         description: Interleaved base/new pairs per runner.
         default: '3'
+      os:
+        description: Runner OS (linux or macos).
+        default: linux
 
 permissions:
   contents: read
@@ -53,6 +56,7 @@ jobs:
       journeys: ${{ steps.req.outputs.journeys }}
       rtt: ${{ steps.req.outputs.rtt }}
       pairs: ${{ steps.req.outputs.pairs }}
+      runner: ${{ steps.req.outputs.runner }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -65,17 +69,19 @@ jobs:
         IN_JOURNEYS: ${{ inputs.journeys }}
         IN_RTT: ${{ inputs.rtt }}
         IN_PAIRS: ${{ inputs.pairs }}
+        IN_OS: ${{ inputs.os }}
       run: |
         set -euo pipefail
         BASE="$IN_BASE"; NEW="$IN_NEW"; FIXTURES="${IN_FIXTURES:-tree-10}"
         JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
-        RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"
+        RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"; OS="${IN_OS:-linux}"
         if [ "${GITHUB_EVENT_NAME}" = push ]; then
           # KEY=VALUE lines only; never sourced, so the file cannot run code.
           while IFS='=' read -r key value; do
             case "$key" in
               BASE) BASE="$value" ;; NEW) NEW="$value" ;; FIXTURES) FIXTURES="$value" ;;
               JOURNEYS) JOURNEYS="$value" ;; RTT) RTT="$value" ;; PAIRS) PAIRS="$value" ;;
+              OS) OS="$value" ;;
             esac
           done < <(grep -E '^[A-Z]+=' bench-request.env)
         fi
@@ -85,15 +91,20 @@ jobs:
         [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
         [[ "$RTT" =~ ^[0-9]{1,4}$ ]] || { echo "::error::bad RTT"; exit 1; }
         [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
+        case "$OS" in
+          linux) RUNNER=ubuntu-24.04 ;;
+          macos) RUNNER=macos-15 ;;
+          *) echo "::error::OS must be linux or macos"; exit 1 ;;
+        esac
         {
           echo "base=$BASE"; echo "new=$NEW"; echo "fixtures=$FIXTURES"
-          echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"
+          echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"; echo "runner=$RUNNER"
         } >> "$GITHUB_OUTPUT"
 
   bench:
     name: ABAB shard ${{ matrix.shard }}
     needs: request
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.request.outputs.runner }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
