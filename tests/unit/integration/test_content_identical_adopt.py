@@ -297,7 +297,7 @@ class TestOverwritePlanSkipsReceiptOnIdentical:
         lookups: list[Path] = []
         integrator.receipted_unchanged = lambda path: lookups.append(path) or False
         target = tmp_path / "review.prompt.md"
-        target.write_text(on_disk, encoding="utf-8")
+        target.write_bytes(on_disk.encode("utf-8"))
         target_paths: list[Path] = []
         decision = integrator._check_adopt_or_skip(
             target,
