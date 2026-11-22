@@ -36,6 +36,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -397,21 +398,57 @@ class Sample:
     load_ok: bool
     traffic: dict
     returncode: int
+    # User + system CPU of the CLI process tree (None where os.wait4 is unavailable).
+    cpu_s: float | None = None
+
+
+def run_with_cpu(
+    command: list[str], cwd: Path, env: dict[str, str]
+) -> tuple[subprocess.CompletedProcess, float | None]:
+    """Run *command*; return its result and the user+sys CPU of it and its reaped children.
+
+    ``os.wait4`` reports the rusage of exactly this child, so the mirror's
+    server-side ``git http-backend`` processes (children of the harness) are
+    excluded, unlike ``RUSAGE_CHILDREN`` deltas. Host load inflates wall time
+    far more than CPU time, so CPU is the primary signal on a shared host.
+    """
+    if not hasattr(os, "wait4"):
+        result = subprocess.run(
+            command, cwd=cwd, env=env, capture_output=True, text=True, check=False
+        )
+        return result, None
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=out, stderr=err)
+        _pid, status, usage = os.wait4(process.pid, 0)
+        process.returncode = os.waitstatus_to_exitcode(status)
+        out.seek(0)
+        err.seek(0)
+        result = subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            out.read().decode("utf-8", "replace"),
+            err.read().decode("utf-8", "replace"),
+        )
+    return result, usage.ru_utime + usage.ru_stime
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     ctx.world.reset_traffic()
     output = ""
     returncode = 0
+    cpu: float | None = 0.0
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
-        result = ctx.run(argv, cwd)
+        result, step_cpu = run_with_cpu([*ctx.apm, *argv], cwd, ctx.world.env)
+        cpu = None if cpu is None or step_cpu is None else cpu + step_cpu
         if result.returncode != 0:
             returncode = result.returncode
             output = f"$ apm {' '.join(argv)}\n{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
             break
     wall = time.perf_counter() - start
-    return Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode), output
+    sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
+    sample.cpu_s = None if cpu is None else round(cpu, 4)
+    return sample, output
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
@@ -467,6 +504,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             f"in all {len(samples)} run(s)"
         )
     walls = [s.wall_s for s in valid]
+    cpus = [s.cpu_s for s in valid if s.cpu_s is not None]
     record = {
         "fixture": ctx.fixture.name,
         "journey": journey.name,
@@ -475,6 +513,8 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "valid_runs": len(valid),
         "p50_s": round(statistics.median(walls), 4) if walls else None,
         "p90_s": round(percentile(walls, 0.9), 4) if walls else None,
+        "cpu_p50_s": round(statistics.median(cpus), 4) if cpus else None,
+        "cpu_p90_s": round(percentile(cpus, 0.9), 4) if cpus else None,
         "traffic": samples[-1].traffic if samples else {},
         "samples": [asdict(s) for s in samples],
         "error": error,
@@ -578,7 +618,7 @@ def _progress(record: dict) -> None:
     status = "[x]" if record["error"] else "[+]"
     print(
         f"{status} {record['fixture']} rtt={record['rtt_ms']:g} {record['journey']}: "
-        f"p50={record['p50_s']} p90={record['p90_s']} valid={record['valid_runs']}/"
+        f"cpu_p50={record.get('cpu_p50_s')} wall_p50={record['p50_s']} p90={record['p90_s']} valid={record['valid_runs']}/"
         f"{record['runs']} traffic={record['traffic']}",
         flush=True,
     )
@@ -636,19 +676,23 @@ def render_markdown(report: dict) -> str:
         "",
         "## Results",
         "",
-        "| fixture | rtt ms | journey | p50 s | p90 s | valid/runs | requests | round trips "
-        "| connects | load1 range | error |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "CPU (user+sys of the CLI process tree) and the counts are the primary signal; "
+        "wall time on a loaded shared host is indicative only.",
+        "",
+        "| fixture | rtt ms | journey | cpu p50 s | cpu p90 s | requests | round trips "
+        "| connects | wall p50 s | wall p90 s | valid/runs | load1 range | error |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in report["results"]:
         loads = [s["load1"] for s in r["samples"]]
         load_range = f"{min(loads)}-{max(loads)}" if loads else "-"
         t = r["traffic"]
         lines.append(
-            f"| {r['fixture']} | {r['rtt_ms']:g} | {r['journey']} | {_cell(r['p50_s'])} "
-            f"| {_cell(r['p90_s'])} | {r['valid_runs']}/{r['runs']} | {t.get('requests', '-')} "
-            f"| {t.get('round_trips', '-')} | {t.get('connects', '-')} | {load_range} "
-            f"| {'yes' if r['error'] else ''} |"
+            f"| {r['fixture']} | {r['rtt_ms']:g} | {r['journey']} "
+            f"| {_cell(r.get('cpu_p50_s'))} | {_cell(r.get('cpu_p90_s'))} "
+            f"| {t.get('requests', '-')} | {t.get('round_trips', '-')} | {t.get('connects', '-')} "
+            f"| {_cell(r['p50_s'])} | {_cell(r['p90_s'])} | {r['valid_runs']}/{r['runs']} "
+            f"| {load_range} | {'yes' if r['error'] else ''} |"
         )
     lines += _scaling(report)
     return "\n".join(lines) + "\n"
@@ -661,8 +705,10 @@ def _scaling(report: dict) -> list[str]:
     cells: dict[tuple[str, float], dict[str, str]] = {}
     for r in report["results"]:
         if r["fixture"] in trees and r["journey"] not in BOOT_JOURNEYS:
-            cells.setdefault((r["journey"], r["rtt_ms"]), {})[r["fixture"]] = _cell(r["p50_s"])
-    lines = ["", "## Scaling (p50 s by tree size)", ""]
+            cpu, wall = r.get("cpu_p50_s"), r["p50_s"]
+            cell = _cell(cpu) if cpu is not None else f"wall {_cell(wall)}"
+            cells.setdefault((r["journey"], r["rtt_ms"]), {})[r["fixture"]] = cell
+    lines = ["", "## Scaling (cpu p50 s by tree size; 'wall' marks cells without CPU)", ""]
     lines.append("| journey | rtt ms | " + " | ".join(trees) + " |")
     lines.append("|---|---|" + "---|" * len(trees))
     for (journey, rtt), row in sorted(cells.items(), key=lambda kv: (kv[0][1], kv[0][0])):

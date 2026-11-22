@@ -45,8 +45,11 @@ from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm`. The journeys are:
   unpack path: a fresh project runs `apm install <bundle>`; `apm unpack` refuses
   bundles that carry hooks)
 
-It writes `journeys-<sha>.json` and `.md`. Each cell reports wall p50 and p90,
-request, round-trip and connect counts, and the 1-min load of every sample. It
+It writes `journeys-<sha>.json` and `.md`. Each cell reports CPU p50 and p90
+(user + system time of the CLI process tree, from `os.wait4`), request,
+round-trip and connect counts, wall p50 and p90, and the 1-min load of every
+sample. CPU and the counts are the primary columns: on a loaded shared host,
+wall time swings with the load (it even fell as the RTT rose). It
 also adds a scaling table for the tree sizes.
 
 ```bash

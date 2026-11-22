@@ -191,6 +191,7 @@ def test_harness_writes_json_and_markdown(tmp_path: Path) -> None:
     by_journey = {r["journey"]: r for r in report["results"]}
     assert set(by_journey) == {"boot-version", "install-cold", "install-frozen", "compile"}
     assert by_journey["install-cold"]["traffic"]["requests"] > 0
+    assert by_journey["install-cold"]["cpu_p50_s"] > 0
     assert by_journey["boot-version"]["traffic"]["requests"] == 0
 
 
