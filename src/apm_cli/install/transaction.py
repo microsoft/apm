@@ -132,6 +132,7 @@ class InstallTransaction:
         self._lock = threading.RLock()
         self._deploy_journal: DeployJournal | None = None
         self._journal_released = False
+        self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
@@ -222,8 +223,13 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
-    def journal_deploy_writes(self) -> None:
-        """Record, at the integrator write seam, the prior state of every path written from now on."""
+    def journal_deploy_writes(self, ctx: Any = None) -> None:
+        """Record, at the integrator write seam, the prior state of every path written from now on.
+
+        ``--frozen`` withholds the lockfile, so its no-rewrite check runs after
+        the pipeline: the journal is then kept until this install commits and
+        a refusal there rolls back every journaled path (#4638).
+        """
         from apm_cli.core.scope import get_apm_home
         from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
         from apm_cli.integration import write_seam
@@ -231,6 +237,11 @@ class InstallTransaction:
         with self._lock:
             if self._deploy_journal is not None or self.committed or self._rolled_back:
                 return
+            if ctx is not None:
+                from apm_cli.install.service import InstallService
+
+                frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+                self._journal_held_until_commit = frozen
             store_parent = get_apm_home() / "install-snapshots"
             if self._workspace_lock is not None:
                 # Under the lifecycle lock no other install owns a journal here.
@@ -268,6 +279,8 @@ class InstallTransaction:
             if self._deploy_journal is None or self._journal_released:
                 return
             self._journal_released = True
+            if self._journal_held_until_commit:
+                return
         # Settle at the durable commit, before receipt binding or any other
         # fallible post-commit action: the lockfile then records the deploys.
         after_lockfile_commit(self._settle_deploy_journal, first=True)

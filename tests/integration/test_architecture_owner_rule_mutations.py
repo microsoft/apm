@@ -745,13 +745,13 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
     [
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.journal_deploy_writes()\n",
+            "        transaction.journal_deploy_writes(ctx)\n",
             "",
             id="commit-order-journal-never-opened",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.journal_deploy_writes()\n",
+            "        transaction.journal_deploy_writes(ctx)\n",
             "        DeployJournal(ctx.apm_modules_dir)\n",
             id="commit-order-journal-outside-transaction",
         ),
