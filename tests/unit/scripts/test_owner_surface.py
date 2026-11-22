@@ -226,6 +226,18 @@ def test_check_is_required_everywhere_and_run_by_every_full_train() -> None:
     assert "owner" in workflow_job(load_workflow(MERGE_TRAIN), "train-gate")["needs"]
 
 
+def test_slice_shard_count_follows_the_matrix() -> None:
+    """4 shards, a 20-minute timeout, and a --shard count that follows the matrix (#4746)."""
+    slice_job = workflow_job(load_workflow(WORKFLOW), "slice")
+    shards = slice_job["strategy"]["matrix"]["shard"]
+    assert shards == list(range(1, len(shards) + 1))
+    assert len(shards) == 4 and slice_job["timeout-minutes"] == 20
+    assert "${{ strategy.job-total }}" in slice_job["name"]
+    step = workflow_step(slice_job, "Run the owner-surface slice")
+    assert step["env"]["SHARD_COUNT"] == "${{ strategy.job-total }}"
+    assert '--shard "$SHARD/$SHARD_COUNT"' in step["run"]
+
+
 @pytest.mark.parametrize(
     ("select", "run", "slice_result", "passes"),
     [

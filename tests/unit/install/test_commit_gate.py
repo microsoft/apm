@@ -387,6 +387,7 @@ def _mcp_ctx(**fields: object) -> SimpleNamespace:
         "claude_native_keys": set(),
         "mcp_runtime": None,
         "target_decision": None,
+        "lsp_preflight": None,
         "logger": Mock(),
     }
     values.update(fields)

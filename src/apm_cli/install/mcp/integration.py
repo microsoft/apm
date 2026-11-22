@@ -593,6 +593,25 @@ def run_mcp_integration(  # noqa: PLR0913
         logger.render_summary()
         raise SystemExit(2) from exc
 
+    if should_install and mcp_deps:
+        from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+
+        # A package install refused these before deploying (commit_gate.py);
+        # an MCP-only install refuses them here, before its first write (#4268).
+        refuse_unrecorded_mcp_collisions(
+            mcp_deps,
+            lockfile=pre_install_lock if pre_install_lock is not None else previous_lock,
+            project_root=project_root,
+            user_scope=user_scope,
+            logger=logger,
+            runtime=runtime,
+            exclude=exclude,
+            apm_config=mcp_apm_config,
+            explicit_target=explicit_target,
+            target_decision=target_decision,
+            scope=scope,
+        )
+
     # Entries APM <= 0.36 wrote to the retired project MCP destinations heal
     # out after this install has written their .mcp.json replacements.
     # Eligibility reads the pre-install lock: the package phase may already

@@ -1056,12 +1056,14 @@ def _resolve_target_runtimes(
     scope: InstallScope | None,
     logger,
     console,
+    materialize: bool = True,
 ) -> list[str] | None:
     """Detect, filter, and gate the target runtimes for MCP installation.
 
     Returns a (possibly empty) list of runtime names to target, or ``None``
     when the caller should immediately return 0 (e.g. all runtimes excluded,
-    no user-scope-capable runtimes available).
+    no user-scope-capable runtimes available). ``materialize=False`` resolves
+    read-only, creating no target directory (the #4268 install preflight).
     """
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
@@ -1250,7 +1252,8 @@ def _resolve_target_runtimes(
         )
 
     if (
-        not user_scope
+        materialize
+        and not user_scope
         and target_decision is not None
         and target_decision.canonical_targets is not None
     ):

@@ -1266,6 +1266,38 @@ def _local_bundle_findings(provider: FactsProvider, rule_id: str) -> list[Violat
     return findings
 
 
+_LOCKFILE_LOADER = "src/apm_cli/deps/lockfile.py"
+_ROW_PROJECTION_OWNER = "src/apm_cli/core/legacy_lock_evidence.py"
+_ROW_PROJECTION_MESSAGE = (
+    "Whether a lockfile load may skip per-row legacy projection is decided only by "
+    "DeploymentLedgerCodec.load_observes_per_row_projection"
+)
+
+
+def _row_projection_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Lockfile loads skip per-row ledger projection only on the codec's verdict."""
+    loader, loader_fail = _facts_for(provider, _LOCKFILE_LOADER, rule_id)
+    owner, owner_fail = _facts_for(provider, _ROW_PROJECTION_OWNER, rule_id)
+    if loader_fail or owner_fail:
+        return list(loader_fail) + list(owner_fail)
+    hardcoded = re.compile(r"\bproject_ledger\s*=\s*(?:False|0)\b")
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        facts = provider.file_facts(path)
+        if getattr(facts, "read_error", None) is not None:
+            continue
+        findings.extend(
+            _line_findings(
+                facts, path, rule_id, hardcoded, _ROW_PROJECTION_MESSAGE, respect_exempt=True
+            )
+        )
+    if not _present(loader, "DeploymentLedgerCodec.load_observes_per_row_projection(") or not all(
+        _present(owner, needle) for needle in ("cls.valid_owner_keys(", "cls._legacy_locator(")
+    ):
+        findings.append(_summary(rule_id, _DEPLOYMENT_LEDGER, _ROW_PROJECTION_MESSAGE))
+    return findings
+
+
 def _drift_membership_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Drift deployment membership must route through DeploymentLedgerCodec."""
     drift, drift_fail = _facts_for(provider, "src/apm_cli/install/drift.py", rule_id)
@@ -1547,6 +1579,7 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings.extend(_legacy_scope_findings(provider, rule_id))
     findings.extend(_state_mutation_findings(provider, rule_id))
     findings.extend(_local_bundle_findings(provider, rule_id))
+    findings.extend(_row_projection_findings(provider, rule_id))
     findings.extend(_drift_membership_findings(provider, rule_id))
     findings.extend(_scanner_membership_findings(provider, rule_id))
     findings.extend(_membership_owner_findings(provider, rule_id))
