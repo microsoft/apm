@@ -6,6 +6,7 @@ Covers:
 - _is_rewritable_relative_link (empty, fragment, //, /, scheme, relative)
 - _split_link_target (no delimiter, fragment, query, both)
 - _remove_frontmatter
+- validate_link_targets with #fragment / ?query suffixes (#3255)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 from apm_cli.compilation.link_resolver import (
     UnifiedLinkResolver,
     _remove_frontmatter,
+    validate_link_targets,
 )
 
 pytestmark = pytest.mark.unit
@@ -170,3 +172,23 @@ class TestRemoveFrontmatter:
     def test_content_without_leading_dashes_unchanged(self) -> None:
         content = "# No frontmatter\n\nBody text"
         assert _remove_frontmatter(content) == content
+
+
+# ---------------------------------------------------------------------------
+# validate_link_targets with suffixes (#3255)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateLinkTargetsSuffixes:
+    @pytest.mark.parametrize("suffix", ["#template", "?view=full", "?view=full#template"])
+    def test_existing_file_with_suffix_no_errors(self, tmp_path: Path, suffix: str) -> None:
+        (tmp_path / "standards.md").write_text("content")
+        errors = validate_link_targets(f"[Standards](standards.md{suffix})", tmp_path)
+        assert errors == []
+
+    @pytest.mark.parametrize("suffix", ["#template", "?view=full", "?view=full#template"])
+    def test_missing_file_with_suffix_reports_path_without_suffix(
+        self, tmp_path: Path, suffix: str
+    ) -> None:
+        errors = validate_link_targets(f"[Standards](missing.md{suffix})", tmp_path)
+        assert errors == ["Referenced file not found: missing.md (in link 'Standards')"]

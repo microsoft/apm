@@ -18,9 +18,11 @@ Every step runs I1-I9 through ``check_cross_cutting``.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from collections.abc import Collection
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,8 +41,9 @@ from tests.lifecycle.machines._kit import (
 )
 from tests.lifecycle.model.expected import expected_exit
 from tests.lifecycle.model.state import ModelState
-from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.oracles import Evidence, Observation, check_obligation
 from tests.lifecycle.receipts import current_node
+from tests.lifecycle.world.services import REGISTRY_SERVER
 
 pytestmark = [
     pytest.mark.e2e,
@@ -292,6 +295,265 @@ class ScopeLockMachine(MachineBase):
         self.run_op(op)
 
 
+# -- drift: a stale or absent lockfile, and the side-door commands -------------
+
+DRIFT_STATES = ("stale", "absent")
+# Commands outside the lockfile pipeline: a verdict, install --mcp, a local
+# bundle and a catalog read. ``deny`` names p-exec (installed, gated) and the
+# bundle is p-lsp's (its LSP server stays parked: nothing new deploys).
+SIDE_DOORS = ("deny", "mcp-install", "bundle", "marketplace")
+_SIDE_PROJECT_ONLY = frozenset({"marketplace"})
+# OP x SCOPE x LOCK cells the lockfile spine above leaves open, per scope and state.
+_DRIFT_PLAN: dict[str, dict[str, tuple[str, ...]]] = {
+    "project": {
+        "stale": ("install", "update", "lock", "prune", "compile", "audit", "remove", *SIDE_DOORS),
+        "absent": ("remove", *SIDE_DOORS),
+        "newer": SIDE_DOORS,
+        "consistent": ("bundle", "marketplace"),
+    },
+    "user": {
+        "stale": ("install", "update", "lock", "compile", "remove", *SIDE_DOORS[:3]),
+        "absent": ("install", "update", "lock", "compile", "remove", *SIDE_DOORS[:3]),
+        "newer": SIDE_DOORS[:3],
+        "consistent": SIDE_DOORS[:3],
+    },
+}
+# Exit of each command per lock state where it is not 0 (observed on the CLI).
+_DRIFT_EXITS: dict[tuple[str, str], frozenset[int]] = {
+    ("newer", "mcp-install"): frozenset({1}),
+    ("newer", "bundle"): frozenset({1}),
+    # A verdict writes the approval store, never the lockfile; without a
+    # lockfile nothing is installed, so the verdict matches no package (#4154).
+    ("absent", "deny"): frozenset({1}),
+}
+_SIDE_ARGS = {
+    "mcp-install": ("install", "--mcp", REGISTRY_SERVER),
+    "marketplace": ("marketplace", "list"),
+}
+
+
+# What each command acts on, as factor values (generator/witnesses.py credits
+# the LOCK pairs they imply). The lockfile spines run p-skill and p-child from
+# local paths into one copilot target, online, with no executable gate level;
+# ``deny`` names p-exec, the bundle carries p-lsp's parked LSP server and
+# install --mcp adds a registry server.
+_SKILL_CONTEXT = {
+    "SRC": "local-path",
+    "PRIM": "skill",
+    "GATE": "none",
+    "TGT": "single-unchanged",
+    "NET": "online",
+}
+_SIDE_CONTEXT: dict[str, dict[str, str]] = {
+    "deny": {"SRC": "local-path"},
+    "mcp-install": {"SRC": "mcp-registry", "PRIM": "mcp"},
+    "bundle": {"SRC": "local-bundle", "PRIM": "lsp", "GATE": "unapproved-exec"},
+    "marketplace": {},
+}
+
+
+def lock_context(op: str, lock: str) -> dict[str, str]:
+    """Factor values a lockfile-spine step of *op* proves beside OP, SCOPE and LOCK."""
+    if op in _SIDE_CONTEXT:
+        return dict(_SIDE_CONTEXT[op])
+    if lock in ("corrupt", "symlink") or op in READERS[:4]:
+        return {}
+    # A deleted lockfile leaves the deployed skill with unknown provenance.
+    deployed = "present-provenance-unknown" if lock == "absent" else "clean"
+    return {**_SKILL_CONTEXT, "DEPLOYED": deployed}
+
+
+def drift_cells(scope: str) -> frozenset[str]:
+    """The T4 cells the drift spine credits at *scope*."""
+    return frozenset(
+        f"T4|{op}|{scope}|{state}" for state, ops in _DRIFT_PLAN[scope].items() for op in ops
+    )
+
+
+DRIFT_KNOWN_CELLS: tuple[KnownCell, ...] = ()
+# T4 cells whose step is a strict known cell -> tracking issue (known-failing).
+KNOWN_T4: dict[str, str] = {}
+
+
+class DriftMachine(ScopeLockMachine):
+    """The lockfile machine with drifted lockfiles and the side-door commands."""
+
+    known = DRIFT_KNOWN_CELLS
+    # Commands that resolve and deploy the declared set, so they record (adopt)
+    # what is deployed; ``lock`` and the side doors write a lockfile without it.
+    ADOPTING = frozenset({"install", "update", "add"})
+
+    def __init__(self, bench: Bench) -> None:
+        super().__init__(bench)
+        # True after the lockfile was deleted: deployed files have unknown
+        # provenance (DEPLOYED=present-provenance-unknown) until a resolving
+        # command records them again, so I1 has nothing to compare them with.
+        self.unknown_provenance = False
+
+    def observe(self) -> Observation:
+        observation = super().observe()
+        if self.unknown_provenance:
+            return replace(observation, managed_paths=frozenset())
+        return observation
+
+    def _args(self, op: str) -> tuple[str, ...]:
+        packages = self.bench.world.packages
+        if op == "deny":
+            return ("deny", packages["p-exec"].spec)
+        if op == "bundle":
+            return ("install", packages["p-lsp:bundle"].spec)
+        return _SIDE_ARGS.get(op) or super()._args(op)
+
+    def exits(self, op: str) -> frozenset[int]:
+        if self.lock_state in ("consistent", "newer") and op not in SIDE_DOORS:
+            return super().exits(op)
+        if op == "remove":
+            # Uninstalling the toggle refuses when the manifest does not declare it.
+            return frozenset({0}) if TOGGLE in self.model.declared else frozenset({1})
+        return _DRIFT_EXITS.get((self.lock_state, op), frozenset({0}))
+
+    def setup(self) -> None:
+        """Seed p-skill, then install p-exec (its executables stay parked)."""
+        self.seed()
+        spec = self.bench.world.packages["p-exec"].spec
+        self.step(("install", spec), exits={0}, mutating=True)
+
+    def drift(self, state: str) -> None:
+        """Make the lockfile *state* again before one command (an input edit)."""
+        path = self.bench.lock_path
+        if state == "absent":
+            if path.exists():
+                self.edit("lock-absent", path.unlink)
+                self.unknown_provenance = True
+            self.lock_state = "absent"
+            self.model = self.model.with_lock("absent")
+            return
+        in_lock = TOGGLE in path.read_text(encoding="utf-8")
+        if (TOGGLE in self.model.declared) == in_lock:
+            # Flip the toggle in the manifest so it disagrees with the lockfile.
+            spec = self.bench.world.packages[TOGGLE].spec
+
+            def change() -> None:
+                data = self.bench.manifest()
+                entries = data.setdefault("dependencies", {}).get("apm") or []
+                data["dependencies"]["apm"] = [e for e in entries if e != spec]
+                if not in_lock:
+                    data["dependencies"]["apm"].append(spec)
+                self.bench.write_manifest(data)
+
+            self.edit("lock-stale", change)
+            self.model = self.model.undeclare(TOGGLE) if in_lock else self.model.declare(TOGGLE)
+        self.lock_state = "stale"
+        self.model = self.model.with_lock("stale")
+
+    def run_drift(self, state: str, op: str) -> None:
+        cell = f"T4|{op}|{self.bench.scope}|{state}"
+        if state in DRIFT_STATES:
+            if self.lock_state in BAD_LOCKS:
+                self.repair()
+            self.drift(state)
+        elif self.lock_state != state:
+            if self.lock_state != "consistent":
+                self.repair()
+            if state != "consistent":
+                self.break_lock(state)
+        self.current = op
+        exits = self.exits(op)
+        requested = self._requested(op)
+        step = self.step(
+            self._args(op),
+            exits=exits,
+            cells=(cell,),
+            converged=False,
+            model=requested,
+            mutating=op in MUTATING and state != "newer",
+        )
+        refused = step.result.returncode != 0
+        if not refused:
+            # Outcome checks run before the credit: a receipt needs them to hold.
+            self.check_side_door(op)
+            if op in self.ADOPTING:
+                self.check_reconciled(step, requested)
+        unchanged = self.durable() if refused else {"outside": ("*",)}
+        check_obligation(
+            cell,
+            strength="e2e-evidence",
+            before=step.before,
+            after=step.after,
+            result=step.result,
+            evidence=Evidence(unchanged=unchanged, exit=exits),
+            scope=self.bench.scope,
+        )
+        if not refused and op in MUTATING:
+            self.model = requested
+        if not refused and op in self.ADOPTING:
+            self.unknown_provenance = False
+        if not refused and self.bench.lock_path.is_file() and state in DRIFT_STATES:
+            self.lock_state = "consistent"
+
+    def check_reconciled(self, step: Step, requested: ModelState) -> None:
+        """A resolving command rewrote a readable lockfile that matches the manifest.
+
+        Every declared package has a lock row, no row is undeclared, and the
+        lock records each declared skill it deployed (adopting what a deleted
+        lockfile left with unknown provenance).
+        """
+        lock = step.after.lock
+        assert lock is not None, "a resolving command left no readable lockfile"
+        declared = {str(entry) for entry in _declared(self.bench.manifest())}
+        rows = {str(dep.local_path) for dep in lock.get_package_dependencies()}
+        assert rows == declared, f"lock rows {sorted(rows)} != manifest {sorted(declared)}"
+        recorded = set(lock.local_deployed_file_hashes)
+        for dep in lock.get_package_dependencies():
+            recorded.update(dep.deployed_file_hashes)
+        for package in requested.declared:
+            skill = f".agents/skills/{package}/SKILL.md"
+            if (self.bench.deploy_root / skill).is_file():
+                assert skill in recorded, f"the lock does not record {skill}"
+
+    def check_side_door(self, op: str) -> None:
+        """What I1-I9 cannot see of an admitted side door: its own outcome."""
+        root, scope = self.bench.deploy_root, self.bench.scope
+        if op == "mcp-install":
+            config = root / (".mcp.json" if scope == "project" else ".copilot/mcp-config.json")
+            servers = json.loads(config.read_text(encoding="utf-8")).get("mcpServers") or {}
+            short = REGISTRY_SERVER.rsplit("/", 1)[-1]
+            assert {REGISTRY_SERVER, short} & set(servers), f"{short} not configured: {servers}"
+            declared = str((self.bench.manifest().get("dependencies") or {}).get("mcp"))
+            assert REGISTRY_SERVER in declared, f"{REGISTRY_SERVER} not declared: {declared}"
+        if op == "bundle":
+            # p-lsp's server stays parked: nothing approved it.
+            config = root / (
+                ".github/lsp.json" if scope == "project" else ".copilot/lsp-config.json"
+            )
+            text = config.read_text(encoding="utf-8") if config.is_file() else ""
+            assert "p-lsp-server" not in text, f"a parked LSP server was configured: {text}"
+            # The durable install state of a bundle: its exact-content approval
+            # key and the LSP type it parked (install/local_bundle_pending.py).
+            record = self.bench.manifest_dir / "apm_modules" / ".local-bundle-pending.json"
+            assert record.is_file(), "bundle install recorded no pending executables"
+            bundles = json.loads(record.read_text(encoding="utf-8")).get("bundles") or {}
+            assert any(
+                str(entry.get("approval_key", "")).startswith("p-lsp#")
+                and "lsp" in entry.get("exec_types", ())
+                for entry in bundles.values()
+            ), f"p-lsp's parked LSP server is not pending approval: {bundles}"
+
+
+def _declared(manifest: dict) -> list:
+    return list((manifest.get("dependencies") or {}).get("apm") or [])
+
+
+def replay_drift(machine: DriftMachine) -> None:
+    """Visit every drift cell of the machine's scope."""
+    machine.setup()
+    plan = _DRIFT_PLAN[machine.bench.scope]
+    # A stale lockfile needs one on disk: the absent state comes last.
+    for state in ("consistent", "newer", "stale", "absent"):
+        for op in plan[state]:
+            machine.run_drift(state, op)
+
+
 def replay_spine(machine: ScopeLockMachine) -> None:
     """Visit every T4 cell of the machine's scope with a meaningful attempt."""
     scope = machine.bench.scope
@@ -324,6 +586,21 @@ def test_scope_lock_spine_refuses_every_write_and_keeps_reads(
     assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
     missing = t4_cells(scope) - earned_cells(current_node(), "T4|")
     assert not missing, f"T4 cells without an oracle receipt: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("scope", SCOPES)
+def test_scope_lock_drift_spine_credits_stale_absent_and_side_doors(
+    lifecycle_template, tmp_path: Path, scope: str
+) -> None:
+    """A stale or absent lockfile reconciles; side-door commands keep I1-I9 at every lock."""
+    machine = DriftMachine(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), scope))
+    replay_drift(machine)
+    strict = {cell.label for cell in machine.known if scope == "project"}
+    assert machine.expected_seen == strict, sorted(strict ^ machine.expected_seen)
+    missing = drift_cells(scope) - earned_cells(current_node(), "T4|")
+    assert not missing, f"drift cells without an oracle receipt: {sorted(missing)}"
+    # No drifted lockfile cost the user the declared skill.
+    assert (machine.bench.deploy_root / ".agents/skills" / BASE / "SKILL.md").exists()
 
 
 @pytest.mark.parametrize("scope", SCOPES)

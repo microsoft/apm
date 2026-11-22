@@ -326,6 +326,43 @@ def test_dependency_unique_key_cannot_drop_the_port(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)",
+            'any("://" in path for dep in dependencies for path in dep.deployed_files)',
+            id="loader-rederives-verdict",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.add_dependency(dep, project_ledger=project_per_row)",
+            "lock.add_dependency(dep, project_ledger=False)",
+            id="loader-hardcodes-skip",
+        ),
+        pytest.param(
+            "src/apm_cli/core/legacy_lock_evidence.py",
+            "cls._legacy_locator(path).kind is LocatorKind.URI",
+            '"://" in path',
+            id="codec-rederives-uri-locator",
+        ),
+    ],
+)
+def test_lockfile_load_row_projection_routes_through_ledger_codec(
+    path: str, original: str, replacement: str
+) -> None:
+    """Skipping per-row legacy projection on load is the ledger codec's decision (#4733)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-provenance-state"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
