@@ -288,7 +288,8 @@ def test_shared_skill_partial_failure_does_not_claim_sibling_or_unwritten_assets
     for previous, current in zip(before["dependencies"], after["dependencies"], strict=True):
         assert current["deployed_files"] == previous["deployed_files"]
         assert current["deployed_file_hashes"] == previous["deployed_file_hashes"]
-    assert (scenario.deploy_root / ".claude/skills/s/new.md").read_bytes() == b"new source asset\n"
+    # The install fails before its lockfile commits, so it restores what it wrote (#4282).
+    assert not (scenario.deploy_root / ".claude/skills/s/new.md").exists()
     assert not (scenario.deploy_root / ".agents/skills/s/new.md").exists()
     for root in _ROOTS:
         assert (scenario.deploy_root / root / "b.md").read_bytes() == b"b asset\n"

@@ -651,6 +651,29 @@ def _keep_prior_entries(
             ctx.kept_overwrite_kinds[entry] = kind
 
 
+def _write_plan(ctx: InstallContext, materialized, deployment_plans, local_plan) -> list:
+    """Every package this phase will deploy, as the commit gate plans its writes (#4381)."""
+    plan = [
+        (
+            materialization.package_info,
+            deployment_plans.get(materialization.dep_key),
+            ctx.managed_files,
+        )
+        for _source, materialization in materialized
+        if materialization.package_info is not None
+    ]
+    if local_plan is not None and ctx.root_has_local_primitives and ctx.targets:
+        from apm_cli.install.project_package import build_project_local_package_info
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        managed = BaseIntegrator.normalize_managed_files(
+            builtins.set(ctx.managed_files) | builtins.set(ctx.old_local_deployed)
+        )
+        local = build_project_local_package_info(ctx.source_root or ctx.project_root)
+        plan.append((local, local_plan, managed))
+    return plan
+
+
 def _kept_skill_values(ctx: InstallContext) -> frozenset[str]:
     """Return declared skill members this batch left on disk; cleanup retains them."""
     from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -824,7 +847,10 @@ def run(ctx: InstallContext) -> None:
             refuse_stale_exec_decisions(ctx, ctx.existing_lockfile, ctx.lockfile_path.parent)
         from apm_cli.install.commit_gate import check_before_deploy
 
-        check_before_deploy(ctx)
+        check_before_deploy(ctx, _write_plan(ctx, materialized, deployment_plans, local_plan))
+        if ctx.overwrite_preflight_refused:
+            _announce_held_headers(prepared_integrations)
+            return
     except BaseException:
         _announce_held_headers(prepared_integrations)
         raise

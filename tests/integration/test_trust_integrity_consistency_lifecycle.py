@@ -833,13 +833,22 @@ def test_reinstalling_an_approved_bundle_records_a_missing_key(
 def _packed_skill_bundle(
     world: PolicyScopeWorld, runner: ApmLifecycleRunner, env: dict, out: Path
 ) -> Path:
-    """Pack a ``--format apm`` bundle whose one dependency is ``contoso/pkg-a``."""
+    """Pack a ``--format apm`` bundle whose one dependency is ``contoso/pkg-a``.
+
+    The producer packs outside the org policy (``apm pack`` refuses a denied
+    dependency), so the bundle reaches the consumer whose unpack is judged.
+    """
     pkg = world.packages["pkg-a"]
     producer = world.consumer("producer", dependencies=[f"{pkg.slug}#v1.0.0"], targets=("claude",))
     (producer / ".claude").mkdir()
     run_step(runner, ("install", "--no-policy"), cwd=producer, env=env, step="producer")
+    unpoliced = {**env, "APM_POLICY_DISABLE": "1"}
     run_step(
-        runner, ("pack", "--format", "apm", "-o", str(out)), cwd=producer, env=env, step="pack"
+        runner,
+        ("pack", "--format", "apm", "-o", str(out)),
+        cwd=producer,
+        env=unpoliced,
+        step="pack",
     )
     return next(out.iterdir())
 

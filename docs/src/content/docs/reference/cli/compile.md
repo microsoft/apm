@@ -439,6 +439,11 @@ output from an earlier compile) do not count as `applyTo` matches, so
 re-running `apm compile` on unchanged sources gives the same layout.
 Hand-authored context files without the marker still count.
 
+When a deployed file that `apm.lock.yaml` records links into `apm_modules/` and the
+link target is missing (for example after a fresh clone), compile prints one warning
+naming the file, the missing target and the remedy, `apm install`. The exit code is
+unchanged.
+
 ## Exit codes
 
 | Code | Meaning |
