@@ -1016,7 +1016,7 @@
       "tests/unit/test_audit_fail_on_drift.py": 1,
       "tests/unit/test_audit_policy_command.py": 11,
       "tests/unit/test_audit_scan_and_render.py": 2,
-      "tests/unit/test_auth.py": 97,
+      "tests/unit/test_auth.py": 16,
       "tests/unit/test_auth_command.py": 46,
       "tests/unit/test_auth_scoping_io.py": 1,
       "tests/unit/test_build_sha.py": 5,
