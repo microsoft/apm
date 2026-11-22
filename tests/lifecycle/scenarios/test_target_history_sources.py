@@ -45,7 +45,8 @@ TARGET_HISTORIES = {
     "multi-narrowed": (("copilot", "claude"), ("copilot",)),
     "multi-widened": (("copilot", "claude"), ("copilot", "claude", "gemini")),
 }
-_CONTEXT = {"SCOPE": "project", "DEPLOYED": "clean"}
+# Every row converges before the edit: the lockfile matches apm.yml's dependencies.
+_CONTEXT = {"SCOPE": "project", "LOCK": "consistent", "DEPLOYED": "clean"}
 _CLOSED_PROXY = "http://127.0.0.1:9"
 _PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
 _INLINE = ("install", "--mcp", "p-inline", "--", "apm-lifecycle-inert-server", "--stdio")

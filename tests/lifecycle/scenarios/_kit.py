@@ -686,7 +686,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
+SCENARIO_LANES = frozenset({"T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -788,10 +788,55 @@ POLICY_REFUSALS = (
     "pair|SRC=pkg-registry|GATE=denied-dependency",
     "pair|SRC=mcp-registry|GATE=denied-dependency",
     "pair|SRC=inline-mcp|GATE=denied-dependency",
+    # T-3: whatever the lockfile says, a deny refuses before anything is written,
+    # and so does a deployed set the user deleted (a lock older than this APM
+    # refuses first: NEWER_LOCK_REFUSALS).
+    *(f"pair|LOCK={lock}|GATE=denied-dependency" for lock in ("absent", "consistent", "stale")),
+    "pair|DEPLOYED=absent|GATE=denied-dependency",
+)
+# T-3 (#4097): a lockfile a newer APM wrote is refused by every command that
+# resolves, writes or packs it, before any other check (deps/lockfile_generator.py).
+NEWER_LOCK = ExpectedRefusal(
+    1,
+    r"on apm\.lock\.yaml: it was written by APM \S+, newer than this APM \S+\..*"
+    r"Nothing was changed\.",
+    "P-OWN-lockfile-generator-compatibility",
+    "deps/lockfile_generator.py: a newer generator's lock refuses every writer (M-SCOPE-LOCK)",
+)
+_NEWER_PARTNERS = (
+    "OP=pack",
+    *(f"SRC={src}" for src in ("git", "marketplace-git", "marketplace-local", "marketplace-file")),
+    *(f"SRC={src}" for src in ("pkg-registry", "inline-mcp", "native-plugin")),
+    *(f"PRIM={prim}" for prim in ("hook", "bin", "canvas")),
+    "SCOPE=project",
+)
+_NEWER_AFTER = (
+    *(f"DEPLOYED={state}" for state in ("absent", "edited", "unowned")),
+    *(f"GATE={gate}" for gate in ("allowed", "denied-executable", "denied-dependency")),
+    "GATE=revoked-after-deploy",
+    *(
+        f"TGT={shape}-{change}"
+        for shape in ("single", "multi")
+        for change in ("unchanged", "widened", "narrowed")
+    ),
+    "NET=offline",
+    *(f"{modifier}=on" for modifier in ("DRYRUN", "FORCE", "UPDATE", "NOPOLICY")),
+)
+NEWER_LOCK_REFUSALS = (
+    *(f"pair|{partner}|LOCK=newer-generator" for partner in _NEWER_PARTNERS),
+    *(f"pair|LOCK=newer-generator|{partner}" for partner in _NEWER_AFTER),
+    "T4|OP=pack|SCOPE=project|LOCK=newer-generator",
 )
 
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
     **dict.fromkeys(POLICY_REFUSALS, POLICY_BLOCK),
+    **dict.fromkeys(NEWER_LOCK_REFUSALS, NEWER_LOCK),
+    "pair|LOCK=stale|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen: apm\.lock\.yaml is out of sync with apm\.yml\.",
+        "P-INV-I3",
+        "req-lk-006: --frozen refuses a lockfile the manifest has moved past (install/service.py)",
+    ),
     "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
         1,
         r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",

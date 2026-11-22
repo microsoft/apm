@@ -131,13 +131,25 @@ def test_no_policy_installs_a_denied_dependency_and_says_so(lifecycle_world) -> 
 # -- the user's bytes under a denied dependency or --no-policy ------------------------
 
 _DEPLOYED = ("clean", "edited", "present-provenance-unknown", "unowned")
+# The lockfile each deployed state leaves: a converged install, or none at all.
+_LOCK_OF = {
+    "clean": "consistent",
+    "edited": "consistent",
+    "present-provenance-unknown": "absent",
+    "unowned": "absent",
+}
+
+
+def _kept_credit(deployed: str) -> list[dict[str, str]]:
+    return [_pair(DEPLOYED=deployed, GATE=_DD), _pair(LOCK=_LOCK_OF[deployed], GATE=_DD)]
 
 
 @pytest.mark.parametrize("deployed", _DEPLOYED)
 def test_a_denied_dependency_keeps_the_deployed_skill(lifecycle_world, deployed) -> None:
     scenario = _skill(lifecycle_world, deployed)
     line = "install p-skill" if deployed == "unowned" else "install"
-    step = scenario.run(line, credit=[_pair(DEPLOYED=deployed, GATE=_DD)], keep=_KEEP, refusal=True)
+    assert scenario.lock_path.exists() == (_LOCK_OF[deployed] == "consistent")
+    step = scenario.run(line, credit=_kept_credit(deployed), keep=_KEEP, refusal=True)
     assert "Nothing was changed" in " ".join(step.output.split()), step.output
     scenario.finish()
 
@@ -429,7 +441,7 @@ CREDITS = credits(
         "test_a_dry_run_says_what_the_policy_would_block": [_pair(GATE=_DD, DRYRUN="on")],
         "test_no_policy_installs_a_denied_dependency_and_says_so": [_pair(GATE=_DD, NOPOLICY="on")],
         **{
-            f"test_a_denied_dependency_keeps_the_deployed_skill[{d}]": [_pair(DEPLOYED=d, GATE=_DD)]
+            f"test_a_denied_dependency_keeps_the_deployed_skill[{d}]": _kept_credit(d)
             for d in _DEPLOYED
         },
         **{

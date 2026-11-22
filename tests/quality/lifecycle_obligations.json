@@ -10643,15 +10643,17 @@
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_pack_under_a_drifted_lock[newer-generator]"
   },
   "T4|OP=pack|SCOPE=project|LOCK=stale": {
    "family": "T4",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_pack_under_a_drifted_lock[stale]"
   },
   "T4|OP=prune|SCOPE=project|LOCK=absent": {
    "family": "T4",
@@ -13006,8 +13008,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[absent-unowned]"
   },
   "pair|LOCK=absent|DRYRUN=on": {
    "family": "pair",
@@ -13037,22 +13040,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[present-provenance-unknown]"
   },
   "pair|LOCK=absent|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=none": {
    "family": "pair",
@@ -13066,8 +13072,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=unapproved-exec": {
    "family": "pair",
@@ -13130,8 +13137,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|NET=online": {
    "family": "pair",
@@ -13145,8 +13153,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|SELECT=on": {
    "family": "pair",
@@ -13160,8 +13169,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=multi-unchanged": {
    "family": "pair",
@@ -13175,15 +13185,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=single-unchanged": {
    "family": "pair",
@@ -13197,8 +13209,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|UPDATE=on": {
    "family": "pair",
@@ -13228,15 +13241,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|LOCK=consistent|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|LOCK=consistent|DRYRUN=on": {
    "family": "pair",
@@ -13274,8 +13289,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[clean]"
   },
   "pair|LOCK=consistent|GATE=denied-executable": {
    "family": "pair",
@@ -13370,8 +13386,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|LOCK=consistent|NET=online": {
    "family": "pair",
@@ -13401,8 +13418,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|LOCK=consistent|TGT=multi-unchanged": {
    "family": "pair",
@@ -13416,15 +13434,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|LOCK=consistent|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|LOCK=consistent|TGT=single-unchanged": {
    "family": "pair",
@@ -13438,8 +13458,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|LOCK=consistent|UPDATE=on": {
    "family": "pair",
@@ -13453,8 +13474,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-absent]"
   },
   "pair|LOCK=newer-generator|DEPLOYED=clean": {
    "credited_by": [
@@ -13480,29 +13502,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-edited]"
   },
   "pair|LOCK=newer-generator|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-unowned]"
   },
   "pair|LOCK=newer-generator|DRYRUN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|FORCE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|FROZEN=on": {
    "credited_by": [
@@ -13520,22 +13546,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=none": {
    "credited_by": [
@@ -13561,8 +13590,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=unapproved-exec": {
    "credited_by": [
@@ -13624,8 +13654,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|NET=online": {
    "credited_by": [
@@ -13651,8 +13682,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|SELECT=on": {
    "credited_by": [
@@ -13672,29 +13704,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-single]"
   },
   "pair|LOCK=newer-generator|TGT=single-unchanged": {
    "credited_by": [
@@ -13720,22 +13756,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-single]"
   },
   "pair|LOCK=newer-generator|UPDATE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=stale|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-absent]"
   },
   "pair|LOCK=stale|DEPLOYED=clean": {
    "credited_by": [
@@ -13758,57 +13797,65 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-edited]"
   },
   "pair|LOCK=stale|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-unowned]"
   },
   "pair|LOCK=stale|DRYRUN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|FORCE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|FROZEN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=allowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=none": {
    "credited_by": [
@@ -13831,8 +13878,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=unapproved-exec": {
    "credited_by": [
@@ -13906,8 +13954,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|NET=online": {
    "credited_by": [
@@ -13930,8 +13979,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|SELECT=on": {
    "credited_by": [
@@ -13949,29 +13999,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=single-unchanged": {
    "credited_by": [
@@ -13994,15 +14048,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|UPDATE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|NET=offline|DRYRUN=on": {
    "family": "pair",
@@ -17507,15 +17563,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_pack_under_a_drifted_lock[newer-generator]"
   },
   "pair|OP=pack|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_pack_under_a_drifted_lock[stale]"
   },
   "pair|OP=pack|NET=offline": {
    "family": "pair",
@@ -19183,15 +19241,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=bin|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|NET=offline": {
    "family": "pair",
@@ -19221,8 +19281,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|SELECT=on": {
    "family": "pair",
@@ -19441,15 +19502,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=canvas|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=canvas|NET=offline": {
    "family": "pair",
@@ -19702,15 +19765,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=hook|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=hook|NET=offline": {
    "family": "pair",
@@ -21077,8 +21142,10 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#3703",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_plugin_with_bin_is_refused_at_user_scope"
   },
   "pair|SCOPE=user|GATE=denied-executable": {
    "credited_by": [
@@ -21505,8 +21572,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=git|LOCK=stale": {
    "credited_by": [
@@ -21768,29 +21836,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
   },
   "pair|SRC=inline-mcp|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|SRC=inline-mcp|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=inline-mcp|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
   },
   "pair|SRC=inline-mcp|NET=offline": {
    "family": "pair",
@@ -22682,29 +22754,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-absent]"
   },
   "pair|SRC=marketplace-file|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-file|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-file|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-file|NET=offline": {
    "family": "pair",
@@ -23108,22 +23184,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-git|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-git|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-git|NET=offline": {
    "family": "pair",
@@ -23467,29 +23546,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-absent]"
   },
   "pair|SRC=marketplace-local|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-local|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-local|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-local|NET=offline": {
    "family": "pair",
@@ -24082,29 +24165,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
   },
   "pair|SRC=native-plugin|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=native-plugin|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=native-plugin|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
   },
   "pair|SRC=native-plugin|NET=offline": {
    "family": "pair",
@@ -24423,29 +24510,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
   },
   "pair|SRC=pkg-registry|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=pkg-registry|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=pkg-registry|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
   },
   "pair|SRC=pkg-registry|NET=offline": {
    "family": "pair",
