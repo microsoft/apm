@@ -370,7 +370,7 @@ def test_target_change_under_a_drifted_lock(lifecycle_world, chain) -> None:
         scenario.set_targets(*after)
         play(scenario, (Row((), "install", (_pair(lock, TGT=tgt),), lock == NEWER),))
         if lock != NEWER:
-            scenario.assert_deployed()
+            scenario.assert_deployed(unproven_kept=lock == "absent")
     scenario.finish()
 
 

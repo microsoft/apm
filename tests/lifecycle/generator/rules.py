@@ -249,8 +249,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "proves nothing about the gate). An org-policy level stays its own cell (U2 "
         "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 725, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 726, "InstallScope.USER"),
         ),
     ),
     "U9": (
