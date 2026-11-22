@@ -88,9 +88,12 @@ class DeploymentEvidence:
         owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
+        locked: LockFile | None = None,
         owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._locked = locked
+        self._legacy_claude_rules: dict[Path, dict[str, str]] = {}
         self._owned_receipts = owned_receipts
         self.user_scope = user_scope
         self._kept: frozenset[str] = frozenset()
@@ -163,6 +166,7 @@ class DeploymentEvidence:
             owners={path: tuple(keys) for path, keys in owners.items()},
             user_scope=user_scope,
             kept=kept,
+            locked=locked,
             owned_receipts=owned_receipts,
         )
 
@@ -400,12 +404,41 @@ class DeploymentEvidence:
                 if not path.is_symlink() and path.is_file()
             ]
             if not rendered:
-                return UNPROVEN
+                return self._legacy_claude_rule_verdict(claim, physical)
             actual = compute_file_hash(physical)
             same = any(compute_file_hash(path) == actual for path in rendered)
         except OSError:
             return UNREADABLE
         return AUTHORIZED if same else EDITED
+
+    def _legacy_claude_rule_verdict(self, claim: str, physical: Path) -> str:
+        """Prove a ``.claude/rules/`` file a pre-#3939 install deployed.
+
+        The locked render routes always-on and directory instructions to
+        AGENTS.md, so it never writes their old rule files; render those
+        through the legacy projection of the same locked source instead.
+        """
+        if self.user_scope or self._locked is None or not claim.startswith(".claude/rules/"):
+            return UNPROVEN
+        expected = [
+            text
+            for root in self._rendered_roots(claim)
+            for rendered in self._legacy_claude_rule_renders(root).values()
+            if (text := rendered.get(claim)) is not None
+        ]
+        if not expected:
+            return UNPROVEN
+        actual = physical.read_bytes()
+        return AUTHORIZED if any(text.encode("utf-8") == actual for text in expected) else EDITED
+
+    def _legacy_claude_rule_renders(self, root: Path) -> dict[str, dict[str, str]]:
+        if root not in self._legacy_claude_rules:
+            from apm_cli.integration.instruction_integrator import routed_claude_rule_renders
+
+            self._legacy_claude_rules[root] = routed_claude_rule_renders(
+                self._locked, self._deploy_root, root / "apm_modules", include_local=True
+            )
+        return self._legacy_claude_rules[root]
 
     def authorizes(self, claim: str, physical: Path, *, rendered_as: str | None = None) -> bool:
         """Return whether every file at *physical*, a file or a tree, is proven APM's."""

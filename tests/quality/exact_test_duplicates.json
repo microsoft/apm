@@ -312,10 +312,6 @@
       "TestGenerateApmYml::test_mcp_deps_injected",
       "TestTryWithFallback::test_auth_first_succeeds"
     ],
-    "tests/integration/test_commands_config_coverage.py": [
-      "TestConfigSet::test_set_auto_integrate_false",
-      "TestConfigSet::test_set_auto_integrate_true"
-    ],
     "tests/integration/test_commands_deep_coverage.py": [
       "TestViewCommand::test_view_invalid_field",
       "TestViewCommand::test_view_no_apm_modules",
@@ -1033,10 +1029,6 @@
     ],
     "tests/unit/test_command_helpers.py": [
       "TestAtomicWrite::test_overwrites_existing_file"
-    ],
-    "tests/unit/test_config_command.py": [
-      "TestConfigSet::test_set_auto_integrate_false",
-      "TestConfigSet::test_set_auto_integrate_true"
     ],
     "tests/unit/test_copilot_adapter_compatibility.py": [
       "TestGetCurrentConfig::test_returns_empty_dict_when_file_missing",

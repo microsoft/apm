@@ -100,7 +100,7 @@ aliases; experimental targets such as `grok-cloud` cannot be stored in
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.gitignore` | Yes | `apm install` adds `apm_modules/` to it |
 | `.apm/` | Yes, if present | Local primitives you author (instructions, agents, etc.) |
-| Deployed files: `.github/`, `.claude/`, `.agents/`, `.grok/`, root `.mcp.json`, `AGENTS.md` | Optional | Any clone rebuilds them from the lockfile (`apm install --frozen`). Commit them when something reads the repo without running APM, such as a cloud coding agent |
+| Deployed files: `.github/`, `.claude/`, `.agents/`, `.grok/`, root `.mcp.json`, `AGENTS.md`, `CLAUDE.md` (imports `AGENTS.md`) | Optional | Any clone rebuilds them from the lockfile (`apm install --frozen`). Commit them when something reads the repo without running APM, such as a cloud coding agent |
 | `apm_modules/` | **No** | Installed dependencies -- gitignored automatically; restored by `apm install` |
 
 ## Team member setup

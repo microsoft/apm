@@ -36,6 +36,8 @@ from apm_cli.utils.patterns import (
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
@@ -75,6 +77,13 @@ class InstructionIntegrator(BaseIntegrator):
             dict[Path, tuple[Path, str, int]],
         ] = {}
         self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
+        # (collector, root) pairs: a planning pass reports into its own
+        # throwaway collector and must not silence the real run's warning.
+        self._claude_blocker_warned: set[tuple[object, Path]] = set()
+        # Instruction sources this install routed to compiled AGENTS.md (#3939).
+        self.agents_md_routed: set[str] = set()
+        # Routed sources no compiled AGENTS.md carries yet (new or changed).
+        self.agents_md_stale: set[str] = set()
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -398,6 +407,17 @@ class InstructionIntegrator(BaseIntegrator):
                 )
                 for source_file in instruction_files
             }
+        instruction_files = self._claude_rule_sources(
+            target,
+            instruction_files,
+            prepared_instructions,
+            package_info,
+            project_root,
+            scope,
+            diagnostics,
+        )
+        if not instruction_files:
+            return IntegrationResult(0, 0, 0, [])
 
         deploy_dir = target_root / mapping.subdir
         write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
@@ -495,6 +515,105 @@ class InstructionIntegrator(BaseIntegrator):
             links_resolved=total_links_resolved,
             files_adopted=files_adopted,
         )
+
+    def _claude_rule_sources(
+        self,
+        target: TargetProfile,
+        instruction_files: list[Path],
+        prepared_instructions: dict[Path, _PreparedInstruction],
+        package_info,
+        project_root: Path,
+        scope,
+        diagnostics,
+    ) -> list[Path]:
+        """Drop project instructions Claude loads from AGENTS.md (#3939).
+
+        Always-on and single-directory instructions reach Claude Code through
+        the compiled ``AGENTS.md`` that ``CLAUDE.md`` imports, so only the
+        remaining path-scoped instructions become ``.claude/rules/`` files.
+        Routed sources are recorded so install can ask for ``apm compile``.
+        User scope and projects with a blocking hand-authored root file keep
+        every instruction in ``.claude/rules/``. Drift replay writes to a
+        scratch root, so scope and the blocker come from the live root it replays.
+        """
+        from apm_cli.compilation.claude_agents_md import (
+            claude_agents_md_blocker,
+            claude_agents_md_blocker_warning,
+            compiled_agents_md_has,
+            routes_to_agents_md,
+        )
+        from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
+
+        if target.compile_family != "claude" or is_user_scope(scope):
+            return instruction_files
+        frame = getattr(package_info, "deployment_frame", None)
+        live_root = Path(
+            frame[1]
+            if frame is not None
+            else getattr(package_info, "root_local_project_root", None) or project_root
+        )
+        if live_root.resolve() == get_deploy_root(InstallScope.USER).resolve():
+            return instruction_files
+        routed = {
+            source
+            for source in instruction_files
+            if routes_to_agents_md(
+                self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo"),
+                live_root,
+            )
+        }
+        if not routed:
+            return instruction_files
+        blocker = claude_agents_md_blocker(live_root)
+        if blocker is not None:
+            warned = (diagnostics, live_root)
+            if diagnostics is not None and warned not in self._claude_blocker_warned:
+                self._claude_blocker_warned.add(warned)
+                diagnostics.warn(claude_agents_md_blocker_warning(blocker))
+            return instruction_files
+        self.agents_md_routed.update(source.name for source in routed)
+        for source in routed:
+            prepared = prepared_instructions[source]
+            apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
+            if not compiled_agents_md_has(live_root, apply_to, prepared.body):
+                self.agents_md_stale.add(source.name)
+        return [source for source in instruction_files if source not in routed]
+
+    def render_agents_md_routed_rules(self, package_info, project_root: Path) -> dict[str, str]:
+        """Render the ``.claude/rules/`` files Claude routing left undeployed.
+
+        ``apm pack --format apm`` ships deployed files, and bundle consumers do
+        not compile, so a pack still carries each instruction that #3939 routed
+        to ``AGENTS.md`` as the rule a pre-#3939 install deployed. Routing and
+        rendering reuse this integrator's install decision and projection.
+        Returns ``{project-relative rule path: content}``.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS["claude"]
+        mapping = target.primitives["instructions"]
+        package_path = Path(package_info.install_path)
+        sources = self.find_instruction_files(package_path)
+        if not sources:
+            return {}
+        self.init_link_resolver(package_info, project_root)
+        prepared = {source: self._prepare_instruction(source) for source in sources}
+        kept = set(
+            self._claude_rule_sources(
+                target, sources, prepared, package_info, project_root, None, None
+            )
+        )
+        routed = [source for source in sources if source not in kept]
+        if not routed:
+            return {}
+        deploy_dir = project_root / target.root_dir / mapping.subdir
+        plan = self._prepare_rule_plan(
+            routed, deploy_dir, mapping.extension, mapping.format_id, prepared
+        )
+        return {
+            portable_relpath(rule_path, project_root): normalize_crlf_to_lf(content)
+            for rule_path, content, _links in plan.values()
+        }
 
     def sync_for_target(
         self,
@@ -843,4 +962,98 @@ class InstructionIntegrator(BaseIntegrator):
             apm_package,
             project_root,
             managed_files=managed_files,
+        )
+
+
+def routed_claude_rule_renders(
+    lockfile,
+    project_root: Path,
+    modules_root: Path,
+    *,
+    include_local: bool,
+    verified: bool = False,
+    dependency_keys: Collection[str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
+
+    Each locked dependency installed under *modules_root* is rendered through
+    :meth:`InstructionIntegrator.render_agents_md_routed_rules`: the
+    ``.claude/rules/`` files a pre-#3939 install deployed for it. Pack ships
+    them; cleanup proves a legacy rule file against them. A dependency whose
+    edge or own ``targets:`` exclude Claude renders nothing, as at install.
+    *dependency_keys*, when given, limits rendering to the dependencies the
+    caller ships (the plugin pack skips dev dependencies). With *verified*
+    (pack), only rules the lock does not already record as deployed are
+    returned. ``apm_modules`` is not attested: a cached copy whose lock row
+    records a ``content_hash`` must match it before its manifest or its
+    instructions (or their absence) decide routing, so a deleted routed
+    instruction fails too. An older row without one renders nothing it
+    does not already record as deployed.
+    """
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import resolve_effective_package_targets
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.models.apm_package import APMPackage, PackageInfo
+
+    rules: dict[str, dict[str, str]] = {}
+    for dep in lockfile.get_all_dependencies():
+        if dep.source == "local" and not include_local:
+            continue
+        if dependency_keys is not None and dep.get_unique_key() not in dependency_keys:
+            continue
+        dep_ref = dep.to_dependency_ref()
+        install_path = dep_ref.get_install_path(modules_root)
+        if not install_path.is_dir():
+            continue
+        attested = bool(getattr(dep, "content_hash", None))
+        if verified and attested:
+            _require_locked_source(lockfile, dep, install_path, project_root)
+        manifest = manifest_file(install_path)
+        package = (
+            APMPackage.from_apm_yml(manifest)
+            if manifest.is_file()
+            else APMPackage(name=dep.name or install_path.name, version=dep.version or "0.0.0")
+        )
+        selection = resolve_effective_package_targets(
+            [KNOWN_TARGETS["claude"]],
+            effective_dependency_selection(dep_ref).target_subset,
+            package,
+            None,
+            dep.get_unique_key(),
+        )
+        if not selection.targets:
+            continue
+        package_info = PackageInfo(
+            package=package, install_path=install_path, dependency_ref=dep_ref
+        )
+        rendered = InstructionIntegrator().render_agents_md_routed_rules(package_info, project_root)
+        if verified:
+            deployed = set(dep.deployed_files)
+            rendered = {path: text for path, text in rendered.items() if path not in deployed}
+            if rendered and not attested:
+                _require_locked_source(lockfile, dep, install_path, project_root)
+        if rendered:
+            rules[dep.get_unique_key()] = rendered
+    return rules
+
+
+def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to render from a cached copy its locked content hash does not attest."""
+    from apm_cli.core.remediation import PACK_DEPENDENCY_UNATTESTED, PACK_INSTALLED_FILE_TAMPERED
+    from apm_cli.install.source_helpers import locked_content_mismatch
+
+    if not getattr(dep, "content_hash", None):
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: apm.lock.yaml records no content hash "
+            "for it, so its Claude rules cannot be rendered from the apm_modules cache. "
+            f"{PACK_DEPENDENCY_UNATTESTED.sentence()}"
+        )
+    key = dep.get_unique_key()
+    if locked_content_mismatch(key, dep, install_path, lockfile=lockfile):
+        cached = portable_relpath(install_path, project_root)
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: {cached} does not match the content "
+            "hash recorded in apm.lock.yaml, so its Claude rules cannot be rendered. "
+            f"{PACK_INSTALLED_FILE_TAMPERED.bind(path=cached).sentence()}"
         )
