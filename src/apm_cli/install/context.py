@@ -88,6 +88,10 @@ class InstallContext:
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.
     claude_native_keys: set[str] = field(default_factory=set)
+    # Plugin names this run evaluated for Copilot and refused (parked or withheld).
+    native_rejected_names: set[str] = field(default_factory=set)
+    # Native plugins this run's targets never reach: deployed nothing, rows kept whole.
+    native_carried_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
     # The caller's MCP/LSP reconciliation, run before native Claude
     # registration commits the lockfile (install/phases/services.py, #4329).

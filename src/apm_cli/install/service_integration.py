@@ -206,9 +206,15 @@ def run_service_integrations(  # noqa: PLR0913
         )
     from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs
+    from apm_cli.install.mcp.write_receipts import journal_mcp_writes
 
     lock_before_mcp = staged_lockfile_text(lock_path)
-    with frozen_unrecorded_mcp_pairs(frozen_unrecorded):
+    with (
+        frozen_unrecorded_mcp_pairs(frozen_unrecorded),
+        journal_mcp_writes(
+            ctx.project_root, user_scope=ctx.scope is InstallScope.USER, logger=ctx.logger
+        ),
+    ):
         mcp_count, mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
             mcp_deps=mcp_deps,
