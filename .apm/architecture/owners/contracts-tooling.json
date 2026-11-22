@@ -4,8 +4,8 @@
     {
       "id": "remediation-advice",
       "decision": "User-facing remediation advice: the command to run and the reported state it clears",
-      "owner": "core/remediation.py (Remediation catalog and renderers)",
-      "selectors": ["src/apm_cli/core/remediation.py"],
+      "owner": "core/remediation.py (Remediation catalog and renderers); policy/allowlist_remedy.py proves when the dependency-allowlist uninstall advice applies",
+      "selectors": ["src/apm_cli/core/remediation.py", "src/apm_cli/policy/allowlist_remedy.py"],
       "guards": ["contracts-tooling-remediation-advice", "contracts-tooling-remediation-drift-kinds"]
     },
     {
