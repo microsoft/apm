@@ -641,3 +641,56 @@ def test_consent_never_hides_a_failed_deletion_of_a_hook_it_kept_earlier(tmp_pat
     assert path.exists()
     assert stats["errors"] >= 1
     assert _HOOK in stats.get("failed_paths", [])
+
+
+def _kept_then_relinked(tmp_path: Path) -> tuple[Path, Path, DeploymentEvidence]:
+    """Keep a hook at preflight, then swap its parent for a symlink before cleanup."""
+    root = tmp_path / "project"
+    path = _hook(root)
+    receipts = {path.resolve().as_posix(): compute_file_hash(path)}
+    evidence = DeploymentEvidence(deploy_root=root, receipts=receipts, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+    path.write_text("edited\n", encoding="utf-8")
+    assert [claim for claim, _ in evidence.refusals([_HOOK])] == [_HOOK]
+    outside = tmp_path / "outside"
+    path.parent.rename(outside)
+    try:
+        os.symlink(outside, path.parent, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    return root, outside / path.name, evidence
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reports_a_safety_rejection_after_preflight_as_a_failure(tmp_path: Path) -> None:
+    root, outside, evidence = _kept_then_relinked(tmp_path)
+
+    stats = _sync_hooks(root, evidence)
+
+    assert outside.read_text(encoding="utf-8") == "edited\n"
+    assert stats["errors"] >= 1
+    assert _HOOK in stats.get("failed_paths", [])
+
+
+@pytest.mark.req("req-lk-024")
+def test_selected_cleanup_never_releases_a_path_a_safety_gate_rejected(tmp_path: Path) -> None:
+    from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.install.selected_cleanup import SelectedCleanupOutcome
+
+    root, outside, evidence = _kept_then_relinked(tmp_path)
+    cleanup = remove_stale_deployed_files(
+        [_HOOK],
+        root,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={},
+        receipt_retirements=[],
+    )
+    outcome = SelectedCleanupOutcome()
+
+    SelectedCleanupOutcome.observer(outcome, InstallLogger(), "owner/pkg")(cleanup)
+
+    assert outside.read_text(encoding="utf-8") == "edited\n"
+    assert _HOOK in outcome.failed_paths

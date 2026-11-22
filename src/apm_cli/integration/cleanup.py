@@ -597,11 +597,13 @@ def consent_outcome(
 
     Consent waives only evidence-based retention: a deletion that was
     authorized but failed stays a failure even for a claim consent kept
-    earlier (for example in the uninstall preflight), and a file consent kept
-    for its evidence is not a path-safety refusal.
+    earlier (for example in the uninstall preflight), as does a path a safety
+    gate refused in this pass (#4815); a file consent kept for its evidence is
+    not a path-safety refusal.
     """
-    failures = list(dict.fromkeys([*cleanup.failed, *unconsented(cleanup.retained, evidence)]))
-    return failures, unconsented(cleanup.skipped_unmanaged, evidence)
+    failures = [*cleanup.failed, *cleanup.unsafe, *unconsented(cleanup.retained, evidence)]
+    unsafe = [*cleanup.unsafe, *unconsented(cleanup.skipped_unmanaged, evidence)]
+    return list(dict.fromkeys(failures)), list(dict.fromkeys(unsafe))
 
 
 def _hash_envelope(value: str) -> str:
@@ -713,6 +715,11 @@ class CleanupResult:
     skipped_unmanaged: list[str] = field(default_factory=list)
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
+
+    unsafe: list[str] = field(default_factory=list)
+    """Paths a path-safety gate refused in this pass (failed validation, or
+    replaced or moved since the scan); also listed in ``skipped_unmanaged``.
+    Always a failure: ``--trust-lockfile`` consent never waives them (#4815)."""
 
     unproven: list[str] = field(default_factory=list)
     """Files kept because no deployment evidence proves APM wrote them (#3701);
@@ -979,6 +986,7 @@ def _remove_proven_members(
     for member_rel, member in proven:
         if not _member_still_safe(skill_dir, member):
             result.skipped_unmanaged.append(member_rel)
+            result.unsafe.append(member_rel)
             diagnostics.warn(
                 f"Skipped removing {member_rel}: it was replaced or moved since APM "
                 "checked it. Inspect it and delete it manually if no longer needed.",
@@ -1230,12 +1238,14 @@ def remove_stale_deployed_files(
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
                 result.skipped_unmanaged.append(stale_path)
+                result.unsafe.append(stale_path)
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
 
             if not stale_path.startswith(get_integration_prefixes(targets=targets)):
                 result.skipped_unmanaged.append(stale_path)
+                result.unsafe.append(stale_path)
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
             try:
@@ -1272,6 +1282,7 @@ def remove_stale_deployed_files(
                 allow_final_symlink=allow_final_symlink,
             ):
                 result.skipped_unmanaged.append(stale_path)
+                result.unsafe.append(stale_path)
                 continue
             stale_target = project_root / stale_path
 
@@ -1309,6 +1320,7 @@ def remove_stale_deployed_files(
                 _deferred_dirs.append((stale_path, stale_target))
             else:
                 result.skipped_unmanaged.append(stale_path)
+                result.unsafe.append(stale_path)
                 diagnostics.warn(
                     (
                         f"Refused to remove directory entry {stale_path}: APM "

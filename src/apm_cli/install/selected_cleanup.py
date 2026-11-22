@@ -28,7 +28,7 @@ class SelectedCleanupOutcome:
 
     claims: dict[str, tuple[list[str], dict[str, str]]] = field(default_factory=dict)
     retained_paths: set[str] = field(default_factory=set)
-    # Paths cleanup could not process (I/O failure), as opposed to kept for evidence.
+    # Paths cleanup failed on (I/O or a path-safety rejection), as opposed to kept for evidence.
     failed_paths: set[str] = field(default_factory=set)
 
     @staticmethod
@@ -45,7 +45,7 @@ class SelectedCleanupOutcome:
         def observe(cleanup) -> None:
             surface(cleanup)
             # Paths cleanup failed on stay retained; no consent waiver hides them.
-            outcome.failed_paths.update(cleanup.failed)
+            outcome.failed_paths.update([*cleanup.failed, *cleanup.unsafe])
 
         return observe
 
