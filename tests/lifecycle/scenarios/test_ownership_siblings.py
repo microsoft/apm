@@ -241,8 +241,9 @@ def test_a_users_lsp_entry_is_never_taken_over(lifecycle_world) -> None:
     scenario.run("approve p-lsp")
 
     # The first failing install still commits the dependency row it resolved, as
-    # the MCP native-conflict path does (#4282); the rerun changes nothing.
-    known = {"I7": Known("#4282", r"failed install changed the lockfile")}
+    # the MCP native-conflict path does (#4594; #4282 closed without covering
+    # this path); the rerun changes nothing.
+    known = {"I7": Known("#4594", r"failed install changed the lockfile")}
     for line, cells in (("install", known), ("install --force", None)):
         step = scenario.run(line, exit=1, known=cells)
         assert f"LSP server '{LSP_SERVER}' conflicts with the existing" in step.output, line
