@@ -323,7 +323,10 @@ apm install --global \
 
 Without `GITHUB_HOST`, a custom host is not GitHub-class: the package is
 refused with a hint to set `GITHUB_HOST` (and write `github.com/` before
-GitHub entries in apm.yml) or to use a `git:` + `path:` object entry.
+GitHub entries in apm.yml) or to use a `git:` + `path:` object entry. When
+`GITHUB_HOST` already names another server, keep it and add the second
+server's package as a `git:` + `path:` object entry; changing `GITHUB_HOST`
+would re-home existing shorthand entries.
 
 ## GitLab (SaaS or self-managed)
 

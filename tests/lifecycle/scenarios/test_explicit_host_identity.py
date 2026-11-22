@@ -51,6 +51,10 @@ pytestmark = [
 ]
 
 GHES = HOST_ALIASES["ghes"][0]
+# A second, unrecognised enterprise server (served only here).
+OTHER = HOST_ALIASES["generic"][0]
+OTHER_SLUG = "beta/team-skills"
+OTHER_SUBPATH = "skills/team-lint"
 GITHUB_HOSTS = frozenset({GITHUB_HOST, API_HOST, RAW_HOST})
 INTERNAL = "acme/internal-skills"
 ANDROID = "example/android-skills"
@@ -254,7 +258,8 @@ def test_mixed_host_global_lifecycle_keeps_each_package_host(lifecycle_world, mi
     world.services.proxy.clear()
 
     # Removal drops one github.com package and keeps the others on their hosts.
-    remove = scenario.run(f"uninstall {specs[_skill_name(ANDROID)].split('#', 1)[0]}")
+    # The full spec, so the CLI and the scenario model select the same package.
+    remove = scenario.run(f"uninstall {specs[_skill_name(ANDROID)]}")
     assert_changes(
         remove.changed,
         (MANIFEST, LOCK, "home:.apm/apm_modules*", *_skills(ANDROID)),
@@ -400,4 +405,75 @@ def test_frozen_reload_without_the_configured_host_fails_closed(lifecycle_world,
     tip = scenario.run("install", exit=1)
     assert_changes(tip.changed, (), label="tip without GITHUB_HOST")
     scenario.assert_deployed()
+    scenario.finish()
+
+
+def test_configured_server_keeps_shorthand_and_object_form_adds_another(
+    lifecycle_world, mixed_hosts
+):
+    """GITHUB_HOST already names a server: the hint keeps it; object form adds the second one."""
+    world = _with_env(lifecycle_world, GITHUB_HOST=GHES)
+    tree = world.root / "mixed-src" / "beta-team-skills"
+    (tree / OTHER_SUBPATH).mkdir(parents=True)
+    (tree / OTHER_SUBPATH / "SKILL.md").write_text(
+        "---\nname: team-lint\ndescription: Second-server skill.\n---\n\nUse team-lint.\n",
+        encoding="ascii",
+    )
+    repository = mixed_hosts.factory.create("beta-team-skills", source_tree=tree)
+    other_commit = mixed_hosts.factory.commit(repository, message=OTHER_SLUG)
+    mixed_hosts.factory.tag(repository, TAG, other_commit)
+    serve_repository(world, OTHER_SLUG, repository.origin)
+    for host, prefix in ((GHES, "/beta/"), (GHES, "/api/v3/repos/beta/"), (GITHUB_HOST, "/beta/")):
+        world.services.script(host, prefix, 404)
+    world.services.script(API_HOST, "/repos/beta/", 404)
+    world.services.script(RAW_HOST, "/beta/", 404)
+
+    internal = _skill_name(INTERNAL)
+    shorthand = f"{INTERNAL}/{SUBPATHS[INTERNAL]}#{TAG}"
+    specs = {internal: shorthand, "team-lint": f"{OTHER}/{OTHER_SLUG}/{OTHER_SUBPATH}#{TAG}"}
+    scenario = Scenario(world, specs, kinds=dict.fromkeys(specs, ("skill",)), scope="user")
+    scenario.run(f"install {shorthand}")
+    ghes_row = (SUBPATHS[INTERNAL], TAG, mixed_hosts.tagged[INTERNAL].sha)
+    assert _lock_rows(scenario) == {f"{GHES}/{INTERNAL}": ghes_row}
+    world.services.proxy.clear()
+
+    scenario.source_moved()
+    refused = scenario.run(f"install {specs['team-lint']}", requested=scenario.model, exit=1)
+    assert_changes(refused.changed, (), label="second server refused")
+    assert (
+        f"GITHUB_HOST already names {GHES}; keep it and, if this is another GitHub "
+        "Enterprise Server, add this package as an explicit 'git:' + 'path:' entry in apm.yml."
+    ) in refused.output, refused.output
+    assert "set GITHUB_HOST=" not in refused.output, refused.output
+    assert _manifest_entries(scenario) == [shorthand]
+    world.services.proxy.clear()
+
+    # The printed remedy: keep GITHUB_HOST and add an explicit object entry.
+    manifest = scenario.manifest_root / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["dependencies"]["apm"].append(
+        {"git": f"https://{OTHER}/{OTHER_SLUG}.git", "path": OTHER_SUBPATH, "ref": TAG}
+    )
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    scenario.adopt(internal, "team-lint", lock="stale")
+    remedied = scenario.run("install")
+    assert_changes(
+        remedied.changed,
+        (LOCK, "home:.apm/apm_modules*", "home:.agents/skills/team-lint*"),
+        label="object-form second server",
+    )
+    scenario.assert_deployed()
+    assert _lock_rows(scenario) == {
+        f"{GHES}/{INTERNAL}": ghes_row,
+        f"{OTHER}/{OTHER_SLUG}": (OTHER_SUBPATH, TAG, other_commit.sha),
+    }
+    assert _manifest_entries(scenario)[0] == shorthand, "the shorthand entry was rewritten"
+    misrouted = [
+        entry
+        for entry in world.services.egress_log()
+        if ("/beta/" in entry["path"] and entry["host"] != OTHER)
+        or ("/acme/" in entry["path"] and entry["host"] != GHES)
+    ]
+    assert not misrouted, f"requests reached the wrong host: {misrouted}"
+    assert any(entry["host"] == OTHER for entry in world.services.egress_log())
     scenario.finish()

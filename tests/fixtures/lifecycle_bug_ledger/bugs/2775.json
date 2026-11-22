@@ -15,6 +15,8 @@
     "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_strict_host_credentials_keep_the_ghes_token_on_ghes",
     "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_unconfigured_ghes_host_is_refused_with_working_remedies",
     "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_frozen_reload_without_the_configured_host_fails_closed",
-    "tests/unit/install/test_validation_error_handling.py::TestGenericHostAmbiguousSubpathHint::test_unrecognised_selfhosted_ambiguous_path_returns_hint"
+    "tests/lifecycle/scenarios/test_explicit_host_identity.py::test_configured_server_keeps_shorthand_and_object_form_adds_another",
+    "tests/unit/install/test_validation_error_handling.py::TestGenericHostAmbiguousSubpathHint::test_unrecognised_selfhosted_ambiguous_path_returns_hint",
+    "tests/unit/install/test_validation_error_handling.py::TestGenericHostAmbiguousSubpathHint::test_configured_github_host_keeps_it_and_recommends_object_form"
   ]
 }
