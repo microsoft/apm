@@ -49,7 +49,9 @@ pytestmark = [
 ]
 
 MARKER = "Route marker for the lifecycle file-routing lane."
-_INSTRUCTION = f"---\napplyTo: '**'\ndescription: File routing marker.\n---\n\n{MARKER}\n"
+# A file-type glob keeps a per-file rule on every deployed target; Claude routes
+# '**' instructions to AGENTS.md instead (#3939).
+_INSTRUCTION = f"---\napplyTo: '**/*.py'\ndescription: File routing marker.\n---\n\n{MARKER}\n"
 # Route -> TGT -> (declared targets before the step, after it). TGT follows ruling #3
 # (tests/lifecycle/generator/factors.py TARGET_CHANGES).
 HISTORIES = {

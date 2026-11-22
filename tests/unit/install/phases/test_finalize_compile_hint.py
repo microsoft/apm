@@ -144,8 +144,8 @@ class TestHintProjectCompileNeeded:
             symbol="info",
         )
 
-    def test_hint_not_fired_for_claude_target(self, tmp_path):
-        """Claude receives dependency instructions directly in .claude/rules."""
+    def test_hint_fired_for_claude_target(self, tmp_path):
+        """Claude loads always-on dependency instructions from compiled AGENTS.md."""
         from apm_cli.install.phases.finalize import _hint_project_compile_needed
 
         instr = tmp_path / "apm_modules" / "pkg" / ".apm" / "instructions"
@@ -157,7 +157,8 @@ class TestHintProjectCompileNeeded:
 
         _hint_project_compile_needed(ctx)
 
-        ctx.logger.info.assert_not_called()
+        ctx.logger.info.assert_called_once()
+        assert "AGENTS.md / CLAUDE.md" in ctx.logger.info.call_args.args[0]
 
     def test_hint_ignores_target_without_project_scope(self, tmp_path):
         """A target unavailable at project scope cannot trigger the hint."""
