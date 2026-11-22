@@ -116,6 +116,17 @@ class TestLockFileReadCost:
         assert copied["c"][1] is copied["c"]
         assert copied["d"] == {1, 2} and copied["d"] is not tree["d"]
 
+    def test_private_copy_keeps_an_alias_shared_across_a_deepcopy_fallback(self):
+        from apm_cli.deps.lockfile_container import parse_lockfile_text
+
+        text = f"x-date: &d 2026-01-02\nx-set: !!set {{*d: null}}\nid: {uuid.uuid4().hex}\n"
+
+        copied = parse_lockfile_text(text)
+
+        (member,) = copied["x-set"]
+        assert member is copied["x-date"]
+        assert copied["x-date"] is not parse_lockfile_text(text)["x-date"]
+
     def test_private_copy_of_a_pure_alias_graph_stays_linear(self):
         from apm_cli.deps.lockfile_container import _private_copy
 
