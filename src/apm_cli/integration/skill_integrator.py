@@ -3,7 +3,6 @@
 import hashlib
 import os
 import re
-import shutil
 import stat
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -16,6 +15,7 @@ from typing import TYPE_CHECKING
 from apm_cli.core import remediation as _remediation
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.install.services import enforce_agent_plugin_deployment_boundary
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_adoption import (
     dircmp_equal,
@@ -43,8 +43,8 @@ from apm_cli.integration.skill_support import (
     skill_dir_has_content,
 )
 from apm_cli.integration.targets import TargetProfile
+from apm_cli.integration.write_seam import write_text_lf
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
-from apm_cli.utils.atomic_io import write_text_lf
 
 __all__ = [
     "SkillIntegrationResult",
@@ -1156,7 +1156,7 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 self._skill_primary_root = resolved_root
 
-            target_skills_root.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(target_skills_root, parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
                 sub_skills_dir,
@@ -1509,7 +1509,7 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 self._skill_primary_root = resolved_root
 
-            target_skills_root.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(target_skills_root, parents=True, exist_ok=True)
 
             n, deployed = self._promote_sub_skills(
                 skills_dir,
@@ -1908,7 +1908,7 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.utils.path_security import ensure_path_within
 
         dest_bin = skill_base / "bin"
-        dest_bin.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(dest_bin, parents=True, exist_ok=True)
         deployed: list[Path] = []
         for src_file in bin_dir.iterdir():
             # Reject symlinks -- a malicious package could point a symlink
@@ -1941,7 +1941,7 @@ class SkillIntegrator(BaseIntegrator):
         if plugin_manifest.is_symlink() or not plugin_manifest.is_file():
             return None
         dest_manifest = skill_base / ".claude-plugin" / "plugin.json"
-        dest_manifest.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(dest_manifest.parent, parents=True, exist_ok=True)
         self._copy_plugin_file(
             plugin_manifest,
             dest_manifest,
@@ -1981,7 +1981,7 @@ class SkillIntegrator(BaseIntegrator):
             skip_copy = src_hash == dst_hash
 
         if not skip_copy:
-            shutil.copy2(src_file, dest_file)
+            write_seam.copy2(src_file, dest_file)
             self.note_rendered_write(dest_file)
 
         if make_executable and os.name == "posix":

@@ -60,6 +60,18 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
         self.wrote_connections = wrote_connections
 
 
+class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
+    """Same-name LSP entries APM did not write were preserved (#4628).
+
+    *preserved* maps each runtime to the server names left as the user wrote
+    them; every other server in the install was still configured.
+    """
+
+    def __init__(self, message: str, *, preserved: dict[str, set[str]]) -> None:
+        super().__init__(message)
+        self.preserved = preserved
+
+
 class RequiredIntegrationError(RuntimeError):
     """Raised when a declared MCP or LSP write cannot be completed."""
 

@@ -327,9 +327,12 @@ class InstallService:
 
         runner = self._build_script_runner(request)
         event = self._build_event("pre-install", request)
-        runner.fire("pre-install", event)
 
         with marketplace_scope:
+            if request.frozen:
+                # A changed local-catalog selection refuses before any script (#4639).
+                self._verify_frozen_local_catalogs(request)
+            runner.fire("pre-install", event)
             if request.frozen:
                 # req-lk-006: the lockfile is never written in frozen mode.
                 # Suppress at the chokepoint, then decide from what was
@@ -694,6 +697,26 @@ class InstallService:
                 selected.append(dependency.to_dependency_ref())
             queue.extend(children.get(key, ()))
         return selected
+
+    @staticmethod
+    def _verify_frozen_local_catalogs(request: InstallRequest) -> None:
+        """Refuse a frozen install whose local catalog no longer selects its lock rows."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.local_content_verdict import local_catalog_selection_reasons
+        from apm_cli.models.dependency.replacement import project_manifest_dependencies
+
+        lockfile = LockFile.read(_frozen_lockfile_path(request))
+        if lockfile is None:
+            return
+        reasons = local_catalog_selection_reasons(
+            lockfile, project_manifest_dependencies(request.apm_package)
+        )
+        if reasons:
+            raise FrozenInstallError(
+                "--frozen: a local marketplace catalog no longer selects apm.lock.yaml.",
+                reasons=reasons,
+            )
 
     @staticmethod
     def _verify_frozen_local_content(
