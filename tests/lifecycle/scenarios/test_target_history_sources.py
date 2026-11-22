@@ -280,41 +280,64 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
 _CLAUDE_LSP = ".claude/skills/apm-lsp/.claude-plugin/plugin.json"
 
 
-# (cell, file, a document that only mentions the package, one that holds its entry).
+_HOOK = {"hooks": [{"type": "command", "command": "echo p-exec"}]}
+_SETTINGS = ".claude/settings.json"
+_SIDECAR = ".claude/apm-hooks.json"
+
+
+def _owned(source: str) -> dict:
+    return {"SessionStart": [{**_HOOK, "_apm_source": source}]}
+
+
+# (cell, the files written, whether Claude has the package's entry).
 _CLAUDE_CONTROLS = (
+    ("p-lsp/lsp/claude", {_CLAUDE_LSP: {"description": "p-lsp-server", "lspServers": {}}}, False),
+    ("p-lsp/lsp/claude", {_CLAUDE_LSP: {"lspServers": {"p-lsp-server": {"command": "x"}}}}, True),
+    ("p-exec/mcp/claude", {".mcp.json": {"note": "p-exec-mcp", "mcpServers": {}}}, False),
+    ("p-exec/mcp/claude", {".mcp.json": {"mcpServers": {"p-exec-mcp": {"command": "x"}}}}, True),
+    # A sidecar alone, or one owning an entry Claude does not have, is no hook.
+    ("p-exec/hook/claude", {_SIDECAR: _owned("_local/p-exec")}, False),
+    ("p-exec/hook/claude", {_SETTINGS: {"hooks": {}}, _SIDECAR: _owned("_local/p-exec")}, False),
     (
-        "p-lsp/lsp/claude",
-        _CLAUDE_LSP,
-        {"name": "apm-lsp", "description": "p-lsp-server", "lspServers": {}},
-        {"name": "apm-lsp", "lspServers": {"p-lsp-server": {"command": "x"}}},
+        "p-exec/hook/claude",
+        {
+            _SETTINGS: {"hooks": {"SessionStart": [{"hooks": [{"command": "echo other"}]}]}},
+            _SIDECAR: _owned("_local/p-exec"),
+        },
+        False,
     ),
+    # Registered and owned: by the dependency, or by the local bundle (#4027 marker).
     (
-        "p-exec/mcp/claude",
-        ".mcp.json",
-        {"note": "p-exec-mcp", "mcpServers": {}},
-        {"mcpServers": {"p-exec-mcp": {"command": "x"}}},
+        "p-exec/hook/claude",
+        {_SETTINGS: {"hooks": {"SessionStart": [_HOOK]}}, _SIDECAR: _owned("_local/p-exec")},
+        True,
     ),
     (
         "p-exec/hook/claude",
-        ".claude/apm-hooks.json",
-        {"SessionStart": [{"command": "echo p-exec"}]},
-        {"SessionStart": [{"_apm_source": "_local/p-exec", "command": "echo p-exec"}]},
+        {
+            _SETTINGS: {"hooks": {"SessionStart": [_HOOK]}},
+            _SIDECAR: _owned("local-bundle::p-exec::sha256:abc"),
+        },
+        True,
     ),
 )
 
 
 def test_claude_surfaces_count_only_their_own_entries(lifecycle_world) -> None:
     """Negative controls: Claude's shared LSP, MCP and hook files count for a package
-    only when its entry sits where Claude reads it, never on a bare mention."""
+    only when its entry sits where Claude reads it, never on a bare mention or a
+    sidecar without the registered hook."""
     scenario = Scenario(lifecycle_world, ("p-lsp", "p-exec"), targets=("claude",))
-    for cell, relative, mention, entry in _CLAUDE_CONTROLS:
-        path = lifecycle_world.project / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        for document in (mention, entry):
+    for cell, files, counted in _CLAUDE_CONTROLS:
+        for relative in (_CLAUDE_LSP, ".mcp.json", _SETTINGS, _SIDECAR):
+            (lifecycle_world.project / relative).unlink(missing_ok=True)
+        for relative, document in files.items():
+            path = lifecycle_world.project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(document), encoding="ascii")
-            observed, _, _ = scenario.deployed()
-            written = json.loads(path.read_text(encoding="ascii"))
-            assert (cell in observed) == (written == entry), (cell, written, sorted(observed))
+        observed, _, _ = scenario.deployed()
+        written = {r: (lifecycle_world.project / r).read_text(encoding="ascii") for r in files}
+        assert written and (cell in observed) == counted, (cell, written, sorted(observed))
 
 
 CREDITS = credits(

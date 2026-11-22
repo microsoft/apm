@@ -69,31 +69,59 @@ class JsonEntry:
 
 
 @dataclass(frozen=True)
-class SourceMarker:
-    """A hook sidecar: some entry's ``_apm_source`` names the package (``.../{pkg}``)."""
+class MergedHooks:
+    """Hooks merged into one settings file (*glob*) under *container*; the
+    ``apm-hooks.json`` sidecar beside it records which entries APM owns. A package's
+    hook counts only when a registered entry carries its ownership marker."""
 
     glob: str
+    container: str = "hooks"
 
 
-def _sources(node) -> Iterator[str]:
-    if isinstance(node, dict):
-        if isinstance(node.get("_apm_source"), str):
-            yield node["_apm_source"]
-        for value in node.values():
-            yield from _sources(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _sources(value)
+def _owned_by(marker: object, name: str) -> bool:
+    """Whether a hook ownership marker names package *name* (dependency or bundle)."""
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    bundle = parse_local_bundle_hook_source(marker)
+    if bundle is not None:
+        return bundle[0] == name
+    return isinstance(marker, str) and (marker == name or marker.endswith("/" + name))
+
+
+def _registered_hook_sources(path: Path, container: str) -> list[object]:
+    """``_apm_source`` of every hook registered in *path*, sidecar ownership restored."""
+    from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        sidecar_path = path.with_name("apm-hooks.json")
+        sidecar = (
+            json.loads(sidecar_path.read_text(encoding="utf-8")) if sidecar_path.is_file() else {}
+        )
+    except ValueError:
+        return []
+    hooks = data.get(container) if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return []
+    if isinstance(sidecar, dict):
+        reinject_apm_source_from_sidecar(hooks, sidecar)
+    return [
+        entry.get("_apm_source")
+        for entries in hooks.values()
+        if isinstance(entries, list)
+        for entry in entries
+        if isinstance(entry, dict)
+    ]
 
 
 # Where a package's surface lands, per (scope, kind, target): a glob relative
-# to the deploy root, or (glob, marker) for a shared file that must name the
-# package's entry. Same world conventions as rows.py.
-SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str] | JsonEntry | SourceMarker] = {
+# to the deploy root, or a shared file that must hold the package's own entry
+# (JsonEntry, MergedHooks). Same world conventions as rows.py.
+SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     ("project", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("project", "hook", "copilot"): ".github/hooks/{pkg}-*.json",
-    ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
-    ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
+    ("project", "mcp", "copilot"): JsonEntry(".mcp.json", "mcpServers", "{pkg}-mcp"),
+    ("project", "lsp", "copilot"): JsonEntry(".github/lsp.json", "lspServers", "{pkg}-server"),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     # Claude reads project LSP servers from APM's plugin (lsp_integrator.py, "claude"),
@@ -104,13 +132,13 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str] | JsonEntry |
     ),
     ("project", "mcp", "claude"): JsonEntry(".mcp.json", "mcpServers", "{pkg}-mcp"),
     # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
-    # each entry with its dependency (hook_ownership.dependency_hook_source_marker).
-    ("project", "hook", "claude"): SourceMarker(".claude/apm-hooks.json"),
+    # each entry with its dependency or local bundle (hook_ownership.py).
+    ("project", "hook", "claude"): MergedHooks(".claude/settings.json"),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
-    ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
-    ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
+    ("user", "mcp", "copilot"): JsonEntry(".copilot/mcp-config.json", "mcpServers", "{pkg}-mcp"),
+    ("user", "lsp", "copilot"): JsonEntry(".copilot/lsp-config.json", "lspServers", "{pkg}-server"),
     ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
     # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
@@ -471,7 +499,7 @@ class Scenario:
                     if surface is None or not self._observable(package, kind, target):
                         continue
                     # A shared file names its entry; only an own file is a managed path.
-                    shared = isinstance(surface, (tuple, JsonEntry, SourceMarker))
+                    shared = isinstance(surface, (JsonEntry, MergedHooks))
                     hits = self._hits(package, surface, users)
                     if hits:
                         cell = f"{package}/{kind}/{target}"
@@ -495,15 +523,12 @@ class Scenario:
         """Files at *surface* that carry *package*, minus the user's own files."""
         root = self.deploy_root
         name = package.split(":")[0]
-        if isinstance(surface, SourceMarker):
+        if isinstance(surface, MergedHooks):
             pattern = surface.glob
 
             def carries(path: Path) -> bool:
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except ValueError:
-                    return False
-                return any(src == name or src.endswith("/" + name) for src in _sources(data))
+                sources = _registered_hook_sources(path, surface.container)
+                return any(_owned_by(source, name) for source in sources)
 
         elif isinstance(surface, JsonEntry):
             pattern = surface.glob
@@ -518,11 +543,10 @@ class Scenario:
                 return isinstance(block, dict) and entry in block
 
         else:
-            pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
-            marker = marker.format(pkg=name)
+            pattern = surface
 
             def carries(path: Path) -> bool:
-                return marker in path.read_text(encoding="utf-8")
+                return True
 
         return [
             path
@@ -1084,6 +1108,12 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         r"conflicts with the existing copilot connection .* Preserved that connection",
         "P-LAW-ownership.preserve_unowned",
         "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|SRC=inline-mcp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-INV-I7",
+        "install/mcp/collision_preflight.py: install --mcp refuses before any write (#4759)",
     ),
     "pair|SRC=mcp-registry|DEPLOYED=edited": ExpectedRefusal(
         1,

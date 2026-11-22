@@ -794,7 +794,13 @@ SITE_SLICES["audit-ci"] = SiteSlice(
         "absent/warn": Expect(0),
         "no_git_remote/block": Expect(1, (r"Could not determine org from git remote", _CI_FAILED)),
         "no_git_remote/warn": Expect(0),
-        "empty/block": Expect(1, (EMPTY, _CI_FAILED)),
+        # #4821: the policy outcome is the one finding; no baseline check repeats it.
+        "empty/block": Expect(
+            1,
+            (EMPTY, _CI_FAILED),
+            forbids=(r"hook-approval-pins\W+Blocked by org policy", r"drift replay blocked"),
+            smoke=True,
+        ),
         "empty/warn": Expect(0),
         "found": Expect(1, (_CHECK_FAILED,)),
         "disabled": Expect(0),
