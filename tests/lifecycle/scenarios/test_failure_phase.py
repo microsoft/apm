@@ -55,16 +55,6 @@ pytestmark = [
     ),
 ]
 
-# A failed install that already committed its lockfile: the MCP config write
-# fails after the lock commit, and the deploy is not rolled back. A failure
-# before the lock commit restores every deployed file (#4282).
-_DEPLOYED_BEFORE_FAILURE = "#4594"  # #4164 closed; its fix did not cover these
-_LOCK_CHANGED = Known(
-    _DEPLOYED_BEFORE_FAILURE,
-    r"failed install changed the lockfile|failed install changed deployed surfaces"
-    r"|failed install changed durable files",
-)
-
 
 @dataclass(frozen=True)
 class FaultRow:
@@ -224,9 +214,7 @@ ROWS = (
         _obstruct_with_dir(".mcp.json"),
         _remove_project_path(".mcp.json"),
         announce="MCP configuration failed for selected runtime(s): p-exec-mcp",
-        changed=("project:apm.lock.yaml", "project:.github/hooks*"),
         exec_given=True,
-        known={"I7": _LOCK_CHANGED},
     ),
     FaultRow(
         "sigterm",
