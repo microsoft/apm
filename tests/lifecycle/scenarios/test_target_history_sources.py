@@ -78,9 +78,27 @@ def _unit(op: str, tgt: str, src: str, prim: str, gate: str | None, **extra) -> 
 _KINDS = {
     "p-lsp": (("local-path", "lsp"),),
     "p-canvas": (("local-path", "canvas"),),
-    # bin/ never deploys at project scope (U-BIN): the native plugin proves its skill.
-    "p-native-claude-bin": (("native-plugin", "skill"),),
+    # A native plugin without bin/ deploys whole once approved (#4559); it proves its
+    # skill inside the plugin root (_assert_whole_plugin).
+    "p-native-claude": (("native-plugin", "skill"),),
 }
+_NATIVE = "p-native-claude"
+# Harness -> the settings file that enables a whole-deployed plugin (#4559).
+_PLUGIN_SETTINGS = {"claude": ".claude/settings.json", "copilot": ".github/copilot/settings.json"}
+
+
+def _assert_whole_plugin(scenario: Scenario, targets: tuple[str, ...], output: str) -> None:
+    """The native plugin sits whole under .agents/plugins and every current harness
+    that loads plugins enables it."""
+    skill = scenario.deploy_root / f".agents/plugins/{_NATIVE}/skills/{_NATIVE}/SKILL.md"
+    assert skill.is_file(), f"{_NATIVE} is not deployed whole\n{output}"
+    for target in sorted(set(targets) & set(_PLUGIN_SETTINGS)):
+        settings = scenario.deploy_root / _PLUGIN_SETTINGS[target]
+        enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+        mine = {key: on for key, on in enabled.items() if key.split("@")[0] == _NATIVE}
+        assert list(mine.values()) == [True], f"{target}: {enabled}\n{output}"
+
+
 _REGISTRY = "p-skill:registry"
 
 
@@ -210,7 +228,8 @@ def _deploy(world, row: str, before) -> tuple[Scenario, object, dict]:
         scenario = Scenario(world, names, targets=before, policy="allow")
         scenario.run(f"install {' '.join(names)}")
         scenario.run(f"approve {' '.join(_KINDS)}")
-        scenario.run("install")
+        installed = scenario.run("install")
+        _assert_whole_plugin(scenario, before, installed.output)
         return scenario, "install", {}
     if row == "gates":
         names = ("p-exec", "p-canvas")
@@ -267,6 +286,8 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     assert step.result.returncode == 0, step.output
     if row in _RECONCILING_ROWS:
         scenario.assert_deployed()
+    if row == "kinds-offline":
+        _assert_whole_plugin(scenario, after, step.output)
     if row in _MCP_NAMES:
         problems = mcp_server_problems(scenario, _MCP_NAMES[row])
         assert not problems, f"{problems}\n{step.output}"
