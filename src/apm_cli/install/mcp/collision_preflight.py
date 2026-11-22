@@ -73,9 +73,10 @@ def _requested(dep: Any) -> tuple[dict, dict | None] | None:
         )
     except Exception:  # an unreachable registry is reported by the install itself
         return None
-    if not isinstance(info, dict) or _needs_input(info):
+    env = dep.env or {}
+    if not isinstance(info, dict) or not isinstance(env, dict) or _needs_input(info):
         return None
-    return info, dict(dep.env or {})
+    return info, dict(env)
 
 
 def _recorded_baselines(lockfile: Any, name: str) -> list[str | None]:
@@ -156,21 +157,24 @@ def project_native_mcp_conflicts(
                 or unsupported_remote_transport(client, info) is not None
             ):
                 continue
-            if all(
-                compare_native_mcp_connection(
-                    client,
-                    name,
-                    requested_info=info,
-                    stored_config=stored,
-                    managed=name in recorded,
-                    native_hash=baseline,
-                    registry_request=registry,
-                    env_overrides=env,
-                    runtime_vars={} if registry else None,
-                )
-                is NativeMcpConnectionState.CONFLICT
-                for baseline in baselines
-            ):
+            try:
+                states = {
+                    compare_native_mcp_connection(
+                        client,
+                        name,
+                        requested_info=info,
+                        stored_config=stored,
+                        managed=name in recorded,
+                        native_hash=baseline,
+                        registry_request=registry,
+                        env_overrides=env,
+                        runtime_vars={} if registry else None,
+                    )
+                    for baseline in baselines
+                }
+            except (OSError, TypeError, ValueError):
+                continue  # an unreadable config is reported by the MCP stage itself
+            if states == {NativeMcpConnectionState.CONFLICT}:
                 _report_native_conflict(
                     name,
                     runtime,
