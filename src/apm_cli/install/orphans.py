@@ -113,13 +113,18 @@ class OrphanRemovalDecision:
     ``retained_paths`` installed roots kept as required package content, and
     ``stale_keys`` lock rows without removable package content.
     ``superseded_roots`` pairs each released root with the retained package
-    subtrees it still hosts.
+    subtrees it still hosts. ``rescued_roots`` are an uninstall's own removal
+    roots that a surviving package still reaches: only their declaration goes,
+    their lock row stays (re-parented through ``repairs``) with its content,
+    and ``rescued_depths`` gives the depth it and its subtree take below the
+    new parent.
     """
 
     operation: OrphanOperation
     candidate_keys: frozenset[str] = frozenset()
     removed_keys: frozenset[str] = frozenset()
     rescued_keys: frozenset[str] = frozenset()
+    rescued_roots: frozenset[str] = frozenset()
     retained_keys: frozenset[str] = frozenset()
     removed_files: Mapping[str, tuple[str, ...]] = field(
         default_factory=lambda: MappingProxyType({})
@@ -136,6 +141,7 @@ class OrphanRemovalDecision:
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    rescued_depths: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
     reachability: ReachabilityResult | None = None
 
     @property
@@ -542,34 +548,37 @@ def _lock_keys_by_install_path(
 def _decide_uninstall(
     lockfile: LockFile, roots: Sequence[object], probe: ReachabilityProbe
 ) -> OrphanRemovalDecision:
-    """Decide which removed roots' descendants are truly unreachable.
+    """Decide which removed roots and descendants are truly unreachable.
 
     Subtracts the surviving direct dependencies and every still-declared
     lockfile entry from the backward-scan candidates, then asks
     :mod:`apm_cli.deps.reachability` whether a remaining candidate is still
     forward-reachable from a surviving package's own manifest (the
-    shared/diamond-dependency rescue). An incomplete walk keeps every
-    candidate this run; with replacement evidence it refuses instead.
-    ``repairs`` maps each rescued key to the ``(parent_repo_url,
-    local_path, dev_only)`` of the surviving node that reached it; only the
-    real run may persist them.
+    shared/diamond-dependency rescue). The removal roots themselves are
+    asked too: a root a surviving package still declares is a
+    ``rescued_root`` whose declaration alone goes (#4749). An incomplete walk
+    keeps every descendant candidate and rescues only the roots it already
+    reached; with replacement evidence it refuses instead. ``repairs`` maps each rescued
+    key to the ``(parent_repo_url, local_path, dev_only)`` of the surviving
+    node that reached it; only the real run may persist them.
     """
     operation = OrphanOperation.UNINSTALL
     if not probe.apm_modules_dir.exists():
         return OrphanRemovalDecision(operation=operation)
     orphans, removed_parents = _collect_orphan_candidates(lockfile, list(roots))
-    if not orphans:
-        return OrphanRemovalDecision(operation=operation)
+    root_keys = _locked_root_keys(lockfile, roots)
     remaining = {ref.get_unique_key() for ref in (*probe.direct_refs, *probe.dev_refs)}
     for dep in lockfile.get_package_dependencies():
         key = dep.get_unique_key()
         if (
             key not in orphans
+            and key not in root_keys
             and lockfile_parent_identity(dep, lockfile.replacements) not in removed_parents
         ):
             remaining.add(key)
     candidate_orphans = frozenset(orphans) - remaining
-    if not candidate_orphans:
+    candidate_roots = root_keys - remaining
+    if not candidate_orphans and not candidate_roots:
         return OrphanRemovalDecision(operation=operation)
 
     from ..deps.reachability import compute_forward_reachable_keys
@@ -579,11 +588,12 @@ def _decide_uninstall(
         probe.project_root,
         probe.apm_modules_dir,
         list(probe.direct_refs),
-        candidate_orphans,
+        candidate_orphans | candidate_roots,
         dev_refs=probe.dev_refs,
     )
     if not walk.complete:
-        if lockfile.replacements is not None:
+        unreached_roots = candidate_roots - walk.reachable
+        if lockfile.replacements is not None and (candidate_orphans or unreached_roots):
             unverifiable = sorted({key for key, _reason in walk.unverifiable})
             details = ", ".join(unverifiable[:3])
             if len(unverifiable) > 3:
@@ -593,26 +603,87 @@ def _decide_uninstall(
                 f"({len(unverifiable)} manifest(s): {details}). Restore missing or "
                 "invalid package manifests before uninstalling."
             )
+        # A root the partial walk already reached is still needed: reaching
+        # it is proof. Unreached roots go as before, and every descendant
+        # candidate is kept because the walk cannot prove it unused.
+        rescued_roots = candidate_roots & walk.reachable
+        repairs = _rescue_repairs(walk, rescued_roots)
         return OrphanRemovalDecision(
             operation=operation,
             candidate_keys=candidate_orphans,
             retained_keys=candidate_orphans,
-            reachability=walk,
+            rescued_roots=rescued_roots,
+            repairs=MappingProxyType(repairs),
+            rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+            reachability=walk if candidate_orphans else None,
         )
     rescued = candidate_orphans & walk.reachable
-    repairs = {
-        key: (*walk.reachable_via[key], key in walk.dev_only)
-        for key in rescued
-        if key in walk.reachable_via
-    }
+    rescued_roots = candidate_roots & walk.reachable
+    repairs = _rescue_repairs(walk, rescued | rescued_roots)
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=candidate_orphans,
         removed_keys=candidate_orphans - walk.reachable,
         rescued_keys=rescued,
+        rescued_roots=rescued_roots,
         repairs=MappingProxyType(repairs),
+        rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
         reachability=walk,
     )
+
+
+def _rescue_repairs(walk, keys: frozenset[str]) -> dict:
+    """Map each rescued key to the surviving parent that reached it."""
+    return {
+        key: (*walk.reachable_via[key], key in walk.dev_only)
+        for key in keys
+        if key in walk.reachable_via
+    }
+
+
+def _rescued_root_depths(
+    lockfile: LockFile, rescued_roots: frozenset[str], repairs: Mapping
+) -> dict[str, int]:
+    """Depth each re-parented root and its locked subtree take (#4749).
+
+    A rescued root is no longer direct. As install records it, its depth is
+    its new parent's depth plus one, and each entry recorded under it follows.
+    """
+    replacements = lockfile.replacements
+    dependencies = lockfile.get_package_dependencies()
+    by_identity = {lockfile_parent_identity(dep, replacements): dep for dep in dependencies}
+    children = _build_children_index(lockfile)
+    depths: dict[str, int] = {}
+    queue = []
+    for key in sorted(rescued_roots):
+        dep = lockfile.get_dependency(key)
+        if dep is None or key not in repairs:
+            continue
+        parent = by_identity.get(repairs[key][0])
+        depths[key] = max(parent.depth if parent is not None else 1, 1) + 1
+        queue.append(dep)
+    while queue:
+        dep = queue.pop()
+        depth = depths[dep.get_unique_key()] + 1
+        for child in children.get(lockfile_parent_identity(dep, replacements), ()):
+            child_key = child.get_unique_key()
+            if child_key not in depths:
+                depths[child_key] = depth
+                queue.append(child)
+    return depths
+
+
+def _locked_root_keys(lockfile: LockFile, roots: Sequence[object]) -> frozenset[str]:
+    """Lock keys of the removal roots that hold a package row."""
+    keys: set[str] = set()
+    for root in roots:
+        try:
+            key = parse_dependency_entry(root).get_unique_key()
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if key in lockfile.dependencies and key != _SELF_KEY:
+            keys.add(key)
+    return frozenset(keys)
 
 
 def _build_expected_install_paths(

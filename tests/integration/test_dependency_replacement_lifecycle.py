@@ -1392,3 +1392,64 @@ def test_existing_local_replacement_reloads_changed_child_manifest(
     entries = load_yaml(fixture.consumer.root / "apm.lock.yaml")["dependencies"]
     assert len(entries) == 1
     assert entries[0]["repo_url"] == "apm-replacement-fixture/base"
+
+
+def test_declaration_only_uninstall_drops_the_replacement_root_request(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """#4749: uninstalling a replaced direct dependency a parent still needs keeps
+    only the surviving parent's request and selection, so the lock no longer
+    records the removed declaration and its extra skill is not redeployed."""
+    fixture = _replacement_fixture(tmp_path, apm_binary_path)
+    for skill in ("alpha", "beta"):
+        skill_file = fixture.local.root / ".apm" / "skills" / skill / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text(
+            f"---\nname: {skill}\ndescription: {skill} skill\n---\n# {skill}\n", encoding="utf-8"
+        )
+    factory = LocalPackageFactory(fixture.consumer.root.parent)
+    parent = factory.create(
+        "left",
+        dependencies=({"git": _UPSTREAM, "ref": fixture.upstream_sha, "skills": ["alpha"]},),
+    )
+    repository = fixture.repositories.create("left", source_tree=parent.root)
+    sha = fixture.repositories.commit(repository, message="Parent of base").sha
+    remote = "https://github.com/apm-replacement-fixture/left"
+    fixture.environment.update(
+        fixture.repositories.url_rewrite_subprocess_env_many(
+            ((fixture.upstream, _UPSTREAM), (fixture.fork, _FORK), (repository, remote))
+        )
+    )
+    manifest = load_yaml(fixture.consumer.manifest_path)
+    manifest["dependencies"]["apm"] = [
+        {"git": remote, "ref": sha},
+        {"git": _UPSTREAM, "ref": fixture.upstream_sha},
+    ]
+    dump_yaml(manifest, fixture.consumer.manifest_path)
+    fixture.replace({"path": "../local-base"})
+    fixture.install()
+
+    def base_entry() -> dict:
+        entries = load_yaml(fixture.consumer.root / "apm.lock.yaml")["dependencies"]
+        return next(d for d in entries if d["repo_url"] == "apm-replacement-fixture/base")
+
+    parents = {r["parent"] for r in base_entry()["replacement"]["requests"]}
+    assert parents == {None, "apm-replacement-fixture/left"}
+    skills = fixture.consumer.root / ".agents" / "skills"
+    assert (skills / "beta" / "SKILL.md").is_file()
+
+    result = fixture.run("uninstall", "apm-replacement-fixture/base")
+    assert result.returncode == 0, result.stdout + result.stderr
+    entry = base_entry()
+    assert entry["resolved_by"] == "apm-replacement-fixture/left"
+    assert [r["parent"] for r in entry["replacement"]["requests"]] == [
+        "apm-replacement-fixture/left"
+    ]
+    # Only the surviving parent's selection stays deployed.
+    assert entry["skill_subset"] == ["alpha"]
+    assert (skills / "alpha" / "SKILL.md").is_file()
+    assert not (skills / "beta").exists()
+    fixture.assert_bytes("LOCAL")
+    frozen = fixture.run(*_INSTALL, "--frozen")
+    assert frozen.returncode == 0, frozen.stdout + frozen.stderr
