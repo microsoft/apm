@@ -29,13 +29,12 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
 
         from apm_cli.install import diff_apply
         from apm_cli.install.locking import lifecycle_operation
-        from apm_cli.install.noop_diff import try_noop
 
         current = click.get_current_context()
         root, argv = Path.cwd(), list(raw)
         options = {"frozen": frozen}
         with lifecycle_operation():
-            done = try_noop(options, argv, root) or diff_apply.try_apply(options, argv, root)
+            done = diff_apply.try_apply(options, argv, root)
         if done:
             return None
         current.meta[DECLINED] = True

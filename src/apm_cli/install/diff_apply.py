@@ -313,6 +313,9 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
     if not noop_diff.eligible(options, argv):
         _trace("full run (options)")
         return False
+    import time
+
+    started = time.perf_counter()
     try:
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
 
@@ -371,7 +374,12 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         return False
     count = len(files) + len(extras)
     _trace(f"applied a verified diff ({count} files)")
-    from apm_cli.utils.console import _rich_success
+    from apm_cli.utils.console import _rich_info, _rich_success
+
+    if not (count or packages):
+        elapsed = time.perf_counter() - started
+        _rich_info(f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info")
+        return True
 
     _rich_success(
         f"Installed {len(lock.dependencies)} locked dependencies from the cache "
