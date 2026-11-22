@@ -545,7 +545,6 @@ _EDITED_EXEC = [
 
 
 _EDITED_EXEC_KNOWN = Known("#4626", r"I1-X2: the user's bytes were changed")
-_MCP_ENTRY_KNOWN = Known("#4759", r"failed install changed (the manifest|durable files)")
 
 
 def test_edited_executable_files_are_kept(lifecycle_world) -> None:
@@ -728,8 +727,9 @@ def test_users_own_executable_files_at_package_paths_survive(lifecycle_world) ->
 def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src) -> None:
     """A user's MCP entry of the same name is never taken over.
 
-    An inline server refuses, but writes before it detects the conflict
-    (#4759; #4268 closed the install path only); a registry server keeps the user's entry and says it skipped.
+    An inline server refuses before any write: apm.yml, .github/ and the
+    user's .mcp.json stay byte-identical (#4759, I7); a registry server keeps
+    the user's entry and says it skipped.
     """
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (), policy="allow")
@@ -738,11 +738,19 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
     scenario.user_write(".mcp.json", json.dumps(servers, indent=2) + "\n")
     scenario.source_moved()
     if src == "inline-mcp":
+        manifest = (lifecycle_world.project / "apm.yml").read_bytes()
         step = scenario.run(
             _MCP_SOURCES[src],
             exit=1,
-            known={"I7": _MCP_ENTRY_KNOWN},
+            credit=[_pair("unowned", SRC=src)],
+            keep={"project": (".mcp.json",)},
+            refusal=True,
         )
+        assert "MCP server 'p-inline' conflicts with the existing copilot" in step.output
+        assert "Preserved that connection" in step.output, step.output
+        assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+        assert not (lifecycle_world.project / ".github").exists(), step.output
+        assert_changes(step.changed, (), label=step.line)
     else:
         step = scenario.run(
             _MCP_SOURCES[src],
@@ -1244,12 +1252,12 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
-        **{
-            f"test_a_users_mcp_entry_blocks_a_server_of_the_same_name[{src}]": [
-                _pair("unowned", PRIM="mcp", SRC=src)
-            ]
-            for src in ("inline-mcp", "mcp-registry")
-        },
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": [
+            _pair("unowned", SRC="inline-mcp")
+        ],
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[mcp-registry]": [
+            _pair("unowned", PRIM="mcp", SRC="mcp-registry")
+        ],
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
             f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
@@ -1326,6 +1334,5 @@ CREDITS = credits(
     },
     known={
         "test_edited_executable_files_are_kept": _EDITED_EXEC_KNOWN,
-        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": _MCP_ENTRY_KNOWN,
     },
 )
