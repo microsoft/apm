@@ -1141,3 +1141,53 @@ def _receipt_evidence_for(root: Path):
         diagnostics=DiagnosticCollector(),
         kept=(),
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_locator_refuses_a_link_planted_after_a_first_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link planted under the skills root after a first check still cannot pass."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    skills_root = TARGET.skills_deploy_path(root)
+    assert session._locator(path, [TARGET]) is not None
+    outside = tmp_path / "outside"
+    (outside / "SKILL.md").parent.mkdir(parents=True)
+    (outside / "SKILL.md").write_text("planted\n", encoding="utf-8")
+    (skills_root / "planted").symlink_to(outside, target_is_directory=True)
+
+    planted = skills_root / "planted" / "SKILL.md"
+    assert session._locator(planted, [TARGET]) is None
+    with pytest.raises(RuntimeError, match="outside"):
+        DeploymentLedgerCodec.locator_for_path(
+            planted, project_root=root, target=TARGET, scope=InstallScope.PROJECT
+        )
+    assert planted.read_text(encoding="utf-8") == "planted\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_locator_resolves_a_retargeted_skills_root_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retargeting the skills root and linking back into its old target is refused."""
+    (tmp_path / "home").mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    root = tmp_path / "consumer"
+    old, new = root / "old", root / "new"
+    (old / "demo").mkdir(parents=True)
+    (old / "demo" / "SKILL.md").write_text("old\n", encoding="utf-8")
+    new.mkdir()
+    skills_root = TARGET.skills_deploy_path(root)
+    skills_root.parent.mkdir(parents=True)
+    skills_root.symlink_to(old, target_is_directory=True)
+    session = _session(root, LockFile())
+    path = skills_root / "demo" / "SKILL.md"
+    assert session._locator(path, [TARGET]) is not None
+
+    skills_root.unlink()
+    skills_root.symlink_to(new, target_is_directory=True)
+    (new / "demo").symlink_to(old / "demo", target_is_directory=True)
+
+    assert session._locator(path, [TARGET]) is None
+    assert path.read_text(encoding="utf-8") == "old\n"
