@@ -15,6 +15,9 @@ class FakeApi:
         self.post_handler: Callable[[str, Mapping[str, Any]], Response] = lambda p, b: Response(
             201, {"sha": "f" * 40}
         )
+        self.patch_handler: Callable[[str, Mapping[str, Any]], Response] = lambda p, b: Response(
+            200, {}
+        )
         self.calls: list[tuple[str, str, Any]] = []
 
     def get(self, path: str, params: Mapping[str, Any] | None = None) -> Any:
@@ -30,6 +33,10 @@ class FakeApi:
     def post(self, path: str, body: Mapping[str, Any]) -> Response:
         self.calls.append(("POST", path, dict(body)))
         return self.post_handler(path, body)
+
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response:
+        self.calls.append(("PATCH", path, dict(body)))
+        return self.patch_handler(path, body)
 
     def delete(self, path: str) -> Response:
         self.calls.append(("DELETE", path, None))

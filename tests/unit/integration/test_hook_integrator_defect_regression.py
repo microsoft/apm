@@ -20,6 +20,7 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.security.gate import SecurityGate
+from apm_cli.utils.diagnostics import DiagnosticCollector
 from tests.utils.deployment_evidence import receipted_evidence
 
 pytestmark = pytest.mark.unit
@@ -916,3 +917,69 @@ def test_undeclared_event_retires_safe_legacy_leaf_marker(
     assert stop_commands.count("echo stop") == (1 if legacy_retired else 2)
     sidecar = json.loads((claude / "apm-hooks.json").read_text(encoding="utf-8"))
     assert ("PreToolUse" in sidecar) is not legacy_retired
+
+
+@pytest.mark.parametrize("target", ["claude", "kiro", "copilot"])
+def test_a_withheld_hook_document_never_ships_as_a_bundle_asset(
+    tmp_path: Path, target: str
+) -> None:
+    """Only admitted documents deploy; a withheld sibling is a document, not an asset."""
+    package_path = tmp_path / "pkg"
+    hooks_dir = package_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "run.sh").write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    command = {"hooks": [{"type": "command", "command": "./run.sh"}]}
+    approved = hooks_dir / "approved.json"
+    approved.write_text(json.dumps({"hooks": {"Stop": [command]}}), encoding="utf-8")
+    withheld = hooks_dir / "withheld.json"
+    withheld.write_text(json.dumps({"hooks": {"Stop": [command]}}), encoding="utf-8")
+
+    selection = HookIntegrator.select_deployable_hook_sources(
+        package_path, (target,), hook_files=[approved]
+    )
+
+    assert withheld not in selection.bundle_for(target)
+    assert hooks_dir / "run.sh" in selection.bundle_for(target)
+    assert withheld.read_text(encoding="utf-8").startswith("{"), "selection is read-only"
+
+
+def test_overlapping_hook_roots_keep_nested_module_metadata_on_reinstall(
+    tmp_path: Path,
+) -> None:
+    """A nested package.json copied by an enclosing root is never a sidecar (#2950)."""
+    package_root = tmp_path / "apm_modules" / "owner" / "overlap-pkg"
+    (package_root / "hooks").mkdir(parents=True)
+    (package_root / "scripts" / "esm").mkdir(parents=True)
+    (package_root / "scripts" / "run.js").write_text("process.exit(0);\n", encoding="utf-8")
+    (package_root / "scripts" / "esm" / "entry.js").write_text("import '#lib';\n", encoding="utf-8")
+    metadata = '{"type": "module", "imports": {"#lib": "./lib.js"}}\n'
+    (package_root / "scripts" / "esm" / "package.json").write_text(metadata, encoding="utf-8")
+    commands = ("node ${PLUGIN_ROOT}/scripts/run.js", "node ${PLUGIN_ROOT}/scripts/esm/entry.js")
+    hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": c} for c in commands]}]}
+    (package_root / "hooks" / "hooks.json").write_text(
+        json.dumps({"hooks": hooks}), encoding="utf-8"
+    )
+    (tmp_path / ".claude").mkdir()
+    package_info = PackageInfo(
+        package=APMPackage(name="overlap-pkg", version="0.0.1"), install_path=package_root
+    )
+    deployed = tmp_path / ".claude" / "hooks" / "overlap-pkg" / "scripts"
+    managed: set[str] = set()
+    for _install in range(2):
+        diagnostics = DiagnosticCollector()
+        result = HookIntegrator().integrate_hooks_for_target(
+            KNOWN_TARGETS["claude"],
+            package_info,
+            tmp_path,
+            managed_files=set(managed),
+            diagnostics=diagnostics,
+        )
+        written = [p.relative_to(tmp_path).as_posix() for p in result.target_paths]
+        managed |= set(written)
+
+        assert diagnostics.by_category() == {}
+        assert sorted(written) == sorted(set(written))
+        assert (deployed / "esm" / "package.json").read_text(encoding="utf-8") == metadata
+        assert json.loads((deployed / "package.json").read_text(encoding="utf-8")) == {
+            "type": "commonjs"
+        }
