@@ -2684,6 +2684,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The registry client loses the canonical MCP registry precedence resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-noop-replay-owner",
+        rule_id="install-deployment-noop-replay-owner",
+        path="src/apm_cli/install/noop_fast_path.py",
+        old="    mismatches, unresolved = verify_deployed_file_hashes(project_root, lock)\n",
+        new="    mismatches, unresolved = [], []\n",
+        intent="A replayed no-op stops verifying deployed files against their lockfile hashes.",
+    ),
+    MutationCase(
         guard_id="install-deployment-orphan-selection",
         rule_id="install-deployment-orphan-selection",
         path="src/apm_cli/commands/prune.py",

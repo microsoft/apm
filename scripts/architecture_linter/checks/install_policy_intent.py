@@ -10,6 +10,10 @@ purely to keep that catalog well under the module size budget.
 
 from __future__ import annotations
 
+from scripts.architecture_linter.checks.install_noop_replay import (
+    RULE_NOOP_REPLAY,
+    check_noop_replay_owner,
+)
 from scripts.architecture_linter.checks.install_policy_deployment_and_ref import (
     RULE_DEPLOYMENT_FRAME,
     RULE_LOCAL_ANCHOR,
@@ -153,6 +157,16 @@ EXTRA_RULES: tuple[Rule, ...] = (
             "APM_POLICY_DISABLE is read only by policy/discovery.py::policy_disabled_by_env."
         ),
         check=check_policy_disable_switch_owner,
+    ),
+    Rule(
+        id=RULE_NOOP_REPLAY,
+        group=GROUP,
+        guard_ids=(RULE_NOOP_REPLAY,),
+        description=(
+            "A no-op install replays only through install/noop_fast_path.py, which keeps "
+            "live policy discovery and the deployed-file hash verifier."
+        ),
+        check=check_noop_replay_owner,
     ),
     Rule(
         id=RULE_EXPLICIT_POLICY_SOURCE,

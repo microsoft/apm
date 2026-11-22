@@ -700,6 +700,7 @@ install-deployment-lifecycle-serialization-closed-world
 install-deployment-mcp-admission
 install-deployment-mcp-native-comparison
 install-deployment-mcp-ownership-migration
+install-deployment-noop-replay-owner
 install-deployment-mcp-registry-resolution
 install-deployment-orphan-selection
 install-deployment-outcome

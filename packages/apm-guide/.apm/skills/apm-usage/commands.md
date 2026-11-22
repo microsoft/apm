@@ -54,6 +54,13 @@ replay without ref discovery; new names may require a lookup.
 Align manifest refs and regenerate the lockfile with a normal install to repair
 a collapsed graph; `--force` does not bypass this check.
 
+With `APM_INSTALL_FAST_PATH=1` (experimental, off by default), a plain
+`apm install` (or `--frozen`) on an unchanged project replays the previous
+no-op and writes nothing, but only when every file it read is byte-identical,
+org policy (re-checked each run) is unchanged and deployed files match their
+lockfile content hashes; otherwise the full install runs. `=trace` also
+prints the decision.
+
 `apm deps list` recognizes declared or locked aliases at their canonical
 install paths and displays logical dependency identities, including in user
 scope. It reads only the selected store; it does not substitute another store.
