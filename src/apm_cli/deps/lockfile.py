@@ -43,7 +43,7 @@ from ..models.dependency.replacement import (
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
-from .lockfile_container import load_observes_per_row_projection, parse_lockfile_text
+from .lockfile_container import parse_lockfile_text
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
 from .lockfile_version_remedy import with_version_remedy
@@ -1668,9 +1668,10 @@ class LockFile:
             [str(name) for name in recorded_targets] if isinstance(recorded_targets, list) else None
         )
         lock._extensions = vendor_extensions(data)
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
         dependencies = [LockedDependency.from_dict(row) for row in data.get("dependencies", [])]
-        # The ledger is set once below; re-projecting it per row is O(N^2).
-        project_per_row = load_observes_per_row_projection(dependencies)
+        project_per_row = DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)
         for dep in dependencies:
             lock.add_dependency(dep, project_ledger=project_per_row)
         lock.mcp_servers = list(data.get("mcp_servers", []))
@@ -1714,8 +1715,6 @@ class LockFile:
         # and the local package, without changing the on-disk YAML shape.
         if lock.local_deployed_files:
             lock.dependencies[_SELF_KEY] = lock.project_self_entry()
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
         if "deployments" in data:
             deployment_rows = data["deployments"]
             lock.deployment_ledger = DeploymentLedgerCodec.from_rows(deployment_rows)

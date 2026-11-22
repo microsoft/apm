@@ -185,3 +185,22 @@ class TestLockFileReadCost:
         )
         with pytest.raises(ValueError, match="requires a canonical sha256"):
             LockFile.from_yaml(text)
+
+    def test_merge_reordered_alias_chain_loads_like_a_fresh_parse(self):
+        """A shallow alias chain the bounded loader accepts is never lost to a copy limit.
+
+        The merge key puts ``deep`` first, so a deep copy enters the whole chain
+        at once and exceeds the recursion limit; every read must still load.
+        """
+        depth = 1200
+        lines = ["lockfile_version: '1'", "dependencies: []", "x-chain:", "  k0: &a0 [leaf]"]
+        lines += [f"  k{index}: &a{index} [*a{index - 1}]" for index in range(1, depth)]
+        lines.append(f"  <<: {{deep: *a{depth - 1}}}")
+        text = "\n".join(lines) + "\n"
+
+        loads = [LockFile.from_yaml(text) for _ in range(2)]
+
+        for lock in loads:
+            chain = lock._extensions["x-chain"]
+            assert next(iter(chain)) == "deep"
+            assert chain["k0"] == ["leaf"]
