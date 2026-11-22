@@ -420,3 +420,17 @@ class TestPackRoutedRules:
             )
             == {}
         )
+
+    def test_routed_rule_at_a_deployed_path_merges_only_identical_bytes(self, tmp_path):
+        """A deployed same-path rule ships once when equal, else the pack refuses."""
+        from apm_cli.bundle.claude_routed_rules import merged_routed_claude_rules
+
+        deployed = tmp_path / "style.md"
+        deployed.write_bytes(b"one")
+        routed = {"a/x": {".claude/rules/style.md": "one"}}
+        shipped = {".claude/rules/style.md": deployed}
+
+        assert merged_routed_claude_rules(routed, shipped) == {}
+        deployed.write_bytes(b"two")
+        with pytest.raises(ValueError, match=r"another dependency deploys a different file"):
+            merged_routed_claude_rules(routed, shipped)

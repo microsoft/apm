@@ -248,11 +248,10 @@ def pack_bundle(
         write_routed_claude_rules,
     )
 
-    rendered_rules = {
-        dep_key: {path: text for path, text in rules.items() if path not in seen}
-        for dep_key, rules in routed_claude_rules(lockfile, project_root, effective_target).items()
-    }
-    rendered_files = merged_routed_claude_rules(rendered_rules)
+    rendered_rules = routed_claude_rules(lockfile, project_root, effective_target)
+    rendered_files = merged_routed_claude_rules(
+        rendered_rules, {path: project_root / path_mappings.get(path, path) for path in seen}
+    )
 
     # 5. Verify each path is safe (no traversal) and exists on disk
     project_root_resolved = project_root.resolve()

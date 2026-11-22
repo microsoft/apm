@@ -218,3 +218,37 @@ def test_pack_refuses_routed_rules_from_an_apm_modules_copy_the_lock_does_not_at
         assert result.returncode != 0, output
         assert "does not match the content hash recorded in apm.lock.yaml" in output, output
         assert not out.exists() or not any(out.iterdir())
+
+
+def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A routed rule never vanishes behind another dependency's same-path rule."""
+    scenario = _new_scenario(tmp_path / "shared-path", apm_binary_path)
+    routed = _publish(scenario, "guard-kit", instruction="guard")
+    scoped = _publish(
+        scenario,
+        "python-kit",
+        instruction="guard",
+        instruction_content=_instruction("guard", apply_to="**/*.py"),
+    )
+    producer = scenario.consumers.create(
+        "producer", dependencies=(routed.dependency, scoped.dependency), targets=("claude",)
+    )
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        ((routed.repository, routed.remote_url), (scoped.repository, scoped.remote_url))
+    )
+    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
+    assert "**/*.py" in (producer.root / _RULE).read_text(encoding="ascii")
+
+    out = tmp_path / "bundles"
+    result = scenario.runner.run(
+        ("pack", "--format", "apm", "-o", str(out)),
+        scenario_id="pack-shared-path",
+        cwd=producer.root,
+        env=environment,
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode != 0, output
+    assert f"Cannot pack {_RULE}" in output, output
+    assert not out.exists() or not any(out.iterdir())

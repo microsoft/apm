@@ -13,6 +13,7 @@ warning instead of guessing.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -93,11 +94,16 @@ def routed_claude_rules(
     return rules
 
 
-def merged_routed_claude_rules(rendered: dict[str, dict[str, str]]) -> dict[str, str]:
+def merged_routed_claude_rules(
+    rendered: dict[str, dict[str, str]], deployed: Mapping[str, Path] | None = None
+) -> dict[str, str]:
     """Flatten per-dependency rules into one bundle tree; refuse divergent same-path renders.
 
     Before #3939 two dependencies writing the same rule path collided at
-    install; the pack must not silently keep only the last one.
+    install; the pack must not silently keep only the last one. *deployed*
+    maps each bundle path the pack already ships to its file on disk: a
+    routed rule at one of those paths must carry the same bytes, and is
+    then left out of the returned files (the deployed copy ships).
     """
     merged: dict[str, str] = {}
     owners: dict[str, str] = {}
@@ -111,6 +117,15 @@ def merged_routed_claude_rules(rendered: dict[str, dict[str, str]]) -> dict[str,
                 )
             merged[path] = text
             owners.setdefault(path, dep_key)
+    for path in [path for path in merged if deployed and path in deployed]:
+        disk = deployed[path]
+        if disk.is_file() and disk.read_bytes() != merged[path].encode("utf-8"):
+            raise ValueError(
+                f"Cannot pack {path}: dependency {owners[path]} routes an instruction with "
+                "that name to AGENTS.md, but another dependency deploys a different file at "
+                "that path, and the bundle can ship only one. Rename one of the instruction files."
+            )
+        del merged[path]
     return merged
 
 
