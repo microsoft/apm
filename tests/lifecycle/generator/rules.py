@@ -174,7 +174,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "revoked executable must survive; an org policy dependency deny removes it",
         (
             Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
-            Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
+            Ev("src/apm_cli/policy/install_preflight.py", 233, "Install blocked by org policy"),
         ),
     ),
     "U3": (
@@ -282,7 +282,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
             Ev("src/apm_cli/install/services.py", 827, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1030, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 1016, '"instructions" not in target.primitives'),
         ),
     ),
 }
