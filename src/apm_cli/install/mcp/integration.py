@@ -893,7 +893,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 servers=(new_mcp_servers, old_mcp_servers),
                 configs=(new_mcp_configs, old_mcp_configs),
                 provenance=(new_mcp_provenance, old_mcp_provenance),
-                native_hashes=native_hashes,
+                native_hashes=(native_hashes, old_native_hashes),
+                stamp_version=translated,
             )
 
         retire_mcp_claims(

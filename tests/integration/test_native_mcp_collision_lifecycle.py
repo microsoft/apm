@@ -578,6 +578,33 @@ def test_a_refused_deselection_keeps_the_claim_it_did_not_remove(
     assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
 
 
+def test_a_refused_deselection_keeps_its_baseline_across_a_declaration_change(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """The URL changes and ``targets:`` drops claude while claude holds the new URL (#4792).
+
+    The refusal keeps the recorded baseline for the pending claude retirement,
+    so an identical retry refuses again instead of deleting the user's entry.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    updated = "http://127.0.0.1:8000/updated"
+    edited = {**scenario.servers("claude")["notes"], "url": updated}
+    scenario.edit("claude", "notes", edited)
+    scenario.declare([{**_http(updated), "targets": ["codex"]}])
+
+    for _attempt in range(2):
+        refused = scenario.install()
+        output = " ".join((refused.stdout + refused.stderr).split())
+        assert refused.returncode == 1, output
+        assert "Preserved MCP connection(s) notes" in output, output
+        assert scenario.servers("claude")["notes"] == edited
+        assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+    assert scenario.servers("codex")["notes"]["url"] == updated
+
+
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])
 def test_claude_managed_env_removal_repeats_and_retires(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],

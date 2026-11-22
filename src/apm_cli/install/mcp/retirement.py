@@ -48,7 +48,8 @@ def record_refused_retirement(
     servers: tuple[builtins.set, builtins.set],
     configs: tuple[dict, dict],
     provenance: tuple[dict, dict],
-    native_hashes: dict[str, dict[str, str]],
+    native_hashes: tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]],
+    stamp_version: bool = False,
 ) -> None:
     """Persist the claims a run wrote before a refused retirement stopped it (#4792).
 
@@ -68,28 +69,40 @@ def record_refused_retirement(
         for target, names in old_target_servers.items()
     }
     retain_deferred_mcp_claims(managed_target_servers, retained, set(new_servers))
+    new_hashes, old_hashes = native_hashes
+    new_configs, old_configs = configs
+    pending_names: set[str] = set()
     for runtime, names, _exclude in planned:
         if runtime is not None and runtime in old_target_servers:
             pending = names & retained[runtime]
             if pending:
                 managed_target_servers.setdefault(runtime, set()).update(pending)
+                pending_names |= pending
+                # The retry compares against the baseline that was refused.
+                for name in pending & set(old_hashes.get(runtime, {})):
+                    new_hashes.setdefault(runtime, {})[name] = old_hashes[runtime][name]
     claimed = set().union(*managed_target_servers.values())
     gone = removed_names(removed) - claimed
     kept_old = {name for name in old_servers if name not in gone}
-    new_configs, old_configs = configs
+    # A pending retirement keeps its recorded declaration as its baseline; a new
+    # write keeps its own proof through its native hash, so the retry still
+    # refuses an edit that only matches the new declaration.
+    baselines = {n: c for n, c in old_configs.items() if n in kept_old}
+    baselines.update({n: c for n, c in new_configs.items() if n not in pending_names})
     new_provenance, old_provenance = provenance
     MCPIntegrator.update_lockfile(
         set(new_servers) | kept_old,
         lock_path,
-        mcp_configs={**{n: c for n, c in old_configs.items() if n in kept_old}, **new_configs},
+        mcp_configs=baselines,
         mcp_target_servers=managed_target_servers,
         mcp_config_provenance={
             **{n: p for n, p in old_provenance.items() if n in kept_old},
             **new_provenance,
         },
-        native_hashes=native_hashes,
+        native_hashes=new_hashes,
         logger=logger,
         fail_on_write_error=True,
+        stamp_version=stamp_version,
     )
 
 
