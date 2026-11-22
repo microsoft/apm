@@ -1,9 +1,10 @@
 """The ``native_plugin`` lock record: APM's only ownership evidence.
 
 A dependency that APM deploys as an intact native plugin records the deployed
-plugin name, its root under the user's ``.agents/plugins`` directory, the
-complete native fingerprint of the deployed bytes and the marketplace binding
-it was declared under. Which harness loads it follows from the entry's
+plugin name, its root under the scope's ``.agents/plugins`` directory, the
+root digest of the deployed bytes (paths, bytes and exec bit at user scope;
+paths and bytes for a committed project-scope root) and the marketplace
+binding it was declared under. Which harness loads it follows from the entry's
 targets, so the record does not repeat them. Settings keys and deployed roots are derived from these records
 in the previous and next lockfile; no receipt file exists beside the lock.
 """
@@ -15,7 +16,9 @@ from dataclasses import dataclass
 from typing import Any
 
 PLUGINS_RELATIVE = ".agents/plugins"
-_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
+# Interior dots are allowed (Agent Plugin names such as ``acme.review``);
+# a leading or trailing dot is refused (req-na-002).
+_NAME = re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9_-])?")
 _FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}")
 
 
@@ -91,3 +94,32 @@ def lock_native_plugins(lockfile: Any) -> dict[str, NativePluginRecord]:
         for key, dependency in lockfile.dependencies.items()
         if dependency.native_plugin is not None
     }
+
+
+def native_fields_from_lock_data(
+    data: dict[str, Any],
+) -> tuple[NativePluginRecord | None, list[str] | None]:
+    """The ``native_plugin`` record and ``native_declared`` harnesses of one lock row.
+
+    Raises :class:`NativePluginRecordError` for a malformed record; an
+    unreadable ``native_declared`` list is ignored (advisory, never trust-bearing).
+    """
+    if "native_plugin" not in data:
+        return None, None
+    record = NativePluginRecord.from_lock_data(data["native_plugin"])
+    declared = data.get("native_declared")
+    if not isinstance(declared, list):
+        return record, None
+    return record, sorted({harness for harness in declared if isinstance(harness, str)})
+
+
+def native_lock_fields(
+    record: NativePluginRecord | None, declared: list[str] | None
+) -> dict[str, Any]:
+    """Serialize one lock row's ``native_plugin`` and ``native_declared`` fields."""
+    if record is None:
+        return {}
+    fields: dict[str, Any] = {"native_plugin": record.to_lock_data()}
+    if declared is not None:
+        fields["native_declared"] = sorted(declared)
+    return fields

@@ -1466,6 +1466,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
         ),
+        # MCP write evidence (#4737) borrows the session's binding and paths only.
+        "src/apm_cli/install/mcp/write_receipts.py": (
+            "session = DeploymentMaterializationSession(Path(project_root), scope, None)",
+            "if not session.binds(data):",
+            "data = self._session.binding()",
+        ),
         "src/apm_cli/commands/uninstall/cli.py": (
             "_persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)",
             "else:\n        if integration_cleanup.materialization_session is not None:",

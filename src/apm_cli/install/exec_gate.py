@@ -422,6 +422,8 @@ class GateRetirements(NamedTuple):
     hook_pins: dict[str, str]
     # Lock key -> (why its recorded hooks are no longer allowed, kinds the rebuild removes).
     hook_packages: dict[str, tuple[str, tuple[str, ...]]]
+    # Lock key -> why a natively deployed plugin is no longer admitted whole (#3921).
+    native_packages: dict[str, str]
 
 
 def gate_retirements(
@@ -435,8 +437,9 @@ def gate_retirements(
     (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
     revoked approval or a changed definition -- recorded hook files whose
     pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
-    the ``--frozen`` and audit owner), and the packages whose recorded hooks
-    install's executables gate no longer deploys (:func:`locked_hooks_retired`).
+    the ``--frozen`` and audit owner), the packages whose recorded hooks
+    install's executables gate no longer deploys (:func:`locked_hooks_retired`),
+    and the native plugins install would now park (``locked_native_retired``).
     ``None`` when the org policy blocks or is unresolved: install's policy
     preflight owns that outcome.
     """
@@ -447,7 +450,7 @@ def gate_retirements(
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
-        return GateRetirements({}, {}, {}, {})
+        return GateRetirements({}, {}, {}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
     if route.blocks or route.unresolved:
         return None
@@ -482,7 +485,10 @@ def gate_retirements(
     retired = locked_hooks_retired(
         lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
     )
-    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+    from apm_cli.claude_plugins.admission import locked_native_retired
+
+    native = locked_native_retired(lockfile, modules_dir, _trust_ctx, route.policy)
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired, native)
 
 
 def locked_hooks_retired(

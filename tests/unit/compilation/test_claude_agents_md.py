@@ -84,7 +84,46 @@ class TestBlocker:
             "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n    mode: managed_section\n",
             encoding="utf-8",
         )
+        (tmp_path / "AGENTS.md").write_text(
+            "# Team AGENTS.md\n<!-- apm:start -->\n<!-- apm:end -->\n", encoding="utf-8"
+        )
         assert claude_agents_md_blocker(tmp_path) is None
+
+    def test_generated_agents_md_needs_markers_once_managed_section_is_on(self, tmp_path):
+        """Managed-section mode writes only between markers, even into a generated file."""
+        (tmp_path / "apm.yml").write_text(
+            "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n    mode: managed_section\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "AGENTS.md").write_text(
+            f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n", encoding="utf-8"
+        )
+        assert "managed section" in claude_agents_md_blocker(tmp_path)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "# Team notes only\n",
+            "<!-- apm:start -->\n<!-- apm:start -->\n<!-- apm:end -->\n",
+            "<!-- apm:end -->\n<!-- apm:start -->\n",
+        ],
+        ids=["missing", "duplicated", "reversed"],
+    )
+    def test_managed_section_without_one_marker_pair_keeps_the_rules(self, tmp_path, body):
+        """Compile would reject the file, so install keeps .claude/rules/ (#4787)."""
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / "apm.yml").write_text(
+            "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n    mode: managed_section\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "AGENTS.md").write_text(body, encoding="utf-8")
+        diagnostics = DiagnosticCollector()
+
+        deployed = _deploy(tmp_path, _package(tmp_path, {"style": "**"}), diagnostics=diagnostics)
+
+        assert deployed == ["style.md"]
+        (warning,) = [d.message for d in diagnostics.by_category()["warning"]]
+        assert "<!-- apm:start --> ... <!-- apm:end --> managed section" in warning
 
     def test_symlinked_agents_md_blocks_even_with_managed_section(self, tmp_path):
         (tmp_path / "apm.yml").write_text(
@@ -161,6 +200,24 @@ def _deploy(tmp_path, package, **kwargs) -> list[str]:
     return sorted(path.name for path in result.target_paths)
 
 
+def _compile_package(
+    project: Path,
+    package: SimpleNamespace | list[SimpleNamespace],
+    *,
+    source_dir: Path | None = None,
+    target: str = "claude",
+):
+    """Compile the packages' instructions the way ``apm compile`` does."""
+    from apm_cli.primitives.parser import parse_primitive_file
+
+    primitives = PrimitiveCollection()
+    for each in package if isinstance(package, list) else [package]:
+        for path in sorted((each.install_path / ".apm").rglob("*.md")):
+            primitives.add_primitive(parse_primitive_file(path, source="dependency:pkg"))
+    compiler = AgentsCompiler(str(project), str(source_dir) if source_dir else None)
+    return compiler.compile(CompilationConfig(target=target), primitives)
+
+
 class TestInstallRouting:
     FILES = {"style": "**", "tests": "src/test/**", "python": "**/*.py"}  # noqa: RUF012
 
@@ -189,20 +246,15 @@ class TestInstallRouting:
             return integrator.agents_md_stale
 
         assert stale() == {"style.instructions.md", "tests.instructions.md"}
-        (tmp_path / "AGENTS.md").write_text(
-            f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n\n# style\n", encoding="utf-8"
-        )
-        (tmp_path / "src" / "test" / "AGENTS.md").write_text(
-            f"{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n# tests\n", encoding="utf-8"
-        )
+        _compile_package(tmp_path, package)
+        assert stale() == set()
         # Claude loads AGENTS.md only through a CLAUDE.md that imports it; a
         # pre-#3939 generated CLAUDE.md does not, so compile must run again.
         (tmp_path / "CLAUDE.md").write_text(f"# CLAUDE.md\n{CLAUDE_HEADER}\n", encoding="utf-8")
-        assert stale() == {"style.instructions.md", "tests.instructions.md"}
-        for directory in (tmp_path, tmp_path / "src" / "test"):
-            (directory / "CLAUDE.md").write_text(
-                f"# CLAUDE.md\n{CLAUDE_HEADER}\n@AGENTS.md\n", encoding="utf-8"
-            )
+        assert stale() == {"style.instructions.md"}
+        (tmp_path / "CLAUDE.md").write_text(
+            f"# CLAUDE.md\n{CLAUDE_HEADER}\n@AGENTS.md\n", encoding="utf-8"
+        )
         assert stale() == set()
         source = package.install_path / ".apm" / "instructions" / "style.instructions.md"
         source.write_text(source.read_text(encoding="utf-8") + "More.\n", encoding="utf-8")
@@ -490,3 +542,181 @@ class TestPackRoutedRules:
         deployed.write_bytes(b"two")
         with pytest.raises(ValueError, match=r"another dependency deploys a different file"):
             merged_routed_claude_rules(routed, shipped)
+
+
+class TestRoutingFollowUps:
+    """The #4005 review follow-ups (#4787); each cell fails without its fix."""
+
+    def test_pack_renders_only_instructions_install_admits(self, tmp_path):
+        """A root-level instruction install never deploys is not packed (item 1)."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.integration.instruction_integrator import routed_claude_rule_renders
+
+        package = TestPackRoutedRules._cached_kit(tmp_path)
+        (package / "excluded.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n# Excluded\n", encoding="utf-8"
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/kit", resolved_commit="a" * 40))
+
+        rules = routed_claude_rule_renders(
+            lockfile, tmp_path, tmp_path / "apm_modules", include_local=False
+        )
+
+        assert sorted(rules["owner/kit"]) == [".claude/rules/style.md"]
+
+    def _stale(self, project: Path, package: SimpleNamespace) -> set[str]:
+        integrator = InstructionIntegrator()
+        integrator.integrate_instructions_for_target(KNOWN_TARGETS["claude"], package, project)
+        return integrator.agents_md_stale
+
+    def test_reminder_clears_after_compile_rewrites_a_context_link(self, tmp_path):
+        """Compile rewrites the link; a no-op reinstall stays quiet (item 2)."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        package = _package(tmp_path, {})
+        (package.install_path / ".apm" / "context").mkdir()
+        (package.install_path / ".apm" / "context" / "notes.context.md").write_text(
+            "---\ndescription: notes\n---\nNotes.\n", encoding="utf-8"
+        )
+        (package.install_path / ".apm" / "instructions" / "style.instructions.md").write_text(
+            "---\napplyTo: '**'\ndescription: style\n---\n\n"
+            "Read [the notes](../context/notes.context.md) first.\n",
+            encoding="utf-8",
+        )
+
+        assert _compile_package(project, package).success
+        compiled = (project / "AGENTS.md").read_text(encoding="utf-8")
+        assert "[the notes](../context/notes.context.md)" not in compiled
+        assert "[the notes](" in compiled
+
+        assert self._stale(project, package) == set()
+
+    @pytest.mark.parametrize("edit", ["narrowed-scope", "shortened-body", "emptied-body"])
+    def test_scope_or_body_edit_after_compile_asks_again(self, tmp_path, edit):
+        """A substring of the compiled text is not the compiled instruction (item 7)."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        (project / "src").mkdir()
+        package = _package(tmp_path, {})
+        source = package.install_path / ".apm" / "instructions" / "style.instructions.md"
+        source.write_text(
+            "---\napplyTo: '**'\ndescription: style\n---\n\nKeep it short.\nUse ASCII.\n",
+            encoding="utf-8",
+        )
+        assert _compile_package(project, package).success
+        assert self._stale(project, package) == set()
+
+        text = source.read_text(encoding="utf-8")
+        if edit == "narrowed-scope":
+            source.write_text(text.replace("applyTo: '**'", "applyTo: 'src/**'"), "utf-8")
+        elif edit == "shortened-body":
+            source.write_text(text.replace("Use ASCII.\n", ""), encoding="utf-8")
+        else:
+            source.write_text(text.split("\n\n")[0] + "\n\n", encoding="utf-8")
+
+        assert self._stale(project, package) == {"style.instructions.md"}
+
+    @staticmethod
+    def _context_reads(tmp_path, monkeypatch, packages: int, rules: int) -> int:
+        """Reads of any AGENTS.md or CLAUDE.md while one install routes the packages."""
+        project = tmp_path / f"project{packages}x{rules}"
+        (project / ".claude").mkdir(parents=True)
+        (project / "src").mkdir()
+        installed = [
+            _package(
+                tmp_path / f"pkg{packages}x{rules}-{k}",
+                {f"p{k}r{i}": ("src/**" if i % 2 else "**") for i in range(rules)},
+            )
+            for k in range(packages)
+        ]
+        assert _compile_package(project, installed).success
+        reads: list[Path] = []
+        real_open, real_read_bytes = Path.open, Path.read_bytes
+
+        def counted(path: Path) -> None:
+            if path.name in ("AGENTS.md", "CLAUDE.md") and project in path.parents:
+                reads.append(path)
+
+        def counting_open(self, *args, **kwargs):
+            counted(self)
+            return real_open(self, *args, **kwargs)
+
+        def counting_read_bytes(self):
+            counted(self)
+            return real_read_bytes(self)
+
+        integrator = InstructionIntegrator()
+        with monkeypatch.context() as patched:
+            patched.setattr(Path, "open", counting_open)
+            patched.setattr(Path, "read_bytes", counting_read_bytes)
+            for package in installed:
+                integrator.integrate_instructions_for_target(
+                    KNOWN_TARGETS["claude"], package, project
+                )
+        assert integrator.agents_md_stale == set()
+        return len(reads)
+
+    def test_one_install_reads_each_context_file_a_fixed_number_of_times(
+        self, tmp_path, monkeypatch
+    ):
+        """Instructions sharing a file, across packages, do not reread it (item 4)."""
+        few = self._context_reads(tmp_path, monkeypatch, packages=3, rules=2)
+        assert self._context_reads(tmp_path, monkeypatch, packages=3, rules=10) == few
+
+    def test_multi_target_compile_clears_the_reminder(self, tmp_path):
+        """Claude reads a shared AGENTS.md too, so compile records it (#4787 review)."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        package = _package(tmp_path, {"style": "**"})
+
+        assert _compile_package(project, package, target="all").success
+
+        assert self._stale(project, package) == set()
+
+    def test_a_rewrite_after_the_record_is_re_pinned(self, tmp_path):
+        """The CLI's constitution step rewrites AGENTS.md, then re-pins it (#4787 review)."""
+        from apm_cli.compilation.claude_agents_md import refresh_compiled_digest
+
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        package = _package(tmp_path, {"style": "**"})
+        assert _compile_package(project, package).success
+        agents_md = project / "AGENTS.md"
+        agents_md.write_text(agents_md.read_text("utf-8") + "\nConstitution.\n", "utf-8")
+        assert self._stale(project, package) == {"style.instructions.md"}
+
+        refresh_compiled_digest(project, agents_md)
+
+        assert self._stale(project, package) == set()
+
+    def test_compile_root_places_directory_guidance_from_the_source_tree(self, tmp_path):
+        """``--root <empty dir>`` still writes src/AGENTS.md and its shim (item 5)."""
+        source, output = tmp_path / "source", tmp_path / "output"
+        (source / "src").mkdir(parents=True)
+        (source / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        output.mkdir()
+        package = _package(tmp_path, {"src": "src/**"})
+
+        result = _compile_package(output, package, source_dir=source)
+
+        assert result.success, result.errors
+        assert "# src" in (output / "src" / "AGENTS.md").read_text(encoding="utf-8")
+        assert "@AGENTS.md" in (output / "src" / "CLAUDE.md").read_text(encoding="utf-8")
+
+    def test_rejected_agents_md_batch_writes_no_claude_shim(self, tmp_path):
+        """A batch the output gate rejects leaves no import of a missing file (item 6)."""
+        project = tmp_path / "project"
+        (project / "src").mkdir(parents=True)
+        package = _package(tmp_path, {"src": "src/**"})
+        (package.install_path / ".apm" / "instructions" / "style.instructions.md").write_text(
+            "---\napplyTo: '**'\ndescription: style\n---\n\nHidden \u202e text.\n",
+            encoding="utf-8",
+        )
+
+        result = _compile_package(project, package)
+
+        assert not result.success
+        assert not (project / "AGENTS.md").exists()
+        assert not (project / "CLAUDE.md").exists()
+        assert not (project / "src" / "CLAUDE.md").exists()
