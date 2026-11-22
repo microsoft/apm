@@ -2015,6 +2015,7 @@
     "tests/unit/core/test_scope.py",
     "tests/unit/core/test_script_runner_execution.py",
     "tests/unit/core/test_target_catalog_owner_invariant.py",
+    "tests/unit/core/test_token_manager_lifecycle.py",
     "tests/unit/deps/test_bare_cache_sparse.py",
     "tests/unit/deps/test_git_auth_env.py",
     "tests/unit/export/test_lazy_import.py",
