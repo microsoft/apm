@@ -37,14 +37,14 @@ can already alter what an install deploys.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +84,7 @@ def _disabled() -> bool:
 _DISABLED = frozenset({"0", "false", "no", "off"})
 
 
-def eligible(options: dict[str, Any]) -> bool:
+def eligible(options: dict[str, Any], argv: list[str] | tuple[str, ...] = ()) -> bool:
     """Only a plain re-install of the manifest (optionally ``--frozen``) qualifies."""
     if _disabled():
         return False
@@ -92,7 +92,7 @@ def eligible(options: dict[str, Any]) -> bool:
         return False
     if options.get("update") or options.get("refresh") or options.get("dry_run"):
         return False
-    if options.get("no_policy") or _explicit_policy_in(sys.argv[1:]):
+    if options.get("no_policy") or _explicit_policy_in(list(argv)):
         # --no-policy must not trigger discovery; an explicit --policy source composes
         # with discovery in ways the org fingerprint does not capture.
         return False
@@ -130,6 +130,26 @@ def _code_identity() -> dict[str, Any]:
     }
 
 
+def _loaded_modules() -> dict[str, str | None]:
+    """Content digests of every loaded module file outside the apm_cli tree.
+
+    Reads under interpreter roots are not recorded, so runtime dependencies
+    (PyYAML's loader, click, ...) and the stdlib are bound here instead.
+    """
+    package_dir = str(Path(__file__).resolve().parents[1])
+    frozen = getattr(sys, "frozen", False)
+    paths = set()
+    for module in list(sys.modules.values()):
+        path = getattr(module, "__file__", None)
+        if not isinstance(path, str):
+            continue
+        path = os.path.abspath(path)
+        if path.startswith(package_dir + os.sep) or (frozen and not os.path.isfile(path)):
+            continue  # apm_cli is hashed whole; a frozen bundle is the executable's hash
+        paths.add(path)
+    return {path: _file_digest(path) for path in sorted(paths)}
+
+
 def _invocation_key(argv: list[str]) -> dict[str, Any]:
     tty = []
     for stream in (sys.stdin, sys.stdout, sys.stderr):
@@ -163,14 +183,35 @@ def _stamp_path(key: dict[str, Any]) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _quiet() -> Iterator[None]:
+    """Silence optimization-only discovery: the full pipeline reports its own."""
+    import io
+    import logging
+
+    previous = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        logging.disable(previous)
+
+
 def policy_fingerprint(project_root: Path) -> str | None:
     """Re-discover and route the org policy live; ``None`` refuses the fast path.
 
     Discovery keeps its unchanged cache-freshness rules, and the routed
     decision comes from the canonical owner (``policy/outcome_routing.py``).
     A blocking or unresolved route, a stale cache, a refresh failure or a
-    warning always takes the full pipeline, which reports it.
+    warning always takes the full pipeline, which reports it. Discovery runs
+    silenced: its diagnostics belong to the full pipeline, not the optimization.
     """
+    with _quiet():
+        return _policy_fingerprint(project_root)
+
+
+def _policy_fingerprint(project_root: Path) -> str | None:
     from apm_cli.policy.discovery import policy_disabled_by_env
     from apm_cli.policy.outcome_routing import classify_project_policy, discover_trust_policy
 
@@ -241,6 +282,10 @@ def _save_stamp(self: _Recording, project_root: Path) -> bool:
         # The output came from the code loaded before the run; bind exactly that.
         recorder.violations.append("APM code changed during the run")
         return False
+    modules = _loaded_modules()
+    if None in modules.values():
+        recorder.violations.append("a loaded module file cannot be hashed")
+        return False
     output = [
         [channel, _SUMMARY.sub(_SUMMARY_PLACEHOLDER, chunk)] for channel, chunk in self.output
     ]
@@ -254,6 +299,7 @@ def _save_stamp(self: _Recording, project_root: Path) -> bool:
         "listed": {path: _listing(path) for path in sorted(recorder.listed)},
         "probed": {path: _probe(path) for path in sorted(recorder.probed)},
         "resolved": {key: _resolution(key) for key in sorted(recorder.resolved)},
+        "modules": modules,
         "output": output,
     }
     if not self.inputs_held():
@@ -285,13 +331,12 @@ def _hidden_local_source(project_root: Path, excluded_roots: tuple[str, ...]) ->
 
 
 def _write_stamp(path: Path, stamp: dict[str, Any]) -> bool:
+    from apm_cli.utils.atomic_io import atomic_write_text
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".stamp-")
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(stamp, handle)
-        os.replace(tmp, path)
-    except OSError:
+        atomic_write_text(path, json.dumps(stamp), temp_prefix=".stamp-")
+    except (OSError, ValueError):
         return False
     return True
 
@@ -326,6 +371,7 @@ def _stamp_mismatch(
         ("path", lambda: _first_changed(stamp.get("probed", {}), _probe)),
         ("resolution", lambda: _first_changed(stamp.get("resolved", {}), _resolution)),
         ("apm version", lambda: stamp.get("code") != _code_identity()),
+        ("dependency code", lambda: _first_changed(stamp.get("modules", {}), _file_digest)),
         ("org policy", lambda: (lambda now: now is None or now != stamp.get("policy"))(policy())),
         ("deployed file hash", lambda: not deployed_hashes_intact(project_root)),
         # Second pass: nothing recorded changed while the live checks ran.
@@ -350,7 +396,7 @@ def _replay(stamp: dict[str, Any], started: float) -> None:
     sys.stderr.flush()
 
 
-_STAMP_MAPS = ("reads", "listed", "probed", "resolved")
+_STAMP_MAPS = ("reads", "listed", "probed", "resolved", "modules")
 
 
 def _load(path: Path) -> dict[str, Any] | None:
@@ -379,16 +425,39 @@ def _load(path: Path) -> dict[str, Any] | None:
     return data
 
 
+def _invocation_argv() -> list[str] | None:
+    """The arguments this CLI invocation actually parsed (``cli.py`` records them).
+
+    ``sys.argv`` is not trustworthy in-process (``CliRunner``, ``cli.main(args=)``).
+    """
+    import click
+
+    ctx = click.get_current_context(silent=True)
+    raw = ctx.meta.get("apm_raw_args") if ctx is not None else None
+    return list(raw) if isinstance(raw, (list, tuple)) else None
+
+
+def _trace(text: str) -> None:
+    from apm_cli.utils.console import ascii_safe
+
+    with contextlib.suppress(Exception):  # a diagnostic never changes the outcome
+        sys.stderr.write(ascii_safe(text) + "\n")
+
+
 def run_with_fast_path(
-    options: dict[str, Any], run: Callable[[], Any], project_root: Path | None = None
+    options: dict[str, Any],
+    run: Callable[[], Any],
+    project_root: Path | None = None,
+    argv: list[str] | None = None,
 ) -> Any:
     """Replay a verified no-op, or run *run* fully while recording its inputs."""
     started = time.perf_counter()
-    if not eligible(options):
+    argv = _invocation_argv() if argv is None else list(argv)
+    if argv is None or not eligible(options, argv):
         return run()
     root = project_root or Path.cwd()
     try:
-        key = _invocation_key(sys.argv[1:])
+        key = _invocation_key(argv)
         stamp_path = _stamp_path(key)
     except Exception:
         return run()
@@ -416,12 +485,12 @@ def run_with_fast_path(
         if reason is None:
             _replay(stamp, started)
             if trace:
-                sys.stderr.write("[i] install fast path: replayed a verified no-op\n")
+                _trace("[i] install fast path: replayed a verified no-op")
             return None
     # A miss runs no live discovery of its own (only a pending invocation does):
     # cold, warm and changed installs pay only the recorder.
     if trace:
-        sys.stderr.write(f"[i] install fast path: full run ({reason})\n")
+        _trace(f"[i] install fast path: full run ({reason})")
     recording = _Recording(key, stamp_path, policy, started, root)
     recording.code = code
     return _run_recorded(run, recording, root, trace)
@@ -459,4 +528,4 @@ def _finish(recording: _Recording, root: Path, trace: bool) -> None:
         saved = False
     if trace:
         detail = "recorded" if saved else f"not recorded {recording.recorder.violations[:8]}"
-        sys.stderr.write(f"[i] install fast path: {detail}\n")
+        _trace(f"[i] install fast path: {detail}")

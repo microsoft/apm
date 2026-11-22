@@ -25,8 +25,10 @@ the exact changed set over project, HOME and the cache root.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
+import sys
 
 import pytest
 
@@ -93,6 +95,12 @@ def _prepare(scenario: Scenario, cache, cache_class: str) -> None:
 
 
 _ELAPSED = re.compile(r"\b\d+\.\ds\b")
+_POLICY_CACHE_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
+_REPLAYED = "[i] install fast path: replayed a verified no-op"
+
+
+def _comparable(output: str) -> str:
+    return _ELAPSED.sub("<T>", _POLICY_CACHE_AGE.sub("", output.replace(_REPLAYED, ""))).strip()
 
 
 def _memo_bytes(cache) -> dict[str, bytes]:
@@ -107,16 +115,23 @@ def _assert_memo_fixed_point(scenario: Scenario, cache, op: str, step) -> None:
     """Fixed-point oracle for the noop_v1 exemption (QL ruling, #4775).
 
     The memo completes on the next repeat (pending -> full stamp); the one
-    after that changes zero bytes anywhere, noop_v1 included, exits 0 and
-    prints what the converged run printed.
+    after that replays: it changes zero bytes anywhere, noop_v1 included,
+    exits 0 and prints what the converged run printed.
     """
     _drive(scenario, op)
     memo = _memo_bytes(cache)
-    fixed = _drive(scenario, op)
+    assert memo, f"{op}: the converged repeats left no stamp"
+    assert all("pending" not in json.loads(raw) for raw in memo.values()), "memo incomplete"
+    scenario.world.env["APM_INSTALL_FAST_PATH"] = "trace"
+    try:
+        fixed = _drive(scenario, op)
+    finally:
+        scenario.world.env.pop("APM_INSTALL_FAST_PATH", None)
     assert fixed.result.returncode == 0, fixed.output
+    assert _REPLAYED in fixed.result.stderr, f"{op} did not replay:\n{fixed.result.stderr}"
     assert fixed.changed == frozenset(), f"{op} at the memo fixed point changed {fixed.changed}"
-    assert _memo_bytes(cache) == memo != {}, f"{op} at the memo fixed point rewrote noop_v1"
-    assert _ELAPSED.sub("<T>", fixed.output) == _ELAPSED.sub("<T>", step.output)
+    assert _memo_bytes(cache) == memo, f"{op} at the memo fixed point rewrote noop_v1"
+    assert _comparable(fixed.output) == _comparable(step.output)
 
 
 def _digest(path) -> str:
@@ -142,7 +157,11 @@ def test_cache_class_by_operation(lifecycle_world, cache_class, op) -> None:
     audit = op == "audit --ci"
     step = scenario.run(op, read_only=True, exit=0) if audit else _drive(scenario, op)
     assert_changes(step.changed, CHANGES[cache_class, op], label=f"{cache_class} {op}")
-    if not audit and cache_class in ("warm-valid", "warm-stale-checkout"):
+    if (
+        not audit
+        and sys.platform != "win32"
+        and cache_class in ("warm-valid", "warm-stale-checkout")
+    ):
         _assert_memo_fixed_point(scenario, cache, op, step)
 
     assert _digest(project / DEPLOYED_SKILL) == locked, "the deployed skill keeps its locked bytes"

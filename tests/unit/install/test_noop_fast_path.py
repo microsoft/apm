@@ -73,8 +73,8 @@ class _Install:
         print(self.summary)
 
 
-def _install(run: _Install) -> None:
-    fp.run_with_fast_path({}, run, project_root=run.root)
+def _install(run: _Install, argv: tuple[str, ...] = ("install",)) -> None:
+    fp.run_with_fast_path({}, run, project_root=run.root, argv=list(argv))
 
 
 def _converge(run: _Install) -> None:
@@ -342,13 +342,12 @@ def test_a_disabled_fast_path_leaves_the_install_untouched(project, monkeypatch)
 
 def test_only_a_plain_reinstall_is_eligible(monkeypatch) -> None:
     monkeypatch.setenv("APM_INSTALL_FAST_PATH", "1")
-    monkeypatch.setattr(sys, "argv", ["apm", "install"])
-    assert fp.eligible({"frozen": True}) is (sys.platform != "win32")
+    argv = ["install"]
+    assert fp.eligible({"frozen": True}, argv) is (sys.platform != "win32")
     for option in ("packages", "update", "refresh", "dry_run", "root", "global_", "no_policy"):
-        assert fp.eligible({option: ("x",)}) is False
-    assert fp.eligible({"mcp_name": "srv"}) is False
-    monkeypatch.setattr(sys, "argv", ["apm", "install", "--policy", "./org.yml"])
-    assert fp.eligible({}) is False
+        assert fp.eligible({option: ("x",)}, argv) is False
+    assert fp.eligible({"mcp_name": "srv"}, argv) is False
+    assert fp.eligible({}, ["install", "--policy", "./org.yml"]) is False
 
 
 @_POSIX_ONLY
@@ -450,3 +449,69 @@ def test_a_local_source_under_an_unrecorded_root_records_no_stamp(project, capsy
     _install(run)
     assert run.calls == 3, "a local source whose reads are unrecorded is never replayed"
     assert "local source under an unrecorded root" in capsys.readouterr().err
+
+
+@_POSIX_ONLY
+def test_without_trustworthy_arguments_the_install_always_runs(project) -> None:
+    """In-process callers (CliRunner) leave sys.argv stale: no click meta, no replay."""
+    run = _Install(project)
+    for _ in range(4):
+        fp.run_with_fast_path({}, run, project_root=project)
+    assert run.calls == 4
+    assert _stamps() == []
+
+
+@_POSIX_ONLY
+def test_other_options_never_reuse_a_stamp(project) -> None:
+    run = _Install(project)
+    _converge(run)
+    _install(run, ("install", "--target", "claude"))
+    assert run.calls == 3, "a different invocation runs the full install"
+
+
+@_POSIX_ONLY
+def test_a_changed_runtime_dependency_runs_the_full_install(project, tmp_path, monkeypatch) -> None:
+    """Interpreter-root reads are unrecorded: loaded module files are bound instead."""
+    modules = tmp_path / "site"
+    modules.mkdir()
+    (modules / "apm_fake_dep.py").write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(modules))
+    import apm_fake_dep  # noqa: F401
+
+    try:
+        run = _Install(project)
+        _converge(run)
+        (modules / "apm_fake_dep.py").write_text("VALUE = 2\n", encoding="utf-8")
+        _install(run)
+        assert run.calls == 3, "changed dependency code is never replayed"
+    finally:
+        sys.modules.pop("apm_fake_dep", None)
+
+
+@_POSIX_ONLY
+def test_an_unheard_audit_hook_records_no_stamp(project, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "audit", lambda *_args: None)
+    run = _Install(project)
+    _converge(run)
+    _install(run)
+    assert run.calls == 3
+    assert "instrumentation-gap" in capsys.readouterr().err
+
+
+@_POSIX_ONLY
+def test_live_discovery_output_never_reaches_the_user(project, monkeypatch, capsys) -> None:
+    import logging
+
+    def noisy(_root):
+        print("discovery chatter")
+        logging.getLogger("apm_cli.policy.discovery").error("discovery log")
+        return PolicyFetchResult(outcome="disabled", source="org:contoso")
+
+    monkeypatch.setattr("apm_cli.policy.outcome_routing.discover_trust_policy", noisy)
+    run = _Install(project)
+    _converge(run)
+    capsys.readouterr()
+    _install(run)
+    out, err = capsys.readouterr()
+    assert run.calls == 2, err
+    assert "discovery" not in out + err

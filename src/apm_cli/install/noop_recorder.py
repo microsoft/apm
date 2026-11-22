@@ -239,6 +239,7 @@ class _Recorder:
         # Caches whose answer depends on the clock (TTL) are not replayable;
         # content-addressed git buckets inside them are.
         self.expiring_roots = expiring_roots
+        self.audited = False
         self.immutable_roots = immutable_roots
 
     def _path(self, value: Any) -> str | None:
@@ -287,7 +288,9 @@ class _Recorder:
             _ACTIVE = None
 
     def on_event(self, event: str, args: tuple[Any, ...]) -> None:
-        if event == "open":
+        if event == _CANARY_EVENT:
+            self.audited = True
+        elif event == "open":
             self._on_open(args)
         elif event in ("os.listdir", "os.scandir"):
             path = self._path(args[0]) if args else os.getcwd()
@@ -411,6 +414,7 @@ def _allowed_subprocess(argv: Any) -> bool:
 
 _ACTIVE: _Recorder | None = None
 _HOOK_INSTALLED = False
+_CANARY_EVENT = "apm.install.noop_canary"
 
 
 _BUSY = threading.local()
@@ -620,7 +624,11 @@ class _Recording:
                 or any(key.endswith("|" + canary) for key in self.recorder.resolved)
             )
         self._forget(canary)
-        if not all(seen):
+        # sys.addaudithook can be refused silently (an existing hook raising
+        # RuntimeError): prove this recorder receives audit events.
+        self.recorder.audited = False
+        sys.audit(_CANARY_EVENT)
+        if not all(seen) or not self.recorder.audited:
             self.recorder.violate("instrumentation-gap")
 
     def changed_input(self) -> str:
