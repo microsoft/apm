@@ -272,3 +272,17 @@ def test_an_unreadable_hook_source_directory_fails_closed_on_install(tmp_path: P
         hooks_source.chmod(0o755)
 
     assert (project / ".claude" / "settings.json").is_file()
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions")
+def test_an_untraversable_config_directory_fails_closed(tmp_path: Path) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    config_dir = project / ".claude"
+    config_dir.chmod(0)
+    try:
+        with pytest.raises(HookPathsUnknown, match="cannot be inspected"):
+            withheld_merged_hook_entries(info, project, targets)
+    finally:
+        config_dir.chmod(0o755)
+
+    assert (config_dir / "settings.json").is_file()

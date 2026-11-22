@@ -39,7 +39,11 @@ def withheld_merged_hook_entries(
     Raises :class:`~apm_cli.install.withheld_hooks.HookPathsUnknown` when a
     config or the package's hooks cannot be read, so callers fail closed.
     """
-    from apm_cli.install.withheld_hooks import HookPathsUnknown, _require_parent_inside
+    from apm_cli.install.withheld_hooks import (
+        HookPathsUnknown,
+        _require_parent_inside,
+        present_hook_path,
+    )
     from apm_cli.integration import hook_integrator as hooks
     from apm_cli.utils.path_security import has_symlink_component
 
@@ -53,7 +57,7 @@ def withheld_merged_hook_entries(
         if config is None:
             continue
         json_path = project_root / target.root_dir / config.config_filename
-        if not (json_path.is_file() or json_path.is_symlink()):
+        if not present_hook_path(json_path, json_path.as_posix()):
             continue
         if user_scope and Path(target.root_dir).is_absolute():
             # A supported user root outside $HOME (CLAUDE_CONFIG_DIR, CODEX_HOME).

@@ -47,11 +47,28 @@ def withheld_hook_files(
         for path in destinations:
             # Lexical, never resolved: a symlink is named as the link itself.
             rel = path.relative_to(project_root).as_posix()
-            if rel in recorded or not (path.is_file() or path.is_symlink()):
+            if rel in recorded or not present_hook_path(path, rel):
                 continue
             _require_parent_inside(path, project_root, rel)
             found.add(rel)
     return sorted(found)
+
+
+def present_hook_path(path: Path, rel: str) -> bool:
+    """Whether a file or link sits at *path*; an unreadable location is unchecked.
+
+    ``lstat`` never follows the leaf; any failure other than a missing path
+    raises :class:`HookPathsUnknown` instead of reading as absent.
+    """
+    import stat
+
+    try:
+        mode = path.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        raise HookPathsUnknown(f"{rel} cannot be inspected: {exc}") from exc
+    return stat.S_ISREG(mode) or stat.S_ISLNK(mode)
 
 
 def _require_readable_hook_dirs(package_root: Path) -> None:
