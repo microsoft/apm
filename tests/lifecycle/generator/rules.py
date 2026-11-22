@@ -247,7 +247,10 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "user-scope form, and a local bundle is never a marketplace plugin, so no gate "
         "level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees "
         "proves nothing about the gate). An org-policy level stays its own cell (U2 "
-        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
+        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. "
+        "Under prune and marketplace that org-policy level stays baseline (Q&L ruling "
+        "2026-11-22): both exit 0 under the deny and bin/ never deploys at project scope "
+        "(U_BIN_PIN), so any absence witness there is vacuous",
         (
             Ev("src/apm_cli/install/exec_gate.py", 725, "PackageType.MARKETPLACE_PLUGIN"),
             Ev("src/apm_cli/install/exec_gate.py", 726, "InstallScope.USER"),

@@ -733,6 +733,8 @@ def test_u_mcpown_user_holds_only_while_the_reader_ignores_user_scope(tmp_path) 
             servers, hashes, apm_version="0.36.0", project_root=tmp_path, user_scope=user_scope
         )
 
+    # No retired destination file on disk: the verdict comes from the lock claims alone.
+    assert not (tmp_path / ".github" / "mcp.json").exists()
     project = claims(user_scope=False)
     assert project.names["vscode"] == {"srv"}, "the fixture lock carries a retired claim"
     user = claims(user_scope=True)

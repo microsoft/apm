@@ -15,12 +15,17 @@ unapproved, denied before any deploy, allowed (``apm approve <key>``), revoked
 after deploy (``apm deny <key>``) and gate off. Every install runs I1-I9 and
 must leave exactly the model's observable deployed set, the instruction file
 where the gate keeps plain files, and the bundle's pending record while its
-executables are parked. ``bundle_cells`` labels the same script statically.
+executables are parked. Under an org deny the spine also installs a copy of
+p-bmix that ships ``bin/`` and no integrity manifest (another tool's bundle):
+integrity is skipped, so the refusal is the policy's, and it credits bin/.
+``bundle_cells`` labels the same script statically.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
+import tarfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +66,9 @@ _DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".m
 _INSTRUCTION = ".github/instructions/p-bmix.instructions.md"
 _PENDING = Path("apm_modules") / ".local-bundle-pending.json"
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo bmix"}]}]}}
+# The p-bmix bundle with a bin/ tool and no apm.lock.yaml: only its refusal is credited.
+_BIN_CELL = "G1|bundle|bin|denied-dependency|project"
+_BIN_TOOL = Path("bin") / f"{MIX}-tool"
 
 
 def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
@@ -86,6 +94,24 @@ def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
         encoding="ascii",
     )
     return _pack_bundle(package.root, root / "bundle", dict(env))
+
+
+def lockless_bin_bundle(archive: Path, root: Path) -> Path:
+    """Unpack *archive* under *root* as a bundle directory that ships bin/ and no lockfile.
+
+    Without ``apm.lock.yaml`` install skips the integrity check (with a warning),
+    so an org refusal of this bundle is the policy's, not the manifest's.
+    """
+    root.mkdir()
+    with tarfile.open(archive, mode="r:gz") as tar:
+        tar.extractall(root, filter="data")
+    (bundle,) = {path.parent for path in root.rglob("plugin.json")}
+    (bundle / "apm.lock.yaml").unlink()
+    tool = bundle / _BIN_TOOL
+    tool.parent.mkdir()
+    tool.write_text("#!/bin/sh\necho p-bmix\n", encoding="ascii")
+    tool.chmod(0o755)
+    return bundle
 
 
 @dataclass
@@ -207,6 +233,36 @@ class GateBundles(StepRunner):
                 evidence=evidence,
             )
 
+    def install_lockless_bin(self) -> None:
+        """Under the org deny, the p-bmix copy shipping bin/ and no manifest is refused too."""
+        assert self.state.denied_by_policy
+        self.credited.add(_BIN_CELL)
+        if self.dry:
+            return
+        root = self.bench.world.root / "gate-bundle-bin"
+        bundle = lockless_bin_bundle(self.archives[MIX], root)
+        try:
+            step = self.step(("install", str(bundle)), exits={1}, cells=[_BIN_CELL], mutating=False)
+            output = step.result.stdout + step.result.stderr
+            assert "skipping integrity check" in output, output
+            assert "Install blocked by org policy" in output, output
+            assert (bundle / _BIN_TOOL).is_file()
+            evidence = Evidence(
+                unchanged={"project": _DURABLE, "outside": ("*",)},
+                output_matches=(r"Policy violation: \S*" + MIX,),
+                exit=1,
+            )
+            check_obligation(
+                _BIN_CELL,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+        finally:
+            shutil.rmtree(root)
+
     def deny_by_policy(self) -> None:
         """The org policy denies both bundles by name (an input edit)."""
         if not self.dry:
@@ -299,6 +355,7 @@ def replay_bundles(machine: GateBundles) -> None:
     both()  # no layer opts into the gate
     machine.deny_by_policy()
     both()  # the org denies the bundles: each install refuses, nothing changes
+    machine.install_lockless_bin()  # ...and so does a p-bmix copy that ships bin/
 
 
 def bundle_cells() -> frozenset[str]:
@@ -348,6 +405,8 @@ CANVAS_PACK = PackSet(
     executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
 )
 PACK_SETS = (EXEC_PACK, CANVAS_PACK)
+# Primitives a package ships that pack never deploys at project scope (U-BIN).
+_SHIPS_ALSO: Mapping[str, tuple[str, ...]] = {"p-exec": ("bin",)}
 # Strict known cells (R: pack must exit 0 and ship what the gate deploys); none
 # since #4714 closed.
 KNOWN_PACK: dict[str, str] = {}
@@ -400,11 +459,11 @@ class GatePack(StepRunner):
 
     def pack(self) -> None:
         """Pack ships exactly the executables the gate lets the project deploy."""
-        cells = sorted(
-            f"G1|pack|{kind}|{self.level}|project"
-            for name in self.packs.packed
-            for kind in self.packs.kinds[name]
-        )
+        kinds = {kind for name in self.packs.packed for kind in self.packs.kinds[name]}
+        if self.level == "denied-dependency":
+            # The refusal covers every primitive a denied package ships, its bin/ too.
+            kinds |= {kind for name in self.packs.packed for kind in _SHIPS_ALSO.get(name, ())}
+        cells = sorted(f"G1|pack|{kind}|{self.level}|project" for kind in kinds)
         self.credited.update(cells)
         if self.dry:
             return

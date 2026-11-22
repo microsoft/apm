@@ -3354,11 +3354,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|audit-ci|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=audit|PRIM=canvas|GATE=allowed": {
    "family": "T1",
@@ -3615,11 +3619,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=bundle-install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|bundle|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
   },
   "T1|OP=bundle-install|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -4109,6 +4117,9 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=other-file|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|compile|other-file|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4116,8 +4127,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=other-file|GATE=none": {
    "credited_by": [
@@ -4193,16 +4205,15 @@
   },
   "T1|OP=install|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
-    "G1|install-frozen|bin|denied-dependency|user",
-    "G1|install|bin|denied-dependency|user"
+    "G1|install-frozen|bin|denied-dependency|project",
+    "G1|install|bin|denied-dependency|project"
    ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=install|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4508,15 +4519,14 @@
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
-    "G1|lock|bin|denied-dependency|user"
+    "G1|lock|bin|denied-dependency|project"
    ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4890,7 +4900,7 @@
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
-    "G1|mcp-install|bin|denied-dependency|user"
+    "G1|mcp-install|bin|denied-dependency|project"
    ],
    "family": "T1",
    "issue": "#4095",
@@ -4899,10 +4909,9 @@
    "rules": [
     "U7"
    ],
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e-evidence",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -5304,11 +5313,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=pack|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|pack|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -6203,15 +6216,14 @@
   },
   "T1|OP=update|PRIM=bin|GATE=denied-dependency": {
    "credited_by": [
-    "G1|update|bin|denied-dependency|user"
+    "G1|update|bin|denied-dependency|project"
    ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#3703",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -6512,10 +6524,12 @@
   },
   "T2|SCOPE=project|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project"
    ],
    "family": "T2",
@@ -12474,8 +12488,9 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[denied-executable]"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=none": {
    "family": "pair",
@@ -12967,10 +12982,12 @@
   },
   "pair|GATE=denied-dependency|FROZEN=on": {
    "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -15139,10 +15156,12 @@
   },
   "pair|OP=audit|GATE=denied-dependency": {
    "credited_by": [
+    "G1|audit-ci|bin|denied-dependency|project",
     "G1|audit-ci|canvas|denied-dependency|project",
     "G1|audit-ci|hook|denied-dependency|project",
     "G1|audit-ci|lsp|denied-dependency|project",
     "G1|audit-ci|mcp|denied-dependency|project",
+    "G1|audit-ci|other-file|denied-dependency|project",
     "G1|audit-ci|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -15628,6 +15647,7 @@
   },
   "pair|OP=bundle-install|GATE=denied-dependency": {
    "credited_by": [
+    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -16160,6 +16180,7 @@
   },
   "pair|OP=compile|PRIM=other-file": {
    "credited_by": [
+    "G1|compile|other-file|denied-dependency|project",
     "G1|compile|other-file|none|project",
     "G1|compile|other-file|revoked-after-deploy|project"
    ],
@@ -16496,15 +16517,19 @@
   },
   "pair|OP=install|GATE=denied-dependency": {
    "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|project",
     "G1|install-frozen|canvas|denied-dependency|project",
     "G1|install-frozen|hook|denied-dependency|project",
     "G1|install-frozen|lsp|denied-dependency|project",
     "G1|install-frozen|mcp|denied-dependency|project",
+    "G1|install-frozen|other-file|denied-dependency|project",
     "G1|install-frozen|skill|denied-dependency|project",
+    "G1|install|bin|denied-dependency|project",
     "G1|install|canvas|denied-dependency|project",
     "G1|install|hook|denied-dependency|project",
     "G1|install|lsp|denied-dependency|project",
     "G1|install|mcp|denied-dependency|project",
+    "G1|install|other-file|denied-dependency|project",
     "G1|install|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -17081,10 +17106,12 @@
   },
   "pair|OP=lock|GATE=denied-dependency": {
    "credited_by": [
+    "G1|lock|bin|denied-dependency|project",
     "G1|lock|canvas|denied-dependency|project",
     "G1|lock|hook|denied-dependency|project",
     "G1|lock|lsp|denied-dependency|project",
     "G1|lock|mcp|denied-dependency|project",
+    "G1|lock|other-file|denied-dependency|project",
     "G1|lock|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -17895,10 +17922,12 @@
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
    "credited_by": [
+    "G1|mcp-install|bin|denied-dependency|project",
     "G1|mcp-install|canvas|denied-dependency|project",
     "G1|mcp-install|hook|denied-dependency|project",
     "G1|mcp-install|lsp|denied-dependency|project",
     "G1|mcp-install|mcp|denied-dependency|project",
+    "G1|mcp-install|other-file|denied-dependency|project",
     "G1|mcp-install|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -18268,6 +18297,7 @@
   },
   "pair|OP=pack|GATE=denied-dependency": {
    "credited_by": [
+    "G1|pack|bin|denied-dependency|project",
     "G1|pack|canvas|denied-dependency|project",
     "G1|pack|hook|denied-dependency|project",
     "G1|pack|lsp|denied-dependency|project",
@@ -19492,10 +19522,12 @@
   },
   "pair|OP=update|GATE=denied-dependency": {
    "credited_by": [
+    "G1|update|bin|denied-dependency|project",
     "G1|update|canvas|denied-dependency|project",
     "G1|update|hook|denied-dependency|project",
     "G1|update|lsp|denied-dependency|project",
     "G1|update|mcp|denied-dependency|project",
+    "G1|update|other-file|denied-dependency|project",
     "G1|update|skill|denied-dependency|project"
    ],
    "family": "pair",
@@ -20452,7 +20484,7 @@
    "lane": "T-6b",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[revoked-after-deploy]"
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[denied-executable]"
   },
   "pair|PRIM=hook|DEPLOYED=unowned": {
    "family": "pair",
@@ -21562,6 +21594,7 @@
   },
   "pair|SCOPE=project|GATE=denied-dependency": {
    "credited_by": [
+    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -22841,6 +22874,7 @@
   },
   "pair|SRC=local-bundle|GATE=denied-dependency": {
    "credited_by": [
+    "G1|bundle|bin|denied-dependency|project",
     "G1|bundle|canvas|denied-dependency|project",
     "G1|bundle|hook|denied-dependency|project",
     "G1|bundle|lsp|denied-dependency|project",
@@ -28260,7 +28294,7 @@
     "src/apm_cli/install/exec_gate.py:725",
     "src/apm_cli/install/exec_gate.py:726"
    ],
-   "text": "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses"
+   "text": "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under prune and marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): both exit 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), so any absence witness there is vacuous"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
