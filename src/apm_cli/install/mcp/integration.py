@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from apm_cli.integration.mcp_integrator_install import ResolvedMcpTargets
     from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.mcp import MCPDependency
-    from apm_cli.security.trust import McpAdmission
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
@@ -101,6 +100,8 @@ def prepare_mcp_integration(  # noqa: PLR0913
             claude_native_keys=claude_native_keys,
         )
     if should_install and current_view is not None:
+        from apm_cli.install.errors import refuse_policy_transitive
+
         refuse_policy_transitive(current_view, admission)
         root_count = len(apm_package.get_all_mcp_dependencies())
         transitive_count = max(0, len(current_view.dependencies) - root_count)
@@ -112,31 +113,6 @@ def prepare_mcp_integration(  # noqa: PLR0913
         mcp_deps,
         current_view if should_install else None,
         current_view,
-    )
-
-
-def refuse_policy_transitive(view: "CurrentMcpConfigView", admission: "McpAdmission") -> None:
-    """Fail the install when an org policy that blocks refuses transitive servers.
-
-    Under ``mcp.trust_transitive: false`` the trust owner parks every
-    transitive server ``mcp.allow`` does not list; with ``enforcement: block``
-    the install stops before any write, as the direct mcp-allowlist check does.
-    """
-    from apm_cli.install.errors import PolicyViolationError
-    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
-
-    refused = sorted(
-        name
-        for name, evidence in view.omissions.items()
-        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
-    )
-    policy = admission.org_policy()
-    if not refused or getattr(policy, "enforcement", None) != "block":
-        return
-    raise PolicyViolationError(
-        "Install blocked by org policy: mcp.trust_transitive is false and mcp.allow does "
-        f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
-        "add them to mcp.allow or set mcp.trust_transitive: true."
     )
 
 

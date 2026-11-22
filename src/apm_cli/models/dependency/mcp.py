@@ -191,8 +191,11 @@ class MCPDependency:
     # Runtimes that load this server natively from its declaring plugin, so
     # APM never writes it there. Never serialized and not part of equality.
     native_runtimes: frozenset[str] = field(default=frozenset(), compare=False)
-    # Lock depth of the declaring package (0 for the root manifest), so org
-    # mcp.trust_transitive judges depth > 1 only. Never serialized, not compared.
+    # Lock depth of the declaring package, set by the lock-backed MCP view with
+    # the trust owner's own rule (``depth or 1``), so org mcp.trust_transitive
+    # judges depth > 1 only. 0 means no current declarer: the root manifest, or
+    # a config-only kept entry (bundle-owned or consent-retained), which the
+    # trust owner already decided when it was written. Never serialized.
     declared_depth: int = field(default=0, compare=False)
 
     @classmethod
