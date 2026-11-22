@@ -1,5 +1,11 @@
 name: Mutation Testing Pilot
 
+# Mutation-tests each canonical owner in scripts/run_mutation_pilot.py, one
+# shard per owner (#4121). A shard fails when a mutant survives that the
+# baseline does not record, when the owner's kill rate drops below its floor
+# in tests/mutation/baseline.json, or when a run is incomplete. Every shard
+# also runs the negative control: losing one killed mutant must fail the floor.
+
 on:
   schedule:
     - cron: '17 3 * * *'
@@ -16,10 +22,42 @@ env:
   PYTHON_VERSION: '3.12'
 
 jobs:
+  owners:
+    name: List mutation owners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      keys: ${{ steps.list.outputs.keys }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: List owner keys
+        id: list
+        run: |
+          keys=$(uv run --frozen --extra dev python scripts/run_mutation_pilot.py --list-owners)
+          echo "keys=$keys" >> "$GITHUB_OUTPUT"
+
   mutation-pilot:
-    name: Bounded Mutation Pilot
+    name: Mutation owner (${{ matrix.owner }})
+    needs: owners
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        owner: ${{ fromJSON(needs.owners.outputs.keys) }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,58 +72,26 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Install frozen development dependencies
         run: uv sync --frozen --extra dev
 
-      - name: Restore exact-input mutation cache
-        id: mutation-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: mutants
-          key: >-
-            mutation-pilot-v1-${{ runner.os }}-${{
-            hashFiles(
-              'uv.lock',
-              'pyproject.toml',
-              'scripts/ratchet_baseline.py',
-              'scripts/run_mutation_pilot.py',
-              'tests/mutation/baseline.json',
-              'tests/conftest.py',
-              'src/apm_cli/models/dependency/subsets.py',
-              'src/apm_cli/install/plan.py',
-              'src/apm_cli/policy/discovery.py',
-              'src/apm_cli/compilation/link_resolver.py',
-              'src/apm_cli/deps/lockfile.py',
-              'tests/unit/test_skill_subset_persistence.py',
-              'tests/unit/test_dep_targets_persistence.py',
-              'tests/unit/install/conftest.py',
-              'tests/unit/install/test_plan.py',
-              'tests/unit/policy/test_cache_merged_effective.py',
-              'tests/unit/compilation/test_link_resolver.py',
-              'tests/unit/compilation/test_link_resolver_phase3.py',
-              'tests/unit/compilation/test_link_resolver_resolution.py',
-              'tests/unit/deps/test_lockfile_field_properties.py'
-            ) }}
-
-      - name: Run bounded mutation pilot
-        shell: bash
+      - name: Mutate one owner and enforce its baseline
+        env:
+          OWNER: ${{ matrix.owner }}
         run: |
-          args=()
-          if [[ "${{ steps.mutation-cache.outputs.cache-hit }}" == "true" ]]; then
-            args+=(--reuse-cache)
-          fi
           uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
+            --owner "$OWNER" \
+            --negative-control \
             --max-children 2 \
-            --output mutation-pilot-report.json \
-            "${args[@]}"
+            --output "mutation-report-$OWNER.json"
 
       - name: Upload deterministic mutation report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutation-pilot-report
-          path: mutation-pilot-report.json
+          name: mutation-report-${{ matrix.owner }}
+          path: mutation-report-${{ matrix.owner }}.json
           if-no-files-found: error
           retention-days: 14
