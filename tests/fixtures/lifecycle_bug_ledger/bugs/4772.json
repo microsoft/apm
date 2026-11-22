@@ -13,10 +13,10 @@
   "regression_tests": [
     "tests/integration/test_claude_config_dir_hook_containment_lifecycle.py::test_a_symlinked_hooks_dir_under_the_claude_config_root_is_refused",
     "tests/integration/test_claude_config_dir_hook_containment_lifecycle.py::test_install_g_deploys_a_scripted_hook_under_the_claude_config_root",
-    "tests/unit/integration/test_hook_containment_root.py::test_a_destination_traversing_to_another_absolute_root_is_refused",
-    "tests/unit/integration/test_hook_containment_root.py::test_a_dotdot_destination_escaping_the_claude_root_is_refused",
-    "tests/unit/integration/test_hook_containment_root.py::test_a_script_deploys_under_an_external_claude_root",
-    "tests/unit/integration/test_hook_containment_root.py::test_a_symlinked_hooks_dir_leaving_the_claude_root_is_refused",
+    "tests/unit/integration/test_hook_bundle_containment.py::test_a_destination_traversing_to_another_absolute_root_is_refused",
+    "tests/unit/integration/test_hook_bundle_containment.py::test_a_dotdot_destination_escaping_the_claude_root_is_refused",
+    "tests/unit/integration/test_hook_bundle_containment.py::test_a_script_deploys_under_an_external_claude_root",
+    "tests/unit/integration/test_hook_bundle_containment.py::test_a_symlinked_hooks_dir_leaving_the_claude_root_is_refused",
     "tests/unit/integration/test_hook_containment_root.py::test_containment_root_is_an_absolute_claude_root_outside_home_only"
   ]
 }

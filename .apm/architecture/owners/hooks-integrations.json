@@ -149,6 +149,13 @@
       "guards": ["hooks-integrations-copilot-cli-mcp-paths"]
     },
     {
+      "id": "claude-config-root-hook-containment",
+      "decision": "User-scope Claude hook bundle containment: an absolute CLAUDE_CONFIG_DIR outside HOME (never the filesystem root or an ancestor of HOME) is the containment root for deployed hook scripts; every other target keeps the deploy root (#4772)",
+      "owner": "integration/hook_bundle.py (hook_containment_root, consumed by copy_deployed_hook_bundle)",
+      "selectors": ["src/apm_cli/integration/hook_bundle.py"],
+      "guards": ["hooks-integrations-hook-containment-root"]
+    },
+    {
       "id": "user-root-scoped-instruction-eligibility",
       "decision": "User-root target capabilities: scoped instruction eligibility and user-scope hook home reference",
       "owner": "integration/targets.py (TargetProfile.include_scoped_in_user_root_context, TargetProfile.user_hook_home_reference, UserHookHomeReference.reference_for)",

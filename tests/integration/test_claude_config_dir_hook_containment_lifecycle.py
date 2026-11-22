@@ -92,7 +92,15 @@ def test_install_g_deploys_a_scripted_hook_under_the_claude_config_root(
     commands = [
         hook["command"] for entry in settings["hooks"]["PreToolUse"] for hook in entry["hooks"]
     ]
-    assert any(str(scripts[0].resolve()) in command or "g.sh" in command for command in commands)
+    spellings = {scripts[0].as_posix(), scripts[0].resolve().as_posix()}
+    for home in (scene.home, scene.home.resolve()):
+        if scripts[0].resolve().is_relative_to(home.resolve()):
+            relative = scripts[0].resolve().relative_to(home.resolve()).as_posix()
+            spellings |= {f"$HOME/{relative}", f"${{HOME}}/{relative}"}
+    assert any(spelling in command for command in commands for spelling in spellings), (
+        commands,
+        spellings,
+    )
     lock = (scene.isolated.config_root / "apm.lock.yaml").read_text(encoding="utf-8")
     assert "g.sh" in lock, lock
     if external:
