@@ -1450,7 +1450,20 @@ def test_journey_files_agree_with_the_index() -> None:
 @pytest.mark.parametrize("path", _params())
 def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins
-    _run_journey(path, lifecycle_world)
+    index = load_index()
+    assert check_journey_file(path, index) == []
+    journey = load_journey(path)
+    entry = next(j for j in index["journeys"] if j["id"] == journey["id"])
+    record = os.environ.get(RECORD_ENV)
+    run = JourneyRun(lifecycle_world, journey, entry, Path(record) if record else None)
+    try:
+        run.start()
+        for step, spec in zip(journey["steps"], entry["steps"], strict=True):
+            oracles = set(spec["oracles"])
+            run.settle(step["n"], run.run_step(step, oracles))
+        run.check_seen()
+    finally:
+        run.close()
 
 
 # Journeys that must hold unchanged with the opt-in no-op install fast path on
@@ -1466,10 +1479,6 @@ _FAST_PATH_JOURNEYS = ("J12",)
 def test_journey_with_install_fast_path_on(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins
     lifecycle_world.env["APM_INSTALL_FAST_PATH"] = "1"
-    _run_journey(path, lifecycle_world)
-
-
-def _run_journey(path: Path, lifecycle_world) -> None:
     index = load_index()
     assert check_journey_file(path, index) == []
     journey = load_journey(path)

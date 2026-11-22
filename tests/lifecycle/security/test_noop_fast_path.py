@@ -207,6 +207,10 @@ CHANGES: dict[str, Callable[[World], None]] = {
 def _arrange(world: World, change: str) -> None:
     use_policy(world, "allow")
     _declare(world, "p-exec:git", "p-skill:git")
+    # apm approve names an installed package: install first (executables park).
+    installed = _run(world, ("install",), fast="0")
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert not sorted(world.project.glob(".github/hooks/p-exec-*.json")), "parked before approval"
     if change == "revoked-user-approval":
         # The grant lives only in the user store, so revoking it leaves apm.yml
         # and the lockfile byte-identical.
@@ -228,6 +232,8 @@ def test_install_after_change_matches_the_full_pipeline(
         world.services.reset()
         _arrange(world, change)
         _converge(world, fast=name == "fast")
+        hooks = sorted(world.project.glob(".github/hooks/p-exec-*.json"))
+        assert hooks, f"{name}: the approved p-exec hook must be deployed before the change"
     manifests = {n: (w.project / "apm.yml").read_bytes() for n, w in worlds.items()}
     locks = {n: (w.project / "apm.lock.yaml").read_bytes() for n, w in worlds.items()}
 
