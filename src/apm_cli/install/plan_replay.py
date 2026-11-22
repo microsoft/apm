@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 _SKIP_DIRS = {"apm_modules", ".git", ".apm-local"}
+# Per-batch caches, reset when the integration context exits.
+_TRANSIENT = {"_ownership_snapshots", "_hash_snapshots"}
 _DEBUG = os.environ.get("APM_POC_REPLAY_DEBUG") == "1"
 
 
@@ -58,7 +60,7 @@ def _state(objs: dict[str, Any]) -> dict[tuple[str, str], bytes | None]:
     tracked = {id(o) for o in objs.values()}
     for oname, obj in objs.items():
         for attr, value in vars(obj).items():
-            if id(value) in tracked or (
+            if attr in _TRANSIENT or id(value) in tracked or (
                 isinstance(value, dict) and any(id(v) in tracked for v in value.values())
             ):
                 continue

@@ -808,6 +808,7 @@ def run(ctx: InstallContext) -> None:
 
 def _run_tail(ctx, prepared_integrations, materialized, direct_dep_keys, session) -> None:
     """Original integrate body after acquire (PoC split)."""
+    apm_modules_dir = ctx.apm_modules_dir
     installed_count = ctx.installed_count
     unpinned_count = ctx.unpinned_count
     total_prompts_integrated = ctx.total_prompts_integrated
