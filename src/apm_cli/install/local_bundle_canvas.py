@@ -373,9 +373,9 @@ def _retire(
     from ..utils.content_hash import compute_file_hash
     from .local_bundle_hook_trust import (
         _drop_lock_rows,
-        local_bundle_paths,
         _relative_value,
         contained_bundle_path,
+        local_bundle_paths,
     )
 
     root = Path(project_root)

@@ -25095,7 +25095,7 @@
     "src/apm_cli/marketplace/registration.py:50",
     "src/apm_cli/commands/uninstall/engine.py:727",
     "src/apm_cli/commands/uninstall/engine.py:889",
-    "src/apm_cli/commands/uninstall/local_bundle.py:156",
+    "src/apm_cli/commands/uninstall/local_bundle.py:192",
     "src/apm_cli/commands/update.py:560",
     "src/apm_cli/core/command_logger.py:297",
     "src/apm_cli/integration/canvas_integrator.py:5"

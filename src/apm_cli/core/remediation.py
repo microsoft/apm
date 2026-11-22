@@ -1554,6 +1554,11 @@ LOCAL_BUNDLE_UNINSTALL_APART = _entry(
     "remove a local bundle's hooks",
     then="uninstall the other packages in a separate command",
 )
+LOCAL_BUNDLE_UNINSTALL_BY_NAME = _entry(
+    "local-bundle-uninstall-by-name",
+    "apm uninstall <installed-name>",
+    "remove one installed local bundle's hooks",
+)
 # -- end W4 phases-targets --
 # -- end install/policy (W4) ---------------------------------------------------
 

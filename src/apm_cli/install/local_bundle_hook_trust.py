@@ -240,19 +240,36 @@ def _hooks_prefixes(targets: Any) -> tuple[str, ...]:
     )
 
 
-def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHooks) -> None:
+def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHooks) -> set[str]:
+    """Remove one bundle's per-file hook files; return the values still on disk.
+
+    A file that cannot be removed (a symlink, an unsafe path) keeps its
+    approval record, so it stays owned and visible instead of orphaned.
+    """
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
-    from apm_cli.integration.hook_ownership import write_per_file_bundle_record
+    from apm_cli.integration.hook_ownership import (
+        per_file_bundle_hook_keys,
+        write_per_file_bundle_record,
+    )
 
     prefixes = tuple(f"{target.root_dir}/hooks/" for target in _per_file_targets(targets))
+    kept: set[str] = set()
     for value in item.hook_files:
         hook_file = contained_bundle_path(project_root, value, prefixes)
         if hook_file is not None and hook_file.is_file():
             hook_file.unlink()
+        literal = Path(value) if Path(value).is_absolute() else Path(project_root) / value
+        if literal.is_symlink() or literal.exists():
+            kept.add(value)
     for target in _per_file_targets(targets):
         sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
-        if sidecar.is_file():
-            write_per_file_bundle_record(sidecar, item.slug, None, [])
+        if not sidecar.is_file():
+            continue
+        key, files = per_file_bundle_hook_keys(sidecar).get(item.slug, (None, []))
+        write_per_file_bundle_record(
+            sidecar, item.slug, key, [value for value in files if value in kept]
+        )
+    return kept
 
 
 def _drop_lock_rows(lock_dir: Path, paths: Collection[str]) -> None:
@@ -392,9 +409,14 @@ def retire_bundle_hooks(
         return False
     # Hook configs register executables and always go; an edited script is kept.
     configs = tuple(sorted(state.hook_files)) if state else ()
-    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))
+    kept = _retire_per_file(
+        project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs)
+    )
     recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
     _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
+    # A hook file left on disk keeps its lock claim as well as its record.
+    kept = {_relative_value(value, project_root) for value in kept}
+    rows -= {value for value in rows if _relative_value(value, project_root) in kept}
     if rows and lock_dir is not None:
         _drop_lock_rows(lock_dir, rows)
     if reason is not None:
@@ -420,6 +442,23 @@ def local_bundle_paths(lock_dir: Path | None) -> frozenset[str]:
     if lockfile is None:
         return frozenset()
     return DeploymentLedgerCodec.local_bundle_values(DeploymentLedgerCodec.from_lockfile(lockfile))
+
+
+def bundle_hook_cleanup_targets(targets: Any, *, user_scope: bool) -> list[Any]:
+    """Return *targets* plus every hook-capable target, for removing a bundle's hooks.
+
+    A bundle installed with ``--target`` may have registered hooks outside the
+    manifest's targets; retirement only touches what the bundle owns, so the
+    cleanup set covers every target that can hold hooks in this scope.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    found = {target.name: target for target in targets or ()}
+    for profile in KNOWN_TARGETS.values():
+        scoped = profile.for_scope(user_scope=user_scope)
+        if scoped is not None and scoped.name not in found and scoped.supports("hooks"):
+            found[scoped.name] = scoped
+    return list(found.values())
 
 
 class BundleHookTargetsUnresolved(RuntimeError):

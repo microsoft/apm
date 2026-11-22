@@ -29,15 +29,26 @@ class _BundleScope:
     apm_package: Any
 
 
-def _bundle_slug(path: Path) -> str | None:
+def _bundle_identity(path: Path) -> tuple[str, str] | None:
+    """Return ``(package_id, approval_key)`` for the bundle at *path*, as install computes them."""
+    from ...security.executables import local_bundle_approval_key
+
     info = detect_local_bundle(path)
     if info is None:
         return None
     try:
-        return info.package_id
+        version = str(info.plugin_json.get("version") or "")
+        key = local_bundle_approval_key(info.package_id, version, info.source_dir, info.lockfile)
+        return info.package_id, key
     finally:
         if info.temp_dir is not None:
             shutil.rmtree(info.temp_dir, ignore_errors=True)
+
+
+def _is_bundle_path(package: str) -> bool:
+    """Any existing bundle-shaped path, with or without ``./``, as install probes it."""
+    path = Path(package)
+    return path.exists() and looks_like_local_bundle(path)
 
 
 def _is_bare_name(package: str) -> bool:
@@ -46,21 +57,53 @@ def _is_bare_name(package: str) -> bool:
     )
 
 
-def _installed_slugs(bundle_scope: _BundleScope) -> set[str]:
+def _deployed(bundle_scope: _BundleScope) -> dict[str, Any]:
     from ...install.local_bundle_hook_trust import deployed_bundle_hook_keys, local_bundle_paths
-    from ...install.local_bundle_pending import recorded_bundle_slugs
 
-    deployed = deployed_bundle_hook_keys(
+    return deployed_bundle_hook_keys(
         bundle_scope.root, bundle_scope.targets, local_bundle_paths(bundle_scope.lock_dir)
     )
-    return set(deployed) | set(recorded_bundle_slugs(bundle_scope.lock_dir))
+
+
+def _installed_slugs(bundle_scope: _BundleScope) -> set[str]:
+    from ...install.local_bundle_pending import recorded_bundle_slugs
+
+    return set(_deployed(bundle_scope)) | set(recorded_bundle_slugs(bundle_scope.lock_dir))
+
+
+def _by_name_remedy(scope: Any):
+    from ...core.remediation import LOCAL_BUNDLE_UNINSTALL_BY_NAME
+    from ...core.scope import is_user_scope
+
+    if is_user_scope(scope):
+        return LOCAL_BUNDLE_UNINSTALL_BY_NAME.with_command("apm uninstall -g <installed-name>")
+    return LOCAL_BUNDLE_UNINSTALL_BY_NAME
+
+
+def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: Any) -> str:
+    """Map a bundle path to the name its hooks were installed under (``--as`` aware)."""
+    identity = _bundle_identity(Path(package))
+    if identity is None:
+        logger.error(f"'{Path(package).name}' could not be read as a local bundle.")
+        sys.exit(1)
+    package_id, key = identity
+    deployed = _deployed(bundle_scope)
+    matches = sorted(slug for slug, state in deployed.items() if key in state.keys)
+    if len(matches) > 1:
+        logger.error(
+            f"'{Path(package).name}' matches {len(matches)} installed local bundles "
+            f"({', '.join(matches)}); no changes were made. {_by_name_remedy(scope).sentence()}"
+        )
+        sys.exit(1)
+    return matches[0] if matches else package_id
 
 
 def _resolve_scope(scope: Any, manifest_path: Path, logger: Any) -> _BundleScope | str:
     """Return the scope's bundle hook inputs, or the reason they cannot be resolved."""
-    from ...core.scope import get_apm_dir
+    from ...core.scope import get_apm_dir, is_user_scope
     from ...install.local_bundle_hook_trust import (
         BundleHookTargetsUnresolved,
+        bundle_hook_cleanup_targets,
         scope_bundle_hook_inputs,
     )
     from ...models.apm_package import APMPackage
@@ -72,7 +115,9 @@ def _resolve_scope(scope: Any, manifest_path: Path, logger: Any) -> _BundleScope
         )
     except (BundleHookTargetsUnresolved, ValueError, OSError) as exc:
         return str(exc)
-    return _BundleScope(root, targets, get_apm_dir(scope), apm_package)
+    # Hooks installed with --target may sit outside the manifest's targets.
+    cleanup = bundle_hook_cleanup_targets(targets, user_scope=is_user_scope(scope))
+    return _BundleScope(root, cleanup, get_apm_dir(scope), apm_package)
 
 
 def select_local_bundles(
@@ -94,7 +139,7 @@ def select_local_bundles(
     bundle_paths: list[str] = []
     names: list[str] = []
     for package in packages:
-        if DependencyReference.is_local_path(package) and looks_like_local_bundle(Path(package)):
+        if _is_bundle_path(package):
             selection = select_manifest_dependency(package, current_deps, lockfile)
             if selection.status is DependencySelectionStatus.NOT_FOUND:
                 bundle_paths.append(package)
@@ -112,11 +157,7 @@ def select_local_bundles(
     installed = _installed_slugs(bundle_scope) if names else set()
     slugs = [name for name in names if name in installed]
     for package in bundle_paths:
-        slug = _bundle_slug(Path(package))
-        if slug is None:
-            logger.error(f"'{Path(package).name}' could not be read as a local bundle.")
-            sys.exit(1)
-        slugs.append(slug)
+        slugs.append(_path_slug(package, bundle_scope, scope=scope, logger=logger))
     if not slugs:
         return [], None
     if len(slugs) != len(packages):
@@ -140,16 +181,11 @@ def uninstall_local_bundles(
     slugs: list[str], bundle_scope: _BundleScope, *, scope: Any, logger: Any, dry_run: bool
 ) -> None:
     """Retire each selected bundle's hooks through the hook trust owner; exit 1 on failure."""
-    from ...install.local_bundle_hook_trust import (
-        deployed_bundle_hook_keys,
-        installed_local_bundles,
-        local_bundle_paths,
-        retire_bundle_hooks,
-    )
+    from ...install.local_bundle_hook_trust import installed_local_bundles, retire_bundle_hooks
     from ...install.local_bundle_pending import drop_bundle_exec_type
 
     root, targets, lock_dir = bundle_scope.root, bundle_scope.targets, bundle_scope.lock_dir
-    deployed = deployed_bundle_hook_keys(root, targets, local_bundle_paths(lock_dir))
+    deployed = _deployed(bundle_scope)
     missing = [slug for slug in slugs if slug not in deployed]
     for slug in missing:
         logger.error(
@@ -157,6 +193,11 @@ def uninstall_local_bundles(
             "local bundle's deployed hooks only; no changes were made."
         )
     if missing:
+        if others := sorted(deployed):
+            logger.error(
+                f"Local bundles with deployed hooks: {', '.join(others)}. "
+                f"{_by_name_remedy(scope).sentence()}"
+            )
         sys.exit(1)
     if dry_run:
         for slug in slugs:
@@ -165,13 +206,17 @@ def uninstall_local_bundles(
 
     for slug in slugs:
         retire_bundle_hooks(root, targets, slug, lock_dir=lock_dir, reason=None)
-        drop_bundle_exec_type(lock_dir, slug, "hooks")
-    left = deployed_bundle_hook_keys(root, targets, local_bundle_paths(lock_dir))
+    left = _deployed(bundle_scope)
+    # Pending state goes only for a bundle whose hooks are confirmed gone.
+    for slug in slugs:
+        if slug not in left:
+            drop_bundle_exec_type(lock_dir, slug, "hooks")
     if failed := [slug for slug in slugs if slug in left]:
         for slug in failed:
+            files = ", ".join(sorted(left[slug].hook_files)) or "merged hook configuration"
             logger.error(
-                f"Hooks from local bundle '{slug}' could not all be removed. Check that the "
-                "hook configuration files are writable, then retry."
+                f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
+                "they stay recorded. Remove or repair those files, then retry."
             )
         sys.exit(1)
     for slug in slugs:

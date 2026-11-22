@@ -79,6 +79,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "local-bundle-update": "full sentence, both scopes, asserted by test_remediation_gate9_call_sites (#4318)",
     "local-bundle-uninstall-apart": "printed command run by the bundle-only uninstall in "
     "tests/integration/test_local_bundle_hooks_lifecycle.py (#3700)",
+    "local-bundle-uninstall-by-name": "printed command run by the alias uninstall in "
+    "tests/integration/test_local_bundle_hooks_lifecycle.py (#3700)",
 }
 
 
