@@ -156,7 +156,13 @@ def locked_withheld_hook_files(
                 package_info, project_root, package_targets, recorded=recorded
             )
             entries = withheld_merged_hook_entries(
-                package_info, project_root, package_targets, user_scope=user_scope
+                package_info,
+                project_root,
+                package_targets,
+                user_scope=user_scope,
+                # The lock records the hooks as deployed, as locked_hooks_retired reads it.
+                receipted=dep.exec_status in {None, TRUST_DEPLOYED}
+                or EXEC_TYPE_HOOKS in tuple(dep.exec_allowed_types or ()),
             )
         except HookPathsUnknown as exc:
             found.append(("", key, f"hooks {reason}; its hook paths cannot be checked: {exc}"))

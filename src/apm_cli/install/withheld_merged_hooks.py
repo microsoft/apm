@@ -3,11 +3,12 @@
 Targets such as Claude, Cursor and Codex merge hook entries into one shared
 config file; ownership lives in an ``_apm_source`` marker or the hooks
 sidecar. When the executables gate withholds a package's hooks, an entry in
-that file that renders exactly as the package's own hook and that no marker
-attributes is named: install keeps it and warns, ``apm audit --ci`` fails.
-An attributed entry is the package's receipted deployment, which install
-retires and ``exec-status-current`` reports. Nothing is removed. Rendering
-reuses the integrator's read-only steps.
+that file that renders exactly as the package's own hook is named unless it
+is the package's receipted deployment (its marker, while the lock still
+records the package deploying hooks: install retires that and
+``exec-status-current`` reports it). Install keeps a named entry and warns,
+``apm audit --ci`` fails. Nothing is removed. Rendering reuses the
+integrator's read-only steps.
 """
 
 from __future__ import annotations
@@ -21,9 +22,19 @@ ENTRY_REASON = "an entry matching its hook is not attributed to another source"
 
 
 def withheld_merged_hook_entries(
-    package_info: Any, project_root: Path, targets: Iterable[Any], *, user_scope: bool = False
+    package_info: Any,
+    project_root: Path,
+    targets: Iterable[Any],
+    *,
+    user_scope: bool = False,
+    receipted: bool = True,
 ) -> list[str]:
     """``<config path>: <event>`` for each matching merged entry no marker attributes.
+
+    *receipted* says the lock still records the package as deploying hooks.
+    Only then does a marker attributing an entry to the package excuse it
+    (install retires it, ``exec-status-current`` reports it); without that
+    record an attributed match is named like an unattributed one.
 
     Raises :class:`~apm_cli.install.withheld_hooks.HookPathsUnknown` when a
     config or the package's hooks cannot be read, so callers fail closed.
@@ -35,9 +46,6 @@ def withheld_merged_hook_entries(
     integrator = hooks.HookIntegrator()
     package_name = integrator._get_package_name(package_info, project_root)
     marker, legacy = integrator._get_hook_source_markers(package_info, project_root, package_name)
-    # Entries these markers attribute are the package's receipted deployment:
-    # install retires them and exec-status-current reports them, so only
-    # unattributed matches are named here.
     owned = {marker, *legacy}
     found: set[str] = set()
     for target in targets or ():
@@ -71,7 +79,7 @@ def withheld_merged_hook_entries(
                     raise HookPathsUnknown(
                         f"attribution of {rel}: {event} is ambiguous; inspect it manually"
                     )
-                if matches and source is None:
+                if matches and (source is None or (source in owned and not receipted)):
                     found.add(f"{rel}: {event}")
     return sorted(found)
 

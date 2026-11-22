@@ -95,6 +95,7 @@ _AMBIGUOUS = "attribution of .claude/settings.json: SessionStart is ambiguous"
     [
         ("unattributed", (".claude/settings.json: SessionStart", "not attributed")),
         ("legacy-marker", None),
+        ("forged-marker-no-receipt", (".claude/settings.json: SessionStart", "not attributed")),
         ("ambiguous-leaf", ("", _AMBIGUOUS)),
         ("no-lock", ("", _AMBIGUOUS)),
     ],
@@ -110,7 +111,10 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(
     from apm_cli.install.drift import _build_package_info
     from apm_cli.install.withheld_hooks import locked_withheld_hook_files
 
-    dep = LockedDependency(repo_url="acme/h-hook", resolved_commit="a" * 40, exec_status="denied")
+    # The lock records the hooks as deployed (a receipt install retires), except
+    # in the forged case: the lock has converged to "denied", yet a marked entry is back.
+    status = "denied" if attribution == "forged-marker-no-receipt" else "deployed"
+    dep = LockedDependency(repo_url="acme/h-hook", resolved_commit="a" * 40, exec_status=status)
     lock = LockFile()
     lock.add_dependency(dep)
     if attribution == "ambiguous-leaf":
@@ -129,6 +133,8 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(
     sidecar = project / ".claude" / "apm-hooks.json"
     if attribution == "unattributed":
         sidecar.unlink()
+    elif attribution == "forged-marker-no-receipt":
+        pass  # the sidecar keeps the canonical marker
     else:
         owners = json.loads(sidecar.read_text(encoding="utf-8"))
         for entries in owners.values():
