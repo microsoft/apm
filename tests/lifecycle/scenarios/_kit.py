@@ -798,8 +798,9 @@ POLICY_REFUSALS = (
 # resolves, writes or packs it, before any other check (deps/lockfile_generator.py).
 NEWER_LOCK = ExpectedRefusal(
     1,
-    r"on apm\.lock\.yaml: it was written by APM \S+, newer than this APM \S+\..*"
-    r"Nothing was changed\.",
+    # A command that resolves nothing new reaches the lock write before it refuses
+    # (install/helpers/plan_inputs.py); the oracle's unchanged state is the evidence.
+    r"apm\.lock\.yaml: it was written by APM \S+, newer than this APM",
     "P-OWN-lockfile-generator-compatibility",
     "deps/lockfile_generator.py: a newer generator's lock refuses every writer (M-SCOPE-LOCK)",
 )

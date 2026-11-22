@@ -23,6 +23,7 @@ credited where a converged world already runs a command
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -122,7 +123,23 @@ def _policy(scenario: Scenario, variant: str) -> None:
     scenario.model = scenario.model.with_policy(variant, denied)
 
 
+# What a fresh checkout lacks: the lockfile and every deployed surface (git ignores them).
+_DEPLOYED_SURFACES = (".agents", ".claude", ".github/hooks", ".github/extensions", "apm_modules")
+_DEPLOYED_FILES = (".github/lsp.json", ".mcp.json")
+
+
+def checkout(scenario: Scenario) -> None:
+    """A fresh clone: apm.yml (with its approvals) but no lockfile and nothing deployed."""
+    root = scenario.deploy_root
+    for name in _DEPLOYED_SURFACES:
+        shutil.rmtree(root / name, ignore_errors=True)
+    for name in _DEPLOYED_FILES:
+        (root / name).unlink(missing_ok=True)
+    forget_lock(scenario)
+
+
 EDITS = {
+    "checkout": checkout,
     "toggle": toggle,
     "forget": forget_lock,
     "stamp": stamp_newer,
@@ -184,9 +201,9 @@ def _gated_rows(lock: str) -> tuple[Row, ...]:
         )
     if lock == "absent":
         return (
-            Row(("forget",), "install", _gate_pairs(lock)),
-            Row(("forget",), "install --no-policy", (_pair(lock, NOPOLICY="on"),), says=says),
-            Row(("forget", "offline"), "install", (_pair(lock, NET="offline"),)),
+            Row(("checkout",), "install", _gate_pairs(lock)),
+            Row(("checkout",), "install --no-policy", (_pair(lock, NOPOLICY="on"),), says=says),
+            Row(("checkout", "offline"), "install", (_pair(lock, NET="offline"),)),
         )
     flags = (
         ("install --dry-run", "DRYRUN"),
@@ -357,7 +374,8 @@ def test_target_change_under_a_drifted_lock(lifecycle_world, chain) -> None:
 _INLINE = ("install", "--mcp", "p-inline", "--", INERT_COMMAND, "--stdio")
 # World -> the sources whose packages it declares.
 _SOURCE_WORLDS = {
-    "direct": ("git", "inline-mcp", "native-plugin", "pkg-registry"),
+    "direct": ("git", "inline-mcp", "native-plugin"),
+    "registry": ("pkg-registry",),
     "marketplace": ("marketplace-file", "marketplace-git", "marketplace-local"),
 }
 _SOURCE_CASES = tuple((world, lock) for world in _SOURCE_WORLDS for lock in _LOCKS)
@@ -378,18 +396,22 @@ def _sources(world, name: str) -> tuple[Scenario, dict[str, object]]:
         names = " ".join(name for name in specs if name != _TOGGLE)
         scenario.run(f"install {names}", allowed=_MARKET_HOME)
         return scenario, {"allowed": _MARKET_HOME}
-    use_registry(world)
-    specs = {
-        "p-skill": world.packages["p-skill:registry"].spec,
-        "p-lsp": world.packages["p-lsp:git"].spec,
-        "p-native-claude": world.packages["p-native-claude"].spec,
-        _TOGGLE: world.packages[_TOGGLE].spec,
-    }
+    if name == "registry":
+        # The registry becomes the default for shorthand specs, so it gets its own world.
+        use_registry(world)
+        specs = {"p-skill": world.packages["p-skill:registry"].spec}
+    else:
+        specs = {
+            "p-skill": world.packages["p-skill:git"].spec,
+            "p-native-claude": world.packages["p-native-claude"].spec,
+        }
+    specs[_TOGGLE] = world.packages[_TOGGLE].spec
     targets = ("copilot", "claude")
     scenario = Scenario(world, specs, targets=targets, policy="allow")
-    scenario.run("install p-skill p-lsp p-native-claude")
-    scenario.source_moved()  # the user adds an MCP server
-    scenario.run(_INLINE)
+    scenario.run(f"install {' '.join(name for name in specs if name != _TOGGLE)}")
+    if name == "direct":
+        scenario.source_moved()  # the user adds an MCP server
+        scenario.run(_INLINE)
     return scenario, {}
 
 
@@ -398,7 +420,8 @@ def _sources(world, name: str) -> tuple[Scenario, dict[str, object]]:
 )
 def test_sources_under_a_drifted_lock(lifecycle_world, world, lock) -> None:
     scenario, fields = _sources(lifecycle_world, world)
-    row = Row((_DRIFT[lock],), "install", tuple(_source_credit(world, lock)), lock == NEWER)
+    drift = "checkout" if lock == "absent" else _DRIFT[lock]
+    row = Row((drift,), "install", tuple(_source_credit(world, lock)), lock == NEWER)
     play(scenario, (row,), **fields)
     if lock != NEWER:
         scenario.assert_deployed()

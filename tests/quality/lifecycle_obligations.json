@@ -24512,7 +24512,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-absent]"
   },
   "pair|SRC=pkg-registry|LOCK=consistent": {
    "family": "pair",
@@ -24528,7 +24528,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-newer-generator]"
   },
   "pair|SRC=pkg-registry|LOCK=stale": {
    "family": "pair",
@@ -24536,7 +24536,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-stale]"
   },
   "pair|SRC=pkg-registry|NET=offline": {
    "family": "pair",
