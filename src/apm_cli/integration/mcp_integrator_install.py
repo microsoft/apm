@@ -815,6 +815,9 @@ def _record_managed_server(
     written_connections: set[tuple[str, str]] | None = None,
 ) -> None:
     """Record a server only after APM successfully writes its target config."""
+    from apm_cli.install.mcp.write_receipts import note_mcp_write
+
+    note_mcp_write(runtime, server_name, (written_hashes or {}).get(server_name))
     if managed_target_servers is not None:
         managed_target_servers.setdefault(runtime, set()).add(server_name)
     if native_hashes is not None and written_hashes and server_name in written_hashes:

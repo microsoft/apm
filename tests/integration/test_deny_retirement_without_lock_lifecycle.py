@@ -110,8 +110,7 @@ def test_deny_retires_the_hook_with_or_without_the_lockfile(
     _ok(world, "install", "--trust-transitive-mcp")
 
     assert not (world.project / _HOOK).exists(), "a denied hook stays deployed"
-    if lock == "kept":
-        assert _SERVER not in _servers(world), "a denied MCP server stays deployed"
+    assert _SERVER not in _servers(world), "a denied MCP server stays deployed"
     _ok(world, "install", "--trust-transitive-mcp")
     assert not (world.project / _HOOK).exists()
     _ok(world, "audit", "--ci")

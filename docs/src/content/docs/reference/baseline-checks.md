@@ -42,6 +42,7 @@ first failure to skip expensive I/O.
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
+| `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it could not confirm |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
 | `includes-consent` | advisory | `ci_checks.py` | yes (advisory; promotable by policy) |
@@ -172,6 +173,12 @@ the [policy schema](../policy-schema/).
 - **Fails when.** Such an entry exists. The detail names the server and the target. An entry equal to the declaration, including one switched off with `enabled = false`, passes and stays the user's.
 - **Remediation.** Make the entry match the declaration or remove it, then run `apm install`. Audit does not change the native configuration.
 
+### `kept-mcp-entries`
+
+- **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
+- **Fails when.** A kept entry is still in its config and the lockfile does not manage its server. The detail names the server, the config file and the runtime.
+- **Remediation.** Remove each entry you no longer use, or declare the server again, then run `apm install`. Audit does not change the native configuration.
+
 ### `content-integrity`
 
 - **What it verifies.** Two independent signals, including local `.apm/` deployments recorded through the synthesized self-entry:
@@ -203,7 +210,7 @@ the [policy schema](../policy-schema/).
 
 ## Run order and fail-fast
 
-The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
+The aggregate runner in `run_baseline_checks` evaluates checks in this order: `manifest-parse` (only when `apm.yml` is unparseable), `lockfile-exists`, `ref-consistency`, `deployment-ledger-owners`, `deployed-files-present`, `no-orphaned-packages`, `lockfile-targets-current`, `skill-subset-consistency`, `config-consistency`, `native-mcp-ownership`, `kept-mcp-entries` (only when reported), `content-integrity`, `local-bundle-hooks`, `hook-approval-pins`, `exec-status-current`, `includes-consent`. Drift is invoked separately by the audit command after the baseline batch, but in `--ci` mode it shares the same cold-cache scratch materialization with `skill-subset-consistency` and `config-consistency`.
 
 With fail-fast on (the default), the runner stops at the first failing check. `apm audit --ci --no-fail-fast` evaluates every check so the report lists every problem at once.
 
