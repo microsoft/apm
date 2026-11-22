@@ -86,8 +86,12 @@ def write_marker(install_path: Path, resolved_commit: str) -> None:
     marker = install_path / MARKER_FILENAME
     data = json.dumps(payload).encode("utf-8")
     try:
-        if _regular_marker_bytes(marker) == data:
-            return
+        current = _regular_marker_bytes(marker)
+    except OSError:
+        current = None  # unreadable: treat as a miss and still repair it
+    if current == data:
+        return
+    try:
         _replace_marker(install_path, marker, data)
     except OSError:
         # Read-only mount, permission denied, a directory in the way, etc.

@@ -92,3 +92,17 @@ def test_a_directory_in_the_way_is_left_and_install_continues(tmp_path: Path) ->
     write_marker(tmp_path, _COMMIT)
     assert (tmp_path / MARKER_FILENAME).is_dir()
     assert [p.name for p in tmp_path.iterdir()] == [MARKER_FILENAME], "no temp file left behind"
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permissions, non-root")
+def test_an_unreadable_stale_marker_is_still_repaired(tmp_path: Path) -> None:
+    marker = tmp_path / MARKER_FILENAME
+    marker.write_bytes(_payload("b" * 40))
+    marker.chmod(0o200)
+    try:
+        write_marker(tmp_path, _COMMIT)
+        marker.chmod(0o600)
+        assert marker.read_bytes() == _payload(_COMMIT), "an unreadable stale pin must be rewritten"
+    finally:
+        if marker.exists():
+            marker.chmod(0o600)
