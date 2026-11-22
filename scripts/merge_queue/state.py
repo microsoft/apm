@@ -46,6 +46,12 @@ class Train:
     published_at: str = ""
     verdict_at: str = ""
     run_id: int | None = None
+    reruns: int = 0
+    # After a rerun request: classify only once this attempt of the run completes.
+    awaiting_attempt: int = 0
+    red_class: str = ""
+    ejected: int | None = None
+    residual: list[str] = field(default_factory=list)
 
     @property
     def head_ref(self) -> str:
@@ -66,6 +72,14 @@ class State:
     trains: dict[int, Train] = field(default_factory=dict)
     max_id: int = 0
     window: int = WINDOW_START
+    # PR -> head ejected at; the PR re-enters with a new head (design section 6).
+    ejected: dict[int, str] = field(default_factory=dict)
+    # Bisect: the next train is built from these PRs only.
+    split: list[int] = field(default_factory=list)
+    # Set by a second infra red; no train launches until a human clears it.
+    halted: str = ""
+    # Ejected PRs whose queue:ready label removal failed; retried every poll.
+    unlabel: list[int] = field(default_factory=list)
 
     def in_flight(self) -> list[Train]:
         return sorted(
@@ -116,7 +130,15 @@ class State:
             int(key): Train(**{**value, "members": [Member(**m) for m in value["members"]]})
             for key, value in raw.get("trains", {}).items()
         }
-        return cls(trains=trains, max_id=raw.get("max_id", 0), window=raw.get("window", 4))
+        return cls(
+            trains=trains,
+            max_id=raw.get("max_id", 0),
+            window=raw.get("window", 4),
+            ejected={int(pr): head for pr, head in raw.get("ejected", {}).items()},
+            split=raw.get("split", []),
+            halted=raw.get("halted", ""),
+            unlabel=raw.get("unlabel", []),
+        )
 
 
 def load(path: Path) -> State:
