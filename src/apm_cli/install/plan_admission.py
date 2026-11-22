@@ -162,10 +162,10 @@ def _retired_kinds(
 
     The types the lock records as deployed that the gate no longer allows,
     plus *withheld* (``hooks`` for a pin mismatch), filtered by
-    :func:`~apm_cli.security.executables.rebuild_retired_kinds`; empty when
+    :func:`~apm_cli.security.exec_kinds.rebuild_retired_kinds`; empty when
     none is a kind the rebuild removes.
     """
-    from apm_cli.security.executables import rebuild_retired_kinds
+    from apm_cli.security.exec_kinds import rebuild_retired_kinds
 
     declared = _declared_exec_types(package_info, dep.get_unique_key())[3]
     deployed = _recorded_deployed_types(dep, declared)

@@ -1844,7 +1844,7 @@ def gate_retired_hook_survivors(
     """
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
-    from ...security.executables import exec_kinds_phrase
+    from ...security.exec_kinds import exec_kinds_phrase
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:

@@ -20,6 +20,7 @@ import pytest
 
 import apm_cli.security.executables as ex
 from apm_cli.core.remediation import MCP_EXECUTABLES_UNTRUSTED
+from apm_cli.security import exec_kinds
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_HOOKS,
@@ -907,7 +908,7 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
 def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_files, expected):
     """#4567: only kinds the rebuild removes, bin/ only when a bin file was deployed."""
     withheld = set(deployed)
-    assert ex.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
+    assert exec_kinds.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
 
 
 @pytest.mark.parametrize(
@@ -919,6 +920,11 @@ def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_file
             ".config/test-claude/skills/p/bin/tool",
             id="claude-relocated-user-root",
         ),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}"},
+            "skills/p/bin/tool",
+            id="claude-config-dir-is-home",
+        ),
     ],
 )
 def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, deployed_file):
@@ -927,7 +933,9 @@ def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, d
     for key, value in env.items():
         monkeypatch.setenv(key, value.format(home=tmp_path))
 
-    assert ex.rebuild_retired_kinds(("hooks", "bin"), {"hooks", "bin"}, [deployed_file]) == (
+    assert exec_kinds.rebuild_retired_kinds(
+        ("hooks", "bin"), {"hooks", "bin"}, [deployed_file]
+    ) == (
         "hooks",
         "bin",
     )
@@ -943,4 +951,4 @@ def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, d
     ],
 )
 def test_exec_kinds_phrase_names_each_kind_once(kinds, expected):
-    assert ex.exec_kinds_phrase(kinds) == expected
+    assert exec_kinds.exec_kinds_phrase(kinds) == expected
