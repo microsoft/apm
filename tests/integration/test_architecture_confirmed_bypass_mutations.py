@@ -101,6 +101,20 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         append="\n\ndef project_check(root):\n    return CheckRoot(root)\n",
     ),
     BypassMutation(
+        name="check-root-chained-alias-store",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new="        check = alias = CheckRoot(self.root)\n        self.kept = alias\n",
+    ),
+    BypassMutation(
+        name="check-root-bound-method-store",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new="        check = CheckRoot(self.root)\n        self.cached_resolver = check.resolve\n",
+    ),
+    BypassMutation(
         name="check-root-module-cache",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/deployed_paths.py",

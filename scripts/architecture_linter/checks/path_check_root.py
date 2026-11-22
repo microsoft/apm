@@ -7,8 +7,8 @@ into a cross-check cache. This check is closed-world:
 - Only the functions in ``_CONSTRUCTORS`` may build one.
 - Inside any function, a name bound to a ``CheckRoot`` (built there, aliased,
   or a parameter annotated ``CheckRoot``) may only be passed to a function in
-  ``_RECEIVERS``, read through ``_READS``, compared, or aliased to a plain
-  local. Returning, yielding, storing it on an attribute, subscript or
+  ``_RECEIVERS``, read through ``_READS``, have ``.resolve``/``.within``
+  called on the spot, be compared, or be aliased to a plain local. Returning, yielding, storing it on an attribute, subscript or
   container, or rebinding it with ``global``/``nonlocal`` is a violation.
 """
 
@@ -31,7 +31,8 @@ _CONSTRUCTORS = frozenset(
     }
 )
 _RECEIVERS = frozenset({"_encode", "_locator", "locator_for_path"})
-_READS = frozenset({"resolve", "within", "resolved", "root"})
+_READS = frozenset({"resolved", "root"})
+_CALLS = frozenset({"resolve", "within"})
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 
@@ -71,14 +72,15 @@ def _tracked_names(function: ast.AST) -> set[str]:
     while changed:
         changed = False
         for node in ast.walk(function):
-            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
                 continue
-            target = node.targets[0]
-            if not isinstance(target, ast.Name) or target.id in names:
+            if not _is_check_root_value(node.value, names):
                 continue
-            if _is_check_root_value(node.value, names):
-                names.add(target.id)
-                changed = True
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in names:
+                    names.add(target.id)
+                    changed = True
     return names
 
 
@@ -92,6 +94,10 @@ def _use_allowed(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
         return name in _RECEIVERS
     if isinstance(parent, ast.Attribute):
+        if parent.attr in _CALLS:
+            # A bound method keeps the instance: it must be invoked on the spot.
+            call = parents.get(parent)
+            return isinstance(call, ast.Call) and call.func is parent
         return parent.attr in _READS
     if isinstance(parent, ast.Compare):
         return True
@@ -99,6 +105,8 @@ def _use_allowed(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
         return _use_allowed(parent, parents)
     if isinstance(parent, ast.Assign):
         return all(isinstance(target, ast.Name) for target in parent.targets)
+    if isinstance(parent, ast.AnnAssign):
+        return isinstance(parent.target, ast.Name)
     return False
 
 
