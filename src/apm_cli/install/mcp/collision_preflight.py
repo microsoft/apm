@@ -90,11 +90,11 @@ def _recorded_baselines(lockfile: Any, name: str) -> list[str | None]:
     return sorted(hashes) or [None]
 
 
-def _claims_settle_in_the_mcp_stage(lockfile: Any, *, frozen: bool) -> bool:
+def _claims_settle_in_the_mcp_stage(lockfile: Any, *, replay_claims: bool) -> bool:
     """Recorded claims an older release wrote, or a ``--frozen`` replay, settle only there."""
     from apm_cli.install.mcp.retired_destinations import lock_holds_untranslated_mcp_claims
 
-    return frozen or lock_holds_untranslated_mcp_claims(
+    return replay_claims or lock_holds_untranslated_mcp_claims(
         lockfile.apm_version, lockfile.mcp_target_servers
     )
 
@@ -107,7 +107,7 @@ def project_native_mcp_conflicts(
     project_root: Any,
     user_scope: bool,
     logger: Any,
-    frozen: bool = False,
+    replay_claims: bool = False,
 ) -> list[str]:
     """Report each ``name (runtime)`` collision the MCP write would hit, without writing.
 
@@ -133,7 +133,9 @@ def project_native_mcp_conflicts(
         target_runtimes, project_root=project_root, user_scope=user_scope
     )
     recorded = recorded_mcp_names(lockfile)
-    settle_later = bool(recorded) and _claims_settle_in_the_mcp_stage(lockfile, frozen=frozen)
+    settle_later = bool(recorded) and _claims_settle_in_the_mcp_stage(
+        lockfile, replay_claims=replay_claims
+    )
     conflicts: list[str] = []
     for dep in dependencies:
         name = getattr(dep, "name", None)
@@ -203,7 +205,7 @@ def refuse_projected_mcp_collisions(
     project_root: Any,
     user_scope: bool,
     logger: Any,
-    frozen: bool = False,
+    replay_claims: bool = False,
     **targets: Any,
 ) -> None:
     """Refuse before any write when a projected MCP server collides (#4268, #4741).
@@ -231,7 +233,7 @@ def refuse_projected_mcp_collisions(
         project_root=project_root,
         user_scope=user_scope,
         logger=logger,
-        frozen=frozen,
+        replay_claims=replay_claims,
     )
     if conflicts:
         message = "MCP installation incomplete: " + ", ".join(conflicts)

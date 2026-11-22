@@ -604,7 +604,7 @@ def run_mcp_integration(  # noqa: PLR0913
             project_root=project_root,
             user_scope=user_scope,
             logger=logger,
-            frozen=frozen,
+            replay_claims=frozen,
             runtime=runtime,
             exclude=exclude,
             apm_config=mcp_apm_config,
