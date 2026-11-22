@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import threading
 from collections import OrderedDict
+from collections.abc import Sequence
 from typing import Any
 
 # One install reads the same lockfile text many times (about 19 call sites).
@@ -39,6 +40,24 @@ def parse_lockfile_text(yaml_str: str) -> object:
             while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
                 _parsed_texts.popitem(last=False)
     return copy.deepcopy(parsed)
+
+
+def load_observes_per_row_projection(dependencies: Sequence[Any]) -> bool:
+    """Whether loading *dependencies* row by row can leave a non-empty ledger.
+
+    Per-row ledger invalidation during a load only rebuilds rows when a URI
+    receipt or a reserved owner (such as local-bundle provenance) appears; a
+    rebuild then keeps the first claimant as active owner. Otherwise each step
+    leaves the empty default the load replaces once at the end.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from .lockfile import LockFile
+
+    reserved_owners = DeploymentLedgerCodec.valid_owner_keys(LockFile())
+    return any(
+        dep.get_unique_key() in reserved_owners or any("://" in path for path in dep.deployed_files)
+        for dep in dependencies
+    )
 
 
 def validate_lockfile_container(data: object) -> dict[str, Any]:
