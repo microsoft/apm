@@ -264,22 +264,21 @@ def _uninstall_policy_resolves(removed: list[object], project: AllowlistProject)
     """Whether uninstall's survivor preflight resolves the org policy it reintegrates under.
 
     With surviving dependencies, ``apm uninstall`` rediscovers the project's
-    org policy and aborts before removing anything when the outcome blocks
-    (for example ``policy.fetch_failure_default: block`` with no reachable
-    policy), whatever policy this audit was given.
+    org policy (``resolve_project_exec_allow_map``) and aborts before removing
+    anything when the outcome blocks (for example
+    ``policy.fetch_failure_default: block`` with no reachable policy),
+    whatever policy this audit was given. Only the policy-outcome owner that
+    raises that refusal is consulted: the audit never reads or migrates the
+    user's executable consent.
     """
     if not any(_survivors(removed, project)):
         return True
+    from ..core.scope import manifest_root
     from ..install.errors import PolicyViolationError
-    from ..models.apm_package import APMPackage
-    from ..security.executables import resolve_project_exec_allow_map
+    from .outcome_routing import resolve_trust_policy
 
     try:
-        package = APMPackage.from_apm_yml(manifest_file(project.project_root))
-    except Exception:
-        return True  # uninstall skips the trust preflight when apm.yml cannot load
-    try:
-        resolve_project_exec_allow_map(project.project_root, package, user_scope=False)
+        resolve_trust_policy(manifest_root(project.project_root, user_scope=False), announce=False)
     except PolicyViolationError:
         return False
     return True

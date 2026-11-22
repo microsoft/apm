@@ -36,7 +36,7 @@ _ROUTES = (
     (_CLI, "_refuse_uninstall_without_evidence", _REFUSAL_OWNER),
     (_REMEDY, "_deletions_have_evidence", _REFUSAL_OWNER),
     (_REMEDY, "_deletions_have_evidence", "project_shrunk_selections"),
-    (_REMEDY, "_uninstall_policy_resolves", "resolve_project_exec_allow_map"),
+    (_REMEDY, "_uninstall_policy_resolves", "resolve_trust_policy"),
     (_CLI, "_preflight_uninstall_writes", "_refuse_unvalidated_paths"),
     (_CLI, "_preflight_uninstall_writes", "resolve_project_exec_allow_map"),
     (_CLI, "_refuse_unvalidated_paths", "validate_deploy_path"),

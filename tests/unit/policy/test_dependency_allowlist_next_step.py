@@ -295,3 +295,28 @@ def test_a_policy_uninstall_cannot_resolve_falls_back_to_the_admin(
         "    Ask your org admin to allow it (policy source: org:contoso/.github)."
     )
     assert check.remediations == ()
+
+
+def test_the_advice_never_migrates_the_users_executable_consent(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    home = tmp_path / "apm-home"
+    home.mkdir()
+    legacy = home / "approvals.yml"
+    legacy.write_text("contoso/keep:\n  hook: true\n", encoding="utf-8")
+    config = home / "config.json"
+    monkeypatch.setenv("APM_HOME", str(home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(config))
+    project = tmp_path / "project"
+    project.mkdir()
+    root = _project(
+        project,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+    )
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'")
+    assert legacy.read_text(encoding="utf-8") == "contoso/keep:\n  hook: true\n"
+    assert not config.exists()
