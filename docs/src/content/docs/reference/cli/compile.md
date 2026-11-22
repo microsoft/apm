@@ -41,6 +41,13 @@ paths. Nested documentation is not imported as a separate package. Without
 manifest or lockfile metadata, only the legacy `owner/package` layout is
 discovered; run `apm install` to record deeper package roots.
 
+Before writing, compile applies the org policy's dependency rules to the
+installed packages recorded in `apm.lock.yaml`, as `apm install` does. When a
+recorded package is no longer allowed and the policy enforces `block`,
+compile writes nothing and exits `1` naming the package; remove or replace it
+in `apm.yml` and run `apm install`. Under `enforcement: warn` it warns and
+compiles. `APM_POLICY_DISABLE=1` skips the check.
+
 Discovery and output are bounded to the active Git checkout. Nested Git
 repositories and linked worktrees below it are excluded, including when
 `includes: auto` is set. Run `apm compile` from a nested checkout to compile it.
@@ -461,7 +468,7 @@ unchanged.
 | Code | Meaning |
 |------|---------|
 | 0 | Compilation succeeded (or `--validate` passed). |
-| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, or compilation error. |
+| 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, an installed package the org policy no longer allows, or compilation error. |
 | 2 | Conflicting flags (e.g. `--all` combined with `--target`, or `--root` combined with `--watch`). |
 
 ## Related

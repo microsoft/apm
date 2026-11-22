@@ -193,7 +193,7 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
 _SPELLING_ALIAS_CALLERS = {
     "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
-    "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/install/manifest_reconcile.py": "live_paths=[*files, *protected_values]",
     "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
 }
 

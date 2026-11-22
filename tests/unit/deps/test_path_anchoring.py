@@ -102,8 +102,8 @@ class TestParentWalk:
         lockfile = _lockfile(*dependencies)
         with patch.object(
             path_anchoring,
-            "_find_parent",
-            wraps=path_anchoring._find_parent,
+            "_find_parents",
+            wraps=path_anchoring._find_parents,
         ) as find_parent:
             resolved = resolve_local_dep_dirs(lockfile, tmp_path)
 
