@@ -33,7 +33,6 @@ def withheld_hook_files(
     """
     from apm_cli.integration.copilot_hook_paths import copilot_hook_destinations
     from apm_cli.integration.hook_integrator import HookIntegrator
-    from apm_cli.utils.paths import portable_relpath
 
     integrator = HookIntegrator()
     found: set[str] = set()
@@ -45,7 +44,8 @@ def withheld_hook_files(
         except (OSError, ValueError) as exc:
             raise HookPathsUnknown(str(exc)) from exc
         for path in destinations:
-            rel = portable_relpath(path, project_root)
+            # Lexical, never resolved: a symlink is named as the link itself.
+            rel = path.relative_to(project_root).as_posix()
             if rel not in recorded and (path.is_file() or path.is_symlink()):
                 found.add(rel)
     return sorted(found)
@@ -92,16 +92,24 @@ def locked_withheld_hook_files(
         install_path = dep_ref.get_install_path(modules_dir)
         if not install_path.is_dir():
             continue
+        subset = effective_dependency_selection(dep_ref).target_subset
         try:
             package_info = _build_package_info(dep, install_path)
             status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
-        except (ExecPolicyUnavailable, OSError, ValueError):
+        except ExecPolicyUnavailable:
+            continue  # the policy checks report an unavailable policy
+        except (OSError, ValueError) as exc:
+            if any(
+                target.name == "copilot" and (not subset or "copilot" in subset)
+                for target in active
+            ):
+                found.append(("", key, f"its executables decision cannot be read: {exc}"))
             continue
         if status in {None, TRUST_DEPLOYED} or EXEC_TYPE_HOOKS in allowed:
             continue
         package_targets = resolve_effective_package_targets(
             active,
-            effective_dependency_selection(dep_ref).target_subset,
+            subset,
             package_info,
             None,
             dep_ref.get_identity(),

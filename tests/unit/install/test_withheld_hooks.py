@@ -113,3 +113,37 @@ def test_hook_paths_that_cannot_be_computed_fail_closed(tmp_path: Path) -> None:
             "hooks denied; its hook paths cannot be checked: unreadable hook source",
         )
     ]
+    assert (project / ".github" / "hooks" / "h-hook-session.json").is_file()
+
+
+@pytest.mark.parametrize(("target_subset", "reported"), [([], True), (["claude"], False)])
+def test_an_unreadable_decision_fails_closed_where_copilot_is_eligible(
+    tmp_path: Path, target_subset: list[str], reported: bool
+) -> None:
+    lock, modules, project = _locked(tmp_path, target_subset)
+
+    with patch(
+        "apm_cli.install.exec_gate.current_exec_decision",
+        side_effect=PermissionError("bin/ unreadable"),
+    ):
+        found = locked_withheld_hook_files(
+            lock, modules, lambda: None, project, [KNOWN_TARGETS["copilot"]]
+        )
+
+    expected = [("", "acme/h-hook", "its executables decision cannot be read: bin/ unreadable")]
+    assert found == (expected if reported else [])
+    assert (project / ".github" / "hooks" / "h-hook-session.json").is_file()
+
+
+def test_a_symlinked_hook_path_is_named_as_the_link(tmp_path: Path) -> None:
+    package = _package(tmp_path / "modules", "session.json")
+    project = tmp_path / "project"
+    hooks = project / ".github" / "hooks"
+    hooks.mkdir(parents=True)
+    (project / "user-hook.json").write_text("{}", encoding="utf-8")
+    (hooks / "h-hook-session.json").symlink_to(project / "user-hook.json")
+
+    found = withheld_hook_files(package, project, [KNOWN_TARGETS["copilot"]], recorded=set())
+
+    assert found == [".github/hooks/h-hook-session.json"]
+    assert (hooks / "h-hook-session.json").is_symlink()
