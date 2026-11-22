@@ -611,6 +611,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
+    if config.user_scope:
+        # Scratch writes, but hook commands name the live user root install -g wrote.
+        integrators["hook"].replay_command_root = deployment_frame[1]
 
     # Pre-create target root dirs in scratch so integrators with
     # auto_create=False do not skip non-skill primitives during replay.

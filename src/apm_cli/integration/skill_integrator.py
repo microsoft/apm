@@ -342,6 +342,18 @@ def copy_skill_to_target(
     return deployed
 
 
+def _directory_is_managed(directory: str, managed_files) -> bool:
+    """Return whether APM owns *directory* or a verified member inside it.
+
+    A pre-0.38 user-root receipt migrates per file (#3772), so the directory
+    entry itself is absent; the copy still protects every unclaimed member.
+    """
+    if directory in managed_files:
+        return True
+    prefix = f"{directory}/"
+    return any(entry.startswith(prefix) for entry in managed_files)
+
+
 class SkillIntegrator(BaseIntegrator):
     """Handles integration of native SKILL.md files for Claude Code, Cursor, and VS Code.
 
@@ -954,7 +966,8 @@ class SkillIntegrator(BaseIntegrator):
             if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
                 is_managed = (
-                    managed_files is not None and rel_path.replace("\\", "/") in managed_files
+                    managed_files is not None
+                    and _directory_is_managed(rel_path.replace("\\", "/"), managed_files)
                 ) or (
                     rewriter._ownership_snapshots is not None
                     and target.resolve() in rewriter._native_skill_session_owners

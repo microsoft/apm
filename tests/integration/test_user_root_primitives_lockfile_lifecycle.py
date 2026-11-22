@@ -224,3 +224,54 @@ def test_unreceipted_pre_existing_file_is_still_skipped(scene: HarnessScene) -> 
     lock_path = scene.isolated.config_root / "apm.lock.yaml"
     lock = load_yaml(lock_path) if lock_path.is_file() else {}
     assert _DEPLOYED not in (lock.get("local_deployed_files") or []), lock
+
+
+def test_first_upgraded_install_updates_a_migrated_user_root_skill(scene: HarnessScene) -> None:
+    """Case 3 for a skill directory: an edited source replaces the 0.37 deployed bytes."""
+    source = scene.isolated.config_root / "skills" / "research" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion one.\n", encoding="utf-8"
+    )
+    _install(scene)
+    deployed = [
+        path
+        for path in scene.home.rglob("SKILL.md")
+        if path.parent.name == "research" and scene.isolated.config_root not in path.parents
+    ]
+    assert len(deployed) == 1, deployed
+    _as_037_state(scene, deployed[0])
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion two.\n", encoding="utf-8"
+    )
+
+    upgraded = _install(scene)
+
+    assert "skipped" not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
+    assert deployed[0].read_text(encoding="utf-8").rstrip().endswith("Version two.")
+
+
+def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessScene) -> None:
+    """I3: audit --ci replays a user-root scripted hook with the commands install -g wrote."""
+    hooks = scene.isolated.config_root / "hooks"
+    (hooks / "scripts").mkdir(parents=True)
+    hook = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "./scripts/g.sh"}]}
+            ]
+        }
+    }
+    (hooks / "guard.json").write_text(json.dumps(hook, indent=2) + "\n", encoding="utf-8")
+    (hooks / "scripts" / "g.sh").write_text("#!/bin/sh\necho guard\n", encoding="utf-8")
+    (scene.home / ".copilot").rmdir()
+    (scene.home / ".claude").mkdir()
+    _install(scene, target="claude")
+    settings = (scene.home / ".claude" / "settings.json").read_text(encoding="utf-8")
+    assert "g.sh" in settings, settings
+
+    audit = scene.runner.run(
+        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+    )
+
+    assert audit.returncode == 0, describe(audit)
