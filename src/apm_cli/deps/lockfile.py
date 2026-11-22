@@ -210,6 +210,18 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
 
 
+def _document_snapshot(data: dict[str, Any]) -> dict[str, Any] | None:
+    """A private copy of a parsed lockfile for the no-op check, or None to re-parse.
+
+    A merge-reordered alias chain the bounded loader accepts can nest deeper
+    than deepcopy recurses; the no-op check then parses the text instead.
+    """
+    try:
+        return copy.deepcopy(data)
+    except RecursionError:
+        return None
+
+
 def _same_document(current: str | None, serialized: str, parsed_current: object = None) -> bool:
     """Whether *current* holds the data *serialized* would write; only formatting may differ.
 
@@ -1787,7 +1799,7 @@ class LockFile:
                 legacy_timestamp_present = existing_data.get("generated_at") is not None
                 # Construction shares nested objects with the parsed mapping;
                 # snapshot it for the no-op check instead of parsing again.
-                existing_document = copy.deepcopy(existing_data)
+                existing_document = _document_snapshot(existing_data)
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
