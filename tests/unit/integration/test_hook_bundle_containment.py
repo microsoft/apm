@@ -107,3 +107,20 @@ def test_an_out_and_back_destination_creates_nothing_outside_the_claude_root(
     assert deployed.read_text(encoding="utf-8") == world.script.read_text(encoding="utf-8")
     assert not (world.tmp / "escaped").exists()
     assert len(written) == 1
+
+
+def test_an_out_and_back_sidecar_is_reported_at_a_readable_path(world: SimpleNamespace) -> None:
+    """The package.json sidecar of a JS hook is receipted where it was written."""
+    script = world.script.with_suffix(".js")
+    script.write_text("console.log('guard')\n", encoding="utf-8")
+    world.script = script
+    detour = f"hooks/local/../../../escaped/../{world.root.name}/hooks/local/scripts/g.js"
+
+    written = _copy(world, f"{world.root.as_posix()}/{detour}")
+
+    sidecar = world.root / "hooks" / "local" / "package.json"
+    assert sidecar.read_text(encoding="utf-8").strip().startswith("{")
+    assert len(written) == 2
+    assert all(path.is_file() for path in written), written
+    assert sidecar in written
+    assert not (world.tmp / "escaped").exists()

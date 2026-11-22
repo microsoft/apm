@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -175,6 +176,18 @@ def iter_deployable_hook_bundle_files(
         yield source_file
 
 
+def _written_path(target_file: Path, checked: Path) -> Path:
+    """Return the path a completed write is reported and receipted under.
+
+    The lexically normalized destination keeps the spelling every other
+    destination uses (no symlink resolution of the root); a '..' detour
+    through a missing directory is unreadable as spelled, so it is collapsed.
+    Falls back to the containment-checked path when the two disagree.
+    """
+    normalized = Path(os.path.normpath(target_file))
+    return normalized if normalized.resolve() == checked else checked
+
+
 def hook_containment_root(target, project_root: Path) -> Path:
     """Return the root a target's deployed hook bundle must stay within (#4772).
 
@@ -301,10 +314,11 @@ def copy_deployed_hook_bundle(
             continue
         write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
         write_seam.copy2(source_file, checked)
-        integrator.note_rendered_write(target_file)
+        written = _written_path(target_file, checked)
+        integrator.note_rendered_write(written)
         if target_file in command_targets:
             result.scripts_copied += 1
-        target_paths.append(target_file)
+        target_paths.append(written)
 
     if exclude_json_files:
         return result
@@ -332,7 +346,8 @@ def copy_deployed_hook_bundle(
             continue
         write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
         write_seam.write_text(checked, content)
-        integrator.note_rendered_write(target_file)
-        target_paths.append(target_file)
+        written = _written_path(target_file, checked)
+        integrator.note_rendered_write(written)
+        target_paths.append(written)
 
     return result
