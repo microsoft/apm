@@ -398,3 +398,25 @@ def test_a_failed_atomic_copy_leaves_the_destination_and_no_temp(tmp_path: Path)
 
     assert destination.read_bytes() == b"old\n"
     assert [p.name for p in tmp_path.iterdir()] == ["deployed.sh"]
+
+
+def test_a_failed_replacement_removes_a_read_only_staging_file(tmp_path: Path) -> None:
+    """#4691: staging made read-only by the source mode is still cleaned up."""
+    import os
+
+    from apm_cli.utils.atomic_io import atomic_copy
+
+    source = tmp_path / "source.md"
+    source.write_bytes(b"new\n")
+    os.chmod(source, stat.S_IREAD)
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    destination = deploy / "deployed.md"
+    destination.write_bytes(b"old\n")
+
+    with patch("os.replace", side_effect=PermissionError("replace refused")):
+        with pytest.raises(PermissionError, match="replace refused"):
+            atomic_copy(source, destination)
+
+    assert destination.read_bytes() == b"old\n"
+    assert [p.name for p in deploy.iterdir()] == ["deployed.md"]

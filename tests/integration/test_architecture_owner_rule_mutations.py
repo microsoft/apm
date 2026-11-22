@@ -831,6 +831,19 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             id="raw-path-replace",
         ),
         pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    atomic_io.atomic_copy(source_file, target_file)\n",
+            id="raw-atomic-copy-call",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            from apm_cli.utils.atomic_io import atomic_copy\n\n"
+            "            atomic_copy(src, dest, metadata=False)\n",
+            id="raw-atomic-copy-import",
+        ),
+        pytest.param(
             "src/apm_cli/integration/write_seam.py",
             "    record_before_write(destination, follow=True)\n"
             "    return atomic_io.atomic_copy(source, destination, metadata=True)",

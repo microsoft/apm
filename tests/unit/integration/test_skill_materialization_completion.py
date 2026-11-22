@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.skill_support import SkillIntegrationResult
@@ -156,7 +157,7 @@ def test_required_identical_write_keeps_normal_hash_guard_and_actual_copy_callba
     shutil.copytree(source, destination)
     written = []
     diagnostics = DiagnosticCollector()
-    with patch("shutil.copy2", wraps=shutil.copy2) as copy:
+    with patch("apm_cli.integration.write_seam.copy2", wraps=write_seam.copy2) as copy:
         copied = BaseIntegrator().copy_directory_files(
             source,
             destination,
@@ -231,7 +232,7 @@ def test_post_discovery_failures_never_publish_success(tmp_path: Path, stage: st
     package, project, plan = _fixture(tmp_path)
     integrator = SkillIntegrator()
     target = {
-        "copy": "shutil.copy2",
+        "copy": "apm_cli.integration.write_seam.copy2",
         "rewrite": "apm_cli.integration.skill_integrator.SkillIntegrator._resolve_markdown_links_in_skill_bundle",
         "hash": "apm_cli.utils.content_hash.compute_file_hash",
     }[stage]
@@ -262,12 +263,13 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
         target.mkdir(parents=True)
     integrator = SkillIntegrator()
 
-    def fail_copy(source: Path, destination: Path) -> None:
+    def fail_staging(_source: Path, fd: int) -> None:
         if partial:
-            destination.write_bytes(b"partial write")
+            os.write(fd, b"partial write")
         raise OSError("injected first-copy failure")
 
-    with patch("shutil.copy2", side_effect=fail_copy):
+    # #4691: the copy fails while staging; nothing partial reaches the target.
+    with patch("apm_cli.utils.atomic_io._stage_copy", side_effect=fail_staging):
         with pytest.raises(OSError, match="injected first-copy failure"):
             integrator.integrate_package_skill(
                 package,
@@ -276,12 +278,12 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
                 source_plan=plan,
                 managed_files={".claude/skills/s"} if existing else set(),
             )
-    assert target.exists() is (existing or partial)
+    assert target.exists() is existing
+    assert not (target / "SKILL.md").exists()
+    assert not list(target.parent.glob("**/apm-atomic-*"))
     assert not integrator._skill_files
     assert not integrator._skill_session_hashes
     assert not integrator._native_skill_session_owners
-    if partial:
-        assert (target / "SKILL.md").read_bytes() == b"partial write"
     result = integrator.integrate_package_skill(
         package,
         project,
@@ -290,11 +292,10 @@ def test_copy_failure_only_rolls_back_new_empty_destination(
         managed_files=set(),
     )
     # #3441: a surviving empty destination tree holds no user content and is deployed into.
-    assert result.complete is (not partial)
-    if result.complete:
-        assert (target / "SKILL.md").read_bytes() == (
-            package.install_path / "skills/s/SKILL.md"
-        ).read_bytes()
+    assert result.complete
+    assert (target / "SKILL.md").read_bytes() == (
+        package.install_path / "skills/s/SKILL.md"
+    ).read_bytes()
 
 
 @pytest.mark.parametrize("removed", ["source", "target"])
@@ -302,7 +303,7 @@ def test_member_disappearing_before_rewrite_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, removed: str
 ) -> None:
     package, project, plan = _fixture(tmp_path)
-    copy_file = shutil.copy2
+    copy_file = write_seam.copy2
 
     def copy_then_remove(source: Path, target: Path) -> Path:
         copied = copy_file(source, target)
@@ -310,7 +311,7 @@ def test_member_disappearing_before_rewrite_fails(
             (source if removed == "source" else target).unlink()
         return Path(copied)
 
-    monkeypatch.setattr(shutil, "copy2", copy_then_remove)
+    monkeypatch.setattr(write_seam, "copy2", copy_then_remove)
     with pytest.raises(OSError, match="Cannot finalize copied skill member"):
         _integrate(package, project, plan)
     assert (project / ".claude/skills/s/SKILL.md").is_file()
