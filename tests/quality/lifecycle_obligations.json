@@ -16058,7 +16058,7 @@
    "lane": "T-6c",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_operations_keep_the_file_route[deployed]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_claude_routes_an_always_on_instruction_to_agents_md"
   },
   "pair|OP=compile|GATE=allowed": {
    "family": "pair",
@@ -21260,7 +21260,7 @@
    "lane": "T-6c",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_claude_routes_an_always_on_instruction_to_agents_md"
   },
   "pair|PRIM=skill|DEPLOYED=absent": {
    "family": "pair",
@@ -21324,7 +21324,7 @@
    "lane": "T-6c",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[multi-narrowed-deployed]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_claude_routes_an_always_on_instruction_to_agents_md"
   },
   "pair|PRIM=skill|FORCE=on": {
    "family": "pair",
@@ -26147,7 +26147,7 @@
    "lane": "T-6c",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_install_routes_file_primitives[single-unchanged-deployed]"
+   "witness": "tests/lifecycle/scenarios/test_file_routing.py::test_claude_routes_an_always_on_instruction_to_agents_md"
   },
   "pair|TGT=single-unchanged|FORCE=on": {
    "family": "pair",
