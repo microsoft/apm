@@ -107,28 +107,66 @@ def _make_lockfile(n: int) -> LockFile:
     return lockfile
 
 
+def _best_per_call(fn, *, repeats: int = 9, min_batch_seconds: float = 0.002) -> float:
+    """Return the best per-call wall time of *fn*, robust at microsecond scale (#4753).
+
+    Calls are batched until one batch takes at least *min_batch_seconds*, so a
+    sample is far above timer resolution; the minimum over *repeats* batches
+    discards samples a shared runner's scheduler preempted.
+    """
+    inner = 1
+    while True:
+        t0 = time.perf_counter()
+        for _ in range(inner):
+            fn()
+        if time.perf_counter() - t0 >= min_batch_seconds or inner >= 1 << 16:
+            break
+        inner *= 2
+    best = float("inf")
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        for _ in range(inner):
+            fn()
+        best = min(best, (time.perf_counter() - t0) / inner)
+    return best
+
+
+def _children_index_ratio(build) -> float:
+    """Per-call time of *build* on a 10x larger lockfile, over the smaller one."""
+    small_lf = _make_lockfile(100)
+    large_lf = _make_lockfile(1000)
+    return _best_per_call(lambda: build(large_lf)) / _best_per_call(lambda: build(small_lf))
+
+
+def _quadratic_children_index(lockfile):
+    """A seeded O(n^2) regression of the index: rescans every edge per dependency."""
+    deps = list(lockfile.get_package_dependencies())
+    children = {}
+    for dep in deps:
+        for other in deps:
+            for parent in other.parent_keys:
+                if parent is not None and other is dep:
+                    children.setdefault(parent, []).append(other)
+    return children
+
+
+_LINEAR_RATIO_BOUND = 15
+
+
 class TestChildrenIndexScaling:
     """_build_children_index must stay O(n)."""
 
     def test_scaling_ratio(self):
         from apm_cli.install.orphans import _build_children_index
 
-        small_lf = _make_lockfile(50)
-        large_lf = _make_lockfile(500)
-
-        t_small = _median_time(lambda: _build_children_index(small_lf))
-        t_large = _median_time(lambda: _build_children_index(large_lf))
-
-        # Guard against division by near-zero (extremely fast small run)
-        if t_small < 1e-7:
-            pytest.skip("below measurement threshold -- too fast to measure reliably")
-
-        ratio = t_large / t_small
-        assert ratio < 15, (
-            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
-            f"O(n^2) regression (t_small={t_small:.6f}s, "
-            f"t_large={t_large:.6f}s)"
+        ratio = _children_index_ratio(_build_children_index)
+        assert ratio < _LINEAR_RATIO_BOUND, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests O(n^2) regression"
         )
+
+    def test_guard_still_fails_a_quadratic_index(self):
+        """The guard keeps its teeth: a seeded quadratic builder exceeds the bound."""
+        assert _children_index_ratio(_quadratic_children_index) > _LINEAR_RATIO_BOUND
 
 
 # ---------------------------------------------------------------------------
