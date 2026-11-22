@@ -935,7 +935,7 @@ def _warn_parked_executables(
     *format_carries* is False for a bundle format that cannot carry canvas
     extensions at all, so approving alone would not ship them.
     """
-    from ..install.exec_gate import withheld_executable_reason
+    from ..install.exec_skip_reasons import withheld_executable_reason
 
     for exec_type in _gate_parked_types(install_path, dep):
         label = dep.get_unique_key()
