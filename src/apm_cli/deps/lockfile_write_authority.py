@@ -90,6 +90,9 @@ class _WriteScope:
     writer: LockfileWriter
     pending: dict[Path, str | _Removed] = field(default_factory=dict)
     after_commit: list[Callable[[], None]] = field(default_factory=list)
+    # Run when the staged documents never reach disk: a failed commit or an
+    # abandoned command (#4664).
+    if_uncommitted: list[Callable[[], None]] = field(default_factory=list)
     # False while only provisional corrections are staged: a failure then
     # commits nothing, because the command has not changed state yet.
     changed_state: bool = False
@@ -220,13 +223,15 @@ def lockfile_write_scope(writer: LockfileWriter) -> Iterator[None]:
     try:
         yield
     except BaseException as error:
-        if active.scope is not None and active.scope.changed_state and _commits(error):
-            _commit(active.scope)
+        if active.scope is not None:
+            if active.scope.changed_state and _commits(error):
+                _commit_or_abandon(active.scope)
+            else:
+                _abandon(active.scope)
         raise
     else:
         if active.scope is not None:
-            commit_point_seam_for_tests()
-            _commit(active.scope)
+            _commit_or_abandon(active.scope, seam=True)
     finally:
         _active_writer.reset(token)
 
@@ -399,6 +404,38 @@ def after_lockfile_commit(action: Callable[[], None], *, first: bool = False) ->
         scope.after_commit.append(action)
 
 
+def unless_lockfile_commits(action: Callable[[], None]) -> bool:
+    """Run *action* if what this command staged never reaches disk (#4664).
+
+    A failed lockfile write or an abandoned command (a check refusal, an
+    interrupt) runs it; a successful commit drops it. Returns ``False`` when
+    nothing is staged: the lockfile on disk is already the committed one.
+    """
+    scope = _scope()
+    if scope is None or not scope.pending:
+        return False
+    scope.if_uncommitted.append(action)
+    return True
+
+
+def _abandon(scope: _WriteScope) -> None:
+    """Run the actions bound to a staged lockfile that will never reach disk."""
+    actions, scope.if_uncommitted = scope.if_uncommitted, []
+    for action in actions:
+        action()
+
+
+def _commit_or_abandon(scope: _WriteScope, *, seam: bool = False) -> None:
+    """Commit *scope*; an error or interrupt at the commit point abandons it."""
+    try:
+        if seam:
+            commit_point_seam_for_tests()
+        _commit(scope)
+    except BaseException:
+        _abandon(scope)
+        raise
+
+
 def discard_staged_lockfile_writes() -> None:
     """Drop everything this command staged, so its writer scope commits nothing.
 
@@ -411,6 +448,7 @@ def discard_staged_lockfile_writes() -> None:
         return
     scope.pending.clear()
     scope.after_commit.clear()
+    scope.if_uncommitted.clear()
     scope.changed_state = False
 
 
@@ -439,6 +477,8 @@ def _commit(scope: _WriteScope) -> None:
             except OSError as exc:
                 raise LockfileCommitError(f"Could not generate {key.name}: {exc}") from exc
         del scope.pending[key]
+    # The lockfile is on disk: a later failing action must not undo the deploys it records.
+    scope.if_uncommitted.clear()
     actions, scope.after_commit = scope.after_commit, []
     for action in actions:
         action()
