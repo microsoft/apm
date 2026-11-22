@@ -39,7 +39,7 @@ from ...models.dependency.selection import (
 from ...native_plugins.scopes import native_harnesses, native_source_current
 from ...utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ...utils.paths import portable_relpath
-from .local_survivors import _surviving_local_refs_at_install_path
+from .local_survivors import _reintegration_error_detail, _surviving_local_refs_at_install_path
 
 if TYPE_CHECKING:
     from ...core.deployment_ledger import DeploymentMaterializationSession
@@ -221,17 +221,6 @@ def _dependency_public_label(dep_entry: object) -> str:
 def _is_private_local_identity(value: str) -> bool:
     """Return whether a diagnostic identity can expose a declared local path."""
     return value.startswith(("local:", "_local/")) or DependencyReference.is_local_path(value)
-
-
-def _reintegration_error_detail(
-    dependency: DependencyReference,
-    error: Exception,
-) -> str:
-    """Return verbose failure detail without exposing a local declaration."""
-    error_type = type(error).__name__
-    if dependency.is_local:
-        return error_type
-    return f"{error_type}: {error}"
 
 
 class _LocalRefreshLogger:

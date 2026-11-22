@@ -47,3 +47,14 @@ def survivor_ships_hooks(lockfile: object, key: str, modules_dir: Path) -> bool:
     except (ValueError, PathTraversalError):
         return False
     return install_path.is_dir() and bool(HookIntegrator().find_hook_files(install_path))
+
+
+def _reintegration_error_detail(
+    dependency: DependencyReference,
+    error: Exception,
+) -> str:
+    """Return verbose failure detail without exposing a local declaration."""
+    error_type = type(error).__name__
+    if dependency.is_local:
+        return error_type
+    return f"{error_type}: {error}"
