@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
+from apm_cli.deps.local_identity import root_local_dirs, transitive_local_identity
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
 from apm_cli.models.apm_package import DependencyReference
@@ -427,9 +428,9 @@ class TestOneAnchoredDirectoryIsOneDependency:
         self, tmp_path: Path, declared: str, expected_key: str
     ) -> None:
         root_ref = DependencyReference.parse("./packages/lib")
-        dirs = APMDependencyResolver.root_local_dirs([root_ref], tmp_path)
+        dirs = root_local_dirs([root_ref], tmp_path)
 
-        edge = APMDependencyResolver.transitive_local_identity(
+        edge = transitive_local_identity(
             DependencyReference.parse(declared),
             declaring_parent="_local/sib",
             anchored=(tmp_path / "packages" / "sib" / declared).resolve(),
@@ -477,3 +478,82 @@ class TestOneAnchoredDirectoryIsOneDependency:
 
         with pytest.raises(LocalResolutionError, match="different directories"):
             resolve_local_dep_dir(lockfile.get_dependency("../leaf"), lockfile, tmp_path)
+
+
+def _monorepo(root: Path, *, dev_lib: bool) -> Path:
+    """root -> ./packages/sib (-> ../lib -> ../leaf), and ./packages/lib directly."""
+    for name, deps in (("sib", ["../lib"]), ("lib", ["../leaf"]), ("leaf", [])):
+        package = root / "packages" / name
+        package.mkdir(parents=True)
+        listed = "".join(f"    - {dep}\n" for dep in deps)
+        apm = f"dependencies:\n  apm:\n{listed}" if deps else ""
+        (package / "apm.yml").write_text(f"name: {name}\nversion: 1.0.0\n{apm}", encoding="utf-8")
+    lib_section = "devDependencies" if dev_lib else "dependencies"
+    sib = "dependencies:\n  apm:\n    - ./packages/sib\n"
+    lib = f"{lib_section}:\n  apm:\n    - ./packages/lib\n"
+    body = (
+        sib + lib
+        if dev_lib
+        else "dependencies:\n  apm:\n    - ./packages/sib\n    - ./packages/lib\n"
+    )
+    (root / "apm.yml").write_text(f"name: mono\nversion: 1.0.0\n{body}", encoding="utf-8")
+    return root / "apm.yml"
+
+
+def _copy_local(calls: list[Path]):
+    """Download callback that materializes a local package like install does."""
+    import shutil
+
+    def download(dep_ref, modules_dir, parent_chain, parent_pkg=None):
+        base = APMDependencyResolver._effective_base_dir(parent_pkg, modules_dir.parent)
+        source = (base / dep_ref.local_path).resolve()
+        calls.append(source)
+        destination = dep_ref.get_install_path(modules_dir)
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+        return destination
+
+    return download
+
+
+class TestOneAnchoredDirectoryNode:
+    """#4731: the collapsed node keeps install semantics for dev status and rechecks."""
+
+    def test_production_sibling_promotes_a_dev_library_and_its_descendants(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        manifest = _monorepo(tmp_path, dev_lib=True)
+        calls: list[Path] = []
+        resolver = APMDependencyResolver(
+            apm_modules_dir=tmp_path / "apm_modules", download_callback=_copy_local(calls)
+        )
+        resolver._project_root = tmp_path
+
+        tree = resolver.build_dependency_tree(manifest)
+
+        assert not tree.resolution_errors, tree.resolution_errors
+        dev = {node.dependency_ref.get_unique_key(): node.is_dev for node in tree.nodes.values()}
+        assert dev == {
+            "./packages/sib": False,
+            "./packages/lib": False,
+            "local:packages/leaf": False,
+        }
+
+    def test_targeted_sibling_update_rechecks_the_library_at_its_own_anchor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        manifest = _monorepo(tmp_path, dev_lib=False)
+        calls: list[Path] = []
+        resolver = APMDependencyResolver(
+            apm_modules_dir=tmp_path / "apm_modules",
+            download_callback=_copy_local(calls),
+            update_keys={"./packages/sib"},
+        )
+        resolver._project_root = tmp_path
+
+        tree = resolver.build_dependency_tree(manifest)
+
+        assert not tree.resolution_errors, tree.resolution_errors
+        assert (tmp_path / "packages" / "sib" / "packages" / "lib") not in calls, calls
+        assert (tmp_path / "packages" / "lib").resolve() in calls, calls
