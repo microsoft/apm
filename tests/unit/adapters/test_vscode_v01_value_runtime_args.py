@@ -125,7 +125,7 @@ class TestDockerRunArgs(unittest.TestCase):
         """`value_hint` is the schema's display hint for a typed argument.
 
         Real registry data carries both keys -- see the GitHub MCP fixture in
-        tests/test_codex_docker_args_fix.py -- so preferring the hint renders
+        tests/unit/adapters/test_codex_docker_args_fix.py -- so preferring the hint renders
         placeholder words like `env_var_name` as CLI arguments.
         """
         package = _docker_package(
