@@ -43,6 +43,7 @@ from ..models.dependency.replacement import (
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from ..native_plugins.record import NativePluginRecord, NativePluginRecordError, native_lock_fields
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
+from .lockfile_container import parse_lockfile_text
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
 from .lockfile_version_remedy import with_version_remedy
@@ -1234,7 +1235,7 @@ class LockFile:
         for dep in self.dependencies.values():
             dep.content_hash_framed = framed
 
-    def add_dependency(self, dep: LockedDependency) -> None:
+    def add_dependency(self, dep: LockedDependency, *, project_ledger: bool = True) -> None:
         """Add a dependency to the lock file.
 
         Adding a registry-sourced dep or a git-source dep with semver
@@ -1245,7 +1246,7 @@ class LockFile:
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         dep.content_hash_framed = self.framed_content_hashes
         self.dependencies[dep.get_unique_key()] = dep
-        if dep.deployed_files or dep.deployed_file_hashes:
+        if project_ledger and (dep.deployed_files or dep.deployed_file_hashes):
             from ..core.deployment_ledger import DeploymentLedgerCodec
 
             DeploymentLedgerCodec.invalidate_legacy_projection(self)
@@ -1605,14 +1606,12 @@ class LockFile:
     @classmethod
     def from_yaml(cls, yaml_str: str) -> LockFile:
         """Deserialize from YAML string."""
-        from ..utils.yaml_io import load_yaml_str
-
         # Bounded loader: an untrusted bundle apm.lock.yaml cannot wedge the
         # parser with a merge-key bomb (the surrounding LockFile.read guard
         # cannot catch a non-terminating safe_load loop -- it can catch the
         # YAMLError this raises instead).
         try:
-            loaded = load_yaml_str(yaml_str)
+            loaded = parse_lockfile_text(yaml_str)
         except (yaml.YAMLError, ValueError) as exc:
             raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
         data = _validate_lockfile_container(loaded)
@@ -1672,8 +1671,12 @@ class LockFile:
             [str(name) for name in recorded_targets] if isinstance(recorded_targets, list) else None
         )
         lock._extensions = vendor_extensions(data)
-        for dep_data in data.get("dependencies", []):
-            lock.add_dependency(LockedDependency.from_dict(dep_data))
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        dependencies = [LockedDependency.from_dict(row) for row in data.get("dependencies", [])]
+        project_per_row = DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)
+        for dep in dependencies:
+            lock.add_dependency(dep, project_ledger=project_per_row)
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
         lock.mcp_omissions = dict(data.get("mcp_omissions") or {})
@@ -1715,8 +1718,6 @@ class LockFile:
         # and the local package, without changing the on-disk YAML shape.
         if lock.local_deployed_files:
             lock.dependencies[_SELF_KEY] = lock.project_self_entry()
-        from ..core.deployment_ledger import DeploymentLedgerCodec
-
         if "deployments" in data:
             deployment_rows = data["deployments"]
             lock.deployment_ledger = DeploymentLedgerCodec.from_rows(deployment_rows)

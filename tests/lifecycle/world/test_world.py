@@ -903,6 +903,7 @@ _POLICY_EXIT = {
     "deny-pkg": 1,
     "exec-deny-all": 0,
     "mcp-deny": 0,
+    "mcp-deny-all": 0,
     "unreachable": 0,
     "hash-mismatch": 1,
     "chain-cycle": 1,
