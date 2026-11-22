@@ -23,6 +23,10 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
     env = dict(world.env)
     plain = subprocess.run([str(apm), "install"], cwd=root, env=env, capture_output=True, text=True)
     print("== OUTPUT rc", plain.returncode, "\n", plain.stdout[-3000:], plain.stderr[-3000:])
+    full = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0"), capture_output=True, text=True)
+    print("== FULL OUTPUT rc", full.returncode, "\n" + full.stdout + "\n--- stderr\n" + full.stderr)
+    trace = subprocess.run([str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="trace"), capture_output=True, text=True)
+    print("== TRACE\n" + trace.stderr[-2000:])
     log = work / "argv.log"
     env2 = dict(env, L5_ARGV_LOG=str(log), PYTHONPATH=str(Path(__file__).parent / "l5_argv"))
     subprocess.run([str(apm), "install"], cwd=root, env=env2, capture_output=True, text=True)
