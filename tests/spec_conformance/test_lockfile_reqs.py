@@ -1014,15 +1014,15 @@ def test_claude_materialization_links_preserve_locked_source_and_virtual_case(
     lock.write(source / "apm.lock.yaml")
     before = ArtifactSnapshot.capture(tmp_path)
 
-    result = ClaudeFormatter(str(output), source_dir=str(source)).format_distributed(
-        PrimitiveCollection(), {}
+    result = ClaudeFormatter(str(output), source_dir=str(source)).format_agents_md_imports(
+        PrimitiveCollection(), set()
     )
 
     assert result.success, result.errors
     imports = [
         line
         for line in result.content_map[output / "CLAUDE.md"].splitlines()
-        if line.startswith("@")
+        if line.startswith("@") and line != "@AGENTS.md"
     ]
     assert imports == [f"@../source/apm_modules/{relative}/CLAUDE.md"]
     assert (output / imports[0][1:]).resolve() == memory.resolve()

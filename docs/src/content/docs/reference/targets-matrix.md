@@ -51,8 +51,8 @@ stable but explicit-only. See [Experimental](../experimental/).
 ## Post-install instruction compilation
 
 After a project install stages dependency instructions, the APM CLI requires a
-separate root-context compile for `codex`, `gemini`, `opencode`, `hermes`, and
-`grok-build`. It emits the
+separate root-context compile for `claude`, `codex`, `gemini`, `opencode`,
+`hermes`, and `grok-build`. It emits the
 [`req-tg-007`](../../specs/openapm-v01/#req-tg-007) reminder for those targets.
 All other targets in this matrix either deploy instructions as native per-file
 rules, do not support dependency instructions, or have no verified
@@ -157,14 +157,24 @@ Claude Code.
 - **Deploy directory.** `.claude/` (project and user scope; user scope honors `CLAUDE_CONFIG_DIR` if set).
 - **Supported primitives.** instructions, agents, skills, commands, hooks, mcp. (No `prompts`.)
 - **File conventions.**
-  - instructions: deployed directly by `apm install` to
-    `.claude/rules/<name>.md`
+  - instructions: path-scoped ones (for example `**/*.py`) deployed by
+    `apm install` to `.claude/rules/<name>.md`; always-on ones compiled
+    into the root `AGENTS.md`; single-directory ones (for example
+    `src/test/**`, when that directory exists and the project is not
+    single-file) into exactly that directory's `AGENTS.md` for a
+    Claude-only target, or wherever the shared `AGENTS.md` places them
+    when Claude is combined with other targets
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
   - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
-- **Compile output.** `CLAUDE.md`; instructions already deployed under
-  `.claude/rules/` are omitted from `CLAUDE.md` to avoid duplicate context.
+- **Compile output.** Root and nested `AGENTS.md`, plus a `CLAUDE.md`
+  beside each that imports `@AGENTS.md`. A Claude-only compile omits
+  instructions already under `.claude/rules/`. A hand-authored root
+  `CLAUDE.md` without `@AGENTS.md` keeps every instruction in
+  `.claude/rules/`. User scope keeps every instruction in
+  `~/.claude/rules/`. See
+  [Claude Code routing](../../consumer/update-and-refresh/#claude-instructions-move-to-agentsmd-038).
 
 ## cursor
 

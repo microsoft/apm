@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
     DRY_RUN_INCOMPLETE,
+    LEGACY_RENDER_MIGRATE,
     LOCKED_REFS_SATISFIED,
     ORPHANED_PACKAGES,
 )
@@ -796,6 +797,15 @@ class InstallLogger(CommandLogger):
         _rich_info(
             "Kept packages no longer in apm.yml because --frozen does not change "
             f"apm.lock.yaml: {', '.join(dep_keys)}. {ORPHANED_PACKAGES.sentence()}",
+            symbol="info",
+        )
+
+    def frozen_stale_kept(self, paths: list[str]) -> None:
+        """Name locked files a frozen install left because this version no longer renders them."""
+        _rich_info(
+            f"Left {len(paths)} file(s) recorded in apm.lock.yaml that this APM version "
+            f"no longer deploys, because --frozen does not change apm.lock.yaml: "
+            f"{', '.join(paths)}. {LEGACY_RENDER_MIGRATE.sentence()}",
             symbol="info",
         )
 
