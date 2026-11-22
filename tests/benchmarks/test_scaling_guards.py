@@ -107,27 +107,60 @@ def _make_lockfile(n: int) -> LockFile:
     return lockfile
 
 
-class TestChildrenIndexScaling:
-    """_build_children_index must stay O(n)."""
+class _CountingDependency:
+    """Locked dependency view that counts every attribute read."""
 
-    def test_scaling_ratio(self):
+    def __init__(self, dependency: LockedDependency, ops: list[int]):
+        self._dependency = dependency
+        self._ops = ops
+
+    def __getattr__(self, name):
+        self._ops[0] += 1
+        return getattr(self._dependency, name)
+
+
+class _CountingLockfile:
+    """Lockfile view that counts the dependencies it hands out (#4753).
+
+    Every dependency the index receives costs one operation, and every
+    attribute it reads on a dependency costs one more. Any other lockfile
+    access raises, so a new access path must be counted here, not missed.
+    """
+
+    def __init__(self, lockfile: LockFile):
+        self.ops = [0]
+        self._dependencies = [
+            _CountingDependency(dependency, self.ops)
+            for dependency in lockfile.get_package_dependencies()
+        ]
+
+    def get_package_dependencies(self) -> list[_CountingDependency]:
+        self.ops[0] += len(self._dependencies)
+        return list(self._dependencies)
+
+
+class TestChildrenIndexScaling:
+    """_build_children_index must stay O(n), counted rather than timed (#4753)."""
+
+    def test_operation_count_grows_linearly(self):
         from apm_cli.install.orphans import _build_children_index
 
-        small_lf = _make_lockfile(50)
-        large_lf = _make_lockfile(500)
+        counts = {}
+        for n in (50, 500):
+            lockfile = _make_lockfile(n)
+            counting = _CountingLockfile(lockfile)
+            index = _build_children_index(counting)
+            expected = _build_children_index(lockfile)
+            assert {parent: [d.repo_url for d in deps] for parent, deps in index.items()} == {
+                parent: [d.repo_url for d in deps] for parent, deps in expected.items()
+            }
+            counts[n] = counting.ops[0]
 
-        t_small = _median_time(lambda: _build_children_index(small_lf))
-        t_large = _median_time(lambda: _build_children_index(large_lf))
-
-        # Guard against division by near-zero (extremely fast small run)
-        if t_small < 1e-7:
-            pytest.skip("below measurement threshold -- too fast to measure reliably")
-
-        ratio = t_large / t_small
-        assert ratio < 15, (
-            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
-            f"O(n^2) regression (t_small={t_small:.6f}s, "
-            f"t_large={t_large:.6f}s)"
+        # Linear work gives exactly 10x for 10x input; quadratic gives ~100x.
+        assert counts[50] > 0
+        assert counts[500] <= 10 * counts[50], (
+            f"_build_children_index did {counts[500]} operations for 500 deps and "
+            f"{counts[50]} for 50, an O(n^2) regression"
         )
 
 
