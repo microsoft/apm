@@ -71,6 +71,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "local-edits-export": "preserves local edits as patches; it does not clear the edit, "
     "the following install does",
     "managed-paths-unresolved": _FAULT,
+    "native-mcp-entry-drifted": "executed by test_native_mcp_collision_lifecycle::"
+    "test_managed_connection_user_edits_block_replay_and_removal (#4757)",
     "native-mcp-ownership-unrecorded": "covered by the audit --ci native-mcp-ownership "
     "check tests in tests/unit/policy/test_ci_checks.py",
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"

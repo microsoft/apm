@@ -308,10 +308,15 @@ def test_managed_connection_user_edits_block_replay_and_removal(
     apm_binary_path: Path,
     modified_target: str,
 ) -> None:
-    """An old ownership name cannot authorize overwriting or deleting edited content."""
+    """An old ownership name cannot authorize overwriting or deleting edited content.
+
+    ``apm audit --ci`` reports the same edited entry, naming it and its file,
+    and passes while the entry is still what APM wrote (#4757).
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([_http()])
     _success(scenario.install(targets=modified_target))
+    _success(scenario.audit())
     scenario.write(modified_target, "http://127.0.0.1:9/personal")
     before = scenario.path(modified_target).read_bytes()
     original_lock = (scenario.root / "apm.lock.yaml").read_bytes()
@@ -320,6 +325,34 @@ def test_managed_connection_user_edits_block_replay_and_removal(
         assert result.returncode != 0, result.stdout + result.stderr
         assert scenario.path(modified_target).read_bytes() == before
         assert (scenario.root / "apm.lock.yaml").read_bytes() == original_lock
+    audited = scenario.audit()
+    output = " ".join((audited.stdout + audited.stderr).split())
+    assert audited.returncode == 1, output
+    assert (
+        f"MCP server 'notes' target '{modified_target}' in "
+        f"'{scenario.path(modified_target)}': the entry differs from what APM recorded writing"
+    ) in output, output
+    assert "Run 'apm install' to rewrite the recorded native MCP entries" in output, output
+    assert output.isascii(), output
+    assert scenario.path(modified_target).read_bytes() == before
+    assert (scenario.root / "apm.lock.yaml").read_bytes() == original_lock
+
+    # The printed remedy: remove the changed entry, install, and audit passes.
+    path = scenario.path(modified_target)
+    if modified_target == "claude":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["mcpServers"]["notes"]
+        path.write_text(json.dumps(data), encoding="utf-8")
+    else:
+        data = tomlkit.parse(path.read_text(encoding="utf-8"))
+        del data["mcp_servers"]["notes"]
+        path.write_text(tomlkit.dumps(data), encoding="utf-8")
+    _success(scenario.install(targets=modified_target))
+    assert scenario.servers(modified_target)["notes"]["url"] == _http()["url"]
+    _success(scenario.audit())
+
+    scenario.write(modified_target, "http://127.0.0.1:9/personal")
+    before = scenario.path(modified_target).read_bytes()
     scenario.declare([])
     removed = scenario.install(targets=modified_target)
     assert removed.returncode != 0, removed.stdout + removed.stderr

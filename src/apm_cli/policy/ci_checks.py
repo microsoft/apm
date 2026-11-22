@@ -808,33 +808,55 @@ def _check_native_mcp_ownership(
     *,
     user_scope: bool,
 ) -> CheckResult:
-    """Fail where ``install --frozen`` refuses a differing same-name native MCP entry (#4477)."""
-    from ..install.mcp.native_entry import differing_unrecorded_native_mcp_entries
+    """Fail on native MCP entries install refuses to overwrite.
 
-    pairs = differing_unrecorded_native_mcp_entries(
-        lock,
-        [target.name for target in targets],
-        project_root=project_root,
-        user_scope=user_scope,
+    An unrecorded same-name entry that differs from its declaration, as
+    ``install --frozen`` refuses it (#4477), and a recorded entry a user
+    changed since APM wrote it, which install preserves and refuses (#4757).
+    """
+    from ..install.mcp.native_entry import (
+        differing_unrecorded_native_mcp_entries,
+        drifted_recorded_native_mcp_entries,
     )
-    if not pairs:
+
+    runtimes = [target.name for target in targets]
+    pairs = differing_unrecorded_native_mcp_entries(
+        lock, runtimes, project_root=project_root, user_scope=user_scope
+    )
+    drifted = drifted_recorded_native_mcp_entries(
+        lock, runtimes, project_root=project_root, user_scope=user_scope
+    )
+    if not pairs and not drifted:
         return CheckResult(
             name="native-mcp-ownership",
             passed=True,
-            message="No unrecorded native MCP entries differ from their declarations",
+            message="No native MCP entries differ from their declarations or recorded state",
+        )
+    message = []
+    if pairs:
+        message.append(
+            f"{len(pairs)} existing native MCP entr(ies) differ from their declarations "
+            "and their ownership is not recorded in apm.lock.yaml -- "
+            f"{remediation.NATIVE_MCP_OWNERSHIP_UNRECORDED.clause()}"
+        )
+    if drifted:
+        message.append(
+            f"{len(drifted)} native MCP entr(ies) recorded in apm.lock.yaml were changed "
+            f"since APM wrote them -- {remediation.NATIVE_MCP_ENTRY_DRIFTED.clause()}"
         )
     return CheckResult(
         name="native-mcp-ownership",
         passed=False,
-        message=(
-            f"{len(pairs)} existing native MCP entr(ies) differ from their declarations "
-            "and their ownership is not recorded in apm.lock.yaml -- "
-            f"{remediation.NATIVE_MCP_OWNERSHIP_UNRECORDED.clause()}"
-        ),
+        message="; ".join(message),
         details=[
             f"MCP server {name!a} target {runtime!a}: the existing entry differs from "
             "its declaration"
             for name, runtime in pairs
+        ]
+        + [
+            f"MCP server {name!a} target {runtime!a} in {path!a}: the entry differs from "
+            "what APM recorded writing"
+            for name, runtime, path in drifted
         ],
     )
 

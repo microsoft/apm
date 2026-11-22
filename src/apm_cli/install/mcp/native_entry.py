@@ -1,7 +1,8 @@
 """Whether a runtime's native config already holds a declared MCP entry.
 
-Read-only probes the frozen lock replay asks before it claims a server; split
-from ``install/mcp/ownership.py``, which owns the comparison they delegate to.
+Read-only probes the frozen lock replay and ``apm audit --ci`` ask about
+native entries; split from ``install/mcp/ownership.py``, which owns the
+comparison they delegate to.
 """
 
 from __future__ import annotations
@@ -141,3 +142,71 @@ def differing_unrecorded_native_mcp_entries(
                 continue
             pairs.append((name, runtime))
     return pairs
+
+
+def drifted_recorded_native_mcp_entries(
+    lockfile: Any,
+    target_runtimes: list[str],
+    *,
+    project_root: Any,
+    user_scope: bool,
+) -> list[tuple[str, str, str]]:
+    """Return ``(server, runtime, config path)`` for recorded entries a user changed (#4757).
+
+    A self-defined server the lock records as APM-owned on a runtime that
+    compares native connections, whose native entry no longer matches what
+    APM wrote. The verdict is install's own (``CONFLICT`` from
+    :func:`~apm_cli.install.mcp.ownership.compare_native_mcp_connection`), so
+    ``apm audit --ci`` names exactly the entries install would preserve and
+    refuse. A missing entry is not drift here: install writes it again.
+    Read-only.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.install.mcp.ownership import (
+        NativeMcpConnectionState,
+        compare_native_mcp_connection,
+        migrate_legacy_project_target_servers,
+        native_comparison_clients,
+    )
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+    from apm_cli.models.dependency.mcp import MCPDependency
+
+    ownership = {
+        runtime: set(names) for runtime, names in (lockfile.mcp_target_servers or {}).items()
+    }
+    migrate_legacy_project_target_servers(
+        ownership, active_runtimes=set(target_runtimes), user_scope=user_scope
+    )
+    self_defined = {
+        name: stored
+        for name, stored in (lockfile.mcp_configs or {}).items()
+        if isinstance(stored, dict) and stored.get("registry") is False
+    }
+    if not any(set(self_defined) & ownership.get(runtime, set()) for runtime in target_runtimes):
+        return []
+    clients = native_comparison_clients(
+        list(target_runtimes), project_root=project_root, user_scope=user_scope
+    )
+    native_hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
+    drifted: list[tuple[str, str, str]] = []
+    for runtime, client in sorted(clients.items()):
+        for name in sorted(set(self_defined) & ownership.get(runtime, set())):
+            stored = self_defined[name]
+            try:
+                state = compare_native_mcp_connection(
+                    client,
+                    name,
+                    requested_info=MCPIntegrator._build_self_defined_info(
+                        MCPDependency.from_dict(stored)
+                    ),
+                    stored_config=stored,
+                    managed=True,
+                    native_hash=native_hashes.get(runtime, {}).get(name),
+                    declaration_changed=False,
+                )
+            except (TypeError, ValueError):
+                logger.debug("Could not compare %s MCP entry %s", runtime, name, exc_info=True)
+                continue
+            if state is NativeMcpConnectionState.CONFLICT:
+                drifted.append((name, runtime, str(client.get_config_path())))
+    return drifted

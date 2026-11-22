@@ -510,7 +510,7 @@ These checks run without a policy file:
 - `lockfile-targets-current` -- no lockfile-recorded files of a target `apm.yml` no longer declares; `apm install --frozen` refuses the same state without writing
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
-- `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
+- `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration, and no recorded self-defined entry was changed since APM wrote it (the detail names the entry and the native config file); `apm install --frozen` refuses the same entries
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration

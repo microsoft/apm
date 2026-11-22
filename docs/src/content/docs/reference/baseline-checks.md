@@ -168,9 +168,9 @@ the [policy schema](../policy-schema/).
 
 ### `native-mcp-ownership`
 
-- **What it verifies.** That no MCP runtime holds a same-name entry that differs from a self-defined declared server whose ownership the lockfile does not record. `apm install --frozen` refuses the same entry, so both commands reach one verdict.
-- **Fails when.** Such an entry exists. The detail names the server and the target. An entry equal to the declaration, including one switched off with `enabled = false`, passes and stays the user's.
-- **Remediation.** Make the entry match the declaration or remove it, then run `apm install`. Audit does not change the native configuration.
+- **What it verifies.** That no MCP runtime holds a same-name entry that differs from a self-defined declared server whose ownership the lockfile does not record, and that every self-defined entry the lockfile records as APM-written still matches what APM wrote. `apm install` and `apm install --frozen` refuse both kinds of entry, so audit and install reach one verdict.
+- **Fails when.** Such an entry exists. The detail names the server and the target; for a recorded entry a user changed, it also names the native config file. An unrecorded entry equal to the declaration, including one switched off with `enabled = false`, passes and stays the user's. A recorded entry that is missing passes: install writes it again.
+- **Remediation.** For an unrecorded entry, make it match the declaration or remove it, then run `apm install`. For a changed recorded entry, remove it or restore what APM wrote, then run `apm install`. Audit does not change the native configuration.
 
 ### `content-integrity`
 

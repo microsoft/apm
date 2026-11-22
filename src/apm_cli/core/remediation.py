@@ -1275,6 +1275,12 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
 )
+NATIVE_MCP_ENTRY_DRIFTED = _entry(
+    "native-mcp-entry-drifted",
+    "apm install",
+    "rewrite the recorded native MCP entries",
+    before="remove each changed entry or restore what APM wrote",
+)
 FROZEN_EXEC_DECISIONS_STALE = _entry(
     "frozen-exec-decisions-stale",
     "apm install",
