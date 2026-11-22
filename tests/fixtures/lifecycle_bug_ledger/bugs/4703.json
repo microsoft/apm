@@ -13,7 +13,7 @@
   "regression_tests": [
     "tests/lifecycle/scenarios/test_file_routing.py::test_uninstall_keeps_a_bundle_owned_instruction",
     "tests/unit/commands/test_uninstall_cleanup_claims.py::test_cleanup_claims_exclude_paths_the_local_owner_still_holds",
-    "tests/unit/core/test_deployment_state_io.py::test_departing_owner_proof_keeps_the_row_with_remaining_owners",
+    "tests/unit/core/test_deployment_departing_owner_rows.py::test_departing_owner_proof_keeps_the_row_with_remaining_owners",
     "tests/unit/commands/test_uninstall_summary_output.py::test_reported_package_failure_makes_uninstall_incomplete"
   ]
 }
