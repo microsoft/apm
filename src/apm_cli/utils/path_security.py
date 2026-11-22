@@ -19,6 +19,7 @@ Design
 
 from __future__ import annotations
 
+import os
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
@@ -214,6 +215,45 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
 def resolve_for_containment(path: Path) -> Path:
     """Resolve *path* once (symlinks followed) for a containment check made now."""
     return _strip_extended_prefix(path.resolve())
+
+
+class CheckRoot:
+    """A trusted root resolved live for ONE containment check; never kept across checks.
+
+    ``resolve(path)`` equals ``resolve_for_containment(path)`` but walks only
+    the components of *path* below the root: ``realpath`` would re-walk the
+    shared root prefix it just resolved. The walk lstats every suffix
+    component now and falls back to a full resolve on any symlink, ``..``,
+    missing component, path outside the root or non-POSIX platform, so the
+    result is the same sequential filesystem observation ``realpath`` makes.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.resolved = resolve_for_containment(root)
+
+    def resolve(self, path: Path) -> Path:
+        if os.name != "posix" or not path.is_absolute() or not self.root.is_absolute():
+            return resolve_for_containment(path)
+        try:
+            suffix = path.relative_to(self.root).parts
+        except ValueError:
+            return resolve_for_containment(path)
+        current = str(self.resolved)
+        for part in suffix:
+            if part in ("..", "."):
+                return resolve_for_containment(path)
+            current = os.path.join(current, part)
+            try:
+                if S_ISLNK(os.lstat(current).st_mode):
+                    return resolve_for_containment(path)
+            except OSError:
+                return resolve_for_containment(path)
+        return Path(current)
+
+    def within(self, candidate: Path, base: Path) -> bool:
+        """Whether resolved *candidate* lies under *base*, resolved now through this check."""
+        return resolved_relative_within(candidate, self.resolve(base)) is not None
 
 
 def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:

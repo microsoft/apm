@@ -7,9 +7,9 @@ from typing import Any
 
 from apm_cli.security.gate import is_generated_python_artifact
 from apm_cli.utils.path_security import (
+    CheckRoot,
     PathTraversalError,
     ensure_path_within,
-    resolve_for_containment,
 )
 from apm_cli.utils.paths import portable_relpath
 
@@ -68,12 +68,13 @@ def deployed_path_entry(
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
-    resolved: list[Path] = []
+    resolved: list[tuple[Path, CheckRoot]] = []
 
-    def _resolved_candidate() -> Path:
-        # Resolved lazily, once per call (external-root targets never need it).
+    def _resolved_candidate() -> tuple[Path, CheckRoot]:
+        # One live check per call, made lazily (external-root targets never need it).
         if not resolved:
-            resolved.append(resolve_for_containment(target_path))
+            check = CheckRoot(project_root)
+            resolved.append((check.resolve(target_path), check))
         return resolved[0]
 
     def _try_target(tgts) -> str | None:
@@ -97,13 +98,14 @@ def deployed_path_entry(
                 else:
                     resolved_target = ensure_path_within(target_path, deploy_root)
                     return portable_relpath(resolved_target, project_root)
+            candidate, check = _resolved_candidate()
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
-                    _resolved_candidate(),
+                    candidate,
                     project_root=project_root,
                     target=_t,
                     scope=InstallScope.PROJECT,
-                    candidate_resolved=True,
+                    check=check,
                 )
             except RuntimeError:
                 continue

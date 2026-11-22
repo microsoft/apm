@@ -26,6 +26,7 @@ from apm_cli.core.deployment_state import (
 from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
+    CheckRoot,
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
@@ -331,30 +332,24 @@ class DeploymentMaterializationSession:
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
 
-    def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
-        return DeploymentLedgerCodec.locator_for_path(
-            candidate,
-            project_root=self.root,
-            target=target,
-            scope=self.scope,
-            candidate_resolved=True,
-        )
+    def _encode(self, candidate: Path, target: TargetProfile, check: CheckRoot):
+        codec = DeploymentLedgerCodec
+        return codec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, check=check)  # fmt: skip
 
-    def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
-        candidate = resolve_for_containment(path)
+    def _locator(self, path: Path, targets: Sequence, check: CheckRoot | None = None):
+        check = check or CheckRoot(self.root)
+        candidate = check.resolve(path)
         for target in targets:
-            if not target.supports("skills"):
-                continue
-            skills_root = resolve_for_containment(target.skills_deploy_path(self.root))
-            if resolved_relative_within(candidate, skills_root) is not None:
-                return self._encode(candidate, target)
+            if target.supports("skills") and check.within(candidate, target.skills_deploy_path(self.root)):  # fmt: skip
+                return self._encode(candidate, target, check)
         return None
 
     def _write_locator(
         self, path: Path, targets: Sequence[TargetProfile]
     ) -> DeploymentLocator | None:
         """Locate a final-rendered write of any file primitive inside a target's roots."""
-        locator = self._locator(path, targets)
+        check = CheckRoot(self.root)
+        locator = self._locator(path, targets, check)
         if locator is not None:
             return locator
         for target in targets:
@@ -365,10 +360,10 @@ class DeploymentMaterializationSession:
                     for mapping in target.primitives.values()
                     if mapping.deploy_root
                 )
-            candidate = resolve_for_containment(path)
+            candidate = check.resolve(path)
             for root in roots:
-                if resolved_relative_within(candidate, resolve_for_containment(root)) is not None:
-                    return self._encode(candidate, target)
+                if check.within(candidate, root):
+                    return self._encode(candidate, target, check)
         return None
 
     @staticmethod
@@ -1711,11 +1706,11 @@ class DeploymentLedgerCodec(RowProjection):
         target: TargetProfile,
         runtime: str | None = None,
         scope: InstallScope,
-        candidate_resolved: bool = False,
+        check: CheckRoot | None = None,
     ) -> DeploymentLocator:
         """Encode a path without forcing external roots into project strings.
 
-        ``candidate_resolved``: *path* was just resolved; roots are always resolved live.
+        ``check``: this check's live *project_root* resolution, which resolved *path*.
         """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
@@ -1727,8 +1722,11 @@ class DeploymentLedgerCodec(RowProjection):
                 scope=scope_value,
             )
 
-        root = resolve_for_containment(project_root)
-        candidate = Path(path) if candidate_resolved else resolve_for_containment(Path(path))
+        candidate = Path(path)
+        if check is None or check.root != project_root:
+            check = CheckRoot(project_root)
+            candidate = check.resolve(candidate)
+        root = check.resolved
         relative = resolved_relative_within(candidate, root)
         if relative is not None:
             return DeploymentLocator(
