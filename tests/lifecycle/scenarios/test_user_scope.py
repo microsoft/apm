@@ -68,7 +68,14 @@ def test_a_first_install_from_each_source_deploys_under_home(lifecycle_world, sr
         scenario, name = _user(lifecycle_world, "p-skill"), "p-skill"
     else:
         scenario, name = from_source(lifecycle_world, src, scope="user")
-    step = scenario.run(f"install {name}", credit=[_source_credit(src)])
+    if src == "native-plugin":
+        # The plugin ships an MCP server, so the user-scope gate parks the whole
+        # plugin until it is approved; the approved install is the source credit.
+        scenario.run(f"install {name}")
+        scenario.run(f"approve {name}")
+        step = scenario.run("install", credit=[_source_credit(src)])
+    else:
+        step = scenario.run(f"install {name}", credit=[_source_credit(src)])
     scenario.assert_deployed()
     assert not any(item.startswith("project:") for item in step.changed), step.changed
     if src != "native-plugin":
