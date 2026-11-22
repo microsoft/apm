@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm install` and `apm update` run up to 3x faster on large projects: a no-op install of 200 packages drops from 133 to 44 seconds. (closes #4733, #4735, #4761, #4766, #4771)
+- `apm install` and `apm update` run up to 3x faster on large projects: a no-op install of 200 packages drops from 133 to 44 seconds. (closes #4733, #4735, #4761, #4766, #4771, #4802)
 - A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (closes #4282, #4612)
 - `apm install` refuses before writing anything when a managed file it would replace lacks deployment evidence, naming every such file. (closes #4381, #4652)
 - `apm install` refuses a self-defined or registry MCP server that collides with a native connection or a lockfile record before writing any file. (closes #4268, #4741, #4745, #4763)
