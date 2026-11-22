@@ -1466,7 +1466,6 @@
     "tests/unit/runtime/test_runtime_utils.py",
     "tests/unit/scripts/test_architecture_authenticated_egress.py",
     "tests/unit/scripts/test_architecture_inventory.py",
-    "tests/unit/scripts/test_architecture_lifecycle_lock.py",
     "tests/unit/scripts/test_architecture_registry.py",
     "tests/unit/scripts/test_architecture_registry_conflicts.py",
     "tests/unit/scripts/test_architecture_runner.py",

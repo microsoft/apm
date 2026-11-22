@@ -25015,16 +25015,16 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:829",
-    "src/apm_cli/install/services.py:1032"
+    "src/apm_cli/install/services.py:827",
+    "src/apm_cli/install/services.py:1016"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:719",
-    "src/apm_cli/install/exec_gate.py:720",
-    "src/apm_cli/install/exec_gate.py:723"
+    "src/apm_cli/install/exec_gate.py:713",
+    "src/apm_cli/install/exec_gate.py:714",
+    "src/apm_cli/install/exec_gate.py:717"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -25033,7 +25033,7 @@
     "src/apm_cli/integration/mcp_config_view.py:1220",
     "src/apm_cli/integration/mcp_config_view.py:1232",
     "docs/src/content/docs/enterprise/control-executables.mdx:19",
-    "docs/src/content/docs/consumer/install-mcp-servers.md:169"
+    "docs/src/content/docs/consumer/install-mcp-servers.md:168"
    ],
    "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies)"
   },
@@ -25051,7 +25051,7 @@
   "U2": {
    "evidence": [
     "src/apm_cli/commands/approve.py:263",
-    "src/apm_cli/policy/install_preflight.py:220"
+    "src/apm_cli/policy/install_preflight.py:233"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },

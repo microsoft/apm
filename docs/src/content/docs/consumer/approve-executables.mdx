@@ -132,8 +132,10 @@ so approving a Claude Code plugin's hooks takes effect on the next install. A pl
 APM installs whole gets one `plugin:` pin in `apm.yml` (`~/.apm/apm.yml` with `-g`;
 run `apm approve` from `~/.apm` then) ([details](../install-plugins/#native-plugins)).
 
-A pin covers the files APM copies. Code a hook downloads when it runs
-(`npx`, `curl`) is not covered.
+A pin covers the files APM copies with a hook, including helper modules and
+`package.json` files next to its scripts. Code a hook downloads when it runs
+(`npx`, `curl`) is not covered. Hook approvals recorded before APM 0.38 need
+one re-approval.
 
 ## Deny a package
 
