@@ -361,19 +361,54 @@ def test_pack_refuses_a_claude_dependency_whose_cache_directory_is_missing(
         assert "Run 'apm install'" in output, output
 
 
+def test_pack_refuses_when_only_a_prompt_was_deployed_without_its_cache(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A non-Claude deployment does not prove Claude was excluded (#4755).
+
+    Claude has no prompts primitive, so a Copilot prompt with no Claude
+    counterpart says nothing about the always-on guidance routed to AGENTS.md.
+    """
+    scenario = _new_scenario(tmp_path / "prompt-dep", apm_binary_path)
+    package = scenario.sources.create("guard-kit")
+    scenario.sources.add_instruction(package, "guard", _instruction("guard"))
+    scenario.sources.add_prompt(package, "review", "---\ndescription: review\n---\nReview it.\n")
+    repository = scenario.repositories.create("guard-kit", source_tree=package.root)
+    commit = scenario.repositories.commit(repository, message="seed guard-kit")
+    remote_url = f"https://github.com/{_OWNER}/guard-kit"
+    environment = scenario.repositories.url_rewrite_subprocess_env(repository, remote_url)
+    dependency = {"git": remote_url, "ref": commit.sha, "alias": "guard-kit"}
+    producer = scenario.consumers.create(
+        "producer", dependencies=(dependency,), targets=("claude", "copilot")
+    )
+    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
+    prompts = producer.root / ".github" / "prompts"
+    assert prompts.is_dir() and any(prompts.iterdir()), "the Copilot prompt deployed"
+
+    shutil.rmtree(producer.root / "apm_modules" / "guard-kit")
+
+    for output in _refuses_both_formats(scenario, producer, environment, tmp_path / "out"):
+        assert "apm_modules/guard-kit is missing" in output, output
+
+
 def test_pack_keeps_packing_a_dependency_that_excludes_claude_without_its_cache(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A package whose ``targets:`` exclude Claude has no routed rules to lose (#4755)."""
+    """A dependency edge whose ``targets:`` exclude Claude has no routed rules to lose (#4755)."""
     scenario = _new_scenario(tmp_path / "copilot-dep", apm_binary_path)
-    package = scenario.sources.create("guard-kit", targets=("copilot",))
+    package = scenario.sources.create("guard-kit")
     scenario.sources.add_skill(package, "helper", _skill("helper"))
     scenario.sources.add_instruction(package, "guard", _instruction("guard"))
     repository = scenario.repositories.create("guard-kit", source_tree=package.root)
     commit = scenario.repositories.commit(repository, message="seed guard-kit")
     remote_url = f"https://github.com/{_OWNER}/guard-kit"
     environment = scenario.repositories.url_rewrite_subprocess_env(repository, remote_url)
-    dependency = {"git": remote_url, "ref": commit.sha, "alias": "guard-kit"}
+    dependency = {
+        "git": remote_url,
+        "ref": commit.sha,
+        "alias": "guard-kit",
+        "targets": ["copilot"],
+    }
     producer = scenario.consumers.create(
         "producer", dependencies=(dependency,), targets=("claude", "copilot")
     )
