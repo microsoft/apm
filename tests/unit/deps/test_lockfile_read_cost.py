@@ -82,6 +82,20 @@ _URI_ROWS = {
 class TestLockFileReadCost:
     """One install reads the lockfile about 19 times; each read must stay O(N)."""
 
+    def test_each_parse_of_a_text_is_a_private_copy(self):
+        from apm_cli.deps.lockfile_container import parse_lockfile_text
+
+        repo_url = f"owner/copy-{uuid.uuid4().hex}"
+        text = _lock_text_with_deployed_files({repo_url: {".github/c.md": ""}})
+        expected = yaml.safe_load(text)
+
+        first = parse_lockfile_text(text)
+        first["dependencies"][0]["deployed_files"].append(".github/injected.md")
+        first["dependencies"].append({"repo_url": "owner/injected"})
+        first["lockfile_version"] = "injected"
+
+        assert parse_lockfile_text(text) == expected
+
     def test_same_text_is_parsed_once(self):
         repo_url = f"owner/memo-{uuid.uuid4().hex}"
         text = _lock_text_with_deployed_files({repo_url: {".github/m.md": ""}})
