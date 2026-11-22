@@ -501,24 +501,22 @@ class LockfileBuilder:
                 locked.native_plugin = prior.native_plugin
 
     def _retire_undeclared_native_plugins(self, lockfile: LockFile) -> None:
-        """Drop native Claude records once apm.yml no longer declares claude (#4744).
+        """Drop native Claude records once contraction retires claude (#4744).
 
-        The rule of target-scoped contraction (``manifest_reconcile``
-        ``_dropped_target_of``): claude is neither declared nor active in this
-        run. Applied to the merged lock, so a partial install retires untouched
-        plugins too; native registration then removes their roots and Claude
-        declarations. ``apm lock`` touches no deployed state, so it keeps them.
+        The target-contraction rule (``target_governance.target_retired``):
+        apm.yml declares targets, and neither they nor this run's targets name
+        claude. Applied to the merged lock, so a partial install retires
+        untouched plugins too; native registration then removes their roots
+        and Claude declarations. ``apm lock`` touches no deployed state, so it
+        keeps them.
         """
-        if self.ctx.lockfile_only or any(t.name == "claude" for t in self.ctx.targets or ()):
-            return
-        package_path = getattr(getattr(self.ctx, "apm_package", None), "package_path", None)
-        if package_path is None:
-            return
-        from apm_cli.install.manifest_reconcile import declared_target_names
+        from apm_cli.install.phases.targets import declared_target_profiles
+        from apm_cli.install.target_governance import retired_native_roots
 
-        scope = getattr(self.ctx, "scope", None)
-        declared = declared_target_names(Path(package_path), user_scope=is_user_scope(scope))
-        if not declared or "claude" in declared:
+        declared = declared_target_profiles(self.ctx)
+        if self.ctx.lockfile_only or not retired_native_roots(
+            lockfile, self.ctx.targets or (), declared
+        ):
             return
         for locked in lockfile.dependencies.values():
             locked.native_plugin = None

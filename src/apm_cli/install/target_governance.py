@@ -6,7 +6,8 @@ reconciler and the Claude plugin phase share these predicates.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -81,3 +82,29 @@ def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[
         path.startswith(prefix) if prefix.endswith("/") else path == prefix
         for prefix in file_prefixes
     )
+
+
+def target_retired(
+    name: str,
+    *,
+    active_targets: Iterable[TargetProfile],
+    declared_targets: Iterable[TargetProfile] | None,
+) -> bool:
+    """Whether contraction retires target *name*: apm.yml declares targets, and
+    neither they nor this run's active targets name it."""
+    if declared_targets is None:
+        return False
+    return name not in {profile.name for profile in (*active_targets, *declared_targets)}
+
+
+def retired_native_roots(
+    lockfile: Any, active_targets: Iterable[TargetProfile], declared_targets: Any
+) -> dict[str, str]:
+    """``{root: "claude"}`` for each native Claude plugin root of a retired claude (#4744)."""
+    from apm_cli.native_plugins.record import lock_native_plugins
+
+    if not target_retired(
+        "claude", active_targets=active_targets, declared_targets=declared_targets
+    ):
+        return {}
+    return {record.root: "claude" for record in lock_native_plugins(lockfile).values()}

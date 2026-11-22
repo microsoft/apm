@@ -233,22 +233,34 @@ _NARROW_PATHS = {
 }
 
 
-@pytest.mark.parametrize("path", sorted(_NARROW_PATHS))
-def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) -> None:
-    """#4744: dropping claude retires the plugin bin/ only claude received; the rest stays."""
-    use_policy(lifecycle_world, "allow")
+def _deployed_plugin_bin(world) -> Scenario:
+    """User scope, targets [copilot, claude]: p-native-claude-bin deployed with its bin/."""
+    use_policy(world, "allow")
     specs = {
-        "p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec,
-        "p-skill": lifecycle_world.packages["p-skill"].spec,
+        "p-native-claude-bin": world.packages["p-native-claude-bin:git"].spec,
+        "p-skill": world.packages["p-skill"].spec,
     }
-    scenario = Scenario(
-        lifecycle_world, specs, scope="user", targets=("copilot", "claude"), policy="allow"
-    )
+    scenario = Scenario(world, specs, scope="user", targets=("copilot", "claude"), policy="allow")
     scenario.run("install p-native-claude-bin")
     scenario.run("approve p-native-claude-bin")
     scenario.run("install --trust-bin")
+    assert (world.home / _PLUGIN_BIN).is_file()
+    return scenario
+
+
+def _assert_plugin_unowned(scenario: Scenario) -> None:
+    lock = scenario.lock_path.read_text(encoding="utf-8")
+    assert _PLUGIN_ROOT not in lock, "the lock still claims the retired plugin files"
+    settings_path = scenario.world.home / ".claude/settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert not settings.get("enabledPlugins"), settings
+
+
+@pytest.mark.parametrize("path", sorted(_NARROW_PATHS))
+def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) -> None:
+    """#4744: dropping claude retires the plugin bin/ only claude received; the rest stays."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
     home = lifecycle_world.home
-    assert (home / _PLUGIN_BIN).is_file()
     kept = sorted(
         item.relative_to(home).as_posix()
         for item in (home / ".agents/skills").rglob("*")
@@ -264,8 +276,7 @@ def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) ->
         assert _PLUGIN_ROOT in lock, f"{command} dropped the ownership of a deployed plugin"
     step = scenario.run(line)
     assert not (home / _PLUGIN_BIN).exists(), f"dropping claude left the plugin bin\n{step.output}"
-    lock = scenario.lock_path.read_text(encoding="utf-8")
-    assert _PLUGIN_ROOT not in lock, "the lock still claims the retired plugin files"
+    _assert_plugin_unowned(scenario)
     # The plugin root and its Claude registration (catalog and settings) retire together.
     assert_changes(
         step.changed,
@@ -277,10 +288,38 @@ def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) ->
         ),
         label=path,
     )
-    settings = json.loads((home / ".claude/settings.json").read_text(encoding="utf-8"))
-    assert not settings.get("enabledPlugins"), settings
     for item in kept:
         assert (home / item).is_file(), f"narrowing removed the copilot output {item}"
+    scenario.finish()
+
+
+def test_target_narrow_keeps_an_edited_plugin_bin_and_says_so(lifecycle_world) -> None:
+    """#4744 control: a bin/ the user edited is kept and reported; ownership still retires."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
+    edited = (lifecycle_world.home / _PLUGIN_BIN).read_text(encoding="ascii") + "# mine\n"
+    scenario.user_write(_PLUGIN_BIN, edited)
+    scenario.set_targets("copilot")
+    step = scenario.run("install --trust-bin")
+    assert (lifecycle_world.home / _PLUGIN_BIN).read_text(encoding="ascii") == edited
+    assert "Kept ~/.agents/plugins/p-native-claude-bin: its files changed" in step.output, (
+        step.output
+    )
+    _assert_plugin_unowned(scenario)
+    scenario.finish()
+
+
+def test_frozen_refuses_a_dropped_claude_native_plugin(lifecycle_world) -> None:
+    """#4744: --frozen refuses the target mismatch (as for files, #4517) and changes nothing."""
+    scenario = _deployed_plugin_bin(lifecycle_world)
+    scenario.set_targets("copilot")
+    step = scenario.run("install --frozen", exit=1)
+    assert "no longer declares target(s) claude" in step.output, step.output
+    assert _PLUGIN_ROOT in step.output, step.output
+    assert_changes(step.changed, (), label="frozen refusal")
+    assert (lifecycle_world.home / _PLUGIN_BIN).is_file()
+    scenario.run("install --trust-bin")
+    assert not (lifecycle_world.home / _PLUGIN_BIN).exists()
+    _assert_plugin_unowned(scenario)
     scenario.finish()
 
 

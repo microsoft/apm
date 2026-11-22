@@ -11,6 +11,8 @@
     "routing.authorized_targets_only"
   ],
   "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_frozen_refuses_a_dropped_claude_native_plugin",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_target_narrow_keeps_an_edited_plugin_bin_and_says_so",
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_target_narrow_retires_a_user_scope_plugin_bin"
   ]
 }
