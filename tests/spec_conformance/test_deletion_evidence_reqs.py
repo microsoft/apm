@@ -216,7 +216,7 @@ def test_consent_keeps_every_file_the_exception_does_not_cover(tmp_path: Path, c
 
     result, _messages = _cleanup(root, evidence, path)
 
-    assert os.path.lexists(path) and result.deleted == []
+    assert (path.is_symlink() or path.exists()) and result.deleted == []
     assert evidence.consented_deletions() == []
 
 
@@ -505,7 +505,7 @@ def test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan(
         receipt_retirements=[],
     )
 
-    assert os.path.lexists(planted)
+    assert planted.is_symlink()
     assert skill not in result.deleted
 
 
