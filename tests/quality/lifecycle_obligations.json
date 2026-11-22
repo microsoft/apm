@@ -28357,12 +28357,11 @@
   },
   "U-USER-SCOPE-ORG-POLICY": {
    "evidence": [
-    "src/apm_cli/core/scope.py:235",
-    "src/apm_cli/core/scope.py:242",
-    "src/apm_cli/policy/discovery.py:961",
-    "docs/src/content/docs/enterprise/apm-policy.mdx:18",
-    "docs/src/content/docs/enterprise/security.md:99",
-    "docs/src/content/docs/reference/cli/policy.md:56"
+    "src/apm_cli/core/scope.py::policy_discovery_uses_git_remote",
+    "src/apm_cli/policy/discovery.py::_auto_discover",
+    "docs/src/content/docs/enterprise/apm-policy.mdx",
+    "docs/src/content/docs/enterprise/security.md::Threat model",
+    "docs/src/content/docs/reference/cli/policy.md::`apm policy status`"
    ],
    "text": "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not a defect): user scope has no git remote, so policy_discovery_uses_git_remote is False at $APM_HOME and install, lock, update and install --mcp at -g discover no org policy; the local executables gate still parks bin/ there, and project scope refuses the denied plugin with exit 1. A user-scope cell whose GATE is denied-dependency under one of those commands is removed until #3703 lands; PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: generator/bin_pin.py hashes the predicate, and when the hash differs from U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails"
   },
