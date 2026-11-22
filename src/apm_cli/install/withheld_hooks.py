@@ -92,13 +92,11 @@ def locked_withheld_hook_files(
         install_path = dep_ref.get_install_path(modules_dir)
         if not install_path.is_dir():
             continue
-        subset = effective_dependency_selection(dep_ref).target_subset
         try:
             package_info = _build_package_info(dep, install_path)
             status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
-        except ExecPolicyUnavailable:
-            continue  # the policy checks report an unavailable policy
-        except (OSError, ValueError) as exc:
+        except (ExecPolicyUnavailable, OSError, ValueError) as exc:
+            subset = effective_dependency_selection(dep_ref).target_subset
             if any(
                 target.name == "copilot" and (not subset or "copilot" in subset)
                 for target in active
@@ -109,7 +107,7 @@ def locked_withheld_hook_files(
             continue
         package_targets = resolve_effective_package_targets(
             active,
-            subset,
+            effective_dependency_selection(dep_ref).target_subset,
             package_info,
             None,
             dep_ref.get_identity(),

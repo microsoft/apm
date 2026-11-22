@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.exec_gate import ExecPolicyUnavailable
 from apm_cli.install.withheld_hooks import locked_withheld_hook_files, withheld_hook_files
 from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -116,16 +117,21 @@ def test_hook_paths_that_cannot_be_computed_fail_closed(tmp_path: Path) -> None:
     assert (project / ".github" / "hooks" / "h-hook-session.json").is_file()
 
 
-@pytest.mark.parametrize(("target_subset", "reported"), [([], True), (["claude"], False)])
+@pytest.mark.parametrize(
+    ("target_subset", "error", "reported"),
+    [
+        ([], PermissionError("bin/ unreadable"), True),
+        ([], ExecPolicyUnavailable("bin/ unreadable"), True),
+        (["claude"], PermissionError("bin/ unreadable"), False),
+    ],
+    ids=["os-error", "policy-unavailable", "restricted-to-claude"],
+)
 def test_an_unreadable_decision_fails_closed_where_copilot_is_eligible(
-    tmp_path: Path, target_subset: list[str], reported: bool
+    tmp_path: Path, target_subset: list[str], error: Exception, reported: bool
 ) -> None:
     lock, modules, project = _locked(tmp_path, target_subset)
 
-    with patch(
-        "apm_cli.install.exec_gate.current_exec_decision",
-        side_effect=PermissionError("bin/ unreadable"),
-    ):
+    with patch("apm_cli.install.exec_gate.current_exec_decision", side_effect=error):
         found = locked_withheld_hook_files(
             lock, modules, lambda: None, project, [KNOWN_TARGETS["copilot"]]
         )
@@ -135,15 +141,20 @@ def test_an_unreadable_decision_fails_closed_where_copilot_is_eligible(
     assert (project / ".github" / "hooks" / "h-hook-session.json").is_file()
 
 
-def test_a_symlinked_hook_path_is_named_as_the_link(tmp_path: Path) -> None:
+@pytest.mark.parametrize("referent_recorded", [False, True], ids=["unrecorded", "recorded"])
+def test_a_symlinked_hook_path_is_named_as_the_link(
+    tmp_path: Path, referent_recorded: bool
+) -> None:
+    """The link is compared and reported as itself, never as its referent."""
     package = _package(tmp_path / "modules", "session.json")
     project = tmp_path / "project"
     hooks = project / ".github" / "hooks"
     hooks.mkdir(parents=True)
     (project / "user-hook.json").write_text("{}", encoding="utf-8")
     (hooks / "h-hook-session.json").symlink_to(project / "user-hook.json")
+    recorded = {"user-hook.json"} if referent_recorded else set()
 
-    found = withheld_hook_files(package, project, [KNOWN_TARGETS["copilot"]], recorded=set())
+    found = withheld_hook_files(package, project, [KNOWN_TARGETS["copilot"]], recorded=recorded)
 
     assert found == [".github/hooks/h-hook-session.json"]
     assert (hooks / "h-hook-session.json").is_symlink()
