@@ -763,8 +763,8 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._restore_deploy_targets()\n",
-            "                    pass\n",
+            "        self._restore_deploy_targets()\n",
+            "        pass\n",
             id="commit-order-rollback-skips-restore",
         ),
         pytest.param(
@@ -775,9 +775,21 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._remove_created_target_roots()\n",
-            "                    pass\n",
+            "        self._remove_created_target_roots()\n",
+            "        pass\n",
             id="commit-order-rollback-keeps-created-roots",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "                    self._undo_deploys()\n",
+            "                    pass\n",
+            id="commit-order-rollback-skips-undo",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "        return unless_lockfile_commits(self._undo_deploys)\n",
+            "        return unless_lockfile_commits(lambda: None)\n",
+            id="commit-order-uncommitted-update-skips-undo",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",

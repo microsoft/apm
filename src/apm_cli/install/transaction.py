@@ -164,7 +164,8 @@ class InstallTransaction:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             try:
                 if not self.committed:
-                    self._settle_deploy_journal()
+                    if not self._settle_at_lockfile_commit():
+                        self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
@@ -285,6 +286,29 @@ class InstallTransaction:
         # fallible post-commit action: the lockfile then records the deploys.
         after_lockfile_commit(self._settle_deploy_journal, first=True)
 
+    def _settle_at_lockfile_commit(self) -> bool:
+        """Keep a released journal until the staged lockfile reaches disk (#4664).
+
+        A command that runs the pipeline inside its own lockfile writer (``apm
+        update``, ``apm deps update``) completes this transaction before the
+        writer commits. The journal then still restores every deployed path if
+        that commit fails or the command is abandoned; a successful commit
+        settles it (:meth:`release_deploy_targets`).
+        """
+        from apm_cli.deps.lockfile_write_authority import unless_lockfile_commits
+
+        if not self._journal_released or self._deploy_journal is None:
+            return False
+        return unless_lockfile_commits(self._undo_deploys)
+
+    def _undo_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created.
+
+        Rollback and an uncommitted completed transaction (#4664) both undo here.
+        """
+        self._restore_deploy_targets()
+        self._remove_created_target_roots()
+
     def _take_deploy_journal(self) -> DeployJournal | None:
         """Stop listening at the write seam and hand over the journal."""
         from apm_cli.integration import write_seam
@@ -334,8 +358,7 @@ class InstallTransaction:
             try:
                 self._ref_pins.discard()
                 try:
-                    self._restore_deploy_targets()
-                    self._remove_created_target_roots()
+                    self._undo_deploys()
                 finally:
                     try:
                         cleanup_issues = self._resolution.rollback() or []

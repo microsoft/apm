@@ -237,6 +237,8 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
             "self._deploy_journal = DeployJournal(store_parent)",
             "self._restore_deploy_targets()",
             "self._remove_created_target_roots()",
+            "self._undo_deploys()\n                finally:",
+            "return unless_lockfile_commits(self._undo_deploys)",
         )
     ):
         found.append(
