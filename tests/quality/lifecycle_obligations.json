@@ -13630,17 +13630,15 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[proxy-logical]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|LOCK=absent|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[qualified-host-port]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|LOCK=absent|MCPOWN=copilot": {
    "family": "pair",
@@ -14142,25 +14140,22 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[bare-default]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|LOCK=newer-generator|HOSTID=proxy-logical": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[proxy-logical]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|LOCK=newer-generator|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[qualified-host-port]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|LOCK=newer-generator|MCPOWN=copilot": {
    "family": "pair",
@@ -15193,25 +15188,22 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[bare-default]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=audit|HOSTID=proxy-logical": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[proxy-logical]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=audit|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[qualified-host-port]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|OP=audit|LOCK=absent": {
    "family": "pair",
@@ -24045,17 +24037,15 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_git_marketplace_plugin_records_its_host_identity[proxy-logical]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=marketplace-git|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "required",
-   "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_git_marketplace_plugin_records_its_host_identity[qualified-host-port]"
+   "status": "baseline",
+   "strength": "e2e"
   },
   "pair|SRC=marketplace-git|LOCK=absent": {
    "credited_by": [

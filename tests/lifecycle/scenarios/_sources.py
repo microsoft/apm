@@ -26,13 +26,13 @@ MARKETPLACES = ("marketplace-git", "marketplace-local", "marketplace-file")
 _MARKET_HOME = {"home": (*PROJECT_HOME_ALLOWED, ".apm/cache/marketplace")}
 
 
-def local_catalog(world, src: str, package: str = "p-skill") -> str:
+def local_catalog(world, src: str) -> str:
     """A marketplace on disk: a catalog directory, or one ``marketplace.json`` file."""
     name = "lifecycle-local" if src == "marketplace-local" else "lifecycle-file"
     plugin = {
-        "name": package,
-        "description": f"Lifecycle world package {package}",
-        "source": {"source": "github", "repo": f"lifecycle/{package}", "ref": "v1.0.0"},
+        "name": "p-skill",
+        "description": "Lifecycle world package p-skill",
+        "source": {"source": "github", "repo": "lifecycle/p-skill", "ref": "v1.0.0"},
     }
     document = {"name": name, "owner": {"name": "APM Lifecycle"}, "plugins": [plugin]}
     root = world.root / name
@@ -42,31 +42,19 @@ def local_catalog(world, src: str, package: str = "p-skill") -> str:
     return str(root if src == "marketplace-local" else catalog)
 
 
-def source_spec(src: str, package: str) -> str:
-    """The world package key (or install spec) of *package* from *src*."""
-    if src in ("marketplace-local", "marketplace-file"):
-        return f"{package}@{SOURCES[src][1].split('@')[1]}"
-    suffix = {"git": "git", "marketplace-git": "marketplace", "pkg-registry": "registry"}
-    return f"{package}:{suffix[src]}" if src in suffix else package
-
-
-def from_source(
-    world, src: str, *, scope: str = "project", package: str | None = None
-) -> tuple[Scenario, str]:
+def from_source(world, src: str, *, scope: str = "project") -> tuple[Scenario, str]:
     """(scenario, package name) with *src* reachable and nothing installed yet."""
     use_policy(world, "allow")
     if src == "pkg-registry":
         # The registry is the default of the manifest the install reads (APM_HOME at -g).
         use_registry(world, scope)
     name, spec = SOURCES[src]
-    if package is not None:
-        name, spec = package, source_spec(src, package)
     spec = world.packages[spec].spec if spec in world.packages else spec
     targets = ("claude",) if src == "native-plugin" else ("copilot",)
     scenario = Scenario(world, {name: spec}, policy="allow", targets=targets, scope=scope)
     if src in MARKETPLACES:
         catalog = world.services.marketplace_url if src == "marketplace-git" else None
-        catalog = catalog or local_catalog(world, src, name)
+        catalog = catalog or local_catalog(world, src)
         if scope == "user":
             # ``apm marketplace`` has no user-scope form; the catalog list is
             # global, so a user-scope install reads what it registers (an input).

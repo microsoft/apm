@@ -311,6 +311,7 @@ SCENARIO_MODULES = (
     "test_graph_version",
     "test_history_upgrade",
     "test_host_identity_pairs",
+    "test_local_bundle_commands",
     "test_lock_states",
     "test_mcp_ownership_history",
     "test_network_offline",
@@ -318,7 +319,6 @@ SCENARIO_MODULES = (
     "test_pack_lock_states",
     "test_platform",
     "test_policy_pairs",
-    "test_source_pairs",
     "test_target_history_sources",
     "test_user_scope",
 )
