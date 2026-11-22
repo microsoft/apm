@@ -578,6 +578,7 @@ def run_mcp_integration(  # noqa: PLR0913
 
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
+    new_mcp_configs: builtins.dict = {}
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
     from apm_cli.core.errors import TargetResolutionError
     from apm_cli.models.apm_package import (
@@ -594,16 +595,17 @@ def run_mcp_integration(  # noqa: PLR0913
         raise SystemExit(2) from exc
 
     if should_install and mcp_deps:
-        from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+        from apm_cli.install.mcp.collision_preflight import refuse_projected_mcp_collisions
 
         # A package install refused these before deploying (commit_gate.py);
         # an MCP-only install refuses them here, before its first write (#4268).
-        refuse_unrecorded_mcp_collisions(
+        refuse_projected_mcp_collisions(
             mcp_deps,
             lockfile=pre_install_lock if pre_install_lock is not None else previous_lock,
             project_root=project_root,
             user_scope=user_scope,
             logger=logger,
+            replay_claims=frozen,
             runtime=runtime,
             exclude=exclude,
             apm_config=mcp_apm_config,
@@ -960,6 +962,20 @@ def run_mcp_integration(  # noqa: PLR0913
             mcp_config_provenance=old_mcp_provenance,
             logger=logger,
             fail_on_write_error=True,
+        )
+
+    if should_install and pre_install_lock is None and not frozen:
+        from apm_cli.install.mcp.write_receipts import retire_undeclared_mcp_writes
+
+        # No prior lockfile names APM's servers: this installation's write
+        # evidence retires the entries APM wrote and no longer deploys (#4737).
+        retire_undeclared_mcp_writes(
+            new_mcp_servers,
+            declared_configs=new_mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):

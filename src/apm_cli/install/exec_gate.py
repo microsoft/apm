@@ -8,7 +8,7 @@ the npm v12-style ``allowExecutables`` default-deny policy.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -17,6 +17,7 @@ from apm_cli.core.remediation import (
     BIN_EXECUTABLES_NOT_RETRUSTED,
     BIN_EXECUTABLES_UNTRUSTED,
 )
+from apm_cli.install.exec_skip_reasons import executable_skip_reason
 from apm_cli.install.plan_admission import (  # noqa: F401 -- re-exported for callers
     _declared_exec_types,
     _is_transitive,
@@ -385,16 +386,28 @@ def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
     The same dependency check the install policy gate applies
     (:func:`~apm_cli.policy.matcher.check_dependency_allowed`).
     """
+    return policy_denied_dependencies(
+        (
+            (key, dep.to_dependency_ref())
+            for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
+            if key != "."
+        ),
+        policy,
+    )
+
+
+def policy_denied_dependencies(
+    dependencies: Iterable[tuple[str, Any]], policy: Any
+) -> dict[str, str]:
+    """Return key -> reason for each ``(key, DependencyReference)`` the org policy denies."""
     from apm_cli.policy.matcher import check_dependency_allowed
 
     dependency_policy = getattr(policy, "dependencies", None)
     if dependency_policy is None:
         return {}
     denied: dict[str, str] = {}
-    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
-        if key == ".":
-            continue
-        allowed, reason = check_dependency_allowed(dep.to_dependency_ref(), dependency_policy)
+    for key, ref in dependencies:
+        allowed, reason = check_dependency_allowed(ref, dependency_policy)
         if not allowed:
             denied[key] = f"org policy: {reason}"
     return denied
@@ -408,6 +421,8 @@ class GateRetirements(NamedTuple):
     hook_pins: dict[str, str]
     # Lock key -> why the hooks it recorded as deployed are no longer allowed.
     hook_packages: dict[str, str]
+    # Lock key -> why a natively deployed plugin is no longer admitted whole (#3921).
+    native_packages: dict[str, str]
 
 
 def gate_retirements(
@@ -421,8 +436,9 @@ def gate_retirements(
     (:class:`~apm_cli.security.trust.McpAdmission`) now parks -- a deny, a
     revoked approval or a changed definition -- recorded hook files whose
     pinned approval no longer admits them (:func:`locked_hook_pin_mismatches`,
-    the ``--frozen`` and audit owner), and the packages whose recorded hooks
-    install's executables gate no longer deploys (:func:`locked_hooks_retired`).
+    the ``--frozen`` and audit owner), the packages whose recorded hooks
+    install's executables gate no longer deploys (:func:`locked_hooks_retired`),
+    and the native plugins install would now park (``locked_native_retired``).
     ``None`` when the org policy blocks or is unresolved: install's policy
     preflight owns that outcome.
     """
@@ -433,7 +449,7 @@ def gate_retirements(
     from apm_cli.security.trust import McpAdmission
 
     if lockfile is None:
-        return GateRetirements({}, {}, {}, {})
+        return GateRetirements({}, {}, {}, {}, {})
     route = classify_project_policy(manifest_root(project_root, user_scope=user_scope))
     if route.blocks or route.unresolved:
         return None
@@ -468,7 +484,10 @@ def gate_retirements(
     retired = locked_hooks_retired(
         lockfile, modules_dir, _trust_ctx, pinned={item.package for item in pins}
     )
-    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired)
+    from apm_cli.claude_plugins.admission import locked_native_retired
+
+    native = locked_native_retired(lockfile, modules_dir, _trust_ctx, route.policy)
+    return GateRetirements(denied, view.consent_problems(lockfile), hooks, retired, native)
 
 
 def locked_hooks_retired(
@@ -722,39 +741,6 @@ def plugin_bin_deployable(
     ):
         return False
     return bin_deploy_denial(package_info, policy) is None
-
-
-def executable_skip_reason(
-    ctx: InstallContext | None, package_name: str, label: str, exec_type: str, kind: str
-) -> str:
-    """Return why *kind* of *package_name* was skipped, with the next step.
-
-    The gate records hard-denied types in ``ctx.package_denied_exec_types``;
-    a denied type points to ``apm policy explain`` because approving cannot
-    lift a deny. Any other skip is approvable.
-    """
-    from apm_cli.core.scope import is_user_scope
-    from apm_cli.security.trust import approve_command, explain_command
-
-    user_scope = is_user_scope(getattr(ctx, "scope", None))
-    denied = getattr(ctx, "package_denied_exec_types", None) or {}
-    if exec_type in denied.get(package_name, frozenset()):
-        explain = explain_command(label, user_scope=user_scope)
-        return f"{kind} skipped (denied). Run '{explain}' to see which deny applies."
-    from apm_cli.core import remediation
-    from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS
-
-    # Only these kinds are skipped as unapproved here; another kind is a caller bug.
-    approve = {
-        EXEC_TYPE_BIN: remediation.BIN_EXECUTABLES_UNAPPROVED,
-        EXEC_TYPE_CANVAS: remediation.CANVAS_SKIPPED_UNAPPROVED,
-        EXEC_TYPE_HOOKS: remediation.HOOKS_UNAPPROVED,
-    }[exec_type]
-    command = approve_command(label, user_scope=user_scope)
-    return (
-        f"{kind} skipped (not approved in executables.allow). "
-        f"{approve.bind(package=label).with_command(command).sentence()}"
-    )
 
 
 def log_bin_status(

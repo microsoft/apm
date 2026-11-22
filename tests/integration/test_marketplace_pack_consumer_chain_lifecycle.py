@@ -26,7 +26,7 @@ from tests.integration._marketplace_pack_kit import (
 )
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _OUTPUTS = {
     "claude": ".claude-plugin/marketplace.json",
@@ -57,7 +57,9 @@ def _build(tmp_path: Path, binary: Path) -> tuple[MarketplacePackWorld, dict]:
     world.repos.tag(sp_repo, "v1.0.0", sp_v1)
 
     rawplug = src / "rawplug"
-    write(rawplug / ".claude-plugin" / "plugin.json", '{"name": "rawplug", "version": "0.4.0"}\n')
+    # A root plugin.json keeps the split route that deploys loose skills; a
+    # .claude-plugin manifest installs whole at project scope (#3921).
+    write(rawplug / "plugin.json", '{"name": "rawplug", "version": "0.4.0"}\n')
     write(rawplug / "skills" / "rx" / "SKILL.md", skill_md("rx"))
     write(rawplug / "agents" / "ra.md", "---\nname: ra\ndescription: a\n---\n# ra\n")
     _, rp_v1 = world.publish("rawplug", rawplug)

@@ -7,7 +7,7 @@ then remaining packages are re-integrated from apm_modules/.
 from datetime import datetime
 from pathlib import Path
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.install.deployed_paths import skill_bundle_file_entries
 from apm_cli.integration import AgentIntegrator, PromptIntegrator
@@ -23,6 +23,8 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
 )
 from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
 
 
 def _sync(integrator, target: str, package, project_root: Path, managed: set[str]) -> dict:

@@ -31,6 +31,7 @@ from hypothesis.stateful import RuleBasedStateMachine, precondition, rule
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.oracles import (
     ExpectedCell,
     Observation,
@@ -73,9 +74,22 @@ _PROJECT_HOME = (
 )
 # At user scope receipts and logs live under APM_HOME; HOME gets the deploy dir.
 _USER_HOME = (".copilot", ".apm-local", ".local/state/gh", ".cache/apm")
+# A reconcile also deploys the native plugin root (#3921).
 _RECONCILE_WRITES = {
-    "project": {"project": ("apm.lock.yaml", "apm_modules", ".github", ".gitignore", ".apm-local")},
-    "user": {"apm-home": ("apm.lock.yaml", "apm_modules", "deployment-receipts", "logs")},
+    "project": {
+        "project": (
+            "apm.lock.yaml",
+            "apm_modules",
+            ".github",
+            ".gitignore",
+            ".apm-local",
+            ".agents/plugins",
+        )
+    },
+    "user": {
+        "apm-home": ("apm.lock.yaml", "apm_modules", "deployment-receipts", "logs"),
+        "home": (".agents/plugins",),
+    },
 }
 _STORE_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("config.json",)}}
 _MANIFEST_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("apm.yml",)}}
@@ -110,6 +124,9 @@ class KnownCell:
     match: str
     scopes: tuple[str, ...] = SCOPES
     per_step: bool = True
+
+    def __post_init__(self) -> None:
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
 
     @property
     def label(self) -> str:

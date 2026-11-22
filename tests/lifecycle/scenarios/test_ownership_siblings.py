@@ -486,10 +486,13 @@ def test_operations_beside_a_users_skill_keep_its_bytes(lifecycle_world, deploye
     else:
         act("pack", "pack", ("project:.github/plugin*", "project:build*"))
     inline = f"install --mcp p-inline -- {INERT_COMMAND} --stdio"
+    # The first MCP write records its evidence against this checkout's
+    # installation identity, created here when nothing was deployed before (#4737).
+    identity = ("project:.apm-local*",) if deployed == "unowned" else ()
     act(
         inline,
         "mcp-install",
-        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml"),
+        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml", *identity),
     )
     act("install p-exec-bundle", "bundle-install", ("project:apm_modules*",))
     scenario.run("install p-exec")
@@ -541,6 +544,9 @@ _EDITED_EXEC = [
 ]
 
 
+_EDITED_EXEC_KNOWN = Known("#4626", r"I1-X2: the user's bytes were changed")
+
+
 def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     """#4626: install replaces an edited hook, canvas or LSP entry without a word."""
     scenario = _deployed_executables(lifecycle_world)
@@ -549,8 +555,7 @@ def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     scenario.user_write(_CANVAS, _with(_CANVAS, "'p-canvas'", "'my-canvas'", world))
     scenario.user_write(_LSP, _with(_LSP, '"--stdio"', '"--my-flag"', world))
     scenario.source_moved()
-    known = {"I1": Known("#4626", r"I1-X2: the user's bytes were changed")}
-    step = scenario.run("install", known=known)
+    step = scenario.run("install", known={"I1": _EDITED_EXEC_KNOWN})
     assert step.result.returncode == 0, step.output
     scenario.finish()
 
@@ -597,6 +602,40 @@ def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> N
         "install", credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=gate)]
     )
     assert not hook.exists(), step.output
+    scenario.finish()
+
+
+def test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected(
+    lifecycle_world,
+) -> None:
+    """A gated package's hook file restored by a checkout without a lockfile stays put.
+
+    No lock record proves APM wrote it, so install keeps it but names it, and
+    ``audit --ci`` fails naming it until the file is gone.
+    """
+    scenario = _hook_package(lifecycle_world)
+    rel = ".github/hooks/h-hook-session.json"
+    hook = lifecycle_world.project / rel
+    committed = hook.read_bytes()
+    scenario.run("deny h-hook")
+    scenario.run("install")
+    assert not hook.exists()
+    scenario.user_write(rel, committed.decode("ascii"))
+    _forget_lock(scenario)
+    scenario.run(
+        "install",
+        keep={"project": (rel,)},
+        says=[rf"Kept {re.escape(rel)}: it sits at h-hook's hook path"],
+    )
+    assert hook.read_bytes() == committed
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    text = " ".join(audit.output.split())
+    assert re.search(rf"{re.escape(rel)}: hook path of \S*h-hook \(hooks denied\)", text), text
+    assert "delete each named file you did not write yourself" in text, text
+    # The printed remedy: delete the file, then the advised audit passes.
+    hook.unlink()
+    scenario.release_user_write(rel)
+    scenario.run("audit --ci", read_only=True, exit=0)
     scenario.finish()
 
 
@@ -956,7 +995,10 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     lifecycle_world, deployed
 ) -> None:
     use_policy(lifecycle_world, "allow")
-    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow")
+    # cursor splits every plugin into loose skills; claude and copilot install a
+    # Claude plugin whole at project scope (#3921), where the skill is not a loose file.
+    targets = ("cursor",)
+    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
     if deployed == "unowned":
         scenario.user_write(_NATIVE_SKILL, _USER_NATIVE_SKILL)
         line = "install --dry-run p-native-claude"
@@ -1291,6 +1333,6 @@ CREDITS = credits(
         },
     },
     known={
-        "test_edited_executable_files_are_kept": "#4626",
+        "test_edited_executable_files_are_kept": _EDITED_EXEC_KNOWN,
     },
 )

@@ -264,7 +264,7 @@ def _build() -> tuple[dict[str, Any], dict[str, object], dict[str, str]]:
             "row_targets": {"single": list(single), "multi": list(multi)},
         },
         "rules": {
-            rule: {"text": text, "evidence": [str(item) for item in evidence]}
+            rule: {"text": text, "evidence": list(dict.fromkeys(str(item) for item in evidence))}
             for rule, (text, evidence) in sorted(RULES.items())
         },
         "rows": {

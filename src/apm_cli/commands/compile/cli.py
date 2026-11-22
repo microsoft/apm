@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -482,6 +482,10 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         selection_source = _display_user_path(manifest_file(source_root))
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
 
+    # After the manifest is validated: its own errors keep their framing.
+    if not _dependency_policy_allows(logger, [source_root], user_scope=True):
+        return 1
+
     results = compile_user_root_contexts(
         compile_targets,
         source_root,
@@ -622,11 +626,16 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
 def _pre_compile_then_validate(
     logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
 ) -> None:
-    """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
-    if not run or source_root is None:
-        return
-    _fire_pre_compile(logger, verbose, source_root)
-    _validate_project(logger, False, source_root, allow_empty=clean)
+    """When ``run``, fire pre-compile scripts, then check the project they may have populated.
+
+    Under the lifecycle lock, right before rendering, the org dependency policy
+    judges the current installed inventory again: a script or an install that
+    finished while compile waited for the lock may have changed it.
+    """
+    if run and source_root is not None:
+        _fire_pre_compile(logger, verbose, source_root)
+        _validate_project(logger, False, source_root, allow_empty=clean)
+    _enforce_dependency_policy(logger, [source_root or Path.cwd(), Path.cwd()])
 
 
 def _validate_project(
@@ -691,6 +700,132 @@ def _validate_project(
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)
+
+
+def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, Any]]:
+    """``(key, DependencyReference)`` for every installed package compile renders from *root*."""
+    from ...install.installed_dependencies import installed_dependency_subjects
+
+    return [(s.key, s.ref) for s in installed_dependency_subjects(root, user_scope=user_scope)]
+
+
+def _declared_across_roots(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Declared dependencies of any root's manifest installed under any root's apm_modules.
+
+    With ``--root`` the renderer reads the source manifest and the redirected
+    installation together, so a package can be declared in one root and
+    installed only in the other.
+    """
+    from ...core.scope import scope_manifest_path
+    from ...models.apm_package import APMPackage
+
+    found: dict[str, Any] = {}
+    if len(roots) < 2:
+        return found
+    for root in roots:
+        manifest = scope_manifest_path(root, user_scope=user_scope)
+        if not manifest.is_file():
+            continue
+        try:
+            declared = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except ValueError:
+            continue  # compile reports an invalid manifest itself
+        for dep in declared:
+            if dep.is_marketplace:
+                continue  # resolves at install; the lock names it
+            if any(dep.get_install_path(other / "apm_modules").is_dir() for other in roots):
+                found.setdefault(dep.get_unique_key(), dep)
+    return found
+
+
+def _policy_subjects(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Every installed package compile renders from *roots*, keyed by lock key."""
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = {
+        key: ref
+        for root in unique_roots
+        for key, ref in _rendered_dependencies(root, user_scope=user_scope)
+    }
+    for key, ref in _declared_across_roots(unique_roots, user_scope=user_scope).items():
+        subjects.setdefault(key, ref)  # the lock's effective source (replace:) wins
+    return subjects
+
+
+def _forget_compile_policy(logger: CommandLogger) -> None:
+    """Start a new compilation: resolve the policy and report warnings afresh (watch mode)."""
+    for name in ("_apm_compile_policy", "_apm_policy_warned"):
+        if name in vars(logger):
+            delattr(logger, name)
+
+
+def _dependency_policy_allows(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> bool:
+    """Whether org policy lets compile render what is installed under *roots*.
+
+    Compile renders installed dependency content (and the files it deployed)
+    into agent context, so it applies the dependency check install, update
+    and uninstall apply, routed through the trust policy owner so an unusable
+    policy fails closed as install does. ``enforcement: warn`` reports and
+    allows. Reports each denied package and the remediation when it refuses.
+    A warning already reported to *logger* (this command) is not repeated.
+    """
+    from ...core.remediation import COMPILE_DEPENDENCY_DENIED
+    from ...core.scope import manifest_root
+    from ...install.errors import PolicyViolationError
+    from ...install.exec_gate import policy_denied_dependencies
+    from ...policy.outcome_routing import resolve_trust_policy
+
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = _policy_subjects(unique_roots, user_scope=user_scope)
+    if not subjects:
+        return True
+    # One resolution per command: the recheck under the lock re-reads the
+    # inventory, not the policy (resolving reports its outcome once).
+    resolved = getattr(logger, "_apm_compile_policy", None)
+    if not isinstance(resolved, tuple):
+        try:
+            resolved = (
+                resolve_trust_policy(
+                    manifest_root(unique_roots[0], user_scope=user_scope), logger=logger
+                ),
+            )
+        except PolicyViolationError as exc:
+            logger.error(str(exc))
+            return False
+        logger._apm_compile_policy = resolved
+    policy = resolved[0]
+    denied = policy_denied_dependencies(subjects.items(), policy) if policy is not None else {}
+    enforcement = getattr(policy, "enforcement", "block")
+    if not denied or enforcement == "off":
+        return True
+    blocking = enforcement != "warn"
+    # The command judges twice (before and under its lock); warn once per package.
+    warned = getattr(logger, "_apm_policy_warned", None)
+    warned = warned if isinstance(warned, set) else set()
+    for key, reason in sorted(denied.items()):
+        message = f"{key}: {reason}"
+        if blocking:
+            logger.error(message)
+        elif message not in warned:
+            logger.warning(message)
+            warned.add(message)
+    if not blocking:
+        logger._apm_policy_warned = warned
+    if blocking:
+        logger.refusal(
+            "Compile blocked by org policy -- nothing was written. "
+            f"{COMPILE_DEPENDENCY_DENIED.sentence()}"
+        )
+    return not blocking
+
+
+def _enforce_dependency_policy(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> None:
+    """Exit 1 before anything is written when org policy refuses the compile."""
+    if not _dependency_policy_allows(logger, roots, user_scope=user_scope):
+        sys.exit(1)
 
 
 def _run_validation_mode(logger: CommandLogger, verbose: bool, source_root: Path) -> None:
@@ -1180,6 +1315,11 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
                                 from ...compilation.output_writer import CompiledOutputWriter
 
                                 CompiledOutputWriter().write(output_path, final_content)
+                            from ...compilation.claude_agents_md import refresh_compiled_digest
+
+                            refresh_compiled_digest(
+                                compiler.base_dir, compiler.base_dir / output_path
+                            )
                         except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)
@@ -1361,9 +1501,8 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
     "no_dedup",
     default=False,
     help=(
-        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
-        "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, in .github/copilot-instructions.md even when the "
+        "Include instructions in AGENTS.md even when .claude/rules/ or "
+        ".github/instructions/ already deliver them, in .github/copilot-instructions.md even when the "
         "matching .github/instructions/ file is deployed, or in .agents/rules/ "
         "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
@@ -1555,6 +1694,9 @@ def compile(  # noqa: PLR0913 -- Click handler
         if validate:
             _run_validation_mode(logger, verbose, source_root)
             return
+
+        # --root installs under the redirected cwd; judge both roots.
+        _enforce_dependency_policy(logger, [source_root, Path.cwd()])
 
         if watch:
             _run_watch_mode(

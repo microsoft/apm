@@ -212,8 +212,10 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
             "materialization_session = _run_integration_phase(ctx)",
         )
         and _ordered(pipeline, '_run_phase("audit"', "transaction.release_deploy_targets()")
+        # Native plugin activation (Codex; Claude Code and Copilot, #3921) runs last.
+        and _ordered(pipeline, "transaction.release_deploy_targets()", '_run_phase("codex_plugins"')
         and _ordered(
-            pipeline, "transaction.release_deploy_targets()", '_run_phase("copilot_plugins"'
+            pipeline, "transaction.release_deploy_targets()", '_run_phase("claude_plugins"'
         )
         and _ordered(
             pipeline,
