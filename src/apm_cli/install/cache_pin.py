@@ -59,9 +59,11 @@ class CachePinError(RuntimeError):
 def write_marker(install_path: Path, resolved_commit: str) -> None:
     """Write the cache-pin marker file to ``install_path``.
 
-    Idempotent: overwrites any prior marker (callers may invoke this
-    on every install, regardless of whether the lockfile YAML changed,
-    to self-heal caches that pre-date the marker contract).
+    Idempotent: callers may invoke this on every install, regardless of
+    whether the lockfile YAML changed, to self-heal caches that pre-date
+    the marker contract. A missing, different or symlinked marker is
+    (re)written; an identical regular-file marker is left untouched, so a
+    converged install writes nothing (#4790).
 
     Failures are silent at the filesystem layer because they are
     non-fatal for ``apm install`` itself -- a missing or unwritable
@@ -76,8 +78,12 @@ def write_marker(install_path: Path, resolved_commit: str) -> None:
         "resolved_commit": resolved_commit,
     }
     marker = install_path / MARKER_FILENAME
+    text = json.dumps(payload)
     try:
-        marker.write_text(json.dumps(payload), encoding="utf-8")
+        if not marker.is_symlink() and marker.is_file():
+            if marker.read_bytes() == text.encode("utf-8"):
+                return
+        marker.write_text(text, encoding="utf-8")
     except OSError:
         # Read-only mount, permission denied, etc. Drift will surface
         # this on the next audit; install must not fail.
