@@ -937,6 +937,19 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
     "apm config set allow-protocol-fallback true",
     "allow cross-protocol fallback (not recommended)",
 )
+CLAUDE_AGENTS_MD_BLOCKED = _entry(
+    "claude-agents-md-blocked",
+    "apm install",
+    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    before="{fix}",
+    then="run 'apm compile'",
+)
+CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
+    "claude-directory-instruction-single-file",
+    "apm install",
+    "keep it in .claude/rules/",
+    before="set 'compilation.strategy: single-file' in apm.yml",
+)
 
 # -- end W3 deps-compilation --
 # -- W3 plugins-runtime --
