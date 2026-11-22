@@ -28,6 +28,7 @@ Concurrency:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -39,7 +40,11 @@ from pathlib import Path
 
 from ..utils.atomic_io import atomic_write_text
 from ..utils.git_env import run_git_text
-from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
+from ..utils.git_sparse import (
+    apply_sparse_cone,
+    materialize_tracked_symlinks,
+    record_links_clean,
+)
 from ..utils.path_security import ensure_path_within
 from .integrity import verify_checkout_sha
 from .locking import atomic_land, cleanup_incomplete, shard_lock, stage_path
@@ -286,6 +291,24 @@ def _partial_clone_fallback_warning(url: str) -> str:
     )
 
 
+def _backfill_links_clean(checkout_dir: Path, sha: str, env: dict[str, str] | None) -> None:
+    """Give a writable full shard from before the links record its record (once).
+
+    Read-only caches never reach this. A failure only means the next hit
+    lists the tree again, exactly as before the record existed.
+    """
+    from ..utils.git_env import get_git_executable, git_subprocess_env
+
+    with contextlib.suppress(subprocess.SubprocessError, OSError, RuntimeError, ValueError):
+        record_links_clean(
+            get_git_executable(),
+            checkout_dir,
+            sha,
+            env=git_subprocess_env(env),
+            extra_git_args=_safe_git_args(),
+        )
+
+
 def _variant_key(sparse_paths: list[str] | None) -> str:
     """Return the on-disk variant segment for a checkout shard.
 
@@ -380,6 +403,8 @@ class GitCache:
                     # which rebuilds it under the same lock (#3071).
                     if _sparse_checkout_is_complete(checkout_dir, sparse_paths, env=env):
                         _log.debug("Cache HIT: %s @ %s [%s]", _sanitize_url(url), sha[:12], variant)
+                        if not sparse_paths:
+                            _backfill_links_clean(checkout_dir, sha, env)
                         return self._record_checkout_access(checkout_dir)
             elif not sha_ok:
                 # Integrity failure -- evict
@@ -415,8 +440,9 @@ class GitCache:
         """Return the verified full checkout of a pinned SHA, or ``None``.
 
         The cache-hit half of :meth:`get_checkout` for a locked commit: it
-        reads only the shard (HEAD and pins), so a hit needs no git process,
-        credentials or network. Anything else (sparse variants, refresh,
+        reads only the shard (HEAD and pins), so a hit needs no credentials
+        or network, and no git process once the shard carries its links
+        record (a shard from before the record gets it on its first hit). Anything else (sparse variants, refresh,
         read-only caches, a missing or unverified shard) returns ``None`` and
         the caller takes the full :meth:`get_checkout` path.
         """
@@ -434,6 +460,7 @@ class GitCache:
             return None
         with shard_lock(checkout_dir):
             _log.debug("Cache HIT: %s @ %s [pinned]", _sanitize_url(url), sha[:12])
+            _backfill_links_clean(checkout_dir, sha, None)
             return self._record_checkout_access(checkout_dir)
 
     def _read_only_checkout(

@@ -499,6 +499,35 @@ def _links_recorded_clean(repo_dir: Path, sha: str) -> bool:
     return recorded == sha.strip().lower()
 
 
+def record_links_clean(
+    git_exe: str,
+    repo_dir: Path,
+    sha: str,
+    *,
+    env: dict[str, str] | None,
+    timeout: int = 30,
+    extra_git_args: list[str] | None = None,
+) -> bool:
+    """Record that the whole tree of *sha* has no unresolvable link, once.
+
+    For checkouts that predate the record: one whole-tree plan, and the
+    record is written only when it finds no failure. Returns whether the
+    checkout now carries a record for *sha*.
+    """
+    marker = _links_clean_marker(repo_dir)
+    if marker is None:
+        return False
+    if _links_recorded_clean(repo_dir, sha):
+        return True
+    _, failures = _plan_tracked_symlinks(
+        git_exe, repo_dir, None, env=env, timeout=timeout, extra_git_args=extra_git_args
+    )
+    if failures:
+        return False
+    marker.write_text(sha.strip().lower() + "\n", encoding="ascii")
+    return True
+
+
 def materialize_tracked_symlinks(
     git_exe: str,
     repo_dir: Path,

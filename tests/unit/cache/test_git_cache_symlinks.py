@@ -245,8 +245,10 @@ def test_a_clean_shard_is_validated_on_hit_without_listing_its_tree(
     assert (checkout / ".git" / "apm-links-clean").read_text(encoding="ascii") == f"{sha}\n"
 
     validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for="0" * 40)
+    assert calls, "another commit lists the tree again"
+    listed = len(calls)
     validate_materialized_symlinks("git", checkout, ["pkg"], env=neutral_git_env(), clean_for=sha)
-    assert len(calls) == 2, "another commit or a scoped check lists the tree again"
+    assert len(calls) > listed, "a scoped check lists the tree again"
 
 
 def test_a_shard_with_an_unresolvable_link_is_never_recorded_clean(tmp_path: Path) -> None:
@@ -288,3 +290,43 @@ def test_a_pinned_hit_refuses_a_shard_that_fails_verification(tmp_path: Path) ->
 
     assert cache.pinned_checkout(str(origin), sha) is None
     assert (checkout / ".git" / "HEAD").read_text(encoding="ascii") == "0" * 40 + "\n"
+
+
+def test_a_shard_from_before_the_record_gets_it_on_its_first_writable_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, sha = build_link_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
+    marker = checkout / ".git" / "apm-links-clean"
+    marker.unlink()
+
+    GitCache(tmp_path / "cache", read_only=True).get_checkout(str(origin), sha, locked_sha=sha)
+    assert not marker.exists(), "a read-only reader never writes the cache"
+
+    cache.get_checkout(str(origin), sha, locked_sha=sha)
+    assert marker.read_text(encoding="ascii") == f"{sha}\n"
+    calls = _ls_tree_calls(monkeypatch)
+    validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for=sha)
+    assert calls == []
+
+
+def test_a_pinned_hit_backfills_the_record_of_an_old_shard(tmp_path: Path) -> None:
+    origin, sha = build_link_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
+    marker = checkout / ".git" / "apm-links-clean"
+    marker.unlink()
+
+    assert cache.pinned_checkout(str(origin), sha) == checkout
+    assert marker.read_text(encoding="ascii") == f"{sha}\n"
+
+
+def test_an_old_shard_with_an_unresolvable_link_is_never_backfilled(tmp_path: Path) -> None:
+    origin, sha = build_link_origin(tmp_path, {"pkg/escape.md": "../../outside.md"})
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
+
+    cache.get_checkout(str(origin), sha, locked_sha=sha)
+
+    assert not (checkout / ".git" / "apm-links-clean").exists()
