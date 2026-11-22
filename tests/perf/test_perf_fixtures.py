@@ -9,7 +9,6 @@ offline mirror and print the request counts.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -25,7 +24,6 @@ from tests.fixtures.perf import (
     TREE_RECIPES,
     build_monorepo,
     build_tree,
-    plan_tree,
     publish_repositories,
     serve_offline,
 )
@@ -48,28 +46,35 @@ def _apm() -> str:
     return candidate
 
 
-def _digest(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        digest.update(path.relative_to(root).as_posix().encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
-
-
 @pytest.mark.parametrize("name", sorted(TREE_RECIPES))
-def test_tree_recipes_have_the_pinned_shape(name: str) -> None:
+def test_tree_recipes_write_the_pinned_shape(name: str, tmp_path: Path) -> None:
     recipe = TREE_RECIPES[name]
-    levels, edges = plan_tree(recipe)
+    fixture = build_tree(recipe, tmp_path / name)
+    owner = f"{recipe.owner}/"
+    edges: dict[str, list[str]] = {}
+    for manifest in sorted((fixture.root / "packages").glob("*/apm.yml")):
+        document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        deps = document.get("dependencies", {}).get("apm", [])
+        edges[document["name"]] = [d.removeprefix(owner).split("#")[0] for d in deps]
+    project = yaml.safe_load((fixture.project / "apm.yml").read_text(encoding="utf-8"))
+    roots = [d.removeprefix(owner).split("#")[0] for d in project["dependencies"]["apm"]]
     parents: dict[str, int] = {}
     for children in edges.values():
         for child in children:
             parents[child] = parents.get(child, 0) + 1
+    memo: dict[str, int] = {}
 
-    assert sum(len(level) for level in levels) == recipe.packages
-    assert len(levels) == recipe.depth >= 5
-    assert all(parents.get(name, 0) >= 1 for level in levels[1:] for name in level)
+    def height(node: str) -> int:
+        if node not in memo:
+            memo[node] = 1 + max((height(c) for c in edges[node]), default=0)
+        return memo[node]
+
+    assert len(edges) == recipe.packages
+    assert max(height(root) for root in roots) == recipe.depth >= 5
+    assert set(parents) | set(roots) == set(edges)
     assert sum(1 for count in parents.values() if count >= 2) >= recipe.min_diamonds
-    assert any(len(children) >= 2 for children in edges.values())
+    skill_files = list((fixture.root / "packages").rglob("SKILL.md"))
+    assert len(skill_files) == recipe.packages * recipe.primitives.skills
 
 
 def test_generation_is_deterministic(tmp_path: Path) -> None:
@@ -77,23 +82,25 @@ def test_generation_is_deterministic(tmp_path: Path) -> None:
     first = build_tree(recipe, tmp_path / "a")
     second = build_tree(recipe, tmp_path / "b")
 
-    assert _digest(first.root) == _digest(second.root)
-    assert first.depth >= 5
-    assert first.diamonds >= 2
+    first_files = sorted(p for p in first.root.rglob("*") if p.is_file())
+    second_files = sorted(p for p in second.root.rglob("*") if p.is_file())
+    assert [p.relative_to(first.root) for p in first_files] == [
+        p.relative_to(second.root) for p in second_files
+    ]
+    assert [p.read_bytes() for p in first_files] == [p.read_bytes() for p in second_files]
     shas = []
     for fixture, label in ((first, "ra"), (second, "rb")):
         bares = publish_repositories(fixture, tmp_path / label)
-        shas.append(
-            sorted(
-                subprocess.run(
-                    ["git", "--git-dir", str(bare), "rev-parse", "v1.0.0"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                ).stdout.strip()
-                for bare in bares.values()
+        tags = [
+            subprocess.run(
+                ["git", "--git-dir", str(bare), "rev-parse", "v1.0.0"],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-        )
+            for bare in bares.values()
+        ]
+        shas.append(sorted(result.stdout.strip() for result in tags))
     assert shas[0] == shas[1]
 
 

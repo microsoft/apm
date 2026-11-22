@@ -35,29 +35,41 @@ def _echo(request: ScriptedRequest) -> ScriptedResponse:
     return ScriptedResponse(status, {"Content-Type": "text/plain"}, request.path.encode())
 
 
-def _exercise(directory: Path, **kwargs: float) -> tuple[list[tuple], dict[str, int], float]:
+def _exercise(
+    directory: Path, **kwargs: float
+) -> tuple[list[requests.Response], list[tuple], dict[str, int], float]:
+    responses: list[requests.Response] = []
     with local_scripted_https_proxy(directory, {_HOST: _echo}, **kwargs) as proxy:
         proxies = {"https": proxy.proxy_url}
         start = time.perf_counter()
         with requests.Session() as session:
             for path in ("/a", "/b", "/missing"):
-                session.get(
-                    f"https://{_HOST}{path}",
-                    proxies=proxies,
-                    verify=str(proxy.ca_path),
-                    timeout=30,
+                responses.append(
+                    session.get(
+                        f"https://{_HOST}{path}",
+                        proxies=proxies,
+                        verify=str(proxy.ca_path),
+                        timeout=30,
+                    )
                 )
         elapsed = time.perf_counter() - start
         observed = [(o.host, o.method, o.target, o.status, o.body) for o in proxy.observations]
-        return observed, proxy.traffic().as_dict(), elapsed
+        return responses, observed, proxy.traffic().as_dict(), elapsed
 
 
 def test_zero_rtt_keeps_observations_identical(tmp_path: Path) -> None:
-    default, default_traffic, _ = _exercise(tmp_path / "default")
-    explicit, explicit_traffic, _ = _exercise(tmp_path / "explicit", rtt_ms=0.0)
+    default_responses, default, default_traffic, _ = _exercise(tmp_path / "default")
+    explicit_responses, explicit, explicit_traffic, _ = _exercise(tmp_path / "explicit", rtt_ms=0.0)
 
+    assert [(r.status_code, r.text) for r in default_responses] == [
+        (200, "/a"),
+        (200, "/b"),
+        (404, "/missing"),
+    ]
+    assert [(r.status_code, r.text) for r in explicit_responses] == [
+        (r.status_code, r.text) for r in default_responses
+    ]
     assert explicit == default
-    assert [(o[2], o[3]) for o in default] == [("/a", 200), ("/b", 200), ("/missing", 404)]
     assert (
         default_traffic
         == explicit_traffic
@@ -71,9 +83,9 @@ def test_zero_rtt_keeps_observations_identical(tmp_path: Path) -> None:
 
 def test_rtt_delays_each_round_trip(tmp_path: Path) -> None:
     rtt_ms = 40.0
-    observed, traffic, elapsed = _exercise(tmp_path, rtt_ms=rtt_ms)
+    responses, _observed, traffic, elapsed = _exercise(tmp_path, rtt_ms=rtt_ms)
 
-    assert len(observed) == 3
+    assert [r.text for r in responses] == ["/a", "/b", "/missing"]
     assert elapsed >= traffic["round_trips"] * rtt_ms / 1000.0
 
 
