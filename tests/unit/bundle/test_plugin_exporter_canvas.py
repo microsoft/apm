@@ -82,25 +82,20 @@ def _canvas_cache(tmp_path: Path) -> Path:
     ],
 )
 def test_a_gate_parked_canvas_is_omitted_not_a_provenance_gap(
-    tmp_path: Path, exec_status, allowed, parked, remedy
+    tmp_path: Path, capfd, exec_status, allowed, parked, remedy
 ) -> None:
     """#4714: pack leaves out a canvas the lock records as withheld and names its remedy."""
     cache = _canvas_cache(tmp_path)
     dep = LockedDependency(
         repo_url="org/canvas", exec_status=exec_status, exec_allowed_types=allowed
     )
-    warnings: list[str] = []
-
-    class _Logger:
-        def warning(self, message: str) -> None:
-            warnings.append(message)
 
     assert _cache_would_contribute_primitives(cache, dep) is not parked
-    _warn_parked_executables(dep, cache, _Logger())
+    _warn_parked_executables(dep, cache)
+    printed = " ".join(capfd.readouterr().out.split())
 
     if not parked:
-        assert warnings == []
+        assert "not packed" not in printed
         return
-    (message,) = warnings
-    assert message.startswith("dependency org/canvas: canvas extension(s) not packed")
-    assert remedy in message
+    assert "[!] dependency org/canvas: canvas extension(s) not packed" in printed
+    assert remedy in printed
