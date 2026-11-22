@@ -14,6 +14,8 @@ def render_bundle_rule(
     rule_format: str | None,
     *,
     record: str,
+    force: bool = False,
+    package_name: str = "",
     diagnostics: DiagnosticCollector | None,
     logger: InstallLogger | None,
 ) -> tuple[str | None, bool]:
@@ -21,7 +23,9 @@ def render_bundle_rule(
 
     Returns ``(text, unrenderable)``; *text* passes through unchanged when no
     rule format applies or it is already a native rule (a Claude rule named
-    ``py.instructions.md`` keeps its ``paths:``).
+    ``py.instructions.md`` keeps its ``paths:``). Decoded frontmatter passes
+    the instruction owner's hidden-character preflight first, so a rule it
+    rejects is skipped (``force`` allows it, as for source installs).
     """
     if text is None or rule_format is None:
         return text, False
@@ -30,19 +34,30 @@ def render_bundle_rule(
     from ..integration.instruction_integrator import InstructionIntegrator
 
     try:
-        if InstructionIntegrator.is_native_rule(text):
+        metadata, _body = InstructionIntegrator._parse_frontmatter(text)
+        if InstructionIntegrator.decoded_frontmatter_blocked(
+            metadata,
+            record,
+            record.rsplit("/", 1)[-1],
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        ):
+            reason = "its decoded frontmatter contains critical hidden Unicode characters"
+        elif InstructionIntegrator.is_native_rule(text):
             return text, False
-        return InstructionIntegrator.convert_rule_content(text, rule_format), False
+        else:
+            return InstructionIntegrator.convert_rule_content(text, rule_format), False
     except yaml.YAMLError:
-        message = (
-            f"Skipped {record}: its instruction frontmatter is not valid YAML. "
-            "Fix the frontmatter in the source package and pack again."
-        )
-        if diagnostics is not None:
-            diagnostics.warn(message)
-        elif logger is not None:
-            logger.warning(message)
-        return None, True
+        reason = "its instruction frontmatter is not valid YAML"
+    message = (
+        f"Skipped {record}: {reason}. Fix the frontmatter in the source package and pack again."
+    )
+    if diagnostics is not None:
+        diagnostics.warn(message)
+    elif logger is not None:
+        logger.warning(message)
+    return None, True
 
 
 def warn_superseded_renderings(

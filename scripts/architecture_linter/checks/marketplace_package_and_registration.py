@@ -337,7 +337,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "def _lower_to_target(",
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
-                "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+                "parts[-1], mapping, spec.apm_basename_fn, rendering_extension",
                 '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})',
                 '_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
             ),

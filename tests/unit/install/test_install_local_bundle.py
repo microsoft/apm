@@ -1079,7 +1079,12 @@ class TestLocalBundlePathRouting:
                 assert deployed == (bundle / packed).read_bytes()
 
     @staticmethod
-    def _install_bundle_files(tmp_path: Path, files: dict[str, str], target_name: str):
+    def _install_bundle_files(
+        tmp_path: Path,
+        files: dict[str, str],
+        target_name: str,
+        deployed: list[str] | None = None,
+    ):
         from apm_cli.bundle.local_bundle import LocalBundleInfo
         from apm_cli.core.scope import InstallScope
         from apm_cli.install.services import integrate_local_bundle
@@ -1089,6 +1094,8 @@ class TestLocalBundlePathRouting:
         project = _make_project(tmp_path / "dst")
         diagnostics = DiagnosticCollector()
         lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        if deployed is not None:
+            lockfile["dependencies"][0]["deployed_files"] = deployed
         bundle_info = LocalBundleInfo(
             source_dir=bundle,
             plugin_json={"id": "test-plugin"},
@@ -1135,6 +1142,69 @@ class TestLocalBundlePathRouting:
         warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
         assert len(warnings) == 1 and ".claude/rules/bad.md" in warnings[0], warnings
         assert "not valid YAML" in warnings[0]
+
+    def test_hidden_character_in_decoded_frontmatter_rejects_the_rule(self, tmp_path: Path) -> None:
+        """#3686: packed rules pass the instruction owner's decoded-frontmatter preflight."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    '---\napplyTo: "src/\\u202e*.py"\n---\nbody\n'
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert ".claude/rules/evil.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert any(".claude/rules/evil.md" in w and "hidden Unicode" in w for w in warnings), (
+            warnings
+        )
+
+    @pytest.mark.parametrize(
+        ("deployed", "expected"),
+        [
+            # Two distinct Claude agents: provenance keeps both names apart.
+            (
+                [".claude/agents/rv.md", ".claude/agents/rv.agent.md"],
+                [".claude/agents/rv.agent.md", ".claude/agents/rv.md"],
+            ),
+            # A pre-fix bundle's Claude and Copilot renderings of one agent.
+            ([".claude/agents/rv.md", ".github/agents/rv.agent.md"], [".claude/agents/rv.md"]),
+        ],
+    )
+    def test_packed_agents_lower_by_rendering_provenance(
+        self, tmp_path: Path, deployed: list[str], expected: list[str]
+    ) -> None:
+        """#3686: distinct native agents rv.md and rv.agent.md both install for Claude."""
+        files = {
+            "agents/rv.md": "---\nname: rv\n---\nrv\n",
+            "agents/rv.agent.md": "---\nname: rv-agent\n---\nother\n",
+        }
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, files, "claude", deployed
+        )
+        assert sorted(result["deployed_files"]) == expected
+        assert (project / ".claude/agents/rv.md").read_text(encoding="utf-8") == files[
+            "agents/rv.md"
+        ]
+
+    def test_superseded_renderings_count_as_skipped(self, tmp_path: Path) -> None:
+        """#3686: a rendering skipped for another one is counted in the install summary."""
+        _project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/py.md": '---\npaths:\n  - "**/*.py"\n---\n\nbody\n',
+                "instructions/py.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert result["skipped"] == 1
 
     @pytest.mark.parametrize(
         "target_name",

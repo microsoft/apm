@@ -1470,12 +1470,22 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                         "identity instructions must materialize the prepared canonical parse",
                     )
                 )
+            # The decoded-frontmatter scan lives in one owner both instruction
+            # preparation and local bundle rule rendering call (#3686).
             prepare_function = facts.tree_index.function(
-                "InstructionIntegrator._prepare_instruction"
+                "InstructionIntegrator.decoded_frontmatter_blocked"
             )
             prepare_scope = (
                 facts.tree_index.own_scope(prepare_function) if prepare_function is not None else ()
             )
+            caller = facts.tree_index.function("InstructionIntegrator._prepare_instruction")
+            owner_calls = [
+                node
+                for node in (facts.tree_index.own_scope(caller) if caller is not None else ())
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "decoded_frontmatter_blocked"
+            ]
             security_calls = [
                 node
                 for node in prepare_scope
@@ -1513,11 +1523,11 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
             block_checks = [
                 node
                 for node in prepare_scope
-                if isinstance(node, ast.If)
-                and isinstance(node.test, ast.Attribute)
-                and isinstance(node.test.value, ast.Name)
-                and node.test.value.id == "verdict"
-                and node.test.attr == "should_block"
+                if isinstance(node, ast.Return)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "verdict"
+                and node.value.attr == "should_block"
             ]
             if (
                 len(security_calls) != 1
@@ -1527,6 +1537,7 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 or not isinstance(ensure_ascii, ast.Constant)
                 or ensure_ascii.value is not False
                 or len(block_checks) != 1
+                or len(owner_calls) != 1
             ):
                 findings.append(
                     _summary(

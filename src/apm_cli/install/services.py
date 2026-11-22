@@ -29,6 +29,7 @@ from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
 from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
+from .local_bundle_paths import bundle_rendering_extensions as _bundle_renderings
 from .local_bundle_paths import bundle_rule_format_id as _bundle_rule_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
@@ -911,6 +912,7 @@ def integrate_local_bundle(
     pack_files = _filtered_pack_files
 
     slug = alias or bundle_info.package_id
+    _renderings = _bundle_renderings(bundle_info)  # #3686: rendering provenance
     _known_deploy_prefixes = _known_bundle_prefixes()
 
     # Canvas extensions are executable: gated and retired like hooks and MCP.
@@ -974,9 +976,14 @@ def integrate_local_bundle(
 
         # #3686: an older bundle may hold several renderings of one primitive.
         _superseded = _superseded_renderings(
-            list(pack_files), _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+            list(pack_files),
+            _allowed_deploy_prefixes,
+            _known_deploy_prefixes,
+            target=target,
+            renderings=_renderings,
         )
         _warn_superseded(target.name, _superseded, diagnostics=diagnostics, logger=logger)
+        skipped += len(_superseded)
         for rel in sorted(pack_files.keys() - _superseded.keys()):
             expected_hash = pack_files[rel]
             # CR1: bundle_files keys come from untrusted lockfile YAML
@@ -1006,6 +1013,7 @@ def integrate_local_bundle(
                 target=target,
                 hooks_approved=_hooks_approved_bundle,
                 canvas_approved=_canvas_ok,
+                rendering_extension=_renderings.get(_rel_norm),
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1112,6 +1120,8 @@ def integrate_local_bundle(
                     _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
                 ),
                 record=record,
+                force=force,
+                package_name=str(slug),
                 diagnostics=diagnostics,
                 logger=logger,
             )

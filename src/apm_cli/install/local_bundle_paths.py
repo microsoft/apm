@@ -90,11 +90,14 @@ def bundle_deploy_relative_path(
     target: TargetProfile | None = None,
     hooks_approved: bool,
     canvas_approved: bool,
+    rendering_extension: str | None = None,
 ) -> str | None:
     """Return a bundle path relative to a target-owned deployment root.
 
     Only primitive files the target deploys are routed. Hook and canvas files
     additionally require *hooks_approved* / *canvas_approved*.
+    *rendering_extension* is the extension the packing install gave the file
+    (:func:`bundle_rendering_extensions`).
     """
     validate_path_segments(rel_path, context="bundle deploy path")
     if is_plugin_hook_path(rel_path):
@@ -106,7 +109,7 @@ def bundle_deploy_relative_path(
         deploy_rel, hooks_approved=hooks_approved, canvas_approved=canvas_approved
     ):
         return None
-    return _lower_to_target(deploy_rel, target)
+    return _lower_to_target(deploy_rel, target, rendering_extension)
 
 
 def bundle_deploy_skip_warning(
@@ -282,7 +285,9 @@ def _is_primitive_deploy_path(deploy_rel: str, target: TargetProfile) -> bool:
     )
 
 
-def _lower_to_target(rel_path: str, target: TargetProfile | None) -> str | None:
+def _lower_to_target(
+    rel_path: str, target: TargetProfile | None, rendering_extension: str | None = None
+) -> str | None:
     """Lower a plugin-native bundle path into one target's deploy layout."""
     if target is None:
         return rel_path
@@ -302,7 +307,7 @@ def _lower_to_target(rel_path: str, target: TargetProfile | None) -> str | None:
     if _is_unsupported_route(rel_path, mapping):
         return None
     parts = rel_path.split("/", 1)[1].split("/")
-    parts[-1] = _retarget_basename(parts[-1], mapping, spec.apm_basename_fn)
+    parts[-1] = _retarget_basename(parts[-1], mapping, spec.apm_basename_fn, rendering_extension)
     lowered_tail = "/".join(parts)
     if not mapping.subdir:
         return lowered_tail
@@ -328,8 +333,18 @@ def _plugin_layout_route(
     return None
 
 
-def _retarget_basename(name: str, mapping: Any, apm_basename_fn: Callable[[str], str]) -> str:
-    """Retarget a plugin-native file basename through a PrimitiveMapping."""
+def _retarget_basename(
+    name: str,
+    mapping: Any,
+    apm_basename_fn: Callable[[str], str],
+    rendering_extension: str | None = None,
+) -> str:
+    """Retarget a plugin-native file basename through a PrimitiveMapping.
+
+    A known *rendering_extension* is stripped exactly, so a Claude agent named
+    ``rv.agent.md`` keeps its ``rv.agent`` stem instead of colliding with
+    ``rv.md``; otherwise the longest primitive suffix is stripped.
+    """
     extension = mapping.extension
     if not extension or extension.startswith("/"):
         return name
@@ -337,10 +352,39 @@ def _retarget_basename(name: str, mapping: Any, apm_basename_fn: Callable[[str],
         return extension
     from ..bundle.plugin_layout import primitive_file_suffix
 
+    if rendering_extension and len(name) > len(rendering_extension):
+        if name.endswith(rendering_extension):
+            return f"{name[: -len(rendering_extension)]}{extension}"
     apm_name = apm_basename_fn(name)
     suffix = primitive_file_suffix(apm_name)
     base_name = apm_name[: -len(suffix)] if suffix else apm_name
     return f"{base_name}{extension}"
+
+
+def bundle_rendering_extensions(bundle_info: LocalBundleInfo) -> dict[str, str]:
+    """Map packed dependency files to the extension their deploying target gave them.
+
+    The bundle lockfile keeps each dependency's ``deployed_files`` (for example
+    ``.claude/agents/rv.agent.md``); this is the provenance that tells a
+    Claude agent named ``rv.agent`` apart from a Copilot rendering of ``rv``.
+    Unknown or unsafe entries are ignored; files without provenance (the
+    producer's own primitives) lower by suffix.
+    """
+    from ..bundle.plugin_exporter import _plugin_rel_for_deployed_path
+    from ..bundle.plugin_layout import deployed_rendering_extension
+
+    renderings: dict[str, str] = {}
+    lock = bundle_info.lockfile if isinstance(bundle_info.lockfile, dict) else {}
+    for dep in lock.get("dependencies") or []:
+        for deployed in (dep.get("deployed_files") or []) if isinstance(dep, dict) else []:
+            extension = deployed_rendering_extension(str(deployed))
+            try:
+                rel = _plugin_rel_for_deployed_path(str(deployed), None) if extension else None
+            except ValueError:
+                continue
+            if rel is not None:
+                renderings.setdefault(rel, extension)
+    return renderings
 
 
 def superseded_bundle_renderings(
@@ -349,6 +393,7 @@ def superseded_bundle_renderings(
     known_deploy_prefixes: frozenset[str],
     *,
     target: TargetProfile,
+    renderings: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Map each bundle path that another path lowering to the same file replaces.
 
@@ -367,10 +412,11 @@ def superseded_bundle_renderings(
         route = _plugin_layout_route(deploy_rel, target) if preference else None
         if route is None or _is_unsupported_route(deploy_rel, route[3]):
             continue
-        lowered = _lower_to_target(deploy_rel, target)
+        known = (renderings or {}).get(rel)
+        lowered = _lower_to_target(deploy_rel, target, known)
         if lowered is None:
             continue
-        suffix = primitive_file_suffix(deploy_rel)
+        suffix = known or primitive_file_suffix(deploy_rel)
         rank = preference.index(suffix) if suffix in preference else len(preference)
         groups.setdefault(lowered, []).append((suffix != route[3].extension, rank, rel))
     superseded: dict[str, str] = {}

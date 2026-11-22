@@ -150,17 +150,46 @@ class InstructionIntegrator(BaseIntegrator):
         package_name: str = "",
     ) -> _PreparedInstruction:
         """Read and validate one instruction without writing target files."""
-        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-
         content = source.read_text(encoding="utf-8")
         try:
             metadata, body = self._parse_frontmatter(content)
         except yaml.YAMLError as exc:
             self._raise_frontmatter_error(source, exc)
+        if self.decoded_frontmatter_blocked(
+            metadata,
+            str(source),
+            source.name,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        ):
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
+        return _PreparedInstruction(content=content, body=body)
+
+    @staticmethod
+    def decoded_frontmatter_blocked(
+        metadata: dict,
+        label: str,
+        file_name: str,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Scan decoded frontmatter values for critical hidden characters.
+
+        YAML escapes such as ``"\\u202e"`` decode to characters a byte scan of
+        the file never sees. Reports findings to *diagnostics* and returns
+        whether the instruction must be rejected (``force`` allows it).
+        """
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
         decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
         verdict = SecurityGate.scan_text(
             decoded_metadata,
-            f"{source}#decoded-frontmatter",
+            f"{label}#decoded-frontmatter",
             policy=BLOCK_POLICY,
             force=force,
         )
@@ -173,14 +202,10 @@ class InstructionIntegrator(BaseIntegrator):
                 force_action="Allowed by preflight",
                 force_detail=(
                     "Decoded frontmatter contains critical hidden characters; "
-                    f"edit the escaped value in {source.name}"
+                    f"edit the escaped value in {file_name}"
                 ),
             )
-        if verdict.should_block:
-            raise yaml.YAMLError(
-                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
-            )
-        return _PreparedInstruction(content=content, body=body)
+        return verdict.should_block
 
     def _render_instruction(
         self,

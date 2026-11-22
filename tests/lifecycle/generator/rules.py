@@ -282,7 +282,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
             Ev("src/apm_cli/install/services.py", 827, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1026, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 1034, '"instructions" not in target.primitives'),
         ),
     ),
 }

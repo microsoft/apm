@@ -1371,18 +1371,18 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             id="omitted-hooks-approved",
         ),
         pytest.param(
             "src/apm_cli/install/local_bundle_paths.py",
-            "    hooks_approved: bool,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
-            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
             id="fail-open-hooks-approved-default",
         ),
