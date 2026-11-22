@@ -48,6 +48,8 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 from tests.utils.materialized_downloader import stub_materialized_downloader
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Paths to real fixtures from W1
 # ---------------------------------------------------------------------------

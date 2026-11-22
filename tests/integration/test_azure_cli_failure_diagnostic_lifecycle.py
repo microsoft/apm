@@ -32,6 +32,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX az shim"),
+    pytest.mark.e2e,
 ]
 
 _TENANT = "72f988bf-0000-4000-8000-0000000000aa"

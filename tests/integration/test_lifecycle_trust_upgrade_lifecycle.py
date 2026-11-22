@@ -24,6 +24,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="bash lifecycle commands"),
+    pytest.mark.e2e,
 ]
 
 
