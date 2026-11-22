@@ -21,6 +21,7 @@ _lock = threading.Lock()
 _memos: dict[str, dict[Any, Any]] | None = None
 _depth = 0
 _overlapped = False
+_generation = 0  # bumped whenever memos are invalidated; a stale read never publishes
 _KEY_LOCK = object()  # memo key prefix for the per-key lock of a memoized call
 
 
@@ -33,8 +34,9 @@ def invocation_scope() -> Iterator[None]:
     the last scope exits, so no invocation reads another's memo and no state
     survives the scopes.
     """
-    global _memos, _depth, _overlapped
+    global _memos, _depth, _overlapped, _generation
     with _lock:
+        _generation += 1
         _depth += 1
         if _depth == 1:
             _memos, _overlapped = {}, False
@@ -44,6 +46,7 @@ def invocation_scope() -> Iterator[None]:
         yield
     finally:
         with _lock:
+            _generation += 1
             _depth -= 1
             if _depth == 0:
                 _memos, _overlapped = None, False
@@ -64,7 +67,9 @@ def forget_invocation_memos() -> None:
     may have refreshed credentials or changed the git remote, so nothing
     learned before it may answer a later lookup.
     """
+    global _generation
     with _lock:
+        _generation += 1
         if _memos is not None:
             for memo in _memos.values():
                 memo.clear()  # a reference captured before the script sees nothing
@@ -87,6 +92,7 @@ def memoized_per_invocation(
         def wrapper(*args: Any, **kwargs: Any) -> _T:
             key = (args, tuple(sorted(kwargs.items())))
             with _lock:
+                generation = _generation
                 memo = None if _memos is None or _overlapped else _memos.setdefault(name, {})
                 key_lock = (
                     None if memo is None else memo.setdefault((_KEY_LOCK, key), threading.Lock())
@@ -94,11 +100,14 @@ def memoized_per_invocation(
             if memo is None or key_lock is None:
                 return fn(*args, **kwargs)
             with key_lock:
-                if key in memo:
-                    return memo[key]
+                with _lock:
+                    if generation == _generation and key in memo:
+                        return memo[key]
                 result = fn(*args, **kwargs)
-                if keep(result):
-                    memo[key] = result
+                with _lock:
+                    # Publish only if nothing invalidated the memo meanwhile.
+                    if generation == _generation and keep(result):
+                        memo[key] = result
                 return result
 
         return wrapper

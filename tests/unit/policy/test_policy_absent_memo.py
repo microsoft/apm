@@ -18,6 +18,7 @@ import pytest
 import requests
 
 from apm_cli.core.invocation_memo import (
+    forget_invocation_memos,
     invocation_memo,
     invocation_scope,
     memoized_per_invocation,
@@ -255,3 +256,29 @@ def test_every_command_script_drops_memos_even_captured_ones(tmp_path, command):
 
         assert captured == {}
         assert invocation_memo("probe") == {}
+
+
+def test_an_in_flight_fetch_never_serves_a_value_across_an_invalidation():
+    calls: list[str] = []
+    entered, release = threading.Event(), threading.Event()
+
+    @memoized_per_invocation("in-flight", keep=lambda _result: True)
+    def fetch(key: str) -> str:
+        calls.append(key)
+        if len(calls) == 1:
+            entered.set()
+            release.wait(5)
+            return "before-invalidation"
+        return "after-invalidation"
+
+    with invocation_scope(), ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(fetch, "key")
+        assert entered.wait(5)
+        waiter = pool.submit(fetch, "key")  # holds the old memo, waits on its key lock
+        time.sleep(0.2)
+        forget_invocation_memos()
+        release.set()
+
+        assert first.result(5) == "before-invalidation"
+        assert waiter.result(5) == "after-invalidation"
+        assert fetch("key") == "after-invalidation"
