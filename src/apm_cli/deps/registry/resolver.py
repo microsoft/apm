@@ -247,8 +247,9 @@ class RegistryPackageResolver:
     def _resolve_registry_url(self, registry_name: str | None) -> str:
         if not registry_name:
             raise RegistryResolutionError(
-                "registry-sourced dep is missing registry_name "
-                "(parser bug or unconfigured default registry)"
+                "registry-sourced dep is missing registry_name: no configured "
+                "registry serves it. Add the registry that serves this package "
+                "to the 'registries:' block in apm.yml"
             )
         url = self._registries.get(registry_name)
         if not url:
