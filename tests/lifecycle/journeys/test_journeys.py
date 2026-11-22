@@ -1433,7 +1433,12 @@ def _raw_changes(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> lis
     """Every entry added, removed or changed in any root, unfiltered (no bookkeeping exempt)."""
     found = []
     for root_id, snapshot in before.snapshots:
-        diff = snapshot.diff(after.snapshot(root_id))
+        end = after.snapshot(root_id)
+        if snapshot.root_existed != end.root_existed:
+            # An empty root created or removed has no entries for diff() to report.
+            found.append(f"{root_id}:<root {'created' if end.root_existed else 'removed'}>")
+            continue
+        diff = snapshot.diff(end)
         found += [f"{root_id}:{path}" for path in diff.added | diff.removed | diff.changed]
     return sorted(found)
 
@@ -1598,6 +1603,21 @@ def test_o8b_sees_a_write_under_an_environment_root_outside_home(
 
     changes = _raw_changes(before, after)
     assert any(path.endswith("written-by-advice.txt") for path in changes), changes
+
+
+@pytest.mark.lifecycle_smoke
+def test_o8b_no_write_check_sees_an_empty_durable_root_created(lifecycle_world) -> None:
+    """Creating an empty durable root is a write, though it adds no entry."""
+    world = lifecycle_world
+    selected = world.root / "gh-config-created-by-advice"
+    probe = replace(world, env={**world.env, "GH_CONFIG_DIR": str(selected)})
+    assert not selected.exists(), "the root starts absent"
+    before = JourneyRun._durable(probe)
+    selected.mkdir()
+    after = JourneyRun._durable(probe)
+
+    changes = _raw_changes(before, after)
+    assert any(path.endswith(":<root created>") for path in changes), changes
 
 
 @pytest.mark.parametrize("path", _params())
