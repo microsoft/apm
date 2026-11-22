@@ -162,6 +162,10 @@ def _assert_deployed(scenario: Scenario, src: str, output: str = "") -> None:
 def test_compile_keeps_a_remote_package_file_primitive(lifecycle_world, src) -> None:
     scenario, name = _scenario(lifecycle_world, src)
     installed = scenario.run(f"install {name}", **source_fields(src))
+    if src == "native-plugin":
+        # #4559 parks an unapproved Claude plugin at project scope too.
+        scenario.run(f"approve {name}")
+        installed = scenario.run("install")
     _assert_deployed(scenario, src, installed.output)
     before = _marked(lifecycle_world)
     assert before, "the package's file primitive is deployed nowhere"
