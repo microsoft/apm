@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,3 +38,21 @@ def test_gitpython_names_remain_patchable_module_attributes() -> None:
     with patch("apm_cli.deps.github_downloader.Repo", double):
         assert github_downloader.Repo is double
     assert github_downloader.Repo is git.Repo
+
+
+def test_loaded_git_module_ignores_a_module_still_initializing(monkeypatch) -> None:
+    import types
+    from importlib.machinery import ModuleSpec
+
+    from apm_cli.deps.git_lazy import loaded_git_module
+
+    synthetic = types.ModuleType("git")
+    synthetic.__spec__ = ModuleSpec("git", None)
+    synthetic.__spec__._initializing = True
+    monkeypatch.setitem(sys.modules, "git", synthetic)
+
+    assert loaded_git_module({}) is None
+    synthetic.__spec__._initializing = False
+    assert loaded_git_module({}) is synthetic
+    double = MagicMock()
+    assert loaded_git_module({"git": double}) is double

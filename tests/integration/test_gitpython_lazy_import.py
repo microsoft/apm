@@ -46,24 +46,24 @@ except git_command_error() as exc:
 """
 
 
-def _run(probe: str) -> list[str]:
-    result = subprocess.run(
-        [sys.executable, "-c", probe],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr[-2000:]
-    return result.stdout.splitlines()
+def _probe(source: str) -> list[str]:
+    return [sys.executable, "-c", source]
 
 
 def test_install_downloader_setup_does_not_import_gitpython() -> None:
-    assert json.loads(_run(_SETUP_PROBE)[-1]) == []
+    result = subprocess.run(
+        _probe(_SETUP_PROBE), capture_output=True, text=True, timeout=120, check=False
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert json.loads(result.stdout.splitlines()[-1]) == []
 
 
 def test_first_git_failure_is_caught_after_lazy_import() -> None:
-    assert _run(_TRANSITION_PROBE) == [
+    result = subprocess.run(
+        _probe(_TRANSITION_PROBE), capture_output=True, text=True, timeout=120, check=False
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.splitlines() == [
         "loaded-before False",
         "caught GitCommandError 128 True",
     ]
