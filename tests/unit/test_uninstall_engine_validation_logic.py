@@ -392,3 +392,30 @@ def test_the_new_target_advice_names_apm_install():
         "Run 'apm install' to deploy the remaining packages to claude and record them "
         "in apm.lock.yaml."
     )
+
+
+@pytest.mark.parametrize(
+    ("hook_entry", "noticed"),
+    [
+        pytest.param(("not approved", ()), True, id="bin-only-native-no-kinds"),
+        pytest.param(("not approved", ("hooks",)), False, id="hooks-already-named"),
+    ],
+)
+def test_native_survivor_notice_follows_named_kinds(hook_entry, noticed):
+    """A native survivor whose hook retirement named no kind still gets its notice (#4567)."""
+    from apm_cli.native_plugins.uninstall import retire_disallowed_native_survivors
+
+    key = "acme/plugin"
+    lockfile = SimpleNamespace(dependencies={key: SimpleNamespace(native_plugin=object())})
+    retirements = SimpleNamespace(denied_packages={}, native_packages={key: "not approved"})
+    logger = MagicMock()
+
+    retired = retire_disallowed_native_survivors(
+        lockfile, retirements, set(), {key: hook_entry}, logger
+    )
+
+    assert retired == {key}
+    assert lockfile.dependencies[key].native_plugin is None
+    notice = f"{key} native plugin is no longer allowed (not approved); removing it"
+    warnings = [call.args[0] for call in logger.warning.call_args_list]
+    assert (notice in warnings) is noticed
