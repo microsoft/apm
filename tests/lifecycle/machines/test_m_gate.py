@@ -18,6 +18,15 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
+from tests.lifecycle.machines._gate_bin import BIN_PATH, GateBin, bin_cells, replay_bin
+from tests.lifecycle.machines._gate_bundle import (
+    GateBundles,
+    GatePack,
+    bundle_cells,
+    pack_cells,
+    replay_bundles,
+    replay_pack,
+)
 from tests.lifecycle.machines._gate_kit import (
     COMPLETED_SPINES,
     KNOWN_CELLS,
@@ -170,8 +179,8 @@ def test_gate_generated_sequences_keep_cross_cutting_laws(
     )
 
 
-# Scopes the GATE matrix spine runs at (user scope joins with its own commands).
-MATRIX_SCOPES = ("project",)
+# Scopes the GATE matrix spine runs at (user scope runs its own, shorter spine).
+MATRIX_SCOPES = SCOPES
 
 
 @pytest.mark.parametrize("scope", MATRIX_SCOPES)
@@ -182,16 +191,54 @@ def test_gate_matrix_credits_op_prim_gate_cells(
     machine = GateMatrix(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), scope), scope)
     replay_matrix(machine)
     assert machine.expected_seen == set(), sorted(machine.expected_seen)
-    missing = matrix_cells(scope) - earned_cells(current_node(), "G1|")
+    earned = earned_cells(current_node(), "G1|") | earned_cells(current_node(), "rule|")
+    missing = matrix_cells(scope) - earned
     assert not missing, f"GATE matrix ids without an oracle receipt: {sorted(missing)}"
-    # The spine ends by uninstalling every package under the dependency deny.
+    bench = machine.bench
+    if scope == "user":
+        # The user spine ends with every package declared and recorded in the user lock.
+        declared = (bench.manifest().get("dependencies") or {}).get("apm") or []
+        assert bench.lock_path.exists() and len(declared) == len(machine.state.declared)
+        return
+    # The project spine ends by uninstalling every package under the dependency deny.
+    surfaces = (".agents/skills", ".github/hooks", ".github/extensions")
     leftovers = [
         p
-        for p in (".agents/skills", ".github/hooks", ".github/extensions")
-        if (machine.bench.deploy_root / p).exists()
-        and any((machine.bench.deploy_root / p).iterdir())
+        for p in surfaces
+        if (bench.deploy_root / p).exists() and any((bench.deploy_root / p).iterdir())
     ]
     assert not leftovers, f"uninstall left deployed surfaces: {leftovers}"
+
+
+def test_gate_bundle_spine_credits_bundle_install_cells(lifecycle_template, tmp_path: Path) -> None:
+    """A local bundle at every gate level keeps I1-I9 and earns its OP x PRIM x GATE ids."""
+    machine = GateBundles(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project"))
+    replay_bundles(machine)
+    missing = bundle_cells() - earned_cells(current_node(), "G1|bundle|")
+    assert not missing, f"bundle ids without an oracle receipt: {sorted(missing)}"
+    # With the gate off at the end, every executable of both bundles is deployed.
+    hooks = machine.bench.deploy_root / ".github" / "hooks"
+    assert any(path.name.startswith("p-bmix") for path in hooks.iterdir())
+
+
+def test_gate_pack_spine_credits_pack_cells(lifecycle_template, tmp_path: Path) -> None:
+    """``apm pack`` ships exactly the dependency executables each gate level deploys."""
+    machine = GatePack(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project"))
+    replay_pack(machine)
+    missing = pack_cells() - earned_cells(current_node(), "G1|pack|")
+    assert not missing, f"pack ids without an oracle receipt: {sorted(missing)}"
+    # The gate is off at the end: the hook stays deployed in the project.
+    assert (machine.bench.deploy_root / ".github/hooks/p-exec-session.json").exists()
+
+
+def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_path: Path) -> None:
+    """bin/ of a Claude marketplace plugin at every user-scope gate level keeps I1-I9."""
+    machine = GateBin(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "user"))
+    replay_bin(machine)
+    missing = bin_cells() - earned_cells(current_node(), "G1|")
+    assert not missing, f"bin ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends with the plugin uninstalled: no bin/ is left in HOME.
+    assert not (machine.bench.deploy_root / BIN_PATH).exists()
 
 
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:

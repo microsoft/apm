@@ -30,6 +30,7 @@ POLICY_VARIANTS = (
     "deny-native",
     "exec-gate-on",
     "deny-all-deps",
+    "mcp-deny-all",
 )
 # Policy variants that deny packages by name; ``policy_denied`` names which.
 # exec-gate-on recommends a package the world never serves, so it denies nothing.
@@ -83,7 +84,7 @@ class ModelState:
     def org_denies(self, kind: str) -> bool:
         if self.policy == "exec-deny-all":
             return kind in GATED_KINDS
-        return self.policy == "mcp-deny" and kind == "mcp"
+        return self.policy in ("mcp-deny", "mcp-deny-all") and kind == "mcp"
 
     # -- transitions ---------------------------------------------------------
 

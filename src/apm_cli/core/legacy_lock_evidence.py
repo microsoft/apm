@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import itertools
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.deployment_state import LocatorKind
+
 if TYPE_CHECKING:
-    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
 
 # Locks written before 0.37, whose APM never refused an overwrite for lack of a
 # receipt (#4360), are the only record of what that APM deployed.
@@ -106,3 +109,26 @@ def legacy_bytes_owned(path: Path, recorded: str | None) -> bool:
         )
     except OSError:
         return False
+
+
+class RowProjection:
+    """``DeploymentLedgerCodec`` half that decides when a lockfile load replays rows."""
+
+    @classmethod
+    def load_observes_per_row_projection(cls, dependencies: Iterable[LockedDependency]) -> bool:
+        """Whether loading *dependencies* row by row can leave a non-empty ledger.
+
+        Per-row legacy invalidation only rebuilds rows when a URI receipt or a
+        reserved owner (local-bundle provenance) appears, and such a rebuild
+        keeps the first claimant as active owner. Otherwise every step leaves
+        the empty default that the load replaces once at its end, so a load may
+        skip the per-row projection (O(N^2) over a lockfile's rows).
+        """
+        from apm_cli.deps.lockfile import LockFile
+
+        reserved_owners = cls.valid_owner_keys(LockFile())
+        return any(
+            dep.get_unique_key() in reserved_owners
+            or any(cls._legacy_locator(path).kind is LocatorKind.URI for path in dep.deployed_files)
+            for dep in dependencies
+        )

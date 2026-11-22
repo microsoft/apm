@@ -161,6 +161,7 @@ class TestDetectTokenType:
             ("ghs_abc123", "github-app"),
             ("ghr_abc123", "github-app"),
             ("some-random-token", "unknown"),
+            ("anunknown_token", "unknown"),
             ("Bearer eyJxxx", "unknown"),
         ],
     )

@@ -26,7 +26,6 @@ from ..models.dependency.replacement import build_replacement_index
 from ..models.dependency.subsets import EdgeSelection, merge_edge_selections
 from ..models.validation import PackageType, detect_package_type, validate_apm_package
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
-from ..utils.paths import portable_relpath
 from ._shared import MarketplaceManifestMaterializationError, materialize_marketplace_manifest
 from .dependency_graph import (
     CircularRef,
@@ -40,6 +39,8 @@ from .immutable_requirements import (
     ImmutableRequirements,
     ReferenceResolver,
 )
+from .local_identity import portable_anchor_identity, transitive_local_identity
+from .local_identity import root_local_dirs as collect_root_local_dirs
 
 if TYPE_CHECKING:
     from .lockfile import LockFile
@@ -499,28 +500,8 @@ class APMDependencyResolver:
 
     @staticmethod
     def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
-        """Return a machine-independent identity string for a resolved local dep.
-
-        ``anchored`` is the absolute, resolved on-disk location of a local
-        package. The returned value is the package's stable identity only --
-        it feeds the ``local:`` cycle key, the lockfile
-        ``dependencies[].anchored_local_path`` field, and (via that same owner
-        identity) the deployment-ledger owner rows. It is never re-opened as a
-        filesystem path.
-
-        A lockfile is a committed, cross-machine artifact, so this identity
-        MUST NOT carry a developer's home directory or any absolute prefix.
-        Packages inside ``base`` (the project root) are recorded relative to
-        it in forward-slash POSIX form -- matching how directly-declared local
-        owners already serialize -- which keeps a regenerated lockfile
-        deterministic across machines and CI. Packages outside ``base`` (or
-        when ``base`` is unknown) fall back to the resolved absolute POSIX
-        path: such out-of-project local deps are inherently non-committable,
-        and the fallback preserves a unique identity without inventing one.
-        """
-        if base is None:
-            return anchored.resolve().as_posix()
-        return portable_relpath(anchored, base)
+        """Delegate to :func:`apm_cli.deps.local_identity.portable_anchor_identity`."""
+        return portable_anchor_identity(anchored, base)
 
     def _remote_source_paths_for_parent(
         self,
@@ -965,6 +946,9 @@ class APMDependencyResolver:
                 queued_keys.add(key)
             # If already queued as prod, prod wins — skip
 
+        root_local_dirs = collect_root_local_dirs(
+            [item[0] for item in processing_queue], consumer_root
+        )
         if self._reject_nested_root_declarations(
             tree, [item[0] for item in processing_queue], modules_dir
         ):
@@ -1037,7 +1021,15 @@ class APMDependencyResolver:
                         and dep_ref.get_unique_key() not in self._scoped_rechecked
                         and existing_node.get_id() not in scheduled_nodes
                     ):
-                        work_items.append((existing_node, dep_ref, parent_node, is_dev))
+                        # Recheck the node at its own anchor, not this edge's (#4731).
+                        work_items.append(
+                            (
+                                existing_node,
+                                existing_node.dependency_ref,
+                                existing_node.parent,
+                                is_dev,
+                            )
+                        )
                         scheduled_nodes.add(existing_node.get_id())
                     continue
 
@@ -1179,12 +1171,12 @@ class APMDependencyResolver:
                                 if local_path.is_absolute()
                                 else (node.package.source_path / local_path).resolve()
                             )
-                            sub_dep = replace(
+                            sub_dep = transitive_local_identity(
                                 sub_dep,
                                 declaring_parent=node.get_id(),
-                                anchored_local_path=self._portable_anchor_identity(
-                                    anchored, root_package.source_path
-                                ),
+                                anchored=anchored,
+                                root=root_package.source_path,
+                                root_local_dirs=root_local_dirs,
                             )
                             ancestor: DependencyNode | None = node
                             while ancestor is not None:
@@ -1231,8 +1223,35 @@ class APMDependencyResolver:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
                             queued_keys.add(queue_key)
 
+        self._propagate_production(tree)
         self._apply_edge_selections(tree)
         return tree
+
+    def _propagate_production(self, tree: DependencyTree) -> None:
+        """Mark every node a production node declares production (prod wins over dev).
+
+        Follows materialized children and every recorded declaring edge, so a
+        node first loaded as dev (a root devDependency a production sibling also
+        declares) promotes its whole subtree, including children whose edges the
+        queue dedup dropped, independent of declaration order (#4731).
+        """
+        declared: dict[int, list[str]] = {}
+        for key, parents in self._edge_parents.items():
+            for parent in parents:
+                declared.setdefault(id(parent), []).append(key)
+        by_key: dict[str, list[DependencyNode]] = {}
+        for node in tree.nodes.values():
+            by_key.setdefault(node.dependency_ref.get_unique_key(), []).append(node)
+        pending = [node for node in tree.nodes.values() if not node.is_dev]
+        while pending:
+            node = pending.pop()
+            declared_children = (
+                c for key in declared.get(id(node), ()) for c in by_key.get(key, ())
+            )
+            for child in [*node.children, *declared_children]:
+                if child.is_dev:
+                    child.is_dev = False
+                    pending.append(child)
 
     @staticmethod
     def _reject_nested_root_declarations(

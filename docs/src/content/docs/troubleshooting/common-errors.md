@@ -271,7 +271,7 @@ Fix: run `apm install` without `--frozen` once and commit `apm.lock.yaml`.
     --force does not take ownership of user connections.
 ```
 
-Cause: an entry in `.mcp.json` (or another native MCP config) with the same name was not written by APM, or was edited after APM wrote it. `--force` does not take ownership of it.
+Cause: an entry in `.mcp.json` (or another native MCP config) with the same name was not written by APM, or was edited after APM wrote it. `--force` does not take ownership of it. For a self-defined server the lockfile has not recorded, `apm install` stops before writing anything, so no primitive, MCP config or lockfile changes. A registry server, or a server the lockfile already records, is still checked when APM writes its MCP config: the install keeps the writes that reached other targets and exits 1.
 
 Fix: restore the exact value the message names (keep the `:-.` default), or rename or remove the connection, then re-run the same install. Rotate credentials only when the hint names `apm.yml` environment references.
 
