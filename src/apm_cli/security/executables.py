@@ -75,11 +75,19 @@ def rebuild_retired_kinds(deployed, withheld, deployed_files) -> tuple[str, ...]
 
     MCP servers are retired and reported by MCP admission, not the rebuild.
     bin/ counts only when *deployed_files* records a file under a ``bin/``
-    directory, since bin/ deploys only in some scopes and targets.
+    directory, since bin/ deploys only in some scopes and targets. A skill
+    directory that is itself named ``bin`` (``skills/bin/``) is not evidence.
     """
     from pathlib import PurePosixPath
 
-    bin_deployed = any("bin" in PurePosixPath(path).parts[:-1] for path in deployed_files or ())
+    def _under_bin_dir(path: str) -> bool:
+        parents = PurePosixPath(path).parts[:-1]
+        return any(
+            part == "bin" and not (index and parents[index - 1] == "skills")
+            for index, part in enumerate(parents)
+        )
+
+    bin_deployed = any(_under_bin_dir(path) for path in deployed_files or ())
     return tuple(
         kind
         for kind in deployed

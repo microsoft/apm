@@ -873,6 +873,15 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
             ("hooks", "bin"), [".claude/skills/p/SKILL.md"], ("hooks",), id="bin-not-deployed"
         ),
         pytest.param(("bin",), [".claude/skills/p/bin/tool"], ("bin",), id="bin-deployed"),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/skills/bin/SKILL.md"],
+            ("hooks",),
+            id="skill-named-bin-is-not-bin-evidence",
+        ),
+        pytest.param(
+            ("bin",), [".github/skills/bin/bin/tool"], ("bin",), id="skill-named-bin-with-bin-dir"
+        ),
         pytest.param(("lsp", "canvas"), [], ("lsp", "canvas"), id="declared-order"),
     ],
 )
