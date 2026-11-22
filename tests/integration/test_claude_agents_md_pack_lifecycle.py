@@ -252,3 +252,36 @@ def test_apm_pack_refuses_a_routed_rule_another_dependency_deploys_differently(
     assert result.returncode != 0, output
     assert f"Cannot pack {_RULE}" in output, output
     assert not out.exists() or not any(out.iterdir())
+
+
+def test_plugin_pack_never_renders_a_dev_dependency_it_does_not_ship(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An edited cached dev dependency cannot fail a pack that excludes it."""
+    scenario = _new_scenario(tmp_path / "dev-pack", apm_binary_path)
+    shipped_dep = _publish(scenario, "helper-kit", skill="helper")
+    dev_dep = _publish(scenario, "guard-kit", instruction="guard")
+    producer = scenario.consumers.create(
+        "producer", dependencies=(shipped_dep.dependency,), targets=("claude",)
+    )
+    manifest = producer.manifest_path.read_text(encoding="ascii")
+    dependency = "\n".join(f"      {key}: {value}" for key, value in dev_dep.dependency.items())
+    producer.manifest_path.write_text(
+        manifest + "devDependencies:\n  apm:\n    -\n" + dependency + "\n", encoding="ascii"
+    )
+    environment = scenario.repositories.url_rewrite_subprocess_env_many(
+        ((shipped_dep.repository, shipped_dep.remote_url), (dev_dep.repository, dev_dep.remote_url))
+    )
+    _run_success(scenario, producer, _INSTALL_ARGS, environment=environment, scenario_id="install")
+    (cached,) = (producer.root / "apm_modules").rglob("guard.instructions.md")
+    cached.write_text(cached.read_text(encoding="ascii") + "Injected.\n", encoding="ascii")
+
+    out = tmp_path / "plugin-out"
+    _run_success(
+        scenario, producer, ("pack", "-o", str(out)), environment=environment, scenario_id="pack"
+    )
+    (bundle,) = [path for path in out.iterdir() if path.is_dir()]
+
+    shipped = _files(bundle)
+    assert "skills/helper/SKILL.md" in shipped, sorted(shipped)
+    assert not any("guard" in path for path in shipped), sorted(shipped)

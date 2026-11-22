@@ -13,7 +13,7 @@ warning instead of guessing.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 
@@ -58,12 +58,16 @@ def _producer_deploys_claude(project_root: Path) -> bool | None:
 
 
 def routed_claude_rules(
-    lockfile, project_root: Path, effective_target: object = None
+    lockfile,
+    project_root: Path,
+    effective_target: object = None,
+    dependency_keys: Collection[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` the pack must add.
 
     *effective_target* is the APM-format pack filter; the plugin format,
-    which ships every deployed file, passes ``None``.
+    which ships every deployed file, passes ``None``. *dependency_keys*
+    limits rendering to the dependencies the bundle ships.
     """
     if lockfile is None:
         return {}
@@ -80,6 +84,7 @@ def routed_claude_rules(
         project_root / "apm_modules",
         include_local=False,
         verified=True,
+        dependency_keys=dependency_keys,
     )
     if active is None and rules:
         from ..utils.console import _rich_warning

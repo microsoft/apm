@@ -36,6 +36,8 @@ from apm_cli.utils.patterns import (
 from apm_cli.utils.yaml_io import loads_frontmatter
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
     from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
@@ -970,6 +972,7 @@ def routed_claude_rule_renders(
     *,
     include_local: bool,
     verified: bool = False,
+    dependency_keys: Collection[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
 
@@ -978,7 +981,9 @@ def routed_claude_rule_renders(
     ``.claude/rules/`` files a pre-#3939 install deployed for it. Pack ships
     them; cleanup proves a legacy rule file against them. A dependency whose
     edge or own ``targets:`` exclude Claude renders nothing, as at install.
-    With *verified* (pack), only rules the lock does not already record as deployed are
+    *dependency_keys*, when given, limits rendering to the dependencies the
+    caller ships (the plugin pack skips dev dependencies). With *verified*
+    (pack), only rules the lock does not already record as deployed are
     returned, and they render only from a cached copy that matches its
     locked ``content_hash``: ``apm_modules`` is not attested.
     """
@@ -991,6 +996,8 @@ def routed_claude_rule_renders(
     rules: dict[str, dict[str, str]] = {}
     for dep in lockfile.get_all_dependencies():
         if dep.source == "local" and not include_local:
+            continue
+        if dependency_keys is not None and dep.get_unique_key() not in dependency_keys:
             continue
         dep_ref = dep.to_dependency_ref()
         install_path = dep_ref.get_install_path(modules_root)

@@ -1017,12 +1017,15 @@ def _collect_lsp_servers(
     return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
-def _routed_rule_components(lockfile, project_root: Path) -> dict[str, list[tuple[Path, str]]]:
+def _routed_rule_components(
+    lockfile, project_root: Path, dependency_keys: set[str]
+) -> dict[str, list[tuple[Path, str]]]:
     """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
 
     A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
     plugin pack mapped to ``instructions/``; render them through the same
-    projection so the bundle keeps those bytes. Keyed by dependency key.
+    projection so the bundle keeps those bytes. Only *dependency_keys* (the
+    dependencies the bundle ships) render. Keyed by dependency key.
     """
     import atexit
     import tempfile
@@ -1030,7 +1033,7 @@ def _routed_rule_components(lockfile, project_root: Path) -> dict[str, list[tupl
     from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
 
     components: dict[str, list[tuple[Path, str]]] = {}
-    routed = routed_claude_rules(lockfile, project_root)
+    routed = routed_claude_rules(lockfile, project_root, dependency_keys=dependency_keys)
     if not routed:
         return components
     rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
@@ -1127,17 +1130,21 @@ def export_plugin_bundle(
 
     apm_modules_dir = project_root / "apm_modules"
 
-    routed_rules = _routed_rule_components(lockfile, project_root)
+    # Prefer lockfile is_dev flag (covers transitive deps);
+    # fall back to apm.yml URL matching for older lockfiles
+    packed_deps = [
+        dep
+        for dep in (lockfile.get_all_dependencies() if lockfile else [])
+        if not (
+            getattr(dep, "is_dev", False)
+            or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+        )
+    ]
+    routed_rules = _routed_rule_components(
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}
+    )
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
-            # Prefer lockfile is_dev flag (covers transitive deps);
-            # fall back to apm.yml URL matching for older lockfiles
-            if (
-                getattr(dep, "is_dev", False)
-                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
-            ):
-                continue
-
+        for dep in packed_deps:
             dep_name = dep.repo_url
 
             # Provenance rule (issue #1999 follow-up): a dependency's content
