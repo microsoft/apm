@@ -1,0 +1,19 @@
+{
+  "issue": 4815,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall --trust-lockfile hid a path-safety rejection that happened after preflight (a kept file's parent swapped for a symlink) as consent-kept and released its ownership; it now fails the uninstall and keeps the lock tracking the file. A file replaced by a link after preflight is kept, and every kept skill member is named.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reports_a_safety_rejection_after_preflight_as_a_failure",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_selected_cleanup_never_releases_a_path_a_safety_gate_rejected",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_uninstall_fails_and_keeps_tracking_a_path_a_safety_gate_rejected",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_file_replaced_by_a_link_after_preflight",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_names_every_kept_member_of_a_skill_directory"
+  ]
+}

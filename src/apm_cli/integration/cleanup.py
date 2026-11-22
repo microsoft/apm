@@ -423,12 +423,16 @@ class DeploymentEvidence:
         return fresh
 
     def consent_kept_link(self, claim: str, physical: Path) -> bool:
-        """Whether *physical* is a link this consented uninstall classified as kept (#4295)."""
-        return (
-            self._lockfile_consent
-            and claim.replace("\\", "/") in self._consent_refused
-            and physical.is_symlink()
-        )
+        """Whether consent keeps *physical* because it is now a symbolic link (#4295).
+
+        Judged on the current file kind, whatever the earlier verdict: a file
+        replaced by a link after preflight is kept too (#4815), and recorded as
+        kept so the uninstall does not report it as a failure.
+        """
+        if not (self._lockfile_consent and physical.is_symlink()):
+            return False
+        self._consent_refused[claim.replace("\\", "/")] = None
+        return True
 
     def kept_under_consent(self) -> frozenset[str]:
         """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
@@ -910,8 +914,10 @@ def _safe_remove_skill_directory(
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
         # prevented cleanup (reviewer feedback on PR #1767).
-        preview = blocking[:5]
-        suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
+        # Under consent every kept member is named: it decides per file (#4815).
+        cap = len(blocking) if evidence.lockfile_consent else 5
+        preview = blocking[:cap]
+        suffix = f" (and {len(blocking) - cap} more)" if len(blocking) > cap else ""
         file_list = ", ".join(preview) + suffix
         release = user_content_only and not failed_path_retained
         if release:
@@ -964,6 +970,19 @@ def _safe_remove_skill_directory(
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+
+
+def _keep_consent_link(result: CleanupResult, diagnostics, stale_path: str, dep_key: str) -> None:
+    """Keep a final symbolic link under ``--trust-lockfile`` and name it (#4295)."""
+    result.skipped_unmanaged.append(stale_path)
+    diagnostics.warn(
+        kept_note(
+            stale_path,
+            "it is a symbolic link, which --trust-lockfile never removes",
+            KEPT_DELETE_MANUALLY,
+        ),
+        package=dep_key,
+    )
 
 
 def _remove_proven_members(
@@ -1281,6 +1300,22 @@ def remove_stale_deployed_files(
                 user_scope=user_scope,
                 allow_final_symlink=allow_final_symlink,
             ):
+                # A consent-kept final link whose parent passes the same gate is
+                # retention, not a safety failure (#4815).
+                if (
+                    not allow_final_symlink
+                    and evidence.lockfile_consent
+                    and BaseIntegrator.validate_deploy_path(
+                        stale_path,
+                        project_root,
+                        targets=targets,
+                        user_scope=user_scope,
+                        allow_final_symlink=True,
+                    )
+                    and evidence.consent_kept_link(stale_path, project_root / stale_path)
+                ):
+                    _keep_consent_link(result, diagnostics, stale_path, dep_key)
+                    continue
                 result.skipped_unmanaged.append(stale_path)
                 result.unsafe.append(stale_path)
                 continue
@@ -1337,15 +1372,7 @@ def remove_stale_deployed_files(
         # bytes; a lockfile hash alone never authorizes deletion. Fails
         # CLOSED: edited, unproven or unreadable files are kept with a warning.
         if evidence.consent_kept_link(stale_path, stale_target):
-            result.skipped_unmanaged.append(stale_path)
-            diagnostics.warn(
-                kept_note(
-                    stale_path,
-                    "it is a symbolic link, which --trust-lockfile never removes",
-                    KEPT_DELETE_MANUALLY,
-                ),
-                package=dep_key,
-            )
+            _keep_consent_link(result, diagnostics, stale_path, dep_key)
             continue
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
