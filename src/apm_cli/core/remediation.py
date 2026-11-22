@@ -1001,6 +1001,11 @@ CLAUDE_PLUGIN_BINDING_MOVED = _entry(
     before="remove the old entries from the harness settings and {plugins_dir}, "
     "move apm.lock.yaml aside",
 )
+NATIVE_PLUGIN_CARRIED_DISALLOWED = _entry(
+    "native-plugin-carried-disallowed",
+    "apm install",
+    "retire the native plugins the gates no longer admit",
+)
 CODEX_PLUGIN_USER_SCOPE = _entry(
     "codex-plugin-user-scope",
     "apm install -g --target codex",

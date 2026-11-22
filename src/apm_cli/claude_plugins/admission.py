@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apm_cli.core.remediation import CLAUDE_PLUGIN_BIN_UNTRUSTED
+from apm_cli.core.remediation import (
+    CLAUDE_PLUGIN_BIN_UNTRUSTED,
+    NATIVE_PLUGIN_CARRIED_DISALLOWED,
+)
 from apm_cli.core.scope import is_user_scope
 from apm_cli.deps.plugin_parser import (
     claude_native_mcp_servers,
@@ -303,11 +306,11 @@ def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     why = _native_retire_reason(verdict, Path(package_info.install_path), package_info, policy)
     if why is not None:
+        command = "apm install --global" if is_user_scope(ctx.scope) else "apm install"
         raise ClaudeNativePluginError(
             f"Native plugin '{dep_key}' is no longer allowed ({why}), and this run's "
-            "targets do not reach it, so it cannot be retired here. Run 'apm install' "
-            "with its targets to retire it, approve it with 'apm approve', or remove it "
-            "with 'apm uninstall'."
+            "targets do not reach it, so it cannot keep it. "
+            + NATIVE_PLUGIN_CARRIED_DISALLOWED.with_command(command).sentence()
         )
 
 

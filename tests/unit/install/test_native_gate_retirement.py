@@ -15,7 +15,7 @@ from apm_cli.claude_plugins.admission import (
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.native_plugins.record import NativePluginRecord
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I4")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I4")]
 
 _KEY = "acme/tool"
 
