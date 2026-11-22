@@ -57,21 +57,54 @@ from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 
+
+@dataclass(frozen=True)
+class JsonEntry:
+    """A shared JSON file whose *key* object must hold the entry *name* (``{pkg}``)."""
+
+    glob: str
+    key: str
+    name: str
+
+
+@dataclass(frozen=True)
+class SourceMarker:
+    """A hook sidecar: some entry's ``_apm_source`` names the package (``.../{pkg}``)."""
+
+    glob: str
+
+
+def _sources(node) -> Iterator[str]:
+    if isinstance(node, dict):
+        if isinstance(node.get("_apm_source"), str):
+            yield node["_apm_source"]
+        for value in node.values():
+            yield from _sources(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _sources(value)
+
+
 # Where a package's surface lands, per (scope, kind, target): a glob relative
 # to the deploy root, or (glob, marker) for a shared file that must name the
 # package's entry. Same world conventions as rows.py.
-SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
+SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str] | JsonEntry | SourceMarker] = {
     ("project", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("project", "hook", "copilot"): ".github/hooks/{pkg}-*.json",
     ("project", "mcp", "copilot"): (".mcp.json", '"{pkg}-mcp"'),
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
-    # Claude reads project LSP servers from APM's plugin (lsp_integrator.py, "claude").
-    ("project", "lsp", "claude"): (
-        ".claude/skills/apm-lsp/.claude-plugin/plugin.json",
-        '"{pkg}-server"',
+    # Claude reads project LSP servers from APM's plugin (lsp_integrator.py, "claude"),
+    # and MCP servers from the project .mcp.json: a surface counts only when the
+    # named entry sits under that key (JsonEntry).
+    ("project", "lsp", "claude"): JsonEntry(
+        ".claude/skills/apm-lsp/.claude-plugin/plugin.json", "lspServers", "{pkg}-server"
     ),
+    ("project", "mcp", "claude"): JsonEntry(".mcp.json", "mcpServers", "{pkg}-mcp"),
+    # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
+    # each entry with its dependency (hook_ownership.dependency_hook_source_marker).
+    ("project", "hook", "claude"): SourceMarker(".claude/apm-hooks.json"),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
@@ -404,7 +437,8 @@ class Scenario:
                     surface = SURFACE_GLOBS.get((self.scope, kind, target))
                     if surface is None or not self._observable(package, kind, target):
                         continue
-                    shared = isinstance(surface, tuple)  # a shared file names its entry
+                    # A shared file names its entry; only an own file is a managed path.
+                    shared = isinstance(surface, (tuple, JsonEntry, SourceMarker))
                     hits = self._hits(package, surface, users)
                     if hits:
                         cell = f"{package}/{kind}/{target}"
@@ -424,18 +458,43 @@ class Scenario:
         native = "native" in self.kinds.get(package, ())
         return not (native and (self.scope, kind, target) in _NATIVE_ELSEWHERE)
 
-    def _hits(self, package: str, surface: str | tuple[str, str], users) -> list[Path]:
+    def _hits(self, package: str, surface, users) -> list[Path]:
         """Files at *surface* that carry *package*, minus the user's own files."""
         root = self.deploy_root
-        pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
         name = package.split(":")[0]
-        marker = marker.format(pkg=name)
+        if isinstance(surface, SourceMarker):
+            pattern = surface.glob
+
+            def carries(path: Path) -> bool:
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    return False
+                return any(src == name or src.endswith("/" + name) for src in _sources(data))
+
+        elif isinstance(surface, JsonEntry):
+            pattern = surface.glob
+            entry = surface.name.format(pkg=name)
+
+            def carries(path: Path) -> bool:
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except ValueError:
+                    return False
+                block = data.get(surface.key) if isinstance(data, dict) else None
+                return isinstance(block, dict) and entry in block
+
+        else:
+            pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
+            marker = marker.format(pkg=name)
+
+            def carries(path: Path) -> bool:
+                return marker in path.read_text(encoding="utf-8")
+
         return [
             path
             for path in root.glob(pattern.format(pkg=name))
-            if path.is_file()
-            and marker in path.read_text(encoding="utf-8")
-            and path.relative_to(root).as_posix() not in users
+            if path.is_file() and carries(path) and path.relative_to(root).as_posix() not in users
         ]
 
     def undeclared_target_cells(self) -> frozenset[str]:
@@ -1011,6 +1070,15 @@ EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
         r"already exists and the previous apm\.lock\.yaml does not record it",
         "P-LAW-ownership.preserve_unowned",
         "claude_plugins/registrar.py: a plugin root APM did not deploy is never replaced",
+    ),
+    **dict.fromkeys(
+        ("pair|LOCK=stale|DEPLOYED=unowned", "pair|LOCK=absent|DEPLOYED=unowned"),
+        ExpectedRefusal(
+            1,
+            r"Installation refused: skill 'p-skill'",
+            "P-LAW-ownership.preserve_unowned",
+            "install/phases/integrate.py skill collision refusal (#4101)",
+        ),
     ),
     "pair|OP=install|DEPLOYED=unowned": ExpectedRefusal(
         1,
