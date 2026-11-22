@@ -17,14 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+import pytest  # noqa: F401
 from click.testing import CliRunner
 
 from apm_cli.commands.marketplace import check
 from apm_cli.marketplace.errors import GitLsRemoteError, OfflineMissError
 from apm_cli.marketplace.ref_resolver import RemoteRef
-
-pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # YAML fixtures

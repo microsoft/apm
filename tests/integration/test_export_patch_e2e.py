@@ -28,8 +28,6 @@ from apm_cli.cli import cli
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
 from apm_cli.install.cache_pin import write_marker
 
-pytestmark = pytest.mark.component
-
 _COMMIT = "b" * 40
 _SOURCE_REL = ".apm/instructions/std.instructions.md"
 _DEPLOYED = ".github/instructions/std.instructions.md"

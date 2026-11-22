@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.component
-
 
 def test_streaming_runtime_is_killed_at_wall_clock_deadline(
     monkeypatch: pytest.MonkeyPatch,

@@ -27,10 +27,7 @@ from apm_cli.marketplace.client import fetch_or_cache
 
 GIT_AVAILABLE = shutil.which("git") is not None
 
-pytestmark = [
-    pytest.mark.skipif(not GIT_AVAILABLE, reason="git executable not available"),
-    pytest.mark.component,
-]
+pytestmark = pytest.mark.skipif(not GIT_AVAILABLE, reason="git executable not available")
 
 MANIFEST = {
     "name": "gen-mkt",

@@ -10,7 +10,6 @@ import pytest
 pytestmark = [
     pytest.mark.requires_e2e_mode,
     pytest.mark.requires_windows,
-    pytest.mark.component,
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
