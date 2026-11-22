@@ -29,7 +29,8 @@ def isolated_config(tmp_path, monkeypatch):
     """Point the owner's config store at a temp APM home and return config.json.
 
     No test reads or writes the real ``~/.apm``; environment overrides of the
-    transport keys are cleared so the file is the only source of truth.
+    transport keys are cleared so the file is the only source of truth, and
+    the terminal width is pinned so Rich tables render rows on one line.
     """
     config_dir = tmp_path / ".apm"
     config_file = config_dir / "config.json"
@@ -37,6 +38,8 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(config_file))
     for name in _TRANSPORT_ENV:
         monkeypatch.delenv(name, raising=False)
+    # Rich tables wrap at the terminal width; pin it so rendered rows are stable.
+    monkeypatch.setenv("COLUMNS", "200")
     cfg_module._invalidate_config_cache()
     yield config_file
     cfg_module._invalidate_config_cache()
