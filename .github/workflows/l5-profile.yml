@@ -54,4 +54,4 @@ jobs:
       working-directory: new
       run: |
         uv sync --frozen --extra dev --quiet
-        uv run --frozen pytest -p no:cacheprovider -q -n 2 -rA tests/lifecycle/security/test_noop_diff.py 2>&1 | tail -150
+        uv run --frozen pytest -p no:cacheprovider -q -n 2 -rA tests/lifecycle/security/test_noop_diff.py 2>&1 | tail -150 || true

@@ -37,6 +37,12 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
         buf = io.StringIO()
         pstats.Stats(str(prof), stream=buf).sort_stats(key).print_stats(70)
         print(f"== PROFILE by {key}\n" + buf.getvalue()[-16000:])
+    fprof = work / "full.prof"
+    subprocess.run([python, "-m", "cProfile", "-o", str(fprof), str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0"), capture_output=True)
+    buf = io.StringIO()
+    st = pstats.Stats(str(fprof), stream=buf)
+    st.sort_stats("cumulative").print_stats(r"apm_cli/(install|integration|policy|commands)/.*", 90)
+    print("== FULL PROFILE (apm_cli install/integration/policy, cumulative)\n" + buf.getvalue()[-30000:])
     imp = subprocess.run([python, "-X", "importtime", str(apm), "install"], cwd=root, env=env, capture_output=True, text=True)
     rows = []
     for line in imp.stderr.splitlines():
