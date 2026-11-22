@@ -47,21 +47,36 @@ def _git(project_root: Path, *args: str) -> str | None:
     """Run ``git *args`` in *project_root*; one command run reads each answer once."""
     # Key on the absolute path without collapsing '..' (abspath would, before
     # symlinks resolve); git still runs in the caller's own project_root.
-    return _git_in(str(Path(project_root).absolute()), project_root, *args)
+    return _git_in(str(Path(project_root).absolute()), _Cwd(project_root), *args)
+
+
+class _Cwd:
+    """The caller's own root: git's cwd, deliberately not part of the memo key."""
+
+    __slots__ = ("path",)
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Cwd)
+
+    def __hash__(self) -> int:
+        return 0
 
 
 # One CLI command discovers org policy several times (preflight, gate, target
 # check, MCP); the remote cannot change within the run, so the answer (failures
 # included) is reused for the invocation. Outside a CLI invocation every read is live.
 @memoized_per_invocation("git-remote", keep=lambda _result: True)
-def _git_in(_key: str, project_root: Path, *args: str) -> str | None:
+def _git_in(_key: str, cwd: _Cwd, *args: str) -> str | None:
     try:
         result = subprocess.run(
             [get_git_executable(), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
-            cwd=project_root,
+            cwd=cwd.path,
             timeout=5,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
