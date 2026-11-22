@@ -93,3 +93,17 @@ def test_a_symlinked_hooks_dir_leaving_the_claude_root_is_refused(
         _copy(world, f"{world.root.as_posix()}/hooks/local/scripts/g.sh")
 
     assert _files(outside) == set()
+
+
+def test_an_out_and_back_destination_creates_nothing_outside_the_claude_root(
+    world: SimpleNamespace,
+) -> None:
+    """A '..' detour that returns inside the root never creates its detour directory."""
+    detour = f"hooks/local/../../../escaped/../{world.root.name}/hooks/local/scripts/g.sh"
+
+    written = _copy(world, f"{world.root.as_posix()}/{detour}")
+
+    deployed = world.root / "hooks" / "local" / "scripts" / "g.sh"
+    assert deployed.read_text(encoding="utf-8") == world.script.read_text(encoding="utf-8")
+    assert not (world.tmp / "escaped").exists()
+    assert len(written) == 1

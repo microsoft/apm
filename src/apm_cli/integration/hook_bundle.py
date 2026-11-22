@@ -278,7 +278,9 @@ def copy_deployed_hook_bundle(
                 root_has_js_hook[(source_root, target_root)] = True
 
     for target_rel, (target_file, source_file) in copy_plan.items():
-        ensure_path_within(target_file, containment)
+        # Write through the resolved path: an out-and-back '..' destination
+        # passes containment but would mkdir its detour outside the root.
+        checked = ensure_path_within(target_file, containment)
         if integrator.try_adopt_identical(target_file, source_file, target_paths):
             if integrator.receipted_unchanged(target_file):
                 continue  # unchanged since APM wrote it: not an adoption (RA-007)
@@ -297,8 +299,8 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
-        write_seam.copy2(source_file, target_file)
+        write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
+        write_seam.copy2(source_file, checked)
         integrator.note_rendered_write(target_file)
         if target_file in command_targets:
             result.scripts_copied += 1
@@ -311,7 +313,7 @@ def copy_deployed_hook_bundle(
         if not root_has_js_hook.get((_source_root, target_root), False):
             continue
         target_file = target_root / "package.json"
-        ensure_path_within(target_file, containment)
+        checked = ensure_path_within(target_file, containment)
         target_rel = entry(target_file)
         if target_rel in copy_plan:
             # An enclosing root already deploys this directory's own metadata.
@@ -328,8 +330,8 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
-        write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
-        write_seam.write_text(target_file, content)
+        write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
+        write_seam.write_text(checked, content)
         integrator.note_rendered_write(target_file)
         target_paths.append(target_file)
 

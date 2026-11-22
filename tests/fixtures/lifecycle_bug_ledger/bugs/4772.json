@@ -17,6 +17,7 @@
     "tests/unit/integration/test_hook_bundle_containment.py::test_a_dotdot_destination_escaping_the_claude_root_is_refused",
     "tests/unit/integration/test_hook_bundle_containment.py::test_a_script_deploys_under_an_external_claude_root",
     "tests/unit/integration/test_hook_bundle_containment.py::test_a_symlinked_hooks_dir_leaving_the_claude_root_is_refused",
+    "tests/unit/integration/test_hook_bundle_containment.py::test_an_out_and_back_destination_creates_nothing_outside_the_claude_root",
     "tests/unit/integration/test_hook_containment_root.py::test_containment_root_is_an_absolute_claude_root_outside_home_only"
   ]
 }
