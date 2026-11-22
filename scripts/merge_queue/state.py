@@ -11,12 +11,13 @@ from scripts.merge_queue.api import REPO, Api
 from scripts.merge_queue.refs import parse_train_ref, prefix_refs, ref_train_id
 from scripts.merge_queue.train import WINDOW_START
 
-TESTING, GREEN, RED, ABORTED = "TESTING", "GREEN", "RED", "ABORTED"
+TESTING, GREEN, RED, ABORTED, LANDED = "TESTING", "GREEN", "RED", "ABORTED", "LANDED"
 TRANSITIONS = {
     TESTING: {GREEN, RED, ABORTED},
-    GREEN: set(),
+    GREEN: {LANDED, ABORTED},
     RED: set(),
     ABORTED: set(),
+    LANDED: set(),
 }
 _TRAILER = re.compile(
     r"^Apm-Train: t(?P<id>\d+) k=(?P<k>\d+) pr=#(?P<pr>\d+) head=(?P<head>[0-9a-f]{40})"
@@ -32,6 +33,7 @@ class Member:
     k: int
     sha: str
     tree: str = ""
+    merged: str = ""
 
 
 @dataclass
@@ -44,6 +46,12 @@ class Train:
     published_at: str = ""
     verdict_at: str = ""
     run_id: int | None = None
+    reruns: int = 0
+    # After a rerun request: classify only once this attempt of the run completes.
+    awaiting_attempt: int = 0
+    red_class: str = ""
+    ejected: int | None = None
+    residual: list[str] = field(default_factory=list)
 
     @property
     def head_ref(self) -> str:
@@ -64,6 +72,14 @@ class State:
     trains: dict[int, Train] = field(default_factory=dict)
     max_id: int = 0
     window: int = WINDOW_START
+    # PR -> head ejected at; the PR re-enters with a new head (design section 6).
+    ejected: dict[int, str] = field(default_factory=dict)
+    # Bisect: the next train is built from these PRs only.
+    split: list[int] = field(default_factory=list)
+    # Set by a second infra red; no train launches until a human clears it.
+    halted: str = ""
+    # Ejected PRs whose queue:ready label removal failed; retried every poll.
+    unlabel: list[int] = field(default_factory=list)
 
     def in_flight(self) -> list[Train]:
         return sorted(
@@ -71,8 +87,38 @@ class State:
             key=lambda train: train.train_id,
         )
 
+    def proven(self) -> list[Train]:
+        """The landing backlog: GREEN trains in launch order, up to the first one still
+        TESTING (a later train was built on it and cannot land before it)."""
+        backlog = []
+        for train in sorted(self.trains.values(), key=lambda train: train.train_id):
+            if train.status == TESTING:
+                break
+            if train.status == GREEN:
+                backlog.append(train)
+        return backlog
+
+    def chain(self) -> list[Train]:
+        """Trains a new train must stack on when landing: testing, or proven but unlanded."""
+        return sorted(
+            (
+                t
+                for t in self.trains.values()
+                if t.status == TESTING
+                or (t.status == GREEN and not all(m.merged for m in t.members))
+            ),
+            key=lambda train: train.train_id,
+        )
+
     def queued_prs(self) -> set[int]:
-        return {m.pr for t in self.trains.values() if t.status == TESTING for m in t.members}
+        """PRs aboard a train that is testing or proven but not yet fully landed."""
+        return {
+            m.pr
+            for t in self.trains.values()
+            if t.status in (TESTING, GREEN)
+            for m in t.members
+            if not m.merged
+        }
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=1, sort_keys=True)
@@ -84,7 +130,15 @@ class State:
             int(key): Train(**{**value, "members": [Member(**m) for m in value["members"]]})
             for key, value in raw.get("trains", {}).items()
         }
-        return cls(trains=trains, max_id=raw.get("max_id", 0), window=raw.get("window", 4))
+        return cls(
+            trains=trains,
+            max_id=raw.get("max_id", 0),
+            window=raw.get("window", 4),
+            ejected={int(pr): head for pr, head in raw.get("ejected", {}).items()},
+            split=raw.get("split", []),
+            halted=raw.get("halted", ""),
+            unlabel=raw.get("unlabel", []),
+        )
 
 
 def load(path: Path) -> State:

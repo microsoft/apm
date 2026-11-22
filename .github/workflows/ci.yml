@@ -535,6 +535,7 @@ jobs:
         include-hidden-files: true
         retention-days: 7
         if-no-files-found: ignore
+        overwrite: true
 
   # Coverage combine + global 80% gate.
   #
@@ -829,6 +830,7 @@ jobs:
         path: build/gate-cells/
         retention-days: 3
         if-no-files-found: ignore
+        overwrite: true
 
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)

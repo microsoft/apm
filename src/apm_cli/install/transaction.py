@@ -132,6 +132,7 @@ class InstallTransaction:
         self._lock = threading.RLock()
         self._deploy_journal: DeployJournal | None = None
         self._journal_released = False
+        self._journal_held_until_commit = False
         self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
@@ -163,7 +164,8 @@ class InstallTransaction:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             try:
                 if not self.committed:
-                    self._settle_deploy_journal()
+                    if not self._settle_at_lockfile_commit():
+                        self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
                     self._ref_pins.commit()
@@ -222,8 +224,13 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
-    def journal_deploy_writes(self) -> None:
-        """Record, at the integrator write seam, the prior state of every path written from now on."""
+    def journal_deploy_writes(self, ctx: Any = None) -> None:
+        """Record, at the integrator write seam, the prior state of every path written from now on.
+
+        ``--frozen`` withholds the lockfile, so its no-rewrite check runs after
+        the pipeline: the journal is then kept until this install commits and
+        a refusal there rolls back every journaled path (#4638).
+        """
         from apm_cli.core.scope import get_apm_home
         from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
         from apm_cli.integration import write_seam
@@ -231,6 +238,11 @@ class InstallTransaction:
         with self._lock:
             if self._deploy_journal is not None or self.committed or self._rolled_back:
                 return
+            if ctx is not None:
+                from apm_cli.install.service import InstallService
+
+                frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+                self._journal_held_until_commit = frozen
             store_parent = get_apm_home() / "install-snapshots"
             if self._workspace_lock is not None:
                 # Under the lifecycle lock no other install owns a journal here.
@@ -268,9 +280,34 @@ class InstallTransaction:
             if self._deploy_journal is None or self._journal_released:
                 return
             self._journal_released = True
+            if self._journal_held_until_commit:
+                return
         # Settle at the durable commit, before receipt binding or any other
         # fallible post-commit action: the lockfile then records the deploys.
         after_lockfile_commit(self._settle_deploy_journal, first=True)
+
+    def _settle_at_lockfile_commit(self) -> bool:
+        """Keep a released journal until the staged lockfile reaches disk (#4664).
+
+        A command that runs the pipeline inside its own lockfile writer (``apm
+        update``, ``apm deps update``) completes this transaction before the
+        writer commits. The journal then still restores every deployed path if
+        that commit fails or the command is abandoned; a successful commit
+        settles it (:meth:`release_deploy_targets`).
+        """
+        from apm_cli.deps.lockfile_write_authority import unless_lockfile_commits
+
+        if not self._journal_released or self._deploy_journal is None:
+            return False
+        return unless_lockfile_commits(self._undo_deploys)
+
+    def _undo_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created.
+
+        Rollback and an uncommitted completed transaction (#4664) both undo here.
+        """
+        self._restore_deploy_targets()
+        self._remove_created_target_roots()
 
     def _take_deploy_journal(self) -> DeployJournal | None:
         """Stop listening at the write seam and hand over the journal."""
@@ -321,8 +358,7 @@ class InstallTransaction:
             try:
                 self._ref_pins.discard()
                 try:
-                    self._restore_deploy_targets()
-                    self._remove_created_target_roots()
+                    self._undo_deploys()
                 finally:
                     try:
                         cleanup_issues = self._resolution.rollback() or []

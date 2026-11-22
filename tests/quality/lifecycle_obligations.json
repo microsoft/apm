@@ -25052,7 +25052,7 @@
   "E3": {
    "evidence": [
     "src/apm_cli/install/services.py:827",
-    "src/apm_cli/install/services.py:1030"
+    "src/apm_cli/install/services.py:1016"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
   },
@@ -25087,7 +25087,7 @@
   "U2": {
    "evidence": [
     "src/apm_cli/commands/approve.py:263",
-    "src/apm_cli/policy/install_preflight.py:220"
+    "src/apm_cli/policy/install_preflight.py:233"
    ],
    "text": "the executable gate governs only executable primitives; a plain file next to a revoked executable must survive; an org policy dependency deny removes it"
   },

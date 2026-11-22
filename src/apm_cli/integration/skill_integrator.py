@@ -22,6 +22,7 @@ from apm_cli.integration.skill_adoption import (
     installing_commit,
     is_skill_dir_identical_to_source,
     render_skill_markdown,
+    report_stale_kept_copies,
     skill_tree_baselines,
     tree_equals_install_output,
 )
@@ -381,6 +382,7 @@ class SkillIntegrator(BaseIntegrator):
         self._skill_completed_roots: dict[Path, set[str]] = {}
         self._skill_completed_files: dict[Path, set[str]] = {}
         self._materialization_session: DeploymentMaterializationSession | None = None
+        self._stale_kept_reported: set[Path] = set()
 
     @contextmanager
     def ownership_snapshot(
@@ -542,6 +544,10 @@ class SkillIntegrator(BaseIntegrator):
             if self.link_resolver is None:
                 raise RuntimeError("Cannot record skill writes without final link rendering.")
             session.record({path: written_hashes[entry(path)] for path in written}, targets, owner)
+        if session is not None:
+            report_stale_kept_copies(
+                self, source, destination, project_root, ignore=ignore, diagnostics=diagnostics
+            )
         self._skill_session_hashes.update(written_hashes)
         self._skill_files.extend(copied)
         plan = self._skill_source_plan
