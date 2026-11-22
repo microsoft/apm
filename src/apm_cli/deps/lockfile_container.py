@@ -7,6 +7,7 @@ Checks the version and the shape of every top-level list and mapping before
 from __future__ import annotations
 
 import copy
+import datetime
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -39,13 +40,44 @@ def parse_lockfile_text(yaml_str: str) -> object:
             while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
                 _parsed_texts.popitem(last=False)
     try:
-        return copy.deepcopy(parsed)
+        return _private_copy(parsed, {})
     except RecursionError:
-        # A merge-reordered alias chain can nest deeper than deepcopy recurses
+        # A merge-reordered alias chain can nest deeper than the copy recurses
         # though the bounded loader accepted it; such text is parsed per read.
         with _parsed_texts_lock:
             _parsed_texts.pop(key, None)
         return yaml_io.load_yaml_str(yaml_str)
+
+
+# Leaves a safe YAML load yields that no caller can mutate in place.
+_IMMUTABLE_LEAVES = (str, int, float, bool, type(None), bytes, datetime.date)
+
+
+def _private_copy(node: object, memo: dict[int, object]) -> object:
+    """Copy a safe-loaded YAML tree like ``copy.deepcopy``, without its per-node dispatch.
+
+    Plain dicts and lists are rebuilt and immutable leaves are shared. *memo*
+    keeps aliases shared, so a pure-alias graph the bounded loader admits stays
+    O(N) to copy, as it does under ``deepcopy``. Any other type falls back to
+    ``deepcopy`` with the same memo.
+    """
+    kind = type(node)
+    if kind is dict:
+        copied = memo.get(id(node))
+        if copied is None:
+            copied = memo[id(node)] = {}
+            for key, value in node.items():
+                copied[key] = _private_copy(value, memo)
+        return copied
+    if kind is list:
+        copied = memo.get(id(node))
+        if copied is None:
+            copied = memo[id(node)] = []
+            copied.extend(_private_copy(value, memo) for value in node)
+        return copied
+    if isinstance(node, _IMMUTABLE_LEAVES):
+        return node
+    return copy.deepcopy(node, memo)
 
 
 def validate_lockfile_container(data: object) -> dict[str, Any]:

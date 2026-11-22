@@ -96,6 +96,38 @@ class TestLockFileReadCost:
 
         assert parse_lockfile_text(text) == expected
 
+    def test_private_copy_matches_deepcopy_and_keeps_aliases_shared(self):
+        import copy
+        import datetime
+
+        from apm_cli.deps.lockfile_container import _private_copy
+
+        shared = {"k": ["v", 1, 2.5, True, None, datetime.date(2026, 1, 2)]}
+        cyclic: list = ["self"]
+        cyclic.append(cyclic)
+        tree = {"a": shared, "b": shared, "c": cyclic, "d": {1, 2}}
+
+        copied = _private_copy(tree, {})
+
+        assert copied["a"] == copy.deepcopy(tree)["a"]
+        assert copied["a"] is copied["b"]
+        assert copied["a"] is not shared
+        assert copied["a"]["k"] is not shared["k"]
+        assert copied["c"][1] is copied["c"]
+        assert copied["d"] == {1, 2} and copied["d"] is not tree["d"]
+
+    def test_private_copy_of_a_pure_alias_graph_stays_linear(self):
+        from apm_cli.deps.lockfile_container import _private_copy
+
+        level: list = ["leaf"]
+        for _ in range(60):
+            level = [level, level]
+
+        copies = _count_calls(_private_copy.__code__, lambda: _private_copy(level, {}))
+
+        # 2^60 expanded nodes, one call per distinct object and per reference.
+        assert copies <= 3 * 61 + 1
+
     def test_same_text_is_parsed_once(self):
         repo_url = f"owner/memo-{uuid.uuid4().hex}"
         text = _lock_text_with_deployed_files({repo_url: {".github/m.md": ""}})
