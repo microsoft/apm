@@ -524,7 +524,6 @@
       "tests/unit/scripts/test_architecture_skills_root_guard.py": 5,
       "tests/unit/scripts/test_contracts_strip_charset.py": 2,
       "tests/unit/scripts/test_lifecycle_evidence.py": 3,
-      "tests/unit/scripts/test_run_mutation_pilot.py": 10,
       "tests/unit/security/test_exec_vocab_unification.py": 17,
       "tests/unit/security/test_trust_admission.py": 58,
       "tests/unit/test_add_mcp_to_apm_yml.py": 12,
@@ -803,7 +802,7 @@
       "tests/unit/agent_plugins/test_package_projection.py": 2,
       "tests/unit/bundle/test_local_bundle.py": 4,
       "tests/unit/cache/test_git_cache.py": 1,
-      "tests/unit/cache/test_git_env.py": 19,
+      "tests/unit/cache/test_git_env.py": 5,
       "tests/unit/cache/test_http_cache.py": 2,
       "tests/unit/commands/compile/test_pre_compile_scripts.py": 4,
       "tests/unit/commands/compile/test_watch_live_reload_and_clean_warning.py": 5,
@@ -1113,8 +1112,7 @@
       "tests/unit/test_yaml_io.py": 1,
       "tests/unit/utils/test_archive.py": 6,
       "tests/unit/utils/test_atomic_io.py": 1,
-      "tests/unit/utils/test_paths.py": 1,
-      "tests/unit/utils/test_real_git_tls_config.py": 19
+      "tests/unit/utils/test_paths.py": 1
     },
     "AQ005_global_patch_through_namespace": {},
     "AQ006_e2e_not_driving_installed_cli": {
