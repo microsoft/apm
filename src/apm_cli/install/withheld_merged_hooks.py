@@ -1,0 +1,135 @@
+"""Merged-config hook entries that match a withheld package's own hooks.
+
+Targets such as Claude, Cursor and Codex merge hook entries into one shared
+config file; ownership lives in an ``_apm_source`` marker or the hooks
+sidecar. When the executables gate withholds a package's hooks, an entry in
+that file that renders exactly as the package's own hook and that no other
+source owns is named: install keeps it and warns, ``apm audit --ci`` fails.
+Nothing is removed. Rendering reuses the integrator's read-only steps.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+ENTRY_REASON = "an entry matching its hook is not attributed to another source"
+
+
+def withheld_merged_hook_entries(
+    package_info: Any, project_root: Path, targets: Iterable[Any], *, user_scope: bool = False
+) -> list[str]:
+    """``<config path>: <event>`` for each matching, unattributed merged entry.
+
+    Raises :class:`~apm_cli.install.withheld_hooks.HookPathsUnknown` when a
+    config or the package's hooks cannot be read, so callers fail closed.
+    """
+    from apm_cli.install.withheld_hooks import HookPathsUnknown, _require_parent_inside
+    from apm_cli.integration import hook_integrator as hooks
+
+    integrator = hooks.HookIntegrator()
+    package_name = integrator._get_package_name(package_info, project_root)
+    marker = integrator._get_hook_source_marker(package_info, project_root, package_name)
+    found: set[str] = set()
+    for target in targets or ():
+        config = hooks._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
+        if config is None:
+            continue
+        json_path = project_root / target.root_dir / config.config_filename
+        if not (json_path.is_file() or json_path.is_symlink()):
+            continue
+        rel = json_path.relative_to(project_root).as_posix()
+        _require_parent_inside(json_path, project_root, rel)
+        try:
+            container = _owned_view(json_path, config, user_scope)
+            wanted = _rendered_keys(
+                integrator, package_info, package_name, target, config, project_root, user_scope
+            )
+        except (OSError, ValueError) as exc:
+            raise HookPathsUnknown(f"{rel}: {exc}") from exc
+        for event, entries in container.items():
+            for entry in entries if isinstance(entries, list) else ():
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("_apm_source") in (None, marker)
+                    and integrator._hook_entry_content_key(entry) in wanted.get(event, ())
+                ):
+                    found.add(f"{rel}: {event}")
+    return sorted(found)
+
+
+def _owned_view(json_path: Path, config: Any, user_scope: bool) -> dict:
+    """The config's hook container with sidecar ownership markers re-applied."""
+    from apm_cli.integration import hook_integrator as hooks
+    from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
+
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    container = data.get(config.event_container_key) if isinstance(data, dict) else None
+    if not isinstance(container, dict):
+        return {}
+    sidecar = json_path.parent / hooks._APM_HOOKS_SIDECAR
+    if config.schema_strict and sidecar.is_file():
+        try:
+            owners = json.loads(sidecar.read_text(encoding="utf-8"))
+        except ValueError:
+            owners = None  # unreadable ownership proves nothing: entries stay unattributed
+        if isinstance(owners, dict):
+            reinject_apm_source_from_sidecar(container, owners)
+    return container
+
+
+def _rendered_keys(
+    integrator: Any,
+    package_info: Any,
+    package_name: str,
+    target: Any,
+    config: Any,
+    project_root: Path,
+    user_scope: bool,
+) -> dict[str, set[str]]:
+    """Content keys of the entries install would merge for the package, per event."""
+    from apm_cli.integration import hook_integrator as hooks
+    from apm_cli.integration import hook_native_formats as formats
+
+    key = config.target_key
+    install_path = Path(package_info.install_path)
+    event_map = hooks._HOOK_EVENT_MAP.get(key, {})
+    plain = {
+        "claude": formats._to_claude_hook_entries,
+        "codex": formats._to_codex_hook_entries,
+        "gemini": formats._to_gemini_hook_entries,
+    }
+    keys: dict[str, set[str]] = {}
+    sources = integrator.select_deployable_hook_sources(install_path, (key,))
+    for hook_file in sources.descriptors_for(key):
+        data = integrator._parse_hook_json(hook_file)
+        if data is None:
+            raise ValueError(f"cannot parse hook source {Path(hook_file).name}")
+        rewritten, _scripts = integrator._rewrite_hooks_data(
+            data,
+            install_path,
+            package_name,
+            key,
+            hook_file_dir=Path(hook_file).parent,
+            root_dir=target.root_dir,
+            deploy_root=integrator._deploy_root_for_hook_rewrite(project_root, user_scope),
+            home_reference=integrator._home_reference_for_hook_rewrite(target, user_scope),
+        )
+        for raw_event, entries in (rewritten.get("hooks") or {}).items():
+            if not isinstance(entries, list):
+                continue
+            event = event_map.get(raw_event, raw_event)
+            if key == "cursor":
+                native = formats._to_cursor_hook_entries(
+                    entries, event, foreign=raw_event in event_map
+                )
+            elif key == "antigravity":
+                native = formats._to_antigravity_hook_entries(entries, event)
+            else:
+                native = plain.get(key, list)(entries)
+            for entry in (*native, *formats._legacy_hook_entries(entries, key)):
+                if isinstance(entry, dict):
+                    keys.setdefault(event, set()).add(integrator._hook_entry_content_key(entry))
+    return keys

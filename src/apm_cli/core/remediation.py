@@ -1298,6 +1298,12 @@ WITHHELD_HOOK_FILE_UNRECORDED = _entry(
     "confirm no unrecorded file remains at a withheld package's hook path",
     before="delete each named file you did not write yourself",
 )
+WITHHELD_HOOK_ENTRY_UNRECORDED = _entry(
+    "withheld-hook-entry-unrecorded",
+    "apm audit --ci",
+    "confirm no unattributed entry matching a withheld package's hook remains",
+    before="remove each named hook entry you did not add yourself",
+)
 WITHHELD_HOOK_PATHS_UNCHECKED = _entry(
     "withheld-hook-paths-unchecked",
     "apm audit --ci",

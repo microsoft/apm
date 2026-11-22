@@ -1481,6 +1481,7 @@ def _check_hook_approval_pins(
     from ..install.errors import PolicyViolationError
     from ..install.exec_gate import locked_hook_pin_mismatches
     from ..install.withheld_hooks import locked_withheld_hook_files
+    from ..install.withheld_merged_hooks import ENTRY_REASON
     from ..security.executables import resolve_project_exec_allow_map
 
     modules_root = (
@@ -1503,14 +1504,21 @@ def _check_hook_approval_pins(
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
         withheld = locked_withheld_hook_files(
-            lock, modules_root, trust_ctx, deployment_root, targets
+            lock, modules_root, trust_ctx, deployment_root, targets, user_scope=user_scope
         )
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
     if withheld:
-        files = [row for row in withheld if row[0]]
+        entries = [row for row in withheld if row[0] and ENTRY_REASON in row[2]]
+        files = [row for row in withheld if row[0] and ENTRY_REASON not in row[2]]
         unchecked = [row for row in withheld if not row[0]]
         message = []
+        if entries:
+            message.append(
+                f"{len(entries)} merged hook entr(ies) match the hooks of a package the "
+                "executables gate withholds, and no ownership record attributes them -- "
+                f"{remediation.WITHHELD_HOOK_ENTRY_UNRECORDED.clause()}"
+            )
         if files:
             message.append(
                 f"{len(files)} file(s) sit at the hook path of a package whose hooks the "
@@ -1526,7 +1534,8 @@ def _check_hook_approval_pins(
             name="hook-approval-pins",
             passed=False,
             message="; ".join(message),
-            details=[
+            details=[f"{path}: hook entry of {key} ({reason})" for path, key, reason in entries]
+            + [
                 f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
                 for path, key, reason in files
             ]
