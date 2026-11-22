@@ -196,11 +196,38 @@ class ReplacementBinding:
 
     def retain_parents(self, parent_keys: set[str]) -> bool:
         """Prune removed dependency requests without changing chosen ownership."""
-        retained = {
-            request: None
-            for request in self.requests
-            if request.parent is None or request.parent in parent_keys
-        }
+        return self._retain(lambda parent: parent is None or parent in parent_keys)
+
+    def drop_root_requests(self) -> bool:
+        """Forget the project's own requests once its declaration is gone (#4749).
+
+        Requests from surviving parents stay, so the binding keeps the edges
+        that still need the selected source, and the node's selection becomes
+        what those edges select, as :meth:`from_dict` derives it.
+        """
+        changed = self._retain(lambda parent: parent is not None)
+        if changed:
+            self._select_from_requests()
+        return changed
+
+    def _select_from_requests(self) -> None:
+        """Give the node the merged selection of its recorded requests (#3735)."""
+        if len(self.requests) == 1:
+            (request,) = self.requests
+            skills, targets = request.skills, request.targets
+        else:
+            merged = merge_edge_selections(
+                EdgeSelection((), request.skills, request.targets) for request in self.requests
+            )
+            skills, targets = merged.skill_subset, merged.target_subset
+        self.original = replace(
+            self.original,
+            skill_subset=None if skills is None else list(skills),
+            target_subset=None if targets is None else list(targets),
+        )
+
+    def _retain(self, keep) -> bool:
+        retained = {request: None for request in self.requests if keep(request.parent)}
         if not retained:
             raise ReplacementConfigError(
                 f"Replacement {self.original.get_unique_key()} has no surviving original request"
@@ -261,14 +288,7 @@ class ReplacementBinding:
             binding.record(edge, request["parent"], request["dev"])
         if len(binding.requests) > 1:
             # The node carries the merged selection of every incoming edge (#3735).
-            merged = merge_edge_selections(
-                EdgeSelection((), request.skills, request.targets) for request in binding.requests
-            )
-            binding.original = replace(
-                binding.original,
-                skill_subset=None if merged.skill_subset is None else list(merged.skill_subset),
-                target_subset=None if merged.target_subset is None else list(merged.target_subset),
-            )
+            binding._select_from_requests()
         return binding
 
     def local_source_path(self, consumer_root: Path | None = None) -> Path:
