@@ -21,7 +21,7 @@ import yaml
 
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import oracles, receipts
-from tests.lifecycle.generator import bin_pin, emit, replay
+from tests.lifecycle.generator import anchors, bin_pin, emit, replay
 from tests.lifecycle.generator.covering import refusal_line
 from tests.lifecycle.generator.factors import (
     FACTORS,
@@ -32,7 +32,6 @@ from tests.lifecycle.generator.factors import (
 )
 from tests.lifecycle.generator.rules import (
     ACCEPTS_EVIDENCE,
-    EVIDENCE_WINDOW,
     FIRST_PARTY_MCP_CELL,
     LOCAL_BUNDLE_REFUSALS,
     MARKETPLACE_ADD_REFUSAL,
@@ -223,11 +222,55 @@ def _anchors():
     yield from USER_SCOPE_EVIDENCE.values()
 
 
-def test_every_rule_cites_code_that_still_says_it() -> None:
+def _line_citations() -> list[str]:
+    sources = sorted(Path(anchors.__file__).parent.glob("*.py"))
+    found = [
+        f"{path.name}:{number}: {match.group(0)}"
+        for path in sources
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        for match in anchors.LINE_CITATION.finditer(line)
+    ]
+    return found + [
+        f"{rule}: {item}"
+        for rule, entry in _document()["rules"].items()
+        for item in entry["evidence"]
+        if anchors.LINE_CITATION.search(item)
+    ]
+
+
+def test_every_rule_cites_a_symbol_that_still_says_it() -> None:
+    """Evidence names a symbol, never a line number (#4696): a line citation moves
+    with every edit to the cited file, so unrelated PRs conflict in a merge train."""
     for anchor in _anchors():
+        spans = anchors.symbols(anchor.path)
+        assert anchor.symbol in spans, f"{anchor}: symbol is gone"
+        start, end = spans[anchor.symbol]
         lines = (_ROOT / anchor.path).read_text(encoding="utf-8").splitlines()
-        window = lines[anchor.line - 1 : anchor.line - 1 + EVIDENCE_WINDOW]
-        assert any(anchor.needle in line for line in window), f"{anchor}: {anchor.needle!r}"
+        body = "\n".join(lines[start - 1 : end])
+        assert anchor.needle in body, f"{anchor}: {anchor.needle!r}"
+    assert _line_citations() == []
+    assert anchors.LINE_CITATION.search("see install/services.py" + ":1025")
+    assert anchors.LINE_CITATION.search("docs/a.md" + ":4-9")
+    assert not anchors.LINE_CITATION.search("src/apm_cli/commands/install.py::install")
+
+
+def test_a_markdown_section_runs_past_comments_in_its_code_fences(tmp_path: Path) -> None:
+    """A shell comment inside a fence is code, not a heading: it neither ends the
+    section nor becomes an anchor of its own. A fence line with an info string
+    inside a block is content, not its close."""
+    page = tmp_path / "page.md"
+    page.write_text(
+        "# Page\n\n## Add a server\n\n```bash\n# From a registry\napm install --mcp x\n"
+        "```not-a-closing-fence\n## Code, not a heading\n"
+        "````\n\n~~~\n## Not a heading\n~~~\n\nRe-declare it.\n\n## Next\n",
+        encoding="utf-8",
+    )
+    spans = anchors.symbols("page.md", tmp_path)
+    assert sorted(spans) == ["", "Add a server", "Next", "Page"]
+    start, end = spans["Add a server"]
+    section = page.read_text(encoding="utf-8").splitlines()[start - 1 : end]
+    assert "Re-declare it." in section
+    assert "## Next" not in section
 
 
 def test_generated_outputs_are_checked_in_without_aggregates() -> None:
@@ -437,7 +480,7 @@ _MCP_SERVER_SOURCES = frozenset({"mcp-registry", "inline-mcp"})
 
 
 def _u6(cell) -> bool:
-    """pack provenance is the dependencies / marketplace block, never a SRC (pack.py:32-33)."""
+    """pack provenance is the dependencies / marketplace block, never a SRC (pack.py::_PACK_HELP)."""
     return cell.get("OP") == "pack" and cell.get("SRC") is not None
 
 
@@ -447,13 +490,15 @@ def _u8(cell) -> str | None:
     if src is None or _u6(cell):
         return None
     if op == "bundle-install" and src != "local-bundle":
-        return "bundle-install from a non-bundle source"  # install.py:1233 detect_local_bundle
+        return "bundle-install from a non-bundle source"  # install.py::install detect_local_bundle
     if op == "mcp-install" and src not in _MCP_SERVER_SOURCES:
-        return "install --mcp from a package source"  # install.py:971 --url, 997 --registry
+        return "install --mcp from a package source"  # install.py::install --url, --registry
     if src in _MCP_SERVER_SOURCES and prim not in (None, "mcp"):
         return "an MCP server source for a non-MCP primitive"
     if src == "native-plugin" and prim == "canvas":
-        return "a native plugin carries no canvas"  # canvas_integrator.py:5 .apm/extensions/
+        return (
+            "a native plugin carries no canvas"  # canvas_integrator.py docstring: .apm/extensions/
+        )
     return None
 
 
@@ -466,11 +511,11 @@ def _u8_mapping(cell) -> str | None:
     if op == "install" and src == "local-bundle":
         return "install of a local bundle is bundle-install"  # install.md: apm install ./b.zip
     if op == "marketplace" and src not in _MARKETPLACE_ADD_SOURCES:
-        return "marketplace add of a source without a catalog"  # registration.py:45
+        return "marketplace add of a source without a catalog"  # registration.py::MarketplaceManifestNotFoundError
     if op == "uninstall" and src in _MCP_SERVER_SOURCES:
-        return f"uninstall of an MCP server ({src})"  # uninstall/engine.py:710, 869
+        return f"uninstall of an MCP server ({src})"  # uninstall/engine.py::_mcp_server_hint
     if src == "local-bundle" and op in ("uninstall", "update", "prune"):
-        return f"{op} of a local bundle"  # uninstall/engine.py:690, update.py:448, prune.py:199
+        return f"{op} of a local bundle"  # _mcp_server_hint, update.py::_explain_local_bundles, prune.py::prune
     if src == "local-bundle" and op is None and {"FROZEN", "UPDATE"} & set(cell):
         # Only an install states a bundle; it refuses --frozen ("positional packages")
         # and --update (install.py rejected_flags), so the pair lands on that refusal.
@@ -479,7 +524,7 @@ def _u8_mapping(cell) -> str | None:
 
 
 def _u3(cell) -> bool:
-    """edited is relative to a receipt; unknown provenance has no lock (deployment_ledger.py:588)."""
+    """edited is relative to a receipt; unknown provenance has no lock (deployment_ledger.py::DeploymentLedgerCodec)."""
     deployed, lock = cell.get("DEPLOYED"), cell.get("LOCK")
     return (deployed in ("clean", "edited") and lock == "absent") or (
         deployed == "present-provenance-unknown" and lock not in (None, "absent")
@@ -487,7 +532,7 @@ def _u3(cell) -> bool:
 
 
 def _u_mcpown_user(cell) -> bool:
-    """Retired MCP owners exist only at project scope (retired_destinations.py:468)."""
+    """Retired MCP owners exist only at project scope (retired_destinations.py::split_mcp_claims)."""
     return cell.get("SCOPE") == "user" and cell.get("MCPOWN") in ("vscode", "legacy-receipt")
 
 
@@ -654,7 +699,7 @@ def test_every_removed_and_mapped_cell_names_its_rules() -> None:
 
 
 def _u_bin(cell) -> bool:
-    """bin/ deploys only at user scope (exec_gate.py:508 scope is not InstallScope.USER)."""
+    """bin/ deploys only at user scope (exec_gate.py::plugin_bin_deployable: scope is not InstallScope.USER)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 

@@ -459,11 +459,19 @@ class GatePack(StepRunner):
 
     def pack(self) -> None:
         """Pack ships exactly the executables the gate lets the project deploy."""
-        kinds = {kind for name in self.packs.packed for kind in self.packs.kinds[name]}
+        found = {
+            f"G1|pack|{kind}|{self._level(name, kind)}|project"
+            for name in self.packs.packed
+            for kind in self.packs.kinds[name]
+        }
         if self.level == "denied-dependency":
             # The refusal covers every primitive a denied package ships, its bin/ too.
-            kinds |= {kind for name in self.packs.packed for kind in _SHIPS_ALSO.get(name, ())}
-        cells = sorted(f"G1|pack|{kind}|{self.level}|project" for kind in kinds)
+            found |= {
+                f"G1|pack|{kind}|{self.level}|project"
+                for name in self.packs.packed
+                for kind in _SHIPS_ALSO.get(name, ())
+            }
+        cells = sorted(found)
         self.credited.update(cells)
         if self.dry:
             return
@@ -492,6 +500,14 @@ class GatePack(StepRunner):
                 result=step.result,
                 evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
             )
+
+    def _level(self, name: str, kind: str) -> str:
+        """The GATE value of one packed (package, kind): a plain file of a package
+        the spine never decided has no executable beside it, so no gate level (U2);
+        the org dependency deny covers every package."""
+        if kind in _PLAIN and name not in self.packs.decided and self.level != "denied-dependency":
+            return "none"
+        return self.level
 
     def _refused(self, cells: list[str]) -> None:
         """Under an org dependency deny pack refuses and ships nothing."""

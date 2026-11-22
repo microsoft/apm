@@ -67,6 +67,11 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
+    # Claude reads project LSP servers from APM's plugin (lsp_integrator.py, "claude").
+    ("project", "lsp", "claude"): (
+        ".claude/skills/apm-lsp/.claude-plugin/plugin.json",
+        '"{pkg}-server"',
+    ),
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
