@@ -17,9 +17,11 @@ from typing import TYPE_CHECKING, ClassVar
 import yaml
 
 from apm_cli.core.remediation import INSTRUCTION_FRONTMATTER_REJECTED
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 from apm_cli.utils.paths import portable_relpath
@@ -73,7 +75,9 @@ class InstructionIntegrator(BaseIntegrator):
             dict[Path, tuple[Path, str, int]],
         ] = {}
         self._prepared_instructions: dict[str, dict[Path, _PreparedInstruction]] = {}
-        self._claude_blocker_warned: set[Path] = set()
+        # (collector, root) pairs: a planning pass reports into its own
+        # throwaway collector and must not silence the real run's warning.
+        self._claude_blocker_warned: set[tuple[object, Path]] = set()
         # Instruction sources this install routed to compiled AGENTS.md (#3939).
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
@@ -414,7 +418,7 @@ class InstructionIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 0, [])
 
         deploy_dir = target_root / mapping.subdir
-        deploy_dir.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
 
@@ -560,8 +564,9 @@ class InstructionIntegrator(BaseIntegrator):
             return instruction_files
         blocker = claude_agents_md_blocker(live_root)
         if blocker is not None:
-            if diagnostics is not None and live_root not in self._claude_blocker_warned:
-                self._claude_blocker_warned.add(live_root)
+            warned = (diagnostics, live_root)
+            if diagnostics is not None and warned not in self._claude_blocker_warned:
+                self._claude_blocker_warned.add(warned)
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
         self.agents_md_routed.update(source.name for source in routed)

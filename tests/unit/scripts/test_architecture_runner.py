@@ -663,6 +663,7 @@ install-deployment-drift-claim-classification
 install-deployment-effective-selection
 install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-explicit-policy-source-owner
 install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
@@ -714,6 +715,7 @@ install-deployment-primitive-classification
 install-deployment-prospective-dry-run-plan
 install-deployment-install-entry-routing
 install-deployment-install-commit-order
+install-deployment-deploy-write-seam
 install-deployment-provenance-state
 install-deployment-ref-recheck-ownership
 install-deployment-immutable-requirements

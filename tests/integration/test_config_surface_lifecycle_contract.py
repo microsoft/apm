@@ -2576,7 +2576,12 @@ def test_manifest_and_explicit_target_precedence_for_mcp_and_lsp(
     assert (project.root / _CLAUDE_LSP_PLUGIN).is_file()
     explicit_lock = LockFile.read(project.root / "apm.lock.yaml")
     assert explicit_lock is not None
-    assert explicit_lock.mcp_target_servers == {"claude": ["precedence-mcp"]}
+    # The flag decides what this run writes; copilot, still selected by the
+    # manifest, keeps its claim (#4562).
+    assert explicit_lock.mcp_target_servers == {
+        "claude": ["precedence-mcp"],
+        "copilot": ["precedence-mcp"],
+    }
 
 
 def test_multi_target_exclusion_applies_to_mcp_and_lsp(

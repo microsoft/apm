@@ -53,6 +53,10 @@ from scripts.architecture_linter.checks.install_codex_agent_links import (
     GUARD_CODEX_AGENT_LINKS,
     check_codex_agent_link_resolution,
 )
+from scripts.architecture_linter.checks.install_deploy_write_seam import (
+    GUARD_DEPLOY_WRITE_SEAM,
+    check_deploy_write_seam,
+)
 from scripts.architecture_linter.checks.install_deployment_shared import _rule
 from scripts.architecture_linter.checks.install_dry_run_plan import (
     _GUARD_DRY_RUN_PLAN,
@@ -440,6 +444,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_COMMIT_ORDER,
         "Every install check completes before the lockfile and deployed files commit.",
         check_install_commit_order,
+    ),
+    _rule(
+        GUARD_DEPLOY_WRITE_SEAM,
+        "Every integrator file write goes through the seam the install transaction journals.",
+        check_deploy_write_seam,
     ),
     _rule(
         _GUARD_SOURCE_PLAN,

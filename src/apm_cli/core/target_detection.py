@@ -900,6 +900,8 @@ def canonical_policy_target_name(value: str | None) -> str | None:
 
 # Provenance label of a decision taken from the manifest's ``targets:``.
 MANIFEST_TARGET_SOURCE = "apm.yml"
+# Provenance label of a decision the user passed on the command line.
+FLAG_TARGET_SOURCE = "--target flag"
 
 
 @dataclass(frozen=True)
@@ -913,6 +915,11 @@ class EffectiveTargetDecision:
     def from_manifest(self) -> bool:
         """True when the manifest's own ``targets:`` made this decision."""
         return self.source == MANIFEST_TARGET_SOURCE
+
+    @property
+    def from_flag(self) -> bool:
+        """True when ``--target`` narrowed this run, whatever the manifest selects."""
+        return self.source == FLAG_TARGET_SOURCE
 
     @cached_property
     def canonical_targets(self) -> tuple[str, ...] | None:
@@ -1015,7 +1022,7 @@ def resolve_effective_target_decision(
     runtimes rather than project harness markers.
     """
     if explicit_target is not None:
-        return EffectiveTargetDecision(explicit_target, "--target flag")
+        return EffectiveTargetDecision(explicit_target, FLAG_TARGET_SOURCE)
 
     if manifest_target:
         return EffectiveTargetDecision(manifest_target, MANIFEST_TARGET_SOURCE)

@@ -184,6 +184,8 @@ RESTORE_EDITED = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# A skill copy a --target-narrowed install kept stale in an inactive target (#4692).
+KEPT_SKILL_REFRESH = _entry("kept-skill-refresh", "apm install --target {targets}", "refresh it")
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
 LEGACY_RENDER_MIGRATE = _entry(
     "legacy-render-migrate",
@@ -875,6 +877,11 @@ BUNDLE_EXECUTABLES_ALLOW = _entry(
 LOCKFILE_UNMANAGED_PATHS = _entry(
     "lockfile-unmanaged-paths", "apm install", "repair it", then="retry"
 )
+UNINSTALL_NEW_TARGET_UNDEPLOYED = _entry(
+    "uninstall-new-target-undeployed",
+    "apm install",
+    "deploy the remaining packages to {targets} and record them in apm.lock.yaml",
+)
 
 # -- end commands/** (W1) -----------------------------------------------------
 
@@ -1224,12 +1231,14 @@ DRIFT_CACHE_UNPOPULATED = _entry(
     "drift-cache-unpopulated", "apm install", "populate the install cache drift replay reads"
 )
 BUNDLE_HOOKS_UNADMITTED = _entry(
-    "bundle-hooks-unadmitted", "apm install", "retire the unadmitted bundle hooks"
+    "bundle-hooks-unadmitted",
+    "apm install",
+    "retire the unadmitted bundle hooks and canvas extensions",
 )
 BUNDLE_HOOKS_APPROVED = _entry(
     "bundle-hooks-approved",
     "apm install <bundle>",
-    "redeploy the bundle with its approved hooks",
+    "redeploy the bundle with its approved executables",
     before="approve the bundle",
 )
 REQUIRED_PACKAGE_UNLOCKED = _entry(

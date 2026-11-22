@@ -29,7 +29,6 @@ from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import (
     ArtifactSnapshot,
     ArtifactSnapshotSet,
-    assert_only_snapshot_paths_changed,
     assert_snapshot_changes_within,
     assert_snapshot_set_unchanged,
     assert_unchanged,
@@ -3865,7 +3864,7 @@ def test_required_global_audit_rule_matrix_for_external_roots(
         assert not (external_roots[target] / skill_paths[target]).exists()
 
 
-def test_required_failed_lock_write_bounds_partial_state_and_recovers(
+def test_required_failed_lock_write_restores_state_and_recovers(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
@@ -3916,6 +3915,10 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         env=failing_environment,
     )
     assert failed.returncode != 0, _result_evidence(failed)
+    # #4282: the failed attempt restores every deployed file and its receipt.
+    assert "Deployed files restored to their previous state." in (failed.stdout + failed.stderr), (
+        _result_evidence(failed)
+    )
     after_failure = LifecycleStateSnapshot.capture(consumer.root, **capture_args)
     after_artifacts = ArtifactSnapshotSet.capture(
         {
@@ -3923,46 +3926,15 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
             "user": scenario.isolated.home,
         }
     )
-    assert after_failure.manifest_bytes == before_failure.manifest_bytes
-    assert after_failure.deployment_records == before_failure.deployment_records
-    assert after_failure.lockfile_bytes == before_failure.lockfile_bytes
-    assert after_failure.mcp_state_bytes == before_failure.mcp_state_bytes
-    assert after_failure.lsp_state_bytes == before_failure.lsp_state_bytes
-    assert after_failure.file(".agents/skills/lock-release/SKILL.md").kind == "missing"
+    assert after_failure == before_failure
     assert (
-        after_failure.file(".claude/skills/lock-release/SKILL.md").content
+        after_failure.file(".agents/skills/lock-release/SKILL.md").content
         == _skill("lock-release").encode()
     )
-    assert (
-        _assert_skill_receipt(
-            scenario,
-            consumer.root,
-            scope="project",
-            owner=f"{_OWNER}/{source.package.name}",
-            expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
-            bound=False,
-        )
-        == receipt
-    )
-    assert_only_snapshot_paths_changed(
-        before_artifacts,
-        after_artifacts,
-        {
-            "project": {
-                ".agents",
-                ".agents/skills",
-                ".agents/skills/lock-release",
-                ".agents/skills/lock-release/SKILL.md",
-                ".claude",
-                ".claude/skills",
-                ".claude/skills/lock-release",
-                ".claude/skills/lock-release/SKILL.md",
-            },
-            "user": {receipt.relative_to(scenario.isolated.home).as_posix()},
-        },
-    )
+    assert after_failure.file(".claude/skills/lock-release/SKILL.md").kind == "missing"
+    assert_snapshot_set_unchanged(before_artifacts, after_artifacts)
     assert list(consumer.root.glob("apm-atomic-*")) == []
-    failed_receipt_bytes = receipt.read_bytes()
+    restored_receipt_bytes = receipt.read_bytes()
 
     _run_success(
         scenario,
@@ -3977,9 +3949,9 @@ def test_required_failed_lock_write_bounds_partial_state_and_recovers(
         scope="project",
         owner=f"{_OWNER}/{source.package.name}",
         expected={"claude": consumer.root / ".claude/skills/lock-release/SKILL.md"},
-        bound=False,
+        bound=True,
     )
-    assert receipt.read_bytes() == failed_receipt_bytes
+    assert receipt.read_bytes() != restored_receipt_bytes
     before_audit = ArtifactSnapshotSet.capture(
         {"project": consumer.root, "user": scenario.isolated.home}
     )

@@ -1,0 +1,107 @@
+# Main Push Gate -- the PR gate suite on every push to main (S28).
+#
+# ci.yml (Tier 1: Lint, unit shards, Coverage Combine, the Windows gate,
+# APM Self-Check, every Lifecycle Smoke shard, the ratchets) triggers only on
+# pull_request and merge_group, and ci-integration.yml (Tier 2: every
+# Integration Tests shard, network, release validation) only on merge_group
+# and dispatch, so a red that reaches main outside the queue went unseen.
+# This workflow calls both unchanged through workflow_call on main's head
+# (Tier 2 with `secrets: inherit`), and `main-push-gate` fails the run when
+# any tier job fails, so main is visibly red. It is NOT a required check;
+# the ruleset still requires only `gate`.
+#
+# Base: the push's `before` SHA, else HEAD^1 (first push, dispatch).
+#
+# Caches: the called setup-uv steps are restore-only outside pull_request
+# and merge_group, and ci-integration.yml saves its APM fetch cache on no
+# push, so this workflow adds no cache save to the default-branch scope.
+# tests/quality/test_ci_topology.py pins triggers, coverage, the aggregate,
+# concurrency and the no-cache-save rule.
+name: Main Push Gate
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Every main SHA keeps its own run; nothing is ever cancelled. Called ci.yml
+# runs group as ci-<this run_id>, distinct from PR (ci-pr-N) and merge-train
+# (ci-<merge-train run_id>) runs.
+concurrency:
+  group: main-push-gate-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  base:
+    name: base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      base_sha: ${{ steps.base.outputs.base_sha }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 2
+        persist-credentials: false
+
+    - name: Resolve push base
+      id: base
+      env:
+        REF: ${{ github.ref }}
+        BEFORE: ${{ github.event.before }}
+      run: |
+        if [ "$REF" != refs/heads/main ]; then
+          echo "::error::Main Push Gate runs on main only; got '$REF'."
+          exit 1
+        fi
+        if [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BEFORE" =~ ^0+$ ]]; then
+          base="$BEFORE"
+        else
+          base="$(git rev-parse HEAD^1)"
+        fi
+        echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+
+  tier1:
+    name: tier1
+    needs: [base]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      base_sha: ${{ needs.base.outputs.base_sha }}
+
+  tier2:
+    name: tier2
+    needs: [base]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci-integration.yml
+    with:
+      base_sha: ${{ needs.base.outputs.base_sha }}
+    secrets: inherit
+
+  main-push-gate:
+    name: main-push-gate
+    needs: [base, tier1, tier2]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+    - name: Require every Tier 1 and Tier 2 job
+      env:
+        BASE_RESULT: ${{ needs.base.result }}
+        TIER1_RESULT: ${{ needs.tier1.result }}
+        TIER2_RESULT: ${{ needs.tier2.result }}
+      run: |
+        if [ "$BASE_RESULT" != success ] || [ "$TIER1_RESULT" != success ] || [ "$TIER2_RESULT" != success ]; then
+          echo "::error::Main is red: base=$BASE_RESULT tier1=$TIER1_RESULT tier2=$TIER2_RESULT. Open the failed tier jobs of this run."
+          exit 1
+        fi
+        echo "Tier 1 and Tier 2 are green on main."

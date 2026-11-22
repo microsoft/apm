@@ -1532,6 +1532,11 @@ def compile(  # noqa: PLR0913 -- Click handler
         # Source root: where apm.yml, .apm/, and the project tree are read
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
+        # Advisory only: a committed deployed file whose apm_modules link
+        # target is missing needs apm install (#3143); exit codes are unchanged.
+        from ...compilation.link_resolver import warn_missing_module_links
+
+        warn_missing_module_links(source_root, logger)
 
         # pre-compile scripts run inside _run_compilation, which checks the
         # project after them so a first compile finds what they generate.
