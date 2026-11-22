@@ -88,6 +88,7 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
         },
         root / "apm.yml",
     )
+    tree = sorted(path.relative_to(project).as_posix() for path in project.rglob("*"))
     result = ApmLifecycleRunner((str(apm_binary_path),)).run(
         (
             "install",
@@ -106,6 +107,7 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
     assert not other_path.exists() or "notes" not in other_path.read_text("utf-8"), evidence
     lock = LockFile.read(root / "apm.lock.yaml") if (root / "apm.lock.yaml").exists() else None
     assert lock is None or not lock.mcp_target_servers, evidence
+    assert sorted(p.relative_to(project).as_posix() for p in project.rglob("*")) == tree, evidence
     assert result.returncode != 0, evidence
     assert foreign_target in (result.stdout + result.stderr).lower(), evidence
 

@@ -122,6 +122,7 @@ def refuse_unrecorded_mcp_collisions(
         logger=_Silent(),
         verbose=False,
         console=None,
+        materialize=False,
     ).runtime_list()
     conflicts = project_native_mcp_conflicts(
         dependencies,
