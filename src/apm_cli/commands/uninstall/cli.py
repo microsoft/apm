@@ -180,7 +180,7 @@ def _report_still_needed_packages(
                 f"because {needed_by}"
             )
         else:
-            logger.progress(f"Kept {label} installed because {needed_by}")
+            logger.progress(f"{label} stays installed because {needed_by}")
 
 
 def _report_uninstall_outcome(

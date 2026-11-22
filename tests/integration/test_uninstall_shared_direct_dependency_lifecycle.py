@@ -102,7 +102,7 @@ def test_uninstall_keeps_a_direct_dependency_another_package_still_needs(
     assert tree_digest(world.project) == tree_before
 
     result = world.apm("uninstall", "test/e")
-    assert "Kept test/e installed because test/d still depends on it" in " ".join(
+    assert "test/e stays installed because test/d still depends on it" in " ".join(
         result.stdout.split()
     )
 
