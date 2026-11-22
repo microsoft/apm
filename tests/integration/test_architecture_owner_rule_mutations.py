@@ -4966,6 +4966,16 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             "native_hashes=DeploymentLedgerCodec.mcp_native_hashes(",
             "native_hashes=DeploymentLedgerCodec.unverified_mcp_native_hashes(",
         ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        _refuse_native_mcp_collision(\n            dep,",
+            "        _skip_native_mcp_collision(\n            dep,",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        refuse_projected_mcp_collisions(\n            [dep],",
+            "        unchecked_mcp_collisions(\n            [dep],",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -4982,6 +4992,8 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "bundle-deferred-claims",
         "registry-install-routing",
         "rebuild-receipt-routing",
+        "direct-entry-preflight-routing",
+        "direct-entry-preflight-delegation",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:

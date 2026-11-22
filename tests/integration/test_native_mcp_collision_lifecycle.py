@@ -277,9 +277,19 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     requested = _http()["url"]
     scenario.write(foreign_target, requested if identical else "http://127.0.0.1:9/personal")
     before = scenario.path(foreign_target).read_bytes()
+    manifest_before = (scenario.root / "apm.yml").read_bytes()
     added = scenario.install("--mcp", "notes", "--url", requested)
     assert (added.returncode == 0) is identical, added.stdout + added.stderr
     other = "codex" if foreign_target == "claude" else "claude"
+    if not identical:
+        # A refused direct add writes nothing (#4759). Record the entry on the
+        # other target alone, then the repeats below exercise the two-target
+        # reconciliation against that recorded claim.
+        assert (scenario.root / "apm.yml").read_bytes() == manifest_before
+        assert not scenario.path(other).exists()
+        assert scenario.path(foreign_target).read_bytes() == before
+        scenario.declare([_http()])
+        _success(scenario.install(targets=other))
     assert scenario.path(foreign_target).read_bytes() == before
     assert scenario.servers(other)["notes"]["url"] == requested
     assert scenario.lock().mcp_target_servers == {other: ["notes"]}

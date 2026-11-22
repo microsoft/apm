@@ -21652,9 +21652,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4759",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {
