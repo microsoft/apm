@@ -97,6 +97,21 @@ write `github.com/owner/repo` for packages on GitHub:
 +    - github.com/microsoft/apm-sample-package#v1.0.0
 ```
 
+The same works from one command, for example for user scope. Keep
+`GITHUB_HOST` set whenever you reinstall: APM writes the server's entries as
+shorthand and keeps the `github.com/` prefix on the others:
+
+```bash frame="terminal"
+export GITHUB_HOST=github.contoso.com
+export GITHUB_APM_PAT_PLATFORM=ghp_...    # token for the server's org
+apm install --global \
+  github.contoso.com/platform/internal-skills/.agents/skills/jdk-installer#v2.1.0 \
+  github.com/contoso-oss/android-skills/performance/analyzer#main
+```
+
+Each package keeps its own host, subpath and ref in `apm.yml` and its host
+and commit in `apm.lock.yaml`.
+
 Enterprise Managed User tokens cannot read public `github.com` repositories;
 public packages install without one.
 
