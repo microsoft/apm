@@ -1,0 +1,17 @@
+{
+  "issue": 4815,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall --trust-lockfile reported a path-safety rejection as an evidence-based keep when a file consent kept in the preflight had its parent replaced by a symlink before cleanup, so the uninstall succeeded and released the file's ownership; cleanup now records each current safety rejection with its reason, and uninstall always reports it as a failure and keeps the lockfile tracking the file.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_consent_safety_rejection.py::test_safety_rejection_after_consent_fails_and_keeps_ownership",
+    "tests/unit/integration/test_cleanup_helper.py::test_safety_rejection_of_a_consent_kept_file_is_always_a_failure"
+  ]
+}

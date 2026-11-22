@@ -76,6 +76,16 @@ UNREADABLE = "unreadable"
 # A member of a claimed directory replaced by a symlink: cleanup keeps the directory (#4451).
 SYMLINKED = "symlinked"
 
+# Reasons a path-safety gate refuses a path at cleanup time (#4815).
+REJECTED_TRAVERSAL = "its path contains a '..' component"
+REJECTED_PREFIX = "it is not under a known integration prefix"
+REJECTED_UNSAFE_PATH = (
+    "it failed the path safety check: it escapes the deploy root, is not under "
+    "a managed prefix, or is reached through a symbolic link"
+)
+REJECTED_DIRECTORY = "it is a directory entry, and APM only deletes individual files"
+REJECTED_REPLACED = "it was replaced or moved since APM checked it"
+
 
 class DeploymentEvidence:
     """Proof that APM deployed the bytes a lockfile-driven deletion removes (#3701).
@@ -674,6 +684,7 @@ def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) ->
     """Drop from *retained* what --trust-lockfile consent kept for its evidence (#4295).
 
     A file consent keeps is not a cleanup failure; every other retained path is.
+    Callers must not pass a path-safety rejection here: see :func:`consent_outcome`.
     """
     kept = evidence.kept_under_consent() if evidence is not None else frozenset()
     return [path for path in retained if _claim_key(path) not in kept]
@@ -687,10 +698,13 @@ def consent_outcome(
     Consent waives only evidence-based retention: a deletion that was
     authorized but failed stays a failure even for a claim consent kept
     earlier (for example in the uninstall preflight), and a file consent kept
-    for its evidence is not a path-safety refusal.
+    for its evidence is not a path-safety refusal. A path this cleanup's
+    safety gates rejected is always both, whatever consent kept earlier (#4815).
     """
-    failures = list(dict.fromkeys([*cleanup.failed, *unconsented(cleanup.retained, evidence)]))
-    return failures, unconsented(cleanup.skipped_unmanaged, evidence)
+    rejected = list(cleanup.rejected)
+    failures = [*cleanup.failed, *rejected, *unconsented(cleanup.retained, evidence)]
+    unsafe = [*rejected, *unconsented(cleanup.skipped_unmanaged, evidence)]
+    return list(dict.fromkeys(failures)), list(dict.fromkeys(unsafe))
 
 
 def _hash_envelope(value: str) -> str:
@@ -813,6 +827,11 @@ class CleanupResult:
     """Paths refused by the safety gates (validation failure, directory
     entry, etc.). Callers retain the prior ownership row when it exists."""
 
+    rejected: dict[str, str] = field(default_factory=dict)
+    """Paths a path-safety gate refused during this cleanup, mapped to the
+    reason; also listed in ``skipped_unmanaged``. A current safety rejection
+    is always a failure: consent never waives it (#4815)."""
+
     unproven: list[str] = field(default_factory=list)
     """Files kept because no deployment evidence proves APM wrote them (#3701);
     also listed in ``skipped_unmanaged``. Callers name them to the user."""
@@ -838,6 +857,11 @@ class CleanupResult:
 
     user_scope: bool = False
     """Whether paths are relative to the user's home (shown with ``~/``)."""
+
+    def reject(self, rel_path: str, reason: str) -> None:
+        """Record that a path-safety gate refused *rel_path* for *reason*."""
+        self.skipped_unmanaged.append(rel_path)
+        self.rejected[rel_path] = reason
 
     @property
     def announced_paths(self) -> list[str]:
@@ -1143,7 +1167,7 @@ def _remove_proven_members(
     complete = True
     for member_rel, member in proven:
         if not _member_still_safe(skill_dir, member):
-            result.skipped_unmanaged.append(member_rel)
+            result.reject(member_rel, REJECTED_REPLACED)
             diagnostics.warn(
                 f"Skipped removing {member_rel}: it was replaced or moved since APM "
                 "checked it. Inspect it and delete it manually if no longer needed.",
@@ -1394,13 +1418,13 @@ def remove_stale_deployed_files(
         if stale_path.startswith(COWORK_URI_SCHEME):
             # Basic security: reject path-traversal components.
             if ".." in stale_path:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_TRAVERSAL)
                 continue
             # Verify the path starts with a known integration prefix.
             from .targets import get_integration_prefixes
 
             if not stale_path.startswith(get_integration_prefixes(targets=targets)):
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_PREFIX)
                 continue
             # Resolve the cowork:// URI to a real filesystem path.
             try:
@@ -1437,7 +1461,7 @@ def remove_stale_deployed_files(
                 user_scope=user_scope,
                 allow_final_symlink=allow_final_symlink,
             ):
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_UNSAFE_PATH)
                 continue
             stale_target = project_root / stale_path
 
@@ -1474,7 +1498,7 @@ def remove_stale_deployed_files(
             if _is_skill_directory_entry(stale_path):
                 _deferred_dirs.append((stale_path, stale_target))
             else:
-                result.skipped_unmanaged.append(stale_path)
+                result.reject(stale_path, REJECTED_DIRECTORY)
                 diagnostics.warn(
                     (
                         f"Refused to remove directory entry {stale_path}: APM "
