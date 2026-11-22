@@ -50,7 +50,6 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 pytestmark = pytest.mark.component
 
-_REAL_RUN = subprocess.run
 
 # Minimal valid YAML that produces a valid ApmPolicy
 VALID_POLICY_YAML = "name: test-policy\nversion: '1.0'\nenforcement: warn\n"
@@ -371,14 +370,17 @@ class _PolicyHost:
     """Policy hosts behind the real fetch, auth-chain, hash-pin and cache code.
 
     Only the boundaries are replaced: ``policy_get`` answers from ``files``
-    (any other URL is a 404), and child processes that read credentials
-    (``git credential``, ``gh``, ``az``) report none. ``git remote`` probes run
-    the real git. The environment is isolated, so no runner token is sent.
+    (any other URL is a 404). At ``subprocess.run``, ``git remote`` probes see a
+    checkout whose only remote is ``origin`` (when set), and the children that
+    read credentials (``git credential``, ``gh``, ``az``) report none; any other
+    child fails the test. The environment is isolated, so no runner token is sent.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, origin: str | None = None) -> None:
+        self.origin = origin
         self.files: dict[str, object] = {}
         self.requests: list[tuple[str, dict]] = []
+        self.remote_probes: list[list[str]] = []
         self._stack = contextlib.ExitStack()
 
     def serve_github(self, repo_ref: str, text: str) -> None:
@@ -404,7 +406,14 @@ class _PolicyHost:
         tool = Path(argv[0]).name.lower()
         if "credential" in argv or tool.startswith(("gh", "az")):
             return subprocess.CompletedProcess(argv, 1, "", "no credential")
-        return _REAL_RUN(args, **kwargs)
+        if argv[1:2] == ["remote"]:
+            self.remote_probes.append(argv[1:])
+            if argv[2:] == ["get-url", "origin"] and self.origin:
+                return subprocess.CompletedProcess(argv, 0, f"{self.origin}\n", "")
+            if argv[2:] == [] and self.origin:
+                return subprocess.CompletedProcess(argv, 0, "origin\n", "")
+            return subprocess.CompletedProcess(argv, 2, "", "error: No such remote 'origin'")
+        raise AssertionError(f"unexpected child process: {argv}")
 
     def __enter__(self) -> _PolicyHost:
         root = Path(self._stack.enter_context(tempfile.TemporaryDirectory()))
@@ -418,13 +427,6 @@ class _PolicyHost:
 
     def __exit__(self, *exc_info) -> None:
         self._stack.close()
-
-
-def _project_with_origin(root: Path, url: str) -> Path:
-    """A real git checkout whose ``origin`` is *url*."""
-    _REAL_RUN(["git", "init", "-q", str(root)], check=True)
-    _REAL_RUN(["git", "-C", str(root), "remote", "add", "origin", url], check=True)
-    return root
 
 
 class TestFetchFromRepo(unittest.TestCase):
@@ -632,8 +634,11 @@ class TestDiscoverPolicy(unittest.TestCase):
         self.assertEqual(host.urls(), [_github_contents_url("contoso/policy.yml")])
 
     def test_override_org_auto_discovers(self):
-        with _PolicyHost() as host, tempfile.TemporaryDirectory() as tmpdir:
-            root = _project_with_origin(Path(tmpdir), "https://github.com/contoso/my-project.git")
+        with (
+            _PolicyHost(origin="https://github.com/contoso/my-project.git") as host,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            root = Path(tmpdir)
             host.serve_github("contoso/.github-private", VALID_POLICY_YAML)
             result = discover_policy(root, policy_override="org", no_cache=True)
             self.assertTrue(result.found)
@@ -641,8 +646,11 @@ class TestDiscoverPolicy(unittest.TestCase):
         self.assertEqual(host.urls(), [_github_contents_url("contoso/.github-private")])
 
     def test_none_auto_discovers(self):
-        with _PolicyHost() as host, tempfile.TemporaryDirectory() as tmpdir:
-            root = _project_with_origin(Path(tmpdir), "https://github.com/contoso/my-project.git")
+        with (
+            _PolicyHost(origin="https://github.com/contoso/my-project.git") as host,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            root = Path(tmpdir)
             host.serve_github("contoso/.github-private", VALID_POLICY_YAML)
             result = discover_policy(root, no_cache=True)
             self.assertTrue(result.found)
@@ -658,8 +666,11 @@ class TestDiscoverPolicy(unittest.TestCase):
             self.assertIn("Could not determine org", result.error)
 
     def test_cache_hit_returns_cached(self):
-        with _PolicyHost() as host, tempfile.TemporaryDirectory() as tmpdir:
-            root = _project_with_origin(Path(tmpdir), "https://github.com/contoso/my-project.git")
+        with (
+            _PolicyHost(origin="https://github.com/contoso/my-project.git") as host,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            root = Path(tmpdir)
             # .github-private 404s; .github is served from the cache.
             _write_cache("contoso/.github", _make_test_policy(), root)
 
@@ -670,10 +681,11 @@ class TestDiscoverPolicy(unittest.TestCase):
         self.assertEqual(host.urls(), [_github_contents_url("contoso/.github-private")])
 
     def test_ghe_repo_ref_includes_host(self):
-        with _PolicyHost() as host, tempfile.TemporaryDirectory() as tmpdir:
-            root = _project_with_origin(
-                Path(tmpdir), "https://ghe.example.com/contoso/my-project.git"
-            )
+        with (
+            _PolicyHost(origin="https://ghe.example.com/contoso/my-project.git") as host,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            root = Path(tmpdir)
             host.serve_github("ghe.example.com/contoso/.github-private", VALID_POLICY_YAML)
             result = discover_policy(root, no_cache=True)
             self.assertTrue(result.found)
@@ -1592,7 +1604,7 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             patch.dict(os.environ, {"ADO_APM_PAT": "pat"}),
         ):
-            host.files[primary] = requests.exceptions.ConnectionError("refused")
+            host.files[primary] = _Response(403)
             result = _fetch_ado_org_policy(
                 org="contoso",
                 host="dev.azure.com",
@@ -1601,6 +1613,8 @@ class TestFetchFromAdoRepo(unittest.TestCase):
             )
 
         self.assertEqual(result.outcome, "cache_miss_fetch_fail")
+        # The denial ran the whole credential chain, and still never probed legacy.
+        self.assertIn("ADO_APM_PAT was rejected (HTTP 403)", result.error)
         self.assertEqual(host.urls(), [primary])
 
     def test_200_caches_result(self):
