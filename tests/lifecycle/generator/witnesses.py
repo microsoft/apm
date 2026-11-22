@@ -312,6 +312,7 @@ SCENARIO_MODULES = (
     "test_history_upgrade",
     "test_lock_states",
     "test_mcp_ownership_history",
+    "test_mcp_write_receipts",
     "test_network_offline",
     "test_ownership_siblings",
     "test_pack_lock_states",
