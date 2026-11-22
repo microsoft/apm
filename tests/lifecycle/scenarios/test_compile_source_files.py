@@ -126,15 +126,28 @@ def _marked(world) -> dict[str, bytes]:
 _PLUGIN_ROOT = f".agents/plugins/{_NATIVE}"
 
 
-def _assert_deployed(scenario: Scenario, src: str) -> None:
+def _layout(scenario: Scenario) -> list[str]:
+    roots = [scenario.deploy_root / ".agents" / "plugins", scenario.deploy_root / ".claude"]
+    return sorted(
+        path.relative_to(scenario.deploy_root).as_posix()
+        for root in roots
+        if root.is_dir()
+        for path in root.rglob("*")
+        if path.is_file()
+    )
+
+
+def _assert_deployed(scenario: Scenario, src: str, output: str = "") -> None:
     """The file primitive sits under its root, with its text, and the lock records it."""
     dependencies = scenario.lock().get_package_dependencies()
     if src == "native-plugin":
         relative = f"{_PLUGIN_ROOT}/agents/{_NATIVE}.md"
+        where = f"{_layout(scenario)}\n{output}"
+        assert (scenario.deploy_root / relative).is_file(), f"{relative} is not deployed: {where}"
         rows = [
             (d.native_plugin.name, d.native_plugin.root) for d in dependencies if d.native_plugin
         ]
-        assert rows == [(_NATIVE, _PLUGIN_ROOT)], rows
+        assert rows == [(_NATIVE, _PLUGIN_ROOT)], f"native_plugin rows {rows}: {where}"
     else:
         mapping = KNOWN_TARGETS["copilot"].primitives["instructions"]
         relative = f"{KNOWN_TARGETS['copilot'].root_dir}/{mapping.subdir}/{_DOC}{mapping.extension}"
@@ -148,8 +161,8 @@ def _assert_deployed(scenario: Scenario, src: str) -> None:
 @pytest.mark.parametrize("src", _SOURCES)
 def test_compile_keeps_a_remote_package_file_primitive(lifecycle_world, src) -> None:
     scenario, name = _scenario(lifecycle_world, src)
-    scenario.run(f"install {name}", **source_fields(src))
-    _assert_deployed(scenario, src)
+    installed = scenario.run(f"install {name}", **source_fields(src))
+    _assert_deployed(scenario, src, installed.output)
     before = _marked(lifecycle_world)
     assert before, "the package's file primitive is deployed nowhere"
     lock_before = scenario.lock_path.read_bytes()
