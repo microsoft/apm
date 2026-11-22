@@ -99,11 +99,11 @@ def _run(
     path: str = REPO_PATH,
 ):
     resolver = resolver or AuthResolver()
-    with _bearer(bearer):
+    with _patched_bearer(bearer):
         return resolver.try_with_fallback(host, operation, org="contoso", port=port, path=path)
 
 
-def _bearer(bearer: MagicMock | None = None):
+def _patched_bearer(bearer: MagicMock | None = None):
     """Patch the az bearer provider; enter it once per test, never per worker thread."""
     return patch(
         "apm_cli.core.azure_cli.get_bearer_provider",
@@ -164,7 +164,7 @@ def test_concurrent_workers_report_once_per_key(helper):
 
     # One patch in the main thread: overlapping per-thread patches of one module
     # global restore each other's mock and leave it patched for the worker (#4830).
-    with _bearer(), ThreadPoolExecutor(max_workers=8) as pool:
+    with _patched_bearer(), ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(_attempt, range(8)))
     assert results == ["ok"] * 8
     assert len(_actions(helper, "store")) == 1
