@@ -1,0 +1,18 @@
+{
+  "issue": 4809,
+  "fixed_in": "Unreleased",
+  "summary": "A user rule such as '* text' in .agents/plugins/.gitattributes re-enabled line-ending conversion of byte-pinned native plugin roots, so a core.autocrlf clone failed audit --ci and install --frozen; APM now keeps the user's file but refuses the native deployment, naming the rule, until a final '* -text' pins the roots.",
+  "failure_modes": [
+    "portability",
+    "ownership"
+  ],
+  "properties": [
+    "portability.byte_deterministic",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_project_plugin_lifecycle.py::test_a_user_gitattributes_that_converts_the_roots_refuses_the_deployment",
+    "tests/integration/test_native_project_scope.py::test_a_user_gitattributes_that_converts_plugin_roots_is_refused",
+    "tests/integration/test_native_project_scope.py::test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept"
+  ]
+}
