@@ -115,6 +115,30 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         new="        check = CheckRoot(self.root)\n        self.cached_resolver = check.resolve\n",
     ),
     BypassMutation(
+        name="check-root-shadowed-receiver",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new=(
+            "        check = CheckRoot(self.root)\n"
+            "\n"
+            "        def _encode(value):\n"
+            "            self.kept = value\n"
+            "\n"
+            "        _encode(check)\n"
+        ),
+    ),
+    BypassMutation(
+        name="check-root-captured-by-lambda",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new=(
+            "        check = CheckRoot(self.root)\n"
+            "        self.cached_resolver = lambda candidate: check.resolve(candidate)\n"
+        ),
+    ),
+    BypassMutation(
         name="check-root-module-cache",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/deployed_paths.py",

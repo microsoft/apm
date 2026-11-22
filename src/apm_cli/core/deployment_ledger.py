@@ -338,8 +338,7 @@ class DeploymentMaterializationSession:
         )
 
     def _encode(self, candidate: Path, target: TargetProfile, check: CheckRoot):
-        codec = DeploymentLedgerCodec
-        return codec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, check=check)  # fmt: skip
+        return DeploymentLedgerCodec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, check=check)  # fmt: skip
 
     def _locator(self, path: Path, targets: Sequence, check: CheckRoot | None = None):
         check = check or CheckRoot(self.root)

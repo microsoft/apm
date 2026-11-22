@@ -6,10 +6,16 @@ into a cross-check cache. This check is closed-world:
 
 - Only the functions in ``_CONSTRUCTORS`` may build one.
 - Inside any function, a name bound to a ``CheckRoot`` (built there, aliased,
-  or a parameter annotated ``CheckRoot``) may only be passed to a function in
-  ``_RECEIVERS``, read through ``_READS``, have ``.resolve``/``.within``
-  called on the spot, be compared, or be aliased to a plain local. Returning, yielding, storing it on an attribute, subscript or
-  container, or rebinding it with ``global``/``nonlocal`` is a violation.
+  or a parameter annotated ``CheckRoot``) may only be passed to a receiver
+  (``self.<name>`` or ``DeploymentLedgerCodec.<name>`` for a name in
+  ``_RECEIVERS``), read through ``_READS``, have ``.resolve``/``.within``
+  called on the spot, be compared, or be aliased to a plain local. Returning,
+  yielding, storing it on an attribute, subscript or container, capturing it in
+  a nested function, lambda or generator, or rebinding it with
+  ``global``/``nonlocal`` is a violation.
+- Receivers are the ledger's own methods: defining, assigning or importing a
+  receiver name anywhere else, or rebinding ``DeploymentLedgerCodec``, is a
+  violation.
 """
 
 from __future__ import annotations
@@ -30,10 +36,14 @@ _CONSTRUCTORS = frozenset(
         ("src/apm_cli/install/deployed_paths.py", "_try_target"),
     }
 )
+_LEDGER = "src/apm_cli/core/deployment_ledger.py"
 _RECEIVERS = frozenset({"_encode", "_locator", "locator_for_path"})
+_RECEIVER_OWNERS = frozenset({"self", "DeploymentLedgerCodec"})
 _READS = frozenset({"resolved", "root"})
 _CALLS = frozenset({"resolve", "within"})
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+# Scopes whose body may run after the enclosing call returns.
+_DEFERRED = (*_FUNCTIONS, ast.GeneratorExp, ast.ClassDef)
 
 
 def _is_check_root_call(node: ast.AST) -> bool:
@@ -62,7 +72,17 @@ def _enclosing_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.A
     return current
 
 
-def _tracked_names(function: ast.AST) -> set[str]:
+def _own_scope(node: ast.AST, function: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Whether *node* runs in *function*'s own frame (not a nested deferred scope)."""
+    current = parents.get(node)
+    while current is not None and current is not function:
+        if isinstance(current, _DEFERRED):
+            return False
+        current = parents.get(current)
+    return current is function
+
+
+def _tracked_names(function: ast.AST, parents: dict[ast.AST, ast.AST]) -> set[str]:
     names: set[str] = set()
     args = getattr(function, "args", None)
     for arg in (*getattr(args, "args", ()), *getattr(args, "kwonlyargs", ())):
@@ -73,6 +93,8 @@ def _tracked_names(function: ast.AST) -> set[str]:
         changed = False
         for node in ast.walk(function):
             if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+                continue
+            if not _own_scope(node, function, parents):
                 continue
             if not _is_check_root_value(node.value, names):
                 continue
@@ -91,8 +113,12 @@ def _use_allowed(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
         parent = parents.get(parent)
     if isinstance(parent, ast.Call) and node is not parent.func:
         func = parent.func
-        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-        return name in _RECEIVERS
+        return (
+            isinstance(func, ast.Attribute)
+            and func.attr in _RECEIVERS
+            and isinstance(func.value, ast.Name)
+            and func.value.id in _RECEIVER_OWNERS
+        )
     if isinstance(parent, ast.Attribute):
         if parent.attr in _CALLS:
             # A bound method keeps the instance: it must be invoked on the spot.
@@ -110,9 +136,35 @@ def _use_allowed(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     return False
 
 
-def _file_violations(path: str, tree: ast.AST) -> list[Violation]:
+def _receiver_violations(path: str, tree: ast.AST, parents) -> list[Violation]:
+    """A receiver name resolves only to the ledger's own methods (closed world)."""
     found: list[Violation] = []
+    message = "CheckRoot receivers are the ledger's own methods: do not shadow or rebind them"
+    for node in ast.walk(tree):
+        bad = False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _RECEIVERS:
+            bad = path != _LEDGER or not isinstance(parents.get(node), ast.ClassDef)
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bad = node.id in _RECEIVERS or node.id in _RECEIVER_OWNERS
+        elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load):
+            bad = node.attr in _RECEIVERS
+        elif isinstance(node, ast.alias):
+            bound = node.asname or node.name.split(".")[0]
+            source = getattr(parents.get(node), "module", "") or ""
+            bad = bound in _RECEIVERS or (
+                bound == "DeploymentLedgerCodec"
+                and (node.name != bound or not source.endswith("core.deployment_ledger"))
+            )
+        elif isinstance(node, ast.arg):
+            bad = node.arg in _RECEIVERS or node.arg == "DeploymentLedgerCodec"
+        if bad:
+            found.append(violation(_RID, path, message, line=getattr(node, "lineno", 0)))
+    return found
+
+
+def _file_violations(path: str, tree: ast.AST) -> list[Violation]:
     parents = _parents(tree)
+    found = _receiver_violations(path, tree, parents)
     message = "A CheckRoot lives for one containment check: build it only in an allowed function"
     for node in ast.walk(tree):
         if _is_check_root_call(node):
@@ -121,13 +173,27 @@ def _file_violations(path: str, tree: ast.AST) -> list[Violation]:
             if not allowed or not _use_allowed(node, parents):
                 found.append(violation(_RID, path, message, line=node.lineno))
         if isinstance(node, _FUNCTIONS[:2]):
-            names = _tracked_names(node)
+            names = _tracked_names(node, parents)
             if not names:
                 continue
             for inner in ast.walk(node):
                 if isinstance(inner, (ast.Global, ast.Nonlocal)) and names & set(inner.names):
                     found.append(
                         violation(_RID, path, "A CheckRoot must not be rebound", line=inner.lineno)
+                    )
+                elif (
+                    isinstance(inner, ast.Name)
+                    and inner.id in names
+                    and not _own_scope(inner, node, parents)
+                ):
+                    found.append(
+                        violation(
+                            _RID,
+                            path,
+                            "A CheckRoot must not be captured by a nested function, "
+                            "lambda or generator",
+                            line=inner.lineno,
+                        )
                     )
                 elif (
                     isinstance(inner, ast.Name)
