@@ -1,0 +1,56 @@
+Usage: cli [OPTIONS] COMMAND [ARGS]...
+
+  Agent Package Manager (APM): The package manager for AI-Native Development
+
+Options:
+  --version      Show version and exit.
+  -v, --verbose  Enable debug-level logging (equivalent to APM_LOG_LEVEL=DEBUG).
+  --help         Show this message and exit.
+
+Commands:
+  approve       Approve executable primitives for packages
+  audit         Scan for hidden Unicode, drift, and policy violations
+  auth          Get a working credential for a git host.
+  cache         Manage the local package cache
+  compile       Compile APM context into distributed AGENTS.md files
+  config        Configure APM CLI.
+  deny          Deny executable primitives for packages
+  deps          Manage APM package dependencies
+  doctor        Run environment diagnostics
+  experimental  Manage experimental feature flags
+  export-patch  Export local edits as patches to source packages
+  find          Trace a materialized file to its package(s)
+  init          Initialize a new APM project
+  install       Install APM, MCP, and LSP dependencies
+  lifecycle     Inspect, test, and scaffold lifecycle scripts.
+  list          List available scripts in the current project
+  lock          Resolve dependencies and write apm.lock.yaml
+  marketplace   Manage marketplaces for discovery and governance
+  mcp           Discover, inspect, and install MCP servers
+  outdated      Show outdated locked dependencies
+  pack          Pack distributable artifacts from your APM project.
+  plugin        Scaffold and manage plugins (plugin-author workflows)
+  policy        Inspect and diagnose APM policy
+  preview       Preview a script's compiled prompt files
+  prune         Remove packages absent from the dependency graph
+  publish       Publish a package to a registry.
+  run           Run a script with parameters (experimental)
+  runtime       Manage AI runtimes (experimental)
+  search        Search plugins in a marketplace (QUERY@MARKETPLACE)
+  self-update   Update the APM CLI binary itself to the latest version.
+  targets       Show resolved targets for the current project.
+  uninstall     Remove packages by manifest entry or locked key
+  unpack        [Deprecated] Extract an APM bundle into the current project.
+  update        Refresh APM dependencies to the latest matching refs
+  view          View package metadata, versions, or file owner
+
+  Common workflows:
+    apm auth <host>                Set up credentials for a git host
+    apm init                       Scaffold a new project
+    apm install                    Install dependencies from apm.yml
+    apm install --frozen           Reproduce lockfile exactly (CI-safe)
+    apm lock                       Resolve deps only (no deploy/delete)
+    apm outdated                   See what's drifted from upstream
+    apm update                     Refresh refs and rewrite the lockfile
+    apm audit --ci                 Validate lockfile integrity for CI gates
+    apm doctor                     Diagnose environment problems

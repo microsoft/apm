@@ -110,55 +110,46 @@ class TestLazyConfirm:
 
 
 class TestPrintVersionShaFalsy:
-    def test_no_sha_not_appended_to_version_string(self) -> None:
-        """Branch 341->344: sha empty → version_str unchanged (no parenthetical)."""
+    def test_no_sha_not_appended_to_version_string(self, capsys) -> None:
+        """An empty build SHA leaves the version string without a parenthetical."""
         from apm_cli.commands._helpers import print_version
 
         ctx = MagicMock()
         ctx.resilient_parsing = False
 
-        mock_console = MagicMock()
         with (
             patch("apm_cli.version_output.get_version", return_value="1.2.3"),
             patch("apm_cli.version_output.get_build_sha", return_value=""),
-            patch("apm_cli.version_output._get_console", return_value=mock_console),
         ):
             print_version(ctx, None, True)
 
-        call_args = mock_console.print.call_args[0][0]
-        assert "1.2.3" in call_args
-        # sha should NOT be appended as "(sha)" — check no "(abc" pattern
-        assert "1.2.3 (" not in call_args
+        assert capsys.readouterr().out == "Agent Package Manager (APM) CLI version 1.2.3\n"
 
 
-class TestPrintVersionConsoleException:
-    def test_console_print_exception_falls_back_to_click_echo(self) -> None:
-        """Lines 350-354: console.print raises → click.echo fallback."""
+class TestPrintVersionWithoutRich:
+    def test_banner_renders_when_rich_cannot_import(self, capsys, monkeypatch) -> None:
+        """The banner is click-only: --version must not need rich (boot diet, #4810)."""
         from apm_cli.commands._helpers import print_version
 
         ctx = MagicMock()
         ctx.resilient_parsing = False
-
-        mock_console = MagicMock()
-        mock_console.print.side_effect = Exception("markup failure")
+        monkeypatch.setitem(sys.modules, "rich", None)
+        monkeypatch.setitem(sys.modules, "rich.console", None)
 
         with (
             patch("apm_cli.version_output.get_version", return_value="2.3.4"),
             patch("apm_cli.version_output.get_build_sha", return_value="abc1234"),
-            patch("apm_cli.version_output._get_console", return_value=mock_console),
-            patch("apm_cli.version_output.click") as mock_click,
         ):
-            # Suppress is_enabled import error if experimental module absent
             print_version(ctx, None, True)
 
-        mock_click.echo.assert_called()
-        text = mock_click.echo.call_args[0][0]
-        assert "2.3.4" in text
+        assert (
+            capsys.readouterr().out == "Agent Package Manager (APM) CLI version 2.3.4 (abc1234)\n"
+        )
 
 
-class TestPrintVersionNoConsole:
-    def test_no_console_falls_back_to_click_echo(self) -> None:
-        """Lines 352-354: console is None → click.echo fallback."""
+class TestPrintVersionPipedOutput:
+    def test_piped_output_carries_no_terminal_styling(self, capsys) -> None:
+        """Click strips the banner style off a terminal, so piped output is plain text."""
         from apm_cli.commands._helpers import print_version
 
         ctx = MagicMock()
@@ -167,14 +158,12 @@ class TestPrintVersionNoConsole:
         with (
             patch("apm_cli.version_output.get_version", return_value="3.0.0"),
             patch("apm_cli.version_output.get_build_sha", return_value=""),
-            patch("apm_cli.version_output._get_console", return_value=None),
-            patch("apm_cli.version_output.click") as mock_click,
         ):
             print_version(ctx, None, True)
 
-        mock_click.echo.assert_called()
-        text = mock_click.echo.call_args[0][0]
-        assert "3.0.0" in text
+        out = capsys.readouterr().out
+        assert out == "Agent Package Manager (APM) CLI version 3.0.0\n"
+        assert "\x1b[" not in out
 
 
 # ---------------------------------------------------------------------------
