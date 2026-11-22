@@ -7,7 +7,7 @@ with runtime-neutral target selection.
 import builtins
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
 
@@ -838,52 +838,22 @@ def run_mcp_integration(  # noqa: PLR0913
             old_mcp_configs,
         ):
             new_mcp_configs[name] = old_mcp_configs[name]
-        for removed_target, retired_names in retired_by_target.items():
-            # An entry in a file the removed runtime shares (.mcp.json) stays
-            # while an active runtime still owns it.
-            retired_names -= names_owned_by_active_peers(
-                removed_target, retired_names, managed_target_servers, user_scope=user_scope
-            )
-            if not retired_names:
-                continue
-            MCPIntegrator.remove_stale(
-                retired_names,
-                runtime=removed_target,
-                project_root=project_root,
-                user_scope=user_scope,
-                scope=scope,
-                fail_on_write_error=True,
-                stored_configs=old_mcp_configs,
-                native_hashes=old_native_hashes,
-            )
-            logger.record_mcp_removed(retired_names)
+        from apm_cli.install.errors import RequiredIntegrationError
 
-        # Remove stale MCP servers that are no longer needed
-        stale_servers = old_mcp_servers - new_mcp_servers
-        if stale_servers:
-            cleanup_owners = {
-                target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
-            }
-            if undeclared_moved:
-                cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
-            if not old_mcp_target_servers_present and not user_scope:
-                # A lockfile written before per-target ownership names no runtime for
-                # its servers, so a project install cleans the runtimes it targets,
-                # as those versions did. User scope stays ownership-only.
-                for legacy_runtime in _legacy_cleanup_runtimes(
-                    runtime=runtime, target_decision=target_decision
-                ):
-                    cleanup_owners.setdefault(legacy_runtime, builtins.set()).update(stale_servers)
-            for cleanup_runtime, owned_servers in sorted(
-                cleanup_owners.items(), key=lambda item: item[0] or ""
-            ):
-                scoped_stale = stale_servers.intersection(owned_servers)
-                if not scoped_stale:
+        # Claims each successful retirement removed from disk (#4792).
+        removed_claims: builtins.dict[str | None, builtins.set] = {}
+        try:
+            for removed_target, retired_names in retired_by_target.items():
+                # An entry in a file the removed runtime shares (.mcp.json) stays
+                # while an active runtime still owns it.
+                retired_names -= names_owned_by_active_peers(
+                    removed_target, retired_names, managed_target_servers, user_scope=user_scope
+                )
+                if not retired_names:
                     continue
                 MCPIntegrator.remove_stale(
-                    scoped_stale,
-                    cleanup_runtime,
-                    exclude,
+                    retired_names,
+                    runtime=removed_target,
                     project_root=project_root,
                     user_scope=user_scope,
                     scope=scope,
@@ -891,7 +861,63 @@ def run_mcp_integration(  # noqa: PLR0913
                     stored_configs=old_mcp_configs,
                     native_hashes=old_native_hashes,
                 )
-                logger.record_mcp_removed(scoped_stale)
+                removed_claims.setdefault(removed_target, builtins.set()).update(retired_names)
+                logger.record_mcp_removed(retired_names)
+
+            # Remove stale MCP servers that are no longer needed
+            stale_servers = old_mcp_servers - new_mcp_servers
+            if stale_servers:
+                cleanup_owners = {
+                    target: builtins.set(servers)
+                    for target, servers in old_mcp_target_servers.items()
+                }
+                if undeclared_moved:
+                    cleanup_owners.setdefault("copilot", builtins.set()).update(undeclared_moved)
+                if not old_mcp_target_servers_present and not user_scope:
+                    # A lockfile written before per-target ownership names no runtime for
+                    # its servers, so a project install cleans the runtimes it targets,
+                    # as those versions did. User scope stays ownership-only.
+                    for legacy_runtime in _legacy_cleanup_runtimes(
+                        runtime=runtime, target_decision=target_decision
+                    ):
+                        cleanup_owners.setdefault(legacy_runtime, builtins.set()).update(
+                            stale_servers
+                        )
+                for cleanup_runtime, owned_servers in sorted(
+                    cleanup_owners.items(), key=lambda item: item[0] or ""
+                ):
+                    scoped_stale = stale_servers.intersection(owned_servers)
+                    if not scoped_stale:
+                        continue
+                    MCPIntegrator.remove_stale(
+                        scoped_stale,
+                        cleanup_runtime,
+                        exclude,
+                        project_root=project_root,
+                        user_scope=user_scope,
+                        scope=scope,
+                        fail_on_write_error=True,
+                        stored_configs=old_mcp_configs,
+                        native_hashes=old_native_hashes,
+                    )
+                    removed_claims.setdefault(cleanup_runtime, builtins.set()).update(scoped_stale)
+                    logger.record_mcp_removed(scoped_stale)
+        except RequiredIntegrationError:
+            # A preserved (edited) entry stopped retirement after this run's
+            # writes: record what reached disk, keep every claim not removed.
+            _record_after_refused_retirement(
+                lock_path,
+                logger,
+                managed_target_servers=managed_target_servers,
+                old_target_servers=old_mcp_target_servers,
+                removed_claims=removed_claims,
+                servers=(new_mcp_servers, old_mcp_servers),
+                configs=(new_mcp_configs, old_mcp_configs),
+                provenance=(new_mcp_provenance, old_mcp_provenance),
+                native_hashes=native_hashes,
+                keep_unhealed=lambda: _keep_unhealed(healed),
+            )
+            raise
 
         _keep_unhealed(healed)
         # Persist the new MCP server set, configs, and transitive provenance.
@@ -969,3 +995,54 @@ def run_mcp_integration(  # noqa: PLR0913
             replace(lockfile, mcp_omissions=omissions).write(lock_path, existing_lockfile=lockfile)
 
     return mcp_count, mcp_apm_config
+
+
+def _record_after_refused_retirement(
+    lock_path: Path,
+    logger: Any,
+    *,
+    managed_target_servers: dict[str, builtins.set],
+    old_target_servers: dict[str, builtins.set],
+    removed_claims: dict[str | None, builtins.set],
+    servers: tuple[builtins.set, builtins.set],
+    configs: tuple[dict, dict],
+    provenance: tuple[dict, dict],
+    native_hashes: dict[str, dict[str, str]],
+    keep_unhealed: Any,
+) -> None:
+    """Persist the claims a run wrote before a refused retirement stopped it (#4792).
+
+    The entries this run wrote stay claimed, as the write-path partial-failure
+    branch records them (req-lk-006), so the lockfile equals disk and the next
+    install retires or keeps them like any other APM entry. Every earlier claim
+    the run did not actually remove is kept for that retry; a claim the run
+    revoked for a requested server (a preserved collision) is not restored.
+    """
+    from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
+    from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+    new_servers, old_servers = servers
+    retained = {
+        target: builtins.set(names) - removed_claims.get(target, builtins.set())
+        for target, names in old_target_servers.items()
+    }
+    retain_deferred_mcp_claims(managed_target_servers, retained, builtins.set(new_servers))
+    claimed = builtins.set().union(*managed_target_servers.values())
+    removed = builtins.set().union(*removed_claims.values()) - claimed
+    kept_old = {name for name in old_servers if name not in removed}
+    new_configs, old_configs = configs
+    new_provenance, old_provenance = provenance
+    keep_unhealed()
+    MCPIntegrator.update_lockfile(
+        builtins.set(new_servers) | kept_old,
+        lock_path,
+        mcp_configs={**{n: c for n, c in old_configs.items() if n in kept_old}, **new_configs},
+        mcp_target_servers=managed_target_servers,
+        mcp_config_provenance={
+            **{n: p for n, p in old_provenance.items() if n in kept_old},
+            **new_provenance,
+        },
+        native_hashes=native_hashes,
+        logger=logger,
+        fail_on_write_error=True,
+    )

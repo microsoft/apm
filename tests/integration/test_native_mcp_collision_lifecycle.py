@@ -465,6 +465,54 @@ def test_partial_install_retains_deferred_names_in_active_target(
     assert scenario.lock().mcp_target_servers == {target: ["new"]}
 
 
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_refused_retirement_records_the_entry_it_wrote(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+    target: str,
+) -> None:
+    """A preserved edit stops retirement after a write; the lock still claims it (#4792).
+
+    The install writes ``new``, then refuses to retire the user-edited ``notes``.
+    The lockfile records ``new`` as APM's and keeps the ``notes`` claim it did
+    not remove, so once the user resolves ``notes`` the next install converges
+    and a later removal retires ``new`` too.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install(targets=target))
+    personal = {**scenario.servers(target)["notes"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit(target, "notes", personal)
+    scenario.declare([{**_http(), "name": "new"}])
+
+    refused = scenario.install(targets=target)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert set(scenario.servers(target)) == {"new", "notes"}
+    assert scenario.servers(target)["notes"] == personal
+    assert scenario.lock().mcp_target_servers == {target: ["new", "notes"]}
+
+    path = scenario.path(target)
+    if target == "claude":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["mcpServers"].pop("notes")
+        path.write_text(json.dumps(document), encoding="utf-8")
+    else:
+        document = tomlkit.parse(path.read_text(encoding="utf-8"))
+        document["mcp_servers"].pop("notes")
+        path.write_text(tomlkit.dumps(document), encoding="utf-8")
+    _success(scenario.install(targets=target))
+    assert set(scenario.servers(target)) == {"new"}
+    assert scenario.lock().mcp_target_servers == {target: ["new"]}
+
+    scenario.declare([])
+    _success(scenario.install(targets=target))
+    assert scenario.servers(target) == {}
+    assert scenario.lock().mcp_target_servers == {}
+
+
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])
 def test_claude_managed_env_removal_repeats_and_retires(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],

@@ -1,0 +1,16 @@
+{
+  "issue": 4792,
+  "fixed_in": "Unreleased",
+  "summary": "An apm install that wrote a new MCP entry and then refused to retire a user-edited managed entry left the new entry on disk but unrecorded, so APM never owned it; the refused retirement now records the claims the run wrote and keeps every earlier claim it did not remove.",
+  "failure_modes": [
+    "ownership",
+    "transaction"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_a_refused_retirement_records_the_entry_it_wrote"
+  ]
+}
