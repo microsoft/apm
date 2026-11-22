@@ -1939,6 +1939,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-local-identity",
+        rule_id="contracts-tooling-local-identity",
+        path="src/apm_cli/deps/reachability.py",
+        old="                ref = transitive_local_identity(",
+        new="                ref = replace(",
+        intent="The reachability walk re-keys a local edge itself instead of calling the owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-local-path-anchor",
         rule_id="contracts-tooling-local-path-anchor",
         path="src/apm_cli/install/sources.py",

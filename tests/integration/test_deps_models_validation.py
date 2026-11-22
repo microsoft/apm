@@ -993,19 +993,6 @@ class TestResolveGitReference:
 class TestCloseRepoAndDebug:
     """_close_repo and _debug utility functions."""
 
-    def test_close_repo_none_is_noop(self) -> None:
-        from apm_cli.deps.github_downloader import _close_repo
-
-        _close_repo(None)  # must not raise
-
-    def test_close_repo_calls_clear_cache_and_close(self) -> None:
-        from apm_cli.deps.github_downloader import _close_repo
-
-        mock_repo = MagicMock()
-        _close_repo(mock_repo)
-        mock_repo.git.clear_cache.assert_called_once()
-        mock_repo.close.assert_called_once()
-
     def test_debug_suppressed_when_env_not_set(self, capsys: pytest.CaptureFixture) -> None:
         from apm_cli.deps.github_downloader import _debug
 

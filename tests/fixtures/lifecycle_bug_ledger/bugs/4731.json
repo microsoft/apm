@@ -1,0 +1,21 @@
+{
+  "issue": 4731,
+  "fixed_in": "Unreleased",
+  "summary": "apm install --frozen refused a monorepo whose root declares ./packages/lib while a sibling declares ../lib ('ambiguous resolved_by parent'); one anchored directory is now one lock row, and parents anchoring to the same directory are not ambiguous.",
+  "failure_modes": [
+    "outcome",
+    "reference"
+  ],
+  "properties": [
+    "lockfile.frozen_preserves_bytes",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_monorepo_frozen_replay_lifecycle.py::test_frozen_replays_a_lib_reached_by_two_relative_spellings",
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryIsOneDependency::test_lockfile_parents_anchoring_to_one_directory_are_one_parent",
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryIsOneDependency::test_root_declared_directory_wins_its_spelling",
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryNode::test_production_sibling_promotes_a_dev_library_and_its_descendants",
+    "tests/unit/deps/test_apm_resolver_helpers.py::TestOneAnchoredDirectoryNode::test_targeted_sibling_update_rechecks_the_library_at_its_own_anchor",
+    "tests/unit/deps/test_apm_resolver_helpers.py::test_production_reaches_a_shared_leaf_in_either_dev_order"
+  ]
+}
