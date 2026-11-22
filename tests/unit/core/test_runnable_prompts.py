@@ -20,7 +20,7 @@ def preserve_cwd():
         original = os.getcwd()
     except (FileNotFoundError, OSError):
         # If we can't get CWD, use a safe default
-        original = Path(__file__).parent.parent
+        original = Path(__file__).resolve().parents[3]
         os.chdir(original)
 
     yield
@@ -30,7 +30,7 @@ def preserve_cwd():
     except (FileNotFoundError, OSError):
         # If original dir was deleted, change to project root
         try:
-            os.chdir(Path(__file__).parent.parent)
+            os.chdir(Path(__file__).resolve().parents[3])
         except (FileNotFoundError, OSError):
             # Last resort: home directory
             os.chdir(Path.home())
