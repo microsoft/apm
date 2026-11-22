@@ -1413,9 +1413,10 @@ def _check_local_bundle_hooks(
     user_scope: bool,
     no_policy: bool,
 ) -> CheckResult:
-    """Fail when a deployed local-bundle hook's approval no longer holds."""
+    """Fail when a deployed local-bundle hook or canvas extension's approval no longer holds."""
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
+    from ..install.local_bundle_canvas import unadmitted_bundle_canvas
     from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
     from ..security.executables import resolve_project_exec_allow_map
 
@@ -1429,21 +1430,29 @@ def _check_local_bundle_hooks(
     )
     try:
         unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
+        canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
-    if not unadmitted:
+    if not unadmitted and not canvas:
         return CheckResult(
             name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"
         )
+    counts = [
+        f"{len(items)} local bundle(s) have {kind} the current executables trust does not admit"
+        for kind, items in (("hooks", unadmitted), ("canvas extensions", canvas))
+        if items
+    ]
     return CheckResult(
         name="local-bundle-hooks",
         passed=False,
         message=(
-            f"{len(unadmitted)} local bundle(s) have hooks the current executables "
-            f"trust does not admit; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
+            f"{'; '.join(counts)}; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
             f"or {remediation.BUNDLE_HOOKS_APPROVED.clause()}"
         ),
-        details=[f"{item.slug}: {item.reason}" for item in unadmitted],
+        details=[
+            *(f"{item.slug}: {item.reason}" for item in unadmitted),
+            *(f"{item.slug}: canvas: {item.reason}" for item in canvas),
+        ],
     )
 
 

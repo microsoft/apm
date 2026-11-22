@@ -894,47 +894,31 @@ def integrate_local_bundle(
     slug = alias or bundle_info.package_id
     _known_deploy_prefixes = _known_bundle_prefixes()
 
-    # Security + feature gate: canvas extensions are executable Node bundles
-    # (``extension.mjs``).  A local / offline bundle copies its files
-    # verbatim WITHOUT routing through ``CanvasIntegrator``, so the
-    # experimental feature flag and the allowExecutables gate must be
-    # checked explicitly here.  When the canvas feature flag is OFF, drop
-    # paths silently (no-op; canvas type does not exist yet).  When ON, the
-    # trust owner approves canvas for the exact bundle content (an explicit
-    # gate-disabled map approves it; a missing map approves nothing).
-    from ..core.experimental import is_enabled
-    from ..integration.canvas_integrator import is_canvas_bundle_path
-    from ..security.executables import EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS, package_type_approved
+    # Canvas extensions are executable: gated and retired like hooks and MCP.
+    from ..security.executables import EXEC_TYPE_HOOKS, package_type_approved
+    from .local_bundle_canvas import gate_bundle_canvas
 
     _bundle_keys = () if approval_key is None else (approval_key,)
-    _canvas_enabled = is_enabled("canvas", create_config=create_config)
-    _canvas_approved_bundle = _canvas_enabled and package_type_approved(
-        allow_executables, _bundle_keys, EXEC_TYPE_CANVAS
-    )
     _hooks_approved_bundle = package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)
-
-    if not (_canvas_enabled and _canvas_approved_bundle):
-        _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
-        if _blocked:
-            for _r in _blocked:
-                pack_files.pop(_r, None)
-            if _canvas_enabled:
-                # Canvas feature on but not approved: block and surface message.
-                skipped += len(_blocked)
-                from ..security.executables import local_bundle_approval_hint
-
-                _msg = (
-                    f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
-                    f"'{slug}': canvas extensions are executable extension.mjs code "
-                    "and are not approved for this exact bundle content. "
-                    + local_bundle_approval_hint(
-                        str(approval_key), "canvas", user_scope=scope is InstallScope.USER
-                    )
-                )
-                if diagnostics is not None:
-                    diagnostics.warn(message=_msg, package=str(slug))
-                elif logger is not None:
-                    logger.warning(_msg)
+    _canvas_ok, _canvas_blocked = gate_bundle_canvas(
+        pack_files,
+        project_root,
+        targets=targets,
+        slug=str(slug),
+        approval_key=approval_key,
+        allow_executables=allow_executables,
+        create_config=create_config,
+        scope=scope,
+        dry_run=dry_run,
+        report=lambda message: (
+            diagnostics.warn(message=message, package=str(slug))
+            if diagnostics is not None
+            else logger.warning(message)
+            if logger is not None
+            else None
+        ),
+    )
+    skipped += _canvas_blocked
 
     if logger:
         logger.verbose_detail(
@@ -996,7 +980,7 @@ def integrate_local_bundle(
                 _known_deploy_prefixes,
                 target=target,
                 hooks_approved=_hooks_approved_bundle,
-                canvas_approved=_canvas_enabled and _canvas_approved_bundle,
+                canvas_approved=_canvas_ok,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1005,7 +989,7 @@ def integrate_local_bundle(
                     _known_deploy_prefixes,
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
-                    canvas_approved=_canvas_enabled and _canvas_approved_bundle,
+                    canvas_approved=_canvas_ok,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1141,6 +1125,11 @@ def integrate_local_bundle(
                 logger.verbose_detail(
                     f"[dry-run] would deploy {record}" if dry_run else f"deployed {record}"
                 )
+
+    if _canvas_ok and not dry_run:
+        from .local_bundle_canvas import record_bundle_canvas
+
+        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
 
     from .local_bundle_hooks import integrate_local_bundle_hooks
 

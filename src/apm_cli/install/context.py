@@ -250,6 +250,7 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
+    overwrite_preflight_refused: bool = False  # commit gate -- unproven overwrite (#4381)
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.

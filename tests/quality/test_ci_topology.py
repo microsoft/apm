@@ -3640,6 +3640,64 @@ def test_train_gate_passes_only_when_every_job_is_green(
     assert "| ref | sha | scope | base |" in (tmp_path / "s.md").read_text(encoding="utf-8")
 
 
+def test_train_gate_excuses_failed_jobs_only_when_every_failure_is_inherited(
+    tmp_path: Path,
+) -> None:
+    """INHERITED_ONLY (the baseline step's output, #4704) turns a failed full-scope job
+    green; it never excuses a scope failure, a cancelled or skipped job, or guard scope."""
+    gate = workflow_job(_train_workflows()[MERGE_TRAIN_WORKFLOW], TRAIN_GATE_JOB)
+    step = workflow_step(gate, TRAIN_GATE_STEP)
+    assert step["env"]["INHERITED_ONLY"] == "${{ steps.baseline.outputs.inherited_only }}"
+    green = ("success",) * len(TRAIN_GATE_RESULTS)
+    for index in range(1, len(TRAIN_GATE_RESULTS)):
+        for outcome, excused in (("failure", True), ("cancelled", False), ("skipped", False)):
+            env = dict(zip(TRAIN_GATE_RESULTS, green, strict=True))
+            env[TRAIN_GATE_RESULTS[index]] = outcome
+            for inherited in ("true", "false"):
+                code = _run_train_gate(
+                    step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": inherited, **env}
+                )
+                assert (code == 0) == (excused and inherited == "true"), (index, outcome)
+    scope_failed = dict(zip(TRAIN_GATE_RESULTS, green, strict=True)) | {"SCOPE_RESULT": "failure"}
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "full", "INHERITED_ONLY": "true", **scope_failed}
+    )
+    guard_only = dict(
+        zip(TRAIN_GATE_RESULTS, ("success", "success") + ("failure",) * 4, strict=True)
+    )
+    assert _run_train_gate(
+        step, tmp_path, {"SCOPE": "guard", "INHERITED_ONLY": "true", **guard_only}
+    )
+
+
+def test_train_gate_excusable_steps_match_the_workflows() -> None:
+    """gate.py excuses an id-less failure only in a step that re-checks needed jobs'
+    results, and attributes a guard failure only to a guard check step. Both lists
+    must match the workflows exactly."""
+    from scripts.merge_queue import gate, proof
+
+    workflows = _train_workflows()
+    aggregation = {}
+    for name in TRAIN_TIERS.values():
+        for job in workflows[name]["jobs"].values():
+            if not (job.get("needs") and "always()" in str(job.get("if", ""))):
+                continue
+            steps = {
+                step["name"]
+                for step in job.get("steps", [])
+                if "needs." in str(step.get("run", "")) + str(step.get("env", ""))
+            }
+            if steps:
+                aggregation[job["name"]] = steps
+    assert aggregation == {name: set(steps) for name, steps in gate.AGGREGATION_STEPS.items()}
+    guard_steps = [
+        step.get("name")
+        for step in workflow_job(workflows[MERGE_TRAIN_WORKFLOW], TRAIN_GUARD_JOB)["steps"]
+    ]
+    checks = guard_steps[guard_steps.index("Install dependencies") + 1 :]
+    assert set(checks) == set(proof.GUARD_CHECKS)
+
+
 TRAIN_SCOPE_CASES = [
     ("queue/t0001/p1-guard", "guard"),
     ("queue/t0001/p3-full", "full"),
@@ -4197,3 +4255,57 @@ def test_coverage_run_with_early_stop_fails(flag: str, scope: str) -> None:
         step["run"] = f"{step['run']}uv run pytest tests/integration {flag}\n"
 
     assert _early_stopping_in("ci-integration.yml", workflow)
+
+
+MUTATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "mutation-pilot.yml"
+MUTATION_STEP = "Mutate one owner and enforce its baseline"
+
+
+def _assert_mutation_shards_enforce_every_owner(workflow: WorkflowNode) -> None:
+    """One scheduled shard per owner, each enforcing its floor with a negative control (#4121)."""
+    assert "schedule" in workflow["on"], "the floors must be enforced on a schedule"
+    owners = workflow_job(workflow, "owners")
+    listing = " ".join(str(step.get("run", "")) for step in owners["steps"])
+    assert "scripts/run_mutation_pilot.py --list-owners" in listing
+    shard = workflow_job(workflow, "mutation-pilot")
+    assert "continue-on-error" not in shard and "if" not in shard
+    assert shard["needs"] == "owners"
+    strategy = shard["strategy"]
+    assert strategy["fail-fast"] is False
+    assert strategy["matrix"] == {"owner": "${{ fromJSON(needs.owners.outputs.keys) }}"}
+    step = workflow_step(shard, MUTATION_STEP)
+    assert "if" not in step and "continue-on-error" not in step
+    assert step["env"]["OWNER"] == "${{ matrix.owner }}"
+    tokens = step["run"].replace("\\\n", " ").split()
+    assert ("--owner", '"$OWNER"') in set(pairwise(tokens))
+    assert "--negative-control" in tokens
+    assert not {"--update-baseline", "--report-only", "--reuse-cache"} & set(tokens)
+    for job in workflow["jobs"].values():
+        for job_step in job.get("steps") or []:
+            assert not str(job_step.get("uses", "")).startswith("actions/cache")
+
+
+def test_mutation_shards_enforce_every_owner_floor() -> None:
+    _assert_mutation_shards_enforce_every_owner(load_workflow(MUTATION_WORKFLOW))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["no-negative-control", "soft-shard", "static-matrix", "no-schedule", "baseline-write"],
+)
+def test_mutation_shard_drift_fails(mutation: str) -> None:
+    workflow = load_workflow(MUTATION_WORKFLOW)
+    shard = workflow_job(workflow, "mutation-pilot")
+    step = workflow_step(shard, MUTATION_STEP)
+    if mutation == "no-negative-control":
+        step["run"] = step["run"].replace("--negative-control", "")
+    elif mutation == "soft-shard":
+        shard["continue-on-error"] = True
+    elif mutation == "static-matrix":
+        shard["strategy"]["matrix"] = {"owner": ["update-plan"]}
+    elif mutation == "no-schedule":
+        del workflow["on"]["schedule"]
+    else:
+        step["run"] += " --update-baseline"
+    with pytest.raises(AssertionError):
+        _assert_mutation_shards_enforce_every_owner(workflow)

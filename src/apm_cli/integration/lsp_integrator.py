@@ -1243,5 +1243,7 @@ class LSPIntegrator:
                 for name in sorted(names)
             )
             logger.error(message)
-            raise LSPUserEntryConflictError(message, preserved=preserved)
+            raise LSPUserEntryConflictError(
+                message, preserved=preserved, wrote_servers=bool(changed_servers)
+            )
         return len(changed_servers)

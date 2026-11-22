@@ -110,9 +110,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 329, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1421, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1440, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1478, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1431, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1450, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1488, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
@@ -161,7 +161,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 91, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1542, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1552, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
 }
 
@@ -174,7 +174,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "revoked executable must survive; an org policy dependency deny removes it",
         (
             Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
-            Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
+            Ev("src/apm_cli/policy/install_preflight.py", 233, "Install blocked by org policy"),
         ),
     ),
     "U3": (
@@ -234,9 +234,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 715, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 716, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 719, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 717, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -256,7 +256,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev(_MCP_VIEW, 1199, "Parked MCP server '{name}' from transitive package"),
             Ev(_MCP_VIEW, 1211, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
-            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 169, "Re-declare it"),
+            Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
         ),
     ),
     "E1": (
@@ -282,7 +282,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
             Ev("src/apm_cli/install/services.py", 814, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1017, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 1001, '"instructions" not in target.primitives'),
         ),
     ),
 }

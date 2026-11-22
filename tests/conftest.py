@@ -382,6 +382,7 @@ _LAZY_CONSUMERS = (
     "apm_cli.deps.github_downloader",
     "apm_cli.install.integrity",
     "apm_cli.install.phases.claude_plugins",
+    "apm_cli.install.phases.cleanup",
     "apm_cli.install.phases.codex_plugins",
     "apm_cli.marketplace.catalog_origin",
     "apm_cli.marketplace.yml_editor",

@@ -10,7 +10,9 @@ would leave it on disk. This guard keeps the seam closed-world:
   and ``os`` copies, moves and removals, ``open`` for writing, or a writer
   helper imported from ``utils`` instead of the seam;
 * every seam writer records its path before it writes;
-* the transaction listens at the seam.
+* the transaction listens at the seam;
+* only the commit gate's write plan enters ``planning`` (#4381) and only the
+  locked render's private scratch tree enters ``private_scratch``.
 
 A line marked ``# write-seam-exempt: <reason>`` (a private scratch tree) is
 skipped.
@@ -69,6 +71,7 @@ _RAW_MODULE_CALLS = frozenset(
 # Writer helpers that must come from the seam, never from their utils module.
 _WRITER_HELPERS = frozenset(
     {
+        "atomic_copy",
         "atomic_write_bytes",
         "atomic_write_text",
         "robust_rmtree",
@@ -82,7 +85,12 @@ _WRITE_MODE = re.compile(r"""(?:,\s*|mode\s*=\s*)["'][rbt]*[wax+][rbt+]*["']""")
 _WRITE_MODE_TEXT = re.compile(r"^[rbt]*[wax+][rbt+]*$")
 _WRITE_FLAGS = re.compile(r"\bos\.O_(?:WRONLY|RDWR|CREAT|TRUNC|APPEND)\b")
 _RECORDERS = frozenset({"record_before_write", "record_before_mkdir"})
-_SEAM_CONTROL = frozenset({"listen", "stop_listening", *_RECORDERS})
+_SEAM_CONTROL = frozenset({"listen", "stop_listening", "planning", "private_scratch", *_RECORDERS})
+# (path, enclosing function) of the only callers of each journal-suspending mode.
+_SEAM_MODES = {
+    "planning": frozenset({("src/apm_cli/install/commit_gate.py", "_planned_keeps")}),
+    "private_scratch": frozenset({("src/apm_cli/integration/cleanup.py", "_render_locked")}),
+}
 
 
 def _call_text(lines: tuple[str, ...], line: int, column: int) -> str:
@@ -224,6 +232,46 @@ def _seam_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
     return found
 
 
+def _mode_violations(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Planning and private scratch suspend the journal only at their closed call sites.
+
+    A mode is matched by its name on any receiver (a module alias included),
+    and importing a mode function directly is rejected, so neither can
+    escape the closed sites under another spelling.
+    """
+    found: list[Violation] = []
+    for path in _python_paths(provider, "src/apm_cli/"):
+        if path == _SEAM:
+            continue
+        facts, failures = _facts_for(provider, path, rule_id)
+        if failures:
+            found += failures
+            continue
+        found += (
+            violation(
+                rule_id,
+                path,
+                f"import write_seam.{name} only as write_seam.{name}()",
+                line=fact.line,
+            )
+            for fact in facts.imports
+            for name in sorted(set(fact.names) & set(_SEAM_MODES))
+            if (fact.module or "").lstrip(".").endswith("write_seam")
+        )
+        for call in facts.calls:
+            mode = call.qualname.rsplit(".", 1)[-1]
+            if mode in _SEAM_MODES and (path, call.scope) not in _SEAM_MODES[mode]:
+                found.append(
+                    violation(
+                        rule_id,
+                        path,
+                        f"write_seam.{mode} outside its closed call site",
+                        line=call.line,
+                    )
+                )
+    return found
+
+
 def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
     """Integrator file writes go through the seam the install transaction journals."""
     rule_id = GUARD_DEPLOY_WRITE_SEAM
@@ -232,6 +280,7 @@ def check_deploy_write_seam(provider: FactsProvider) -> tuple[Violation, ...]:
         if path != _SEAM:
             found += _bypass_violations(provider, path, rule_id)
     found += _seam_violations(provider, rule_id)
+    found += _mode_violations(provider, rule_id)
     transaction, failures = _facts_for(provider, _TRANSACTION, rule_id)
     if failures:
         return (*found, *failures)

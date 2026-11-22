@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -398,10 +399,10 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     failed_this_run = False
     inject_failure = True
     copies: list[str] = []
-    copy_file = shutil.copy2
+    real_replace = os.replace
     evidence = _observe_pipeline(monkeypatch, fixture, failed_dependency=lambda: failed_this_run)
 
-    def fail_first_skill_copy(src: Any, dst: Any, *args: Any, **kwargs: Any) -> Any:
+    def fail_first_skill_copy(src: Any, dst: Any) -> Any:  # os.replace publishes each copy
         nonlocal failed_this_run, inject_failure
         if Path(dst).parent.parent == fixture.deployed.parent.parent:
             copies.append(Path(dst).parent.name)
@@ -410,9 +411,9 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
             inject_failure = False
             failed_this_run = True
             raise OSError("injected package copy failure")
-        return copy_file(src, dst, *args, **kwargs)
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(shutil, "copy2", fail_first_skill_copy)
+    monkeypatch.setattr(os, "replace", fail_first_skill_copy)
     deployed_before = fixture.deployed.read_bytes() if fixture.deployed.exists() else None
     failed = pipeline.run_install_pipeline(
         fixture.package,
