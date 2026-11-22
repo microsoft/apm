@@ -184,3 +184,21 @@ def install_pipeline_options(
         transaction=ctx.transaction,
         lsp_preflight=lsp_preflight,
     )
+
+
+_FAST_PATH_ENV = "APM_INSTALL_FAST_PATH"
+_FAST_PATH_ON = frozenset({"1", "true", "yes", "on", "trace"})
+
+
+def noop_fast_path(command: Any) -> Any:
+    """Engage the opt-in no-op install fast path (#4770) on ``apm install``.
+
+    Decided once, when the command module loads: with ``APM_INSTALL_FAST_PATH``
+    unset (the default) *command* is returned untouched and the fast-path
+    modules are never imported, so an install pays nothing for it.
+    """
+    if os.environ.get(_FAST_PATH_ENV, "").strip().lower() not in _FAST_PATH_ON:
+        return command
+    from apm_cli.install.noop_fast_path import fast_path
+
+    return fast_path(command)

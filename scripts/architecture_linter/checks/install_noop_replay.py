@@ -28,6 +28,8 @@ RULE_NOOP_REPLAY = "install-deployment-noop-replay-owner"
 
 _OWNER = "src/apm_cli/install/noop_fast_path.py"
 _RECORDER = "src/apm_cli/install/noop_recorder.py"
+# Imports the owner only when APM_INSTALL_FAST_PATH enables it (default off).
+_GATE = "src/apm_cli/install/pipeline_entry.py"
 _ENGAGER = "src/apm_cli/commands/install.py"
 _SOURCE_TREE = "src/apm_cli/"
 _LIVE_CHECKS = (
@@ -44,7 +46,7 @@ _LIVE_CHECKS = (
 )
 _ENGAGE = re.compile(r"\bnoop_fast_path\b")
 # The decorator must sit directly on the install click callback.
-_DECORATED_INSTALL = re.compile(r"^@noop_fast_path$")
+_DECORATED_INSTALL = re.compile(r"^@pipeline_entry\.noop_fast_path$")
 _INSTALL_DEF = re.compile(r"^def install\(")
 _AUDIT_HOOK = re.compile(r"\bsys\.addaudithook\(")
 
@@ -79,10 +81,12 @@ def check_noop_replay_owner(provider: FactsProvider) -> tuple[Violation, ...]:
             _report(
                 rule_id,
                 _ENGAGER,
-                "apm install's callback must be decorated with @noop_fast_path directly",
+                "apm install's callback must be decorated with @pipeline_entry.noop_fast_path",
             )
         )
-    others = _tree_python_paths(provider, _SOURCE_TREE, excluded=(_OWNER, _ENGAGER, _RECORDER))
+    others = _tree_python_paths(
+        provider, _SOURCE_TREE, excluded=(_OWNER, _ENGAGER, _RECORDER, _GATE)
+    )
     findings.extend(
         _banned(
             provider,

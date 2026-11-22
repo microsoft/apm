@@ -41,6 +41,7 @@ from apm_cli.deps.lockfile_generator import (
 )
 from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.deps.registry.feature_gate import UserRegistryConfigDisabledError
+from apm_cli.install import pipeline_entry
 from apm_cli.install.argv import (
     _get_invocation_argv,
     _split_argv_at_double_dash,
@@ -181,7 +182,6 @@ from ..install.mcp.conflicts import (
 from ..install.mcp.registry import resolve_registry_url as _resolve_registry_url
 from ..install.mcp.registry import validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry
 from ..install.mcp.registry import validate_registry_url as _validate_registry_url
-from ..install.noop_fast_path import fast_path as noop_fast_path
 from ..marketplace.reconcile import reconcile_user_marketplaces_or_exit
 from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests patch commands.install._rich_success
     _rich_echo,
@@ -1117,7 +1117,7 @@ def _handle_mcp_install(  # noqa: PLR0913
 )
 @click.pass_context
 @serialized_lifecycle_unless_fresh_preview("dry_run")
-@noop_fast_path
+@pipeline_entry.noop_fast_path
 def install(  # noqa: PLR0913
     ctx,
     packages,
