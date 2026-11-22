@@ -1035,6 +1035,24 @@ def test_a_native_plugin_is_one_gated_cell_at_project_scope(lifecycle_world) -> 
     scenario.finish()
 
 
+def test_a_native_plugin_with_bin_deploys_whole_only_when_trusted(lifecycle_world) -> None:
+    """At project scope an approved plugin that ships bin/ is parked whole until
+    ``--trust-bin`` (claude_plugins/admission.py); then root and declaration land."""
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(
+        lifecycle_world, ("p-native-claude-bin",), policy="allow", targets=("claude",)
+    )
+    scenario.run("install p-native-claude-bin")
+    scenario.run("approve p-native-claude-bin")
+    step = scenario.run("install")
+    assert not scenario.deployed()[0], sorted(step.changed)
+    # The model carries no bin-trust posture: trusting bin/ is a new input.
+    scenario.source_moved()
+    scenario.run("install --trust-bin")
+    scenario.assert_deployed()
+    scenario.finish()
+
+
 _PLUGIN_BIN = ".agents/plugins/p-native-claude-bin/bin/p-native-claude-bin"
 
 

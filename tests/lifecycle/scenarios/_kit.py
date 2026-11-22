@@ -420,17 +420,19 @@ class Scenario:
         declaration = native_declaration(root, target, name) if native else None
         return (found | {declaration} if declaration else found), owned
 
-    def native_gaps(self, observation: Observation) -> list[str]:
+    def native_gaps(self, observation: Observation, *, trust_bin: bool = True) -> list[str]:
         """Allowed native cells not deployed whole: a root without its declaration,
         or neither (#4808).
 
         A declaration file that holds declared user bytes is the user's (I1-X2
-        forbids APM to change it), so its cell needs only the root.
+        forbids APM to change it), so its cell needs only the root. Without
+        *trust_bin* a plugin that ships bin/ is parked whole (claude_plugins/
+        admission.py), so its cell is not required.
         """
         gaps = []
         for cell in sorted(self.expected_cells()):
             package, kind, target = cell.split("/")
-            if kind != "native":
+            if kind != "native" or not (trust_bin or "bin" not in self.kinds[package]):
                 continue
             found = observation.cell_paths.get(cell, frozenset())
             wanted = {SURFACE_GLOBS[(self.scope, kind, target)].format(pkg=package.split(":")[0])}
@@ -553,7 +555,7 @@ class Scenario:
         check_cross_cutting(before, after, result, model, op)
         self._advance(op, args, requested, result)
         if self._reconciled(op, result) and not (known or exit_cell):
-            gaps = self.native_gaps(after)
+            gaps = self.native_gaps(after, trust_bin="--trust-bin" in args)
             assert not gaps, f"{' '.join(args)}: allowed native plugins not whole: {gaps}"
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
