@@ -33,7 +33,7 @@ request() {
   git -C "$tmp" add bench-request.env
   git -C "$tmp" -c user.name="perf-bench" -c user.email="perf-bench@users.noreply.github.com" \
     commit --quiet -m "perf-bench: ${base:0:8} -> ${new:0:8}"
-  git -C "$tmp" push --quiet "$URL" "HEAD:refs/heads/$branch"
+  git -C "$tmp" push --quiet "$URL" "HEAD:refs/heads/$branch" 2>/dev/null || die "push failed"
   echo "$branch"
 }
 
