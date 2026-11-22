@@ -1,8 +1,9 @@
 """A converged install leaves the cache-pin marker untouched (#4790).
 
 ``install/cache_pin.py::write_marker`` runs on every install. A second no-op
-install must not rewrite an identical ``.apm-pin`` (bytes and mtime kept),
-while a missing, different or symlinked marker is still (re)written.
+install must not rewrite an identical ``.apm-pin`` (bytes, mtime and inode
+kept). A missing or different marker is written, and a symlinked marker is
+replaced by a regular file without touching the link target.
 """
 
 from __future__ import annotations
@@ -57,14 +58,37 @@ def test_a_different_marker_is_rewritten(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
-def test_a_symlinked_marker_is_still_written_through(tmp_path: Path) -> None:
+def test_a_symlinked_marker_is_replaced_by_a_regular_file(tmp_path: Path) -> None:
     target = tmp_path / "elsewhere"
-    target.write_bytes(_payload(_COMMIT))
+    target.write_bytes(b"unrelated")
     stamped = _age(target)
     marker = tmp_path / MARKER_FILENAME
     marker.symlink_to(target)
 
     write_marker(tmp_path, _COMMIT)
 
-    assert target.read_bytes() == _payload(_COMMIT)
-    assert target.stat().st_mtime_ns != stamped, "a symlinked marker keeps the old rewrite"
+    assert not marker.is_symlink(), "the marker must become a regular file"
+    assert marker.is_file()
+    assert marker.read_bytes() == _payload(_COMMIT)
+    assert target.read_bytes() == b"unrelated", "the link target must stay unchanged"
+    assert target.stat().st_mtime_ns == stamped
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_marker_with_identical_target_bytes_is_still_replaced(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.write_bytes(_payload(_COMMIT))
+    marker = tmp_path / MARKER_FILENAME
+    marker.symlink_to(target)
+
+    write_marker(tmp_path, _COMMIT)
+
+    assert not marker.is_symlink()
+    assert marker.read_bytes() == _payload(_COMMIT)
+
+
+def test_a_directory_in_the_way_is_left_and_install_continues(tmp_path: Path) -> None:
+    (tmp_path / MARKER_FILENAME).mkdir()
+    write_marker(tmp_path, _COMMIT)
+    assert (tmp_path / MARKER_FILENAME).is_dir()
+    assert [p.name for p in tmp_path.iterdir()] == [MARKER_FILENAME], "no temp file left behind"
