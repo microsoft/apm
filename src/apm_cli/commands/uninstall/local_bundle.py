@@ -177,6 +177,34 @@ def select_local_bundles(
     return list(dict.fromkeys(slugs)), bundle_scope
 
 
+@dataclass(frozen=True)
+class _Unconfirmed:
+    hook_files: tuple[str, ...]
+
+
+def _refuse_unsafe_cleanup(bundle_scope: _BundleScope, *, logger: Any, dry_run: bool) -> None:
+    """Refuse before any write when hook configs or the lockfile cannot be safely rewritten."""
+    from ...deps.lockfile import LockFile, get_lockfile_path, refuse_lockfile_before_mutation
+    from ...install.local_bundle_hook_trust import bundle_hook_cleanup_blockers, local_bundle_paths
+
+    blockers = bundle_hook_cleanup_blockers(bundle_scope.root, bundle_scope.targets)
+    if blockers:
+        logger.error(
+            f"Local bundle hooks were not removed: {', '.join(blockers)} cannot be safely "
+            "read or rewritten; no changes were made. Replace a linked path with a regular "
+            "file or directory, or repair the file, then retry."
+        )
+        sys.exit(1)
+    if dry_run:
+        return
+    lock_path = get_lockfile_path(bundle_scope.lock_dir)
+    refuse_lockfile_before_mutation(
+        LockFile.read(lock_path),
+        lock_path,
+        would_mutate=bool(local_bundle_paths(bundle_scope.lock_dir)),
+    )
+
+
 def uninstall_local_bundles(
     slugs: list[str], bundle_scope: _BundleScope, *, scope: Any, logger: Any, dry_run: bool
 ) -> None:
@@ -199,14 +227,20 @@ def uninstall_local_bundles(
                 f"{_by_name_remedy(scope).sentence()}"
             )
         sys.exit(1)
+    _refuse_unsafe_cleanup(bundle_scope, logger=logger, dry_run=dry_run)
     if dry_run:
         for slug in slugs:
             logger.dry_run_notice(f"Would remove hooks from local bundle '{slug}'")
         return
 
+    unconfirmed: dict[str, tuple[str, ...]] = {}
     for slug in slugs:
-        retire_bundle_hooks(root, targets, slug, lock_dir=lock_dir, reason=None)
+        retired = retire_bundle_hooks(root, targets, slug, lock_dir=lock_dir, reason=None)
+        if retired.failed_paths:
+            unconfirmed[slug] = retired.failed_paths
     left = _deployed(bundle_scope)
+    for slug, paths in unconfirmed.items():
+        left.setdefault(slug, _Unconfirmed(paths))
     # Pending state goes only for a bundle whose hooks are confirmed gone.
     for slug in slugs:
         if slug not in left:

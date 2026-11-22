@@ -232,6 +232,46 @@ def contained_bundle_path(project_root: Path, value: str, prefixes: Collection[s
     return path
 
 
+def _target_base(project_root: Path, target: Any) -> Path:
+    root_dir = Path(target.root_dir)
+    return root_dir.parent if root_dir.is_absolute() else Path(project_root)
+
+
+def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
+    """Return the hook configs a bundle hook removal could not safely read or rewrite.
+
+    A linked path (a symlinked target root or config) or an unreadable config
+    cannot prove what a bundle registered, so its removal is refused before
+    any change instead of reported as done (#3700).
+    """
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_ownership import read_hook_object
+    from apm_cli.utils.path_security import has_symlink_component
+
+    blockers: list[str] = []
+    for target in targets or ():
+        if not (callable(getattr(target, "supports", None)) and target.supports("hooks")):
+            continue
+        root = Path(project_root) / target.root_dir
+        config = _MERGE_HOOK_TARGETS.get(target.name)
+        paths = [root / _APM_HOOKS_SIDECAR]
+        if config is not None:
+            paths.insert(0, root / config.config_filename)
+        base = _target_base(Path(project_root), target)
+        for path in paths:
+            if not (path.is_symlink() or path.exists()):
+                continue
+            label = _record_value(path, Path(project_root))
+            if has_symlink_component(base, path):
+                blockers.append(f"{label} (linked path)")
+                continue
+            try:
+                read_hook_object(path)
+            except (OSError, ValueError, TypeError):
+                blockers.append(f"{label} (unreadable)")
+    return blockers
+
+
 def _hooks_prefixes(targets: Any) -> tuple[str, ...]:
     return tuple(
         f"{target.root_dir}/hooks/"
@@ -265,7 +305,10 @@ def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHoo
         sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
         if not sidecar.is_file():
             continue
-        key, files = per_file_bundle_hook_keys(sidecar).get(item.slug, (None, []))
+        records = per_file_bundle_hook_keys(sidecar)
+        if item.slug not in records:
+            continue
+        key, files = records[item.slug]
         write_per_file_bundle_record(
             sidecar, item.slug, key, [value for value in files if value in kept]
         )
@@ -325,12 +368,24 @@ def retire_unadmitted_bundle_hooks(
     return unadmitted
 
 
-def retire_merged_bundle_entries(project_root: Path, targets: Any, slug: str) -> None:
-    """Drop one bundle's merged hook entries before an approved reinstall rewrites them."""
+def retire_merged_bundle_entries(project_root: Path, targets: Any, slug: str) -> list[str]:
+    """Drop one bundle's merged hook entries; return the configs that could not be rewritten."""
     from apm_cli.integration.hook_integrator import HookIntegrator
 
     hook_targets = [target for target in targets if target.supports("hooks")]
-    HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
+    stats = HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
+    return list(stats["failed_paths"])
+
+
+@dataclass(frozen=True)
+class BundleHookRetirement:
+    """What retiring one bundle's hooks did; truthy when the bundle had deployed hooks."""
+
+    deployed: bool
+    failed_paths: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return self.deployed
 
 
 def _bundle_script_rows(
@@ -383,13 +438,15 @@ def retire_bundle_hooks(
     reason: str | None,
     logger: Any = None,
     diagnostics: Any = None,
-) -> bool:
+) -> BundleHookRetirement:
     """Retire every hook one local bundle deployed earlier; its reinstall registers none.
 
     Removes merged entries, per-file hook files with their approval record,
     the hook scripts copied for *slug*, and their lockfile rows. A *reason*
     announces the retirement; ``None`` retires silently (the new bundle ships
-    no hooks). Returns whether anything was deployed.
+    no hooks). The result is truthy when anything was deployed and names the
+    merged configs that could not be rewritten; then nothing else is removed,
+    so the bundle's scripts, records and lock rows stay for a retry.
     """
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -404,9 +461,11 @@ def retire_bundle_hooks(
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
-    retire_merged_bundle_entries(project_root, targets, slug)
+    failed = retire_merged_bundle_entries(project_root, targets, slug)
+    if failed:
+        return BundleHookRetirement(True, tuple(failed))
     if state is None and not rows:
-        return False
+        return BundleHookRetirement(False)
     # Hook configs register executables and always go; an edited script is kept.
     configs = tuple(sorted(state.hook_files)) if state else ()
     item = UnadmittedBundleHooks(slug, reason or "", configs)
@@ -427,7 +486,7 @@ def retire_bundle_hooks(
             diagnostics.warn(message=message, package=slug)
         elif logger is not None:
             logger.warning(message)
-    return True
+    return BundleHookRetirement(True)
 
 
 def local_bundle_paths(lock_dir: Path | None) -> frozenset[str]:

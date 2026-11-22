@@ -220,7 +220,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/marketplace/registration.py", 50, "No marketplace.json found"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 727, "is an MCP server, not a package"),
             Ev("src/apm_cli/commands/uninstall/engine.py", 889, "was not found in apm.yml"),
-            Ev("src/apm_cli/commands/uninstall/local_bundle.py", 192, "has no hooks deployed"),
+            Ev("src/apm_cli/commands/uninstall/local_bundle.py", 220, "has no hooks deployed"),
             Ev("src/apm_cli/commands/update.py", 560, "No APM dependencies to update"),
             Ev("src/apm_cli/core/command_logger.py", 297, "Nothing to prune"),
             Ev("src/apm_cli/integration/canvas_integrator.py", 5, ".apm/extensions/"),

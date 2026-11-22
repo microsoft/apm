@@ -731,3 +731,80 @@ def test_uninstall_bundle_path_without_dot_slash(tmp_path: Path, apm_binary_path
     text = output(world.apm(consumer, "uninstall", rel))
     assert "Removed hooks from local bundle 'hookpkg'" in text, text
     assert _hook_entries(consumer) == {}
+
+
+def test_uninstall_bundle_refuses_a_linked_hook_config_root(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a symlinked root of a target outside the manifest is refused, not rewritten."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "linked-root-consumer", key)
+    (consumer / ".gemini").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,gemini")
+    assert "local-bundle::hookpkg" in (consumer / ".gemini" / "apm-hooks.json").read_text()
+    outside = tmp_path / "outside-gemini"
+    shutil.move(str(consumer / ".gemini"), outside)
+    (consumer / ".gemini").symlink_to(outside, target_is_directory=True)
+    before, outside_before = tree_bytes(consumer), tree_bytes(outside)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "Local bundle hooks were not removed: .gemini/settings.json (linked path)" in refused
+    assert "no changes were made" in refused, refused
+    assert tree_bytes(consumer) == before
+    assert tree_bytes(outside) == outside_before
+
+
+def test_uninstall_bundle_refuses_a_symlinked_lockfile_before_removing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a lockfile APM cannot rewrite stops the uninstall before any removal."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "linked-lock-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    real_lock = tmp_path / "real-apm.lock.yaml"
+    shutil.move(str(consumer / "apm.lock.yaml"), real_lock)
+    (consumer / "apm.lock.yaml").symlink_to(real_lock)
+    before, lock_bytes = tree_bytes(consumer), real_lock.read_bytes()
+
+    refused = world.apm(consumer, "uninstall", str(bundle), expect=1)
+    assert "symbolic link" in output(refused), output(refused)
+    assert tree_bytes(consumer) == before
+    assert real_lock.read_bytes() == lock_bytes
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+
+
+def test_uninstall_bundle_refuses_when_a_hook_config_is_unreadable(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: an unreadable hook config on any target cannot confirm removal."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "unreadable-consumer", key)
+    (consumer / ".gemini").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,gemini")
+    write(consumer / ".gemini" / "apm-hooks.json", "{not json")
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert ".gemini/apm-hooks.json (unreadable)" in refused, refused
+    assert "Removed hooks" not in refused, refused
+    assert tree_bytes(consumer) == before
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+
+
+def test_uninstall_bundle_leaves_an_unrelated_sidecar_byte_identical(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a hook sidecar with no record for the bundle is never rewritten."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "unrelated-sidecar-consumer", key)
+    (consumer / ".github").mkdir()
+    sidecar = write(consumer / ".github" / "apm-hooks.json", '{"local-bundle-hooks":[]}')
+    world.apm(consumer, "install", str(bundle), "--target", "claude")
+
+    world.apm(consumer, "uninstall", str(bundle))
+    assert _hook_entries(consumer) == {}
+    assert sidecar.read_bytes() == b'{"local-bundle-hooks":[]}'

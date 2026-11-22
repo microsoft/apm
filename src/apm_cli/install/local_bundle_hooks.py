@@ -206,8 +206,11 @@ def _retire_bundle_hooks(
     slug: str,
     *,
     scope: Any,
-) -> bool:
-    """Retire what this bundle deployed earlier through the hook trust owner (#4216)."""
+) -> Any:
+    """Retire what this bundle deployed earlier through the hook trust owner (#4216).
+
+    The owner's result is truthy when the bundle had deployed hooks.
+    """
     from ..core.scope import InstallScope, get_apm_dir
     from .local_bundle_hook_trust import retire_bundle_hooks
 
