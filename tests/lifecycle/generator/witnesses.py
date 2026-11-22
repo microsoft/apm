@@ -269,11 +269,13 @@ class Witness:
 
 
 def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
-    """Obligation id -> its machine witness (the first spine, by node, that implies it).
+    """Obligation id -> its machine witness (the first spine, by node, that passes it).
 
-    Receipts of passing machine ids discharge the obligation; when every
-    implying id of that spine is a strict known cell, the obligation is
-    known-failing with the first owning issue.
+    Receipts of passing machine ids discharge the obligation, so the witness is
+    the first spine with a passing implying id; one spine whose ids are all
+    strict known cells never hides another spine's proof. Only when every
+    implying id of every spine is a strict known cell is the obligation
+    known-failing, with the first spine's first owning issue.
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
@@ -282,12 +284,15 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
-        node = sorted(nodes)[0]
-        cells = nodes[node]
-        passing = tuple(sorted(cell.id for cell in cells if cell.tracking is None))
-        if passing:
-            witnesses[key] = Witness(node, cells[0].lane, passing)
+        for node in sorted(nodes):
+            cells = nodes[node]
+            passing = tuple(sorted(cell.id for cell in cells if cell.tracking is None))
+            if passing:
+                witnesses[key] = Witness(node, cells[0].lane, passing)
+                break
         else:
+            node = sorted(nodes)[0]
+            cells = nodes[node]
             issues = sorted(str(cell.tracking) for cell in cells)
             witnesses[key] = Witness(
                 node, cells[0].lane, tuple(sorted(c.id for c in cells)), issues[0]
