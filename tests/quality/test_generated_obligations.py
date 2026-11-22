@@ -20,7 +20,11 @@ from pathlib import Path
 import pytest
 
 from tests.lifecycle import obligation_space, oracles, receipts
-from tests.lifecycle.machines._gate_matrix import mcp_install_problems
+from tests.lifecycle.machines._gate_matrix import (
+    UMKT_LEVELS,
+    mcp_install_problems,
+    umkt_ready,
+)
 from tests.lifecycle.obligations import (
     GENERATED_PATH,
     Obligation,
@@ -366,3 +370,11 @@ def test_mcp_install_oracle_rejects_no_ops_and_collateral(
         before,
     )
     assert faithful == []
+
+
+@pytest.mark.parametrize("dropped", sorted(UMKT_LEVELS))
+def test_u_mkt_is_uncovered_when_either_gate_level_probe_is_dropped(dropped: str) -> None:
+    """Negative control: the U-MKT rule cell needs both witness levels, not one."""
+    assert umkt_ready(UMKT_LEVELS)
+    assert not umkt_ready(UMKT_LEVELS - {dropped})
+    assert not umkt_ready(UMKT_LEVELS - {dropped} | {"unapproved-exec", "none"})

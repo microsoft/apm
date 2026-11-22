@@ -104,6 +104,7 @@ POLICY_VARIANTS = (
     "garbage_response",
     "cached_stale",
     "deny-all-deps",
+    "mcp-deny-all",
     "allow-list",
 )
 DENIED_PACKAGE = "p-exec"
@@ -148,6 +149,9 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
         },
         "exec-deny-all": {"name": "exec-deny-all", **base, "executables": {"deny_all": True}},
         "mcp-deny": {"name": "mcp-deny", **base, "mcp": {"deny": ["*"]}},
+        # ``*`` stays within one segment (policy/matcher.py); ``**`` also denies
+        # namespaced registry servers such as io.github.lifecycle/p-registry.
+        "mcp-deny-all": {"name": "mcp-deny-all", **base, "mcp": {"deny": ["**"]}},
         # The project pins a different hash (``use_policy``); the served bytes are benign.
         "hash-mismatch": {"name": "hash-mismatch", **base},
         "deny-lsp": {

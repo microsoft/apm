@@ -326,6 +326,43 @@ def test_dependency_unique_key_cannot_drop_the_port(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)",
+            'any("://" in path for dep in dependencies for path in dep.deployed_files)',
+            id="loader-rederives-verdict",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.add_dependency(dep, project_ledger=project_per_row)",
+            "lock.add_dependency(dep, project_ledger=False)",
+            id="loader-hardcodes-skip",
+        ),
+        pytest.param(
+            "src/apm_cli/core/legacy_lock_evidence.py",
+            "cls._legacy_locator(path).kind is LocatorKind.URI",
+            '"://" in path',
+            id="codec-rederives-uri-locator",
+        ),
+    ],
+)
+def test_lockfile_load_row_projection_routes_through_ledger_codec(
+    path: str, original: str, replacement: str
+) -> None:
+    """Skipping per-row legacy projection on load is the ledger codec's decision (#4733)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-provenance-state"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -843,9 +880,23 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             id="raw-path-replace",
         ),
         pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    atomic_io.atomic_copy(source_file, target_file)\n",
+            id="raw-atomic-copy-call",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            from apm_cli.utils.atomic_io import atomic_copy\n\n"
+            "            atomic_copy(src, dest, metadata=False)\n",
+            id="raw-atomic-copy-import",
+        ),
+        pytest.param(
             "src/apm_cli/integration/write_seam.py",
-            "    record_before_write(destination, follow=True)\n    return shutil.copy2(",
-            "    return shutil.copy2(",
+            "    record_before_write(destination, follow=True)\n"
+            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
             id="seam-writer-skips-record",
         ),
         pytest.param(

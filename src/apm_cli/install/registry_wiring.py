@@ -84,6 +84,17 @@ def validate_registry_ref(dep_ref: Any) -> tuple[bool, str]:
     from ..models.dependency.identity import InvalidSemverRangeError
 
     ref = getattr(dep_ref, "reference", None)
+    if not ref and getattr(dep_ref, "source", None) == "registry":
+        # Explicitly registry-routed (an ``id:``/``registry:`` entry or a
+        # catalog entry with ``registry:``): there is no Git path to fall back to.
+        repo = getattr(dep_ref, "repo_url", None) or "the package"
+        registry = getattr(dep_ref, "registry_name", None)
+        where = f" in registry '{registry}'" if registry else ""
+        return False, (
+            f"version selector required: '{repo}' routes to a package registry{where} "
+            f"but names no version. The catalog entry or apm.yml entry must name "
+            f"a version selector (e.g. '^1.0.0')"
+        )
     if not ref:
         repo = getattr(dep_ref, "repo_url", None) or ""
         hint = f"'{repo}#1.0.0'" if repo else "owner/repo#1.0.0"

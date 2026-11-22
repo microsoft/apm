@@ -1283,6 +1283,7 @@ def _check_registry_source(
     deps: list[DependencyReference],
     policy: RegistrySourcePolicy,
     registries_map: dict[str, str] | None,
+    lockfile=None,
 ) -> CheckResult:
     """Check registry source policy (require / allow_non_registry).
 
@@ -1311,6 +1312,15 @@ def _check_registry_source(
         key = dep.get_canonical_dependency_string()
         is_registry = getattr(dep, "source", None) == "registry"
         registry_name = getattr(dep, "registry_name", None)
+        if is_registry and registry_name is None and lockfile is not None:
+            # A replayed row (for example a registry-routed catalog entry,
+            # #4009) names no registry; judge it by the configured registry
+            # that owns its locked URL, as its download does.
+            from ..deps.registry.auth import dependency_ref_with_registry_name_from_lockfile
+
+            registry_name = dependency_ref_with_registry_name_from_lockfile(
+                dep, registries_map or {}, existing_lockfile=lockfile
+            ).registry_name
 
         reason = None
         if not policy.allow_non_registry and not is_registry:
@@ -1777,7 +1787,7 @@ def run_dependency_policy_checks(  # noqa: PLR0913
     # Collect all remaining checks into a single loop so the function
     # stays within the max-returns threshold.
     remaining_checks: list[CheckResult] = [
-        _check_registry_source(deps_list, policy.registry_source, registries),
+        _check_registry_source(deps_list, policy.registry_source, registries, lockfile),
         # Pinned-constraint: property check on declared refs. Cheap
         # (O(N) string classification, no I/O) so it always runs.
         # When direct_dep_keys is supplied, restrict to direct deps -- a

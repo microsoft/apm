@@ -33,7 +33,7 @@ from tests.lifecycle.generator.factors import (
     compile_staged_targets,
     row_targets,
 )
-from tests.lifecycle.generator.rules import RULES
+from tests.lifecycle.generator.rules import RULES, SCENARIO_REFUSALS
 from tests.lifecycle.generator.space import Entry, Space, build_space
 from tests.lifecycle.generator.witnesses import machine_witnesses, scenario_witnesses
 
@@ -71,7 +71,7 @@ def lane_for(entry: Entry) -> str:
         (cell.get("SCOPE") == "user" or "LOCK" in cell or cell.get("DEPLOYED") == "absent", "T-3"),
         (cell.get("GATE") == "denied-dependency" or "NOPOLICY" in cell, "T-7b"),
         (cell.get("DEPLOYED") in ("edited", "unowned", "present-provenance-unknown"), "T-6b"),
-        (cell.get("TGT", "").endswith(("widened", "narrowed")), "T-6a"),
+        (cell.get("TGT", "").endswith(("widened", "narrowed", "changed")), "T-6a"),
         (cell.get("NET") == "offline", "T-6e"),
         ("SRC" in cell or cell.get("OP") in ("marketplace", "bundle-install"), "T-2"),
         ("GATE" in cell or "PRIM" in cell, "T-1"),
@@ -215,6 +215,9 @@ def _build() -> tuple[dict[str, Any], dict[str, object], dict[str, str]]:
                 record["tracking"] = machine.tracking
             else:
                 statuses[key] = "required"
+        elif key in SCENARIO_REFUSALS:
+            statuses[key], lanes[key] = "required", lane_for(entry)
+            record["witness"] = SCENARIO_REFUSALS[key]
         elif key in scenarios:
             scenario = scenarios[key]
             lanes[key] = scenario.lane

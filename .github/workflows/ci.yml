@@ -375,6 +375,7 @@ jobs:
           tests/quality/test_journey_index.py \
           tests/quality/test_generated_obligations.py \
           tests/quality/test_oracle_user_writes.py \
+          tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
 
   test-architecture-scaling:
@@ -535,6 +536,7 @@ jobs:
         include-hidden-files: true
         retention-days: 7
         if-no-files-found: ignore
+        overwrite: true
 
   # Coverage combine + global 80% gate.
   #
@@ -829,6 +831,7 @@ jobs:
         path: build/gate-cells/
         retention-days: 3
         if-no-files-found: ignore
+        overwrite: true
 
   lifecycle-smoke-shard-2:
     name: Lifecycle Smoke Shard 2 (Linux)
