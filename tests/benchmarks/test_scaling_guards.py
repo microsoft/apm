@@ -188,10 +188,9 @@ class TestChildrenIndexScaling:
             f"_build_children_index did {counts[500]} operations for 500 deps and "
             f"{counts[50]} for 50, an O(n^2) regression"
         )
-
-    def test_a_seeded_quadratic_index_fails_the_guard(self):
-        counts = _children_index_operation_counts(_seeded_quadratic_children_index)
-        assert not _grows_linearly(counts), counts
+        # Negative control: the same index built quadratically fails the guard.
+        seeded = _children_index_operation_counts(_seeded_quadratic_children_index)
+        assert not _grows_linearly(seeded), seeded
 
 
 # ---------------------------------------------------------------------------
