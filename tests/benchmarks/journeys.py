@@ -212,6 +212,31 @@ def _traffic(world) -> dict:
     return traffic if isinstance(traffic, dict) else traffic.as_dict()
 
 
+def _observations(world) -> tuple:
+    """Requests the offline mirror saw (empty for the real-network tunnel)."""
+    services = getattr(world, "services", None)
+    return services.proxy.observations if services is not None else ()
+
+
+def _route(observation) -> str:
+    """``METHOD host /coarse/path``: owner, repo and ref segments collapsed to ``*``."""
+    parts = [p for p in observation.path.split("/") if p]
+    if parts[:1] == ["repos"] and len(parts) > 3:
+        parts = ["repos", "*", "*", parts[3]] + (["*"] if len(parts) > 4 else [])
+    elif parts and parts[-1] in ("refs", "git-upload-pack", "git-receive-pack"):
+        parts = ["*", *parts[-2:]] if parts[-1] == "refs" else ["*", parts[-1]]
+    return f"{observation.method} {observation.host} /{'/'.join(parts)}"
+
+
+def _routes(observations) -> dict[str, int]:
+    routes: dict[str, int] = {}
+    for observation in observations:
+        if observation.method != "CONNECT":
+            route = _route(observation)
+            routes[route] = routes.get(route, 0) + 1
+    return dict(sorted(routes.items(), key=lambda kv: -kv[1]))
+
+
 # -- journeys ------------------------------------------------------------------
 
 
@@ -472,6 +497,7 @@ class Sample:
     cpu_s: float = 0.0
     spawns: dict = field(default_factory=dict)
     modules: int = 0
+    routes: dict = field(default_factory=dict)
 
 
 def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
@@ -491,6 +517,7 @@ def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     ctx.world.reset_traffic()
+    seen = len(_observations(ctx.world))
     if ctx.spawn_log is not None:
         ctx.spawn_log.unlink(missing_ok=True)
     output = ""
@@ -508,6 +535,7 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     spawns, modules = _read_spawn_log(ctx.spawn_log)
     sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
     sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.routes = _routes(_observations(ctx.world)[seen:])
     return sample, output
 
 
@@ -581,6 +609,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "traffic": samples[-1].traffic if samples else {},
         "spawns": ok[-1].spawns if ok else {},
         "modules": ok[-1].modules if ok else 0,
+        "routes": ok[-1].routes if ok else {},
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -855,6 +884,15 @@ def render_markdown(report: dict) -> str:
             f"| {_spawn_cell(r.get('spawns'))} | {r.get('modules') or '-'} | {load_range} "
             f"| {'yes' if r['error'] else ''} |"
         )
+    routed = [r for r in report["results"] if r.get("routes")]
+    if routed:
+        lines += ["", "## Requests by route (last valid sample)", ""]
+        lines += ["| fixture | rtt ms | journey | route | count |", "|---|---|---|---|---|"]
+        for r in routed:
+            for route, count in r["routes"].items():
+                lines.append(
+                    f"| {r['fixture']} | {r['rtt_ms']:g} | {r['journey']} | `{route}` | {count} |"
+                )
     lines += _scaling(report)
     return "\n".join(lines) + "\n"
 
