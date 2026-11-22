@@ -70,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --frozen` and `apm audit --ci` accept a monorepo library referenced as `./packages/lib` from the root and `../lib` from a sibling. (closes #4731, #4739)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4620)
 - `apm uninstall` keeps a skill-directory file another installed package still deploys, rechecking each file right before removing it. (closes #4750, #4752)
+- `apm uninstall` keeps a dependency another installed package still needs, so `apm install --frozen` keeps passing. (closes #4749, #4765)
 - `apm uninstall` no longer writes `apm.yml` or `.apm/` into a surviving local dependency's source directory; it validates a staged copy. (closes #4566, #4649)
 - `apm uninstall` after a target change no longer deploys unrecorded files to the new target; it says to run `apm install` instead. (closes #4636, #4663)
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content. (closes #4556, #4580)
