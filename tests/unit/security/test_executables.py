@@ -911,6 +911,29 @@ def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_file
 
 
 @pytest.mark.parametrize(
+    ("env", "deployed_file"),
+    [
+        pytest.param({}, ".copilot/skills/p/bin/tool", id="copilot-user-legacy-root"),
+        pytest.param(
+            {"CLAUDE_CONFIG_DIR": "{home}/.config/test-claude"},
+            ".config/test-claude/skills/p/bin/tool",
+            id="claude-relocated-user-root",
+        ),
+    ],
+)
+def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, deployed_file):
+    """#4567: bin/ under a user-scope skills root, relocated homes included, counts."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value.format(home=tmp_path))
+
+    assert ex.rebuild_retired_kinds(("hooks", "bin"), {"hooks", "bin"}, [deployed_file]) == (
+        "hooks",
+        "bin",
+    )
+
+
+@pytest.mark.parametrize(
     ("kinds", "expected"),
     [
         (("hooks",), "hooks"),

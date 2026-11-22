@@ -71,13 +71,23 @@ EXEC_KIND_LABELS = {
 
 
 def _skill_roots() -> tuple[tuple[str, ...], ...]:
-    """Every static skills root a target deploys to, in either skill layout."""
-    from ..integration.skill_layout import with_every_skill_layout
-    from ..integration.targets import KNOWN_TARGETS
+    """Every static skills root a target deploys to: both scopes, both skill layouts.
 
+    User scope honours relocated homes (``CLAUDE_CONFIG_DIR`` and friends)
+    through the target-root owner, so recorded home-relative paths match.
+    """
+    from ..integration.skill_layout import with_every_skill_layout
+    from ..integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    profiles = []
+    for profile in KNOWN_TARGETS.values():
+        profiles.append(profile)
+        user_profile = scoped_profile_or_none(profile, user_scope=True)
+        if user_profile is not None:
+            profiles.append(user_profile)
     roots = {
         profile.skills_rel_root
-        for profile in with_every_skill_layout(KNOWN_TARGETS.values())
+        for profile in with_every_skill_layout(profiles)
         if profile.supports("skills") and profile.user_root_resolver is None
     }
     return tuple(tuple(root.split("/")) for root in roots)
