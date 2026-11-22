@@ -7719,8 +7719,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[git]"
   },
   "T3|OP=compile|SRC=git|PRIM=skill": {
    "family": "T3",
@@ -7868,8 +7869,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[marketplace-git]"
   },
   "T3|OP=compile|SRC=marketplace-git|PRIM=skill": {
    "credited_by": [
@@ -7941,8 +7943,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[native-plugin]"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=skill": {
    "credited_by": [
