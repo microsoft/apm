@@ -133,6 +133,22 @@ def enforce_declared_policy(
     )
 
 
+def enforce_explicit_policy_without_deps(
+    project_root: Any, apm_package: Any, logger: Any, *, dry_run: bool = False
+) -> None:
+    """Route a named ``--policy`` source when no APM dependency gate runs (#1925).
+
+    Without APM dependencies the install pipeline and its policy gate never
+    run, so an unloadable explicit source would pass silently. This loads and
+    routes it (failing closed) before any write.
+    """
+    from apm_cli.policy.explicit_source import explicit_source_needs_standalone_check
+
+    if not explicit_source_needs_standalone_check(apm_package):
+        return
+    enforce_declared_policy(project_root, [], None, logger, dry_run=dry_run)
+
+
 def install_pipeline_options(
     ctx: Any, outcome: Any, *, logger: Any, install_mcp: bool, lsp_preflight: Any
 ) -> dict[str, Any]:

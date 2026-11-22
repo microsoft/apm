@@ -25,12 +25,14 @@ import shutil
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
+    Known,
     Scenario,
     Tree,
     assert_changes,
     serve_repository,
 )
 from tests.lifecycle.world import use_policy
+from tests.lifecycle.world.packages import LSP_SERVER
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
@@ -228,3 +230,25 @@ def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -
     )
     assert "o-mcp-mcp" not in _mcp_servers(lifecycle_world.project)
     _survives(scenario, tree, "MCP-only uninstall", "p-exec-mcp")
+
+
+def test_a_users_lsp_entry_is_never_taken_over(lifecycle_world) -> None:
+    """T-6b ``pair|PRIM=lsp|DEPLOYED=unowned`` (#4628): install keeps the user's entry."""
+    scenario, tree = _start(lifecycle_world, ("p-lsp",))
+    servers = {"lspServers": {LSP_SERVER: {"command": "mine"}, "user-lsp": {"command": "u"}}}
+    scenario.user_write(".github/lsp.json", json.dumps(servers, indent=2) + "\n")
+    scenario.run("install p-lsp")
+    scenario.run("approve p-lsp")
+
+    # The first failing install still commits the dependency row it resolved, as
+    # the MCP native-conflict path does (#4282); the rerun changes nothing.
+    known = {"I7": Known("#4282", r"failed install changed the lockfile")}
+    for line, cells in (("install", known), ("install --force", None)):
+        step = scenario.run(line, exit=1, known=cells)
+        assert f"LSP server '{LSP_SERVER}' conflicts with the existing" in step.output, line
+        assert "Preserved that entry" in step.output, line
+        tree.assert_intact(line)
+    assert_changes(step.changed, (), label="rerun")
+    lock = scenario.lock_path.read_text(encoding="utf-8")
+    assert LSP_SERVER not in lock, "the lock claims the user's entry"
+    scenario.finish()

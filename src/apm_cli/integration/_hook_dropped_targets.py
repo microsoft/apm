@@ -41,6 +41,7 @@ import json
 from pathlib import Path
 
 from apm_cli.core.remediation import HOOK_CONFIG_UNREADABLE, HOOK_SIDECAR_UNREADABLE
+from apm_cli.integration import write_seam
 from apm_cli.utils.console import _rich_warning
 
 from . import hook_integrator as _hi
@@ -121,7 +122,7 @@ def _reconcile_sidecar_only_orphan(sidecar_path: Path, stats: dict[str, int]) ->
         )
         return
     try:
-        sidecar_path.unlink()
+        write_seam.unlink(sidecar_path)
         stats["files_removed"] += 1
     except OSError as exc:
         stats["errors"] += 1
