@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import subprocess
 import time
@@ -379,9 +378,10 @@ def _mcp_collision_world(tmp_path: Path, apm_binary_path: Path) -> tuple[FaultWo
     return world, foreign
 
 
-def test_a_partial_mcp_collision_reports_each_write_and_records_what_reached_disk(
+def test_a_colliding_mcp_install_is_refused_before_any_file_is_written(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
+    """The install preflight finds the collision, so nothing reaches disk (#4268)."""
     world, foreign = _mcp_collision_world(tmp_path, apm_binary_path)
     original = foreign.read_bytes()
 
@@ -389,33 +389,14 @@ def test_a_partial_mcp_collision_reports_each_write_and_records_what_reached_dis
     output = " ".join((result.stdout + result.stderr).split())
 
     assert result.returncode != 0, evidence(result)
-    assert foreign.read_bytes() == original
     assert "conflicts with the existing claude connection" in output, evidence(result)
-    assert "beta-srv -> Codex CLI (configured)" in output, evidence(result)
     assert "MCP installation incomplete: beta-srv (claude)" in output, evidence(result)
-    assert not re.search(r"\bInstalled \d+", output), evidence(result)
-    lock = LockFile.read(world.project / "apm.lock.yaml")
-    assert lock is not None, evidence(result)
-    assert lock.mcp_target_servers == {"codex": ["beta-srv"]}, evidence(result)
-    recorded = {
-        path for dep in lock.get_package_dependencies() for path in dep.deployed_file_hashes
-    }
-    assert ".claude/agents/alpha.md" in recorded, evidence(result)
-    assert all((world.project / path).exists() for path in recorded), evidence(result)
-
-
-@pytest.mark.xfail(strict=True, reason="#4268: MCP collisions are detected at the MCP write")
-def test_a_colliding_mcp_install_is_refused_before_any_file_is_written(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    world, _foreign = _mcp_collision_world(tmp_path, apm_binary_path)
-
-    result = world.install("--target", "claude,codex")
-
-    assert result.returncode != 0, evidence(result)
+    assert "Codex CLI (configured)" not in output, evidence(result)
+    assert foreign.read_bytes() == original
     assert world.lockfile_bytes() is None, evidence(result)
     assert not (world.project / ".claude/agents").exists(), evidence(result)
     assert not (world.project / ".codex/config.toml").exists(), evidence(result)
+    assert not (Path(world.env["CODEX_HOME"]) / "config.toml").exists(), evidence(result)
 
 
 def test_dry_run_waits_for_a_running_install(tmp_path: Path, apm_binary_path: Path) -> None:
