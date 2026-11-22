@@ -157,16 +157,13 @@ def test_installed_global_prune_intersects_each_targets_ownership(
     _seed(scenario, "cursor", {})
     _seed(scenario, "opencode", {"obsolete": foreign})
     _write_root(scenario, [_server("obsolete"), _server("keep")])
-    # Recorded first on cursor, so the opencode collision reaches the MCP write,
-    # which keeps the cursor claim (#4268 refuses only unrecorded servers early).
+    # Owned on cursor first; the opencode collision then refuses before any
+    # write (#4741), so the lock keeps only the cursor claims.
     first = scenario.run("install", "-g", "--target", "cursor", "--no-policy")
     assert first.returncode == 0, first.stdout + first.stderr
     install = ("install", "-g", "--target", "cursor,opencode", "--no-policy")
     _conflict(scenario.run(*install), "obsolete")
-    assert scenario.lock().mcp_target_servers == {
-        "cursor": ["keep", "obsolete"],
-        "opencode": ["keep"],
-    }
+    assert scenario.lock().mcp_target_servers == {"cursor": ["keep", "obsolete"]}
     _write_root(scenario, [_server("keep")])
     assert scenario.run(*install).returncode == 0
     assert "obsolete" not in _servers(scenario, "cursor")

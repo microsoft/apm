@@ -362,7 +362,12 @@ def test_home_allowlist_admits_only_exact_ancestors(tmp_path: Path) -> None:
 def _native_after(
     tmp_path: Path, managed: set[str], *, user_scope: bool = True, recorded_name: str = "tool"
 ) -> Observation:
-    """A user deploy root with one native plugin root recorded by its lock (#4225)."""
+    """A deploy root with one native plugin root recorded by its lock (#4225, #3921).
+
+    The record carries the per-machine digest at user scope and the portable
+    path-and-bytes digest at project scope.
+    """
+    from apm_cli.claude_plugins.admission import fingerprint_native_claude_source
     from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.native_plugins.record import NativePluginRecord
     from apm_cli.utils.content_hash import compute_native_plugin_hash
@@ -375,7 +380,9 @@ def _native_after(
     dependency = LockedDependency(repo_url="fixture/tool")
     dependency.native_plugin = NativePluginRecord(
         recorded_name,
-        compute_native_plugin_hash(root),
+        compute_native_plugin_hash(root)
+        if user_scope
+        else fingerprint_native_claude_source(root, portable=True),
         "apm-fixture",
         str(tmp_path / ".agents/plugins"),
     )
@@ -398,7 +405,7 @@ def test_i1_counts_paths_under_a_verified_native_plugin_root_as_recorded(tmp_pat
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"})
     _expect_i1(after, [])
     project = _native_after(tmp_path / "p", {".agents/plugins/tool/bin/tool"}, user_scope=False)
-    _expect_i1(project, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+    _expect_i1(project, [])
 
 
 def test_i1_fails_a_native_plugin_root_that_differs_from_its_record(tmp_path: Path) -> None:

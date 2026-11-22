@@ -30,6 +30,8 @@ from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 from apm_cli.utils import themed_console
 from tests.conftest import _reset_console_state
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

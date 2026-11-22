@@ -8,6 +8,7 @@ import pytest
 
 from apm_cli.models.dependency import DependencyReference
 from apm_cli.utils.path_security import (
+    CheckRoot,
     PathTraversalError,
     ensure_path_within,
     resolve_for_containment,
@@ -238,3 +239,110 @@ class TestResolvedContainment:
         assert resolved_relative_within(escaped, base) is None
         with pytest.raises(PathTraversalError):
             ensure_path_within(tmp_path / "base" / "link" / "f.md", tmp_path / "base")
+
+
+class TestCheckRoot:
+    """CheckRoot.resolve equals a full resolve; it only skips re-walking the root prefix."""
+
+    def _tree(self, tmp_path: Path) -> Path:
+        root = tmp_path / "project"
+        (root / "a" / "b").mkdir(parents=True)
+        (root / "a" / "b" / "f.md").write_text("f\n", encoding="utf-8")
+        (tmp_path / "outside").mkdir()
+        (tmp_path / "outside" / "g.md").write_text("g\n", encoding="utf-8")
+        return root
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_matches_full_resolution_for_every_shape(self, tmp_path: Path) -> None:
+        root = self._tree(tmp_path)
+        (root / "link").symlink_to(tmp_path / "outside", target_is_directory=True)
+        (root / "a" / "inner").symlink_to(root / "a" / "b", target_is_directory=True)
+        check = CheckRoot(root)
+        shapes = [
+            root / "a" / "b" / "f.md",
+            root / "link" / "g.md",
+            root / "a" / "inner" / "f.md",
+            root / "a" / ".." / "a" / "b" / "f.md",
+            root / "a" / "missing" / "x.md",
+            tmp_path / "outside" / "g.md",
+            Path("relative") / "x.md",
+        ]
+
+        for shape in shapes:
+            assert check.resolve(shape) == resolve_for_containment(shape), shape
+        assert check.resolve(root / "link" / "g.md").read_text(encoding="utf-8") == "g\n"
+        assert not check.within(check.resolve(root / "link" / "g.md"), root)
+        assert check.within(check.resolve(root / "a" / "inner" / "f.md"), root / "a")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_suffix_link_planted_after_the_root_was_resolved_is_followed(
+        self, tmp_path: Path
+    ) -> None:
+        root = self._tree(tmp_path)
+        check = CheckRoot(root)
+        (root / "late").symlink_to(tmp_path / "outside", target_is_directory=True)
+
+        resolved = check.resolve(root / "late" / "g.md")
+
+        assert resolved == resolve_for_containment(tmp_path / "outside" / "g.md")
+        assert resolved.read_text(encoding="utf-8") == "g\n"
+        assert not check.within(resolved, root)
+
+
+class TestCheckRootMatrix:
+    """Parity with a full resolve for every link position, and root swaps (W4 / Copilot)."""
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_leaf_link_file_as_dir_symlinked_root_and_dotdot_root(self, tmp_path: Path) -> None:
+        real = tmp_path / "real"
+        (real / "a").mkdir(parents=True)
+        (real / "a" / "f.md").write_text("f\n", encoding="utf-8")
+        (tmp_path / "outside.md").write_text("out\n", encoding="utf-8")
+        (real / "a" / "leaf.md").symlink_to(tmp_path / "outside.md")
+        (tmp_path / "linkroot").symlink_to(real, target_is_directory=True)
+        roots = [real, tmp_path / "linkroot", tmp_path / "x" / ".." / "real"]
+        (tmp_path / "x").mkdir()
+
+        for root in roots:
+            check = CheckRoot(root)
+            for shape in (root / "a" / "leaf.md", root / "a" / "f.md" / "x", root / "a" / "f.md"):
+                assert check.resolve(shape) == resolve_for_containment(shape), (root, shape)
+            leaf = check.resolve(root / "a" / "leaf.md")
+            assert leaf.read_text(encoding="utf-8") == "out\n"
+            assert not check.within(leaf, root)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_retargeted_root_link_is_seen_by_the_next_check(self, tmp_path: Path) -> None:
+        for name in ("A", "B"):
+            (tmp_path / name / "a").mkdir(parents=True)
+            (tmp_path / name / "a" / "f.md").write_text(f"{name}\n", encoding="utf-8")
+        root = tmp_path / "root"
+        root.symlink_to(tmp_path / "A", target_is_directory=True)
+        first = CheckRoot(root).resolve(root / "a" / "f.md")
+        root.unlink()
+        root.symlink_to(tmp_path / "B", target_is_directory=True)
+
+        second = CheckRoot(root).resolve(root / "a" / "f.md")
+
+        assert first.read_text(encoding="utf-8") == "A\n"
+        assert second.read_text(encoding="utf-8") == "B\n"
+        assert second == resolve_for_containment(root / "a" / "f.md")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+    def test_root_swapped_within_one_check_falls_back_to_full_resolution(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "project"
+        (root / "a").mkdir(parents=True)
+        (root / "a" / "f.md").write_text("inside\n", encoding="utf-8")
+        (tmp_path / "evil" / "a").mkdir(parents=True)
+        (tmp_path / "evil" / "a" / "f.md").write_text("evil\n", encoding="utf-8")
+        check = CheckRoot(root)
+        root.rename(tmp_path / "project.bak")
+        root.symlink_to(tmp_path / "evil", target_is_directory=True)
+
+        resolved = check.resolve(root / "a" / "f.md")
+
+        assert resolved == resolve_for_containment(root / "a" / "f.md")
+        assert resolved.read_text(encoding="utf-8") == "evil\n"
+        assert resolved_relative_within(resolved, check.resolved) is None
