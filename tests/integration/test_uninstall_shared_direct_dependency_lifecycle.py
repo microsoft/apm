@@ -235,3 +235,19 @@ def test_uninstall_under_a_dev_only_parent_moves_the_subtree_to_dev(
     assert rows["test/e"].get("is_dev") is True
     assert rows["test/f"].get("is_dev") is True
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_tie_rule_spans_production_and_dev_parents(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4804: production b and dev a both need e; install's tie ignores dev status."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("b", "e"), ("a", "e")),
+        ["test/b", "test/e"],
+        dev=["test/a"],
+    )
+    world.apm("uninstall", "test/e")
+    assert not _rows(world)["test/e"].get("is_dev")
+    _assert_install_rewrites_nothing(world)

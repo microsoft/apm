@@ -127,19 +127,20 @@ class DeclaredSelections:
 class _NearestParents:
     """Record each node's parent by the install resolver's nearest-parent rule.
 
-    The first edge to reach a node is its shallowest (the walk is breadth
-    first, production before dev); a later edge at the same depth and dev
-    status replaces it only with a lower parent key, so a repaired
-    ``resolved_by`` matches what a fresh install records (#4804).
+    Like the resolver, the nearest declaring parent wins and equal depths go
+    to the lowest parent key, whatever each path's dev status: the walk
+    drains production before dev, so a shorter or lower-keyed dev edge
+    still replaces an earlier production one. A repaired ``resolved_by``
+    then matches what a fresh install records (#4804).
     """
 
     def __init__(self, reachable_via: dict[str, tuple[str, str | None]]):
         self._reachable_via = reachable_via
-        self._ranks: dict[str, tuple[bool, int, str]] = {}
+        self._ranks: dict[str, tuple[int, str]] = {}
 
-    def offer(self, key: str, rank: tuple[bool, int, str], via: tuple[str, str | None]) -> None:
+    def offer(self, key: str, rank: tuple[int, str], via: tuple[str, str | None]) -> None:
         current = self._ranks.get(key)
-        if current is None or (rank[:2] == current[:2] and rank[2] < current[2]):
+        if current is None or rank < current:
             self._ranks[key] = rank
             self._reachable_via[key] = via
 
@@ -377,7 +378,7 @@ def compute_forward_reachable_keys(
             if matched_key is not None and parent_repo_url is not None:
                 parent_ranks.offer(
                     matched_key,
-                    (is_dev, len(chain), parent_repo_url),
+                    (len(chain), parent_repo_url),
                     (parent_repo_url, None if ref.replacement is not None else ref.local_path),
                 )
             if visit_key in visited:
@@ -413,7 +414,7 @@ def compute_forward_reachable_keys(
                 # Remote deps don't use anchored local_path -- only
                 # resolved_by needs repairing for these.
                 parent_ranks.offer(
-                    visit_key, (is_dev, len(chain), parent_repo_url), (parent_repo_url, None)
+                    visit_key, (len(chain), parent_repo_url), (parent_repo_url, None)
                 )
             if visit_key in visited:
                 continue

@@ -157,12 +157,13 @@ def _split_removals(
 def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
     """Re-parent each still-needed row, then re-derive its subtree's depth and dev status."""
     updated = False
-    for key, (parent, local_path, dev_only) in repair.parents.items():
+    # Dev status comes only from ``repair.dev``: a partial walk proves
+    # production paths, never their absence.
+    for key, (parent, local_path, _dev_only) in repair.parents.items():
         kept = lockfile.get_dependency(key)
         if kept is None:
             continue
         kept.resolved_by = parent
-        kept.is_dev = dev_only
         if local_path is not None:
             kept.local_path = local_path
         if kept.replacement is not None:
