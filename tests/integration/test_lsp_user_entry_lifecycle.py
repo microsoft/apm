@@ -170,3 +170,42 @@ def test_a_bundle_records_what_it_wrote_before_failing_on_a_user_lsp_entry(
     assert lock["lsp_target_servers"] == {"copilot": ["other-lsp"]}
     deployed = json.dumps(lock.get("local_deployed_files") or lock)
     assert "b-skill" in deployed, "the bundle's deployed files went unrecorded"
+
+
+def test_an_mcp_write_stays_recorded_when_a_user_lsp_entry_conflicts(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4697: the LSP refusal must not discard the record of an MCP write it follows."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "lsp-mcp", base_env=dict(os.environ))
+    project = (
+        LocalPackageFactory(isolated.work_root)
+        .create(
+            "consumer",
+            mcp_dependencies=(
+                {
+                    "name": "my-mcp",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "my-mcp-server",
+                    "args": [],
+                },
+            ),
+            lsp_dependencies=(
+                {"name": "p-lsp", "command": "pkg-lsp", "extensionToLanguage": {".p": "p"}},
+            ),
+            targets=("copilot",),
+        )
+        .root
+    )
+    _seed(project, {"p-lsp": _MINE})
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+
+    result = _install(runner, project, isolated.subprocess_env())
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "LSP server 'p-lsp' conflicts with the existing copilot entry" in output
+    assert _servers(project)["p-lsp"] == _MINE
+    written = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert "my-mcp" in written, output
+    lock = load_yaml(project / "apm.lock.yaml")
+    assert "my-mcp" in lock.get("mcp_servers", []), "the MCP write went unrecorded"
