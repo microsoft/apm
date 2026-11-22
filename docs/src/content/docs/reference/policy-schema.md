@@ -104,7 +104,7 @@ When a dependency matches `deny`, `apm install` will **not download or deploy th
 
 `deny` also covers local bundles and `apm pack`. `apm install <bundle>` checks the bundle's own package name as `_local/<name>` (so `**/<name>` matches it) and every package its embedded `apm.lock.yaml` records. `apm pack` refuses when a declared dependency or a package in the project's `apm.lock.yaml` is denied; pack applies no other dependency rule.
 
-`allow` judges a local bundle by the packages its embedded `apm.lock.yaml` records, with the same matching as remote dependencies. It never matches the bundle's own name (`_local/<name>`), which the bundle author chooses. Under an allow list, a bundle that records no packages is refused before any file is written. Without an allow list, bundle installs are unchanged.
+`allow` judges a local bundle by the packages its embedded `apm.lock.yaml` records, with the same matching as remote dependencies. It never matches the bundle's own name (`_local/<name>`), which the bundle author chooses. Under an allow list, a bundle that records no packages is a violation. With `enforcement: block`, a bundle with any `allow` violation is refused before any file is written; `warn` reports it and installs, and `off` skips the check. Without an allow list, bundle installs are unchanged.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
