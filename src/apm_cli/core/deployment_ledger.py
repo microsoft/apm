@@ -557,20 +557,18 @@ class DeploymentMaterializationSession:
         for record, physical, value in prepared:
             key = record.locator.key
             previous = self._physical_keys.get(physical)
-            replaced = self._records.pop(previous, None) if previous is not None else None
-            if previous is not None:
-                self._destinations.pop(previous, None)
-                self._bindings.pop(previous, None)
+            binding = [record.active_owner, self._claim_signature(value)]
+            replaced = self._records.pop(previous, None) if previous else None
+            same = previous is not None and self._bindings.pop(previous, None) == binding
+            self._destinations.pop(previous or "", None)
+            old_hash = replaced and replaced.content_hash
             self._history.replace(
-                previous, replaced and replaced.content_hash, key, record.content_hash or ""
+                previous, old_hash, key, record.content_hash or "", same_binding=same
             )
             self._records[key] = record
             self._destinations[key] = physical
             self._physical_keys[physical] = key
-            self._bindings[key] = [
-                record.active_owner,
-                self._claim_signature(value),
-            ]
+            self._bindings[key] = binding
             if not evidence_only:
                 self._written[key] = value
         self._dirty = True
@@ -599,7 +597,10 @@ class DeploymentMaterializationSession:
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):
                 continue
-            committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
+            binding = [record.active_owner, committed._claim_signature(value)]
+            if committed._bindings.get(key) != binding:
+                committed._history.forget(key)  # never carry hashes to a new binding (#4428)
+            committed._bindings[key] = binding
             committed._dirty = True
         committed.flush()
 

@@ -49,16 +49,29 @@ class ReceiptHistory:
                 raise ValueError("invalid rendered-write history")
         return cls({key: list(hashes) for key, hashes in raw.items()})
 
-    def replace(self, previous: str | None, replaced: str | None, key: str, new: str) -> None:
-        """Key *key* now holds *new*; keep *replaced* when the same key is rewritten."""
+    def replace(
+        self, previous: str | None, replaced: str | None, key: str, new: str, *, same_binding: bool
+    ) -> None:
+        """Key *key* now holds *new*; keep *replaced* only for a same-binding rewrite.
+
+        A different key, owner or claim binding starts a fresh history, so
+        hashes written under one binding never become a baseline for another.
+        """
         earlier = self._hashes.pop(previous, []) if previous is not None else []
-        if previous == key and replaced:
+        if previous != key or not same_binding:
+            self._hashes.pop(key, None)
+            return
+        if replaced:
             earlier = [*earlier, replaced]
         earlier = [h for h in earlier if h != new][-HISTORY_LIMIT:]
         if earlier:
             self._hashes[key] = earlier
         else:
             self._hashes.pop(key, None)
+
+    def forget(self, key: str) -> None:
+        """Drop the history of *key*, whose binding changed."""
+        self._hashes.pop(key, None)
 
     def retain(self, keys: Collection[str]) -> None:
         """Forget the history of every key not in *keys*."""

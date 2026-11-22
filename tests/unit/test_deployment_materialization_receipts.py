@@ -1150,6 +1150,30 @@ def test_an_invalid_write_history_is_refused(
         _session(root, lock)
 
 
+@pytest.mark.parametrize("handoff", ["owner", "claims"])
+def test_earlier_writes_never_acquire_a_new_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, handoff: str
+) -> None:
+    """A new owner or claim binding starts a fresh history (#4428)."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    _rewrite(session, path, "rendered old\n")
+    if handoff == "owner":
+        path.write_text("another owner's render\n", encoding="utf-8")
+        session.record({path: compute_file_hash(path)}, [TARGET], "other")
+        session.flush()
+    else:
+        _rewrite(session, path, "rendered new\n")
+        assert json.loads(session.state_path.read_text(encoding="utf-8"))["history"]
+        session.bind_committed_claims(LockFile())
+    path.write_bytes(old_bytes)
+
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert "history" not in persisted
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
 @pytest.mark.parametrize("target_name", ["claude", "copilot-cowork"])
 def test_owner_receipts_stand_in_with_the_claim_spelling_current_claims_use(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str

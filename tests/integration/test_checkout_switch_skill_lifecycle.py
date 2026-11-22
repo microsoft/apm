@@ -744,5 +744,6 @@ def test_removal_after_branch_round_trip_needs_todays_deletion_evidence(
 
     result = world.apm("install")
     output = _output(result)
+    assert result.returncode == 0, output
     assert {name: (world.project / _X / name).read_bytes() for name in kept} == kept, output
     assert "Cleaned" not in output, output
