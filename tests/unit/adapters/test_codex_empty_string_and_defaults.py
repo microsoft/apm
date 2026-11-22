@@ -8,19 +8,21 @@ This test verifies that the adapter:
 4. Maintains consistent behavior for environment variable handling
 """
 
-import os
-import sys
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
 import pytest
 
 # Add the source directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 from apm_cli.adapters.client.codex import CodexClientAdapter
 
 pytestmark = pytest.mark.component
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path, monkeypatch):
+    """The adapter writes a project-scope .codex/config.toml under the cwd."""
+    monkeypatch.chdir(tmp_path)
 
 
 class TestCodexEmptyStringAndDefaults:

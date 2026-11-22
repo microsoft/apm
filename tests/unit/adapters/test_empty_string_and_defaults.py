@@ -9,16 +9,12 @@ This test verifies that the adapter:
 """
 
 import json
-import os
-import sys
 from pathlib import Path
 from unittest.mock import Mock, patch  # noqa: F401
 
 import pytest
 
 # Add the source directory to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 
