@@ -216,11 +216,37 @@ def test_the_exact_written_key_is_recorded_not_an_identical_user_entry(project: 
 
     _retire(project, logger)
 
-    assert set(_servers(project)) == {full}, "the user's identical entry must stay"
+    assert set(json.loads(_config(project).read_text())["mcpServers"]) == {full}
     assert logger.removed == {full}
 
 
-def test_an_unreadable_config_keeps_its_evidence(project: Path) -> None:
+def test_a_declared_server_on_the_same_native_key_keeps_its_entry(project: Path) -> None:
+    """Replacing registry ``owner/demo`` with a self-defined ``demo`` keeps the shared entry."""
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        _write_entries(project, {"demo": ENTRY})
+        note_mcp_write("copilot", "owner/demo", mcp_native_hash(ENTRY), None)
+    before = _config(project).read_bytes()
+
+    retire_undeclared_mcp_writes(
+        {"demo"}, project_root=project, user_scope=False, exclude=None, logger=_Logger()
+    )
+
+    assert _config(project).read_bytes() == before
+
+
+@pytest.mark.parametrize("exclude", ["Copilot", "copilot"])
+def test_an_excluded_runtime_is_never_retired(project: Path, exclude: str) -> None:
+    _install_write(project, _Logger())
+    before = _config(project).read_bytes()
+
+    retire_undeclared_mcp_writes(
+        set(), project_root=project, user_scope=False, exclude=exclude, logger=_Logger()
+    )
+
+    assert _config(project).read_bytes() == before
+
+
+def test_an_unreadable_config_keeps_its_evidence_and_reports_it(project: Path) -> None:
     _install_write(project, _Logger())
     _config(project).write_text("{not json")
     logger = _Logger()
@@ -229,31 +255,34 @@ def test_an_unreadable_config_keeps_its_evidence(project: Path) -> None:
     forget_removed_mcp_writes(project, user_scope=False)
 
     assert _config(project).read_text() == "{not json"
-    assert [w for w in logger.warnings if "cannot read that config" in w]
-    assert McpWriteReceipts.open(project, user_scope=False).writes, "evidence was dropped"
+    assert [w for w in logger.warnings if f"Kept MCP server '{SERVER}'" in w]
+    kept = kept_mcp_writes(project, user_scope=False, managed=())
+    assert [write.name for write, _ in kept] == [SERVER]
     _write_entries(project, {SERVER: ENTRY})
     _retire(project, _Logger())
-    assert _servers(project) == {}, "repaired config: the proven entry is retired"
+    assert _config(project).read_text().count(SERVER) == 0, "repaired: the entry is retired"
 
 
 def test_a_removal_that_does_not_happen_keeps_the_record(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import apm_cli.integration.mcp_integrator_install as install_module
-
     _install_write(project, _Logger())
-    monkeypatch.setattr(install_module, "_remove_native_entry", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "apm_cli.integration.mcp_integrator._clean_json_mcp_config", lambda *a, **k: 0
+    )
     logger = _Logger()
 
     _retire(project, logger)
 
-    assert SERVER in _servers(project) and not logger.removed
-    assert [w for w in logger.warnings if "could not confirm its removal" in w]
+    assert SERVER in _config(project).read_text() and not logger.removed
+    assert [w for w in logger.warnings if f"Kept MCP server '{SERVER}'" in w]
     kept = kept_mcp_writes(project, user_scope=False, managed=())
     assert [write.name for write, _ in kept] == [SERVER]
 
 
 def test_exact_key_removal_handles_hermes_yaml_and_opencode_v2(project: Path) -> None:
+    import yaml
+
     from apm_cli.factory import ClientFactory
     from apm_cli.integration.mcp_integrator_install import _remove_native_entry
 
@@ -269,8 +298,6 @@ def test_exact_key_removal_handles_hermes_yaml_and_opencode_v2(project: Path) ->
     _remove_native_entry(hermes, "demo", NullCommandLogger())
     _remove_native_entry(opencode, "demo", NullCommandLogger())
 
-    import yaml
-
     assert set(yaml.safe_load(hermes_cfg.read_text())["mcp_servers"]) == {"keep"}
     assert set(json.loads(opencode_cfg.read_text())["mcp"]["servers"]) == {"keep"}
 
@@ -281,11 +308,13 @@ def test_audit_reports_unusable_evidence(project: Path) -> None:
 
     _install_write(project, _Logger())
     McpWriteReceipts.open(project, user_scope=False).path.write_text("{not json")
+    before = _config(project).read_bytes()
 
     (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
 
     assert check.name == "kept-mcp-entries" and not check.passed
     assert any("Invalid MCP write evidence" in detail for detail in check.details)
+    assert _config(project).read_bytes() == before, "audit must not change the config"
 
 
 def test_audit_reads_user_scope_evidence_from_the_deployment_root(project: Path) -> None:
@@ -312,3 +341,4 @@ def test_audit_reads_user_scope_evidence_from_the_deployment_root(project: Path)
 
     kept = [check for check in result.checks if check.name == "kept-mcp-entries"]
     assert kept and not kept[0].passed, [check.name for check in result.checks]
+    assert SERVER in config.read_text(), "the kept user-scope entry stays configured"

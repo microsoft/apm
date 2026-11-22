@@ -230,8 +230,12 @@ class McpWriteReceipts:
             return None
         return mcp_native_hash(self._client(runtime).managed_server_config(native))
 
-    def _present(self, write: McpWrite) -> bool:
-        return (write.key or write.name) in (self._existing(write.runtime) or {})
+    def _presence(self, write: McpWrite) -> bool | None:
+        """Whether *write*'s entry is in its config; None when that cannot be established."""
+        existing = self._existing(write.runtime)
+        if existing is None or write.key is None:
+            return None
+        return write.key in existing
 
     def display(self, write: McpWrite) -> str:
         """The config file holding *write*'s entry now, relative to the project when inside it."""
@@ -264,7 +268,7 @@ class McpWriteReceipts:
     def forget_absent(self) -> None:
         """Drop records whose entry is no longer in its config: nothing remains to prove."""
         for ident, write in list(self.writes.items()):
-            if self._existing(write.runtime) is not None and not self._present(write):
+            if self._presence(write) is False:
                 del self.writes[ident]
                 self._dirty = True
 
@@ -293,47 +297,54 @@ class McpWriteReceipts:
         Returns the names of the servers whose entries were removed.
         """
         from apm_cli.integration.mcp_integrator_install import _remove_native_entry
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
+        runtimes = sorted({write.runtime for write in self.writes.values()})
+        included = set(filter_excluded_mcp_runtimes(runtimes, exclude))
         removed: set[str] = set()
         for _, write in sorted(self.writes.items()):
-            if write.name in declared or write.runtime == exclude:
+            if write.name in declared or write.runtime not in included:
                 continue
-            if self._existing(write.runtime) is None:
-                logger.warning(
-                    f"Kept MCP server '{write.name}' in {self.display(write)}: APM cannot "
-                    "read that config to confirm the entry, so its record is kept."
-                )
+            if write.key is not None and write.key in self._declared_keys(write.runtime, declared):
+                # A declared server now deploys to this exact native entry.
                 continue
-            if not self._present(write):
+            presence = self._presence(write)
+            if presence is False:
                 self.forget(write)
-            elif self.proven(write):
+                continue
+            if presence and self.proven(write):
                 _remove_native_entry(self._client(write.runtime), write.key, logger)
                 self._entries.clear()
-                if self._existing(write.runtime) is not None and not self._present(write):
+                if self._presence(write) is False:
                     self.forget(write)
                     removed.add(write.name)
-                else:
-                    self.mark_kept(write)
-                    logger.warning(
-                        f"Kept MCP server '{write.name}' in {self.display(write)}: APM could "
-                        "not confirm its removal. Remove the entry if you no longer use it."
-                    )
-            else:
-                self.mark_kept(write)
-                logger.warning(
-                    f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
-                    "deploys it and cannot confirm the entry is the one it wrote. "
-                    "Remove the entry if you no longer use it."
-                )
+                    continue
+            self.mark_kept(write)
+            logger.warning(
+                f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
+                "deploys it and cannot confirm the entry is the one it wrote. "
+                "Remove the entry if you no longer use it."
+            )
         self.save()
         return removed
+
+    def _declared_keys(self, runtime: str, declared: set[str]) -> set[str]:
+        """Native keys a declared server may deploy to on *runtime* (full or short name)."""
+        client = self._client(runtime)
+        if client is None:
+            return set()
+        return {
+            key
+            for name in declared
+            for key in (name, client.determine_config_key(name, None, None))
+        }
 
     def kept(self, managed: set[str]) -> list[tuple[McpWrite, str]]:
         """Kept records of unmanaged servers whose entry is still present."""
         return [
             (write, self.display(write))
             for _, write in sorted(self.writes.items())
-            if write.kept and write.name not in managed and self._present(write)
+            if write.kept and write.name not in managed and self._presence(write) is not False
         ]
 
     def save(self) -> None:

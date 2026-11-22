@@ -126,6 +126,7 @@ def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) 
                     and recorded.is_absolute()
                     and not os.path.lexists(recorded)
                     and recorded.parent.is_dir()
+                    and not has_symlink_component(directory, directory / "mcp" / path.name)
                 ):
                     path.unlink()
                     (directory / "mcp" / path.name).unlink(missing_ok=True)
@@ -180,8 +181,7 @@ class DeploymentMaterializationSession:
         self.scope = scope
         self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
         self.mcp_state_path = self.state_path.parent / "mcp" / self.state_path.name
-        # Containment is anchored one level above APM_HOME (``$HOME`` by
-        # default); for a shallow custom root the symlink check is the guard.
+        # Containment anchors above APM_HOME ($HOME by default); else the symlink check guards.
         self._receipts_base = self.state_path.parent.parent.parent
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
