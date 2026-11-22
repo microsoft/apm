@@ -43,6 +43,10 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Local paths written with backslashes (`.\pkg`, `..\pkg`, `~\pkg`) are
+normalised to `/` on read and behave exactly like `./pkg`, `../pkg` and
+`~/pkg`. Windows drive-letter and UNC paths are not normalised.
+
 Bare `owner/repo` shorthand resolves against the manifest's top-level
 `default_host:` (bare hostname, e.g. `default_host: gitlab.com`), else
 `GITHUB_HOST`, else `github.com`. Each manifest uses its own value, and

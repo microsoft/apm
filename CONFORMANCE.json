@@ -1861,6 +1861,27 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
+      ],
+      "conformance_class": "governance",
+      "id": "req-pl-022",
+      "keyword": "MUST",
+      "section": "6.1",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
+        "tests/spec_conformance/test_policy_reqs.py::test_spec_scopes_replacement_rules_and_names_composition",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
+      ]
+    },
+    {
+      "behavioral_tests": [
         "tests/unit/primitives/test_discovery_parser.py::test_discovered_primitives_carry_local_or_dependency_attribution"
       ],
       "conformance_class": "consumer",
@@ -3337,7 +3358,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 21,
+      "active": 22,
       "partial": 0,
       "skipped": 0,
       "text-only": 0,
@@ -3361,5 +3382,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 151
+  "total_requirements": 152
 }
