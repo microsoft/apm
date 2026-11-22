@@ -66,7 +66,6 @@ FIXTURES = Path(__file__).parents[2] / "fixtures" / "upgrade_0361" / "t2"
 TARGETS = ("claude", "copilot")
 DEPLOYED = (
     ".agents/skills/pkg-skill/SKILL.md",
-    ".claude/rules/style.md",
     ".claude/skills/pkg-skill/SKILL.md",
     ".github/instructions/style.instructions.md",
 )
@@ -77,9 +76,12 @@ PRIOR = {
     "unstamped": ("v0.35.1", ""),
     "unknown": ("v0.35.1", "apm_version: unknown\n"),
 }
+# An always-on rule older generators deployed; Claude now loads it from AGENTS.md (#3939).
+ROUTED_RULE = ".claude/rules/style.md"
 # What the first install after the upgrade writes.
 UPGRADE_WRITES = (
     "project:apm.lock.yaml",
+    f"project:{ROUTED_RULE}",
     "project:.github/mcp.json",
     "project:.apm-local*",
     "project:apm_modules*",
@@ -120,12 +122,14 @@ def test_upgrade_from_prior_generator(lifecycle_world, generator) -> None:
     project = lifecycle_world.project
     deployed = {path: (project / path).read_bytes() for path in DEPLOYED}
     assert "srv" in _servers(project / ".github/mcp.json")
+    assert (project / ROUTED_RULE).is_file()
 
     step = scenario.run("install")
     assert_changes(step.changed, UPGRADE_WRITES, label=f"upgrade from {generator}")
     data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
     assert data["apm_version"] == _running_version(scenario)
     assert {path: (project / path).read_bytes() for path in DEPLOYED} == deployed
+    assert not (project / ROUTED_RULE).exists()
     assert "srv" in _servers(project / ".mcp.json")
     # The fixture's retired file holds only APM's entry and Copilot stays
     # declared, so the healed, emptied file is deleted (#4524).

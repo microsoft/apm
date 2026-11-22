@@ -75,9 +75,13 @@ def test_a_first_install_from_each_source_deploys_under_home(lifecycle_world, sr
         assert (lifecycle_world.home / _SKILL).is_file(), step.output
     if src == "native-plugin":
         assert scenario.lock_names(), "the user lock records the native plugin"
-        settings = json.loads(
-            (lifecycle_world.home / ".claude/settings.json").read_text(encoding="utf-8")
+        path = lifecycle_world.home / ".claude/settings.json"
+        claude = sorted(
+            entry.relative_to(lifecycle_world.home).as_posix()
+            for entry in (lifecycle_world.home / ".claude").rglob("*")
         )
+        assert path.is_file(), f"Claude settings not written; ~/.claude: {claude}\n{step.output}"
+        settings = json.loads(path.read_text(encoding="utf-8"))
         enabled = {
             key.split("@")[0]
             for key, on in (settings.get("enabledPlugins") or {}).items()
