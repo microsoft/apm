@@ -613,6 +613,10 @@ class TestKeptEntryKindsSurviveTheHold:
             diagnostics=diagnostics,
         )
 
+        copilot = json.loads((tmp_path / ".github" / "lsp.json").read_text())["lspServers"]
+        claude = json.loads((tmp_path / _CLAUDE_PROJECT_PLUGIN).read_text())["lspServers"]
+        assert copilot["pyright"]["command"] == "mine"
+        assert claude["ruff"]["command"] == "mine"
         assert record.kept_edits == {"pyright": "blocked", "ruff": "blocked"}
         assert diagnostics.error.call_count == 2
         diagnostics.warn.assert_not_called()
