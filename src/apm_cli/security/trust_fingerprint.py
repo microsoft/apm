@@ -115,25 +115,78 @@ def hook_item_key(package_path: Path, hook_file: Path) -> str:
     return normalized_hook_source(relative, root) or relative
 
 
+def _bundle_key(package_path: Path, path: Path) -> str:
+    """Publisher-relative key of a bundle file at its own (unresolved) location."""
+    from apm_cli.deps.plugin_parser import normalized_hook_source
+
+    relative = path.relative_to(package_path).as_posix()
+    return normalized_hook_source(relative, package_path) or relative
+
+
 def hook_file_fingerprint(package_path: Path, hook_file: Path) -> str:
-    """Fingerprint one hook file: its document plus every script it references."""
+    """Fingerprint one hook file and the whole bundle that deploys with it.
+
+    Binds the hook document, every script it references, every file the hook
+    bundle copier deploys from those scripts' source roots (imported helpers,
+    nested ``package.json`` and other assets) and the Node module type each
+    root runs under, so a change to any byte that can run re-gates approval.
+    Sibling hook documents stay out: each is pinned on its own.
+    """
+    from apm_cli.integration.hook_bundle import (
+        _hook_module_type,
+        _hook_source_root,
+        iter_deployable_hook_bundle_files,
+    )
+    from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.hook_source_selection import (
         _parse_hook_json,
         _referenced_hook_source_files,
     )
 
     package_path = package_path.resolve()
+    hook_file = hook_file.resolve()
     data = _parse_hook_json(hook_file, logger=logging.getLogger(__name__))
     if data is None:
         raise UnfingerprintableError(f"hook file {hook_file.name} is not a hook document")
-    scripts = []
-    for script in sorted(_referenced_hook_source_files(data, package_path, hook_file.parent)):
-        digest = hashlib.sha256(script.read_bytes()).hexdigest()
-        scripts.append([hook_item_key(package_path, script), digest])
+
+    def _digest(path: Path, key: str | None = None) -> list[str]:
+        key = key or hook_item_key(package_path, path)
+        return [key, hashlib.sha256(path.read_bytes()).hexdigest()]
+
+    referenced = sorted(_referenced_hook_source_files(data, package_path, hook_file.parent))
+    descriptors = {path.resolve() for path in HookIntegrator().find_hook_files(package_path)}
+    roots = sorted({_hook_source_root(package_path, hook_file.parent, s) for s in referenced})
+    bundle: dict[str, list[str]] = {}
+    for root in roots:
+        for path in iter_deployable_hook_bundle_files(
+            root,
+            descriptor_files=descriptors,
+            include_package_metadata=True,
+            dereference_within=package_path,
+        ):
+            # Keyed by where the file deploys (a link's own name), as a copy
+            # that dereferenced the link lays it out.
+            item = _digest(path, _bundle_key(package_path, path))
+            bundle[item[0]] = item
     return definition_fingerprint(
         KIND_HOOK,
         hook_item_key(package_path, hook_file),
-        {"document": data, "scripts": scripts},
+        {
+            "document": data,
+            "scripts": [_digest(script) for script in referenced],
+            "bundle": [bundle[key] for key in sorted(bundle)],
+            # Keyed by each script's publisher key: a root directory has no
+            # normalized spelling, so source and normalized trees would differ.
+            "module_types": [
+                [
+                    hook_item_key(package_path, script),
+                    _hook_module_type(
+                        package_path, _hook_source_root(package_path, hook_file.parent, script)
+                    ),
+                ]
+                for script in referenced
+            ],
+        },
     )
 
 

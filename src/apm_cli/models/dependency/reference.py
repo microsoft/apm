@@ -51,6 +51,7 @@ from .identity import (
     case_insensitive_identity_prefix_segments,
     effective_policy_host,
     is_case_insensitive_package_identity,
+    normalise_local_path_separators,
     normalize_package_repo_url,
 )
 from .manifest_host import manifest_host_strips, qualify_manifest_shorthand
@@ -1865,7 +1866,7 @@ class DependencyReference(ProviderCoordinateMixin):
 
         # --- Local path detection (must run before URL/host parsing) ---
         if cls.is_local_path(dependency_str):
-            local = dependency_str.strip()
+            local = normalise_local_path_separators(dependency_str.strip())
             pkg_name = (PureWindowsPath(local) if "\\" in local else Path(local)).name
             if not pkg_name or pkg_name in (".", ".."):
                 raise ValueError(

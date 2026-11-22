@@ -189,9 +189,9 @@ def test_approve_parallel_replacement_derivation_is_rejected() -> None:
 
 
 def test_local_bundle_canvas_approval_bypass_is_rejected() -> None:
-    path = "src/apm_cli/install/services.py"
+    path = "src/apm_cli/install/local_bundle_canvas.py"
     source = (ROOT / path).read_text(encoding="utf-8")
-    old = "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS"
+    old = "allow_executables, keys, EXEC_TYPE_CANVAS"
     assert old in source
     mutated = source.replace(old, "allow_executables, (slug,), EXEC_TYPE_CANVAS", 1)
 

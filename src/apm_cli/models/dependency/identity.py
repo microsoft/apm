@@ -360,3 +360,19 @@ class InvalidSemverRangeError(ValueError):
 def _looks_like_invalid_semver_range(spec: str) -> bool:
     """Return whether *spec* starts like a semver range but is invalid."""
     return bool(_RANGE_PREFIX_RE.match(spec.strip()))
+
+
+_BACKSLASH_LOCAL_PREFIXES = (".\\", "..\\", "~\\")
+
+
+def normalise_local_path_separators(local_path: str) -> str:
+    """Return *local_path* in POSIX form when it starts with a backslash prefix.
+
+    OpenAPM v0.1 Section 4.3.1: ``.\\``, ``..\\`` and ``~\\`` local paths are
+    normalised to POSIX form on read, so they resolve, anchor and pass every
+    traversal and containment check exactly like ``./``, ``../`` and ``~/``.
+    Windows absolute forms (``C:\\x``, ``\\\\server\\share``) are left as written.
+    """
+    if local_path.startswith(_BACKSLASH_LOCAL_PREFIXES):
+        return local_path.replace("\\", "/")
+    return local_path
