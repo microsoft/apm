@@ -848,6 +848,10 @@ class BaseIntegrator:
         plan = self._overwrite_plan
         if identical:
             target_paths.append(target_path)
+            if plan is not None:
+                # Planning records only files it would keep, and an identical
+                # file is never kept: its receipt cannot change the plan (#4381).
+                return True, False
             # Already receipted with these bytes: unchanged, not an adoption (RA-007).
             if self.receipted_unchanged(target_path):
                 return True, False

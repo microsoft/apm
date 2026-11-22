@@ -31,11 +31,11 @@ _INSTALL = ("install", "--target", "claude", "--no-policy", "--parallel-download
 
 
 def _imports(output: Path) -> list[str]:
-    imports = [
-        line
-        for line in (output / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
-        if line.startswith("@")
-    ]
+    lines = (output / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    # Every generated CLAUDE.md imports the sibling AGENTS.md first (#3939);
+    # the remaining imports are dependency memory.
+    assert "@AGENTS.md" in lines
+    imports = [line for line in lines if line.startswith("@") and line != "@AGENTS.md"]
     assert imports == sorted(set(imports))
     for line in imports:
         assert "\\" not in line
