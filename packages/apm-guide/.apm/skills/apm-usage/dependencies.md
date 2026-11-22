@@ -381,6 +381,12 @@ object-form `version: v1.0.1` or `apm install pkg@catalog#v1.0.1` for a literal
 ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resolution. The lockfile records the resolved ref, not the marketplace
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
+A catalog entry with `registry:` resolves through that package registry
+instead: `apm install pkg@catalog` writes `{id, registry, version}` to
+`apm.yml`, and the lockfile records the exact `version`, `resolved_url` and
+`resolved_hash` with no commit. Locked entries replay, including `--frozen`,
+without the catalog, through a registry declared in `apm.yml`, like any
+registry dependency.
 Unknown keys in a marketplace entry are rejected.
 A committed install records each plugin version's catalog ref under
 `APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
@@ -404,10 +410,9 @@ marketplace registration; catalog edits do not move it. New entries, entries
 whose `name`, `marketplace` or `version` changed, and `apm update` resolve
 through the catalog, and `--frozen` fails for an unlocked entry.
 `apm install --refresh`, `apm update` and `apm marketplace update` revalidate
-the marketplace and fail rather than use stale cached data. Exceptions
-until 0.38 (#2903): registry-routed catalog entries still resolve through the
-catalog (the lockfile has no registry binding), and the lockfile does not
-record catalog-inline MCP/LSP servers, so a package with locked servers and no
+the marketplace and fail rather than use stale cached data. Exception
+until 0.38 (#2903): the lockfile does not record catalog-inline MCP/LSP
+servers, so a package with locked servers and no
 `apm_modules/` copy reads the catalog for server metadata only, also under
 `--frozen` (the locked commit still pins it; a catalog that now selects
 another commit fails until `apm update <name>@<marketplace>`); one with no

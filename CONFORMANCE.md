@@ -60,7 +60,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-ext-003](docs/src/content/docs/specs/openapm-v0.1.md#req-ext-003) | MUST | 4.6.2 | consumer | active | 2 / 9 | - |
 | [req-lk-001](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-001) | MUST | 5.1 | consumer | active | 1 / 2 | - |
 | [req-lk-002](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-002) | MUST | 5.4 | consumer | active | 1 / 2 | - |
-| [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 8 / 9 | - |
+| [req-lk-003](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-003) | MUST | 5.2 | consumer | active | 11 / 12 | - |
 | [req-lk-004](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-004) | MUST | 5.4 | consumer | text-only | 0 / 1 | - |
 | [req-lk-005](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-005) | MUST | 5.5 | consumer | active | 1 / 2 | - |
 | [req-lk-006](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-006) | MUST | 5.5 | consumer | active | 35 / 35 | - |
@@ -76,7 +76,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-lk-016](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-016) | MUST | 5.2 | consumer | active | 8 / 14 | - |
 | [req-lk-017](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-017) | MUST | 5.2 | consumer | active | 4 / 5 | - |
 | [req-lk-018](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-018) | SHOULD | 5.5 | consumer | partial | 9 / 10 | - |
-| [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 9 / 10 | - |
+| [req-lk-019](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-019) | MUST | 5.2 | consumer | active | 13 / 14 | - |
 | [req-lk-020](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-020) | MUST | 5.2 | consumer | active | 5 / 5 | - |
 | [req-lk-021](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-021) | MUST | 5.2 | consumer | active | 8 / 8 | - |
 | [req-lk-022](docs/src/content/docs/specs/openapm-v0.1.md#req-lk-022) | MUST | 5.2 | consumer | active | 5 / 6 | - |
