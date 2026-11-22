@@ -276,6 +276,9 @@ class BaseIntegrator:
 
     # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
     _overwrite_gate: "OverwriteGate | None" = None
+    # While install plans its writes (#4381), every file the gate would keep
+    # without evidence, with its edit kind, instead of any write or keep.
+    _overwrite_plan: list[tuple[Path, str | None]] | None = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -873,6 +876,7 @@ class BaseIntegrator:
                 lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
             )
         )
+        plan = self._overwrite_plan
         if identical:
             target_paths.append(target_path)
             # Already receipted with these bytes: unchanged, not an adoption (RA-007).
@@ -880,7 +884,7 @@ class BaseIntegrator:
                 return True, False
             # A managed file already holding the final render is APM's bytes:
             # record the receipt the skipped rewrite would have (#4184, #3701).
-            if managed_files and rel_path.replace("\\", "/") in managed_files:
+            if plan is None and managed_files and rel_path.replace("\\", "/") in managed_files:
                 self.note_rendered_write(target_path)
             return True, True
         if self.check_collision(
@@ -951,12 +955,21 @@ class BaseIntegrator:
         deployment evidence that APM wrote its current bytes (a matching
         receipt, legacy ownership or the locked render); the lockfile hash
         alone never authorizes it. A kept file stays in *target_paths* with its
-        prior lock entry and finalize names it.
+        prior lock entry and finalize names it. While planning (#4381) nothing
+        is written and every blocking keep goes to the plan.
         """
         gate = self._overwrite_gate
+        plan = self._overwrite_plan
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
+            # One literal write-permitting return (install-deployment-overwrite-evidence).
+            if plan is not None:  # noqa: SIM103
+                return True
             return False
-        if gate is not None and gate.adopt_legacy(target_path, rel_path):
+        if gate is not None and (
+            gate.legacy_adoptable(target_path, rel_path)
+            if plan is not None
+            else gate.adopt_legacy(target_path, rel_path)
+        ):
             target_paths.append(target_path)
             return True
         rendered = self._rendered_hash(source_file, expected_content)
@@ -966,19 +979,23 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
-        if gate is not None and gate.keep(target_path, rel_path, edit=edit):
+        if plan is not None:
+            # Planning writes nothing; a blocking keep refuses the whole plan (#4381).
+            if edit != "drift":
+                plan.append((target_path, edit))
+        elif gate is not None and gate.keep(target_path, rel_path, edit=edit):
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
-            return True
-        # A proven edit the gate cannot keep (the project's own local content)
-        # still names the true reason (RA-012).
-        message = kept_edit_message(
-            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
-        )
-        if diagnostics is not None:
-            diagnostics.error(message, package=gate.owner if gate else "")
         else:
-            _rich_warning(message)
+            # A proven edit the gate cannot keep (the project's own local content)
+            # still names the true reason (RA-012).
+            message = kept_edit_message(
+                rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
+            )
+            if diagnostics is not None:
+                diagnostics.error(message, package=gate.owner if gate else "")
+            else:
+                _rich_warning(message)
         return True
 
     # Known integration prefixes that APM is allowed to deploy/remove under.

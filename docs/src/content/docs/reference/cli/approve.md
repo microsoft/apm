@@ -91,9 +91,12 @@ each self-defined MCP server gets a SHA-256 fingerprint of what runs. `bin`,
   and extra keys. A registry-resolved server from a transitive package that
   sets its own `registry:` or an overlay also binds the resolved registry
   entry, so pinning it needs registry access.
-- **Hook file**: the hook JSON document plus the bytes of every script it
-  references that APM copies. Code a hook downloads at run time (`npx`,
-  `curl`) or loads indirectly is not covered.
+- **Hook file**: the hook JSON document, every script it references, every
+  other file APM copies with those scripts (imported helpers, nested
+  `package.json` and other assets in the script's hooks directory), and the
+  Node module type the scripts run under. Code a hook downloads at run time
+  (`npx`, `curl`) is not covered. Hook pins recorded before APM 0.38 cover
+  less, so they show as changed once: run `apm approve <pkg>` again.
 
 Each item is then admitted in this order (first match wins):
 
