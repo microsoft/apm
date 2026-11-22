@@ -265,9 +265,10 @@ def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessSc
     (hooks / "guard.json").write_text(json.dumps(hook, indent=2) + "\n", encoding="utf-8")
     (hooks / "scripts" / "g.sh").write_text("#!/bin/sh\necho guard\n", encoding="utf-8")
     (scene.home / ".copilot").rmdir()
-    (scene.home / ".claude").mkdir()
+    claude_root = scene.home / ".claude"
+    claude_root.mkdir()
     _install(scene, target="claude")
-    settings = (scene.home / ".claude" / "settings.json").read_text(encoding="utf-8")
+    settings = (claude_root / "settings.json").read_text(encoding="utf-8")
     assert "g.sh" in settings, settings
 
     audit = scene.runner.run(

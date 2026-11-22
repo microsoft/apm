@@ -342,16 +342,18 @@ def copy_skill_to_target(
     return deployed
 
 
-def _directory_is_managed(directory: str, managed_files) -> bool:
-    """Return whether APM owns *directory* or a verified member inside it.
+def _managed_member_dirs(managed_files) -> frozenset[str]:
+    """Return every ancestor directory of a managed path, built once per inventory.
 
-    A pre-0.38 user-root receipt migrates per file (#3772), so the directory
-    entry itself is absent; the copy still protects every unclaimed member.
+    A pre-0.38 user-root receipt migrates per file (#3772), so a skill
+    directory can be owned through a verified member while its own entry is
+    absent; the copy still protects every unclaimed member.
     """
-    if directory in managed_files:
-        return True
-    prefix = f"{directory}/"
-    return any(entry.startswith(prefix) for entry in managed_files)
+    dirs: set[str] = set()
+    for entry in managed_files:
+        parts = entry.split("/")
+        dirs.update("/".join(parts[:end]) for end in range(1, len(parts)))
+    return frozenset(dirs)
 
 
 class SkillIntegrator(BaseIntegrator):
@@ -942,6 +944,7 @@ class SkillIntegrator(BaseIntegrator):
             candidates = [source_paths[name] for name in sorted(source_paths)]
 
         materialization_root = project_root or target_skills_root.parent.parent
+        member_dirs: frozenset[str] | None = None
 
         for sub_skill_path in candidates:
             if not sub_skill_path.is_dir():
@@ -965,9 +968,12 @@ class SkillIntegrator(BaseIntegrator):
             is_managed = False
             if target_existed:
                 # Check if this is a user-authored skill (not managed by APM)
+                entry = rel_path.replace("\\", "/")
+                if managed_files is not None and entry not in managed_files and member_dirs is None:
+                    member_dirs = _managed_member_dirs(managed_files)
                 is_managed = (
                     managed_files is not None
-                    and _directory_is_managed(rel_path.replace("\\", "/"), managed_files)
+                    and (entry in managed_files or entry in (member_dirs or ()))
                 ) or (
                     rewriter._ownership_snapshots is not None
                     and target.resolve() in rewriter._native_skill_session_owners
