@@ -77,3 +77,29 @@ def test_every_declared_refusal_names_its_law_and_source() -> None:
         assert refusal.exit != 0, key
         assert refusal.upholds.startswith(("P-LAW-", "P-INV-")), key
         assert refusal.source, key
+
+
+_POLICY = "pair|SRC=inline-mcp|GATE=denied-dependency"
+_PACKAGE_BLOCK = (
+    "[x] Blocked by org policy at org:acme/.github (deny). Nothing was changed. "
+    "Remove `p-skill` from apm.yml, or contact your policy admin to allow it."
+)
+_MCP_BLOCK = "[x] MCP server(s) blocked by org policy. MCP configs were NOT written."
+
+
+@pytest.mark.parametrize("output", [_PACKAGE_BLOCK, _MCP_BLOCK], ids=["package", "mcp"])
+def test_a_policy_refusal_credits_only_with_its_policy_cause(output) -> None:
+    assert credit_problems([_POLICY], exit=1, output=output, changed=(), refusal=True) == []
+
+
+def test_a_non_policy_refusal_that_wrote_nothing_earns_no_policy_credit() -> None:
+    """Any exit-1 failure can end in "Nothing was written"; only a policy cause credits."""
+    unrelated = (
+        "[x] Cannot create apm.yml for --target vscode: an IDE is not a target. "
+        "Nothing was written."
+    )
+    problems = credit_problems([_POLICY], exit=1, output=unrelated, changed=(), refusal=True)
+
+    assert problems == [
+        f"{_POLICY}: output does not name the cause {EXPECTED_REFUSALS[_POLICY].cause!r}"
+    ]

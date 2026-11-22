@@ -760,9 +760,16 @@ class ExpectedRefusal:
 # step, and so does a declared pair whose command succeeds.
 # An org policy that denies a declared dependency refuses every resolving
 # install and writes nothing (policy/install_preflight.py, dependency-denylist).
+# Each alternative names its policy cause: a package denial
+# (command_logger._policy_reason_blocked) or an MCP server denial
+# (commit_gate.refuse_blocked_mcp). Any other refusal earns no credit.
+POLICY_BLOCK_CAUSE = (
+    r"Blocked by org policy at \S.*?Nothing was changed\."
+    r"|MCP server\(s\) blocked by org policy\. MCP configs were NOT written\."
+)
 POLICY_BLOCK = ExpectedRefusal(
     1,
-    r"Blocked by org policy .*Nothing was changed|Nothing was written",
+    POLICY_BLOCK_CAUSE,
     "P-INV-I4",
     "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
 )
