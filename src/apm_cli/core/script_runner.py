@@ -815,7 +815,8 @@ class ScriptRunner:
         applies. ``enforcement: warn`` warns and continues.
         """
         from ..install.errors import PolicyViolationError
-        from ..install.exec_gate import installed_dependency_subjects, policy_denied_dependencies
+        from ..install.exec_gate import policy_denied_dependencies
+        from ..install.installed_dependencies import installed_dependency_subjects
         from ..policy.outcome_routing import resolve_trust_policy
         from ..utils.console import _rich_warning
         from ..utils.paths import portable_relpath

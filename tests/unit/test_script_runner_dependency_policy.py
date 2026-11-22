@@ -101,3 +101,23 @@ def test_warn_enforcement_compiles_and_warns(project: Path, capsys) -> None:
 
     assert compiled == [prompt]
     assert "acme/denied: org policy" in capsys.readouterr().out
+
+
+def test_a_declared_marketplace_dependency_still_lets_a_denied_prompt_be_judged(
+    project: Path,
+) -> None:
+    """An unresolved marketplace entry in apm.yml has no install path; the lock names it."""
+    (project / "apm.yml").write_text(
+        "name: p\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "  - name: p-skill\n    marketplace: lifecycle-market\n",
+        encoding="utf-8",
+    )
+    prompt = "apm_modules/acme/denied/.apm/prompts/review.prompt.md"
+    with (
+        patch(_RESOLVE, return_value=_DENY),
+        patch("apm_cli.install.exec_gate.policy_denied_dependencies", side_effect=_deny),
+        pytest.raises(RuntimeError, match=r"acme/denied: org policy"),
+    ):
+        ScriptRunner()._auto_compile_prompts(f"copilot -p {prompt}", {})
+
+    assert not (project / ".apm" / "compiled").exists(), "nothing was compiled"

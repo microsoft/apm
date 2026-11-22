@@ -699,7 +699,7 @@ def _validate_project(
 
 def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, Any]]:
     """``(key, DependencyReference)`` for every installed package compile renders from *root*."""
-    from ...install.exec_gate import installed_dependency_subjects
+    from ...install.installed_dependencies import installed_dependency_subjects
 
     return [(s.key, s.ref) for s in installed_dependency_subjects(root, user_scope=user_scope)]
 
