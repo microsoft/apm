@@ -36,6 +36,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
@@ -65,6 +66,8 @@ NETWORK_JOURNEYS = (
     "install-warm",
     "install-noop",
     "install-frozen",
+    "install-locked-warm",
+    "install-frozen-warm",
     "install-global-cold",
     "install-global-warm",
     "update",
@@ -76,6 +79,26 @@ _GLOBAL = ("install-global-cold", "install-global-warm")
 _PACKS = ("pack", "install-bundle")
 DEFAULT_RTT_JOURNEYS = ("install-cold", "install-warm", "install-frozen", "update")
 _COMMAND_TIMEOUT_S = 1800
+_SPAWN_COUNTER_DIR = Path(__file__).resolve().parent / "spawn_counter"
+
+# The North Star scoreboard: tree-10 at 30 ms RTT, 5 runs, CPU and counts on.
+# Mode -> journey: no-op (all installed), warm (lockfile, no apm_modules, warm
+# cache), fresh (no lockfile, warm cache), frozen (--frozen, warm cache),
+# empty-cache (no lockfile, empty cache: network-bound, reported separately).
+SCOREBOARD_MODES = (
+    ("no-op", "install-noop"),
+    ("warm", "install-locked-warm"),
+    ("fresh", "install-warm"),
+    ("frozen", "install-frozen-warm"),
+    ("empty-cache", "install-cold"),
+    ("boot", "boot-version"),
+)
+SCOREBOARD_PRESET = {
+    "fixtures": "tree-10",
+    "journeys": ",".join(journey for _, journey in SCOREBOARD_MODES),
+    "rtt": [30.0],
+    "runs": 5,
+}
 
 
 # -- fixtures ------------------------------------------------------------------
@@ -189,6 +212,31 @@ def _traffic(world) -> dict:
     return traffic if isinstance(traffic, dict) else traffic.as_dict()
 
 
+def _observations(world) -> tuple:
+    """Requests the offline mirror saw (empty for the real-network tunnel)."""
+    services = getattr(world, "services", None)
+    return services.proxy.observations if services is not None else ()
+
+
+def _route(observation) -> str:
+    """``METHOD host /coarse/path``: owner, repo and ref segments collapsed to ``*``."""
+    parts = [p for p in observation.path.split("/") if p]
+    if parts[:1] == ["repos"] and len(parts) > 3:
+        parts = ["repos", "*", "*", parts[3]] + (["*"] if len(parts) > 4 else [])
+    elif parts and parts[-1] in ("refs", "git-upload-pack", "git-receive-pack"):
+        parts = ["*", *parts[-2:]] if parts[-1] == "refs" else ["*", parts[-1]]
+    return f"{observation.method} {observation.host} /{'/'.join(parts)}"
+
+
+def _routes(observations) -> dict[str, int]:
+    routes: dict[str, int] = {}
+    for observation in observations:
+        if observation.method != "CONNECT":
+            route = _route(observation)
+            routes[route] = routes.get(route, 0) + 1
+    return dict(sorted(routes.items(), key=lambda kv: -kv[1]))
+
+
 # -- journeys ------------------------------------------------------------------
 
 
@@ -210,6 +258,12 @@ class Context:
     def roots(self) -> list[Path]:
         return [self.project / root for root in self.fixture.roots]
 
+    spawn_log: Path | None = None
+    # Setup reuse: the installed state survives a no-op sample, and the
+    # committed lockfiles are captured once per fixture (generation is seeded).
+    is_installed: bool = False
+    locks: dict[str, bytes] | None = None
+
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
             [*self.apm, *argv],
@@ -220,6 +274,29 @@ class Context:
             timeout=_COMMAND_TIMEOUT_S,
             check=False,
         )
+
+    def timed_run(self, argv: list[str], cwd: Path) -> tuple[int, str, float]:
+        """Run one command; return its exit code, output tail and CPU seconds.
+
+        CPU is user + sys of the child and every descendant it waited for
+        (``wait4``), so server-side ``git http-backend`` work is excluded.
+        """
+        env = dict(self.world.env)
+        if self.spawn_log is not None:
+            env["APM_PERF_SPAWN_LOG"] = str(self.spawn_log)
+            env["PYTHONPATH"] = str(_SPAWN_COUNTER_DIR)
+        with (
+            tempfile.TemporaryFile() as out,
+            tempfile.TemporaryFile() as err,
+        ):
+            proc = subprocess.Popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
+            _, status, usage = os.wait4(proc.pid, 0)
+            proc.returncode = os.waitstatus_to_exitcode(status)
+            out.seek(0)
+            err.seek(0)
+            tail = out.read()[-3000:].decode(errors="replace") + "\n"
+            tail += err.read()[-3000:].decode(errors="replace")
+        return proc.returncode, tail, usage.ru_utime + usage.ru_stime
 
     def checked(self, argv: list[str], cwd: Path) -> None:
         result = self.run(argv, cwd)
@@ -235,12 +312,16 @@ class Context:
         shutil.rmtree(self.project, ignore_errors=True)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
+        self.is_installed = False
 
     def installed(self) -> None:
         """Every root installed from the current manifests (warm cache as a side effect)."""
+        if self.is_installed:
+            return
         self.fresh_project()
         for root in self.roots():
             self.checked(["install"], root)
+        self.is_installed = True
 
     def warm_cache(self) -> None:
         if not any(self.world.cache_dir.iterdir()):
@@ -275,13 +356,23 @@ def _setup_warm(ctx: Context) -> None:
     ctx.fresh_project()
 
 
+def _locked_project(ctx: Context, warm: bool = True) -> None:
+    """A fresh checkout of an installed project: manifests plus committed lockfiles."""
+    if ctx.locks is None:
+        ctx.installed()
+        ctx.locks = {
+            root: (ctx.project / root / "apm.lock.yaml").read_bytes() for root in ctx.fixture.roots
+        }
+    if warm:
+        ctx.warm_cache()
+    ctx.fresh_project()
+    for root, data in ctx.locks.items():
+        (ctx.project / root / "apm.lock.yaml").write_bytes(data)
+
+
 def _setup_frozen(ctx: Context) -> None:
     """CI replay: committed lockfiles, nothing else, cold cache."""
-    ctx.installed()
-    locks = {root: (root / "apm.lock.yaml").read_bytes() for root in ctx.roots()}
-    ctx.fresh_project()
-    for root, data in locks.items():
-        (root / "apm.lock.yaml").write_bytes(data)
+    _locked_project(ctx, warm=False)
     ctx.world.clear_cache()
 
 
@@ -347,6 +438,12 @@ JOURNEYS: dict[str, Journey] = {
         Journey("install-warm", _setup_warm, lambda c: _per_root(c, ["install"])),
         Journey("install-noop", Context.installed, lambda c: _per_root(c, ["install"])),
         Journey("install-frozen", _setup_frozen, lambda c: _per_root(c, ["install", "--frozen"])),
+        Journey("install-locked-warm", _locked_project, lambda c: _per_root(c, ["install"])),
+        Journey(
+            "install-frozen-warm",
+            _locked_project,
+            lambda c: _per_root(c, ["install", "--frozen"]),
+        ),
         Journey(
             "install-global-cold", _setup_global_cold, lambda c: [(["install", "-g"], c.elsewhere)]
         ),
@@ -397,21 +494,49 @@ class Sample:
     load_ok: bool
     traffic: dict
     returncode: int
+    cpu_s: float = 0.0
+    spawns: dict = field(default_factory=dict)
+    modules: int = 0
+    routes: dict = field(default_factory=dict)
+
+
+def _read_spawn_log(path: Path | None) -> tuple[dict, int]:
+    """Spawns by executable summed over every Python process, plus the max module count."""
+    if path is None or not path.is_file():
+        return {}, 0
+    spawns: dict[str, int] = {}
+    modules = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        modules = max(modules, record["modules"])
+        for name, count in record["spawns"].items():
+            spawns[name] = spawns.get(name, 0) + count
+    path.unlink()
+    return dict(sorted(spawns.items())), modules
 
 
 def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     ctx.world.reset_traffic()
+    seen = len(_observations(ctx.world))
+    if ctx.spawn_log is not None:
+        ctx.spawn_log.unlink(missing_ok=True)
     output = ""
     returncode = 0
+    cpu = 0.0
     start = time.perf_counter()
     for argv, cwd in journey.steps(ctx):
-        result = ctx.run(argv, cwd)
-        if result.returncode != 0:
-            returncode = result.returncode
-            output = f"$ apm {' '.join(argv)}\n{result.stdout[-3000:]}\n{result.stderr[-3000:]}"
+        code, tail, step_cpu = ctx.timed_run(argv, cwd)
+        cpu += step_cpu
+        if code != 0:
+            returncode = code
+            output = f"$ apm {' '.join(argv)}\n{tail}"
             break
     wall = time.perf_counter() - start
-    return Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode), output
+    spawns, modules = _read_spawn_log(ctx.spawn_log)
+    sample = Sample(round(wall, 4), 0.0, True, _traffic(ctx.world), returncode)
+    sample.cpu_s, sample.spawns, sample.modules = round(cpu, 4), spawns, modules
+    sample.routes = _routes(_observations(ctx.world)[seen:])
+    return sample, output
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
@@ -454,6 +579,8 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
+        if journey.name != "install-noop":
+            ctx.is_installed = False
         sample.load1 = load
         sample.load_ok = load < args.max_load
         samples.append(sample)
@@ -467,6 +594,9 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             f"in all {len(samples)} run(s)"
         )
     walls = [s.wall_s for s in valid]
+    # CPU and counts do not depend on load, so every successful sample counts.
+    ok = [s for s in samples if s.returncode == 0]
+    cpus = [s.cpu_s for s in ok]
     record = {
         "fixture": ctx.fixture.name,
         "journey": journey.name,
@@ -475,7 +605,11 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "valid_runs": len(valid),
         "p50_s": round(statistics.median(walls), 4) if walls else None,
         "p90_s": round(percentile(walls, 0.9), 4) if walls else None,
+        "cpu_p50_s": round(statistics.median(cpus), 4) if cpus else None,
         "traffic": samples[-1].traffic if samples else {},
+        "spawns": ok[-1].spawns if ok else {},
+        "modules": ok[-1].modules if ok else 0,
+        "routes": ok[-1].routes if ok else {},
         "samples": [asdict(s) for s in samples],
         "error": error,
     }
@@ -508,9 +642,12 @@ def resolve_apm(explicit: str | None) -> list[str]:
 def _journeys_for(
     fixture: Fixture, rtt: float, first: bool, wanted: list[str], rtt_journeys: list[str]
 ) -> list[str]:
+    """Boot runs once (first fixture, first RTT); other non-RTT journeys only at RTT 0."""
     names = []
     for name in wanted:
-        if name in BOOT_JOURNEYS and not (first and rtt == 0):
+        if name in BOOT_JOURNEYS:
+            if first:
+                names.append(name)
             continue
         if rtt != 0 and name not in rtt_journeys:
             continue
@@ -556,10 +693,13 @@ def run(args: argparse.Namespace) -> dict:
         with open_world(fixture, work / "worlds" / name) as world:
             ctx = Context(fixture, world, apm, work / "runs" / name)
             ctx.work.mkdir(parents=True, exist_ok=True)
+            if args.counts:
+                ctx.spawn_log = ctx.work / "spawns.jsonl"
             ctx.fresh_project()
-            for rtt in rtts:
+            for rtt_index, rtt in enumerate(rtts):
                 world.rtt_ms = rtt
-                names = _journeys_for(fixture, rtt, index == 0, wanted, args.rtt_journeys)
+                first = index == 0 and rtt_index == 0
+                names = _journeys_for(fixture, rtt, first, wanted, args.rtt_journeys)
                 for journey in names:
                     record = measure(ctx, JOURNEYS[journey], args)
                     report["results"].append(record)
@@ -615,6 +755,99 @@ def _cell(value) -> str:
     return "-" if value is None else f"{value:.3f}" if isinstance(value, float) else str(value)
 
 
+def _spawn_cell(spawns: dict | None) -> str:
+    """Total spawns plus the per-executable split, e.g. ``42 (git 40, uv 2)``."""
+    if not spawns:
+        return "0" if spawns == {} else "-"
+    split = ", ".join(f"{name} {count}" for name, count in spawns.items())
+    return f"{sum(spawns.values())} ({split})"
+
+
+_NORTH_STAR = ("no-op", "warm", "fresh", "frozen")
+SCOREBOARD_HEADER = (
+    "| main SHA | measured | "
+    + " | ".join(f"{mode} wall / CPU s" for mode, _ in SCOREBOARD_MODES)
+    + " | requests (no-op/warm/fresh/frozen/empty) | spawns (no-op/warm/fresh/frozen/empty) "
+    "| modules no-op | load1 | worst gap to 1 s (wall / CPU) "
+    "| CPU vs previous row (no-op/warm/fresh/frozen) |"
+)
+
+
+def _previous_cpu(text: str) -> tuple[str, dict[str, float]]:
+    """The SHA and per-mode CPU p50 of the last scoreboard row in *text*."""
+    rows = [
+        line
+        for line in text.splitlines()
+        if line.startswith("| ") and " / " in line and line != SCOREBOARD_HEADER
+    ]
+    if not rows:
+        return "", {}
+    cells = [cell.strip() for cell in rows[-1].strip("|").split("|")]
+    cpu = {}
+    for (mode, _), cell in zip(SCOREBOARD_MODES, cells[2:], strict=False):
+        value = cell.rsplit("/", 1)[-1].strip()
+        if value not in ("-", ""):
+            cpu[mode] = float(value)
+    return cells[0], cpu
+
+
+def _delta(before: float | None, after: float | None) -> str:
+    """Speedup factor and change of the whole journey, e.g. ``2.00x -50%``."""
+    if not before or after is None:
+        return "-"
+    return f"{before / after:.2f}x {100 * (after - before) / before:+.0f}%"
+
+
+def scoreboard_row(report: dict, previous: tuple[str, dict[str, float]] = ("", {})) -> str:
+    """One markdown row for the North Star scoreboard (wall and CPU p50 per mode)."""
+    by_journey = {r["journey"]: r for r in report["results"] if r["fixture"] == "tree-10"}
+    cells, requests, spawns, loads = [], [], [], []
+    wall_gaps, cpu_gaps, deltas = [], [], []
+    for mode, journey in SCOREBOARD_MODES:
+        r = by_journey.get(journey)
+        if r is None:
+            cells.append("-")
+            continue
+        loads += [s["load1"] for s in r["samples"]]
+        cpu = r.get("cpu_p50_s")
+        cells.append(f"{_cell(r['p50_s'])} / {_cell(cpu)}")
+        if mode != "boot":
+            requests.append(str(r["traffic"].get("requests", "-")))
+            spawns.append(str(sum((r.get("spawns") or {}).values())))
+        if mode in _NORTH_STAR:
+            if r["p50_s"] is not None:
+                wall_gaps.append(r["p50_s"] - 1.0)
+            if cpu is not None:
+                cpu_gaps.append(cpu - 1.0)
+            deltas.append(_delta(previous[1].get(mode), cpu))
+    noop = by_journey.get("install-noop") or {}
+    load = f"{min(loads)}-{max(loads)}" if loads else "-"
+    wall_gap = f"{max(wall_gaps):+.2f}" if wall_gaps else "-"
+    cpu_gap = f"{max(cpu_gaps):+.2f}" if cpu_gaps else "-"
+    vs = f"vs {previous[0]}: " + " / ".join(deltas) if previous[0] else "first row"
+    return (
+        f"| {_cli_sha(report)} | {report['meta']['started']} | "
+        + " | ".join(cells)
+        + f" | {'/'.join(requests)} | {'/'.join(spawns)} | {noop.get('modules') or '-'} "
+        f"| {load} | {wall_gap} / {cpu_gap} s | {vs} |"
+    )
+
+
+def append_scoreboard(report: dict, path: Path) -> None:
+    """Append this run's row to *path*, writing the header on first use."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    previous = (
+        _previous_cpu(text[text.find(SCOREBOARD_HEADER) :])
+        if SCOREBOARD_HEADER in text
+        else ("", {})
+    )
+    if SCOREBOARD_HEADER not in text:
+        separator = "|" + "---|" * SCOREBOARD_HEADER.count(" | ") + "---|"
+        text += f"\n{SCOREBOARD_HEADER}\n{separator}\n"
+    path.write_text(text + scoreboard_row(report, previous) + "\n", encoding="utf-8")
+
+
 def render_markdown(report: dict) -> str:
     meta = report["meta"]
     lines = [
@@ -636,9 +869,9 @@ def render_markdown(report: dict) -> str:
         "",
         "## Results",
         "",
-        "| fixture | rtt ms | journey | p50 s | p90 s | valid/runs | requests | round trips "
-        "| connects | load1 range | error |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| fixture | rtt ms | journey | p50 s | p90 s | CPU p50 s | valid/runs | requests "
+        "| round trips | connects | spawns | modules | load1 range | error |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in report["results"]:
         loads = [s["load1"] for s in r["samples"]]
@@ -646,10 +879,20 @@ def render_markdown(report: dict) -> str:
         t = r["traffic"]
         lines.append(
             f"| {r['fixture']} | {r['rtt_ms']:g} | {r['journey']} | {_cell(r['p50_s'])} "
-            f"| {_cell(r['p90_s'])} | {r['valid_runs']}/{r['runs']} | {t.get('requests', '-')} "
-            f"| {t.get('round_trips', '-')} | {t.get('connects', '-')} | {load_range} "
+            f"| {_cell(r['p90_s'])} | {_cell(r.get('cpu_p50_s'))} | {r['valid_runs']}/{r['runs']} "
+            f"| {t.get('requests', '-')} | {t.get('round_trips', '-')} | {t.get('connects', '-')} "
+            f"| {_spawn_cell(r.get('spawns'))} | {r.get('modules') or '-'} | {load_range} "
             f"| {'yes' if r['error'] else ''} |"
         )
+    routed = [r for r in report["results"] if r.get("routes")]
+    if routed:
+        lines += ["", "## Requests by route (last valid sample)", ""]
+        lines += ["| fixture | rtt ms | journey | route | count |", "|---|---|---|---|---|"]
+        for r in routed:
+            for route, count in r["routes"].items():
+                lines.append(
+                    f"| {r['fixture']} | {r['rtt_ms']:g} | {r['journey']} | `{route}` | {count} |"
+                )
     lines += _scaling(report)
     return "\n".join(lines) + "\n"
 
@@ -726,14 +969,51 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument(
         "--profile", action="store_true", help="one extra cProfile run per cell"
     )
+    run_parser.add_argument(
+        "--counts",
+        action="store_true",
+        help="count subprocess spawns and imported modules of each apm child",
+    )
+    run_parser.add_argument(
+        "--preset",
+        choices=("scoreboard",),
+        default=None,
+        help="scoreboard: tree-10, rtt 30, 5 runs, the North Star modes + boot, counts on",
+    )
+    run_parser.add_argument(
+        "--scoreboard", default=None, help="append the North Star row to this markdown file"
+    )
     for p in (run_parser, sub.add_parser("verify-real", help="check REAL_PACKAGES resolve")):
         p.add_argument("--apm", default=None)
         p.add_argument("--work", default=str(REPO_ROOT / "build" / "perf-work"))
     run_parser.add_argument("--out", default=str(REPO_ROOT / "build" / "perf"))
+    board = sub.add_parser("scoreboard", help="append a North Star row from a journeys JSON")
+    board.add_argument("file", help="scoreboard markdown file to append to")
+    board.add_argument(
+        "json", nargs="+", help="journeys-<sha>.json files of one CLI SHA (chunks are merged)"
+    )
     args = parser.parse_args(argv)
+    if args.command == "scoreboard":
+        reports = [json.loads(Path(j).read_text(encoding="utf-8")) for j in args.json]
+        report = reports[0]
+        for extra in reports[1:]:
+            report["results"] += extra["results"]
+        append_scoreboard(report, Path(args.file))
+        return 0
     if args.command == "verify-real":
         return verify_real(args)
+    if args.preset == "scoreboard":
+        # The preset replaces defaults only; explicit flags (e.g. --runs 1) still win.
+        defaults = vars(parser.parse_args(["run"]))
+        for key, value in SCOREBOARD_PRESET.items():
+            if getattr(args, key) == defaults[key]:
+                setattr(args, key, value)
+        if args.rtt_journeys == defaults["rtt_journeys"]:
+            args.rtt_journeys = args.journeys.split(",")
+        args.counts = True
     report = run(args)
+    if args.scoreboard:
+        append_scoreboard(report, Path(args.scoreboard))
     return 1 if any(r["error"] for r in report["results"]) else 0
 
 

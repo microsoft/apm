@@ -1,0 +1,180 @@
+name: Perf bench
+
+# Base-vs-new journey benchmarks on hosted runners, so agents never benchmark
+# on a shared host. Agents only push a request and read the summary
+# (scripts/perf/bench_ci.sh); the runners do all the work.
+# Trigger: a push to perf-bench/** carrying bench-request.env (no main change
+# needed), or a manual dispatch once this file is on main.
+# Reported: CPU (user+sys of apm and its children, wait4) and deterministic
+# counts. Wall time is never reported: hosted runners are shared VMs.
+
+on:
+  push:
+    branches: ['perf-bench/**']
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base commit SHA.
+        required: true
+      new:
+        description: New commit SHA.
+        required: true
+      fixtures:
+        description: Comma list of fixtures.
+        default: tree-10
+      journeys:
+        description: Comma list of journeys.
+        default: install-noop,install-locked-warm,install-warm,install-frozen-warm
+      rtt:
+        description: Injected RTT in ms.
+        default: '30'
+      pairs:
+        description: Interleaved base/new pairs per runner.
+        default: '3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-bench-${{ github.ref }}-${{ github.run_id }}
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  request:
+    name: Validate request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.req.outputs.base }}
+      new: ${{ steps.req.outputs.new }}
+      fixtures: ${{ steps.req.outputs.fixtures }}
+      journeys: ${{ steps.req.outputs.journeys }}
+      rtt: ${{ steps.req.outputs.rtt }}
+      pairs: ${{ steps.req.outputs.pairs }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - id: req
+      env:
+        IN_BASE: ${{ inputs.base }}
+        IN_NEW: ${{ inputs.new }}
+        IN_FIXTURES: ${{ inputs.fixtures }}
+        IN_JOURNEYS: ${{ inputs.journeys }}
+        IN_RTT: ${{ inputs.rtt }}
+        IN_PAIRS: ${{ inputs.pairs }}
+      run: |
+        set -euo pipefail
+        BASE="$IN_BASE"; NEW="$IN_NEW"; FIXTURES="${IN_FIXTURES:-tree-10}"
+        JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
+        RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"
+        if [ "${GITHUB_EVENT_NAME}" = push ]; then
+          # KEY=VALUE lines only; never sourced, so the file cannot run code.
+          while IFS='=' read -r key value; do
+            case "$key" in
+              BASE) BASE="$value" ;; NEW) NEW="$value" ;; FIXTURES) FIXTURES="$value" ;;
+              JOURNEYS) JOURNEYS="$value" ;; RTT) RTT="$value" ;; PAIRS) PAIRS="$value" ;;
+            esac
+          done < <(grep -E '^[A-Z]+=' bench-request.env)
+        fi
+        [[ "$BASE" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad BASE '$BASE'"; exit 1; }
+        [[ "$NEW" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad NEW '$NEW'"; exit 1; }
+        [[ "$FIXTURES" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad FIXTURES"; exit 1; }
+        [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
+        [[ "$RTT" =~ ^[0-9]{1,4}$ ]] || { echo "::error::bad RTT"; exit 1; }
+        [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
+        {
+          echo "base=$BASE"; echo "new=$NEW"; echo "fixtures=$FIXTURES"
+          echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"
+        } >> "$GITHUB_OUTPUT"
+
+  bench:
+    name: ABAB shard ${{ matrix.shard }}
+    needs: request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      BASE: ${{ needs.request.outputs.base }}
+      NEW: ${{ needs.request.outputs.new }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Install base and new CLIs
+      run: |
+        set -euo pipefail
+        for side in base new; do
+          sha=$([ "$side" = base ] && echo "$BASE" || echo "$NEW")
+          git -C harness fetch --quiet --no-tags origin "$sha"
+          git -C harness worktree add --quiet --detach "../$side" FETCH_HEAD
+          (cd "$side" && uv sync --frozen --no-editable --quiet)
+          echo "$side: $(git -C "$side" rev-parse HEAD) $("$side/.venv/bin/apm" --version)"
+        done
+    - name: Install harness
+      working-directory: harness
+      run: uv sync --frozen --extra dev --quiet
+    - name: Interleaved runs
+      working-directory: harness
+      run: |
+        uv run --frozen python -m tests.benchmarks.ci_bench abab \
+          --base-apm "$GITHUB_WORKSPACE/base/.venv/bin/apm" \
+          --new-apm "$GITHUB_WORKSPACE/new/.venv/bin/apm" \
+          --pairs '${{ needs.request.outputs.pairs }}' \
+          --fixtures '${{ needs.request.outputs.fixtures }}' \
+          --journeys '${{ needs.request.outputs.journeys }}' \
+          --rtt '${{ needs.request.outputs.rtt }}' \
+          --out "$GITHUB_WORKSPACE/out/shard-${{ matrix.shard }}"
+    - if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: perf-bench-shard-${{ matrix.shard }}
+        path: |
+          out/shard-${{ matrix.shard }}/runs/**/*.json
+          out/shard-${{ matrix.shard }}/runs/**/*.md
+        if-no-files-found: warn
+
+  report:
+    name: Report
+    needs: [request, bench]
+    if: always() && needs.request.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        pattern: perf-bench-shard-*
+        path: shards
+    - name: Summarize
+      run: |
+        uv sync --frozen --extra dev --quiet
+        set +e
+        uv run --frozen python -m tests.benchmarks.ci_bench report shards --json perf-bench-result.json \
+          --base '${{ needs.request.outputs.base }}' --new '${{ needs.request.outputs.new }}' \
+          --shards 3 --pairs '${{ needs.request.outputs.pairs }}' > summary.md
+        status=$?
+        cat summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+        exit $status
+    - if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: perf-bench-result
+        path: |
+          perf-bench-result.json
+          summary.md
