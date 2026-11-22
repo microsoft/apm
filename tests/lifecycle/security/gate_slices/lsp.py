@@ -18,7 +18,6 @@ _ALL = (
     "revoke-approval",
 )
 _LOCAL = ("local-deny", "revoke-approval")
-_XFAIL: dict[str, str] = {}
 _SMOKE = {"G|install|local-deny|lsp"}
 
 # G path -> (changes with a row, surface files)
@@ -42,7 +41,6 @@ SLICE = GateSlice(
             f"G|{path}|{change}|lsp",
             surface=surface,
             smoke=f"G|{path}|{change}|lsp" in _SMOKE,
-            xfail=_XFAIL.get(f"G|{path}|{change}|lsp", ""),
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes

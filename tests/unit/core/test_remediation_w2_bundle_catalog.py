@@ -39,6 +39,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "not clear the agent-plugin refusal, it sidesteps it",
     "bundle-integrity-failed": "the advised command runs in the producer's source, not in "
     "the consumer that saw the refusal; test_local_bundle_hooks_lifecycle pins the rendering",
+    "bundle-packages-unrecorded": "the refused bundle stays refused by design (#4646); the "
+    "advised install of an allow-listed package runs in "
+    "test_org_dependency_allow_local_bundle_lifecycle",
     "pack-dependency-unattested": "needs a lockfile row with no deployed files beside a "
     "populated apm_modules cache; not reachable from a consistent install",
     "pack-skill-subset-missing": "needs a skill-subset package whose recorded skills vanish "

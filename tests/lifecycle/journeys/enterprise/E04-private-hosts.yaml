@@ -41,17 +41,20 @@ steps:
     env:
       GITHUB_HOST: ghes.lifecycle.test
       GITHUB_APM_PAT_LIFECYCLE: e04-bad-token-444
-    # The printed advice is diagnostic (the package does not exist), so the step
-    # runs it and checks it shows the credential source and each probe (#4174).
-    run: [apm install lifecycle.ghe.com/lifecycle/p-missing, apm install --verbose lifecycle.ghe.com/lifecycle/p-missing]
+    run: [apm install lifecycle.ghe.com/lifecycle/p-missing]
     exit: 1
     files: []
     key_lines:
       - "[x] lifecycle.ghe.com/lifecycle/p-missing -- not accessible or doesn't exist"
-      - "credential tried: GITHUB_APM_PAT_LIFECYCLE). Run 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing' to see each probe and credential."
-      - "Auth resolved: host=lifecycle.ghe.com, org=lifecycle, source=GITHUB_APM_PAT_LIFECYCLE"
-      - "Trying git ls-remote for lifecycle.ghe.com (1 attempt)"
+      - "host: lifecycle.ghe.com, credential tried: GITHUB_APM_PAT_LIFECYCLE"
+      - "Run 'apm install --verbose lifecycle.ghe.com/lifecycle/p-missing'"
     forbidden_lines: [e04-bad-token-444, Traceback]
+    diagnose:
+      advice: apm install --verbose lifecycle.ghe.com/lifecycle/p-missing
+      # "to see each probe and credential": the credential source and the probe.
+      promises:
+        - "source=GITHUB_APM_PAT_LIFECYCLE"
+        - "Trying git ls-remote for lifecycle.ghe.com"
   - n: 5
     env:
       GH_TOKEN: e04-gh-token-555
