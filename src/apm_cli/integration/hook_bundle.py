@@ -140,6 +140,11 @@ def iter_deployable_hook_bundle_files(
 
     With *dereference_within*, in-package symlinks are followed as the local
     package copy follows them (see :func:`_walk_dereferencing`).
+
+    The hooks root's own ``package.json`` is skipped (the deployed module-type
+    sidecar replaces it) unless *include_package_metadata*; a nested
+    ``package.json`` is module metadata for its directory and deploys with the
+    scripts it governs (#2950).
     """
     descriptors = descriptor_files or set()
     candidates = (
@@ -158,7 +163,11 @@ def iter_deployable_hook_bundle_files(
             (source_file.is_symlink() and dereference_within is None)
             or not source_file.is_file()
             or source_file.name == MARKER_FILENAME
-            or (source_file.name == "package.json" and not include_package_metadata)
+            or (
+                source_file.name == "package.json"
+                and source_file.parent == source_root
+                and not include_package_metadata
+            )
             or _is_root_hook_descriptor(source_file, source_root, descriptors)
         ):
             continue
@@ -275,6 +284,9 @@ def copy_deployed_hook_bundle(
             continue
         target_file = target_root / "package.json"
         target_rel = portable_relpath(target_file, project_root)
+        if target_rel in copy_plan:
+            # An enclosing root already deploys this directory's own metadata.
+            continue
         ensure_path_within(target_file, project_root)
         content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
         if target_file.exists() and _same_text(target_file, content):
