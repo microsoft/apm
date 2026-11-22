@@ -1897,7 +1897,7 @@ class GitHubPackageDownloader:
                     validate_links=lambda: validate_materialized_symlinks(
                         "git", _cached, None, env=self._git_env_dict()
                     ),
-                    read_only=bool(getattr(_persistent_cache, "read_only", False)),
+                    read_only=getattr(_persistent_cache, "read_only", False) is True,
                 )
 
                 # Validate, then return without cloning.

@@ -203,8 +203,8 @@ its next use.
 Each full checkout carries a seal (`.git/apm-seal.json`): the SHA-256
 of every file and the result of its symlink check. Every install
 re-hashes the checkout against its seal before using it. A checkout that
-no longer matches is discarded and rebuilt, never copied into
-`apm_modules/`.
+no longer matches, or that holds a symlink, is discarded and rebuilt,
+never copied into `apm_modules/`.
 
 On macOS (APFS), APM fills `apm_modules/<pkg>/` with copy-on-write
 clones of the checkout, so editing a file there never changes the cache.

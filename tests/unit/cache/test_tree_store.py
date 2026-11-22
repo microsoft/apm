@@ -19,9 +19,10 @@ from apm_cli.cache.tree_store import (
     seal_path,
     verified_seal,
 )
-from apm_cli.utils.path_security import safe_rmtree
+from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
+from apm_cli.utils.reflink import reflink_supported
 
-pytestmark = pytest.mark.component
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
 _FILES = {
     "apm.yml": b"name: pkg\nversion: 1.0.0\n",
@@ -67,9 +68,13 @@ def test_materialized_tree_matches_the_entry(tmp_path, monkeypatch, strategy):
     entry = _entry(tmp_path / "cache" / "full")
     dest = tmp_path / "apm_modules" / "pkg"
 
-    _materialize(entry, dest)
+    stats = _materialize(entry, dest)
 
     assert _tree(dest) == _tree(entry)
+    if strategy == "link":
+        assert stats.links == len(_FILES)
+    elif strategy == "clone" and sys.platform == "darwin" and reflink_supported():
+        assert stats.clones == len(read_seal(entry).top_level())
     assert (dest / "empty").is_dir()
     assert not (dest / ".git").exists()
     if sys.platform != "win32":
@@ -155,8 +160,8 @@ def test_hardlink_unavailable_falls_back_to_copy(tmp_path, monkeypatch):
     stats = _materialize(entry, dest)
 
     assert (stats.links, stats.copies) == (0, len(_FILES))
-    assert _tree(dest) == _tree(entry)
-    for rel in _FILES:
+    for rel, data in _FILES.items():
+        assert (dest / rel).read_bytes() == data
         assert not os.path.samefile(entry / rel, dest / rel)
 
 
@@ -190,6 +195,8 @@ def test_link_verdict_is_recorded_once_and_reused(tmp_path, monkeypatch):
 
     assert calls == [1]
     assert read_seal(entry).link_failures == ()
+    assert (tmp_path / "two" / "apm.yml").read_bytes() == _FILES["apm.yml"]
+    assert json.loads(seal_path(entry).read_text(encoding="utf-8"))["link_failures"] == []
 
 
 @pytest.mark.parametrize("recorded", [None, ["docs/broken-link"]])
@@ -213,19 +220,47 @@ def test_unknown_or_failing_link_verdict_still_raises_the_strict_diagnostic(
     assert list(dest.iterdir()) == []
 
 
-def test_unsealable_entry_keeps_the_validated_copy_path(tmp_path, monkeypatch):
+@pytest.mark.parametrize("read_only", [False, True])
+def test_cache_entry_link_pointing_outside_is_refused_before_any_write(
+    tmp_path, monkeypatch, read_only
+):
     if sys.platform == "win32":
         pytest.skip("symlink creation needs privileges on Windows")
-    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "link")
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "copy")
+    secret = tmp_path / "outside" / "secret.txt"
+    secret.parent.mkdir()
+    secret.write_bytes(b"host secret\n")
     entry = _entry(tmp_path / "cache" / "full")
-    (entry / "alias.md").symlink_to("apm.yml")
-    calls: list[int] = []
+    (entry / ".apm" / "leak.md").symlink_to(secret)
+    dest = tmp_path / "apm_modules" / "pkg"
 
-    stats = _materialize(entry, tmp_path / "dest", calls)
+    with pytest.raises(TreeIntegrityError, match="symlink"):
+        _materialize(entry, dest, read_only=read_only)
 
-    assert calls == [1]
-    assert stats.strategy == "copy"
-    assert read_seal(entry) is None
+    assert list(dest.iterdir()) == []
+    assert entry.exists() is read_only
+    assert secret.read_bytes() == b"host secret\n"
+
+
+@pytest.mark.parametrize("strategy", ["clone", "link", "copy"])
+def test_destination_leaving_the_deploy_root_is_refused_before_any_write(
+    tmp_path, monkeypatch, strategy
+):
+    if sys.platform == "win32":
+        pytest.skip("symlink creation needs privileges on Windows")
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, strategy)
+    entry = _entry(tmp_path / "cache" / "full")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    (modules / "pkg").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PathTraversalError):
+        materialize_cached_checkout(entry, modules / "pkg", validate_links=lambda: None)
+
+    assert list(outside.iterdir()) == []
+    assert (entry / "apm.yml").read_bytes() == _FILES["apm.yml"]
 
 
 def test_read_only_reader_never_writes_the_cache(tmp_path, monkeypatch):

@@ -109,8 +109,13 @@ def _hash_file(path: str) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def scan_tree(entry: Path) -> TreeSeal | None:
-    """Hash the content of *entry*; ``None`` when it holds anything but files and dirs."""
+def scan_tree(entry: Path) -> TreeSeal:
+    """Hash the content of *entry* (``.git`` excluded).
+
+    Raises :class:`TreeIntegrityError` for a symlink or special file: Git
+    writes every tracked link in a cache checkout as its text, so a real
+    link there was not written by Git and could point outside the entry.
+    """
     files: list[FileRecord] = []
     dirs: list[str] = []
     pending = [("", os.fspath(entry))]
@@ -122,7 +127,7 @@ def scan_tree(entry: Path) -> TreeSeal | None:
                     continue
                 rel = f"{prefix}{item.name}"
                 if item.is_symlink():
-                    return None
+                    raise TreeIntegrityError(f"cache entry {entry} holds a symlink: {rel}")
                 if item.is_dir(follow_symlinks=False):
                     dirs.append(rel)
                     pending.append((f"{rel}/", item.path))
@@ -131,7 +136,7 @@ def scan_tree(entry: Path) -> TreeSeal | None:
                     mode = item.stat(follow_symlinks=False).st_mode
                     files.append(FileRecord(rel, digest, size, bool(mode & stat.S_IXUSR)))
                 else:
-                    return None
+                    raise TreeIntegrityError(f"cache entry {entry} holds a special file: {rel}")
     files.sort(key=lambda record: record.path)
     dirs.sort()
     return TreeSeal(tuple(files), tuple(dirs))
@@ -197,17 +202,14 @@ def verified_seal(entry: Path, *, read_only: bool = False) -> TreeSeal | None:
     The caller holds the entry's shard lock. An unsealed entry is sealed
     from its current content (entries were only ever copied out before
     sealing existed, so that content is the content Git checked out).
-    ``None`` means the entry cannot be sealed (it holds a symlink or a
-    special file) or, for a *read_only* reader, is not sealed yet; the
-    caller keeps the legacy copy path for it.
+    ``None`` means the entry is not a Git checkout or, for a *read_only*
+    reader, is not sealed yet; the caller keeps the legacy copy path.
 
     Raises :class:`TreeIntegrityError` when the content no longer matches.
     """
     if not (entry / _GIT_DIR).is_dir():
         return None
     current = scan_tree(entry)
-    if current is None:
-        return None
     sealed = read_seal(entry)
     if sealed is None:
         if read_only:
@@ -292,13 +294,10 @@ def _link_tree(
 def copy_checkout(entry: Path, dest: Path) -> MaterializeStats:
     """Legacy materialization: copy every top-level entry except ``.git``."""
     stats = MaterializeStats("copy")
-    resolved_dest = dest.resolve()
-    for item in sorted(entry.iterdir()):
-        if item.name == _GIT_DIR:
-            continue
-        target = dest / item.name
-        ensure_path_within_resolved(target, resolved_dest)
-        _copy_item(item, target, stats)
+    items = [item for item in sorted(entry.iterdir()) if item.name != _GIT_DIR]
+    _checked_destination(dest, tuple(item.name for item in items))
+    for item in items:
+        _copy_item(item, dest / item.name, stats)
     return stats
 
 
@@ -344,6 +343,16 @@ def materialize_cached_checkout(
         return materialize_tree(entry, seal, dest)
 
 
+def _checked_destination(dest: Path, names: tuple[str, ...]) -> Path:
+    """Refuse a destination that is a link or not empty, before the first write."""
+    if dest.is_symlink() or not dest.is_dir() or any(dest.iterdir()):
+        raise PathTraversalError(f"refusing to materialize into {dest}: not an empty directory")
+    resolved_dest = dest.resolve()
+    for name in names:
+        ensure_path_within_resolved(dest / name, resolved_dest)
+    return resolved_dest
+
+
 def materialize_tree(entry: Path, seal: TreeSeal, dest: Path) -> MaterializeStats:
     """Place the sealed content of *entry* into the empty directory *dest*.
 
@@ -351,14 +360,13 @@ def materialize_tree(entry: Path, seal: TreeSeal, dest: Path) -> MaterializeStat
     still holds it. Every destination path is checked to stay in *dest*.
     """
     stats = MaterializeStats(_strategy())
-    resolved_dest = dest.resolve()
+    resolved_dest = _checked_destination(dest, seal.top_level())
     if stats.strategy == "link":
         _link_tree(entry, seal, dest, resolved_dest, stats)
         return stats
     for name in seal.top_level():
         source = entry / name
         target = dest / name
-        ensure_path_within_resolved(target, resolved_dest)
         if stats.strategy == "clone":
             _clone_item(source, target, stats)
         else:

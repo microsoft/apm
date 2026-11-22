@@ -1051,6 +1051,53 @@ class TestPersistentGitCacheInDownloadPackage:
         # No clone should have been attempted
         assert not hasattr(downloader, "_clone_with_fallback_called")
 
+    def test_sealed_cache_hit_skips_symlink_scan_and_tamper_falls_back_to_clone(
+        self, downloader: GitHubPackageDownloader, tmp_path: Path
+    ) -> None:
+        """Warm hits reuse the recorded link verdict; an edited entry is never copied."""
+        dep = _make_dep()
+        resolved = _make_resolved(ref_type=GitReferenceType.BRANCH)
+        cached_dir = tmp_path / "checkouts" / "full"
+        (cached_dir / ".git").mkdir(parents=True)
+        (cached_dir / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        cache = MagicMock()
+        cache.read_only = False
+        cache.get_checkout.return_value = cached_dir
+        downloader.persistent_git_cache = cache
+        validation = MagicMock()
+        validation.is_valid = True
+        validation.package = MagicMock(version="1.0.0")
+        clone = MagicMock(side_effect=RuntimeError("network clone"))
+        link_scan = MagicMock()
+
+        def _download(target: Path):
+            with (
+                patch.object(downloader, "_is_artifactory_only", return_value=False),
+                patch.object(downloader, "_parse_artifactory_base_url", return_value=None),
+                patch.object(downloader, "_should_use_artifactory_proxy", return_value=False),
+                patch.object(downloader, "resolve_git_reference", return_value=resolved),
+                patch.object(downloader, "_clone_with_fallback", clone),
+                patch("apm_cli.deps.github_downloader.validate_materialized_symlinks", link_scan),
+                patch(
+                    "apm_cli.deps.github_downloader.validate_apm_package", return_value=validation
+                ),
+                patch.object(downloader, "_git_env_dict", return_value={}),
+            ):
+                return downloader.download_package(dep, target)
+
+        _download(tmp_path / "one")
+        _download(tmp_path / "two")
+        assert link_scan.call_count == 1
+        assert (tmp_path / "two" / "apm.yml").read_text() == "name: pkg\nversion: 1.0.0\n"
+        clone.assert_not_called()
+
+        (cached_dir / "apm.yml").write_text("name: evil\n")
+        with pytest.raises(RuntimeError):
+            _download(tmp_path / "three")
+        clone.assert_called_once()
+        assert not cached_dir.exists()
+        assert not (tmp_path / "three" / "apm.yml").exists()
+
     def test_cache_exception_falls_through_to_clone(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:

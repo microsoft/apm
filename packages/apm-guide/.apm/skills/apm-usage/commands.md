@@ -534,6 +534,14 @@ drift check without starting Codex or changing native state.
 | `apm cache clean` | Remove every entry from the git and HTTP caches. If a deletion fails, it still removes every other entry, reports the affected paths, and exits nonzero; successful removals are not rolled back. Close locking processes or fix permissions, then retry. | `--force`/`-f`, `--yes`/`-y` skip the confirmation prompt only -- they do not suppress deletion failures or make the command succeed |
 | `apm cache prune` | Remove Git checkout SHA groups not accessed within `--days`; full and sparse variants share recency and are evicted together, and `0` makes every group eligible. Partial failures exit `1`; fix permissions or release locks and rerun | `--days N` (default `30`; negative values are rejected before the cache is touched) |
 
+Every install re-hashes a cached Git checkout against its seal
+(`.git/apm-seal.json`) before using it; a mismatch or a symlink in the
+checkout discards it. `APM_MATERIALIZE` picks how it reaches `apm_modules/`:
+`clone` (copy-on-write, default on macOS), `copy` (default elsewhere) or
+`link` (hard links that share the cached files: an in-place edit in
+`apm_modules/` also edits the cache, so use it only when nobody edits
+`apm_modules/` by hand).
+
 ## Compilation
 
 | Command | Purpose | Key flags |
