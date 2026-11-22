@@ -17,6 +17,7 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -412,18 +413,38 @@ _ACTIVE: _Recorder | None = None
 _HOOK_INSTALLED = False
 
 
-def _audit_hook(event: str, args: tuple[Any, ...]) -> None:
+_BUSY = threading.local()
+
+
+def _observing(observe: Callable[[_Recorder], None]) -> None:
+    """Run one observation; never re-enter, never let it fail the install.
+
+    The recorder's own snapshots (a directory listing, an lstat) raise audit
+    events too: those are not the run's inputs. Any error in observing
+    refuses the stamp instead of propagating into the command.
+    """
     recorder = _ACTIVE
-    if recorder is not None:
-        recorder.on_event(event, args)
+    if recorder is None or getattr(_BUSY, "active", False):
+        return
+    _BUSY.active = True
+    try:
+        observe(recorder)
+    except Exception as error:
+        recorder.violate(f"recorder error: {type(error).__name__}")
+    finally:
+        _BUSY.active = False
+
+
+def _audit_hook(event: str, args: tuple[Any, ...]) -> None:
+    if _ACTIVE is not None:
+        _observing(lambda recorder: recorder.on_event(event, args))
 
 
 def _probing(original: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(original)
     def probe(path: Any, *args: Any, **kwargs: Any) -> Any:
-        recorder = _ACTIVE
-        if recorder is not None and not kwargs.get("dir_fd"):
-            recorder.on_probe(path)
+        if _ACTIVE is not None and not kwargs.get("dir_fd"):
+            _observing(lambda recorder: recorder.on_probe(path))
         return original(path, *args, **kwargs)
 
     return probe
@@ -435,10 +456,9 @@ def _resolving(original: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(original)
     def resolve(path: Any, *args: Any, **kwargs: Any) -> Any:
         result = original(path, *args, **kwargs)
-        recorder = _ACTIVE
-        if recorder is not None:
+        if _ACTIVE is not None:
             strict = bool(kwargs.get("strict", args[0] if args else False))
-            recorder.on_resolve(path, strict, result)
+            _observing(lambda recorder: recorder.on_resolve(path, strict, result))
         return result
 
     return resolve

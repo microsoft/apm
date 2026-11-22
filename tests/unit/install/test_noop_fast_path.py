@@ -386,3 +386,22 @@ def test_a_same_source_policy_rule_change_runs_the_full_install(project, monkeyp
     serve(ApmPolicy(enforcement="block", executables=ExecutablesPolicy(deny_all=True)))
     _install(run)
     assert run.calls == 3, "a tightened rule under the same source must run the full install"
+
+
+@_POSIX_ONLY
+def test_a_run_that_lists_directories_is_recorded_and_replayed(project) -> None:
+    """The recorder's own listing snapshot must not re-enter it or fail the run."""
+
+    class _ListingInstall(_Install):
+        def __call__(self) -> None:
+            sorted(os.listdir(self.root))
+            sorted(entry.name for entry in os.scandir(self.root))
+            super().__call__()
+
+    run = _ListingInstall(project)
+    _converge(run)
+    _install(run)
+    assert run.calls == 2
+    (project / "new-entry.txt").write_text("x", encoding="utf-8")
+    _install(run)
+    assert run.calls == 3, "a new entry in a listed directory runs the full install"
