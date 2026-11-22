@@ -194,6 +194,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "resolve_project_exec_allow_map(project_root, apm_package, user_scope",
                 ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
+                "src/apm_cli/install/local_bundle_canvas.py": (
+                    "keys = () if approval_key is None else (approval_key,)",
+                    "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
+                ),
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)",
                     "    return local_bundle_approval_key(",
@@ -204,7 +208,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     # Bundle hooks and canvas are approved for the exact bundle content.
                     "_bundle_keys = () if approval_key is None else (approval_key,)",
                     "package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)",
-                    "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS",
+                    "_canvas_ok, _canvas_blocked = gate_bundle_canvas(",
                     # A gated package's hooks retire through the hook owner (#3924).
                     "reconcile_package_targets(package_info, project_root, targets),",
                 ),

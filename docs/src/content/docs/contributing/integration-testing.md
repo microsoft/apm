@@ -63,12 +63,12 @@ APM uses a tiered approach to integration testing:
     -m 'lifecycle_smoke and not lifecycle_merge_group' tests/integration
   ```
 
-### 3b. **Owner Surface Check** (PR-time, advisory until required)
+### 3b. **Owner Surface Check** (required on every PR)
 - **Location**: `.github/workflows/owner-surface.yml`, selection in `scripts/owner_surface.py`.
 - **Purpose**: run, on every pull request, the slice of the merge-time integration suite that an owner or install-path change can break. Owner-guard and install regressions then show on the PR, not on `main`.
 - **Trigger**: a change to `src/apm_cli/install/*`, `src/apm_cli/deps/lockfile*`, `.apm/architecture/*`, `scripts/architecture_linter/*`, `tests/integration/test_architecture_*.py`, `tests/integration/test_install_*.py`, or any file an owner registry selector names.
 - **Slice**: owner-rule mutation cases and `test_architecture_*.py` files that name a changed file or an affected owner, guard or rule; plus every `test_install_*.py` file for install-path changes. It runs hermetic tests in 3 duration-balanced shards (target under 10 min).
-- **Result**: `Owner Surface Check` always reports. It passes when no owner surface changed (the slice is skipped) and on merge_group, where the full suite runs.
+- **Result**: `Owner Surface Check` always reports and is required by `gate` in every context. It passes when no owner surface changed (the slice steps are skipped) and on merge_group and merge trains (as the `owner` tier), where the full suite runs.
 - **Run it locally**:
   ```bash
   python3 -m scripts.owner_surface plan --base origin/main --out /tmp/changed.txt
@@ -666,6 +666,86 @@ release qualification or change required checks.
 - Test builds (uploads as workflow artifacts)
 - Allows testing the full build pipeline without creating a release, even when dispatched from a tag ref
 - Useful for validating changes before tagging
+
+### Tier 1 and Tier 2 on every push to main
+
+`main-push-gate.yml` runs the whole PR gate suite (`ci.yml`, including every
+Lifecycle Smoke shard) and the full integration suite (`ci-integration.yml`,
+every shard) on each push to `main`. Its `main-push-gate` job fails the run
+when any tier job fails, so a red `main` shows on the commit. It is
+not a required check and never saves caches to the `main` scope.
+
+### Merge-train proof
+
+`merge-train.yml` proves one exact merge result before it lands. Push the
+merged tree (main plus the queued PRs) to a `queue/*` branch and read the
+single `train-gate` check at that SHA:
+
+| Ref | Runs | Time |
+|---|---|---|
+| `queue/t<id>/p<k>-guard` | `scope`, `guard`, `train-gate` | about 5-10 min |
+| `queue/t<id>/p<k>-full` | the guard plus `tier1` (ci.yml), `tier2` (ci-integration.yml), `spec` (spec-conformance.yml) and `owner` (owner-surface.yml) | about 30-35 min |
+| `queue/b<sha12>/p0-full` | a full proof of a `main` SHA | about 30-35 min |
+
+`guard` runs the Lint chain (`.github/actions/lint-chain`, shared with the
+`Lint` job), the architecture ratchet contracts, every other `tests/quality`
+module and the NOTICE check. The ratchets compare against the merge base with
+`main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
+train runs every check the `merge_group` gate requires. `train-gate` passes only
+when every job is green, or when every failure is inherited: `gate.py` collects the
+failing pytest node ids from the failed jobs' logs and subtracts the
+`train-failures.json` of the newest base probe (`queue/b<sha12>/p0-full`). It then
+publishes the run's own `train-failures.json`. A cancelled job, or a failure
+without node ids, is never excused.
+
+Queue refs are real branches: only write-access users can push them, and every
+job tests the triggering commit. Train jobs restore caches (including `main`'s)
+read-only and never save one. After `train-gate` reports, the `cleanup` job
+deletes the train branch, so push it again to re-run (a manual dispatch with
+`--ref <queue branch>` works only while the branch exists).
+
+A green `train-gate` found by SHA alone is not a full proof: the same SHA can
+also carry a guard-only run. A full proof is a successful merge-train run on the
+`-full` branch (`queue/t<id>/p<k>-full` or `queue/b<sha12>/p0-full`) at that
+exact SHA:
+
+```bash
+git push origin HEAD:refs/heads/queue/t0001/p1-full
+gh run list --workflow merge-train.yml --branch queue/t0001/p1-full \
+  --commit "$(git rev-parse HEAD)" --json conclusion,url
+```
+
+The run must show `"conclusion": "success"`; cite its `url` as the proof.
+
+`scripts/merge_queue/` composes these trains automatically (shadow mode: it
+builds and proves trains but never merges). It reads PRs labeled `queue:ready`
+with an `apm-queue-ticket` marker comment, builds `queue-build/t<id>` through
+the merges API, publishes the prefix refs, and logs `would-land` events:
+
+```bash
+python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
+python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
+```
+
+A red train is classified by `scripts/merge_queue/classify.py`:
+- the earliest red guard prefix ejects its PR;
+- an infra failure is rerun once, and a second infra failure halts launches;
+- a failure attributable to one member's files ejects that member;
+- any other failure is rerun once (a flake lands), then bisected by halves.
+
+An ejected PR re-enters only with a new head.
+
+Landing is off by default. `--land` (`scripts/merge_queue/landing.py`) also
+admin-merges proven trains in launch order with
+`gh pr merge --merge --admin --match-head-commit`. It does so only when main's
+tree is the tree the member was proven on, and the merge commit must carry the
+proven tree. Any drift, or a merge to main that the runner did not make, HALTs
+landing and records the reason in `landing.json`; trains keep testing. Two
+failed admin probes in a row pause landing until elevation returns.
+Before merging, `closure.py` requires the issues GitHub will close
+(`closingIssuesReferences` plus closing keywords in commit messages) to equal the
+ticket's `fixes`; a mismatch ejects the train unmerged. After the merge it closes
+any fix GitHub left open and retargets stacked PRs.
 
 ### Windows unit hang diagnostics
 

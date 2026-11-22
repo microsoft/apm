@@ -145,6 +145,9 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[git@github.com:fixture/private-mkt.git-success]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success-named]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_replays_on_url_and_hash_without_a_commit",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_hash]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_url]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]"
       ],
@@ -153,7 +156,7 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 9,
+      "test_count": 12,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_frozen_manifest_pin_requires_the_exact_locked_commit",
         "tests/spec_conformance/test_lockfile_reqs.py::test_full_sha_pin_audit_rejects_resolved_commit_mismatch",
@@ -162,6 +165,9 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[git@github.com:fixture/private-mkt.git-success]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success-named]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_ssh_marketplace_install_records_repository_and_exact_commit[ssh://git@github.com/fixture/private-mkt.git-success]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_replays_on_url_and_hash_without_a_commit",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_hash]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_without_url_or_hash_is_not_replayed[resolved_url]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]"
       ]
@@ -528,6 +534,10 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[^1.0.0-1.2.3]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[main-main]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_refuses_a_selector_that_excludes_its_version",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[^1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[~1.0.0]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[name]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[version]"
       ],
@@ -536,7 +546,7 @@
       "keyword": "MUST",
       "section": "5.2",
       "status": "active",
-      "test_count": 10,
+      "test_count": 14,
       "tests": [
         "tests/spec_conformance/test_acquired_manifest_reqs.py::test_snapshot_preserves_manifestless_optional_version",
         "tests/spec_conformance/test_acquired_manifest_reqs.py::test_snapshot_preserves_resolver_version_precedence[git-semver]",
@@ -546,6 +556,10 @@
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[^1.0.0-1.2.3]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb]",
         "tests/spec_conformance/test_lockfile_reqs.py::test_marketplace_inventory_cannot_substitute_for_locked_selection[main-main]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_marketplace_row_refuses_a_selector_that_excludes_its_version",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[^1.0.0]",
+        "tests/spec_conformance/test_marketplace_registry_replay_reqs.py::test_registry_version_is_the_replayed_selection[~1.0.0]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[name]",
         "tests/spec_conformance/test_mcp_omission_inventory.py::test_omission_evidence_never_uses_inventory_as_identity[version]"
       ]
@@ -1843,6 +1857,27 @@
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_that_cannot_load_fails_closed[missing-file]",
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_that_cannot_load_fails_closed[unreachable]",
         "tests/spec_conformance/test_policy_reqs.py::test_explicit_policy_ref_under_operator_disable_is_disclosed"
+      ]
+    },
+    {
+      "behavioral_tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
+      ],
+      "conformance_class": "governance",
+      "id": "req-pl-022",
+      "keyword": "MUST",
+      "section": "6.1",
+      "status": "active",
+      "test_count": 5,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_alone_when_nothing_discovered",
+        "tests/spec_conformance/test_policy_reqs.py::test_explicit_install_source_composes_tighten_only",
+        "tests/spec_conformance/test_policy_reqs.py::test_spec_scopes_replacement_rules_and_names_composition",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[block]",
+        "tests/spec_conformance/test_policy_reqs.py::test_unloadable_explicit_install_source_fails_closed[warn]"
       ]
     },
     {
@@ -3329,7 +3364,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 21,
+      "active": 22,
       "partial": 0,
       "skipped": 0,
       "text-only": 0,
@@ -3353,5 +3388,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 151
+  "total_requirements": 152
 }

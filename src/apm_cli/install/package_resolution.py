@@ -25,7 +25,13 @@ GIT_PARENT_USER_SCOPE_ERROR = (
 
 
 def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
-    """Serialize a structured dependency reference for ``apm.yml`` storage."""
+    """Serialize a structured dependency reference for ``apm.yml`` storage.
+
+    A registry-sourced reference (a catalog entry routed to a registry) keeps
+    its registry form; it is never rewritten as a ``git:`` entry (#4009).
+    """
+    if getattr(dep_ref, "source", None) == "registry":
+        return dep_ref.to_apm_yml_entry()
     git_url = dep_ref.to_github_url()
     if dep_ref.explicit_scheme == "ssh":
         git_url = build_ssh_url(

@@ -4,7 +4,9 @@ Two attacks:
 
 1. Concurrent fires of the SAME event must not garble the shared
    ~/.apm/logs/scripts.log (each append must stay intact). Regression
-   trap: O_APPEND single-write blocks should not interleave.
+   trap: O_APPEND single-write blocks should not interleave. An HTTP
+   dispatch that finishes late must log under the APM home it fired in,
+   never into a home that became current later (#4706).
 
 2. The trust store read-modify-writes ($APM_HOME/scripts-trust.json) are
    NOT atomic. Concurrent trust() calls for distinct projects can lose
@@ -26,7 +28,9 @@ from apm_cli.core.lifecycle_scripts import (
     LifecycleEvent,
     LifecycleScriptRunner,
     PackageInfo,
+    ScriptEntry,
 )
+from apm_cli.core.script_executors import execute_script
 from apm_cli.core.script_trust import (
     is_project_scripts_trusted,
     trust_project_scripts,
@@ -81,6 +85,121 @@ def test_concurrent_fires_do_not_corrupt_log(apm_home: Path, tmp_path: Path) -> 
     for ln in text.splitlines():
         hits = [m for m in markers if m in ln]
         assert len(hits) <= 1, f"interleaved log line mixes markers: {ln!r}"
+
+
+@pytest.mark.parametrize("entrypoint", ["fire", "execute_script"])
+def test_late_http_dispatch_logs_to_home_it_fired_under(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entrypoint: str
+) -> None:
+    """#4706: a dispatch that outlives its firing context keeps its log home.
+
+    The POST is held on an Event until APM_HOME points elsewhere, the way a
+    leaked worker outlives one test and writes during the next. The block
+    must land in the home it fired under, never the later one.
+    """
+    import requests
+
+    fired_home = tmp_path / "fired_home"
+    later_home = tmp_path / "later_home"
+    monkeypatch.setenv("APM_HOME", str(fired_home))
+    entered = threading.Event()
+    release = threading.Event()
+
+    def held_post(*_a, **_k):
+        entered.set()
+        release.wait(timeout=10)
+
+        class _Resp:
+            status_code = 200
+            ok = True
+
+            def close(self) -> None:
+                pass
+
+        return _Resp()
+
+    monkeypatch.setattr(requests, "post", held_post)
+    # A literal public address keeps the SSRF guard off the resolver.
+    entry = ScriptEntry(
+        script_type="http",
+        event="post-install",
+        url="https://93.184.215.14/hook",
+        source="user",
+    )
+    event = _event(str(tmp_path))
+    if entrypoint == "fire":
+        threads = LifecycleScriptRunner(scripts=[entry]).fire("post-install", event)
+    else:
+        threads = [execute_script(entry, event)]
+    try:
+        assert entered.wait(timeout=10), "HTTP dispatch never reached the POST"
+        monkeypatch.setenv("APM_HOME", str(later_home))
+    finally:
+        release.set()
+        for t in threads:
+            t.join(timeout=10)
+    assert not any(t.is_alive() for t in threads), "dispatch thread did not finish"
+
+    fired_log = fired_home / "logs" / "scripts.log"
+    assert fired_log.is_file(), "late dispatch did not log under the home it fired in"
+    headers = [ln for ln in fired_log.read_text(encoding="utf-8").splitlines() if "event=" in ln]
+    assert len(headers) == 1
+    assert "type=http" in headers[0]
+    assert "status=ok" in headers[0]
+    assert not (later_home / "logs" / "scripts.log").exists(), (
+        "late dispatch wrote into a home that became current after it fired"
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["fire", "execute_script"])
+def test_home_switch_during_ssrf_lookup_keeps_fire_time_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entrypoint: str
+) -> None:
+    """#4706: the log home is bound before the SSRF guard resolves the host.
+
+    The fake resolver switches APM_HOME mid-lookup, the way a slow DNS answer
+    lets the current home change while dispatch is still being prepared.
+    """
+    import socket
+
+    import requests
+
+    fired_home = tmp_path / "fired_home"
+    later_home = tmp_path / "later_home"
+    monkeypatch.setenv("APM_HOME", str(fired_home))
+
+    def switching_getaddrinfo(*_a, **_k):
+        monkeypatch.setenv("APM_HOME", str(later_home))
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+
+    class _Resp:
+        status_code = 200
+        ok = True
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(socket, "getaddrinfo", switching_getaddrinfo)
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: _Resp())
+    entry = ScriptEntry(
+        script_type="http",
+        event="post-install",
+        url="https://hooks.rt-4706.test/hook",
+        source="user",
+    )
+    event = _event(str(tmp_path))
+    if entrypoint == "fire":
+        threads = LifecycleScriptRunner(scripts=[entry]).fire("post-install", event)
+    else:
+        threads = [execute_script(entry, event)]
+    for t in threads:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in threads), "dispatch thread did not finish"
+
+    fired_log = fired_home / "logs" / "scripts.log"
+    assert fired_log.is_file(), "dispatch logged under the home current after the lookup"
+    assert "type=http" in fired_log.read_text(encoding="utf-8")
+    assert not (later_home / "logs" / "scripts.log").exists()
 
 
 def test_trust_store_stays_valid_json_under_concurrency(apm_home: Path, tmp_path: Path) -> None:
