@@ -1,0 +1,17 @@
+{
+  "issue": 3110,
+  "fixed_in": "Unreleased",
+  "summary": "Behind PROXY_REGISTRY_URL, an archive the proxy served but extraction refused (a symlink member) was reported as the HTTP 404 of a later fallback URL; apm install now reports the refused archive, its URL and reason, writes nothing, keeps the registry token out of the output, and a valid archive at a later URL still installs.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_registry_proxy_archive_rejection_lifecycle.py::test_rejected_proxy_archive_is_reported_instead_of_later_404",
+    "tests/integration/test_registry_proxy_archive_rejection_lifecycle.py::test_fallback_to_a_valid_proxy_archive_still_installs",
+    "tests/unit/test_artifactory_support_io.py::TestArtifactoryArchiveDownload::test_archive_rejection_not_masked_by_later_404"
+  ]
+}

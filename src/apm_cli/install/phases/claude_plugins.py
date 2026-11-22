@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.deps.lockfile_write_authority import flush_lockfile_writes, remove_lockfile
+from apm_cli.deps.lockfile_write_authority import (
+    flush_lockfile_writes,
+    remove_lockfile,
+    restore_lockfile_bytes,
+)
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
@@ -48,33 +53,102 @@ def run(ctx: InstallContext) -> None:
 
     The lock and Claude's declarations are one rollback unit (req-na-004): when
     declaration fails, the previous lock is restored so a retry still owns
-    everything it must retire.
+    everything it must retire. MCP/LSP reconciliation already ran (#4329), so
+    the restored lock keeps the service records that reached disk.
     """
     if ctx.apm_modules_dir is None:
         return
     _refuse_retained_loose_claude_files(ctx)
     lock_path = get_lockfile_path(ctx.apm_dir)
-    previous = ctx.existing_lockfile
-    previous_owned = None if previous is None else native_ownership(previous)
+    previous_owned = (
+        None if ctx.existing_lockfile is None else native_ownership(ctx.existing_lockfile)
+    )
+    # The lock on disk before this command commits, restored verbatim when the
+    # rollback carries no service change (#4685).
+    original = (
+        lock_path.read_bytes()
+        if ctx.existing_lockfile is not None and lock_path.is_file()
+        else None
+    )
     if ctx.claude_native_plugins or previous_owned:
         # Claude's declarations never run ahead of the lock they follow.
         flush_lockfile_writes()
+    committed = LockFile.read(lock_path)
     try:
         reconcile_claude_plugins(
             modules_dir=ctx.apm_modules_dir,
             scope=ctx.scope,
             previous=previous_owned,
-            lockfile=LockFile.read(lock_path),
+            lockfile=committed,
             prepared=ctx.claude_native_plugins,
             deploy_root=ctx.project_root,
             logger=ctx.logger,
             dry_run=ctx.dry_run,
         )
     except ClaudeNativePluginError:
-        if previous is not None:
+        previous = _with_reconciled_services(ctx.existing_lockfile, committed)
+        if previous is not None and previous is ctx.existing_lockfile and original is not None:
+            restore_lockfile_bytes(lock_path, original)
+        elif previous is not None:
             # The rollback is durable even though this install fails.
             previous.write(lock_path)
             flush_lockfile_writes()
         else:
             remove_lockfile(lock_path)
         raise
+
+
+def _with_reconciled_services(previous: LockFile | None, committed: LockFile | None):
+    """*previous* carrying the MCP/LSP records *committed* holds for what reached disk.
+
+    When the install changed no service record, *previous* itself is returned, so
+    the caller restores the previous lock's bytes (#4685).
+    """
+    if committed is None or (
+        previous is None
+        and not committed.mcp_servers
+        and not committed.lsp_servers
+        and not (committed.mcp_target_servers or committed.lsp_target_servers)
+    ):
+        return previous
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    if previous is not None and _service_records(previous) == _service_records(committed):
+        return previous
+
+    rollback = copy.deepcopy(previous) if previous is not None else LockFile()
+    rollback.mcp_servers = list(committed.mcp_servers)
+    rollback.mcp_configs = copy.deepcopy(committed.mcp_configs)
+    rollback.mcp_omissions = copy.deepcopy(committed.mcp_omissions)
+    rollback.mcp_config_provenance = copy.deepcopy(committed.mcp_config_provenance)
+    rollback.lsp_servers = list(committed.lsp_servers)
+    rollback.lsp_configs = copy.deepcopy(committed.lsp_configs)
+    rollback.lsp_config_provenance = copy.deepcopy(committed.lsp_config_provenance)
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        rollback,
+        committed.mcp_target_servers,
+        native_hashes=DeploymentLedgerCodec.mcp_native_hashes(committed),
+    )
+    DeploymentLedgerCodec.replace_lsp_target_servers(rollback, committed.lsp_target_servers)
+    return rollback
+
+
+def _service_records(lock: LockFile) -> str:
+    """The MCP/LSP records the rollback carries, type-sensitive (``1`` is not ``true``)."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import _json_identity
+
+    return _json_identity(
+        [
+            sorted(lock.mcp_servers),
+            lock.mcp_configs,
+            lock.mcp_omissions,
+            lock.mcp_config_provenance,
+            sorted(lock.lsp_servers),
+            lock.lsp_configs,
+            lock.lsp_config_provenance,
+            {target: sorted(names) for target, names in lock.mcp_target_servers.items() if names},
+            {target: sorted(names) for target, names in lock.lsp_target_servers.items() if names},
+            DeploymentLedgerCodec.mcp_native_hashes(lock),
+        ]
+    )

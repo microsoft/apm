@@ -191,6 +191,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
+    explicit_policy_option,
     trust_transitive_mcp_option,
 )
 
@@ -1036,6 +1037,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@explicit_policy_option
 @click.option(
     "--audit",
     "audit_mode",
@@ -1164,6 +1166,7 @@ def install(  # noqa: PLR0913
         apm install --only=apm                  # Install only APM packages
         apm update                              # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would change
+        apm install --policy ./org-policy.yml   # Also enforce a vendored policy
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
         apm install --skill my-skill org/bundle  # Install one skill from bundle
@@ -1870,7 +1873,9 @@ def _install_apm_packages(ctx, outcome):
     _check_insecure_dependencies(
         project_manifest_dependencies(apm_package), ctx.allow_insecure, logger
     )
+    from apm_cli.install.pipeline_entry import enforce_explicit_policy_without_deps
 
+    enforce_explicit_policy_without_deps(ctx.project_root, apm_package, logger)
     apm_count = 0
 
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
@@ -1916,6 +1921,46 @@ def _install_apm_packages(ctx, outcome):
         and not has_any_apm_deps
         and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
     )
+    from apm_cli.install.service_integration import ServiceReconciliation
+
+    def _adopt(install_result: InstallResult) -> None:
+        ctx.target_decision = install_result.target_decision
+        ctx.exec_allow_map = install_result.exec_allow_map
+        ctx.exec_allow_resolved = install_result.exec_allow_resolved
+        ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
+
+    def _service_options(install_result: InstallResult | None) -> dict[str, Any]:
+        if install_result is not None:
+            _adopt(install_result)
+        return dict(
+            diagnostics=install_result.diagnostics if install_result is not None else None,
+            explicit_target=ctx.target or ctx.runtime,
+            target_decision=ctx.target_decision,
+            active_package_keys=(
+                install_result.active_package_keys if install_result is not None else None
+            ),
+            claude_native_keys=(
+                install_result.claude_native_keys if install_result is not None else frozenset()
+            ),
+        )
+
+    reconcile_services = ServiceReconciliation(
+        ctx,
+        _service_options,
+        apm_package=apm_package,
+        mcp_deps=mcp_deps,
+        lock_path=_lock_path,
+        existing_lock=_existing_lock,
+        old_mcp_servers=old_mcp_servers,
+        old_mcp_configs=old_mcp_configs,
+        old_mcp_provenance=old_mcp_provenance,
+        old_mcp_target_servers=old_mcp_target_servers,
+        old_mcp_target_servers_present=old_mcp_target_servers_present,
+        frozen_disposition=frozen_disposition,
+    )
+    # Reconciled before native registration commits the lockfile (#4329); --frozen writes none.
+    if not frozen_disposition.withhold_lockfile_writes:
+        pipeline_options["reconcile_services"] = reconcile_services
     apm_diagnostics = None
     install_result = None
     if should_install_apm and (
@@ -1941,10 +1986,7 @@ def _install_apm_packages(ctx, outcome):
                 )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
-            ctx.target_decision = install_result.target_decision
-            ctx.exec_allow_map = install_result.exec_allow_map
-            ctx.exec_allow_resolved = install_result.exec_allow_resolved
-            ctx.mcp_policy_enforced = install_result.mcp_policy_enforced
+            _adopt(install_result)
             if install_result.disposition not in {
                 InstallDisposition.SUCCESS,
                 InstallDisposition.PARTIAL_SUCCESS,
@@ -1994,45 +2036,7 @@ def _install_apm_packages(ctx, outcome):
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 
-    if ctx.update:
-        from apm_cli.models.apm_package import clear_apm_yml_cache
-
-        clear_apm_yml_cache()
-
-    from apm_cli.install.commit_gate import refuse_blocked_mcp
-    from apm_cli.install.service_integration import run_service_integrations
-    from apm_cli.policy.install_preflight import PolicyBlockError
-
-    try:
-        service_result = run_service_integrations(
-            ctx,
-            apm_package=apm_package,
-            mcp_deps=mcp_deps,
-            lock_path=_lock_path,
-            existing_lock=_existing_lock,
-            old_mcp_servers=old_mcp_servers,
-            old_mcp_configs=old_mcp_configs,
-            old_mcp_provenance=old_mcp_provenance,
-            old_mcp_target_servers=old_mcp_target_servers,
-            old_mcp_target_servers_present=old_mcp_target_servers_present,
-            diagnostics=apm_diagnostics,
-            explicit_target=ctx.target or ctx.runtime,
-            target_decision=ctx.target_decision,
-            active_package_keys=(
-                install_result.active_package_keys if install_result is not None else None
-            ),
-            claude_native_keys=(
-                install_result.claude_native_keys if install_result is not None else frozenset()
-            ),
-            frozen_disposition=frozen_disposition,
-        )
-    except PolicyBlockError as exc:
-        refuse_blocked_mcp(logger, exc)
-    except RequiredIntegrationError as exc:
-        logger.error(str(exc))
-        logger.render_summary()
-        raise InstallFailureAlreadyRendered(str(exc)) from exc
-
+    service_result = reconcile_services.settle(install_result)
     ctx.target_decision = service_result.target_decision
     mcp_count = service_result.mcp_count
     lsp_count = service_result.lsp_count

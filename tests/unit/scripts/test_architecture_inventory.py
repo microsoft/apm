@@ -332,3 +332,20 @@ def test_root_apm_modules_is_never_walked(tmp_path) -> None:
     assert _is_excluded(("apm_modules",))
     assert _is_excluded(("apm_modules", "acme", "pkg", "x.py"))
     assert not _is_excluded(("src", "apm_cli", "apm_modules.py"))
+
+
+def test_root_coverage_data_files_are_never_inventoried(tmp_path) -> None:
+    """A coverage worker's data file written mid-run must not change the inventory."""
+    _write_minimal_repo(tmp_path)
+    before = build_inventory(tmp_path).files
+    (tmp_path / ".coverage").write_bytes(b"")
+    (tmp_path / ".coverage.runner.4242.Xabc123").write_bytes(b"")
+    (tmp_path / "src" / ".coverage.nested").write_text("kept\n", encoding="utf-8")
+    (tmp_path / ".coveragerc").write_text("[run]\n", encoding="utf-8")
+
+    after = build_inventory(tmp_path)
+
+    assert ".coverage" not in after.files
+    assert ".coverage.runner.4242.Xabc123" not in after.files
+    assert set(after.files) - set(before) == {".coveragerc", "src/.coverage.nested"}
+    assert len(after.excluded_roots) == len(EXCLUDED_ROOTS)
