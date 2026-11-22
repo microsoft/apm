@@ -25,6 +25,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 _HOST = "gitlab.example.invalid"

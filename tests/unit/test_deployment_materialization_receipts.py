@@ -1130,6 +1130,86 @@ def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monk
     assert corrupt.exists()
 
 
+def _rewrite(session: DeploymentMaterializationSession, path: Path, text: str) -> str:
+    path.write_text(text, encoding="utf-8")
+    content_hash = compute_file_hash(path)
+    session.record({path: content_hash}, [TARGET], "pkg")
+    session.flush()
+    return content_hash
+
+
+def test_an_earlier_write_on_this_checkout_is_a_baseline_but_not_deletion_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#4428: bytes this installation wrote earlier stay provable after a rewrite."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    old_hash = _rewrite(session, path, "rendered old\n")
+    _rewrite(session, path, "rendered on another branch\n")
+    path.write_bytes(old_bytes)  # git checkout restores the earlier render
+
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert [old_hash in hashes for hashes in persisted["history"].values()] == [True]
+    assert _session(root, lock).baseline(path, [TARGET]) == old_hash
+    assert _receipt_evidence(root).receipt_hashes.get(path.resolve().as_posix()) != old_hash
+    path.write_text("user edit\n", encoding="utf-8")
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
+def test_the_write_history_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from apm_cli.core.receipt_history import HISTORY_LIMIT
+
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    first = _rewrite(session, path, "write 0\n")
+    for index in range(1, HISTORY_LIMIT + 2):
+        _rewrite(session, path, f"write {index}\n")
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    (history,) = data["history"].values()
+    assert len(history) == HISTORY_LIMIT
+    assert first not in history
+
+
+def test_an_invalid_write_history_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    session = _session(root, lock)
+    _rewrite(session, path, "write 0\n")
+    _rewrite(session, path, "write 1\n")
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    data["history"] = {key: ["not-a-hash"] for key in data["history"]}
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="rendered-write history"):
+        _session(root, lock)
+
+
+@pytest.mark.parametrize("handoff", ["owner", "claims"])
+def test_earlier_writes_never_acquire_a_new_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, handoff: str
+) -> None:
+    """A new owner or claim binding starts a fresh history (#4428)."""
+    root, path, lock = _fixture(tmp_path, monkeypatch)
+    old_bytes = path.read_bytes()
+    session = _session(root, lock)
+    _rewrite(session, path, "rendered old\n")
+    if handoff == "owner":
+        path.write_text("another owner's render\n", encoding="utf-8")
+        session.record({path: compute_file_hash(path)}, [TARGET], "other")
+        session.flush()
+    else:
+        _rewrite(session, path, "rendered new\n")
+        assert json.loads(session.state_path.read_text(encoding="utf-8"))["history"]
+        session.bind_committed_claims(LockFile())
+    path.write_bytes(old_bytes)
+
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert "history" not in persisted
+    assert _session(root, lock).baseline(path, [TARGET]) is None
+
+
 @pytest.mark.parametrize("target_name", ["claude", "copilot-cowork"])
 def test_owner_receipts_stand_in_with_the_claim_spelling_current_claims_use(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str

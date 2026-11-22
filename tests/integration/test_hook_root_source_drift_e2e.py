@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 def _run(apm_binary_path: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(

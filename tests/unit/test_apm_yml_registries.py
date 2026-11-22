@@ -15,6 +15,16 @@ from pathlib import Path
 import pytest
 
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+from tests.lifecycle.known import KnownFailure
+
+# @registry shorthand: a deferred design, its tracker stays open (#4543).
+_REGISTRY_SHORTHAND = KnownFailure(
+    "#4543",
+    "@registry scope shorthand not yet implemented",
+    r"Shorthand '@alias' is not supported",
+    kind="deferred-design",
+    raises=(ValueError, AssertionError),
+)
 
 pytestmark = pytest.mark.component
 
@@ -372,7 +382,7 @@ class TestDefaultRouting:
             assert dep.source == "registry"
             assert dep.registry_name == "corp"
 
-    @pytest.mark.xfail(reason="#4543 @registry scope shorthand not yet implemented", strict=True)
+    @_REGISTRY_SHORTHAND.mark()
     def test_at_scope_overrides_default(self, write_yml):
         p = write_yml("""
             name: x

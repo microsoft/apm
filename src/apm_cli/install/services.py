@@ -450,7 +450,13 @@ def integrate_package_primitives(  # noqa: PLR0913
             from apm_cli.install.withheld_hooks import announce_withheld_hook_files
 
             announce_withheld_hook_files(
-                package_name, package_info, project_root, targets, managed_files, logger
+                package_name,
+                package_info,
+                project_root,
+                targets,
+                managed_files,
+                logger,
+                user_scope=scope is InstallScope.USER,
             )
             continue
         # Executable approval gate: skip canvas if not approved.

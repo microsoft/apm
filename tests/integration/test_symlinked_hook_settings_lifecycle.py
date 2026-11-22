@@ -19,6 +19,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows"),
+    pytest.mark.e2e,
 ]
 
 _LINKED = '{"outsideOnly": "value"}\n'

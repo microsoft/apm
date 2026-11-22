@@ -13,7 +13,10 @@ from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.models.apm_package import PackageInfo, PackageType, validate_apm_package
 from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="POSIX mode hardening only")
+pytestmark = [
+    pytest.mark.skipif(os.name != "posix", reason="POSIX mode hardening only"),
+    pytest.mark.component,
+]
 
 
 def _write_marketplace_plugin(package_dir: Path, *, manifest_name: str) -> tuple[PackageInfo, Path]:

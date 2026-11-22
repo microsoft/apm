@@ -11,7 +11,7 @@ import pytest
 
 from tests.integration._target_compile_kit import Scenario, output, tree_digest, write
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _SCRIPT = """#!/bin/sh
 cat > /dev/null

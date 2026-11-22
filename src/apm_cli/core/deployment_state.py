@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.core.receipt_history import is_canonical_bundle_hash
+
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -88,16 +90,6 @@ class DeploymentLedger:
     """Immutable deployment record collection keyed by locator key."""
 
     records: Mapping[str, DeploymentRecord]
-
-
-def is_canonical_bundle_hash(content_hash: str | None) -> bool:
-    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
-    digest = (
-        content_hash.removeprefix("sha256:")
-        if isinstance(content_hash, str) and content_hash.startswith("sha256:")
-        else ""
-    )
-    return len(digest) == 64 and all(character in "0123456789abcdef" for character in digest)
 
 
 def require_local_bundle_hash(path: str, content_hash: str | None) -> None:

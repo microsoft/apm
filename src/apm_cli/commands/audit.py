@@ -778,6 +778,7 @@ def _audit_ci_gate(
             if no_policy and not policy_source
             else lambda: exec_policy_from_discovery(fetch_policy)
         ),
+        policy_fetch=None if no_policy and not policy_source else fetch_policy,
     )
 
     # Resolve policy source: explicit --policy wins; otherwise mirror

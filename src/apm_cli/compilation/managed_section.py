@@ -23,6 +23,11 @@ class ManagedSectionError(ValueError):
     """Raised when the managed-section markers are missing or duplicated."""
 
 
+def validate_managed_section(existing_content: str, start_marker: str, end_marker: str) -> None:
+    """Raise :class:`ManagedSectionError` unless the markers frame exactly one section."""
+    apply_managed_section(existing_content, "", start_marker, end_marker)
+
+
 def apply_managed_section(
     existing_content: str,
     new_section_content: str,

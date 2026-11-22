@@ -9,6 +9,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 def _h1_lines(path: Path) -> list[str]:
     return [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("# ")]

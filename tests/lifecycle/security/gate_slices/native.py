@@ -7,6 +7,7 @@ root goes as one unit when the gate closes.
 
 from __future__ import annotations
 
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice
 
 _PROJECT = {"project": (".agents/plugins/p-native-claude/.claude-plugin/plugin.json",)}
@@ -29,7 +30,15 @@ _PLUGIN_CHANGES = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
+_USER_ORG = KnownFailure(
+    "#3703",
+    "user-scope installs discover no org policy, so an org policy change leaves"
+    " user-scope deployments in place",
+    # I4 keeps the surface (org-deny, org-enables-gate); the dep deny row keeps
+    # the plugin file and prints no deny (policy-dep-deny).
+    r"still deployed but not allowed|plugins/p-native-claude-bin/\S+ must be absent"
+    r"|output lacks /denied by pattern/",
+)
 _XFAIL = {
     **{
         f"G|native-plugin|{change}|native": _USER_ORG
@@ -56,7 +65,7 @@ SLICE = GateSlice(
             f"G|{path}|{change}|native",
             surface=surface,
             smoke=f"G|{path}|{change}|native" in _SMOKE,
-            xfail=_XFAIL.get(f"G|{path}|{change}|native", ""),
+            xfail=_XFAIL.get(f"G|{path}|{change}|native"),
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes
@@ -66,7 +75,7 @@ SLICE = GateSlice(
             f"G|native-plugin|{change}|native",
             surface=_PLUGIN,
             package="p-native-claude-bin",
-            xfail=_XFAIL.get(f"G|native-plugin|{change}|native", ""),
+            xfail=_XFAIL.get(f"G|native-plugin|{change}|native"),
         )
         for change in _PLUGIN_CHANGES
     ),
