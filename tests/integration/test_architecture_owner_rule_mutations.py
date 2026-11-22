@@ -2144,6 +2144,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Plugin-root hook command vocabulary loses its canonical constant.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-hook-containment-root",
+        rule_id="mutation_writes.hook_containment_root",
+        path="src/apm_cli/integration/hook_bundle.py",
+        old="    containment = hook_containment_root(target, project_root)",
+        new="    containment = project_root",
+        intent="Hook bundle copies re-decide their containment root instead of asking the owner.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-jetbrains-mcp-path",
         rule_id="mutation_writes.jetbrains_mcp_path",
         path="src/apm_cli/adapters/client/intellij.py",
@@ -4958,6 +4966,16 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             "native_hashes=DeploymentLedgerCodec.mcp_native_hashes(",
             "native_hashes=DeploymentLedgerCodec.unverified_mcp_native_hashes(",
         ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        _refuse_native_mcp_collision(\n            dep,",
+            "        _skip_native_mcp_collision(\n            dep,",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "        refuse_projected_mcp_collisions(\n            [dep],",
+            "        unchecked_mcp_collisions(\n            [dep],",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -4974,6 +4992,8 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "bundle-deferred-claims",
         "registry-install-routing",
         "rebuild-receipt-routing",
+        "direct-entry-preflight-routing",
+        "direct-entry-preflight-delegation",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:

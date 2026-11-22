@@ -603,6 +603,17 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "_refuse_native_mcp_collisions",
             "refuse_projected_mcp_collisions",
         ),
+        # A direct ``install --mcp`` entry refuses before apm.yml is written (#4759).
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "run_mcp_install",
+            "_refuse_native_mcp_collision",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "_refuse_native_mcp_collision",
+            "refuse_projected_mcp_collisions",
+        ),
         (
             "src/apm_cli/install/mcp/integration.py",
             "run_mcp_integration",
