@@ -54,10 +54,13 @@ def withheld_merged_hook_entries(
         except (OSError, ValueError, TypeError) as exc:
             raise HookPathsUnknown(f"{rel}: {exc}") from exc
         for event, entries in container.items():
-            for entry in entries if isinstance(entries, list) else ():
+            for entry in entries:
+                source = entry.get("_apm_source") if isinstance(entry, dict) else None
+                if source is not None and not isinstance(source, str):
+                    raise HookPathsUnknown(f"{rel}: event {event!a} has invalid ownership metadata")
                 if (
                     isinstance(entry, dict)
-                    and entry.get("_apm_source") in owned
+                    and source in owned
                     and integrator._hook_entry_content_key(entry) in wanted.get(event, ())
                 ):
                     found.add(f"{rel}: {event}")
@@ -70,9 +73,16 @@ def _owned_view(json_path: Path, config: Any, user_scope: bool) -> dict:
     from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    container = data.get(config.event_container_key) if isinstance(data, dict) else None
-    if not isinstance(container, dict):
+    if not isinstance(data, dict):
+        raise ValueError("the config is not a JSON object")
+    container = data.get(config.event_container_key)
+    if container is None:
         return {}
+    if not isinstance(container, dict):
+        raise ValueError(f"'{config.event_container_key}' is not an object")
+    for event, entries in container.items():
+        if not isinstance(entries, list):
+            raise ValueError(f"event {event!a} is not a list")
     sidecar = json_path.parent / hooks._APM_HOOKS_SIDECAR
     if config.schema_strict and sidecar.is_file():
         try:

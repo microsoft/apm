@@ -158,3 +158,38 @@ def test_a_malformed_event_list_fails_closed(tmp_path: Path) -> None:
         withheld_merged_hook_entries(info, project, targets)
 
     assert json.loads(settings.read_text(encoding="utf-8"))["hooks"]["Stop"] is None
+
+
+@pytest.mark.parametrize(
+    "document",
+    [[], {"hooks": []}, {"hooks": {"SessionStart": None}}],
+    ids=["not-an-object", "container-not-an-object", "event-not-a-list"],
+)
+def test_a_malformed_config_shape_fails_closed_without_a_sidecar(
+    tmp_path: Path, document: object
+) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    for path in project.rglob("apm-hooks.json"):
+        path.unlink()
+    settings = project / ".claude" / "settings.json"
+    settings.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HookPathsUnknown, match=r"\.claude/settings\.json"):
+        withheld_merged_hook_entries(info, project, targets)
+
+    assert json.loads(settings.read_text(encoding="utf-8")) == document
+
+
+def test_invalid_ownership_metadata_fails_closed(tmp_path: Path) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    for path in project.rglob("apm-hooks.json"):
+        path.unlink()
+    settings = project / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"]["SessionStart"][0]["_apm_source"] = {"not": "a marker"}
+    settings.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(HookPathsUnknown, match="invalid ownership metadata"):
+        withheld_merged_hook_entries(info, project, targets)
+
+    assert json.loads(settings.read_text(encoding="utf-8")) == data
