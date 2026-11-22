@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="${PERF_BENCH_REPO:-microsoft/apm}"
-HARNESS_REF="${PERF_BENCH_HARNESS_REF:-danielmeppiel-perf-bench-ci}"
+HARNESS_REF="${PERF_BENCH_HARNESS_REF:-main}"
 URL="https://github.com/${REPO}.git"
 
 die() { echo "[x] $*" >&2; exit 1; }
