@@ -20,6 +20,7 @@ from apm_cli.bundle.plugin_exporter import (
     _get_dev_dependency_urls,
     _merge_file_map,
     _reconcile_plugin_json_version,
+    _warn_unpacked_dependency_config,
     export_plugin_bundle,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -399,6 +400,40 @@ class TestCollectMcp:
 
     def test_missing_file(self, tmp_path):
         assert _collect_mcp(tmp_path) == {}
+
+
+class TestUnpackedDependencyConfigWarning:
+    """The warning names only dependency config the bundle will not carry."""
+
+    @staticmethod
+    def _warn(tmp_path, capsys, components, *, mcp=False) -> str:
+        install_path = tmp_path / "cache"
+        hooks_dir = install_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "session.json").write_text(json.dumps({"hooks": {"SessionStart": []}}))
+        if mcp:
+            (install_path / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"db": {"command": "db"}}})
+            )
+        _warn_unpacked_dependency_config(
+            LockedDependency(repo_url="acme/hooky"), install_path, components
+        )
+        captured = capsys.readouterr()
+        return " ".join(f"{captured.out} {captured.err}".split())
+
+    def test_packed_hooks_file_is_not_reported(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        assert "acme/hooky" not in self._warn(tmp_path, capsys, packed)
+
+    def test_hook_scripts_alone_do_not_carry_the_config(self, tmp_path, capsys):
+        scripts = [(tmp_path / "run.sh", "hooks/scripts/hooky/run.sh")]
+        output = self._warn(tmp_path, capsys, scripts)
+        assert "acme/hooky contributed hooks config that is not attested" in output
+
+    def test_mcp_config_is_reported_beside_packed_hooks(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        output = self._warn(tmp_path, capsys, packed, mcp=True)
+        assert "acme/hooky contributed MCP config that is not attested" in output
 
 
 # ---------------------------------------------------------------------------
@@ -1234,15 +1269,23 @@ class TestExportPluginBundle:
         assert (result.bundle_path / "agents" / "root-bot.agent.md").is_file()
 
     def test_omitted_includes_with_apm_dir_skips_root_components(self, tmp_path):
-        """An omitted includes field does not weaken .apm authority."""
+        """An omitted includes field does not weaken .apm authority over root primitives.
+
+        Root skills are the exception when .apm/ authors none: a path install
+        deploys them, so the bundle carries them (#4709).
+        """
         project = _setup_plugin_project(tmp_path)
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "draft.agent.md").write_text("draft", encoding="utf-8")
         root_skills = project / "skills" / "root-skill"
         root_skills.mkdir(parents=True)
         (root_skills / "SKILL.md").write_text("# Root\n", encoding="utf-8")
 
         result = export_plugin_bundle(project, tmp_path / "build")
 
-        assert not (result.bundle_path / "skills" / "root-skill").exists()
+        assert not (result.bundle_path / "agents" / "draft.agent.md").exists()
+        assert (result.bundle_path / "skills" / "root-skill" / "SKILL.md").is_file()
 
     def test_explicit_includes_are_exhaustive(self, tmp_path):
         """An explicit path list packs no unlisted local primitives."""
@@ -1487,6 +1530,57 @@ class TestExportPluginBundle:
             "Move plugin-native content into .apm/, or remove .apm/ to restore "
             "root convention discovery.",
         ]
+
+    def test_root_skills_ship_when_apm_dir_authors_no_skill(self, tmp_path):
+        """A path install deploys root skills beside .apm/; the bundle carries them too."""
+        project = _setup_plugin_project(tmp_path, instructions=["style.instructions.md"])
+        skill = project / "skills" / "review"
+        (skill / "refs").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\nbody\n", encoding="utf-8")
+        (skill / "refs" / "guide.md").write_text("guide\n", encoding="utf-8")
+        captured: list[str] = []
+
+        class _StubLogger:
+            def info(self, message, symbol=None):
+                pass
+
+            def warning(self, message):
+                captured.append(message)
+
+        result = export_plugin_bundle(project, tmp_path / "build", logger=_StubLogger())
+
+        assert (result.bundle_path / "skills" / "review" / "SKILL.md").is_file()
+        assert (result.bundle_path / "skills" / "review" / "refs" / "guide.md").is_file()
+        assert (result.bundle_path / "instructions" / "style.instructions.md").is_file()
+        assert not any("root-level skills/" in message for message in captured), captured
+
+    @pytest.mark.parametrize("marker", ["directory", "dangling-link"])
+    def test_a_non_file_skill_marker_under_apm_does_not_hide_root_skills(self, tmp_path, marker):
+        project = _setup_plugin_project(tmp_path, instructions=["style.instructions.md"])
+        stub = project / ".apm" / "skills" / "draft" / "SKILL.md"
+        stub.parent.mkdir(parents=True)
+        if marker == "directory":
+            stub.mkdir()
+        else:
+            stub.symlink_to(tmp_path / "missing.md")
+        skill = project / "skills" / "review"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\nbody\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "skills" / "review" / "SKILL.md").is_file()
+
+    def test_root_skills_stay_skipped_when_apm_dir_authors_skills(self, tmp_path):
+        project = _setup_plugin_project(tmp_path, skills={"published": ["SKILL.md"]})
+        draft = project / "skills" / "draft"
+        draft.mkdir(parents=True)
+        (draft / "SKILL.md").write_text("draft\n", encoding="utf-8")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "skills" / "published" / "SKILL.md").is_file()
+        assert not (result.bundle_path / "skills" / "draft").exists()
 
     def test_empty_apm_dir_warns_when_no_local_primitives_exist(self, tmp_path):
         """An empty APM-native layout explains how to recover."""

@@ -108,6 +108,18 @@ plus where it was found:
   locked commit still pins the download. If the marketplace now selects another
   source or commit, install fails; run `apm update <plugin>@<marketplace>` to
   move to it.
+- An entry the marketplace routes through a package registry locks the exact
+  version, `resolved_url` and `resolved_hash` instead of a commit, and replays
+  through a registry declared in `apm.yml`, like any registry dependency; the
+  archive hash is checked before anything is extracted. `apm install <plugin>@<marketplace>`
+  writes such an entry to `apm.yml` in registry form (`id`, `registry`,
+  `version`), never as a Git entry.
+- A plugin from a local catalog (a directory or a `marketplace.json` file) is
+  locked by its content, not a commit. `apm install` reads the catalog again,
+  so catalog edits apply. `apm install --frozen` passes while the catalog still
+  selects the locked plugin directory and its content is unchanged, and
+  otherwise fails without writing anything; run `apm install` to lock the
+  change.
 - `apm update` and `apm install --refresh` revalidate the marketplace and fail
   rather than use stale data. `apm marketplace update` refreshes the cached
   list and nothing else.
@@ -220,7 +232,8 @@ The plugin appears with its primitive counts. Commit `apm.yml` and
   to public `github.com`, so APM refuses it as a dependency-confusion risk.
   Ask the publisher to host-qualify the entry. A bare `owner/repo` is accepted
   when your `GITHUB_HOST` is the marketplace host, because it then resolves
-  to that host.
+  to that host. A `default_host:` in `apm.yml` does not admit it: an
+  operator setting, not a manifest, decides which host a bare entry trusts.
 - **The plugin installs but is incomplete in Claude Code.** See
   [Install plugins](../install-plugins/#known-gaps).
 

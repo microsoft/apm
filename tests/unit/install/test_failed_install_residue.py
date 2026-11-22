@@ -73,9 +73,10 @@ def _forced_lockfile_failure(self) -> None:
 
 
 class TestCliFailureAfterNativeDeploy:
-    def test_failure_lists_every_leftover_path_without_rollback_claim(
+    def test_failure_restores_every_native_write_and_reports_no_residue(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        """#4282: the transaction restores what it deployed, so nothing is left to list."""
         project, manifest = _project_with_local_dependency(tmp_path, monkeypatch)
 
         with patch(
@@ -85,18 +86,11 @@ class TestCliFailureAfterNativeDeploy:
             result = CliRunner().invoke(cli, ["install", "--target", "claude"])
 
         output = _flat(result.output)
-        listed = {line.strip() for line in result.output.splitlines()}
         assert result.exit_code == 1, result.output
-        assert (project / ".claude" / "agents" / "helper.md").is_file()
-        assert (project / ".claude" / "skills" / "demo" / "SKILL.md").is_file()
-        assert ".claude/agents/helper.md" in listed
-        assert ".claude/skills/demo/SKILL.md" in listed
-        # The skill directory may hold unrelated files; it is not listed as removable.
-        assert ".claude/skills/demo" not in listed
-        assert "native target files on disk" in output
-        assert "Remove these files, then re-run 'apm install'." in output
-        _assert_no_rollback_claim(result.output)
-        # Existing apm.yml and lockfile behavior on failure is unchanged.
+        assert "Deployed files restored to their previous state." in output
+        assert not (project / ".claude" / "agents" / "helper.md").exists()
+        assert not (project / ".claude" / "skills" / "demo").exists()
+        assert "native target files on disk" not in output
         assert (project / "apm.yml").read_bytes() == manifest
         assert not get_lockfile_path(project).exists()
 

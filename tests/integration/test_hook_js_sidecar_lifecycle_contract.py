@@ -879,3 +879,107 @@ def test_required_global_copilot_sidecar_lifecycle(
         ).content
         == user_content.encode()
     )
+
+
+_NESTED_PACKAGE = "nested-module-kit"
+_NESTED_REMOTE = f"https://gitlab.example.invalid/apm-fixture-org/{_NESTED_PACKAGE}.git"
+_NESTED_CLAUDE_SCRIPT = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/entry.js")
+_NESTED_CLAUDE_METADATA = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/package.json")
+_NESTED_CLAUDE_SIDECAR = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/package.json")
+
+
+def test_required_claude_hook_keeps_nested_module_metadata(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A nested package.json governs its .js scripts after deploy (#2950).
+
+    The package root declares no module type, so the hooks root sidecar is
+    CommonJS; the ES module under esm/ runs only if its own package.json
+    deploys beside it.
+    """
+    scenario = new_lifecycle_scenario(tmp_path / "nested-module", apm_binary_path)
+    package = scenario.sources.create(_NESTED_PACKAGE)
+    scenario.sources.add_hook(
+        package,
+        "esm",
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f"node ./esm/esm/entry.js {_HOOK_OUTPUT.as_posix()}",
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    scenario.sources.add_hook_asset(
+        package, "esm", PurePosixPath("esm/entry.js"), _script("nested-esm-hook")
+    )
+    scenario.sources.add_hook_asset(
+        package, "esm", PurePosixPath("esm/package.json"), '{ "type": "module" }\n'
+    )
+    repository = scenario.repositories.create(_NESTED_PACKAGE, source_tree=package.root)
+    scenario.repositories.commit(repository, message="seed nested ES module hook package")
+    scenario.repositories.install_url_rewrite(repository, _NESTED_REMOTE)
+    environment = scenario.isolated.subprocess_env()
+    consumer = scenario.consumers.create(
+        "nested-module-consumer",
+        dependencies=(
+            {"git": _NESTED_REMOTE, "type": "gitlab", "ref": "main", "alias": _NESTED_PACKAGE},
+        ),
+        targets=("claude",),
+    )
+    for args, scenario_id in (
+        (("install", "--parallel-downloads", "0"), "nested-module-declare"),
+        (("approve", _NESTED_PACKAGE), "nested-module-approve"),
+        (("install", "--parallel-downloads", "0"), "nested-module-install"),
+    ):
+        _run_success(scenario, consumer, args, environment=environment, scenario_id=scenario_id)
+
+    paths = (_NESTED_CLAUDE_SCRIPT, _NESTED_CLAUDE_METADATA, _NESTED_CLAUDE_SIDECAR)
+    deployed = LifecycleStateSnapshot.capture(
+        consumer.root, targets=("claude",), config_paths=paths
+    )
+    assert deployed.file(_NESTED_CLAUDE_SCRIPT.as_posix()).kind == "file"
+    assert deployed.file(_NESTED_CLAUDE_METADATA.as_posix()).kind == "file"
+    assert json.loads(deployed.file(_NESTED_CLAUDE_METADATA.as_posix()).content.decode()) == {
+        "type": "module"
+    }
+    assert json.loads(deployed.file(_NESTED_CLAUDE_SIDECAR.as_posix()).content.decode()) == {
+        "type": "commonjs"
+    }
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    recorded = {
+        path for dep in lock.get_package_dependencies() for path in (dep.deployed_files or ())
+    }
+    assert _NESTED_CLAUDE_METADATA.as_posix() in recorded, sorted(recorded)
+
+    result = ApmLifecycleRunner(("node",), timeout_seconds=30, scenario_timeout_seconds=30).run(
+        (_NESTED_CLAUDE_SCRIPT.as_posix(), _HOOK_OUTPUT.as_posix()),
+        scenario_id="nested-module-execute",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    assert consumer.root.joinpath(*_HOOK_OUTPUT.parts).read_text(encoding="utf-8") == (
+        "nested-esm-hook\n"
+    )
+
+    _run_success(
+        scenario,
+        consumer,
+        ("install", "--parallel-downloads", "0"),
+        environment=environment,
+        scenario_id="nested-module-converged",
+    )
+    _assert_exact_state(
+        deployed,
+        LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
+    )

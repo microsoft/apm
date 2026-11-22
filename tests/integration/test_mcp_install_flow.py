@@ -907,6 +907,7 @@ def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
 
     manifest["targets"] = ["copilot"]
     (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    clear_apm_yml_cache()  # a real second command reads apm.yml in a fresh process
     contracted = CliRunner().invoke(
         cli,
         ["install", "--target", "copilot", "--no-policy"],

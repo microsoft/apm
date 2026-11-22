@@ -17,9 +17,11 @@ Two genuine breaks on head:
   simultaneous threads + sockets. Secure expectation: a sane cap (bounded
   pool / semaphore). The assertion FAILS on head.
 
-Both tests are hermetic: ``requests.post`` is patched. The thread test
-uses a blocking post so the started threads are observably concurrent,
-then releases and joins them.
+Both tests are hermetic: ``requests.post`` is patched and the thread
+tests target a literal public address, so the SSRF guard never reaches the
+resolver. They use a blocking post so the started threads are observably
+concurrent, then release them and require every worker to finish: a worker
+that outlives its test logs into the next test's APM home (#4706).
 """
 
 from __future__ import annotations
@@ -38,6 +40,23 @@ pytestmark = pytest.mark.component
 # Head applies no cap; with N entries it starts N threads.
 MAX_CONCURRENT_DISPATCH = 32
 
+# Worst-case wait for the released pool to drain.
+_DRAIN_TIMEOUT = 30
+
+
+def _public_url(i: int) -> str:
+    # A literal address skips DNS in the SSRF guard; one slow answer from a
+    # real resolver held a worker past its join and leaked a log block (#4706).
+    return f"https://93.184.215.14/hook-{i}"
+
+
+def _release_and_drain(release: threading.Event, threads: list[threading.Thread]) -> None:
+    release.set()
+    for t in threads:
+        t.join(timeout=_DRAIN_TIMEOUT)
+    leaked = [t.name for t in threads if t.is_alive()]
+    assert not leaked, f"dispatch workers outlived the test: {leaked}"
+
 
 class TestResponseBodyNotBuffered:
     def test_stream_true_is_passed(self, dispatch) -> None:
@@ -54,9 +73,7 @@ class TestResponseBodyNotBuffered:
 class TestDispatchThreadCap:
     def test_fire_caps_concurrent_threads(self, blocking_post) -> None:
         n_entries = 500
-        scripts = [
-            make_http_script(f"https://endpoint-{i}.example.com/hook") for i in range(n_entries)
-        ]
+        scripts = [make_http_script(_public_url(i)) for i in range(n_entries)]
         runner = LifecycleScriptRunner(scripts=scripts)
         event = make_event()
 
@@ -71,10 +88,7 @@ class TestDispatchThreadCap:
                     f"<= {MAX_CONCURRENT_DISPATCH})"
                 )
             finally:
-                release.set()
-                for t in threads:
-                    if isinstance(t, threading.Thread):
-                        t.join(timeout=5)
+                _release_and_drain(release, threads)
 
     def test_small_batch_all_delivered(self, dispatch) -> None:
         """Regression trap: a modest batch must still all be delivered.
@@ -82,7 +96,7 @@ class TestDispatchThreadCap:
         Exercised one-at-a-time through the same dispatch helper to confirm
         the executor itself delivers each configured entry.
         """
-        scripts = [make_http_script(f"https://e{i}.example.com/h") for i in range(5)]
+        scripts = [make_http_script(_public_url(i)) for i in range(5)]
         delivered = 0
         for s in scripts:
             if dispatch(s).dispatched:
@@ -97,7 +111,7 @@ class TestDispatchThreadCap:
         unambiguous: every entry yields its own live thread.
         """
         n_entries = 20
-        scripts = [make_http_script(f"https://e{i}.example.com/h") for i in range(n_entries)]
+        scripts = [make_http_script(_public_url(i)) for i in range(n_entries)]
         runner = LifecycleScriptRunner(scripts=scripts)
 
         with blocking_post() as (release, started, live, lock):
@@ -110,7 +124,4 @@ class TestDispatchThreadCap:
                     assert live["count"] == n_entries
                 assert len(threads) == n_entries
             finally:
-                release.set()
-                for t in threads:
-                    if isinstance(t, threading.Thread):
-                        t.join(timeout=5)
+                _release_and_drain(release, threads)

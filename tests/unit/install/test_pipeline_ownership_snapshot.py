@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -311,7 +312,7 @@ def test_receipt_persistence_failure_is_a_pipeline_failure(
     local_install_factory: Callable[..., LocalInstall],
     failed_write: int,
 ) -> None:
-    """Successful target writes do not turn a failed evidence write into success."""
+    """A failed evidence write fails the install, which restores what it deployed (#4282)."""
     from apm_cli.utils import atomic_io
 
     fixture = local_install_factory()
@@ -319,15 +320,16 @@ def test_receipt_persistence_failure_is_a_pipeline_failure(
     write = atomic_io.atomic_write_text
     writes = 0
     failed_path: Path | None = None
-    prior_receipt: bytes | None = None
+    prior_receipt: dict[Path, bytes | None] = {}
+    deployed_before = fixture.deployed.read_bytes() if fixture.deployed.exists() else None
 
     def fail_receipt(path: Path, text: str, **kwargs: Any) -> None:
-        nonlocal writes, failed_path, prior_receipt
+        nonlocal writes, failed_path
         if path.parent.name == "deployment-receipts":
+            prior_receipt.setdefault(path, path.read_bytes() if path.exists() else None)
             writes += 1
             if writes == failed_write:
                 failed_path = path
-                prior_receipt = path.read_bytes() if path.exists() else None
                 raise OSError("injected materialization persistence failure")
         write(path, text, **kwargs)
 
@@ -342,8 +344,10 @@ def test_receipt_persistence_failure_is_a_pipeline_failure(
             audit_override="off",
         )
     assert failed_path is not None
-    assert (failed_path.read_bytes() if failed_path.exists() else None) == prior_receipt
-    assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
+    assert (failed_path.read_bytes() if failed_path.exists() else None) == prior_receipt[
+        failed_path
+    ]
+    assert (fixture.deployed.read_bytes() if fixture.deployed.exists() else None) == deployed_before
     assert get_lockfile_path(fixture.metadata).exists() is (failed_write == 2)
     assert evidence.contexts[0].integrators["skill"]._ownership_snapshots is None
     assert evidence.contexts[0].integrators["skill"]._materialization_session is None
@@ -385,7 +389,7 @@ def test_exception_after_real_integration_exits_before_any_lock_writer(
 def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     monkeypatch: pytest.MonkeyPatch, local_install_factory: Callable[..., LocalInstall]
 ) -> None:
-    """A failed copy is caught by the real template; later packages still deploy."""
+    """A failed copy is caught by the real template; the failed install restores (#4282)."""
     fixture = local_install_factory()
     later = fixture.source.parent / "zz-later"
     later.mkdir()
@@ -395,10 +399,10 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     failed_this_run = False
     inject_failure = True
     copies: list[str] = []
-    copy_file = shutil.copy2
+    real_replace = os.replace
     evidence = _observe_pipeline(monkeypatch, fixture, failed_dependency=lambda: failed_this_run)
 
-    def fail_first_skill_copy(src: Any, dst: Any, *args: Any, **kwargs: Any) -> Any:
+    def fail_first_skill_copy(src: Any, dst: Any) -> Any:  # os.replace publishes each copy
         nonlocal failed_this_run, inject_failure
         if Path(dst).parent.parent == fixture.deployed.parent.parent:
             copies.append(Path(dst).parent.name)
@@ -407,9 +411,10 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
             inject_failure = False
             failed_this_run = True
             raise OSError("injected package copy failure")
-        return copy_file(src, dst, *args, **kwargs)
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(shutil, "copy2", fail_first_skill_copy)
+    monkeypatch.setattr(os, "replace", fail_first_skill_copy)
+    deployed_before = fixture.deployed.read_bytes() if fixture.deployed.exists() else None
     failed = pipeline.run_install_pipeline(
         fixture.package,
         target="copilot",
@@ -424,10 +429,9 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     first = evidence.contexts[0]
     later_key = fixture.package.get_apm_dependencies()[1].get_unique_key()
     assert ".agents/skills/zz-later" in first.package_deployed_files[later_key]
-    assert (
-        fixture.root / ".agents" / "skills" / "zz-later" / "SKILL.md"
-    ).read_bytes() == later_content
-    assert fixture.deployed.read_bytes() == fixture.local_skill.read_bytes()
+    # The later package deployed, then the failed install restored every written path.
+    assert not (fixture.root / ".agents" / "skills" / "zz-later").exists()
+    assert (fixture.deployed.read_bytes() if fixture.deployed.exists() else None) == deployed_before
     assert first.diagnostics.error_count == 1
     assert first.integrators["skill"]._ownership_snapshots is None
     assert evidence.builds == {fixture.metadata.resolve(): 1}
@@ -435,7 +439,6 @@ def test_real_template_catches_package_failure_and_retry_gets_fresh_epoch(
     assert not get_lockfile_path(fixture.metadata).exists()
 
     failed_this_run = False
-    # The failed run left root-local bytes without a lock; retry needs explicit overwrite.
     retried = pipeline.run_install_pipeline(
         fixture.package,
         target="copilot",

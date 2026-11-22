@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -774,7 +775,6 @@ def test_control_file_appearing_during_creation_is_never_clobbered(
 def test_failed_rendering_never_promotes_a_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
-    import shutil
 
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.utils import atomic_io, content_hash
@@ -793,7 +793,7 @@ def test_failed_rendering_never_promotes_a_receipt(
         raise OSError(f"injected {stage} failure")
 
     if stage == "copy":
-        monkeypatch.setattr(shutil, "copy2", fail)
+        monkeypatch.setattr(os, "replace", fail)
     elif stage == "rewrite":
         monkeypatch.setattr(integrator, "_resolve_markdown_links_in_skill_bundle", fail)
     elif stage == "hash":
@@ -1092,3 +1092,52 @@ def test_orphaned_receipt_collection_keeps_every_doubtful_receipt(tmp_path, monk
     assert not gone.exists()
     assert all(path.exists() for path in kept.values()), kept
     assert corrupt.exists()
+
+
+@pytest.mark.parametrize("target_name", ["claude", "copilot-cowork"])
+def test_owner_receipts_stand_in_with_the_claim_spelling_current_claims_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str
+) -> None:
+    """A lost lock's stand-in uses each receipt's lock value, so cleanup compares like with like."""
+    from dataclasses import replace
+
+    from apm_cli.install.deployed_paths import deployed_path_entry
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    target = KNOWN_TARGETS[target_name]
+    if target_name == "copilot-cowork":
+        target = replace(target, resolved_deploy_root=tmp_path / "external-target")
+    else:
+        target = target.for_scope(user_scope=True)
+    path = target.skills_deploy_path(home) / "demo/SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("rendered\n", encoding="utf-8")
+    content_hash = compute_file_hash(path)
+    session = DeploymentMaterializationSession(home, InstallScope.USER, None)
+    session.record({path: content_hash}, [target], "pkg")
+    session.flush()
+
+    evidence = _receipt_evidence_for(home)
+
+    assert evidence.receipted_claims("pkg", [target]) == {
+        deployed_path_entry(path, home, [target]): content_hash
+    }
+    assert evidence.receipted_claims("other", [target]) == {}
+    assert session.state_path.is_file(), "the receipt must persist across a lost lock"
+    assert path.read_text(encoding="utf-8") == "rendered\n", "reading claims must not touch files"
+
+
+def _receipt_evidence_for(root: Path):
+    from apm_cli.integration.cleanup import DeploymentEvidence
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    return DeploymentEvidence.collect(
+        root,
+        user_scope=True,
+        lockfile=None,
+        lockfile_root=root,
+        diagnostics=DiagnosticCollector(),
+        kept=(),
+    )

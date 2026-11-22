@@ -53,6 +53,18 @@ runs:
         uv run --frozen --extra dev python scripts/check_taxonomy_allowances.py \
           --base-ref "$BASE_SHA"
 
+    - name: Obligation status ratchet (required never silently demoted vs base)
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: |
+        # A lifecycle obligation required at the base stays required or
+        # known-failing unless this change adds and names a removal or mapping
+        # rule for it (#4586).
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        uv run --frozen --extra dev python scripts/check_obligation_status_ratchet.py \
+          --base-ref "$BASE_SHA"
+
     - name: Check YAML encoding safety
       shell: bash
       run: |
