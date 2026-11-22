@@ -93,7 +93,8 @@ def signature_mismatch(item: pytest.Item, error: BaseException) -> str | None:
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     """Report a strict known cell that failed without its signature as a failure."""
     report = yield
-    if report.when == "call" and hasattr(report, "wasxfail") and call.excinfo is not None:
+    # pytest xfails a setup failure too, so every phase that raised is checked.
+    if hasattr(report, "wasxfail") and call.excinfo is not None:
         problem = signature_mismatch(item, call.excinfo.value)
         if problem is not None:
             report.outcome = "failed"

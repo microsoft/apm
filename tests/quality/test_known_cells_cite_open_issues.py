@@ -130,3 +130,32 @@ def test_a_known_cell_failing_for_another_reason_fails(pytester: pytest.Pytester
         KnownFailure("#0", "unfiled", "x")
     with pytest.raises(AssertionError):
         KnownFailure("#4543", "deferred", "x", kind="wontfix")
+
+
+def test_a_known_cell_whose_fixture_breaks_for_another_reason_fails(
+    pytester: pytest.Pytester,
+) -> None:
+    """A setup failure never stands in for the tracked defect the test body would hit."""
+    pytester.makeini("[pytest]")
+    pytester.makepyfile(
+        """
+        import pytest
+
+        from tests.lifecycle.known import KnownFailure
+
+        CELL = KnownFailure("#3703", "user scope keeps the surface", r"still deployed")
+
+
+        @pytest.fixture
+        def broken_world():
+            raise AssertionError("world template failed to build")
+
+
+        @CELL.mark()
+        def test_body_never_runs(broken_world):
+            assert False, "I4: p/hook still deployed but not allowed"
+        """
+    )
+    result = pytester.runpytest_inprocess("-q", "-o", "addopts=", "-p", "tests.lifecycle.known")
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*failed for a different reason*"])
