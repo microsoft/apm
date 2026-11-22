@@ -310,11 +310,13 @@ def test_audit_reports_unusable_evidence(project: Path) -> None:
     McpWriteReceipts.open(project, user_scope=False).path.write_text("{not json")
     before = _config(project).read_bytes()
 
-    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
+    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False, lockless=True)
 
     assert check.name == "kept-mcp-entries" and not check.passed
     assert any("Invalid MCP write evidence" in detail for detail in check.details)
     assert _config(project).read_bytes() == before, "audit must not change the config"
+    locked = _kept_mcp_entries(project, LockFile(), user_scope=False)
+    assert locked == () and _config(project).read_bytes() == before, "a lockfile governs"
 
 
 def test_audit_reads_user_scope_evidence_from_the_deployment_root(project: Path) -> None:
@@ -378,7 +380,7 @@ def test_audit_reports_symlinked_evidence_without_following_it(
     path.symlink_to(elsewhere)
     before = elsewhere.read_bytes()
 
-    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
+    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False, lockless=True)
 
     assert not check.passed
     assert any("Unusable MCP write evidence" in detail for detail in check.details)

@@ -840,7 +840,7 @@ def _check_native_mcp_ownership(
 
 
 def _kept_mcp_entries(
-    project_root: Path, lock: LockFile, *, user_scope: bool
+    project_root: Path, lock: LockFile, *, user_scope: bool, lockless: bool = False
 ) -> tuple[CheckResult, ...]:
     """Report MCP entries install kept without a lockfile because it could not prove them (#4737).
 
@@ -850,8 +850,9 @@ def _kept_mcp_entries(
 
     kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
     details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
-    # Unusable evidence keeps every entry it lists, so it is reported too.
-    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope)
+    # Without a lockfile, unusable evidence keeps every entry it lists, so it is
+    # reported; with one, the lockfile governs cleanup and the record is unused.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope) if lockless else None
     if unusable is not None:
         details.append(unusable)
     if not details:
@@ -1629,7 +1630,9 @@ def run_baseline_checks(
                 deployment_root, LockFile(), resolved_targets, user_scope=user_scope
             )
         )
-        result.checks.extend(_kept_mcp_entries(deployment_root, LockFile(), user_scope=user_scope))
+        result.checks.extend(
+            _kept_mcp_entries(deployment_root, LockFile(), user_scope=user_scope, lockless=True)
+        )
         return result
 
     if lock is None or manifest is None:
