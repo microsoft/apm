@@ -1078,6 +1078,64 @@ class TestLocalBundlePathRouting:
             else:
                 assert deployed == (bundle / packed).read_bytes()
 
+    @staticmethod
+    def _install_bundle_files(tmp_path: Path, files: dict[str, str], target_name: str):
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.services import integrate_local_bundle
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        bundle = _make_bundle(tmp_path / "src", pack_target="claude", files=files)
+        project = _make_project(tmp_path / "dst")
+        diagnostics = DiagnosticCollector()
+        lockfile = yaml.safe_load((bundle / "apm.lock.yaml").read_text(encoding="utf-8"))
+        bundle_info = LocalBundleInfo(
+            source_dir=bundle,
+            plugin_json={"id": "test-plugin"},
+            package_id="test-plugin",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+        result = integrate_local_bundle(
+            bundle_info,
+            project,
+            targets=(KNOWN_TARGETS[target_name],),
+            diagnostics=diagnostics,
+            scope=InstallScope.PROJECT,
+        )
+        return project, result, diagnostics
+
+    def test_packed_native_claude_rule_with_dotted_stem_keeps_its_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """#3686: a Claude rule packed as py.instructions.md is not converted twice."""
+        rule = '---\npaths:\n  - "**/*.py"\n---\n\n# Python rule\n'
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path, {"instructions/py.instructions.md": rule}, "claude"
+        )
+        assert result["deployed_files"] == [".claude/rules/py.md"]
+        assert (project / ".claude/rules/py.md").read_text(encoding="utf-8") == rule
+
+    def test_malformed_instruction_frontmatter_skips_only_that_file(self, tmp_path: Path) -> None:
+        """#3686: an unparseable packed instruction is named and skipped; its sibling installs."""
+        from apm_cli.utils.diagnostics import CATEGORY_WARNING
+
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/bad.instructions.md": "---\napplyTo: [unclosed\n---\nbody\n",
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/bad.md").exists()
+        assert ".claude/rules/bad.md" not in result["deployed_file_hashes"]
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        warnings = [w.message for w in diagnostics.by_category().get(CATEGORY_WARNING, [])]
+        assert len(warnings) == 1 and ".claude/rules/bad.md" in warnings[0], warnings
+        assert "not valid YAML" in warnings[0]
+
     @pytest.mark.parametrize(
         "target_name",
         sorted(KNOWN_TARGETS),

@@ -209,6 +209,23 @@ class InstructionIntegrator(BaseIntegrator):
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
 
+    # Scoping keys the rule converters emit; ``applyTo`` marks APM instructions.
+    _NATIVE_RULE_SCOPE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"paths", "globs", "alwaysApply", "trigger", "inclusion", "fileMatchPattern"}
+    )
+
+    @classmethod
+    def is_native_rule(cls, content: str) -> bool:
+        """Return whether *content* is already a target rule, not an APM instruction.
+
+        A native rule scopes itself with a target key (Claude ``paths:``,
+        Cursor ``globs:``) and has no ``applyTo``; converting it again would
+        drop that scoping. Raises :class:`yaml.YAMLError` on malformed
+        frontmatter.
+        """
+        metadata, _body = cls._parse_frontmatter(content)
+        return "applyTo" not in metadata and bool(cls._NATIVE_RULE_SCOPE_KEYS & set(metadata))
+
     @classmethod
     def convert_rule_content(cls, content: str, fmt: str) -> str:
         """Convert APM instruction *content* to rule format *fmt*.

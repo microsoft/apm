@@ -309,3 +309,18 @@ class TestDuplicatePluginRenderings:
 
         renderings = {rel: deployed_rendering_extension(src) for src, rel in deployed.items()}
         assert duplicate_plugin_renderings(renderings) == dropped
+
+    def test_prompt_rename_keeps_distinct_commands_apart(self):
+        """A Claude command and a renamed Copilot prompt with a dotted stem stay distinct."""
+        from apm_cli.bundle.plugin_layout import (
+            deployed_rendering_extension,
+            duplicate_plugin_renderings,
+        )
+
+        deployed = [".claude/commands/review.md", ".github/prompts/review.prompt.prompt.md"]
+        renderings = {
+            _plugin_rel_for_deployed_path(src, None): deployed_rendering_extension(src)
+            for src in deployed
+        }
+        assert set(renderings) == {"commands/review.md", "commands/review.prompt.md"}
+        assert duplicate_plugin_renderings(renderings) == set()

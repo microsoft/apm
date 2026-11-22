@@ -20,7 +20,8 @@ def render_bundle_rule(
     """Convert a packed APM instruction to *rule_format* (#3686).
 
     Returns ``(text, unrenderable)``; *text* passes through unchanged when no
-    rule format applies.
+    rule format applies or it is already a native rule (a Claude rule named
+    ``py.instructions.md`` keeps its ``paths:``).
     """
     if text is None or rule_format is None:
         return text, False
@@ -29,6 +30,8 @@ def render_bundle_rule(
     from ..integration.instruction_integrator import InstructionIntegrator
 
     try:
+        if InstructionIntegrator.is_native_rule(text):
+            return text, False
         return InstructionIntegrator.convert_rule_content(text, rule_format), False
     except yaml.YAMLError:
         message = (
