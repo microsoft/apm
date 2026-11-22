@@ -67,31 +67,33 @@ def _pins(tmp_path: Path, fetch: PolicyFetchResult | None):
             targets=[KNOWN_TARGETS["copilot"]],
             policy_fetch=None if fetch is None else (lambda: fetch),
         )
-    assert (project / _RESTORED).read_text(encoding="utf-8") == "{}"
-    return result
+    return result, project
 
 
 def test_a_valid_explicit_policy_still_checks_withheld_hook_files(tmp_path: Path) -> None:
     """--policy names a valid file: the route does not block, so the scan must run."""
     fetch = PolicyFetchResult(policy=ApmPolicy(), source="file:valid.yml", outcome="found")
 
-    result = _pins(tmp_path, fetch)
+    result, project = _pins(tmp_path, fetch)
 
     assert not result.passed
     assert any(detail.startswith(f"{_RESTORED}: hook path of") for detail in result.details)
+    assert (project / _RESTORED).read_text(encoding="utf-8") == "{}"
 
 
 def test_a_blocking_route_is_left_to_the_policy_outcome(tmp_path: Path) -> None:
     """The route blocks on the same discovery and reports it; this check does not repeat it."""
     fetch = PolicyFetchResult(policy=None, source="org:acme/.github", outcome="empty")
 
-    result = _pins(tmp_path, fetch)
+    result, project = _pins(tmp_path, fetch)
 
     assert result.passed, result.message
+    assert (project / _RESTORED).read_text(encoding="utf-8") == "{}"
 
 
 def test_without_an_audit_discovery_a_policy_block_fails_closed(tmp_path: Path) -> None:
-    result = _pins(tmp_path, None)
+    result, project = _pins(tmp_path, None)
 
     assert not result.passed
     assert "Blocked by org policy" in result.message
+    assert (project / _RESTORED).read_text(encoding="utf-8") == "{}"
