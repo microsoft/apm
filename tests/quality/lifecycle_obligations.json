@@ -6707,11 +6707,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "T3|approve-deny|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
@@ -6725,11 +6729,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|approve-deny|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
@@ -6743,11 +6751,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|bundle|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -7107,11 +7119,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|pkg-registry|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=git|PRIM=bin": {
    "family": "T3",
@@ -7190,11 +7206,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "T3|audit|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
@@ -7230,11 +7250,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|bundle|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -7742,25 +7766,37 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "T3|compile|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=other-file": {
+   "credited_by": [
+    "T3|compile|bundle|other-file"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=skill": {
+   "credited_by": [
+    "T3|compile|bundle|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -7978,11 +8014,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=other-file": {
+   "credited_by": [
+    "T3|compile|pkg-registry|other-file"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=pkg-registry|PRIM=skill": {
    "credited_by": [
@@ -8516,11 +8556,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
+   "credited_by": [
+    "T3|lock|bundle|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
@@ -8556,11 +8600,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=skill": {
+   "credited_by": [
+    "T3|lock|bundle|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-path|PRIM=bin": {
    "family": "T3",
@@ -14927,8 +14975,12 @@
   "pair|OP=approve-deny|SRC=local-bundle": {
    "credited_by": [
     "T3|approve-deny|bundle|bin",
+    "T3|approve-deny|bundle|canvas",
     "T3|approve-deny|bundle|hook",
+    "T3|approve-deny|bundle|lsp",
     "T3|approve-deny|bundle|mcp",
+    "T3|approve-deny|bundle|other-file",
+    "T3|approve-deny|bundle|skill",
     "T5|real|approve-deny|bundle"
    ],
    "family": "pair",
@@ -15024,6 +15076,8 @@
     "T3|approve-deny|pkg-registry|hook",
     "T3|approve-deny|pkg-registry|lsp",
     "T3|approve-deny|pkg-registry|mcp",
+    "T3|approve-deny|pkg-registry|other-file",
+    "T3|approve-deny|pkg-registry|skill",
     "T5|real|approve-deny|pkg-registry"
    ],
    "family": "pair",
@@ -15359,9 +15413,12 @@
   "pair|OP=audit|SRC=local-bundle": {
    "credited_by": [
     "T3|audit|bundle|bin",
+    "T3|audit|bundle|canvas",
     "T3|audit|bundle|hook",
     "T3|audit|bundle|lsp",
     "T3|audit|bundle|mcp",
+    "T3|audit|bundle|other-file",
+    "T3|audit|bundle|skill",
     "T5|dry-run|audit|bundle",
     "T5|real|audit|bundle"
    ],
@@ -15476,6 +15533,7 @@
     "T3|audit|pkg-registry|hook",
     "T3|audit|pkg-registry|lsp",
     "T3|audit|pkg-registry|mcp",
+    "T3|audit|pkg-registry|other-file",
     "T3|audit|pkg-registry|skill",
     "T5|dry-run|audit|pkg-registry",
     "T5|real|audit|pkg-registry"
@@ -16230,9 +16288,12 @@
   "pair|OP=compile|SRC=local-bundle": {
    "credited_by": [
     "T3|compile|bundle|bin",
+    "T3|compile|bundle|canvas",
     "T3|compile|bundle|hook",
     "T3|compile|bundle|lsp",
     "T3|compile|bundle|mcp",
+    "T3|compile|bundle|other-file",
+    "T3|compile|bundle|skill",
     "T5|dry-run|compile|bundle",
     "T5|real|compile|bundle"
    ],
@@ -16347,6 +16408,7 @@
     "T3|compile|pkg-registry|hook",
     "T3|compile|pkg-registry|lsp",
     "T3|compile|pkg-registry|mcp",
+    "T3|compile|pkg-registry|other-file",
     "T3|compile|pkg-registry|skill",
     "T5|dry-run|compile|pkg-registry",
     "T5|real|compile|pkg-registry"
@@ -16951,6 +17013,7 @@
     "T3|install|pkg-registry|hook",
     "T3|install|pkg-registry|lsp",
     "T3|install|pkg-registry|mcp",
+    "T3|install|pkg-registry|other-file",
     "T3|install|pkg-registry|skill",
     "T5|dry-run|install|pkg-registry",
     "T5|real|install|pkg-registry",
@@ -17325,9 +17388,12 @@
   "pair|OP=lock|SRC=local-bundle": {
    "credited_by": [
     "T3|lock|bundle|bin",
+    "T3|lock|bundle|canvas",
     "T3|lock|bundle|hook",
     "T3|lock|bundle|lsp",
     "T3|lock|bundle|mcp",
+    "T3|lock|bundle|other-file",
+    "T3|lock|bundle|skill",
     "T5|real|lock|bundle"
    ],
    "family": "pair",
@@ -17435,6 +17501,7 @@
     "T3|lock|pkg-registry|hook",
     "T3|lock|pkg-registry|lsp",
     "T3|lock|pkg-registry|mcp",
+    "T3|lock|pkg-registry|other-file",
     "T3|lock|pkg-registry|skill",
     "T5|real|lock|pkg-registry"
    ],
@@ -18873,6 +18940,7 @@
     "T3|prune|pkg-registry|hook",
     "T3|prune|pkg-registry|lsp",
     "T3|prune|pkg-registry|mcp",
+    "T3|prune|pkg-registry|other-file",
     "T3|prune|pkg-registry|skill",
     "T5|dry-run|prune|pkg-registry",
     "T5|real|prune|pkg-registry"
@@ -19351,6 +19419,7 @@
     "T3|uninstall|pkg-registry|hook",
     "T3|uninstall|pkg-registry|lsp",
     "T3|uninstall|pkg-registry|mcp",
+    "T3|uninstall|pkg-registry|other-file",
     "T3|uninstall|pkg-registry|skill",
     "T5|dry-run|uninstall|pkg-registry",
     "T5|real|uninstall|pkg-registry"
@@ -19852,6 +19921,7 @@
     "T3|update|pkg-registry|hook",
     "T3|update|pkg-registry|lsp",
     "T3|update|pkg-registry|mcp",
+    "T3|update|pkg-registry|other-file",
     "T3|update|pkg-registry|skill",
     "T5|dry-run|update|pkg-registry",
     "T5|real|update|pkg-registry",
@@ -25662,6 +25732,7 @@
   },
   "pair|SRC=pkg-registry|PRIM=skill": {
    "credited_by": [
+    "T3|approve-deny|pkg-registry|skill",
     "T3|audit|pkg-registry|skill",
     "T3|compile|pkg-registry|skill",
     "T3|install|pkg-registry|skill",
