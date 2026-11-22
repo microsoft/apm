@@ -294,17 +294,18 @@ def _refuse_native_mcp_collisions(ctx: InstallContext) -> None:
     """
     from apm_cli.core.scope import is_user_scope
     from apm_cli.install.lsp.integration import lsp_target_config
-    from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+    from apm_cli.install.mcp.collision_preflight import refuse_projected_mcp_collisions
 
     filters = ctx.lsp_preflight
     if filters is None or ctx.target_decision is None or not ctx.preview_mcp_dependencies:
         return
-    refuse_unrecorded_mcp_collisions(
+    refuse_projected_mcp_collisions(
         ctx.preview_mcp_dependencies,
         lockfile=ctx.existing_lockfile,
         project_root=ctx.project_root,
         user_scope=is_user_scope(ctx.scope),
         logger=ctx.logger,
+        frozen=ctx.frozen,
         runtime=filters.runtime,
         exclude=filters.exclude,
         apm_config=lsp_target_config(ctx.apm_package),

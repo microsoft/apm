@@ -673,6 +673,48 @@ def test_a_self_defined_conflict_is_refused_before_the_registry_write(
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_colliding_registry_server_is_refused_before_any_write(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+    target: str,
+) -> None:
+    """A registry server is projected before any write; recorded, it installs again (#4741)."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    personal_url = "http://127.0.0.1:9/personal"
+    scenario.write(target, personal_url)
+    personal = (
+        {"type": "http", "url": personal_url} if target == "claude" else {"url": personal_url}
+    )
+    scenario.edit(target, "registered", personal)
+    before = scenario.path(target).read_bytes()
+    other = scenario.path("codex" if target == "claude" else "claude")
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        refused = scenario.install()
+        output = " ".join((refused.stdout + refused.stderr).split())
+        assert refused.returncode == 1, output
+        assert f"conflicts with the existing {target} connection" in output, output
+        assert scenario.path(target).read_bytes() == before, output
+        assert not other.exists() or "registered" not in other.read_text("utf-8"), output
+        lock_path = scenario.root / "apm.lock.yaml"
+        assert not lock_path.exists() or not scenario.lock().mcp_target_servers, output
+
+        data = scenario.path(target).read_text(encoding="utf-8")
+        if target == "claude":
+            document = json.loads(data)
+            document["mcpServers"].pop("registered")
+            scenario.path(target).write_text(json.dumps(document), encoding="utf-8")
+        else:
+            document = tomlkit.parse(data)
+            document["mcp_servers"].pop("registered")
+            scenario.path(target).write_text(tomlkit.dumps(document), encoding="utf-8")
+        _success(scenario.install())
+        _success(scenario.install())
+    assert "registered" in scenario.servers(target)
+    assert sorted(scenario.lock().mcp_target_servers) == ["claude", "codex"]
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
 @pytest.mark.parametrize("evidence", ["edited", "hashless", "deleted-lock"])
 def test_registry_receipt_never_adopts_or_deletes_unverified_native_state(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
