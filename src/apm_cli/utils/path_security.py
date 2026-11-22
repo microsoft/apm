@@ -211,6 +211,34 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
     )
 
 
+def resolve_for_containment(path: Path) -> Path:
+    """Resolve *path* once (symlinks followed) for a containment check made now."""
+    return _strip_extended_prefix(path.resolve())
+
+
+def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
+    """POSIX path of *resolved* under *resolved_base*, or ``None`` when it escapes.
+
+    Both arguments must come from :func:`resolve_for_containment` taken for
+    this check: the filesystem is observed once, at resolution, instead of
+    resolving the same two paths again for the containment test and again for
+    the relative form (``ensure_path_within`` plus ``portable_relpath``). The
+    verdict is identical; only the repeated symlink walks are gone.
+    """
+    # Strip both sides, as ensure_path_within_resolved does (#886): one side
+    # may carry the Windows extended-length prefix while the other does not.
+    resolved, resolved_base = (
+        _strip_extended_prefix(resolved),
+        _strip_extended_prefix(resolved_base),
+    )
+    try:
+        if not resolved.is_relative_to(resolved_base):
+            return None
+        return resolved.relative_to(resolved_base).as_posix()
+    except (TypeError, ValueError):
+        return None
+
+
 def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     """Resolve *path* and assert containment against a pre-resolved base."""
     resolved = _strip_extended_prefix(path.resolve())

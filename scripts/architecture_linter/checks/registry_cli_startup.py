@@ -5,7 +5,9 @@ GitPython. The canonical owner is ``cli.py``: every verb is registered as a
 ``_LazyCommand`` stub, and ``deps/__init__.py`` resolves its public names
 lazily so light ``apm_cli.deps.*`` submodules do not drag in the downloader
 stack. The installed-CLI budget test measures the real imported-module set;
-this rule keeps the static shape that budget depends on.
+this rule keeps the static shape that budget depends on. It also keeps the
+dependency transport modules free of module-scope GitPython imports, so the
+downloader every ``apm install`` builds never loads GitPython unless it clones.
 """
 
 from __future__ import annotations
@@ -22,6 +24,16 @@ _RULE_ID = "registry_delegation.cli_startup_imports"
 _CLI_ENTRY = "src/apm_cli/cli.py"
 _DEPS_PACKAGE = "src/apm_cli/deps/__init__.py"
 _BUDGET_TEST = "tests/integration/test_cli_startup_import_budget.py"
+# Every ``apm install`` builds the downloader; these modules reach GitPython
+# only through deps/git_lazy.py so a run that never clones never imports it.
+_GITPYTHON_LAZY_MODULES = (
+    "src/apm_cli/deps/bare_cache.py",
+    "src/apm_cli/deps/clone_engine.py",
+    "src/apm_cli/deps/git_reference_resolver.py",
+    "src/apm_cli/deps/git_lazy.py",
+    "src/apm_cli/deps/github_downloader.py",
+)
+_GITPYTHON_EAGER = re.compile(r"^(?:from|import)\s+git\b")
 
 # Column-0 imports run at module import time; indented ones are deferred.
 _CLI_EAGER_FORBIDDEN = re.compile(
@@ -45,7 +57,9 @@ def _eager_import_violations(
 
 def _check_cli_startup_imports(provider: FactsProvider) -> Iterable[Violation]:
     """Keep command modules and GitPython off the CLI startup path."""
-    facts_by_path, failures = _read_required(provider, _RULE_ID, (_CLI_ENTRY, _DEPS_PACKAGE))
+    facts_by_path, failures = _read_required(
+        provider, _RULE_ID, (_CLI_ENTRY, _DEPS_PACKAGE, *_GITPYTHON_LAZY_MODULES)
+    )
     if failures:
         return failures
     cli = facts_by_path[_CLI_ENTRY]
@@ -73,6 +87,15 @@ def _check_cli_startup_imports(provider: FactsProvider) -> Iterable[Violation]:
             "deps/__init__.py must resolve submodule exports lazily (PEP 562)",
         )
     )
+    for path in _GITPYTHON_LAZY_MODULES:
+        findings.extend(
+            _eager_import_violations(
+                facts_by_path[path].lines,
+                path,
+                _GITPYTHON_EAGER,
+                "dependency transport modules must import GitPython lazily (deps/git_lazy.py)",
+            )
+        )
     budget, budget_failures = checked_facts(provider, _BUDGET_TEST, _RULE_ID, require_python=True)
     findings.extend(budget_failures)
     if not budget_failures and '"git"' not in source_text(budget):

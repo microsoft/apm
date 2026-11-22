@@ -1939,6 +1939,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-local-identity",
+        rule_id="contracts-tooling-local-identity",
+        path="src/apm_cli/deps/reachability.py",
+        old="                ref = transitive_local_identity(",
+        new="                ref = replace(",
+        intent="The reachability walk re-keys a local edge itself instead of calling the owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-local-path-anchor",
         rule_id="contracts-tooling-local-path-anchor",
         path="src/apm_cli/install/sources.py",
@@ -2342,6 +2350,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
         new="    return Path.home() if user_scope else Path.cwd()\n",
         intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="            if routes_to_agents_md(",
+        new="            if True or routes_to_agents_md(",
+        intent="Install widens Claude routing beyond the owner's verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
@@ -4034,6 +4050,14 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # Multiple routing edges extend existing owners; they do not allocate competing
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="blocker = claude_agents_md_blocker(live_root)",
+        new="blocker = None",
+        intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
+    ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",

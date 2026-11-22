@@ -473,17 +473,20 @@ def test_project_and_global_native_rules_do_not_cross_scope(
         cwd=project.root,
     )
     project_rules = project.root / ".claude" / "rules"
-    project_style = project_rules / "style.md"
-    assert _STYLE in project_style.read_text(encoding="utf-8")
+    # At project scope, always-on instructions load from AGENTS.md (#3939);
+    # user scope (below) keeps native rules.
+    assert not (project_rules / "style.md").exists()
     for path in project_rules.glob("*.md"):
         path.unlink()
 
     lifecycle.run("compile", "--target", "claude,codex", cwd=project.root)
 
-    project_memory = project.root / "CLAUDE.md"
+    assert "@AGENTS.md" in (project.root / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    project_memory = project.root / "AGENTS.md"
     project_before = project_memory.read_bytes()
     assert _STYLE.encode() in project_before
     assert _WORKFLOW.encode() in project_before
+    project_rules.mkdir(parents=True, exist_ok=True)
     for path in lifecycle.rules.glob("*.md"):
         (project_rules / path.name).write_bytes(path.read_bytes())
     for path in lifecycle.rules.glob("*.md"):
