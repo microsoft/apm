@@ -89,16 +89,58 @@ def write_catalog(root: Path, marketplace: str, plugins: Iterable[str], *, owned
     atomic_write_text(catalog, json.dumps(document, indent=2) + "\n")
 
 
+def _conversion_reason(text: str) -> str | None:
+    """Say why a ``.gitattributes`` leaves plugin roots open to conversion.
+
+    Later lines win, and once ``text`` is unset neither ``eol`` nor ``crlf``
+    converts. So the roots are pinned only by a final ``* -text`` (or
+    ``* binary``) that no later rule setting ``text`` overrides.
+    """
+    pinned = False
+    conflict: str | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        fields = line.split()
+        if not fields or fields[0].startswith(("#", "[attr]")):
+            continue
+        universal = fields[0] in ("*", "**")
+        for attribute in fields[1:]:
+            if attribute in ("-text", "binary"):
+                if universal:
+                    pinned, conflict = True, None
+            elif attribute.lstrip("-!").split("=", 1)[0] == "text":
+                conflict = (
+                    f"has rule '{line.strip()}' (line {number}), "
+                    "which re-enables line-ending conversion"
+                )
+    if conflict is None and not pinned:
+        return "has no '* -text' rule"
+    return conflict
+
+
+def _require_pinning(attributes: Path) -> None:
+    """Refuse a user's file that lets git convert the byte-pinned roots (#4809)."""
+    reason = _conversion_reason(attributes.read_text(encoding="utf-8"))
+    if reason is not None:
+        raise NativeLayoutError(
+            f"{attributes} {reason}, so a checkout with core.autocrlf would change plugin "
+            "bytes pinned in apm.lock.yaml. Add '* -text' as its last rule, or delete the "
+            "file so APM writes its own, then retry."
+        )
+
+
 def write_attributes(root: Path, *, enabled: bool) -> None:
     """Keep git from converting line endings in committed plugin roots.
 
     A checkout with ``core.autocrlf`` would otherwise rewrite the bytes the
-    lock pins. Only APM's own file is written or removed; a user's is kept.
+    lock pins. Only APM's own file is written or removed; a user's is kept,
+    but only when it leaves the roots unconverted.
     """
     attributes = _checked(root, root / ATTRIBUTES_RELATIVE)
     ours = attributes.is_file() and attributes.read_text(encoding="utf-8") == ATTRIBUTES_TEXT
     if enabled and not attributes.exists():
         atomic_write_text(attributes, ATTRIBUTES_TEXT)
+    elif enabled and not ours:
+        _require_pinning(attributes)
     elif not enabled and ours:
         attributes.unlink()
 

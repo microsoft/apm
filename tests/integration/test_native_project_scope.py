@@ -223,6 +223,40 @@ def test_a_failed_last_plugin_removal_keeps_the_roots_byte_pinned(project, monke
     assert attributes.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("rules", "named"),
+    [
+        ("* text\n", r"'\* text' \(line 1\)"),
+        ("* -text\n*.sh text=auto\n", r"'\*\.sh text=auto' \(line 2\)"),
+        ("* binary\n*.md !text\n", r"'\*\.md !text' \(line 2\)"),
+        ("# kept by the team\n*.png -diff\n", r"no '\* -text' rule"),
+    ],
+)
+def test_a_user_gitattributes_that_converts_plugin_roots_is_refused(project, rules, named) -> None:
+    """A user's .agents/plugins/.gitattributes is kept, but it must leave the
+    byte-pinned roots unconverted under core.autocrlf (#4809)."""
+    project.source("acme/alpha", "alpha")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text(rules)
+    with pytest.raises(ClaudeNativePluginError, match=named):
+        project.reconcile(None)
+    assert attributes.read_text() == rules
+    assert not (project.plugins / "alpha").exists()
+    assert not (project.root / _CLAUDE).exists()
+
+
+@pytest.mark.parametrize("rules", ["* text\n*.png -diff\n* -text\n", "* text\n* binary\n"])
+def test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept(project, rules) -> None:
+    project.source("acme/alpha", "alpha")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text(rules)
+    project.reconcile(None)
+    assert attributes.read_text() == rules
+    assert (project.plugins / "alpha/hooks/run.sh").read_text() == "v1"
+
+
 def test_an_unparseable_second_file_leaves_every_file_and_root_untouched(project) -> None:
     project.source("acme/alpha", "alpha")
     broken = project.root / _COPILOT
