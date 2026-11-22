@@ -86,6 +86,8 @@ def local_content_reasons(
     from dataclasses import replace
 
     from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.deps.local_identity import root_local_dirs as collect_root_local_dirs
+    from apm_cli.deps.local_identity import transitive_local_identity
     from apm_cli.deps.path_anchoring import (
         LocalResolutionError,
         build_local_parent_index,
@@ -105,6 +107,7 @@ def local_content_reasons(
     package_root = Path(apm_package.package_path).resolve()
     consumer_root = apm_package.source_path or package_root
     rules = build_replacement_index(apm_package.replace_rules or [])
+    root_local_dirs = collect_root_local_dirs(manifest_deps, consumer_root)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     seen: set[str] = set()
@@ -176,12 +179,12 @@ def local_content_reasons(
                     anchored = APMDependencyResolver._compute_dep_source_path(
                         child, package, source
                     )
-                    child = replace(
+                    child = transitive_local_identity(
                         child,
                         declaring_parent=key,
-                        anchored_local_path=APMDependencyResolver._portable_anchor_identity(
-                            anchored, apm_package.source_path or package_root
-                        ),
+                        anchored=anchored,
+                        root=apm_package.source_path or package_root,
+                        root_local_dirs=root_local_dirs,
                     )
                     queue.append(child)
         except (LocalResolutionError, OSError, ValueError) as exc:
