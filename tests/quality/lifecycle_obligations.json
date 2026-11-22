@@ -11989,7 +11989,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|DEPLOYED=clean|TGT=multi-unchanged": {
    "family": "pair",
@@ -12005,7 +12005,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|DEPLOYED=clean|TGT=single-narrowed": {
    "family": "pair",
@@ -12013,7 +12013,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|DEPLOYED=clean|TGT=single-unchanged": {
    "family": "pair",
@@ -12029,7 +12029,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|DEPLOYED=clean|UPDATE=on": {
    "family": "pair",
@@ -12669,7 +12669,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|GATE=allowed|TGT=multi-unchanged": {
    "family": "pair",
@@ -12685,7 +12685,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|GATE=allowed|TGT=single-narrowed": {
    "family": "pair",
@@ -12693,7 +12693,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|GATE=allowed|TGT=single-unchanged": {
    "family": "pair",
@@ -12709,7 +12709,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|GATE=allowed|UPDATE=on": {
    "family": "pair",
@@ -13012,7 +13012,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|GATE=none|TGT=multi-unchanged": {
    "family": "pair",
@@ -13028,7 +13028,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|GATE=none|TGT=single-narrowed": {
    "family": "pair",
@@ -13036,7 +13036,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|GATE=none|TGT=single-unchanged": {
    "family": "pair",
@@ -13052,7 +13052,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|GATE=none|UPDATE=on": {
    "family": "pair",
@@ -13122,8 +13122,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-narrowed]"
   },
   "pair|GATE=revoked-after-deploy|TGT=multi-unchanged": {
    "family": "pair",
@@ -13137,15 +13138,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-widened]"
   },
   "pair|GATE=revoked-after-deploy|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-narrowed]"
   },
   "pair|GATE=revoked-after-deploy|TGT=single-unchanged": {
    "family": "pair",
@@ -13159,8 +13162,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-widened]"
   },
   "pair|GATE=revoked-after-deploy|UPDATE=on": {
    "family": "pair",
@@ -13230,8 +13234,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|GATE=unapproved-exec|TGT=multi-unchanged": {
    "family": "pair",
@@ -13245,15 +13250,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|GATE=unapproved-exec|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|GATE=unapproved-exec|TGT=single-unchanged": {
    "family": "pair",
@@ -13267,8 +13274,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|GATE=unapproved-exec|UPDATE=on": {
    "family": "pair",
@@ -13301,8 +13309,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[absent-unowned]"
   },
   "pair|LOCK=absent|DRYRUN=on": {
    "family": "pair",
@@ -13332,22 +13341,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[present-provenance-unknown]"
   },
   "pair|LOCK=absent|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=none": {
    "family": "pair",
@@ -13361,8 +13373,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|GATE=unapproved-exec": {
    "family": "pair",
@@ -13401,29 +13414,33 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-copilot]"
   },
   "pair|LOCK=absent|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-legacy-receipt]"
   },
   "pair|LOCK=absent|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-absent-vscode]"
   },
   "pair|LOCK=absent|NET=offline": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|NET=online": {
    "family": "pair",
@@ -13437,8 +13454,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|SELECT=on": {
    "family": "pair",
@@ -13452,8 +13470,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=multi-unchanged": {
    "family": "pair",
@@ -13467,15 +13486,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|TGT=single-unchanged": {
    "family": "pair",
@@ -13489,8 +13510,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[absent]"
   },
   "pair|LOCK=absent|UPDATE=on": {
    "family": "pair",
@@ -13520,15 +13542,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_deployed_skill_survives_every_operation"
   },
   "pair|LOCK=consistent|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_user_file_at_a_package_path_survives_every_operation"
   },
   "pair|LOCK=consistent|DRYRUN=on": {
    "family": "pair",
@@ -13566,8 +13590,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_policy_pairs.py::test_a_denied_dependency_keeps_the_deployed_skill[clean]"
   },
   "pair|LOCK=consistent|GATE=denied-executable": {
    "family": "pair",
@@ -13638,29 +13663,33 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|LOCK=consistent|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|LOCK=consistent|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|LOCK=consistent|NET=offline": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|LOCK=consistent|NET=online": {
    "family": "pair",
@@ -13690,8 +13719,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|LOCK=consistent|TGT=multi-unchanged": {
    "family": "pair",
@@ -13705,15 +13735,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|LOCK=consistent|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|LOCK=consistent|TGT=single-unchanged": {
    "family": "pair",
@@ -13727,8 +13759,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|LOCK=consistent|UPDATE=on": {
    "family": "pair",
@@ -13742,8 +13775,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-absent]"
   },
   "pair|LOCK=newer-generator|DEPLOYED=clean": {
    "credited_by": [
@@ -13769,29 +13803,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-edited]"
   },
   "pair|LOCK=newer-generator|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[newer-generator-unowned]"
   },
   "pair|LOCK=newer-generator|DRYRUN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|FORCE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|FROZEN=on": {
    "credited_by": [
@@ -13809,22 +13847,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=none": {
    "credited_by": [
@@ -13850,8 +13891,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|GATE=unapproved-exec": {
    "credited_by": [
@@ -13889,29 +13931,33 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[copilot]"
   },
   "pair|LOCK=newer-generator|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[legacy-receipt]"
   },
   "pair|LOCK=newer-generator|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_newer_generator_lock_is_refused_for_every_mcp_owner[vscode]"
   },
   "pair|LOCK=newer-generator|NET=offline": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|NET=online": {
    "credited_by": [
@@ -13937,8 +13983,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=newer-generator|SELECT=on": {
    "credited_by": [
@@ -13958,29 +14005,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-multi]"
   },
   "pair|LOCK=newer-generator|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-single]"
   },
   "pair|LOCK=newer-generator|TGT=single-unchanged": {
    "credited_by": [
@@ -14006,22 +14057,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[newer-generator-single]"
   },
   "pair|LOCK=newer-generator|UPDATE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|LOCK=stale|DEPLOYED=absent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-absent]"
   },
   "pair|LOCK=stale|DEPLOYED=clean": {
    "credited_by": [
@@ -14044,57 +14098,65 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-edited]"
   },
   "pair|LOCK=stale|DEPLOYED=unowned": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_deployed_state_under_a_drifted_lock[stale-unowned]"
   },
   "pair|LOCK=stale|DRYRUN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|FORCE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|FROZEN=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=allowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=denied-dependency": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=denied-executable": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=none": {
    "credited_by": [
@@ -14117,8 +14179,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|GATE=unapproved-exec": {
    "credited_by": [
@@ -14168,29 +14231,33 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-copilot]"
   },
   "pair|LOCK=stale|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-legacy-receipt]"
   },
   "pair|LOCK=stale|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[lock-stale-vscode]"
   },
   "pair|LOCK=stale|NET=offline": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|NET=online": {
    "credited_by": [
@@ -14213,8 +14280,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|SELECT=on": {
    "credited_by": [
@@ -14232,29 +14300,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=multi-unchanged": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=multi-widened": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|TGT=single-unchanged": {
    "credited_by": [
@@ -14277,15 +14349,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_target_change_under_a_drifted_lock[stale]"
   },
   "pair|LOCK=stale|UPDATE=on": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|NET=offline|DRYRUN=on": {
    "family": "pair",
@@ -15170,8 +15244,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|OP=audit|TGT=multi-unchanged": {
    "family": "pair",
@@ -15185,15 +15260,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|OP=audit|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|OP=audit|TGT=single-unchanged": {
    "family": "pair",
@@ -15207,8 +15284,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|OP=bundle-install|DEPLOYED=absent": {
    "family": "pair",
@@ -15596,8 +15674,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|OP=bundle-install|TGT=multi-unchanged": {
    "credited_by": [
@@ -15614,15 +15693,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|OP=bundle-install|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|OP=bundle-install|TGT=single-unchanged": {
    "credited_by": [
@@ -15639,8 +15720,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|OP=compile|DEPLOYED=absent": {
    "family": "pair",
@@ -16286,22 +16368,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|OP=install|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|OP=install|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|OP=install|NET=offline": {
    "family": "pair",
@@ -17399,8 +17484,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-multi-narrowed]"
   },
   "pair|OP=marketplace|TGT=multi-unchanged": {
    "credited_by": [
@@ -17417,15 +17503,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-multi-widened]"
   },
   "pair|OP=marketplace|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-single-narrowed]"
   },
   "pair|OP=marketplace|TGT=single-unchanged": {
    "credited_by": [
@@ -17442,8 +17530,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-list-single-widened]"
   },
   "pair|OP=mcp-install|DEPLOYED=absent": {
    "family": "pair",
@@ -17615,22 +17704,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-copilot]"
   },
   "pair|OP=mcp-install|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-legacy-receipt]"
   },
   "pair|OP=mcp-install|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[mcp-install-vscode]"
   },
   "pair|OP=mcp-install|NET=offline": {
    "family": "pair",
@@ -17774,8 +17866,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|OP=mcp-install|TGT=multi-unchanged": {
    "family": "pair",
@@ -17789,15 +17882,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-widened]"
   },
   "pair|OP=mcp-install|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-narrowed]"
   },
   "pair|OP=mcp-install|TGT=single-unchanged": {
    "family": "pair",
@@ -17811,8 +17906,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-widened]"
   },
   "pair|OP=pack|DEPLOYED=absent": {
    "family": "pair",
@@ -18052,8 +18148,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-multi-narrowed]"
   },
   "pair|OP=pack|TGT=multi-unchanged": {
    "family": "pair",
@@ -18067,15 +18164,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-multi-widened]"
   },
   "pair|OP=pack|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-single-narrowed]"
   },
   "pair|OP=pack|TGT=single-unchanged": {
    "family": "pair",
@@ -18089,8 +18188,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[pack-single-widened]"
   },
   "pair|OP=prune|DEPLOYED=absent": {
    "family": "pair",
@@ -18261,22 +18361,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-copilot]"
   },
   "pair|OP=prune|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-legacy-receipt]"
   },
   "pair|OP=prune|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[prune-vscode]"
   },
   "pair|OP=prune|NET=offline": {
    "family": "pair",
@@ -18725,22 +18828,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-copilot]"
   },
   "pair|OP=uninstall|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-legacy-receipt]"
   },
   "pair|OP=uninstall|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[uninstall-vscode]"
   },
   "pair|OP=uninstall|NET=offline": {
    "family": "pair",
@@ -19195,22 +19301,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-copilot]"
   },
   "pair|OP=update|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-legacy-receipt]"
   },
   "pair|OP=update|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[update-vscode]"
   },
   "pair|OP=update|NET=offline": {
    "family": "pair",
@@ -19628,15 +19737,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=bin|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|NET=offline": {
    "family": "pair",
@@ -19668,7 +19779,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_plugin_bin_deploys_under_home_once_trusted"
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_user_bin_plugin_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=bin|SELECT=on": {
    "family": "pair",
@@ -19869,15 +19980,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=canvas|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=canvas|NET=offline": {
    "family": "pair",
@@ -19931,8 +20044,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-narrowed]"
   },
   "pair|PRIM=canvas|TGT=multi-unchanged": {
    "family": "pair",
@@ -19946,15 +20060,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-multi-widened]"
   },
   "pair|PRIM=canvas|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-narrowed]"
   },
   "pair|PRIM=canvas|TGT=single-unchanged": {
    "family": "pair",
@@ -19968,8 +20084,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[gates-single-widened]"
   },
   "pair|PRIM=canvas|UPDATE=on": {
    "family": "pair",
@@ -20117,15 +20234,17 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[newer-generator]"
   },
   "pair|PRIM=hook|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_gates_modifiers_and_network_under_a_drifted_lock[stale]"
   },
   "pair|PRIM=hook|NET=offline": {
    "family": "pair",
@@ -20181,7 +20300,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=hook|TGT=multi-unchanged": {
    "family": "pair",
@@ -20197,7 +20316,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=hook|TGT=single-narrowed": {
    "family": "pair",
@@ -20205,7 +20324,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=hook|TGT=single-unchanged": {
    "family": "pair",
@@ -20221,7 +20340,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=hook|UPDATE=on": {
    "family": "pair",
@@ -20440,8 +20559,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|PRIM=lsp|TGT=multi-unchanged": {
    "family": "pair",
@@ -20455,15 +20575,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|PRIM=lsp|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|PRIM=lsp|TGT=single-unchanged": {
    "family": "pair",
@@ -20477,8 +20599,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|PRIM=lsp|UPDATE=on": {
    "family": "pair",
@@ -20698,7 +20821,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|PRIM=mcp|TGT=multi-unchanged": {
    "family": "pair",
@@ -20714,7 +20837,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|PRIM=mcp|TGT=single-narrowed": {
    "family": "pair",
@@ -20722,7 +20845,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|PRIM=mcp|TGT=single-unchanged": {
    "family": "pair",
@@ -20738,7 +20861,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|PRIM=mcp|UPDATE=on": {
    "family": "pair",
@@ -21229,22 +21352,25 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-copilot]"
   },
   "pair|SCOPE=project|MCPOWN=legacy-receipt": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-legacy-receipt]"
   },
   "pair|SCOPE=project|MCPOWN=vscode": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_one_command_on_an_mcp_owner[install-vscode]"
   },
   "pair|SCOPE=project|NET=offline": {
    "family": "pair",
@@ -21284,7 +21410,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SCOPE=project|TGT=multi-unchanged": {
    "family": "pair",
@@ -21300,7 +21426,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SCOPE=project|TGT=single-narrowed": {
    "family": "pair",
@@ -21308,7 +21434,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SCOPE=project|TGT=single-unchanged": {
    "family": "pair",
@@ -21324,7 +21450,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SCOPE=project|UPDATE=on": {
    "family": "pair",
@@ -21571,22 +21697,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SCOPE=user|MCPOWN=legacy-receipt": {
-   "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|SCOPE=user|MCPOWN=vscode": {
-   "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_ownership_history.py::test_user_scope_copilot_owner"
   },
   "pair|SCOPE=user|NET=offline": {
    "family": "pair",
@@ -21876,8 +21989,9 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=git|LOCK=stale": {
    "credited_by": [
@@ -22003,7 +22117,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SRC=git|TGT=multi-unchanged": {
    "family": "pair",
@@ -22019,7 +22133,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SRC=git|TGT=single-narrowed": {
    "family": "pair",
@@ -22027,7 +22141,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SRC=git|TGT=single-unchanged": {
    "family": "pair",
@@ -22043,7 +22157,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SRC=git|UPDATE=on": {
    "family": "pair",
@@ -22153,29 +22267,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
   },
   "pair|SRC=inline-mcp|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|SRC=inline-mcp|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=inline-mcp|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
   },
   "pair|SRC=inline-mcp|NET=offline": {
    "family": "pair",
@@ -22246,8 +22364,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-narrowed]"
   },
   "pair|SRC=inline-mcp|TGT=multi-unchanged": {
    "credited_by": [
@@ -22264,15 +22383,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-multi-widened]"
   },
   "pair|SRC=inline-mcp|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-narrowed]"
   },
   "pair|SRC=inline-mcp|TGT=single-unchanged": {
    "credited_by": [
@@ -22289,8 +22410,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[inline-mcp-single-widened]"
   },
   "pair|SRC=inline-mcp|UPDATE=on": {
    "credited_by": [
@@ -22632,8 +22754,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
   },
   "pair|SRC=local-bundle|TGT=multi-unchanged": {
    "credited_by": [
@@ -22650,15 +22773,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-widened]"
   },
   "pair|SRC=local-bundle|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
   },
   "pair|SRC=local-bundle|TGT=single-unchanged": {
    "credited_by": [
@@ -22675,8 +22800,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-widened]"
   },
   "pair|SRC=local-path|DEPLOYED=absent": {
    "family": "pair",
@@ -22937,7 +23063,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|SRC=local-path|TGT=multi-unchanged": {
    "family": "pair",
@@ -22953,7 +23079,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|SRC=local-path|TGT=single-narrowed": {
    "family": "pair",
@@ -22961,7 +23087,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|SRC=local-path|TGT=single-unchanged": {
    "family": "pair",
@@ -22977,7 +23103,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|SRC=local-path|UPDATE=on": {
    "family": "pair",
@@ -23135,29 +23261,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-absent]"
   },
   "pair|SRC=marketplace-file|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-file|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-file|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-file|NET=offline": {
    "family": "pair",
@@ -23334,8 +23464,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-file|TGT=multi-unchanged": {
    "credited_by": [
@@ -23352,15 +23483,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-file|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-file|TGT=single-unchanged": {
    "credited_by": [
@@ -23377,8 +23510,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-file|UPDATE=on": {
    "credited_by": [
@@ -23588,22 +23722,25 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-git|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-git|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-git|NET=offline": {
    "family": "pair",
@@ -23770,8 +23907,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-git|TGT=multi-unchanged": {
    "credited_by": [
@@ -23789,15 +23927,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-git|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-git|TGT=single-unchanged": {
    "credited_by": [
@@ -23815,8 +23955,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-git|UPDATE=on": {
    "credited_by": [
@@ -23977,29 +24118,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-absent]"
   },
   "pair|SRC=marketplace-local|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-local|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-newer-generator]"
   },
   "pair|SRC=marketplace-local|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[marketplace-stale]"
   },
   "pair|SRC=marketplace-local|NET=offline": {
    "family": "pair",
@@ -24176,8 +24321,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-narrowed]"
   },
   "pair|SRC=marketplace-local|TGT=multi-unchanged": {
    "credited_by": [
@@ -24194,15 +24340,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-multi-widened]"
   },
   "pair|SRC=marketplace-local|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-narrowed]"
   },
   "pair|SRC=marketplace-local|TGT=single-unchanged": {
    "credited_by": [
@@ -24219,8 +24367,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[marketplace-install-single-widened]"
   },
   "pair|SRC=marketplace-local|UPDATE=on": {
    "credited_by": [
@@ -24417,8 +24566,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-multi-narrowed]"
   },
   "pair|SRC=mcp-registry|TGT=multi-unchanged": {
    "family": "pair",
@@ -24432,15 +24582,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-multi-widened]"
   },
   "pair|SRC=mcp-registry|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-single-narrowed]"
   },
   "pair|SRC=mcp-registry|TGT=single-unchanged": {
    "family": "pair",
@@ -24454,8 +24606,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[mcp-registry-single-widened]"
   },
   "pair|SRC=mcp-registry|UPDATE=on": {
    "credited_by": [
@@ -24612,29 +24765,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-absent]"
   },
   "pair|SRC=native-plugin|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=native-plugin|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-newer-generator]"
   },
   "pair|SRC=native-plugin|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[direct-stale]"
   },
   "pair|SRC=native-plugin|NET=offline": {
    "family": "pair",
@@ -24765,8 +24922,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -24783,15 +24941,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|SRC=native-plugin|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [
@@ -24808,8 +24968,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|SRC=native-plugin|UPDATE=on": {
    "credited_by": [
@@ -24970,29 +25131,33 @@
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-absent]"
   },
   "pair|SRC=pkg-registry|LOCK=consistent": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=pkg-registry|LOCK=newer-generator": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-newer-generator]"
   },
   "pair|SRC=pkg-registry|LOCK=stale": {
    "family": "pair",
    "issue": "#4097",
    "lane": "T-3",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_lock_states.py::test_sources_under_a_drifted_lock[registry-stale]"
   },
   "pair|SRC=pkg-registry|NET=offline": {
    "family": "pair",
@@ -25140,8 +25305,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|SRC=pkg-registry|TGT=multi-unchanged": {
    "credited_by": [
@@ -25158,15 +25324,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|SRC=pkg-registry|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|SRC=pkg-registry|TGT=single-unchanged": {
    "credited_by": [
@@ -25183,8 +25351,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|SRC=pkg-registry|UPDATE=on": {
    "credited_by": [
@@ -25233,8 +25402,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NET=online": {
    "family": "pair",
@@ -25242,7 +25412,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NOPOLICY=on": {
    "family": "pair",
@@ -25384,8 +25554,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-widened]"
   },
   "pair|TGT=multi-widened|NET=online": {
    "family": "pair",
@@ -25393,7 +25564,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-multi-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-multi-widened]"
   },
   "pair|TGT=multi-widened|NOPOLICY=on": {
    "family": "pair",
@@ -25455,8 +25626,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
   },
   "pair|TGT=single-narrowed|NET=online": {
    "family": "pair",
@@ -25464,7 +25636,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-narrowed]"
   },
   "pair|TGT=single-narrowed|NOPOLICY=on": {
    "family": "pair",
@@ -25606,8 +25778,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-widened]"
   },
   "pair|TGT=single-widened|NET=online": {
    "family": "pair",
@@ -25615,7 +25788,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[compile-single-widened]"
+   "witness": "tests/lifecycle/scenarios/test_history_upgrade.py::test_command_after_a_target_change[audit-single-widened]"
   },
   "pair|TGT=single-widened|NOPOLICY=on": {
    "family": "pair",
@@ -27582,6 +27755,12 @@
   "pair|PRIM=bin|SCOPE=project": [
    "U-BIN"
   ],
+  "pair|SCOPE=user|MCPOWN=legacy-receipt": [
+   "U-MCPOWN-USER"
+  ],
+  "pair|SCOPE=user|MCPOWN=vscode": [
+   "U-MCPOWN-USER"
+  ],
   "pair|SRC=inline-mcp|PRIM=bin": [
    "U8"
   ],
@@ -27686,6 +27865,14 @@
     "src/apm_cli/commands/approve.py:1397"
    ],
    "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies). apm approve / apm deny decide only installed packages, so approve-deny of an MCP source maps there too (R5)"
+  },
+  "U-MCPOWN-USER": {
+   "evidence": [
+    "src/apm_cli/install/mcp/retired_destinations.py:3",
+    "src/apm_cli/install/mcp/retired_destinations.py:468",
+    "src/apm_cli/install/mcp/retired_destinations.py:469"
+   ],
+   "text": "the retired MCP owners (vscode, legacy-receipt) exist only at project scope: APM <= 0.36 wrote them to project files and the retired-claim reader returns no claims at user scope, so a user-scope cell with a retired owner is unreachable and removed"
   },
   "U-MKT": {
    "evidence": [

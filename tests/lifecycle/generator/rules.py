@@ -48,6 +48,7 @@ _APPROVE = "src/apm_cli/commands/approve.py"
 _COMPILE = "src/apm_cli/commands/compile/cli.py"
 _PACK = "src/apm_cli/commands/pack.py"
 _MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
+_RETIRED = "src/apm_cli/install/mcp/retired_destinations.py"
 
 # -- U1: the modifiers each command accepts -----------------------------------
 
@@ -306,6 +307,16 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             Ev("src/apm_cli/install/service.py", 133, "cannot replay the selected native services"),
         ),
     ),
+    "U-MCPOWN-USER": (
+        "the retired MCP owners (vscode, legacy-receipt) exist only at project scope: APM "
+        "<= 0.36 wrote them to project files and the retired-claim reader returns no claims "
+        "at user scope, so a user-scope cell with a retired owner is unreachable and removed",
+        (
+            Ev(_RETIRED, 3, "APM <= 0.36 wrote ``copilot`` project MCP servers"),
+            Ev(_RETIRED, 468, "if user_scope:"),
+            Ev(_RETIRED, 469, "return RetiredMcpClaims({}, {})"),
+        ),
+    ),
     "E1": (
         "hosts are equivalent except lock identity (HOSTID)",
         (Ev("src/apm_cli/models/dependency/identity.py", 246, "def build_dependency_unique_key"),),
@@ -358,6 +369,8 @@ EXCEPTION_PARTNERS: Mapping[str, Mapping[str, tuple[str, ...] | None]] = {
 }
 # Ops where E3's exception (compile-staging routing) applies to a file primitive.
 FILEROUTE_OPS = frozenset({"compile", "bundle-install"})
+# MCPOWN values that name a retired project destination (U-MCPOWN-USER).
+RETIRED_MCP_OWNERS = frozenset({"vscode", "legacy-receipt"})
 MARKETPLACE_SOURCES = frozenset({"marketplace-git", "marketplace-local", "marketplace-file"})
 # Sources of a single MCP server (install --mcp), not of a package.
 MCP_SOURCES = frozenset({"mcp-registry", "inline-mcp"})
@@ -485,6 +498,8 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U-BIN"
     if u_bin_ops_applies(cell) and u_bin_pinned():
         return "U-BIN-OPS"
+    if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
+        return "U-MCPOWN-USER"
     if (deployed in ("clean", "edited") and lock == "absent") or (
         deployed == "present-provenance-unknown" and lock not in (None, "absent")
     ):

@@ -43,9 +43,8 @@ import pytest
 import yaml
 
 from tests.lifecycle.generator.rules import FROZEN_TARGET_CHANGE, FROZEN_TARGET_CHANGE_MESSAGES
-from tests.lifecycle.model.expected import exit_contract
 from tests.lifecycle.oracles import Evidence, check_obligation
-from tests.lifecycle.scenarios._kit import Known, Scenario, assert_changes, credits
+from tests.lifecycle.scenarios._kit import Scenario, assert_changes, credits
 from tests.lifecycle.world import use_policy
 
 pytestmark = [
@@ -213,15 +212,19 @@ def test_install_after_a_target_change(lifecycle_world, tgt) -> None:
 
 
 # Row -> (command after the target change, OP, packages whose units it proves,
-# factor overrides). Every credited row must exit 0: scenario-lane pairs are success pairs.
+# factor overrides). Every row must exit 0: scenario-lane pairs are success pairs.
 HISTORY_ROWS = {
     "update": ("update --yes", "update", _PACKAGES, {}),
     "uninstall": ("uninstall p-child", "uninstall", ("p-child",), {}),
     "prune": ("prune", "prune", _PACKAGES, {}),
     "compile": ("compile", "compile", _PACKAGES, {}),
     "lock": ("lock", "lock", _PACKAGES, {}),
-    "audit": ("audit --ci", "audit", _PACKAGES, {}),
-    "pack": ("pack", "pack", _PACKAGES, {}),
+    # audit --ci reports a target change as drift (exit 1, by design); plain audit
+    # scans the deployed content and succeeds.
+    "audit": ("audit", "audit", _PACKAGES, {}),
+    # pack refuses local-path dependencies (development only), so its history holds
+    # only the git dependency.
+    "pack": ("pack", "pack", ("p-skill:git",), {}),
     "deny": ("deny p-exec", "approve-deny", ("p-exec",), {"GATE": "denied-executable"}),
     "install-dry-run": ("install --dry-run", "install", _PACKAGES, {"DRYRUN": "on"}),
     "install-force": ("install --force", "install", _PACKAGES, {"FORCE": "on"}),
@@ -235,31 +238,14 @@ def _row_assignments(row: str, tgt: str) -> list[dict[str, str]]:
     return [{**item, **overrides} for item in _assignments(op, tgt, packages)]
 
 
-# Rows whose step is a strict known cell (none: #4636 is fixed).
-KNOWN_ROWS: dict[tuple[str, str], dict[str, Known]] = {}
-# Refusals, never success witnesses, so their rows credit nothing: pack refuses
-# local-path dependencies (both exporters), and audit --ci fails while the lock
-# still records the targets declared before the change.
-_REFUSING_ROWS = ("pack", "audit")
-UNCREDITED_ROWS = {
-    *KNOWN_ROWS,
-    *((row, tgt) for row in _REFUSING_ROWS for tgt in TARGET_HISTORIES),
-}
-
-
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
 @pytest.mark.parametrize("row", sorted(HISTORY_ROWS))
 def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
-    scenario = _history(lifecycle_world, tgt)
-    line = HISTORY_ROWS[row][0]
-    credit = () if (row, tgt) in UNCREDITED_ROWS else _row_assignments(row, tgt)
-    step = scenario.run(line, credit=credit, known=KNOWN_ROWS.get((row, tgt)))
-    if credit:
-        # A credited row is a success pair: it must exit 0.
-        assert step.result.returncode == 0, step.output
-    else:
-        # I8: an uncredited row still stays inside the command's exit contract.
-        assert step.result.returncode in exit_contract(line.split()[0]), step.output
+    line, _, packages, _ = HISTORY_ROWS[row]
+    scenario = _history(lifecycle_world, tgt, packages if row == "pack" else _PACKAGES)
+    step = scenario.run(line, credit=_row_assignments(row, tgt))
+    # Every row must succeed to earn its receipts (scenario-lane pairs are success pairs).
+    assert step.result.returncode == 0, step.output
     scenario.finish()
 
 
@@ -307,7 +293,6 @@ CREDITS = credits(
             f"test_command_after_a_target_change[{row}-{tgt}]": _row_assignments(row, tgt)
             for row in HISTORY_ROWS
             for tgt in TARGET_HISTORIES
-            if (row, tgt) not in UNCREDITED_ROWS
         },
     },
 )
