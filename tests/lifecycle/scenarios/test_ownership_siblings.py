@@ -541,6 +541,10 @@ _EDITED_EXEC = [
 ]
 
 
+_EDITED_EXEC_KNOWN = Known("#4626", r"I1-X2: the user's bytes were changed")
+_MCP_ENTRY_KNOWN = Known("#4268", r"failed install changed (the manifest|durable files)")
+
+
 def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     """#4626: install replaces an edited hook, canvas or LSP entry without a word."""
     scenario = _deployed_executables(lifecycle_world)
@@ -549,8 +553,7 @@ def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     scenario.user_write(_CANVAS, _with(_CANVAS, "'p-canvas'", "'my-canvas'", world))
     scenario.user_write(_LSP, _with(_LSP, '"--stdio"', '"--my-flag"', world))
     scenario.source_moved()
-    known = {"I1": Known("#4626", r"I1-X2: the user's bytes were changed")}
-    step = scenario.run("install", known=known)
+    step = scenario.run("install", known={"I1": _EDITED_EXEC_KNOWN})
     assert step.result.returncode == 0, step.output
     scenario.finish()
 
@@ -701,7 +704,7 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
         step = scenario.run(
             _MCP_SOURCES[src],
             exit=1,
-            known={"I7": Known("#4268", r"failed install changed (the manifest|durable files)")},
+            known={"I7": _MCP_ENTRY_KNOWN},
         )
     else:
         step = scenario.run(
@@ -1282,7 +1285,7 @@ CREDITS = credits(
         },
     },
     known={
-        "test_edited_executable_files_are_kept": "#4626",
-        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
+        "test_edited_executable_files_are_kept": _EDITED_EXEC_KNOWN,
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": _MCP_ENTRY_KNOWN,
     },
 )
