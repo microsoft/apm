@@ -55,22 +55,26 @@ if ! uv run pyinstaller --version &> /dev/null; then
     exit 1
 fi
 
-# Check if UPX is available (optional, for compression)
-if command -v upx &> /dev/null; then
-    echo -e "${GREEN}UPX found - binary will be compressed${NC}"
-else
-    echo -e "${YELLOW}UPX not found - binary will not be compressed (install with: brew install upx)${NC}"
-fi
+# The bundle is never UPX-compressed (build/apm.spec should_use_upx): every
+# packed shared library would be decompressed on each start.
 
-# Inject build SHA into version.py
+# Inject the build version and SHA into version.py, so a binary reports its
+# version from constants instead of reading the bundled pyproject.toml.
 VERSION_FILE="src/apm_cli/version.py"
 BUILD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+BUILD_VERSION=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)
+cp "$VERSION_FILE" "${VERSION_FILE}.bak"
+# Guarantee restore on any exit (success, failure, or signal)
+trap 'if [ -f "${VERSION_FILE}.bak" ]; then mv "${VERSION_FILE}.bak" "$VERSION_FILE"; fi' EXIT
+if [ -n "$BUILD_VERSION" ]; then
+    echo -e "${YELLOW}Injecting build version: $BUILD_VERSION${NC}"
+    sed -i.tmp "s/^__BUILD_VERSION__ = None$/__BUILD_VERSION__ = \"$BUILD_VERSION\"/" "$VERSION_FILE"
+fi
 if [ -n "$BUILD_SHA" ]; then
     echo -e "${YELLOW}Injecting build SHA: $BUILD_SHA${NC}"
-    sed -i.bak "s/^__BUILD_SHA__ = None$/__BUILD_SHA__ = \"$BUILD_SHA\"/" "$VERSION_FILE"
-    # Guarantee restore on any exit (success, failure, or signal)
-    trap 'if [ -f "${VERSION_FILE}.bak" ]; then mv "${VERSION_FILE}.bak" "$VERSION_FILE"; fi' EXIT
+    sed -i.tmp "s/^__BUILD_SHA__ = None$/__BUILD_SHA__ = \"$BUILD_SHA\"/" "$VERSION_FILE"
 fi
+rm -f "${VERSION_FILE}.tmp"
 
 # Build binary
 echo -e "${YELLOW}Building binary with PyInstaller...${NC}"

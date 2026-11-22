@@ -16,14 +16,15 @@ def is_upx_available():
         return False
 
 def should_use_upx():
-    """Enable UPX only on non-Windows platforms where it is available.
+    """Never compress the bundle with UPX.
 
     UPX-compressed PE binaries trigger ML-based AV false positives
-    (e.g. Trojan:Win32/Bearfoos.B!ml) on Windows Defender.
+    (e.g. Trojan:Win32/Bearfoos.B!ml) on Windows Defender. On Linux and
+    macOS every UPX-packed shared library is decompressed on each start,
+    which every command (even ``apm --version``) pays at boot.
+    ``is_upx_available`` stays for diagnostics only.
     """
-    if sys.platform == 'win32':
-        return False
-    return is_upx_available()
+    return False
 
 # Get the directory where this spec file is located
 spec_dir = Path(SPECPATH)
@@ -84,7 +85,9 @@ if sys.platform == 'win32':
         _win_version_info = None
 
 # APM CLI entry point
-entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
+# entrypoint.py answers a standalone ``apm --version`` without importing the
+# CLI; every other invocation delegates to apm_cli.cli.main.
+entry_point = repo_root / 'src' / 'apm_cli' / 'entrypoint.py'
 
 # Data files to include - recursively include all template files
 datas = [

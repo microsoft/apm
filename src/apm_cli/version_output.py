@@ -3,10 +3,10 @@
 from pathlib import Path
 
 import click
-from colorama import Fore, Style
 
-from .utils.console import _get_console, _rich_echo
 from .version import get_build_sha, get_version
+
+_BANNER = "Agent Package Manager (APM) CLI"
 
 
 def print_version(ctx: click.Context, param: click.Parameter | None, value: bool) -> None:
@@ -19,22 +19,10 @@ def print_version(ctx: click.Context, param: click.Parameter | None, value: bool
     if sha:
         version_str += f" ({sha})"
 
-    console = _get_console()
-    if console:
-        try:
-            console.print(
-                f"[bold cyan]Agent Package Manager (APM) CLI[/bold cyan] version {version_str}"
-            )
-        except Exception:
-            click.echo(
-                f"{Fore.CYAN}{Style.BRIGHT}Agent Package Manager (APM) CLI"
-                f"{Style.RESET_ALL} version {version_str}"
-            )
-    else:
-        click.echo(
-            f"{Fore.CYAN}{Style.BRIGHT}Agent Package Manager (APM) CLI"
-            f"{Style.RESET_ALL} version {version_str}"
-        )
+    # click.style + click.echo, not a rich Console: the banner is the whole
+    # output of ``apm --version``, which should load nothing but click. Click
+    # strips the styling when stdout is not a terminal.
+    click.echo(f"{click.style(_BANNER, fg='cyan', bold=True)} version {version_str}")
 
     try:
         from .core.experimental import is_enabled
@@ -42,6 +30,8 @@ def print_version(ctx: click.Context, param: click.Parameter | None, value: bool
         if is_enabled("verbose_version"):
             import platform
             import sys
+
+            from .utils.console import _rich_echo
 
             python_ver = platform.python_version()
             plat = f"{sys.platform}-{platform.machine()}"

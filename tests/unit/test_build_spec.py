@@ -209,7 +209,7 @@ class TestSpecFileSyntax:
 
 
 class TestShouldUseUpx:
-    """``should_use_upx()`` disables UPX on Windows, delegates on other platforms."""
+    """``should_use_upx()`` disables UPX on every platform."""
 
     def test_returns_false_on_windows(self, monkeypatch):
         """Regression guard: UPX must be disabled on win32 to avoid AV false positives."""
@@ -218,30 +218,13 @@ class TestShouldUseUpx:
         result = ns["should_use_upx"]()
         assert result is False, "should_use_upx() must return False on win32"
 
-    def test_delegates_to_is_upx_available_when_upx_present_on_linux(self, monkeypatch):
-        """On Linux, should_use_upx() returns True when UPX is installed."""
-        monkeypatch.setattr(sys, "platform", "linux")
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    @pytest.mark.parametrize("available", [True, False])
+    def test_never_compresses_on_linux_or_macos(self, monkeypatch, platform, available):
+        """Boot cost: a UPX-packed library is decompressed on every start."""
+        monkeypatch.setattr(sys, "platform", platform)
         ns = _make_helpers_ns()
-        ns["is_upx_available"] = lambda: True  # inject mock into helpers' namespace
-        result = ns["should_use_upx"]()
-        assert result is True
-
-    def test_delegates_to_is_upx_available_when_upx_absent_on_linux(self, monkeypatch):
-        """On Linux, should_use_upx() returns False when UPX is not installed."""
-        monkeypatch.setattr(sys, "platform", "linux")
-        ns = _make_helpers_ns()
-        ns["is_upx_available"] = lambda: False
-        result = ns["should_use_upx"]()
-        assert result is False
-
-    def test_delegates_to_is_upx_available_on_darwin(self, monkeypatch):
-        """On macOS (darwin), should_use_upx() delegates correctly."""
-        monkeypatch.setattr(sys, "platform", "darwin")
-        ns = _make_helpers_ns()
-        ns["is_upx_available"] = lambda: True
-        assert ns["should_use_upx"]() is True
-
-        ns["is_upx_available"] = lambda: False
+        ns["is_upx_available"] = lambda: available
         assert ns["should_use_upx"]() is False
 
     def test_never_calls_is_upx_available_on_windows(self, monkeypatch):
