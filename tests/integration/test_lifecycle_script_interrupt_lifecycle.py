@@ -22,6 +22,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX process groups and signals"),
+    pytest.mark.e2e,
 ]
 
 _SCRIPT = (

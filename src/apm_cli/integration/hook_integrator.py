@@ -32,7 +32,7 @@ from apm_cli.core.deployment_state import (
 from apm_cli.core.remediation import HOOK_PATH_ESCAPES_PACKAGE
 from apm_cli.core.scope import InstallScope, manifest_file
 from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
-from apm_cli.hook_contract import walk_hook_commands
+from apm_cli.hook_contract import summarize_hook_command, walk_hook_commands
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.copilot_hook_paths import copilot_hook_target
@@ -412,27 +412,7 @@ class HookIntegrator(BaseIntegrator):
             for declaration in walk_hook_commands(payload)
         ]
 
-    @staticmethod
-    def _summarize_command(entry: dict) -> str:
-        """Return a human-readable summary for a single hook command entry."""
-        command = ""
-        for key in HookIntegrator.HOOK_COMMAND_KEYS:
-            value = entry.get(key)
-            if isinstance(value, str) and value.strip():
-                command = value.strip()
-                break
-        if not command:
-            return "runs hook command"
-        # Collapse any internal whitespace (including embedded newlines) so
-        # the summary is always single-line. A hook command containing a
-        # newline must not break install-log formatting or enable
-        # log-spoofing. Addresses Copilot inline on hook_integrator.py.
-        command = " ".join(command.split())
-        for token in command.split():
-            cleaned = token.strip("\"'")
-            if "/" in cleaned or cleaned.startswith("."):
-                return f"runs {cleaned}"
-        return f"runs {command}"
+    _summarize_command = staticmethod(summarize_hook_command)
 
     def _build_display_payload(
         self,
@@ -1505,6 +1485,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_descriptor_files=set(hook_files),
                 source_plan=source_plan,
                 selected_bundle_files=hook_sources.bundle_for(config.target_key),
+                target=target,
             )
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted

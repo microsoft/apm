@@ -48,6 +48,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX credential helper launcher"),
+    pytest.mark.e2e,
 ]
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t1"
