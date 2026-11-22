@@ -1,6 +1,6 @@
 """A monorepo lib reached through two relative spellings replays with --frozen (#4731).
 
-PROMISE: lockfile.frozen_preserves_bytes -- ``apm install --frozen`` replays the
+PROMISE: P-INV-I3 -- ``apm install --frozen`` and ``apm audit --ci`` accept the
 lockfile ``apm install`` just wrote, without changing the lockfile or the deployed
 files (source: issue #4731 scope record).
 CELL: OP=install FROZEN=on SRC=local(transitive, two spellings) PRIM=skill SCOPE=project
@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
@@ -66,6 +67,10 @@ def test_frozen_replays_a_lib_reached_by_two_relative_spellings(
     installed = runner.run(("install",), cwd=root, env=env)
     assert installed.returncode == 0, _evidence(installed)
     lock = (root / "apm.lock.yaml").read_bytes()
+    rows = yaml.safe_load(lock)["dependencies"]
+    assert [row["local_path"] for row in rows if row["repo_url"] == "_local/lib-05"] == [
+        "./packages/lib-05"
+    ]
     deployed = ArtifactSnapshot.capture(root / ".claude")
     for name in ("lib-04", "lib-05", "lib-06"):
         assert (root / ".claude" / "skills" / f"{name}-skill" / "SKILL.md").is_file()

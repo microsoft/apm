@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
 from apm_cli.models.apm_package import DependencyReference
 
 pytestmark = [
@@ -412,3 +414,66 @@ class TestShouldForceRecheck:
 # ---------------------------------------------------------------------------
 # Anchored-local-path portability (committable, cross-machine lockfile)
 # ---------------------------------------------------------------------------
+
+
+class TestOneAnchoredDirectoryIsOneDependency:
+    """#4731: a library reached as ``./packages/lib`` and ``../lib`` is one package."""
+
+    @pytest.mark.parametrize(
+        ("declared", "expected_key"),
+        [("../lib", "./packages/lib"), ("../other", "local:packages/other")],
+    )
+    def test_root_declared_directory_wins_its_spelling(
+        self, tmp_path: Path, declared: str, expected_key: str
+    ) -> None:
+        root_ref = DependencyReference.parse("./packages/lib")
+        dirs = APMDependencyResolver.root_local_dirs([root_ref], tmp_path)
+
+        edge = APMDependencyResolver.transitive_local_identity(
+            DependencyReference.parse(declared),
+            declaring_parent="_local/sib",
+            anchored=(tmp_path / "packages" / "sib" / declared).resolve(),
+            root=tmp_path,
+            root_local_dirs=dirs,
+        )
+
+        assert edge.get_unique_key() == expected_key
+
+    @staticmethod
+    def _lockfile(*rows: tuple[str, str, str | None]) -> LockFile:
+        lockfile = LockFile()
+        for repo_url, local_path, resolved_by in rows:
+            lockfile.add_dependency(
+                LockedDependency(
+                    repo_url=repo_url,
+                    source="local",
+                    local_path=local_path,
+                    resolved_by=resolved_by,
+                )
+            )
+        return lockfile
+
+    def test_lockfile_parents_anchoring_to_one_directory_are_one_parent(
+        self, tmp_path: Path
+    ) -> None:
+        lockfile = self._lockfile(
+            ("_local/sib", "./packages/sib", None),
+            ("_local/lib", "./packages/lib", None),
+            ("_local/lib", "../lib", "_local/sib"),
+            ("_local/leaf", "../leaf", "_local/lib"),
+        )
+        leaf = lockfile.get_dependency("../leaf")
+
+        resolved = resolve_local_dep_dir(leaf, lockfile, tmp_path)
+
+        assert resolved == (tmp_path / "packages" / "leaf").resolve()
+
+    def test_lockfile_parents_in_different_directories_still_refuse(self, tmp_path: Path) -> None:
+        lockfile = self._lockfile(
+            ("_local/lib", "./packages/lib", None),
+            ("_local/lib", "./vendor/lib", None),
+            ("_local/leaf", "../leaf", "_local/lib"),
+        )
+
+        with pytest.raises(LocalResolutionError, match="different directories"):
+            resolve_local_dep_dir(lockfile.get_dependency("../leaf"), lockfile, tmp_path)
