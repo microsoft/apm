@@ -204,8 +204,15 @@ def stateless_noop(command: Any) -> Any:
         root, argv = Path.cwd(), invocation_argv()
         if try_noop(kwargs, argv, root) or diff_apply.try_apply(kwargs, argv, root):
             return None
+        import click
+
         before = diff_apply.snapshot(root)
-        result = command(*args, **kwargs)
+        try:
+            result = command(*args, **kwargs)
+        except click.exceptions.Exit as done:
+            if done.exit_code == 0:
+                diff_apply.harvest(root, before)
+            raise
         diff_apply.harvest(root, before)
         return result
 
