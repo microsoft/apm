@@ -143,3 +143,26 @@ def test_a_prompt_name_the_compiler_resolves_into_a_denied_package_is_refused(
         ScriptRunner()._auto_compile_prompts(f"copilot -p {token}", {})
 
     assert not (project / ".apm" / "compiled").exists(), "nothing was compiled"
+
+
+@pytest.mark.parametrize(
+    ("alias", "target", "token"),
+    [
+        ("alias", ".github/prompts", "alias/audit.prompt.md"),
+        ("vendor", "apm_modules/acme/denied/.apm", "vendor/prompts/review.prompt.md"),
+    ],
+    ids=["deployed-file", "package-root"],
+)
+def test_a_directory_symlink_into_a_denied_package_is_refused(
+    project: Path, alias: str, target: str, token: str
+) -> None:
+    """A prompt reached through a linked directory is judged by the real file it opens."""
+    (project / alias).symlink_to(project / target, target_is_directory=True)
+    with (
+        patch(_RESOLVE, return_value=_DENY),
+        patch("apm_cli.install.exec_gate.policy_denied_dependencies", side_effect=_deny),
+        pytest.raises(RuntimeError, match=r"acme/denied: org policy"),
+    ):
+        ScriptRunner()._auto_compile_prompts(f"copilot -p {token}", {})
+
+    assert not (project / ".apm" / "compiled").exists(), "nothing was compiled"
