@@ -882,6 +882,25 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
         pytest.param(
             ("bin",), [".github/skills/bin/bin/tool"], ("bin",), id="skill-named-bin-with-bin-dir"
         ),
+        pytest.param(
+            ("hooks", "bin"),
+            ["agent-data/workflows/bin/SKILL.md"],
+            ("hooks",),
+            id="grok-skill-named-bin",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".github/hooks/scripts/bin/scripts/run.sh"],
+            ("hooks",),
+            id="hook-scripts-bin-dir",
+        ),
+        pytest.param(
+            ("hooks", "bin"),
+            [".agents/skills/p/references/skills/bin/tool"],
+            ("hooks",),
+            id="nested-bin-is-not-the-withheld-bin",
+        ),
+        pytest.param(("bin",), [".agents/skills/p/bin/tool"], ("bin",), id="agents-skill-bin"),
         pytest.param(("lsp", "canvas"), [], ("lsp", "canvas"), id="declared-order"),
     ],
 )

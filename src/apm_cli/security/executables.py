@@ -70,24 +70,43 @@ EXEC_KIND_LABELS = {
 }
 
 
+def _skill_roots() -> tuple[tuple[str, ...], ...]:
+    """Every static skills root a target deploys to, legacy layouts included."""
+    from ..integration.targets import (
+        KNOWN_TARGETS,
+        apply_legacy_skill_paths,
+        skills_root_prefixes,
+    )
+
+    roots = set(skills_root_prefixes())
+    for profile in apply_legacy_skill_paths(list(KNOWN_TARGETS.values())):
+        if profile.supports("skills") and profile.user_root_resolver is None:
+            roots.add(profile.skills_rel_root)
+    return tuple(tuple(root.split("/")) for root in roots)
+
+
+def _deployed_bin_file(path: str, skill_roots) -> bool:
+    """True for ``<skills root>/<skill>/bin/...``, the only place bin/ deploys."""
+    from pathlib import PurePosixPath
+
+    parts = PurePosixPath(path).parts
+    for root in skill_roots:
+        size = len(root)
+        if parts[:size] == root and len(parts) > size + 2 and parts[size + 1] == "bin":
+            return True
+    return False
+
+
 def rebuild_retired_kinds(deployed, withheld, deployed_files) -> tuple[str, ...]:
     """Kinds a gated survivor rebuild removes: *withheld* among *deployed*, in order.
 
     MCP servers are retired and reported by MCP admission, not the rebuild.
-    bin/ counts only when *deployed_files* records a file under a ``bin/``
-    directory, since bin/ deploys only in some scopes and targets. A skill
-    directory that is itself named ``bin`` (``skills/bin/``) is not evidence.
+    bin/ counts only when *deployed_files* records a file under a skill's
+    top-level ``bin/`` directory below a target skills root (the only bin/ the
+    install plan withholds), since bin/ deploys only in some scopes and targets.
     """
-    from pathlib import PurePosixPath
-
-    def _under_bin_dir(path: str) -> bool:
-        parents = PurePosixPath(path).parts[:-1]
-        return any(
-            part == "bin" and not (index and parents[index - 1] == "skills")
-            for index, part in enumerate(parents)
-        )
-
-    bin_deployed = any(_under_bin_dir(path) for path in deployed_files or ())
+    skill_roots = _skill_roots()
+    bin_deployed = any(_deployed_bin_file(path, skill_roots) for path in deployed_files or ())
     return tuple(
         kind
         for kind in deployed
