@@ -811,6 +811,8 @@ class TestMarketplaceResolution(unittest.TestCase):
             version_spec=None,
             auth_resolver=None,
             warning_handler=unittest.mock.ANY,
+            enforce_ref_pins=True,
+            accept_ref_change=False,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -842,6 +844,8 @@ class TestMarketplaceResolution(unittest.TestCase):
             version_spec=None,
             auth_resolver=auth,
             warning_handler=unittest.mock.ANY,
+            enforce_ref_pins=True,
+            accept_ref_change=False,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
@@ -857,6 +861,8 @@ class TestMarketplaceResolution(unittest.TestCase):
             version_spec="~2.1.0",
             auth_resolver=None,
             warning_handler=unittest.mock.ANY,
+            enforce_ref_pins=True,
+            accept_ref_change=False,
         )
 
     @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")

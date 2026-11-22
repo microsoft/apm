@@ -18,6 +18,7 @@ import yaml
 
 from ..cache.paths import get_cache_root
 from ..core.auth_chain import AdoAuthChainExhaustedError
+from ..core.invocation_memo import memoized_per_invocation
 from ..utils.file_ops import robust_replace
 from ..utils.github_host import (
     build_ado_api_url,
@@ -1299,6 +1300,7 @@ def _fetch_from_repo(
     )
 
 
+@memoized_per_invocation("github-policy-404", keep=lambda r: str(r[1]).startswith("404:"))
 def _fetch_github_contents(
     repo_ref: str,
     file_path: str,

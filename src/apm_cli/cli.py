@@ -527,6 +527,9 @@ def cli(ctx, verbose: bool) -> None:
             "See https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
         )
     ctx.ensure_object(dict)
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    ctx.with_resource(invocation_scope())
     ctx.obj["verbose"] = verbose
     from apm_cli.core.output_mode import configure_output_mode, detect_output_mode
 
