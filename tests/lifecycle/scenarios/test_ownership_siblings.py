@@ -689,7 +689,7 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
     """A user's MCP entry of the same name is never taken over.
 
     An inline server refuses, but writes before it detects the conflict
-    (#4268); a registry server keeps the user's entry and says it skipped.
+    (#4759, after #4268); a registry server keeps the user's entry and says it skipped.
     """
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (), policy="allow")
@@ -701,7 +701,7 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
         step = scenario.run(
             _MCP_SOURCES[src],
             exit=1,
-            known={"I7": Known("#4268", r"failed install changed (the manifest|durable files)")},
+            known={"I7": Known("#4759", r"failed install changed (the manifest|durable files)")},
         )
     else:
         step = scenario.run(
@@ -1283,6 +1283,6 @@ CREDITS = credits(
     },
     known={
         "test_edited_executable_files_are_kept": "#4626",
-        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4759",
     },
 )
