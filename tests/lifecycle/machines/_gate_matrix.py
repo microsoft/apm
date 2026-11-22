@@ -58,8 +58,12 @@ OBSERVED: Mapping[str, frozenset[str]] = {
 # Kinds no spine step observes an outcome for, so the matrix credits none:
 # bin/ deploys only for a Claude marketplace plugin at user scope (U-BIN,
 # install/exec_gate.py plugin_bin_deployable); the p-mixed instruction
-# (other-file) has no compile-staged output to assert for the copilot target.
+# (other-file) is observed only by ``render`` (compile deduplicates it for
+# copilot unless --force-instructions writes it into AGENTS.md).
 _UNOBSERVED = frozenset({"bin", "other-file"})
+_RENDER = ("compile", "--force-instructions")
+_AGENTS_MD = "AGENTS.md"
+_INSTRUCTION_BODY = "Keep the lifecycle world mixed."
 _PLAIN = frozenset({"skill", "other-file"})
 _MIXED_SKILL = f".agents/skills/{MIXED}/SKILL.md"
 # Project surfaces of every primitive but MCP: install --mcp must leave them alone (U7).
@@ -176,6 +180,13 @@ class GateMatrix(StepRunner):
             # U-MKT: below an org deny every marketplace cell maps onto one rule cell.
             return [MARKETPLACE_UNTOUCHED]
         unobserved = _UNOBSERVED
+        if command.args == _RENDER:
+            # The forced render observes the instruction and nothing else.
+            return sorted(
+                f"G1|compile|other-file|{self.state.gate(MIXED, 'other-file')}|{self.scope}"
+                for package in command.packages
+                if package == MIXED
+            )
         if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
             # U7 credits the collateral primitives only: a first-party server
             # requested by name is never gated (U-FIRST-PARTY-MCP).
@@ -316,6 +327,8 @@ class GateMatrix(StepRunner):
             unchanged["project"] = _DURABLE
         elif command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
+        if command.args == _RENDER and exit_code == 0:
+            present["project"] = [_AGENTS_MD]
         if (
             MIXED in command.packages
             and MIXED in self.state.revoked
@@ -400,6 +413,18 @@ class GateMatrix(StepRunner):
 
         self.edit_inputs("policy-deny-all-deps", change, transition)
 
+    def render(self) -> None:
+        """``compile --force-instructions`` renders the instruction the gate keeps."""
+        self.run("compile", *_RENDER)
+        if not self.dry:
+            body = (self.bench.deploy_root / _AGENTS_MD).read_text(encoding="utf-8")
+            assert _INSTRUCTION_BODY in body, f"{_AGENTS_MD} lacks the {MIXED} instruction:\n{body}"
+
+        def change() -> None:
+            (self.bench.deploy_root / _AGENTS_MD).unlink()
+
+        self.edit_inputs("remove-agents-md", change, lambda state: None)
+
     def marketplace(self, verb: str) -> None:
         """``apm marketplace add|update``: a catalog command over the declared set."""
         words = ("marketplace", verb)
@@ -479,6 +504,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
     machine.gate_off()
     machine.run("install", "install", packages=PACKAGES)
     machine.probes(*reads, "mcp-install")
+    machine.render()
     machine.run("uninstall", "uninstall", packages=EXEC_PACKAGES)
     machine.run("install", "install", packages=EXEC_PACKAGES)
     # approve under the open gate turns the gate on (allowed).
@@ -491,6 +517,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
     machine.run("deny", "deny", packages=exec_and_mixed)
     machine.marketplace("update")
     machine.probes("mcp-install", "install", *reads)
+    machine.render()
     machine.run("deny", "deny", packages=(MIXED,))
     machine.run("uninstall", "uninstall", packages=exec_and_mixed)
     # denied-executable: denied before any deploy.

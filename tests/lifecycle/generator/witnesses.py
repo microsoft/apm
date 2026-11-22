@@ -89,6 +89,7 @@ GATE_SPINE = (
 GATE_BUNDLE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
 )
+MATRIX_RENDER = "G1|compile|other-file|"
 GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
 GATE_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
@@ -218,6 +219,10 @@ def machine_cells() -> list[MachineCell]:
             witness = GATE_SPINE.format(scope=scope)
             assignment = _gate_assignment(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            if key.startswith(MATRIX_RENDER):
+                # The forced render is the matrix's only compile x instruction step.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, anchor="PRIM"))
     return cells
 
 

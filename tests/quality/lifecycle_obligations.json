@@ -4052,13 +4052,20 @@
    "strength": "e2e-evidence"
   },
   "T1|OP=compile|PRIM=other-file|GATE=none": {
+   "credited_by": [
+    "G1|compile|other-file|none|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=other-file|GATE=revoked-after-deploy": {
+   "credited_by": [
+    "G1|compile|other-file|revoked-after-deploy|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -4066,8 +4073,9 @@
    "rules": [
     "U2"
    ],
-   "status": "baseline",
-   "strength": "e2e-evidence"
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=compile|PRIM=skill|GATE=denied-dependency": {
    "credited_by": [
@@ -15276,11 +15284,16 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=compile|PRIM=other-file": {
+   "credited_by": [
+    "G1|compile|other-file|none|project",
+    "G1|compile|other-file|revoked-after-deploy|project"
+   ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "pair|OP=compile|PRIM=skill": {
    "family": "pair",
