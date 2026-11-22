@@ -234,3 +234,24 @@ def test_a_lifecycle_command_script_drops_memos_so_refreshed_credentials_apply(s
         runner.fire("pre-install", LifecycleEvent(event="pre-install"))
         server.status = 200  # the policy became visible to the refreshed credentials
         assert _discover(tmp_path) == "found"
+
+
+@pytest.mark.parametrize(
+    "command", ['-c "raise SystemExit(3)"', '-c "pass"'], ids=["fails", "passes"]
+)
+def test_every_command_script_drops_memos_even_captured_ones(tmp_path, command):
+    import sys
+
+    from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner, ScriptEntry
+
+    script = ScriptEntry(
+        script_type="command", event="post-install", command=f'"{sys.executable}" {command}'
+    )
+    runner = LifecycleScriptRunner(scripts=[script], project_root=str(tmp_path))
+    with invocation_scope():
+        captured = invocation_memo("probe")
+        captured["key"] = "before-script"
+        runner.fire("post-install", LifecycleEvent(event="post-install"))
+
+        assert captured == {}
+        assert invocation_memo("probe") == {}

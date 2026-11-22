@@ -66,6 +66,8 @@ def forget_invocation_memos() -> None:
     """
     with _lock:
         if _memos is not None:
+            for memo in _memos.values():
+                memo.clear()  # a reference captured before the script sees nothing
             _memos.clear()
 
 
