@@ -24,6 +24,8 @@ from apm_cli.core.deployment_state import (
     LocatorKind,
 )
 from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.receipt_history import ReceiptHistory
+from apm_cli.core.receipt_history import is_canonical_bundle_hash as _is_canonical_bundle_hash
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -61,7 +63,6 @@ DEPLOYMENT_OWNER_REMEDIATION = DEPLOYMENT_OWNERS_INVALID.sentence()
 LOCAL_STATE_DIR = ".apm-local"
 """Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
-_LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
@@ -187,6 +188,7 @@ class DeploymentMaterializationSession:
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
+        self._history = ReceiptHistory()  # earlier writes per key (#4428)
         self._written: dict[str, str] = {}
         self._kept: set[str] = set()
         self._dirty = False
@@ -314,6 +316,7 @@ class DeploymentMaterializationSession:
             self._records = dict(ledger.records)
             self._destinations = destinations
             self._bindings = bindings
+            self._history = ReceiptHistory.load(data.get("history", {}), ledger.records)
             self._physical_keys = {path: key for key, path in destinations.items()}
             if len(self._physical_keys) != len(destinations):
                 raise ValueError("ambiguous physical write receipts")
@@ -496,7 +499,7 @@ class DeploymentMaterializationSession:
             return None
         claimed = {claim.content_hash for claim in self._claims[value]} - {None}
         if record.content_hash not in claimed and not self._holds(path, record):
-            return None
+            return self._history.earlier_write(key, path)  # a branch round trip (#4428)
         return record.content_hash
 
     @staticmethod
@@ -562,17 +565,18 @@ class DeploymentMaterializationSession:
         for record, physical, value in prepared:
             key = record.locator.key
             previous = self._physical_keys.get(physical)
-            if previous is not None:
-                self._records.pop(previous, None)
-                self._destinations.pop(previous, None)
-                self._bindings.pop(previous, None)
+            binding = [record.active_owner, self._claim_signature(value)]
+            replaced = self._records.pop(previous, None) if previous else None
+            same = previous is not None and self._bindings.pop(previous, None) == binding
+            self._destinations.pop(previous or "", None)
+            old_hash = replaced and replaced.content_hash
+            self._history.replace(
+                previous, old_hash, key, record.content_hash or "", same_binding=same
+            )
             self._records[key] = record
             self._destinations[key] = physical
             self._physical_keys[physical] = key
-            self._bindings[key] = [
-                record.active_owner,
-                self._claim_signature(value),
-            ]
+            self._bindings[key] = binding
             if not evidence_only:
                 self._written[key] = value
         self._dirty = True
@@ -601,7 +605,10 @@ class DeploymentMaterializationSession:
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):
                 continue
-            committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
+            binding = [record.active_owner, committed._claim_signature(value)]
+            if committed._bindings.get(key) != binding:
+                committed._history.forget(key)  # never carry hashes to a new binding (#4428)
+            committed._bindings[key] = binding
             committed._dirty = True
         committed.flush()
 
@@ -641,6 +648,8 @@ class DeploymentMaterializationSession:
         self._validate_paths()
         data["records"] = DeploymentLedgerCodec.rows(DeploymentLedger(records))
         data["bindings"] = {key: self._bindings[key] for key in records}
+        if history := self._history.payload(records):
+            data["history"] = history
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
@@ -665,6 +674,7 @@ class DeploymentMaterializationSession:
             self._records, self._destinations = records, destinations
             self._bindings = {k: v for k, v in self._bindings.items() if k not in keys}
             self._physical_keys = {path: key for key, path in destinations.items()}
+            self._history.retain(records)
 
     @classmethod
     def retire_removed(
@@ -833,16 +843,6 @@ def record_bundle_receipts(
         except ValueError:
             continue
     session.flush()
-
-
-def _is_canonical_bundle_hash(content_hash: str | None) -> bool:
-    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
-    digest = (
-        content_hash.removeprefix(_SHA256_PREFIX)
-        if isinstance(content_hash, str) and content_hash.startswith(_SHA256_PREFIX)
-        else ""
-    )
-    return len(digest) == 64 and all(character in _LOWER_HEX for character in digest)
 
 
 def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:
