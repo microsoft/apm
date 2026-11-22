@@ -628,9 +628,15 @@ def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
     return None
 
 
-# Compile records which routed instructions each Claude AGENTS.md it wrote carries, in
-# APM home so the repository gains no file (#4805; core/agents_md_compile_record.py).
-_COMPILE_HOME_RECORD = ".apm/compiled-agents-md"
+def compile_home_record(deploy_root: Path) -> str:
+    """The one APM-home file a compile of *deploy_root* may write (#4805).
+
+    Compile records which routed instructions each Claude AGENTS.md it wrote
+    carries, outside the repository, one file per output root keyed by its
+    path (core/agents_md_compile_record.py).
+    """
+    key = hashlib.sha256(deploy_root.resolve().as_posix().encode("utf-8")).hexdigest()[:32]
+    return f".apm/compiled-agents-md/{key}.json"
 
 
 def _i5_write_set(
@@ -644,7 +650,7 @@ def _i5_write_set(
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
         if root_id == "home" and op.name == "compile" and not op.read_only:
-            allowed = (*allowed, _COMPILE_HOME_RECORD)
+            allowed = (*allowed, compile_home_record(after.deploy_root))
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path
