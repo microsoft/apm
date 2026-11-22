@@ -36,7 +36,7 @@ def test_unquoted_lockfile_version_replays_unchanged(tmp_path: Path, apm_binary_
     rules.mkdir(parents=True)
     dump_yaml({"name": "alpha", "version": "1.0.0"}, package / "apm.yml")
     (rules / "alpha.instructions.md").write_text(
-        '---\napplyTo: "**"\n---\n# alpha\n', encoding="ascii"
+        '---\napplyTo: "**/*.md"\n---\n# alpha\n', encoding="ascii"
     )
     dump_yaml(
         {

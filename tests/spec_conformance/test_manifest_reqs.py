@@ -1043,6 +1043,35 @@ def test_consumer_emits_project_compile_guidance_for_dependency_instructions(tmp
     )
 
 
+@pytest.mark.req("req-tg-007")
+def test_claude_requires_post_install_compile_for_agents_md(tmp_path):
+    """Claude loads always-on instructions from compiled AGENTS.md (#3939)."""
+    instruction_dir = tmp_path / "apm_modules" / "example" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "example.instructions.md").write_text(
+        "Apply this instruction.\n", encoding="ascii"
+    )
+    target = SimpleNamespace(name="Claude Code", compile_family="claude")
+    target.for_scope = MagicMock(return_value=target)
+    logger = MagicMock()
+    ctx = SimpleNamespace(
+        apm_modules_dir=tmp_path / "apm_modules",
+        dry_run=False,
+        installed_count=1,
+        logger=logger,
+        project_root=tmp_path,
+        targets=[target],
+    )
+
+    _hint_project_compile_needed(ctx)
+
+    logger.info.assert_called_once_with(
+        "Instructions installed for Claude Code. Run 'apm compile' to update AGENTS.md / CLAUDE.md.",
+        symbol="info",
+    )
+    assert_spec_contains("only the applicable root context output\nclasses")
+
+
 @pytest.mark.req("req-tg-008")
 @pytest.mark.parametrize(
     ("declaration", "selection"),

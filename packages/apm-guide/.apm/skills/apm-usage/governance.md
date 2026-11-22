@@ -510,7 +510,7 @@ These checks run without a policy file:
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
-- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
+- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path (`apm install` keeps it and warns; it never deletes it)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 Marketplace object declarations must match one locked coordinate through

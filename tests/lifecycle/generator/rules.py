@@ -155,7 +155,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 866, '"--global"'),
-    "compile": Ev(_COMPILE, 1532, '"--global"'),
+    "compile": Ev(_COMPILE, 1531, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
@@ -282,7 +282,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "target (#4517) and an added one. A changed TGT with FROZEN maps to one refusal cell, "
         "witnessed by the T-6a history scenario",
         (
-            Ev("src/apm_cli/install/service.py", 659, "no longer declares target(s)"),
+            Ev("src/apm_cli/install/service.py", 668, "no longer declares target(s)"),
             Ev(
                 "src/apm_cli/install/frozen_withdrawal.py",
                 273,

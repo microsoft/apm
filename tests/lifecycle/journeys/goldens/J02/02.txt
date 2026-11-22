@@ -3,13 +3,14 @@ $ apm install --frozen
 [exit 0]
 --- stdout
 [>] Installing dependencies from apm.yml...
-[>] Resolving microsoft/apm-sample-package...
 [>] Resolving awesome-copilot-review-and-refactor...
+[>] Resolving microsoft/apm-sample-package...
 [i] Targets: claude, copilot  (source: apm.yml)
   [+] github.com/github/awesome-copilot/skills/review-and-refactor @<SHA8>
   |-- (files unchanged)
   [+] microsoft/apm-sample-package #v1.0.0 @<SHA8>
   |-- (files unchanged)
+[i] Instructions installed for claude. Run 'apm compile' to update AGENTS.md / CLAUDE.md.
 
 [*] Installed 2 APM dependencies in <DUR>.
 [i] Deployed files verified against apm.lock.yaml.
