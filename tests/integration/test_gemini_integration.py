@@ -32,6 +32,8 @@ from apm_cli.models.apm_package import (
 )
 from tests.utils.deployment_evidence import receipted_evidence
 
+pytestmark = pytest.mark.component
+
 
 def _make_package_info(
     package_dir: Path,

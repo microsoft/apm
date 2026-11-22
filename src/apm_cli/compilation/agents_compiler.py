@@ -31,6 +31,7 @@ from .claude_agents_md import (
     claude_md_imports_agents_md,
     is_claude_only_target,
     pin_directory_placements,
+    record_compiled_instructions,
     user_claude_md_imports_agents_md,
     without_claude_rule_instructions,
     without_directory_instructions,
@@ -347,6 +348,7 @@ class AgentsCompiler:
         self._deploy_inventory: CompileInventory | None = None
         self._protected_root_context_paths: set[Path] = set()
         self._agents_md_outputs: set[Path] = set()
+        self._claude_consumes_agents_md = False
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
@@ -473,10 +475,23 @@ class AgentsCompiler:
                 frozenset({"agents", "claude", "gemini"}) if root_outputs is None else root_outputs
             )
 
+            agents_failed = False
+            # Claude reads these AGENTS.md outputs, so compile records their coverage.
+            self._claude_consumes_agents_md = "claude" in requested_outputs and (
+                should_compile_claude_md(routing_target)
+            )
             if "agents" in requested_outputs and should_compile_agents_md(routing_target):
-                results.append(self._compile_agents_md(config, primitives))
+                agents_result = self._compile_agents_md(config, primitives)
+                results.append(agents_result)
+                agents_failed = not agents_result.success
 
-            if "claude" in requested_outputs and should_compile_claude_md(routing_target):
+            # CLAUDE.md imports the AGENTS.md just written; after a failed
+            # AGENTS.md batch no shim may point at a missing file (#4787).
+            if (
+                "claude" in requested_outputs
+                and should_compile_claude_md(routing_target)
+                and not agents_failed
+            ):
                 results.append(self._compile_claude_md(config, primitives))
 
             if "gemini" in requested_outputs and should_compile_gemini_md(routing_target):
@@ -652,6 +667,7 @@ class AgentsCompiler:
                 distributed_config["placement_map"],
                 self.base_dir,
                 lambda msg: self.warnings.append(msg),
+                source_dir=self.source_dir,
             )
 
         # Compile distributed
@@ -713,7 +729,6 @@ class AgentsCompiler:
                     )
             except (OSError, ValueError) as e:
                 self.errors.append(f"Failed to write {agents_path}: {e!s}")
-        self._agents_md_outputs.update(pending_outputs)
 
         if self.errors:
             self.warnings.extend(distributed_result.warnings)
@@ -779,6 +794,7 @@ class AgentsCompiler:
         nested_git_skips = max(0, skipped_agents_count - protected_agents_count)
         distributed_result.stats["root_context_files_protected"] = protected_agents_count
         if config.dry_run:
+            self._agents_md_outputs.update(pending_outputs)
             distributed_result.stats["agents_files_generated"] = len(pending_outputs)
             distributed_result.stats["nested_git_placements_skipped"] = nested_git_skips
             return CompilationResult(
@@ -801,8 +817,18 @@ class AgentsCompiler:
                     preserve_line_endings=preserve_line_endings,
                 )
                 successful_writes = len(pending_outputs)
+                self._agents_md_outputs.update(pending_outputs)
             except (OSError, CompiledOutputPolicyError) as exc:
                 self.errors.append(f"Failed to write distributed output batch: {exc}")
+        if successful_writes and self._claude_consumes_agents_md:
+            record_compiled_instructions(
+                self.base_dir,
+                {
+                    placement.agents_path: [] if skip_instructions else placement.instructions
+                    for placement in distributed_result.placements
+                    if placement.agents_path in pending_outputs
+                },
+            )
 
         if not self.errors and config.clean_orphaned and cleanup_paths:
             cleanup_messages = distributed_compiler._cleanup_orphaned_files(cleanup_paths)
@@ -857,10 +883,16 @@ class AgentsCompiler:
             config.agents_md_mode != "managed_section"
             and self._hand_authored_root_context_blocks_write(output_file)
         )
+        errors_before = len(self.errors)
         if not config.dry_run and not write_blocked:
             self._write_output_file_with_config(output_path, content, config)
-        if not write_blocked and output_file.name == "AGENTS.md":
+        written = len(self.errors) == errors_before
+        if not write_blocked and written and output_file.name == "AGENTS.md":
             self._agents_md_outputs.add(output_file)
+            if not config.dry_run and self._claude_consumes_agents_md:
+                record_compiled_instructions(
+                    self.base_dir, {output_file: list(primitives.instructions)}
+                )
 
         # Compile statistics
         stats = self._compile_stats(primitives, template_data)

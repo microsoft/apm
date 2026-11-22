@@ -486,10 +486,13 @@ def test_operations_beside_a_users_skill_keep_its_bytes(lifecycle_world, deploye
     else:
         act("pack", "pack", ("project:.github/plugin*", "project:build*"))
     inline = f"install --mcp p-inline -- {INERT_COMMAND} --stdio"
+    # The first MCP write records its evidence against this checkout's
+    # installation identity, created here when nothing was deployed before (#4737).
+    identity = ("project:.apm-local*",) if deployed == "unowned" else ()
     act(
         inline,
         "mcp-install",
-        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml"),
+        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml", *identity),
     )
     act("install p-exec-bundle", "bundle-install", ("project:apm_modules*",))
     scenario.run("install p-exec")
@@ -541,6 +544,9 @@ _EDITED_EXEC = [
 ]
 
 
+_EDITED_EXEC_KNOWN = Known("#4626", r"I1-X2: the user's bytes were changed")
+
+
 def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     """#4626: install replaces an edited hook, canvas or LSP entry without a word."""
     scenario = _deployed_executables(lifecycle_world)
@@ -549,8 +555,7 @@ def test_edited_executable_files_are_kept(lifecycle_world) -> None:
     scenario.user_write(_CANVAS, _with(_CANVAS, "'p-canvas'", "'my-canvas'", world))
     scenario.user_write(_LSP, _with(_LSP, '"--stdio"', '"--my-flag"', world))
     scenario.source_moved()
-    known = {"I1": Known("#4626", r"I1-X2: the user's bytes were changed")}
-    step = scenario.run("install", known=known)
+    step = scenario.run("install", known={"I1": _EDITED_EXEC_KNOWN})
     assert step.result.returncode == 0, step.output
     scenario.finish()
 
@@ -722,8 +727,9 @@ def test_users_own_executable_files_at_package_paths_survive(lifecycle_world) ->
 def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src) -> None:
     """A user's MCP entry of the same name is never taken over.
 
-    An inline server refuses, but writes before it detects the conflict
-    (#4268); a registry server keeps the user's entry and says it skipped.
+    An inline server refuses before any write: apm.yml, .github/ and the
+    user's .mcp.json stay byte-identical (#4759, I7); a registry server keeps
+    the user's entry and says it skipped.
     """
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (), policy="allow")
@@ -732,11 +738,19 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
     scenario.user_write(".mcp.json", json.dumps(servers, indent=2) + "\n")
     scenario.source_moved()
     if src == "inline-mcp":
+        manifest = (lifecycle_world.project / "apm.yml").read_bytes()
         step = scenario.run(
             _MCP_SOURCES[src],
             exit=1,
-            known={"I7": Known("#4268", r"failed install changed (the manifest|durable files)")},
+            credit=[_pair("unowned", SRC=src)],
+            keep={"project": (".mcp.json",)},
+            refusal=True,
         )
+        assert "MCP server 'p-inline' conflicts with the existing copilot" in step.output
+        assert "Preserved that connection" in step.output, step.output
+        assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+        assert not (lifecycle_world.project / ".github").exists(), step.output
+        assert_changes(step.changed, (), label=step.line)
     else:
         step = scenario.run(
             _MCP_SOURCES[src],
@@ -981,7 +995,10 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     lifecycle_world, deployed
 ) -> None:
     use_policy(lifecycle_world, "allow")
-    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow")
+    # cursor splits every plugin into loose skills; claude and copilot install a
+    # Claude plugin whole at project scope (#3921), where the skill is not a loose file.
+    targets = ("cursor",)
+    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
     if deployed == "unowned":
         scenario.user_write(_NATIVE_SKILL, _USER_NATIVE_SKILL)
         line = "install --dry-run p-native-claude"
@@ -1235,12 +1252,12 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
-        **{
-            f"test_a_users_mcp_entry_blocks_a_server_of_the_same_name[{src}]": [
-                _pair("unowned", PRIM="mcp", SRC=src)
-            ]
-            for src in ("inline-mcp", "mcp-registry")
-        },
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": [
+            _pair("unowned", SRC="inline-mcp")
+        ],
+        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[mcp-registry]": [
+            _pair("unowned", PRIM="mcp", SRC="mcp-registry")
+        ],
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
             f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
@@ -1316,7 +1333,6 @@ CREDITS = credits(
         },
     },
     known={
-        "test_edited_executable_files_are_kept": "#4626",
-        "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": "#4268",
+        "test_edited_executable_files_are_kept": _EDITED_EXEC_KNOWN,
     },
 )

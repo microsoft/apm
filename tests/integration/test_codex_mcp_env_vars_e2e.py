@@ -12,7 +12,7 @@ import yaml
 
 from apm_cli.install.mcp.ownership import mcp_native_hash
 
-pytestmark = pytest.mark.xdist_group(name="home_env")
+pytestmark = [pytest.mark.xdist_group(name="home_env"), pytest.mark.e2e]
 
 SET_SECRET = "codex-e2e-set-secret=canary"
 ENV_SET_SECRET = "codex-e2e-envset-secret=canary"
