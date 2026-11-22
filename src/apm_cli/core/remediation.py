@@ -1275,6 +1275,12 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
 )
+WITHHELD_HOOK_FILE_UNRECORDED = _entry(
+    "withheld-hook-file-unrecorded",
+    "apm audit --ci",
+    "confirm no unrecorded file remains at a withheld package's hook path",
+    before="delete each named file you did not write yourself",
+)
 FROZEN_EXEC_DECISIONS_STALE = _entry(
     "frozen-exec-decisions-stale",
     "apm install",

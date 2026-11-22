@@ -991,6 +991,25 @@ class HookIntegrator(BaseIntegrator):
         reference = getattr(target, "user_hook_home_reference", None) if user_scope else None
         return reference if isinstance(reference, UserHookHomeReference) else None
 
+    @staticmethod
+    def _copilot_hook_target(hooks_dir: Path, package_name: str, hook_file) -> Path:
+        """The clean, package-namespaced file a Copilot hook source deploys to."""
+        return hooks_dir / f"{package_name}-{Path(hook_file).stem}.json"
+
+    def copilot_hook_destinations(
+        self, package_info, project_root: Path, target=None, source_plan=None
+    ) -> list[Path]:
+        """Every file :meth:`integrate_package_hooks` would write for *package_info*.
+
+        Computed without writing, from the package's own hook sources.
+        """
+        package_name = self._get_package_name(package_info, project_root)
+        hook_files = self.select_hook_sources_for_target(
+            package_info, "copilot", source_plan=source_plan
+        ).descriptors_for("copilot")
+        hooks_dir = project_root / (target.root_dir if target else ".github") / "hooks"
+        return [self._copilot_hook_target(hooks_dir, package_name, f) for f in hook_files]
+
     def integrate_package_hooks(
         self,
         package_info,
@@ -1064,10 +1083,7 @@ class HookIntegrator(BaseIntegrator):
                 home_reference=home_reference,
             )
 
-            # Generate target filename (clean, no -apm suffix)
-            stem = hook_file.stem
-            target_filename = f"{package_name}-{stem}.json"
-            target_path = hooks_dir / target_filename
+            target_path = self._copilot_hook_target(hooks_dir, package_name, hook_file)
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -1150,7 +1166,7 @@ class HookIntegrator(BaseIntegrator):
             display_payloads.append(
                 self._build_display_payload(
                     f"{root_dir}/hooks/",
-                    target_filename,
+                    target_path.name,
                     hook_file,
                     rewritten,
                 )

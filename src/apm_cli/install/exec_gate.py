@@ -827,6 +827,40 @@ def log_hooks_skip(
     logger.warning(f"{label}: {reason}", symbol="warning")
 
 
+def announce_withheld_hook_files(
+    package_name: str,
+    package_info: Any,
+    project_root: Path,
+    targets: Any,
+    managed_files: Any,
+    logger: Any | None,
+) -> None:
+    """Warn, naming the path, for each unrecorded file at a withheld package's hook path.
+
+    Nothing is deleted: without a lock record APM cannot prove it wrote the
+    file. ``apm audit --ci`` fails on the same files
+    (:func:`locked_withheld_hook_files`).
+    """
+    if logger is None:
+        return
+    from apm_cli.core.remediation import WITHHELD_HOOK_FILE_UNRECORDED, kept_file_message
+
+    package = getattr(package_info, "package", None)
+    label = getattr(package, "name", None) or package_name or "unknown"
+    for rel in withheld_hook_files(
+        package_info, project_root, targets, recorded=builtins.set(managed_files or ())
+    ):
+        logger.warning(
+            kept_file_message(
+                rel,
+                f"it sits at {label}'s hook path, the executables gate withholds {label}'s "
+                "hooks, and apm.lock.yaml does not record the file",
+                WITHHELD_HOOK_FILE_UNRECORDED,
+            ),
+            symbol="warning",
+        )
+
+
 class ReplayExecAllowMap:
     """Resolve the install gate's allow-map once, only for gated dependencies.
 
@@ -961,5 +995,84 @@ def locked_hook_pin_mismatches(
                 recorded_status=dep.exec_status,
                 recorded_allowed=tuple(dep.exec_allowed_types or ()),
             )
+        )
+    return found
+
+
+def withheld_hook_files(
+    package_info: Any, project_root: Path, targets: Any, *, recorded: Any
+) -> builtins.list[str]:
+    """Hook files at a gated package's own hook paths that APM does not record.
+
+    For a package whose hooks the executables gate withholds, each file at
+    one of the package-namespaced destinations its own hook sources deploy
+    to (the Copilot hooks directory) that is not among *recorded*
+    deployment claims. APM cannot prove it wrote such a file, so it never
+    deletes it; install announces it and ``apm audit --ci`` fails on it.
+    Read-only.
+    """
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.utils.paths import portable_relpath
+
+    integrator = HookIntegrator()
+    found: builtins.set[str] = set()
+    for target in targets or ():
+        if getattr(target, "name", None) != "copilot":
+            continue
+        try:
+            destinations = integrator.copilot_hook_destinations(package_info, project_root, target)
+        except (OSError, ValueError):
+            continue
+        for path in destinations:
+            rel = portable_relpath(path, project_root)
+            if rel not in recorded and (path.is_file() or path.is_symlink()):
+                found.add(rel)
+    return sorted(found)
+
+
+def locked_withheld_hook_files(
+    lockfile: Any,
+    modules_dir: Path,
+    trust_ctx: Callable[[], Any],
+    project_root: Path,
+    targets: Any,
+) -> builtins.list[tuple[str, str, str]]:
+    """``(path, lock key, reason)`` for each unrecorded file at a withheld package's hook path.
+
+    Each locked package is judged with :func:`current_exec_decision`, the
+    install gate's own verdict; a package whose hooks it denies or leaves
+    unapproved is checked with :func:`withheld_hook_files`. A package not
+    materialized under *modules_dir* is left to the checks that report it.
+    """
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.install.drift import _build_package_info
+    from apm_cli.security.executables import (
+        EXEC_TYPE_HOOKS,
+        TRUST_ABSENT,
+        TRUST_DENIED,
+        TRUST_DEPLOYED,
+    )
+
+    if lockfile is None:
+        return []
+    recorded = builtins.set(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile))
+    found: builtins.list[tuple[str, str, str]] = []
+    for key, dep in sorted((getattr(lockfile, "dependencies", None) or {}).items()):
+        if key == "." or dep.exec_status == TRUST_ABSENT:
+            continue
+        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
+        if not install_path.is_dir():
+            continue
+        try:
+            package_info = _build_package_info(dep, install_path)
+            status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
+        except (ExecPolicyUnavailable, OSError, ValueError):
+            continue
+        if status in {None, TRUST_DEPLOYED} or EXEC_TYPE_HOOKS in allowed:
+            continue
+        reason = "denied" if status == TRUST_DENIED else "not approved"
+        found.extend(
+            (path, key, reason)
+            for path in withheld_hook_files(package_info, project_root, targets, recorded=recorded)
         )
     return found
