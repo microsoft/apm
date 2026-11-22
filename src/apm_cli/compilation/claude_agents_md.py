@@ -21,6 +21,8 @@ cannot disagree about where an instruction lives.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -168,6 +170,33 @@ def _agents_md_managed_section(project_root: Path) -> bool:
     return isinstance(agents_md, dict) and agents_md.get("mode") == "managed_section"
 
 
+def _managed_section_markers(project_root: Path) -> tuple[str, str]:
+    """The managed-section markers compile uses (``apm.yml`` overrides the defaults)."""
+    agents_md = _compilation_config(project_root).get("agents_md")
+    agents_md = agents_md if isinstance(agents_md, dict) else {}
+    start = agents_md.get("start_marker")
+    end = agents_md.get("end_marker")
+    return (
+        start if isinstance(start, str) else "<!-- apm:start -->",
+        end if isinstance(end, str) else "<!-- apm:end -->",
+    )
+
+
+def _managed_section_blocker(content: str, label: str, project_root: Path) -> str | None:
+    """Why compile cannot write the managed section of a hand-authored file, or None."""
+    from .managed_section import ManagedSectionError, validate_managed_section
+
+    start, end = _managed_section_markers(project_root)
+    try:
+        validate_managed_section(content, start, end)
+    except ManagedSectionError:
+        return (
+            f"{label} has no single {start} ... {end} managed section;"
+            " add each marker once, start first"
+        )
+    return None
+
+
 def _label(directory: Path, project_root: Path, name: str) -> str:
     """Name *name* in *directory* relative to the project, without following links."""
     relative = portable_relpath(directory, project_root)
@@ -213,12 +242,16 @@ def _agents_md_blocker(directory: Path, project_root: Path) -> str | None:
     generated = content is not None and has_generated_marker_header(
         content, (AGENTS_MD_GENERATED_MARKER, DISTRIBUTED_AGENTS_MD_GENERATED_MARKER)
     )
-    if not generated and not _agents_md_managed_section(project_root):
+    if generated:
+        return None
+    if not _agents_md_managed_section(project_root):
         return (
             f"{label} is hand-authored and APM does not manage a section in it;"
             " set 'compilation.agents_md.mode: managed_section' in apm.yml"
         )
-    return None
+    if content is None:
+        return f"{label} could not be read; make it readable"
+    return _managed_section_blocker(content, label, project_root)
 
 
 def _in_nested_repository(directory: Path, project_root: Path) -> bool:
@@ -240,7 +273,8 @@ def claude_agents_md_blocker(project_root: Path) -> str | None:
     * a hand-authored root ``CLAUDE.md`` that does not import ``@AGENTS.md``
       (Claude Code then never reads ``AGENTS.md``),
     * a hand-authored root ``AGENTS.md`` APM may not write into (no
-      ``compilation.agents_md.mode: managed_section``), and
+      ``compilation.agents_md.mode: managed_section``, or no single pair of
+      its managed-section markers), and
     * a symlinked root ``AGENTS.md``, which compile never writes through.
     """
     return _claude_md_blocker(project_root, project_root) or _agents_md_blocker(
@@ -355,12 +389,16 @@ def without_claude_rule_instructions(primitives, base_dir: Path, warn_fn):
     return filtered
 
 
-def pin_directory_placements(placement_map: dict, base_dir: Path, warn_fn) -> dict:
+def pin_directory_placements(
+    placement_map: dict, base_dir: Path, warn_fn, source_dir: Path | None = None
+) -> dict:
     """Place each directory instruction in exactly ``<dir>/AGENTS.md``.
 
     The shared optimizer may hoist a widely matching glob to the root or fall
     back to a parent; for Claude that would load directory guidance in every
-    session. A directory that no longer exists gets no file and a warning.
+    session. A directory that does not exist in the source project
+    (*source_dir*, which ``apm compile --root`` separates from the output
+    *base_dir*) gets no file and a warning.
     """
     pinned: dict[Path, list] = {}
     moved: list = []
@@ -372,9 +410,8 @@ def pin_directory_placements(placement_map: dict, base_dir: Path, warn_fn) -> di
                 moved.append(instruction)
     for instruction in moved:
         prefix = directory_scope(instruction.apply_to)
-        target = base_dir / prefix
-        if target.is_dir():
-            pinned.setdefault(target, []).append(instruction)
+        if ((source_dir or base_dir) / prefix).is_dir():
+            pinned.setdefault(base_dir / prefix, []).append(instruction)
         else:
             warn_fn(
                 f"applyTo '{instruction.apply_to}' names no directory; "
@@ -418,26 +455,124 @@ def _claude_loads_agents_md(directory: Path, project_root: Path) -> bool:
     return claude_md_imports_agents_md(claude_md, project_root)
 
 
-def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:
-    """Return True when a compiled ``AGENTS.md`` Claude loads already carries this body.
+def instruction_fingerprint(apply_to: object, body: str) -> str:
+    """Exact identity of a routed instruction: its scope plus its normalized body.
 
-    Install uses it to ask for ``apm compile`` only when a routed instruction
-    is new or changed, not on every no-op reinstall. An ``AGENTS.md`` whose
-    sibling ``CLAUDE.md`` is missing or lacks the ``@AGENTS.md`` import (a
-    pre-#3939 compile) does not count: compile must write that import.
+    Compile records it for each instruction it writes to a Claude ``AGENTS.md``;
+    install compares it, so an ``applyTo`` or body edit after compiling asks
+    for ``apm compile`` again, while compile's link rewriting does not.
     """
+    scope = normalize_apply_to(apply_to, default="")
     text = body.replace("\r\n", "\n").strip()
-    if not text:
-        return True
-    prefix = directory_scope(apply_to)
-    candidates = [project_root / prefix / "AGENTS.md"] if prefix else []
-    candidates.append(project_root / "AGENTS.md")
-    for candidate in candidates:
-        content = _read_text(candidate, project_root) if candidate.is_file() else None
-        if (
-            content is not None
-            and text in content.replace("\r\n", "\n")
-            and _claude_loads_agents_md(candidate.parent, project_root)
-        ):
+    encoded = json.dumps([scope, text], ensure_ascii=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+
+def _coverage_record_path(project_root: Path) -> Path:
+    from ..core.scope import get_apm_home
+
+    key = hashlib.sha256(project_root.resolve().as_posix().encode("utf-8")).hexdigest()[:32]
+    return get_apm_home() / "compiled-agents-md" / f"{key}.json"
+
+
+def _file_digest(path: Path) -> str | None:
+    try:
+        return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def record_compiled_instructions(base_dir: Path, written: dict) -> None:
+    """Record which routed instructions a Claude compile wrote to each ``AGENTS.md``.
+
+    *written* maps each ``AGENTS.md`` this compile wrote to the instructions it
+    carries. The record (APM home, keyed by the output root) also pins each
+    file's bytes, so a later rewrite of that file by anything else is stale.
+    """
+    from ..integration.write_seam import atomic_write_text, mkdir
+
+    files = {}
+    for agents_md, instructions in sorted(written.items()):
+        digest = _file_digest(agents_md)
+        if digest is None:
+            continue
+        files[portable_relpath(agents_md, base_dir)] = {
+            "sha256": digest,
+            "instructions": sorted(
+                {instruction_fingerprint(i.apply_to, i.content) for i in instructions}
+            ),
+        }
+    path = _coverage_record_path(base_dir)
+    try:
+        mkdir(path.parent, parents=True, exist_ok=True)
+        atomic_write_text(path, json.dumps({"version": 1, "files": files}, indent=2) + "\n")
+    except OSError:
+        return  # install then asks for apm compile again, which is safe
+
+
+class CompiledCoverage:
+    """Whether a compiled ``AGENTS.md`` Claude loads carries a routed instruction.
+
+    One instance serves one install: the compile record, each file's digest
+    and each directory's ``CLAUDE.md`` import check are read once per path.
+    """
+
+    def __init__(self, project_root: Path) -> None:
+        self.project_root = project_root
+        self._files: dict | None = None
+        self._current: dict[Path, bool] = {}
+        self._loads: dict[Path, bool] = {}
+
+    def _record(self) -> dict:
+        if self._files is None:
+            try:
+                data = json.loads(
+                    _coverage_record_path(self.project_root).read_text(encoding="utf-8")
+                )
+                files = data.get("files") if isinstance(data, dict) else None
+            except (OSError, ValueError):
+                files = None
+            self._files = files if isinstance(files, dict) else {}
+        return self._files
+
+    def _entry(self, agents_md: Path) -> dict | None:
+        entry = self._record().get(portable_relpath(agents_md, self.project_root))
+        if not isinstance(entry, dict):
+            return None
+        if agents_md not in self._current:
+            self._current[agents_md] = agents_md.is_file() and _file_digest(agents_md) == entry.get(
+                "sha256"
+            )
+        return entry if self._current[agents_md] else None
+
+    def _claude_loads(self, directory: Path) -> bool:
+        if directory not in self._loads:
+            self._loads[directory] = _claude_loads_agents_md(directory, self.project_root)
+        return self._loads[directory]
+
+    def has(self, apply_to: object, body: str) -> bool:
+        """Return True when the ``AGENTS.md`` for this scope already carries this body.
+
+        Install uses it to ask for ``apm compile`` only when a routed instruction
+        is new or changed, not on every no-op reinstall. Only the file its scope
+        names counts (the root for always-on guidance, exactly ``<dir>/AGENTS.md``
+        for a directory), and only when its sibling ``CLAUDE.md`` imports it (a
+        pre-#3939 compile does not): compile must write that import.
+        """
+        if not body.replace("\r\n", "\n").strip():
             return True
-    return False
+        prefix = directory_scope(apply_to)
+        agents_md = (
+            self.project_root / prefix / "AGENTS.md" if prefix else self.project_root / "AGENTS.md"
+        )
+        entry = self._entry(agents_md)
+        return (
+            entry is not None
+            and instruction_fingerprint(apply_to, body) in (entry.get("instructions") or ())
+            and self._claude_loads(agents_md.parent)
+        )
+
+
+def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:
+    """One-off :meth:`CompiledCoverage.has` (install reuses one instance per root)."""
+    return CompiledCoverage(project_root).has(apply_to, body)

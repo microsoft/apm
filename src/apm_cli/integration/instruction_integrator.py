@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import yaml
 
@@ -84,6 +84,8 @@ class InstructionIntegrator(BaseIntegrator):
         self.agents_md_routed: set[str] = set()
         # Routed sources no compiled AGENTS.md carries yet (new or changed).
         self.agents_md_stale: set[str] = set()
+        # One compiled-coverage snapshot per project root for this install.
+        self._compiled_coverage: dict[Path, Any] = {}
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -537,9 +539,9 @@ class InstructionIntegrator(BaseIntegrator):
         scratch root, so scope and the blocker come from the live root it replays.
         """
         from apm_cli.compilation.claude_agents_md import (
+            CompiledCoverage,
             claude_agents_md_blocker,
             claude_agents_md_blocker_warning,
-            compiled_agents_md_has,
             routes_to_agents_md,
         )
         from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
@@ -572,10 +574,11 @@ class InstructionIntegrator(BaseIntegrator):
                 diagnostics.warn(claude_agents_md_blocker_warning(blocker))
             return instruction_files
         self.agents_md_routed.update(source.name for source in routed)
+        coverage = self._compiled_coverage.setdefault(live_root, CompiledCoverage(live_root))
         for source in routed:
             prepared = prepared_instructions[source]
             apply_to = self._parse_frontmatter(prepared.content)[0].get("applyTo")
-            if not compiled_agents_md_has(live_root, apply_to, prepared.body):
+            if not coverage.has(apply_to, prepared.body):
                 self.agents_md_stale.add(source.name)
         return [source for source in instruction_files if source not in routed]
 
@@ -593,7 +596,7 @@ class InstructionIntegrator(BaseIntegrator):
         target = KNOWN_TARGETS["claude"]
         mapping = target.primitives["instructions"]
         package_path = Path(package_info.install_path)
-        sources = self.find_instruction_files(package_path)
+        sources = self.find_instruction_files(package_path, _instruction_source_plan(package_info))
         if not sources:
             return {}
         self.init_link_resolver(package_info, project_root)
@@ -963,6 +966,26 @@ class InstructionIntegrator(BaseIntegrator):
             project_root,
             managed_files=managed_files,
         )
+
+
+def _instruction_source_plan(package_info):
+    """The instructions install admits from *package_info* for Claude (#4787).
+
+    The routed-rule projection selects sources through the canonical
+    deployment source plan, so a pack never ships an instruction install
+    did not admit (only ``.apm/instructions/`` sources deploy).
+    """
+    from apm_cli.install.deployable_source_plan import DeployableSourcePlan
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return DeployableSourcePlan.create(
+        package_info,
+        [KNOWN_TARGETS["claude"]],
+        skill_subset=None,
+        hooks_approved=False,
+        canvas_approved=False,
+        skip_bin=True,
+    )
 
 
 def routed_claude_rule_renders(
