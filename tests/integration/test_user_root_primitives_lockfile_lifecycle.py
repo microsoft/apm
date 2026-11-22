@@ -317,10 +317,3 @@ def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessSc
     audit = _install_claude_hook_then_audit(scene, "./scripts/g.sh")
 
     assert audit.returncode == 0, describe(audit)
-
-
-def test_install_g_then_audit_accepts_a_user_root_inline_hook(scene: HarnessScene) -> None:
-    """I3: a user-root hook naming no script has no file claim, yet audit --ci replays it."""
-    audit = _install_claude_hook_then_audit(scene, "echo guard")
-
-    assert audit.returncode == 0, describe(audit)

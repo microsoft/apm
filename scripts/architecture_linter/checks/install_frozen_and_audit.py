@@ -919,11 +919,8 @@ def _check_project_self_entry(
         )
     if not (
         _body_has(run_replay_body, "lock.project_self_entry()")
-        and _body_has(run_replay_body, "_project_has_root_primitives(self_source_root)")
-        and _body_has(
-            run_replay_body,
-            "get_source_root(InstallScope.USER) if config.user_scope else project_root",
-        )
+        and _body_has(run_replay_body, "_project_has_root_primitives(project_root)")
+        and _body_has(run_replay_body, "not config.user_scope")
     ):
         findings.append(
             _summary(
