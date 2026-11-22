@@ -12,6 +12,14 @@ open. Reading issue state needs the network, so the gate
 changes:
 
     python -m tests.quality.known_cell_issues --write
+
+The snapshot only moves when someone runs ``--write``, so an issue closed on
+GitHub would not trip it. ``--check-live`` reads the live state of every cited
+issue in one batched GraphQL request (``gh api graphql``: ``GH_TOKEN`` or
+``GITHUB_TOKEN`` in CI, the gh login locally)
+and fails naming each known cell whose issue is closed:
+
+    python -m tests.quality.known_cell_issues --check-live
 """
 
 from __future__ import annotations
@@ -23,13 +31,15 @@ import pkgutil
 import re
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 SNAPSHOT_PATH = Path(__file__).with_name("known_cell_issue_states.json")
 GENERATED_PATH = Path(__file__).with_name("generated_obligations.json")
 REPO = "microsoft/apm"
+# GraphQL query -> the decoded response; tests pass a stub.
+Transport = Callable[[str], Mapping]
 # KnownFailure itself and the gate that exercises it declare no known cell.
 _NOT_CELLS = frozenset(
     {
@@ -165,7 +175,73 @@ def _fetch_state(number: int) -> str:
     return out.stdout.strip()
 
 
+def live_query(numbers: Iterable[int], repo: str = REPO) -> str:
+    """One GraphQL query that reads the state of every issue (or PR) in *numbers*."""
+    owner, name = repo.split("/", 1)
+    fields = " ".join(
+        f"i{n}: issueOrPullRequest(number: {n}) {{ ... on Issue {{ state }} "
+        f"... on PullRequest {{ state }} }}"
+        for n in sorted(set(numbers))
+    )
+    return f'{{ repository(owner: "{owner}", name: "{name}") {{ {fields} }} }}'
+
+
+def _gh_graphql(query: str) -> Mapping:
+    out = subprocess.run(
+        ["gh", "api", "graphql", "-f", f"query={query}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(f"gh api graphql failed: {out.stderr.strip() or out.stdout.strip()}")
+    return json.loads(out.stdout)
+
+
+def live_states(numbers: Iterable[int], transport: Transport = _gh_graphql) -> dict[str, str]:
+    """``{"<n>": "OPEN" | "CLOSED" | "MERGED" | "MISSING"}`` read live from GitHub."""
+    numbers = sorted(set(numbers))
+    if not numbers:
+        return {}
+    payload = transport(live_query(numbers))
+    if payload.get("errors") and not payload.get("data"):
+        raise RuntimeError(f"GitHub GraphQL error: {payload['errors']}")
+    found = (payload.get("data") or {}).get("repository") or {}
+    return {str(n): ((found.get(f"i{n}") or {}).get("state") or "MISSING") for n in numbers}
+
+
+def closed_cells(cells: Mapping[str, str], states: Mapping[str, str]) -> dict[str, str]:
+    """``{cell label: "#<n> (<state>)"}`` for every cell whose issue is not open."""
+    return {
+        label: f"{tracking} ({states.get(tracking.lstrip('#'), 'MISSING')})"
+        for label, tracking in sorted(cells.items())
+        if re.fullmatch(r"#\d+", tracking) and states.get(tracking.lstrip("#")) != "OPEN"
+    }
+
+
+def check_live(cells: Mapping[str, str] | None = None, transport: Transport = _gh_graphql) -> int:
+    """Fail (1) when a known cell cites an issue that is no longer open on GitHub."""
+    cells = known_cells() if cells is None else cells
+    try:
+        states = live_states(cited_issues(cells), transport)
+    except RuntimeError as error:
+        print(f"[x] could not read issue state: {error}")
+        return 2
+    closed = closed_cells(cells, states)
+    for label, issue in closed.items():
+        print(
+            f"[x] {label} cites {issue}: rerun the cell; flip it to required if it now "
+            "passes (or re-key it to an open issue), then run "
+            "'python -m tests.quality.known_cell_issues --write'"
+        )
+    if not closed:
+        print(f"[+] {len(cells)} known cells cite {len(states)} open issues")
+    return int(bool(closed))
+
+
 def main(argv: list[str]) -> int:
+    if "--check-live" in argv:
+        return check_live()
     issues = {str(n): _fetch_state(n) for n in cited_issues()}
     if "--write" not in argv:
         stale = issues != load_snapshot()

@@ -159,3 +159,60 @@ def test_a_known_cell_whose_fixture_breaks_for_another_reason_fails(
     result = pytester.runpytest_inprocess("-q", "-o", "addopts=", "-p", "tests.lifecycle.known")
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*failed for a different reason*"])
+
+
+def _stub(states: dict[int, str], calls: list[str]):
+    """A GraphQL transport answering *states*; it records each query it receives."""
+
+    def transport(query: str) -> dict:
+        calls.append(query)
+        found = {f"i{n}": {"state": state} for n, state in states.items()}
+        return {"data": {"repository": found}}
+
+    return transport
+
+
+def test_check_live_fails_naming_a_cell_whose_issue_closed(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    cells = {"source:tests/lifecycle/a.py:10": "#11", "source:tests/lifecycle/b.py:20": "#12"}
+    calls: list[str] = []
+
+    code = check_live(cells, transport=_stub({11: "OPEN", 12: "CLOSED"}, calls))
+
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "[x] source:tests/lifecycle/b.py:20 cites #12 (CLOSED)" in out, out
+    assert "flip it to required" in out and "--write" in out, out
+    assert "a.py" not in out, out
+    assert len(calls) == 1 and "i11:" in calls[0] and "i12:" in calls[0], calls
+
+
+def test_check_live_passes_when_every_issue_is_open(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    cells = {"machine:G1|x": "#11", "generated:pair|y": "#11"}
+
+    code = check_live(cells, transport=_stub({11: "OPEN"}, []))
+
+    assert code == 0
+    assert "[+] 2 known cells cite 1 open issues" in capsys.readouterr().out
+
+
+def test_check_live_reports_an_issue_github_does_not_return(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    code = check_live({"rule:r": "#13"}, transport=_stub({}, []))
+
+    assert code == 1
+    assert "[x] rule:r cites #13 (MISSING)" in capsys.readouterr().out
+
+
+def test_check_live_fails_when_github_cannot_be_read(capsys) -> None:
+    from tests.quality.known_cell_issues import check_live
+
+    def broken(query: str) -> dict:
+        raise RuntimeError("HTTP 401")
+
+    assert check_live({"rule:r": "#13"}, transport=broken) == 2
+    assert "could not read issue state: HTTP 401" in capsys.readouterr().out
