@@ -28,6 +28,7 @@ from __future__ import annotations
 import ast
 import re
 
+from scripts.architecture_linter.checks.path_check_root import check_root_lifetime
 from scripts.architecture_linter.checks.python_semantics import (
     direct_definitions,
     effective_definition,
@@ -1783,6 +1784,7 @@ def _check_url_path_security(provider: FactsProvider) -> tuple[Violation, ...]:
             exempt=False,
         )
     )
+    findings.extend(check_root_lifetime(provider, _src_python(provider)))
 
     # AC10a -- strict percent-encoded URL-path decoding authority.
     findings.extend(

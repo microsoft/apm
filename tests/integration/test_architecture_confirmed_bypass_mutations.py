@@ -81,6 +81,26 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         new="        self.root = project_root.resolve()\n        self._check = CheckRoot(self.root)\n",
     ),
     BypassMutation(
+        name="check-root-alias-stored-on-session",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new="        check = CheckRoot(self.root)\n        self.check = check\n",
+    ),
+    BypassMutation(
+        name="check-root-multiline-store",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        check = CheckRoot(self.root)\n",
+        new="        check = CheckRoot(self.root)\n        self.kept = (\n            CheckRoot(self.root)\n        )\n",
+    ),
+    BypassMutation(
+        name="check-root-returned-by-helper",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/deployed_paths.py",
+        append="\n\ndef project_check(root):\n    return CheckRoot(root)\n",
+    ),
+    BypassMutation(
         name="check-root-module-cache",
         rule_id="transport-platform-url-path-security",
         path="src/apm_cli/install/deployed_paths.py",

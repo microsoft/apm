@@ -68,15 +68,6 @@ def deployed_path_entry(
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
-    resolved: list[tuple[Path, CheckRoot]] = []
-
-    def _resolved_candidate() -> tuple[Path, CheckRoot]:
-        # One live check per call, made lazily (external-root targets never need it).
-        if not resolved:
-            check = CheckRoot(project_root)
-            resolved.append((check.resolve(target_path), check))
-        return resolved[0]
-
     def _try_target(tgts) -> str | None:
         for _t in tgts:
             deploy_root = _t.managed_deploy_root
@@ -98,7 +89,8 @@ def deployed_path_entry(
                 else:
                     resolved_target = ensure_path_within(target_path, deploy_root)
                     return portable_relpath(resolved_target, project_root)
-            candidate, check = _resolved_candidate()
+            check = CheckRoot(project_root)
+            candidate = check.resolve(target_path)
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
                     candidate,

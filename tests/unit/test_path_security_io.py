@@ -1,6 +1,5 @@
 """Tests for path security utilities (CVE path traversal fix) (filesystem, process and CLI boundary cases)."""
 
-import ast
 import shutil  # noqa: F401
 import sys
 from pathlib import Path
@@ -347,63 +346,3 @@ class TestCheckRootMatrix:
         assert resolved == resolve_for_containment(root / "a" / "f.md")
         assert resolved.read_text(encoding="utf-8") == "evil\n"
         assert resolved_relative_within(resolved, check.resolved) is None
-
-
-class TestCheckRootLifetime:
-    """A CheckRoot never outlives one call, so it can never become a cross-check cache."""
-
-    SRC = Path(__file__).resolve().parents[2] / "src" / "apm_cli"
-
-    @staticmethod
-    def _storage_sites(tree: ast.Module) -> list[int]:
-        """Lines that build a CheckRoot outside a function or store it beyond the call."""
-        bad: list[int] = []
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        for node in ast.walk(tree):
-            builds = (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "CheckRoot"
-            )
-            if not builds:
-                continue
-            owner, scope = parents.get(node), node
-            while owner is not None and not isinstance(
-                owner, (ast.FunctionDef, ast.AsyncFunctionDef)
-            ):
-                scope, owner = owner, parents.get(owner)
-            stored = isinstance(scope, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and any(
-                isinstance(target, (ast.Attribute, ast.Subscript))
-                for target in getattr(scope, "targets", [getattr(scope, "target", None)])
-            )
-            if owner is None or stored:
-                bad.append(node.lineno)
-            for statement in ast.walk(owner) if owner is not None else ():
-                if isinstance(statement, (ast.Global, ast.Nonlocal)):
-                    bad.append(statement.lineno)
-        return bad
-
-    def test_no_source_stores_a_check_root(self) -> None:
-        offenders = {
-            str(path.relative_to(self.SRC)): lines
-            for path in sorted(self.SRC.rglob("*.py"))
-            if "CheckRoot" in (text := path.read_text(encoding="utf-8"))
-            and (lines := self._storage_sites(ast.parse(text)))
-        }
-
-        assert offenders == {}
-
-    def test_the_guard_flags_attribute_and_module_storage(self, tmp_path: Path) -> None:
-        sample = tmp_path / "sample.py"
-        sample.write_text(
-            "ROOT = CheckRoot(p)\n"
-            "class S:\n"
-            "    def __init__(self, p):\n"
-            "        self.check = CheckRoot(p)\n"
-            "def f(p):\n"
-            "    check = CheckRoot(p)\n"
-            "    return check.resolve(p)\n",
-            encoding="utf-8",
-        )
-
-        assert self._storage_sites(ast.parse(sample.read_text(encoding="utf-8"))) == [1, 4]
