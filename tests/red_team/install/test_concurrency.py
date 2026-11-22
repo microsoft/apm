@@ -151,6 +151,57 @@ def test_late_http_dispatch_logs_to_home_it_fired_under(
     )
 
 
+@pytest.mark.parametrize("entrypoint", ["fire", "execute_script"])
+def test_home_switch_during_ssrf_lookup_keeps_fire_time_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entrypoint: str
+) -> None:
+    """#4706: the log home is bound before the SSRF guard resolves the host.
+
+    The fake resolver switches APM_HOME mid-lookup, the way a slow DNS answer
+    lets the current home change while dispatch is still being prepared.
+    """
+    import socket
+
+    import requests
+
+    fired_home = tmp_path / "fired_home"
+    later_home = tmp_path / "later_home"
+    monkeypatch.setenv("APM_HOME", str(fired_home))
+
+    def switching_getaddrinfo(*_a, **_k):
+        monkeypatch.setenv("APM_HOME", str(later_home))
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]
+
+    class _Resp:
+        status_code = 200
+        ok = True
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(socket, "getaddrinfo", switching_getaddrinfo)
+    monkeypatch.setattr(requests, "post", lambda *_a, **_k: _Resp())
+    entry = ScriptEntry(
+        script_type="http",
+        event="post-install",
+        url="https://hooks.rt-4706.test/hook",
+        source="user",
+    )
+    event = _event(str(tmp_path))
+    if entrypoint == "fire":
+        threads = LifecycleScriptRunner(scripts=[entry]).fire("post-install", event)
+    else:
+        threads = [execute_script(entry, event)]
+    for t in threads:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in threads), "dispatch thread did not finish"
+
+    fired_log = fired_home / "logs" / "scripts.log"
+    assert fired_log.is_file(), "dispatch logged under the home current after the lookup"
+    assert "type=http" in fired_log.read_text(encoding="utf-8")
+    assert not (later_home / "logs" / "scripts.log").exists()
+
+
 def test_trust_store_stays_valid_json_under_concurrency(apm_home: Path, tmp_path: Path) -> None:
     """trust/untrust/is_trusted in parallel must leave a parseable store."""
     apm_yml = write_project(tmp_path / "p", "post-install", ["echo hi"])

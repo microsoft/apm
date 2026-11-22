@@ -1462,6 +1462,8 @@ def _execute_http(
     - Configurable timeout (default 10s)
     - Header values support ``$ENV_VAR`` expansion (credential vars blocked)
     """
+    # Bind before preparation: the SSRF guard can block in DNS resolution.
+    log_path = _bind_scripts_log_path()
     prepared = _prepare_http(script, event, logger=logger, verbose=verbose)
     if prepared is None:
         return None
@@ -1471,7 +1473,7 @@ def _execute_http(
     thread = threading.Thread(
         target=_dispatch_http_request,
         args=(url, payload, request_headers, timeout, event_name, safe_url),
-        kwargs={"log_path": _bind_scripts_log_path()},
+        kwargs={"log_path": log_path},
         daemon=True,
     )
     thread.start()
