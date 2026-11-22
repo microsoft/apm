@@ -76,7 +76,12 @@ apm install -g --target claude review-kit@contoso
 - **The lockfile owns it.** Each entry records `native_plugin`: the plugin name, its
   root, a fingerprint over the path, bytes and executable bit of every plugin file
   except APM's own `apm.yml` and `.apm/`, and the marketplace it was declared under.
-  The record stays when a later run does not target `claude`. `apm audit --ci`, run from `~/.apm` with `claude`
+  The record stays when a one-shot `--target` run or auto-detection skips `claude`.
+  When `targets:` in `~/.apm/apm.yml` drops `claude`, the next `apm install -g` retires
+  the plugin like any other dropped target's files: it removes the root and its Claude
+  settings entries, and keeps an edited root with a warning. `apm lock -g` leaves the
+  plugin in place until that install, and `apm install -g --frozen` refuses the change.
+  `apm audit --ci`, run from `~/.apm` with `claude`
   in its targets, reports drift when the source or the deployed copy no longer
   matches.
 - **Your settings win.** An explicit `false` in `enabledPlugins`, your own entries and
