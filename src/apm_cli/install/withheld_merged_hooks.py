@@ -28,10 +28,12 @@ def withheld_merged_hook_entries(
     """
     from apm_cli.install.withheld_hooks import HookPathsUnknown, _require_parent_inside
     from apm_cli.integration import hook_integrator as hooks
+    from apm_cli.utils.path_security import has_symlink_component
 
     integrator = hooks.HookIntegrator()
     package_name = integrator._get_package_name(package_info, project_root)
-    marker = integrator._get_hook_source_marker(package_info, project_root, package_name)
+    marker, legacy = integrator._get_hook_source_markers(package_info, project_root, package_name)
+    owned = {None, marker, *legacy}
     found: set[str] = set()
     for target in targets or ():
         config = hooks._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
@@ -42,18 +44,20 @@ def withheld_merged_hook_entries(
             continue
         rel = json_path.relative_to(project_root).as_posix()
         _require_parent_inside(json_path, project_root, rel)
+        if not user_scope and has_symlink_component(project_root, json_path):
+            raise HookPathsUnknown(f"{rel} is reached through a symlink; inspect it manually")
         try:
             container = _owned_view(json_path, config, user_scope)
             wanted = _rendered_keys(
                 integrator, package_info, package_name, target, config, project_root, user_scope
             )
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, TypeError) as exc:
             raise HookPathsUnknown(f"{rel}: {exc}") from exc
         for event, entries in container.items():
             for entry in entries if isinstance(entries, list) else ():
                 if (
                     isinstance(entry, dict)
-                    and entry.get("_apm_source") in (None, marker)
+                    and entry.get("_apm_source") in owned
                     and integrator._hook_entry_content_key(entry) in wanted.get(event, ())
                 ):
                     found.add(f"{rel}: {event}")

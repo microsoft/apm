@@ -86,7 +86,10 @@ def test_an_unreadable_merged_config_fails_closed(tmp_path: Path) -> None:
     assert settings.read_text(encoding="utf-8") == "{not json"
 
 
-def test_the_audit_scan_names_a_withheld_packages_merged_entry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy_marker", [False, True], ids=["unattributed", "legacy-marker"])
+def test_the_audit_scan_names_a_withheld_packages_merged_entry(
+    tmp_path: Path, legacy_marker: bool
+) -> None:
     from unittest.mock import patch
 
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -104,9 +107,18 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(tmp_path: Path) -
     project = tmp_path / "project"
     claude = KNOWN_TARGETS["claude"]
     (project / claude.root_dir).mkdir(parents=True)
+    lock.write(project / "apm.lock.yaml")
     HookIntegrator().integrate_hooks_for_target(claude, _build_package_info(dep, root), project)
-    for path in project.rglob("apm-hooks.json"):
-        path.unlink()
+    if legacy_marker:
+        sidecar = project / ".claude" / "apm-hooks.json"
+        owners = json.loads(sidecar.read_text(encoding="utf-8"))
+        for entries in owners.values():
+            for entry in entries:
+                entry["_apm_source"] = "h-hook"
+        sidecar.write_text(json.dumps(owners), encoding="utf-8")
+    else:
+        for path in project.rglob("apm-hooks.json"):
+            path.unlink()
 
     with patch("apm_cli.install.exec_gate.current_exec_decision", return_value=("denied", ())):
         found = locked_withheld_hook_files(lock, modules, lambda: None, project, [claude])
@@ -116,3 +128,33 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(tmp_path: Path) -
     ]
     assert "not attributed to another source" in found[0][2]
     assert (project / ".claude" / "settings.json").is_file()
+
+
+def test_a_merged_config_reached_through_a_symlink_is_never_named_for_editing(
+    tmp_path: Path,
+) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    settings = project / ".claude" / "settings.json"
+    external = tmp_path / "external-settings.json"
+    external.write_bytes(settings.read_bytes())
+    settings.unlink()
+    settings.symlink_to(external)
+
+    with pytest.raises(HookPathsUnknown, match="through a symlink"):
+        withheld_merged_hook_entries(info, project, targets)
+
+    assert settings.is_symlink()
+
+
+def test_a_malformed_event_list_fails_closed(tmp_path: Path) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    settings = project / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"]["Stop"] = None
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    (project / ".claude" / "apm-hooks.json").write_text(json.dumps({"Stop": []}), "utf-8")
+
+    with pytest.raises(HookPathsUnknown, match=r"\.claude/settings\.json"):
+        withheld_merged_hook_entries(info, project, targets)
+
+    assert json.loads(settings.read_text(encoding="utf-8"))["hooks"]["Stop"] is None
