@@ -387,3 +387,40 @@ def test_consent_classifies_a_standalone_symlinked_file_as_kept(tmp_path: Path) 
     assert [claim for claim, _verdict in evidence.refusals([_PATH])] == [_PATH]
     assert evidence.kept_under_consent() == frozenset({_PATH})
     assert target.read_text(encoding="utf-8") == "outside\n"
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_rechecks_an_all_matching_skill_directory_before_removing_it(
+    tmp_path: Path,
+) -> None:
+    """Every member matched at the scan; one edited before its unlink is kept."""
+    skill = ".agents/skills/alpha"
+    first, late = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    hashes, evidence = _skill_world(tmp_path, {first: "skill\n", late: "notes\n"})
+    scanned = evidence.verdict
+    seen: dict[str, int] = {}
+
+    def scan_then_user_edits(claim: str, physical: Path, **kwargs) -> str:
+        verdict = scanned(claim, physical, **kwargs)
+        seen[claim] = seen.get(claim, 0) + 1
+        if claim == late and seen[claim] == 1:
+            physical.write_text("edited after the scan\n", encoding="utf-8")
+        return verdict
+
+    evidence.verdict = scan_then_user_edits
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert (tmp_path / late).read_text(encoding="utf-8") == "edited after the scan\n"
+    assert not (tmp_path / first).exists()
+    assert skill not in result.deleted and late not in result.deleted
+    assert evidence.consented_deletions() == [first]

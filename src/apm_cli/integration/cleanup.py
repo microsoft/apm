@@ -861,6 +861,18 @@ def _safe_remove_skill_directory(
             result.skipped_unmanaged.append(rel_path)
         return
 
+    if evidence.lockfile_consent:
+        # Consent decides per file (#4295): each member is rechecked right before
+        # its unlink, and only a directory left holding no file is removed.
+        if not _remove_proven_members(
+            skill_dir, proven, evidence, result, diagnostics, dep_key
+        ) or any(
+            child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir))
+            for child in skill_dir.rglob("*")
+        ):
+            result.skipped_unmanaged.append(rel_path)
+            return
+
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
     try:
