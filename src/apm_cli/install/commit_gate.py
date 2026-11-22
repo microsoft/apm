@@ -335,7 +335,7 @@ def _planned_keeps(
     from apm_cli.integration.dispatch import get_dispatch_table
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
-    if plan is None or plan.source_plan is None or plan.codex_native is not None:
+    if plan is None or plan.source_plan is None:
         return []
     if admits_native_plugin(package_info):
         return []

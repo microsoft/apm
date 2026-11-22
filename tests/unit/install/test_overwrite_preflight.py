@@ -50,7 +50,6 @@ def _refuse(found: Path, error: BaseException) -> SimpleNamespace:
     ctx.integrators["skill"] = SimpleNamespace(_materialization_session=object())
     plan = SimpleNamespace(
         source_plan=object(),
-        codex_native=None,
         target_selection=SimpleNamespace(targets=[target]),
         projection_targets=[target],
     )
