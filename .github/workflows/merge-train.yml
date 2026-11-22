@@ -159,6 +159,7 @@ jobs:
           tests/quality/test_journey_index.py \
           tests/quality/test_generated_obligations.py \
           tests/quality/test_known_cells_cite_open_issues.py \
+          tests/quality/test_oracle_compile_record.py \
           tests/quality/test_oracle_user_writes.py \
           tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
