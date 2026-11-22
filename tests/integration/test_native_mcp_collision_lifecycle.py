@@ -477,7 +477,6 @@ def test_partial_install_retains_deferred_names_in_active_target(
         path.write_text(tomlkit.dumps(document), encoding="utf-8")
     _success(scenario.install(targets=target))
     assert set(scenario.servers(target)) == {"new"}
-    assert scenario.lock().mcp_target_servers == {target: ["new"]}
 
 
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])

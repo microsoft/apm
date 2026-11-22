@@ -28,8 +28,12 @@ def recorded_mcp_names(lockfile: Any) -> frozenset[str]:
 
 
 def _needs_input(info: dict) -> bool:
-    """Whether rendering *info* needs values the MCP stage may prompt for."""
-    if "${" in str((info.get("docker") or {}).get("args", "")):
+    """Whether rendering *info* may need a value the MCP stage resolves or prompts for.
+
+    Any placeholder (docker args, remote headers or URLs) counts: an adapter
+    may prompt for it, and the install resolves it from group-level inputs.
+    """
+    if "${" in str(info.get("docker") or "") or "${" in str(info.get("remotes") or ""):
         return True
     for package in info.get("packages") or ():
         if not isinstance(package, dict):
@@ -73,10 +77,11 @@ def _requested(dep: Any) -> tuple[dict, dict | None] | None:
         )
     except Exception:  # an unreachable registry is reported by the install itself
         return None
-    env = dep.env or {}
-    if not isinstance(info, dict) or not isinstance(env, dict) or _needs_input(info):
+    # Declared env feeds the group-wide overrides the install merges across
+    # registry servers, so such a server is left to the MCP write.
+    if not isinstance(info, dict) or dep.env or _needs_input(info):
         return None
-    return info, dict(env)
+    return info, {}
 
 
 def _recorded_baselines(lockfile: Any, name: str) -> list[str | None]:
