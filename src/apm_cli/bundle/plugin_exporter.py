@@ -872,7 +872,50 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     probe = _collect_apm_components(install_path / ".apm")
     probe.extend(_collect_root_plugin_components(install_path))
     _collect_bare_skill(install_path, dep, probe)
+    # A canvas the executable gate kept from deploying is not a provenance
+    # gap: install recorded it as withheld, and pack omits it (#4714).
+    if _gate_parked_types(install_path, dep):
+        probe = [item for item in probe if not item[1].startswith("extensions/")]
     return bool(probe)
+
+
+def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, ...]:
+    """Executable types the cache ships that the lock records the gate withheld (#4714).
+
+    Of the executable kinds only canvas extensions pack from ``.apm/``; the
+    lock row's ``exec_status`` and ``exec_allowed_types`` say whether install
+    deployed them.
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, TRUST_GATED
+
+    if dep.exec_status not in (TRUST_GATED, TRUST_DENIED):
+        return ()
+    if EXEC_TYPE_CANVAS in (dep.exec_allowed_types or ()):
+        return ()
+    canvas: list[tuple[Path, str]] = []
+    _collect_recursive(install_path / ".apm" / "extensions", "extensions", canvas)
+    return (EXEC_TYPE_CANVAS,) if canvas else ()
+
+
+def _warn_parked_executables(dep: LockedDependency, install_path: Path, logger=None) -> None:
+    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714)."""
+    from ..install.exec_gate import withheld_executable_reason
+    from ..security.executables import TRUST_DENIED
+
+    for exec_type in _gate_parked_types(install_path, dep):
+        label = dep.get_canonical_dependency_string()
+        reason = withheld_executable_reason(
+            label,
+            exec_type,
+            "canvas extension(s)",
+            denied=dep.exec_status == TRUST_DENIED,
+            outcome="not packed",
+        )
+        message = f"dependency {label}: {reason}"
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
 
 
 def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
@@ -1050,6 +1093,7 @@ def export_plugin_bundle(
             # ``apm_modules`` is an unattested cache -- it carries no integrity
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger)
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:

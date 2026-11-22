@@ -58,6 +58,7 @@ from .export_common import (
     _sanitize_bundle_name,
     _scan_bundle_sources,
     _warn_no_local_primitives,
+    _warn_parked_executables,
     _warn_skipped_root_components,
     _warn_skipped_source_links,
     _write_bundle_sources,
@@ -378,6 +379,7 @@ def export_agent_plugin_bundle(
 
             dep_name = dep.repo_url
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger)
             if dep.deployed_files:
                 dep_components, dep_dropped = _portable_components(
                     _collect_deployed_components(project_root, dep)
