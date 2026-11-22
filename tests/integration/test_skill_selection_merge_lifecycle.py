@@ -804,3 +804,32 @@ def test_uninstall_of_an_unrelated_local_package_keeps_a_local_bundle_skill_pin(
     assert skill_dirs(skills_root) == ["alpha"]
     world.run(("uninstall", "../local-c"), cwd=project, env=env, scenario_id="u1l-uninstall")
     assert skill_dirs(skills_root) == ["alpha"]
+
+
+def test_declaration_only_uninstall_refuses_when_its_shrink_would_remove_an_edited_skill(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4749: a declaration-only removal still checks the files its shrink retires."""
+    world = _world(tmp_path, apm_binary_path)
+    bundle = world.publish("bundle", skills=_SKILLS).slug
+    a = world.publish("pkg-a", dependencies=[_edge(bundle, skills=["alpha"])]).slug
+    project = world.project("consumer", dependencies=[a, bundle])
+    skills_root = project / _PROJECT_SKILLS
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="4749-edit-install")
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        edited = skills_root / "beta" / "SKILL.md"
+        edited.write_text(edited.read_text(encoding="utf-8") + "\nlocal edit\n", encoding="utf-8")
+        watched = (
+            project / "apm.yml",
+            lock_path(project),
+            project / "apm_modules",
+            skills_root,
+            project / _CLAUDE_SKILLS,
+        )
+        before = _tree_bytes(*watched)
+        result = world.run(
+            ("uninstall", bundle), cwd=project, env=env, expect=None, scenario_id="4749-edit"
+        )
+        _assert_shrink_refused(result, edited)
+        assert _tree_bytes(*watched) == before

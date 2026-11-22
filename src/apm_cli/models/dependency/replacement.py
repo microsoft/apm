@@ -196,11 +196,18 @@ class ReplacementBinding:
 
     def retain_parents(self, parent_keys: set[str]) -> bool:
         """Prune removed dependency requests without changing chosen ownership."""
-        retained = {
-            request: None
-            for request in self.requests
-            if request.parent is None or request.parent in parent_keys
-        }
+        return self._retain(lambda parent: parent is None or parent in parent_keys)
+
+    def drop_root_requests(self) -> bool:
+        """Forget the project's own requests once its declaration is gone (#4749).
+
+        Requests from surviving parents stay, so the binding keeps the edges
+        that still need the selected source.
+        """
+        return self._retain(lambda parent: parent is not None)
+
+    def _retain(self, keep) -> bool:
+        retained = {request: None for request in self.requests if keep(request.parent)}
         if not retained:
             raise ReplacementConfigError(
                 f"Replacement {self.original.get_unique_key()} has no surviving original request"

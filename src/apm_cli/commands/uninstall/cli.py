@@ -163,6 +163,9 @@ def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
         kept.is_dev = dev_only
         if local_path is not None:
             kept.local_path = local_path
+        if kept.replacement is not None:
+            # The removed declaration's own request goes; surviving parents' stay.
+            kept.replacement.drop_root_requests()
         updated = True
     for key, depth in repair.depths.items():
         kept = lockfile.get_dependency(key)
@@ -722,7 +725,7 @@ def _refuse_uninstall_without_evidence(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
-    if not lockfile or not cleanup_keys:
+    if not lockfile or (not cleanup_keys and not shrunk):
         return
     # Hash-tracked skill members count too: directory cleanup deletes them.
     selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
