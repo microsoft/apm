@@ -348,6 +348,7 @@ class TestExplicitFreshness:
         assert request.headers["User-Agent"] == "apm-cli"
         assert "Authorization" not in request.headers
         assert transport.send_kwargs[0]["stream"] is True
+        assert transport.responses[0]._content is False
         meta_path = Path(client_mod._cache_meta_path(client_mod._cache_key(source)))
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         assert meta["etag"] == "etag-1"
@@ -445,6 +446,8 @@ class TestExplicitFreshness:
         assert [request.url for request in transport.requests] == [source_url]
         assert transport.send_kwargs[0]["stream"] is True
         assert transport.send_kwargs[0]["timeout"] == 30
+        # Read through iter_content, never buffered whole via response.content.
+        assert transport.responses[0]._content is False
 
     def test_fetch_remote_marketplace_url_rejects_oversized_stream_without_content_length(
         self, transport
@@ -456,6 +459,8 @@ class TestExplicitFreshness:
         with pytest.raises(MarketplaceFetchError, match=r"marketplace\.json exceeds"):
             client_mod._fetch_url_direct(source_url, credential=_anonymous(source_url))
         assert transport.send_kwargs[0]["stream"] is True
+        # Rejected while streaming: the body was never buffered whole.
+        assert transport.responses[0]._content is False
 
 
 def test_bounded_reader_skips_empty_keep_alive_chunks():

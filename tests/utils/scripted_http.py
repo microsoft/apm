@@ -9,6 +9,7 @@ whose predicate accepts it; every prepared request is recorded for assertions.
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 from collections.abc import Callable, Iterator
@@ -23,6 +24,21 @@ from requests.structures import CaseInsensitiveDict
 Responder = Callable[[requests.PreparedRequest], requests.Response]
 
 
+class _RawStream(io.BytesIO):
+    """Body stream carrying the parsed header message, as urllib3 responses do.
+
+    ``requests`` extracts ``Set-Cookie`` into the session jar only through
+    ``raw._original_response.msg``; without it cookies would never persist.
+    """
+
+    def __init__(self, data: bytes, headers: dict[str, str]) -> None:
+        super().__init__(data)
+        block = "".join(f"{name}: {value}\r\n" for name, value in headers.items()) + "\r\n"
+        self._original_response = type(
+            "_Original", (), {"msg": http.client.parse_headers(io.BytesIO(block.encode()))}
+        )()
+
+
 def make_response(
     request: requests.PreparedRequest,
     status: int = 200,
@@ -35,7 +51,7 @@ def make_response(
     response = requests.Response()
     response.status_code = status
     response.headers = CaseInsensitiveDict(headers or {})
-    response.raw = io.BytesIO(data)
+    response.raw = _RawStream(data, headers or {})
     response.url = request.url or ""
     response.request = request
     response.encoding = "utf-8"
@@ -94,6 +110,7 @@ class ScriptedTransport:
     )
     requests: list[requests.PreparedRequest] = field(default_factory=list)
     send_kwargs: list[dict] = field(default_factory=list)
+    responses: list[requests.Response] = field(default_factory=list)
 
     def on(self, predicate: Callable[[requests.PreparedRequest], bool], respond: Responder):
         self.routes.append((predicate, respond))
@@ -121,7 +138,9 @@ class ScriptedTransport:
         self.send_kwargs.append(kwargs)
         for predicate, respond in self.routes:
             if predicate(request):
-                return respond(request)
+                response = respond(request)
+                self.responses.append(response)
+                return response
         raise AssertionError(f"unexpected HTTP request: {request.method} {request.url}")
 
     @contextmanager
