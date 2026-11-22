@@ -46,6 +46,7 @@ def _deployed(tmp_path: Path, names: tuple[str, ...]) -> tuple[SimpleNamespace, 
 def test_an_entry_matching_the_withheld_hook_is_named(
     tmp_path: Path, names: tuple[str, ...], expected: list[str], sidecar: bool
 ) -> None:
+    """Named only when no marker attributes it: an attributed entry is receipted."""
     info, project, targets = _deployed(tmp_path, names)
     if not sidecar:
         for path in project.rglob("apm-hooks.json"):
@@ -54,7 +55,7 @@ def test_an_entry_matching_the_withheld_hook_is_named(
 
     found = withheld_merged_hook_entries(info, project, targets)
 
-    assert found == sorted(expected)
+    assert found == ([] if sidecar else sorted(expected))
     assert {path: path.read_bytes() for path in project.rglob("*.json")} == before
 
 
@@ -86,10 +87,23 @@ def test_an_unreadable_merged_config_fails_closed(tmp_path: Path) -> None:
     assert settings.read_text(encoding="utf-8") == "{not json"
 
 
-@pytest.mark.parametrize("legacy_marker", [False, True], ids=["unattributed", "legacy-marker"])
+_AMBIGUOUS = "attribution of .claude/settings.json: SessionStart is ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("attribution", "expected"),
+    [
+        ("unattributed", (".claude/settings.json: SessionStart", "not attributed")),
+        ("legacy-marker", None),
+        ("ambiguous-leaf", ("", _AMBIGUOUS)),
+        ("no-lock", ("", _AMBIGUOUS)),
+    ],
+)
 def test_the_audit_scan_names_a_withheld_packages_merged_entry(
-    tmp_path: Path, legacy_marker: bool
+    tmp_path: Path, attribution: str, expected: tuple[str, str] | None
 ) -> None:
+    """Unattributed entries are named; a resolved legacy marker is a receipt; a bare
+    leaf that cannot be resolved is never skipped silently."""
     from unittest.mock import patch
 
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -99,6 +113,8 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(
     dep = LockedDependency(repo_url="acme/h-hook", resolved_commit="a" * 40, exec_status="denied")
     lock = LockFile()
     lock.add_dependency(dep)
+    if attribution == "ambiguous-leaf":
+        lock.add_dependency(LockedDependency(repo_url="other/h-hook", resolved_commit="b" * 40))
     modules = tmp_path / "apm_modules"
     root = dep.to_dependency_ref().get_install_path(modules)
     (root / "hooks").mkdir(parents=True)
@@ -107,26 +123,27 @@ def test_the_audit_scan_names_a_withheld_packages_merged_entry(
     project = tmp_path / "project"
     claude = KNOWN_TARGETS["claude"]
     (project / claude.root_dir).mkdir(parents=True)
-    lock.write(project / "apm.lock.yaml")
+    if attribution != "no-lock":
+        lock.write(project / "apm.lock.yaml")
     HookIntegrator().integrate_hooks_for_target(claude, _build_package_info(dep, root), project)
-    if legacy_marker:
-        sidecar = project / ".claude" / "apm-hooks.json"
+    sidecar = project / ".claude" / "apm-hooks.json"
+    if attribution == "unattributed":
+        sidecar.unlink()
+    else:
         owners = json.loads(sidecar.read_text(encoding="utf-8"))
         for entries in owners.values():
             for entry in entries:
                 entry["_apm_source"] = "h-hook"
         sidecar.write_text(json.dumps(owners), encoding="utf-8")
-    else:
-        for path in project.rglob("apm-hooks.json"):
-            path.unlink()
 
     with patch("apm_cli.install.exec_gate.current_exec_decision", return_value=("denied", ())):
         found = locked_withheld_hook_files(lock, modules, lambda: None, project, [claude])
 
-    assert [(path, key) for path, key, _ in found] == [
-        (".claude/settings.json: SessionStart", "acme/h-hook")
-    ]
-    assert "not attributed to another source" in found[0][2]
+    if expected is None:
+        assert found == []
+    else:
+        assert [(path, key) for path, key, _ in found] == [(expected[0], "acme/h-hook")]
+        assert expected[1] in found[0][2]
     assert (project / ".claude" / "settings.json").is_file()
 
 

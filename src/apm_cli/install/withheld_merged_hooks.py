@@ -3,9 +3,11 @@
 Targets such as Claude, Cursor and Codex merge hook entries into one shared
 config file; ownership lives in an ``_apm_source`` marker or the hooks
 sidecar. When the executables gate withholds a package's hooks, an entry in
-that file that renders exactly as the package's own hook and that no other
-source owns is named: install keeps it and warns, ``apm audit --ci`` fails.
-Nothing is removed. Rendering reuses the integrator's read-only steps.
+that file that renders exactly as the package's own hook and that no marker
+attributes is named: install keeps it and warns, ``apm audit --ci`` fails.
+An attributed entry is the package's receipted deployment, which install
+retires and ``exec-status-current`` reports. Nothing is removed. Rendering
+reuses the integrator's read-only steps.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ ENTRY_REASON = "an entry matching its hook is not attributed to another source"
 def withheld_merged_hook_entries(
     package_info: Any, project_root: Path, targets: Iterable[Any], *, user_scope: bool = False
 ) -> list[str]:
-    """``<config path>: <event>`` for each matching, unattributed merged entry.
+    """``<config path>: <event>`` for each matching merged entry no marker attributes.
 
     Raises :class:`~apm_cli.install.withheld_hooks.HookPathsUnknown` when a
     config or the package's hooks cannot be read, so callers fail closed.
@@ -33,7 +35,10 @@ def withheld_merged_hook_entries(
     integrator = hooks.HookIntegrator()
     package_name = integrator._get_package_name(package_info, project_root)
     marker, legacy = integrator._get_hook_source_markers(package_info, project_root, package_name)
-    owned = {None, marker, *legacy}
+    # Entries these markers attribute are the package's receipted deployment:
+    # install retires them and exec-status-current reports them, so only
+    # unattributed matches are named here.
+    owned = {marker, *legacy}
     found: set[str] = set()
     for target in targets or ():
         config = hooks._MERGE_HOOK_TARGETS.get(getattr(target, "name", ""))
@@ -58,11 +63,15 @@ def withheld_merged_hook_entries(
                 source = entry.get("_apm_source") if isinstance(entry, dict) else None
                 if source is not None and not isinstance(source, str):
                     raise HookPathsUnknown(f"{rel}: event {event!a} has invalid ownership metadata")
-                if (
-                    isinstance(entry, dict)
-                    and source in owned
-                    and integrator._hook_entry_content_key(entry) in wanted.get(event, ())
-                ):
+                matches = isinstance(entry, dict) and integrator._hook_entry_content_key(
+                    entry
+                ) in wanted.get(event, ())
+                if matches and source == package_name and source not in owned:
+                    # A bare leaf marker another locked package could share: never skip it.
+                    raise HookPathsUnknown(
+                        f"attribution of {rel}: {event} is ambiguous; inspect it manually"
+                    )
+                if matches and source is None:
                     found.add(f"{rel}: {event}")
     return sorted(found)
 
