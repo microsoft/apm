@@ -192,7 +192,17 @@ class TestInstallRouting:
         (tmp_path / "AGENTS.md").write_text(
             f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n\n# style\n", encoding="utf-8"
         )
-        (tmp_path / "src" / "test" / "AGENTS.md").write_text("# tests\n", encoding="utf-8")
+        (tmp_path / "src" / "test" / "AGENTS.md").write_text(
+            f"{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n# tests\n", encoding="utf-8"
+        )
+        # Claude loads AGENTS.md only through a CLAUDE.md that imports it; a
+        # pre-#3939 generated CLAUDE.md does not, so compile must run again.
+        (tmp_path / "CLAUDE.md").write_text(f"# CLAUDE.md\n{CLAUDE_HEADER}\n", encoding="utf-8")
+        assert stale() == {"style.instructions.md", "tests.instructions.md"}
+        for directory in (tmp_path, tmp_path / "src" / "test"):
+            (directory / "CLAUDE.md").write_text(
+                f"# CLAUDE.md\n{CLAUDE_HEADER}\n@AGENTS.md\n", encoding="utf-8"
+            )
         assert stale() == set()
         source = package.install_path / ".apm" / "instructions" / "style.instructions.md"
         source.write_text(source.read_text(encoding="utf-8") + "More.\n", encoding="utf-8")

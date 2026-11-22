@@ -407,11 +407,24 @@ def without_directory_instructions(primitives, warn_fn):
     return filtered
 
 
+def _claude_loads_agents_md(directory: Path, project_root: Path) -> bool:
+    """Return True when the ``CLAUDE.md`` in *directory* gives Claude its ``AGENTS.md``."""
+    claude_md = directory / "CLAUDE.md"
+    try:
+        if claude_md.exists() and claude_md.samefile(directory / "AGENTS.md"):
+            return True
+    except OSError:
+        return False
+    return claude_md_imports_agents_md(claude_md, project_root)
+
+
 def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> bool:
-    """Return True when a compiled ``AGENTS.md`` already carries this body.
+    """Return True when a compiled ``AGENTS.md`` Claude loads already carries this body.
 
     Install uses it to ask for ``apm compile`` only when a routed instruction
-    is new or changed, not on every no-op reinstall.
+    is new or changed, not on every no-op reinstall. An ``AGENTS.md`` whose
+    sibling ``CLAUDE.md`` is missing or lacks the ``@AGENTS.md`` import (a
+    pre-#3939 compile) does not count: compile must write that import.
     """
     text = body.replace("\r\n", "\n").strip()
     if not text:
@@ -421,6 +434,10 @@ def compiled_agents_md_has(project_root: Path, apply_to: object, body: str) -> b
     candidates.append(project_root / "AGENTS.md")
     for candidate in candidates:
         content = _read_text(candidate, project_root) if candidate.is_file() else None
-        if content is not None and text in content.replace("\r\n", "\n"):
+        if (
+            content is not None
+            and text in content.replace("\r\n", "\n")
+            and _claude_loads_agents_md(candidate.parent, project_root)
+        ):
             return True
     return False
