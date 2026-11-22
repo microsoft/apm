@@ -1,0 +1,16 @@
+{
+  "issue": 4813,
+  "fixed_in": "Unreleased",
+  "summary": "The first upgraded apm install -g that switches between targets sharing ~/.agents/skills (Copilot to Codex) skipped an edited user-root skill; the 0.37 receipt's skill directory is now adopted for the selected target sharing that destination.",
+  "failure_modes": [
+    "ownership",
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_first_upgrade_switching_to_a_target_sharing_the_skills_dir_updates_it"
+  ]
+}
