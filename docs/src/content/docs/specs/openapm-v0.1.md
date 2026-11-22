@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **151 normative statements (146 MUST, 5 SHOULD)** indexed in
+- OpenAPM v0.1 carries **152 normative statements (147 MUST, 5 SHOULD)** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1735,8 +1735,10 @@ This section's normative statements are:
 
 ### 6.1 Loading and discovery
 
-A Governance implementation reads zero or one `apm-policy.yml` file
-per install operation.
+A Governance implementation reads zero or one discovered
+`apm-policy.yml` file per install operation. An install or update
+operation that also accepts an explicit policy source composes it
+with the discovered policy under [req-pl-022](#req-pl-022).
 
 <a id="req-pl-001"></a>
 **[req-pl-001]** A conforming **governance** implementation MUST
@@ -1746,7 +1748,9 @@ registered **discovery provider** invoked in the configured order
 (see [Section 6.1.1](#611-discovery-providers) and
 [req-pl-011](#req-pl-011)). No other discovery mechanism MAY be
 substituted for this order. When no provider yields a policy, no
-policy is applied.
+policy is applied. An install or update operation that also accepts
+an explicit policy source composes it with the discovered policy under
+[req-pl-022](#req-pl-022).
 
 <a id="req-pl-021"></a>
 **[req-pl-021]** A conforming **governance** implementation MUST,
@@ -1763,6 +1767,28 @@ disables policy enforcement for the whole invocation is outside this
 requirement, because the ref is never loaded; an implementation that
 honours such a switch MUST state in its diagnostics that the explicit
 ref was not enforced.
+
+<a id="req-pl-022"></a>
+**[req-pl-022]** A conforming **governance** implementation that
+accepts an explicit policy source on an install or update operation
+in addition to discovery MUST: (a) evaluate the operation against the
+merge of the discovered effective policy, as parent, and the explicit
+policy, as child, under the tighten-only rules of Section 6.4
+([req-pl-006](#req-pl-006)), so the explicit source can add
+constraints but never relax, remove, or replace a discovered one;
+(b) when no policy is discovered, evaluate the operation against the
+explicit policy alone; (c) when the explicit source cannot be
+resolved, fetched, or parsed into a valid policy, or publishes none,
+terminate the operation non-zero before any deployment write, with a
+diagnostic that names the source (credentials redacted) and the
+cause, whatever the consumer `policy.fetch_failure_default`
+(Section 4.6.1) says; a failure of the discovered policy keeps its
+own routing; and (d) report every policy source in effect for the
+operation. A previously fetched valid policy served from cache under
+the documented stale-cache rules counts as resolved. The manifest
+`policy.hash` pin (Section 4.6.1) continues to cover only the
+discovered policy. An operator-level switch that disables policy
+enforcement for the whole invocation is outside this requirement.
 
 #### 6.1.1 Discovery providers
 
@@ -2333,7 +2359,7 @@ This section's normative statements are:
   [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
   [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
   [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
-  [req-pl-021](#req-pl-021).
+  [req-pl-021](#req-pl-021), [req-pl-022](#req-pl-022).
 
 ---
 
@@ -5079,7 +5105,7 @@ v0.2 will formalise the surrounding HTTP wire envelope.
 [req-pl-015](#req-pl-015), [req-pl-016](#req-pl-016),
 [req-pl-017](#req-pl-017), [req-pl-018](#req-pl-018),
 [req-pl-019](#req-pl-019), [req-pl-020](#req-pl-020),
-[req-pl-021](#req-pl-021).
+[req-pl-021](#req-pl-021), [req-pl-022](#req-pl-022).
 
 ### 11.4 Worked conformance examples (informative)
 
@@ -5521,6 +5547,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-pl-019](#req-pl-019)                | MUST    | 6.8.1   | governance  |
 | [req-pl-020](#req-pl-020)                | MUST    | 6.8.1   | governance  |
 | [req-pl-021](#req-pl-021)                | MUST    | 6.1     | governance  |
+| [req-pl-022](#req-pl-022)                | MUST    | 6.1     | governance  |
 | [req-rs-001](#req-rs-001)                | MUST    | 7.2     | consumer    |
 | [req-rs-002](#req-rs-002)                | MUST    | 7.3     | consumer    |
 | [req-rs-003](#req-rs-003)                | MUST    | 7.3     | consumer    |
@@ -5596,7 +5623,7 @@ staged-replacement capability, not every consumer implementation.
 | [req-rpl-003](#req-rpl-003)              | MUST    | 4.8.1   | consumer    |
 | [req-rpl-004](#req-rpl-004)              | MUST    | 4.8.1   | consumer    |
 
-**Total normative statements: 151** (146 MUST, 5 SHOULD).
+**Total normative statements: 152** (147 MUST, 5 SHOULD).
 
 ---
 
@@ -5676,15 +5703,16 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.71  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-lk-015](#req-lk-015) (Section 5.6.4, consumer MUST) in place, re-anchoring git-source integrity: every git-sourced lock entry records `content_hash`, a `sha256` envelope over the package tree whose byte stream follows [req-lk-016](#req-lk-016); a frozen install and `apm audit` recompute it at `resolved_commit` and fail closed with a diagnostic naming the entry, the expected envelope and the observed envelope. The canonical git tree hash `tree_sha256` and its Section 5.6.4 byte representation are reserved for v0.2; the Section 5.2 field table, the Section 5.6.4 editorial note, the Section 7.5 lockfile-replay prose and the informative lockfile examples are aligned. Under Section 9.2 this changes the field a normative statement names, so it is an amendment, not errata; the integrity obligation itself is unchanged. Schema bytes and `lockfile_version` are unchanged. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.72  | 2026-11-20 | Amendment from the spec-conformance linking review (Part of #4092). Revised [req-sc-005](#req-sc-005) (Section 10.3, consumer MUST) in place: beside identical eTLD+1 (a) and an explicit `aliases:` entry (b), a third basis (c) admits the built-in GitHub-operated host class, which is `github.com` and every `*.ghe.com` host, plus a GitHub Enterprise Server host only when the operator names it through the `GITHUB_HOST` setting, never through a manifest. An implementation that uses (c) documents the class in its conformance statement and applies it under the [req-sc-013](#req-sc-013) determinism and precedence rules. Basis (c) covers only those hosts and does not widen (a) or (b) for any other host. Under Section 9.2 this changes an evaluation defined by a normative statement, so it is an amendment, not errata. Proposed and adopted 2026-11-20 in this Working Draft by editor decision (steward ruling, issue #4092), without the Section 9.3 reviewer-panel approval and public comment period. No statement added; the count remains 149 (144 MUST, 5 SHOULD). |
 | 0.1.73 (proposed) | 2026-11-21 | Amendment for accepted issue #2903 (root project marketplace map). Added Section 4.2.5 `marketplaces` and two consumer MUSTs, both conditional on resolving marketplace references, which stay non-normative in v0.1. [req-mf-028](#req-mf-028): the root project manifest may declare a `marketplaces:` list (`name`, `source`, optional `ref`); malformed, unknown-key and duplicate-name entries are rejected; a declared name resolves through its entry, never through a same-named user or machine registration; names are manifest-local and the lockfile records the catalog origin and resolved commit; a declared entry is never persisted to a user-level or machine-level registry. [req-mf-029](#req-mf-029): a dependency whose manifest declares `marketplaces:` is refused, and when the root declares the list a transitive marketplace reference must name a root-declared entry or resolution fails with a diagnostic naming the entry to add. Under Section 9.2, a consumer that resolves marketplace references and ignores a dependency's `marketplaces:` key, or lets a same-named registration override a root declaration, no longer conforms; the reference implementation previously refused the key in every project and package manifest. Sections 1.3, 4.2, 4.9, 7.1, 11.3.2, Appendix C, the requirements manifest, a conformance fixture and conformance coverage are updated; schema bytes are unchanged (the manifest schemas already admit unknown top-level keys). Adds two MUSTs. Statement count: 149 -> 151 (146 MUST, 5 SHOULD). |
+| 0.1.75  | 2026-11-21 | Amendment for accepted issue #1925 (explicit policy source on install and update). Added [req-pl-022](#req-pl-022) (Section 6.1, governance MUST): an install or update operation that accepts an explicit policy source in addition to discovery evaluates the tighten-only merge of the discovered policy (parent) and the explicit policy (child) per [req-pl-006](#req-pl-006), uses the explicit policy alone when none is discovered, fails closed when the explicit source cannot be resolved, fetched or parsed into a valid policy or publishes none (non-zero before any deployment write, naming the source and the cause, whatever `policy.fetch_failure_default` says; a discovered-policy failure keeps its own routing), and reports every policy source in effect; a valid stale cached copy counts as resolved and the manifest `policy.hash` pin still covers only the discovered policy. Revised [req-pl-001](#req-pl-001) and the Section 6.1 lead sentence in place to admit the composed explicit source; [req-pl-021](#req-pl-021) is unchanged. Under Section 9.2 this adds a capability, so it is an amendment, not behavior-neutral errata; an operation that replaces discovery is unchanged. Proposed and adopted 2026-11-21 in this Working Draft by editor decision (CEO sign-off D5, issue #1925), without the Section 9.3 reviewer-panel approval and public comment period. Statement count: 151 -> 152 (147 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63 and 0.1.69 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, and the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place; none adds a statement. Together, this
 working draft
-contains 151 statements (146 MUST, 5 SHOULD). Combining the proposals does not establish
+contains 152 statements (147 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
 
-Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004), [req-lk-015](#req-lk-015) and [req-sc-005](#req-sc-005) in place and add no statement.
+Amendments 0.1.70, 0.1.71 and 0.1.72 were adopted on 2026-11-20 by editor decision (issues #4234 and #4092); their Date is the adoption date. They revise [req-sc-004](#req-sc-004), [req-lk-015](#req-lk-015) and [req-sc-005](#req-sc-005) in place and add no statement. Amendment 0.1.75 was adopted on 2026-11-21 by editor decision (CEO sign-off D5, issue #1925); its Date is the adoption date. It adds [req-pl-022](#req-pl-022) and revises [req-pl-001](#req-pl-001) in place.
 
 Errata:
 

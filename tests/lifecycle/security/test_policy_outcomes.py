@@ -515,6 +515,8 @@ _CHECK_FAILED = r"check\(s\) failed"
 _UNAVAILABLE = r"Org policy unavailable \("
 _CONSENT_OK = r"config-consistency\s*\|\s*MCP configs match lockfile baseline"
 _POLICY_DENY_PKG = r"Policy: org:policy-deny-pkg/\.github -- enforcement=block"
+# The org dependency deny list names a local bundle as ``_local/<name>``.
+_BUNDLE_DENIED = r"_local/p-exec -- denied by pattern: \*\*/p-exec"
 _DENY_ALL_SUPPRESSED = r"Lifecycle scripts suppressed by org policy \(executables\.deny_all\)"
 
 
@@ -678,8 +680,8 @@ SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
             (TRUST_BLOCK + r"org policy refresh failed and the cached policy",),
             absent=(HOOK, ".mcp.json"),
         ),
-        "found": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,)),
-        "cache=cold": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,)),
+        "found": Expect(1, (_POLICY_DENY_PKG, _BUNDLE_DENIED), absent=(HOOK,)),
+        "cache=cold": Expect(1, (_POLICY_DENY_PKG, _BUNDLE_DENIED), absent=(HOOK,)),
         "disabled": Expect(
             0, (r"Policy enforcement disabled by APM_POLICY_DISABLE=1",), absent=(HOOK,)
         ),
@@ -689,10 +691,14 @@ SITE_SLICES["bundle-allow-map(getattr cache_only)"] = SiteSlice(
         "malformed/warn": Expect(0, (r"is malformed",), absent=(HOOK,)),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
         "garbage_response/warn": Expect(0, (r"is not valid YAML",), absent=(HOOK,)),
-        "cached_stale/warn": Expect(0, (r"\(cached, fetched 2h ago\)",), absent=(HOOK,)),
-        "cache=warm-fresh": Expect(0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,)),
+        "cached_stale/warn": Expect(
+            1, (r"\(cached, fetched 2h ago\)", _BUNDLE_DENIED), absent=(HOOK,)
+        ),
+        "cache=warm-fresh": Expect(
+            1, (r"\(cached, fetched \d+s ago\)", _BUNDLE_DENIED), absent=(HOOK,)
+        ),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
-        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,)),
+        "cache=stale<7d": Expect(1, (r"(?i)stale", _BUNDLE_DENIED), absent=(HOOK,)),
     },
 )
 
@@ -1000,11 +1006,16 @@ SITE_SLICES["bundle-install-preflight(cache_only)"] = SiteSlice(
             1, (TRUST_BLOCK + "no enforceable", KNOB_BLOCK), absent=(HOOK, ".mcp.json")
         ),
         "cache_miss_fetch_fail/warn": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
-        "cache=cold": Expect(0, (_POLICY_DENY_PKG,), absent=(HOOK,), policy_fetch=True),
-        "cache=warm-fresh": Expect(
-            0, (r"\(cached, fetched \d+s ago\)",), absent=(HOOK,), policy_fetch=False
+        "cache=cold": Expect(
+            1, (_POLICY_DENY_PKG, _BUNDLE_DENIED), absent=(HOOK,), policy_fetch=True
         ),
-        "cache=stale<7d": Expect(0, (r"(?i)stale",), absent=(HOOK,)),
+        "cache=warm-fresh": Expect(
+            1,
+            (r"\(cached, fetched \d+s ago\)", _BUNDLE_DENIED),
+            absent=(HOOK,),
+            policy_fetch=False,
+        ),
+        "cache=stale<7d": Expect(1, (r"(?i)stale", _BUNDLE_DENIED), absent=(HOOK,)),
         "cache=stale>7d-or-expired": Expect(0, (UNREACHABLE,), absent=(HOOK,)),
     },
 )
