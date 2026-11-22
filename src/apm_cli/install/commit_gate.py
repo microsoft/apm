@@ -292,7 +292,6 @@ def _refuse_native_mcp_collisions(ctx: InstallContext) -> None:
     command's ``--runtime`` and ``--exclude`` (carried by ``lsp_preflight``);
     without them the MCP write path's own comparison stays the only check.
     """
-    from apm_cli.core.null_logger import NullCommandLogger
     from apm_cli.core.scope import is_user_scope
     from apm_cli.install.errors import MCPNativeConflictError
     from apm_cli.install.lsp.integration import lsp_target_config
@@ -315,7 +314,7 @@ def _refuse_native_mcp_collisions(ctx: InstallContext) -> None:
         explicit_target=ctx.target_decision.value,
         target_decision=ctx.target_decision,
         scope=ctx.scope,
-        logger=NullCommandLogger(),
+        logger=_SilentLogger(),  # the MCP stage announces its targets
         verbose=False,
         console=None,
     ).runtime_list()

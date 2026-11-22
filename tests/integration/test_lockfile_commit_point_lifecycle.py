@@ -399,6 +399,48 @@ def test_a_colliding_mcp_install_is_refused_before_any_file_is_written(
     assert not (Path(world.env["CODEX_HOME"]) / "config.toml").exists(), evidence(result)
 
 
+@pytest.mark.parametrize("change", ["declaration", "user-edit"])
+def test_a_recorded_mcp_server_is_left_to_the_mcp_write(
+    tmp_path: Path, apm_binary_path: Path, change: str
+) -> None:
+    """The preflight never refuses a server the lockfile records (#4268).
+
+    A changed declaration updates APM's own entry; a user edit to it is still
+    caught by the MCP write's comparison, after the primitives deployed.
+    """
+    world = build_world(
+        tmp_path, apm_binary_path, mcp_package="beta", targets=("claude", "codex"), installed=False
+    )
+    world.env["CODEX_HOME"] = str(world.isolated.home / ".codex")
+    first = world.install("--target", "claude,codex")
+    assert first.returncode == 0, evidence(first)
+    mcp = world.project / ".mcp.json"
+    agent = world.project / "packages/alpha/.apm/agents/alpha.agent.md"
+    agent.write_text(agent.read_text(encoding="ascii") + "v2\n", encoding="ascii")
+    if change == "declaration":
+        manifest = world.project / "packages/beta/apm.yml"
+        text = manifest.read_text(encoding="ascii")
+        manifest.write_text(text.replace("beta-mcp", "beta-mcp-v2"), encoding="ascii")
+    else:
+        data = json.loads(mcp.read_text(encoding="utf-8"))
+        data["mcpServers"]["beta-srv"] = {"command": "personal"}
+        mcp.write_text(json.dumps(data), encoding="utf-8")
+
+    result = world.install("--target", "claude,codex")
+    output = " ".join((result.stdout + result.stderr).split())
+
+    servers = json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]
+    deployed = (world.project / ".claude/agents/alpha.md").read_text(encoding="utf-8")
+    assert deployed.endswith("v2\n"), evidence(result)
+    if change == "declaration":
+        assert result.returncode == 0, evidence(result)
+        assert servers["beta-srv"]["command"] == "beta-mcp-v2", evidence(result)
+    else:
+        assert result.returncode != 0, evidence(result)
+        assert "conflicts with the existing claude connection" in output, evidence(result)
+        assert servers["beta-srv"] == {"command": "personal"}, evidence(result)
+
+
 def test_dry_run_waits_for_a_running_install(tmp_path: Path, apm_binary_path: Path) -> None:
     """A dry-run resolves into apm_modules staging, so it serializes with a running install."""
     world = build_world(tmp_path, apm_binary_path)
@@ -558,8 +600,15 @@ def _assert_user_lock_equals_disk(world: FaultWorld) -> LockFile:
 def test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_to_disk(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#4329: native registration commits the lock, then the MCP reconcile fails."""
+    """#4329: a native plugin install whose MCP server collides keeps the lock equal to disk.
+
+    The server is self-defined and unrecorded, so the install preflight refuses
+    it before native registration or any other write (#4268); clearing the
+    user's entry then converges.
+    """
     world = _native_plugin_with_colliding_mcp(tmp_path, apm_binary_path)
+    claude_json = world.isolated.home / ".claude.json"
+    original = claude_json.read_bytes()
 
     failed = _user(world, "install", "-g", "--no-policy")
 
@@ -567,14 +616,8 @@ def test_a_failed_mcp_reconcile_after_native_registration_keeps_the_lock_equal_t
     output = " ".join((failed.stdout + failed.stderr).split())
     assert "conflicts with the existing claude connection" in output, evidence(failed)
     assert f"MCP installation incomplete: {_COLLIDING_SERVER} (claude)" in output, evidence(failed)
-    lock = _assert_user_lock_equals_disk(world)
-    assert any(dep.native_plugin for dep in lock.get_package_dependencies()), evidence(failed)
-    audit = _user_audit(world)
-    frozen = _user(world, "install", "-g", "--frozen", "--no-policy")
-    assert (audit.returncode == 0) == (frozen.returncode == 0), (
-        f"{evidence(audit)}\n{evidence(frozen)}"
-    )
-    _assert_user_lock_equals_disk(world)
+    assert not (world.isolated.config_root / "apm.lock.yaml").exists(), evidence(failed)
+    assert claude_json.read_bytes() == original, evidence(failed)
 
     (world.isolated.home / ".claude.json").write_text("{}", encoding="utf-8")
     converged = _user(world, "install", "-g", "--no-policy")
