@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from tests.lifecycle.scenarios._kit import Scenario, assert_changes, credits
+from tests.lifecycle.scenarios._kit import Scenario, assert_changes, credits, known_defect
 from tests.lifecycle.scenarios._sources import SOURCES, from_source
 from tests.lifecycle.scenarios.test_network_offline import go_offline
 from tests.lifecycle.world import use_policy
@@ -156,6 +156,40 @@ def test_a_target_change_at_user_scope_redeploys_under_home(lifecycle_world, cha
     scenario.finish()
 
 
+_CHANGED = ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
+# #4744: dropping claude from targets: leaves the plugin bin deployed.
+_BIN_KNOWN = {"multi-narrowed": "#4744"}
+
+
+def _bin_credit(change: str) -> dict[str, str]:
+    return {**_USER, "OP": "install", "PRIM": "bin", "GATE": "allowed", "SRC": "git", "TGT": change}
+
+
+@pytest.mark.parametrize("change", _CHANGED)
+def test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared(
+    lifecycle_world, change
+) -> None:
+    """U-BIN: plugin bin/ deploys only for a Claude target, so it follows claude in targets:."""
+    before, after = _TARGETS[change]
+    use_policy(lifecycle_world, "allow")
+    specs = {"p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec}
+    scenario = Scenario(lifecycle_world, specs, scope="user", targets=before, policy="allow")
+    scenario.run("install p-native-claude-bin")
+    scenario.run("approve p-native-claude-bin")
+    scenario.run("install --trust-bin")
+    assert (lifecycle_world.home / _PLUGIN_BIN).is_file() == ("claude" in before)
+    scenario.set_targets(*after)
+    step = scenario.run("install --trust-bin", credit=[_bin_credit(change)])
+    assert step.result.returncode == 0, step.output
+    deployed = (lifecycle_world.home / _PLUGIN_BIN).is_file()
+    if change in _BIN_KNOWN:
+        with known_defect(_BIN_KNOWN[change], r"^a dropped claude target left the plugin bin"):
+            assert not deployed, f"a dropped claude target left the plugin bin\n{step.output}"
+    else:
+        assert deployed == ("claude" in after), step.output
+    scenario.finish()
+
+
 # -- modifiers and the network -------------------------------------------------------
 
 _MODIFIER_LINES = {
@@ -253,6 +287,12 @@ CREDITS = credits(
             for change in _TARGETS
         },
         **{
+            f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": [
+                _bin_credit(change)
+            ]
+            for change in _CHANGED
+        },
+        **{
             f"test_install_modifiers_at_user_scope[{row}]": [{**_USER, **factors}]
             for row, (_line, factors, _says) in _MODIFIER_LINES.items()
         },
@@ -266,5 +306,9 @@ CREDITS = credits(
             ]
             for deployed in ("edited", "present-provenance-unknown", "unowned")
         },
+    },
+    known={
+        f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": issue
+        for change, issue in _BIN_KNOWN.items()
     },
 )

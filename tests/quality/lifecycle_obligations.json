@@ -19793,8 +19793,10 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "known-failing",
+   "strength": "e2e",
+   "tracking": "#4744",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {
    "family": "pair",
@@ -19808,15 +19810,17 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-widened]"
   },
   "pair|PRIM=bin|TGT=single-narrowed": {
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-narrowed]"
   },
   "pair|PRIM=bin|TGT=single-unchanged": {
    "family": "pair",
@@ -19830,8 +19834,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[single-widened]"
   },
   "pair|PRIM=bin|UPDATE=on": {
    "family": "pair",
