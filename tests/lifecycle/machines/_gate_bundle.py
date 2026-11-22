@@ -348,6 +348,8 @@ CANVAS_PACK = PackSet(
     executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
 )
 PACK_SETS = (EXEC_PACK, CANVAS_PACK)
+# Primitives a package ships that pack never deploys at project scope (U-BIN).
+_SHIPS_ALSO: Mapping[str, tuple[str, ...]] = {"p-exec": ("bin",)}
 # Strict known cells (R: pack must exit 0 and ship what the gate deploys); none
 # since #4714 closed.
 KNOWN_PACK: dict[str, str] = {}
@@ -400,11 +402,11 @@ class GatePack(StepRunner):
 
     def pack(self) -> None:
         """Pack ships exactly the executables the gate lets the project deploy."""
-        cells = sorted(
-            f"G1|pack|{kind}|{self.level}|project"
-            for name in self.packs.packed
-            for kind in self.packs.kinds[name]
-        )
+        kinds = {kind for name in self.packs.packed for kind in self.packs.kinds[name]}
+        if self.level == "denied-dependency":
+            # The refusal covers every primitive a denied package ships, its bin/ too.
+            kinds |= {kind for name in self.packs.packed for kind in _SHIPS_ALSO.get(name, ())}
+        cells = sorted(f"G1|pack|{kind}|{self.level}|project" for kind in kinds)
         self.credited.update(cells)
         if self.dry:
             return

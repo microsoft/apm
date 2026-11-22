@@ -5304,11 +5304,15 @@
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=pack|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|pack|bin|denied-dependency|project"
+   ],
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=allowed": {
    "credited_by": [
@@ -12474,8 +12478,9 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[denied-executable]"
   },
   "pair|DEPLOYED=present-provenance-unknown|GATE=none": {
    "family": "pair",
@@ -18268,6 +18273,7 @@
   },
   "pair|OP=pack|GATE=denied-dependency": {
    "credited_by": [
+    "G1|pack|bin|denied-dependency|project",
     "G1|pack|canvas|denied-dependency|project",
     "G1|pack|hook|denied-dependency|project",
     "G1|pack|lsp|denied-dependency|project",
@@ -20452,7 +20458,7 @@
    "lane": "T-6b",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[revoked-after-deploy]"
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_closed_gate_retires_a_hook_without_a_lock[denied-executable]"
   },
   "pair|PRIM=hook|DEPLOYED=unowned": {
    "family": "pair",

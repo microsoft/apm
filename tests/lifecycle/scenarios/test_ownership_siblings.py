@@ -583,21 +583,49 @@ def _hook_package(world) -> Scenario:
     return scenario
 
 
-@pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
+def _deny_in_manifest(scenario: Scenario, package: str) -> None:
+    """A deny for *package* arrives in apm.yml (a teammate's commit), replacing its approval."""
+    manifest = scenario.world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    allow = data["executables"]["allow"]
+    keys = [key for key in allow if package in key]
+    assert keys, f"no approval of {package} in {allow}"
+    deny = data["executables"].setdefault("deny", {})
+    for key in keys:
+        del allow[key]
+        deny[key] = {"hooks": True}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    scenario.model = scenario.model.deny(package, scenario.kinds[package])
+
+
+# GATE level -> the gate change, made before (revoked, unapproved) or after
+# (denied) the lockfile is lost: a deny that arrives with no lockfile finds no
+# recorded deployment, so it reads as denied-executable.
+_CLOSED_GATES = ("denied-executable", "revoked-after-deploy", "unapproved-exec")
+
+
+@pytest.mark.parametrize("gate", _CLOSED_GATES)
 def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> None:
     scenario = _hook_package(lifecycle_world)
     hook = lifecycle_world.project / ".github/hooks/h-hook-session.json"
     assert hook.is_file()
     if gate == "revoked-after-deploy":
         scenario.run("deny h-hook")
-    else:
+    elif gate == "unapproved-exec":
         _drop_approval(scenario, "h-hook")
     _forget_lock(scenario)
-    step = scenario.run(
-        "install", credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=gate)]
-    )
+    if gate == "denied-executable":
+        _deny_in_manifest(scenario, "h-hook")
+    step = scenario.run("install", credit=_closed_gate_credit(gate))
     assert not hook.exists(), step.output
     scenario.finish()
+
+
+def _closed_gate_credit(gate: str) -> list[dict[str, str]]:
+    return [
+        _pair("present-provenance-unknown", PRIM="hook", GATE=gate),
+        {"LOCK": "absent", "PRIM": "hook", "GATE": gate},
+    ]
 
 
 @pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
@@ -1209,10 +1237,8 @@ CREDITS = credits(
         },
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
-            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
-                _pair("present-provenance-unknown", PRIM="hook", GATE=gate)
-            ]
-            for gate in ("revoked-after-deploy", "unapproved-exec")
+            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": _closed_gate_credit(gate)
+            for gate in _CLOSED_GATES
         },
         **{
             f"test_a_native_plugins_skill_in_the_users_hands_survives_install[{deployed}]": [
