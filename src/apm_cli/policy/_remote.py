@@ -10,11 +10,13 @@ owners of git-remote reading and URL parsing.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..core.invocation_memo import memoized_per_invocation
 from ..utils.git_env import get_git_executable
 from ..utils.github_host import (
     is_azure_devops_hostname,
@@ -43,6 +45,15 @@ class AmbiguousGitRemoteError(ValueError):
 
 
 def _git(project_root: Path, *args: str) -> str | None:
+    """Run ``git *args`` in *project_root*; one command run reads each answer once."""
+    return _git_in(os.path.abspath(project_root), *args)
+
+
+# One CLI command discovers org policy several times (preflight, gate, target
+# check, MCP); the remote cannot change within the run, so the answer (failures
+# included) is reused for the invocation. Outside a CLI invocation every read is live.
+@memoized_per_invocation("git-remote", keep=lambda _result: True)
+def _git_in(project_root: str, *args: str) -> str | None:
     try:
         result = subprocess.run(
             [get_git_executable(), *args],
