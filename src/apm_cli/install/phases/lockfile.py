@@ -19,6 +19,7 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.cache.deploy_store import DeployStore
 from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
@@ -26,7 +27,7 @@ from apm_cli.install.phases.lockfile_cache_pins import (
     sync_cache_pin_markers_from_disk,
     sync_cache_pin_markers_from_existing,
 )
-from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.content_hash import canonical_digest
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
@@ -55,6 +56,8 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     from apm_cli.utils.path_security import PathTraversalError
 
     out: dict = {}
+    # Every recorded hash also stores its bytes, so a lockfile hash can rebuild the file.
+    store = DeployStore.open_default() if rel_paths else None
     cowork_root: Path | None = None
     cowork_resolved = False
     for _rel in rel_paths or ():
@@ -74,10 +77,14 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
         else:
             _full = project_root / _rel
         if _full.is_file() and not _full.is_symlink():
-            try:  # noqa: SIM105
-                out[_rel] = compute_file_hash(_full)
-            except Exception:
-                pass
+            try:
+                data = _full.read_bytes()
+            except OSError:
+                continue
+            digest = canonical_digest(data)
+            out[_rel] = f"sha256:{digest}"
+            if store is not None:
+                store.put(digest, data)
     return out
 
 
