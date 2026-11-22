@@ -110,9 +110,9 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev(_APPROVE, 329, 'argument("packages"'),
     ),
     "audit": (
-        Ev("src/apm_cli/commands/audit.py", 1421, 'argument("package"'),
-        Ev("src/apm_cli/commands/audit.py", 1440, '"--dry-run"'),
-        Ev("src/apm_cli/commands/audit.py", 1478, '"--no-policy"'),
+        Ev("src/apm_cli/commands/audit.py", 1431, 'argument("package"'),
+        Ev("src/apm_cli/commands/audit.py", 1450, '"--dry-run"'),
+        Ev("src/apm_cli/commands/audit.py", 1488, '"--no-policy"'),
     ),
     "marketplace": (
         Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
@@ -161,7 +161,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     # U5: pack has no --global (options 163-301).
     "pack": Ev(_PACK, 177, '@click.command(name="pack"'),
     "prune": Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
-    "audit": Ev("src/apm_cli/commands/audit.py", 1542, "def audit("),
+    "audit": Ev("src/apm_cli/commands/audit.py", 1552, "def audit("),
     "marketplace": Ev("src/apm_cli/commands/marketplace/__init__.py", 372, "def add(source, name"),
 }
 
@@ -174,7 +174,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "revoked executable must survive; an org policy dependency deny removes it",
         (
             Ev(_APPROVE, 263, "hooks, MCP, LSP, bin, canvas"),
-            Ev("src/apm_cli/policy/install_preflight.py", 220, "Install blocked by org policy"),
+            Ev("src/apm_cli/policy/install_preflight.py", 233, "Install blocked by org policy"),
         ),
     ),
     "U3": (
@@ -314,7 +314,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "file primitives are equivalent except compile-staging routing (FILEROUTE)",
         (
             Ev("src/apm_cli/install/services.py", 827, "staged_files"),
-            Ev("src/apm_cli/install/services.py", 1030, '"instructions" not in target.primitives'),
+            Ev("src/apm_cli/install/services.py", 1016, '"instructions" not in target.primitives'),
         ),
     ),
 }

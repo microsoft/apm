@@ -117,6 +117,12 @@ dependencies:
 - Hostless patterns (`contoso/**`) keep matching every host.
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and
   `replace` sources, plus lockfile transitives).
+- `deny` also applies to `apm install <bundle>` (the bundle's own name as
+  `_local/<name>`, so `**/<name>` matches, plus every package its embedded
+  lockfile records; an unreadable embedded lockfile is refused) and to
+  `apm pack`, which refuses to ship a denied declared or locked package
+  (`Pack blocked by org policy: <pkg>`, exit 1). Pack applies deny only:
+  allow, require and pin rules do not apply to it.
 
 `dependencies.require` entries are exact and name ONE host: a hostless
 entry (`contoso/baseline`) names the default host only; write other hosts
@@ -291,7 +297,9 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
 `apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
-fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
+fingerprint of what runs (for a hook: its document, referenced scripts, every
+file deployed with them and their Node module type; pre-0.38 hook pins need one
+re-approval); `bin`, `lsp` and `canvas` stay `true`. A native
 Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
 root (every file's path and bytes; executable bits are left out so the pin
 holds across operating systems), next to item pins for a split install; any
@@ -543,6 +551,13 @@ An explicit `--policy` path, URL, or `owner/repo` that cannot be loaded
 warn-by-default behaviour. CI JSON/SARIF report `policy.enforced` so a
 wrapper can tell whether policy checks actually ran.
 
+`apm install --policy <source>` and `apm update --policy <source>` add a
+policy on top of discovery (tighten-only). The named source fails closed
+the same way: if it cannot be loaded the command exits non-zero before any
+write, whatever `policy.fetch_failure_default` says; a cached copy within
+the stale-cache window counts as loaded. A failed discovered policy keeps
+following `policy.fetch_failure_default`.
+
 ## Install-time enforcement
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.
@@ -731,6 +746,29 @@ fail the PR for the same policy violation.
 
 `APM_POLICY` is reserved for a future override env var and is **not**
 equivalent to `APM_POLICY_DISABLE`.
+
+### Explicit policy source (`--policy`)
+
+`apm install --policy SOURCE` and `apm update --policy SOURCE` enforce a
+policy discovery cannot reach: plain git remotes, other hosts, air-gapped
+installs. SOURCE is a local path, `owner/repo`, or `https://` URL (same forms
+as `apm audit --policy`).
+
+- Tighten-only: it combines with any discovered org policy through the
+  inheritance merge and can never loosen it (no re-allowing a denied
+  dependency, no lowering `enforcement`).
+- A local path needs no network.
+- A source that cannot be loaded (unreachable, missing, malformed, or
+  publishing no policy) fails the command before any write, whatever
+  `policy.fetch_failure_default` says; a cached copy within the stale-cache
+  window counts as loaded. Only a failed discovered policy follows
+  `policy.fetch_failure_default`.
+- Effective sources always print: `[i] Policy: org:contoso/.github + file:/repo/p.yml -- enforcement=block`.
+- `policy.hash` pins the discovered org policy only. Not valid with
+  `--global` or `--no-policy`.
+
+`apm audit --ci --policy SOURCE` differs: it audits against that one source
+instead of discovery and fails closed when it cannot be loaded.
 
 ### 9. Cache and offline behaviour
 

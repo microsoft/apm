@@ -110,6 +110,7 @@ fallback. See
 | Flag | Default | Description |
 |---|---|---|
 | `--no-policy` | off | Skip org policy enforcement for this invocation. Loudly logged. Does not bypass `apm audit --ci`. Env: `APM_POLICY_DISABLE=1`. |
+| `--policy SOURCE` | none | Also enforce this policy: a local path, `owner/repo`, or `https://` URL (same forms as `apm audit --policy`). It combines with any auto-discovered org policy and can only add constraints. Use it on remotes auto-discovery cannot reach (plain git) and in air-gapped installs (a local path needs no network). A source that cannot be loaded (unreachable, missing, malformed, or publishing no policy) fails the command before anything is written, whatever `policy.fetch_failure_default` says; a cached copy within the stale-cache window counts as loaded. Not valid with `--global` or `--no-policy`. See [Enforce a policy discovery cannot reach](../../../enterprise/apm-policy/#enforce-a-policy-discovery-cannot-reach). |
 | `--audit <off\|warn\|block>` | (config/policy) | Run a content audit over the files this install deploys. `warn` records findings in the summary; `block` halts the install on critical findings and restores the files it deployed to their previous bytes. Overrides your `audit-on-install` config but cannot relax an org policy floor. Requires the `external-scanners` experimental flag. |
 | `--no-audit` | off | Disable the install-time audit for this invocation (equivalent to `--audit off`). Cannot relax an org policy `block` floor. |
 | `--trust-transitive-mcp` | off | Deploy, for this run only, MCP servers from transitive packages that are self-defined or set their own `registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys, including a pinned one whose definition changed. Install warns that consent is not saved: the next install without the flag removes them. To keep one, run [`apm approve`](../approve/#pinned-approvals) on its package and commit `apm.yml`. The flag never writes `apm.yml` and does not bypass the executables gate or org policy. |
@@ -461,7 +462,16 @@ the same hook merge a source install uses, once the exact bundle key printed by
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. `apm uninstall` does not remove local-bundle content. A
+them first. Canvas extensions a bundle deploys (with the `canvas` experimental
+flag) follow the same approval, re-check and retirement; a reinstall retires
+the extensions the new bundle content no longer ships. Retiring one bundle's
+extensions never removes another bundle's or anything outside the target's
+extensions directory, and an extension you edited is kept.
+Org policy `dependencies.deny` applies to the bundle's package
+name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
+denied bundle is refused before any file is written. A bundle whose
+`apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
+remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
 whole and registers it without locating or executing Copilot. Stable Copilot

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..agent_plugins.constants import COM_MICROSOFT_APM_NAMESPACE
@@ -324,3 +325,28 @@ def _retarget_basename(name: str, mapping: Any, apm_basename_fn: Callable[[str],
             base_name = base_name[: -len(suffix)]
             break
     return f"{base_name}{extension}"
+
+
+def declared_bundle_exec_types(
+    bundle_info, mcp_deps: list, lsp_deps: list, *, create_config: bool
+) -> tuple[str, ...]:
+    """Executable types the bundle ships, before trust filters them."""
+    from ..core.experimental import is_enabled
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    files = list(bundle_pack_files(bundle_info))
+    if not files and bundle_info.source_dir is not None:
+        root = Path(bundle_info.source_dir)
+        files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+    declared = []
+    if any(is_plugin_hook_path(path) for path in files):
+        declared.append("hooks")
+    if mcp_deps:
+        declared.append("mcp")
+    if lsp_deps:
+        declared.append("lsp")
+    if any(is_canvas_bundle_path(path) for path in files) and is_enabled(
+        "canvas", create_config=create_config
+    ):
+        declared.append("canvas")
+    return tuple(declared)

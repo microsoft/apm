@@ -352,6 +352,13 @@
       "guards": ["install-deployment-uninstall-selection"]
     },
     {
+      "id": "explicit-policy-source",
+      "decision": "Explicit install/update --policy source: per-invocation binding, tighten-only composition with discovered org policy, and per-source fetch_failure_default routing of a source that cannot be loaded",
+      "owner": "policy/explicit_source.py (explicit_policy_scope, active_explicit_policy_source, compose_explicit_policy) composed by policy/discovery.py (discover_policy_with_chain) and routed by policy/outcome_routing.py (route_discovery_outcome)",
+      "selectors": ["src/apm_cli/policy/explicit_source.py"],
+      "guards": ["install-deployment-explicit-policy-source-owner"]
+    },
+    {
       "id": "policy-remote-origin-reader",
       "decision": "Reading and parsing the project git remote for org-policy discovery",
       "owner": "policy/_remote.py (_git_remote_origin_url, _remote_url_parts, _parse_remote_url, _extract_org_host_port_from_git_remote)",
@@ -436,16 +443,22 @@
     },
     {
       "id": "bundle-admission-owner",
-      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080)",
-      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd",
-      "selectors": ["src/apm_cli/install/bundle_admission.py"],
+      "decision": "Which org policy, integrity check and lockfile record apply when a bundle deploys, for every bundle deploy entry point (#4080); the package identities a local bundle presents to the org dependency deny list, and the org dependency policy apm pack applies before it ships dependency content",
+      "owner": "install/bundle_admission.py (admit_bundle runs the install policy preflight and the require_hashes integrity decision; bundle_policy_subjects names the bundle and the packages it records; record_unpacked_files records through DeploymentLedgerCodec.record_local_bundle_files); entry points: install/local_bundle_handler.py install_local_bundle, commands/pack.py unpack_cmd, bundle/packer.py pack_bundle through bundle/pack_policy.py pack_policy_preflight",
+      "selectors": [
+        "src/apm_cli/install/bundle_admission.py",
+        "src/apm_cli/bundle/pack_policy.py"
+      ],
       "guards": ["install-deployment-bundle-admission-owner"]
     },
     {
       "id": "local-bundle-hook-trust",
-      "decision": "Whether a deployed local bundle's hooks are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
-      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; consumers: commands/install.py, commands/update.py, commands/prune.py, policy/ci_checks.py",
-      "selectors": ["src/apm_cli/install/local_bundle_hook_trust.py"],
+      "decision": "Whether a deployed local bundle's hooks and canvas extensions are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
+      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; consumers: commands/install.py, commands/update.py, commands/prune.py, policy/ci_checks.py",
+      "selectors": [
+        "src/apm_cli/install/local_bundle_hook_trust.py",
+        "src/apm_cli/install/local_bundle_canvas.py"
+      ],
       "guards": [
         "install-deployment-local-bundle-hook-trust",
         "install-deployment-local-bundle-hook-retirement"

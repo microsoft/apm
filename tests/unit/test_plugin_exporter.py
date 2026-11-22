@@ -20,6 +20,7 @@ from apm_cli.bundle.plugin_exporter import (
     _get_dev_dependency_urls,
     _merge_file_map,
     _reconcile_plugin_json_version,
+    _warn_unpacked_dependency_config,
     export_plugin_bundle,
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -399,6 +400,40 @@ class TestCollectMcp:
 
     def test_missing_file(self, tmp_path):
         assert _collect_mcp(tmp_path) == {}
+
+
+class TestUnpackedDependencyConfigWarning:
+    """The warning names only dependency config the bundle will not carry."""
+
+    @staticmethod
+    def _warn(tmp_path, capsys, components, *, mcp=False) -> str:
+        install_path = tmp_path / "cache"
+        hooks_dir = install_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "session.json").write_text(json.dumps({"hooks": {"SessionStart": []}}))
+        if mcp:
+            (install_path / ".mcp.json").write_text(
+                json.dumps({"mcpServers": {"db": {"command": "db"}}})
+            )
+        _warn_unpacked_dependency_config(
+            LockedDependency(repo_url="acme/hooky"), install_path, components
+        )
+        captured = capsys.readouterr()
+        return " ".join(f"{captured.out} {captured.err}".split())
+
+    def test_packed_hooks_file_is_not_reported(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        assert "acme/hooky" not in self._warn(tmp_path, capsys, packed)
+
+    def test_hook_scripts_alone_do_not_carry_the_config(self, tmp_path, capsys):
+        scripts = [(tmp_path / "run.sh", "hooks/scripts/hooky/run.sh")]
+        output = self._warn(tmp_path, capsys, scripts)
+        assert "acme/hooky contributed hooks config that is not attested" in output
+
+    def test_mcp_config_is_reported_beside_packed_hooks(self, tmp_path, capsys):
+        packed = [(tmp_path / "x.json", "hooks/hooky-session.json")]
+        output = self._warn(tmp_path, capsys, packed, mcp=True)
+        assert "acme/hooky contributed MCP config that is not attested" in output
 
 
 # ---------------------------------------------------------------------------

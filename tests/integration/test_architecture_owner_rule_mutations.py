@@ -1317,10 +1317,10 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
         pytest.param(
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
             id="omitted-hooks-approved",
@@ -2340,6 +2340,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def exec_trust_context_for_project(",
         new="def exec_trust_context_for_project_disabled(",
         intent="Executable trust loses its canonical project-context resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-explicit-policy-source-owner",
+        rule_id="install-deployment-explicit-policy-source-owner",
+        path="src/apm_cli/policy/explicit_source.py",
+        old="inheritance.merge_policies(discovered.policy, explicit.policy)",
+        new="inheritance.merge_policies(explicit.policy, discovered.policy)",
+        intent="The explicit --policy source becomes the parent and can loosen org policy.",
     ),
     MutationCase(
         guard_id="install-deployment-frozen-flag-reader",
@@ -6836,3 +6844,86 @@ def test_every_stale_deleter_consumes_the_skip_set(
     )
     assert report.failures == ()
     assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "            bundled_deps=bundle_policy_subjects(bundle_info),\n",
+            "",
+            id="bundle-identity-skips-dependency-deny",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/packer.py",
+            "    policy_warnings = pack_policy_preflight(Path(project_root), logger)\n",
+            "    policy_warnings = []\n",
+            id="pack-skips-dependency-policy",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/pack_policy.py",
+            "    bundled = locked_package_refs(",
+            "    bundled = list(",
+            id="pack-policy-ignores-locked-packages",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "    retire_unadmitted_bundle_canvas(\n",
+            "    dict(\n",
+            id="scope-recheck-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/policy/ci_checks.py",
+            "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
+            "[]",
+            id="audit-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
+            "holding = found.setdefault((slug, False), BundleCanvas(slug, False))",
+            id="bundle-canvas-ownership-unrecorded",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "        path = contained_bundle_path(root, value, prefixes)\n",
+            "        path = root / rel\n",
+            id="bundle-canvas-retire-uncontained",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        hook_file = contained_bundle_path(project_root, value, prefixes)\n",
+            "        hook_file = Path(project_root) / value\n",
+            id="bundle-hook-retire-uncontained",
+        ),
+        pytest.param(
+            "install-deployment-executable-trust-context",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_HOOKS)",
+            id="bundle-canvas-approved-as-hooks",
+        ),
+    ],
+)
+def test_bundle_policy_and_canvas_gate_routes_are_guarded(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Local bundle identity, pack and bundle canvas gate, record and re-check route through owners."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )
