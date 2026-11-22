@@ -424,3 +424,117 @@ def test_consent_rechecks_an_all_matching_skill_directory_before_removing_it(
     assert not (tmp_path / first).exists()
     assert skill not in result.deleted and late not in result.deleted
     assert evidence.consented_deletions() == [first]
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_recorded_hashes_under_one_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A conflicting hash recorded under a backslash key still blocks consent."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    path = _deployed(tmp_path)
+    native = _PATH.replace("/", "\\")
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="owner/pkg",
+            deployed_files=[_PATH],
+            deployed_file_hashes={_PATH: compute_file_hash(path)},
+        )
+    )
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="owner/other",
+            deployed_files=[_PATH],
+            deployed_file_hashes={native: _OTHER},
+        )
+    )
+
+    def source_gone(*_args, **_kwargs):
+        raise OSError("source unreachable")
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", source_gone)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    evidence = DeploymentEvidence.collect(
+        tmp_path,
+        user_scope=False,
+        lockfile=lock,
+        lockfile_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+        kept=(),
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan(
+    tmp_path: Path,
+) -> None:
+    """A dangling link planted after the member scan blocks removing the directory."""
+    skill = ".agents/skills/alpha"
+    first, second = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    hashes, evidence = _skill_world(tmp_path, {first: "skill\n", second: "notes\n"})
+    scanned = evidence.verdict
+    planted = tmp_path / skill / "planted.md"
+
+    def scan_then_plant(claim: str, physical: Path, **kwargs) -> str:
+        verdict = scanned(claim, physical, **kwargs)
+        if claim == second and not os.path.lexists(planted):
+            try:
+                os.symlink(tmp_path / "missing-target.md", planted)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        return verdict
+
+    evidence.verdict = scan_then_plant
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert os.path.lexists(planted)
+    assert skill not in result.deleted
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_never_unlinks_a_link_it_classified_as_kept(tmp_path: Path) -> None:
+    """The final-symlink rule does not override consent's kept classification."""
+    target = tmp_path / "elsewhere.md"
+    target.write_text("outside\n", encoding="utf-8")
+    link = tmp_path / _PATH
+    link.parent.mkdir(parents=True)
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    evidence = _consent_evidence(tmp_path, target, render=_no_render)
+    evidence.consent_to_lockfile_hashes()
+    assert [claim for claim, _ in evidence.refusals([_PATH])] == [_PATH]
+
+    result = remove_stale_deployed_files(
+        [_PATH],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={},
+        receipt_retirements=[],
+        allow_final_symlink=True,
+    )
+
+    assert link.is_symlink() and result.deleted == []
+    assert target.read_text(encoding="utf-8") == "outside\n"

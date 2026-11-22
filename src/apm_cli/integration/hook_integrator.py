@@ -1895,7 +1895,7 @@ class HookIntegrator(BaseIntegrator):
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import remove_synced_files
+            from apm_cli.integration.cleanup import remove_synced_files, unconsented
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
@@ -1909,7 +1909,7 @@ class HookIntegrator(BaseIntegrator):
                 allow_final_symlink=True,
             )
             stats["files_removed"] += len(cleanup.deleted)
-            retained = cleanup.retained
+            retained = unconsented(cleanup.retained, evidence)
             if retained:
                 stats["errors"] += len(retained)
                 stats.setdefault("failed_paths", []).extend(retained)

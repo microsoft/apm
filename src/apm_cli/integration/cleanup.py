@@ -411,6 +411,14 @@ class DeploymentEvidence:
         self._reported.update(fresh)
         return fresh
 
+    def consent_kept_link(self, claim: str, physical: Path) -> bool:
+        """Whether *physical* is a link this consented uninstall classified as kept (#4295)."""
+        return (
+            self._lockfile_consent
+            and claim.replace("\\", "/") in self._consent_refused
+            and physical.is_symlink()
+        )
+
     def kept_under_consent(self) -> frozenset[str]:
         """Claims a deletion decision kept, despite ``--trust-lockfile`` consent, for their evidence."""
         return frozenset(self._consent_refused)
@@ -533,6 +541,15 @@ class DeploymentEvidence:
         return True
 
 
+def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) -> list[str]:
+    """Drop from *retained* what --trust-lockfile consent kept for its evidence (#4295).
+
+    A file consent keeps is not a cleanup failure; every other retained path is.
+    """
+    kept = evidence.kept_under_consent() if evidence is not None else frozenset()
+    return [path for path in retained if path.replace("\\", "/") not in kept]
+
+
 def _hash_envelope(value: str) -> str:
     """Return *value* as an ``<algo>:<hex>`` envelope; bare hex reads as sha256 (req-lk-016)."""
     value = value.strip().lower()
@@ -547,11 +564,13 @@ def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
     hashes: dict[str, set[str]] = {}
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if record.content_hash and owners.intersection(record.owners):
-            hashes.setdefault(record.locator.value, set()).add(record.content_hash)
+            key = record.locator.value.replace("\\", "/")
+            hashes.setdefault(key, set()).add(record.content_hash)
     for dependency in lockfile.dependencies.values():
         for path, content_hash in dependency.deployed_file_hashes.items():
             if content_hash:
-                hashes.setdefault(path, set()).add(content_hash)
+                # One spelling per file, as cleanup looks it up (#4295).
+                hashes.setdefault(path.replace("\\", "/"), set()).add(content_hash)
     return {path: frozenset(values) for path, values in hashes.items()}
 
 
@@ -867,7 +886,8 @@ def _safe_remove_skill_directory(
         if not _remove_proven_members(
             skill_dir, proven, evidence, result, diagnostics, dep_key
         ) or any(
-            child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir))
+            child.is_symlink()
+            or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
             for child in skill_dir.rglob("*")
         ):
             result.skipped_unmanaged.append(rel_path)
@@ -1250,6 +1270,14 @@ def remove_stale_deployed_files(
         # or byte equality with the locked render proves APM deployed these
         # bytes; a lockfile hash alone never authorizes deletion. Fails
         # CLOSED: edited, unproven or unreadable files are kept with a warning.
+        if evidence.consent_kept_link(stale_path, stale_target):
+            result.skipped_unmanaged.append(stale_path)
+            diagnostics.warn(
+                f"Kept {stale_path}: it is a symbolic link, which --trust-lockfile never removes. "
+                "Delete it manually if no longer needed.",
+                package=dep_key,
+            )
+            continue
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
         if allow_final_symlink and stale_target.is_symlink():

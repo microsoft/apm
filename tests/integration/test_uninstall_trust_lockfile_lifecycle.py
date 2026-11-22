@@ -259,3 +259,40 @@ def test_trust_lockfile_deletes_nothing_when_receipt_state_is_unreadable(
     text = _text(result)
     assert _tree(scope.skills) == before, text
     assert "Deleted " not in text, text
+
+
+def test_trust_lockfile_keeps_an_edited_hook_without_failing_the_uninstall(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A hook consent keeps for its edit is named, not counted as a cleanup failure."""
+    world = SkillSelectionWorld.create(tmp_path / "w", (str(apm_binary_path),))
+    hook = {
+        "hooks": {
+            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo t"}]}]
+        }
+    }
+    slug = world.publish("pkg", skills=("beta",), hooks={"pretool": hook}).slug
+    scope = _Scope(world, slug, user=False)
+    with world.serve() as env:
+        world.run(scope.install, cwd=scope.cwd, env=env, scenario_id="4295-h-install")
+    hooks = [
+        path for path in locked(scope.apm_root, slug).get("deployed_files") or [] if "hook" in path
+    ]
+    assert hooks, locked(scope.apm_root, slug)
+    edited = scope.apm_root / hooks[0]
+    edited.write_text(edited.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    _strand(world, scope.apm_root / "apm_modules")
+
+    trusted = world.run(
+        ("uninstall", slug, "--trust-lockfile"),
+        cwd=scope.cwd,
+        env=env,
+        expect=None,
+        scenario_id="4295-h-trust",
+    )
+
+    text = _text(trusted)
+    assert trusted.returncode == 0, text
+    assert edited.is_file() and edited.read_text(encoding="utf-8").endswith("\n\n"), text
+    assert not (scope.skills / "beta").exists(), text
+    assert slug not in json.dumps(load_yaml(scope.apm_root / "apm.yml"))
