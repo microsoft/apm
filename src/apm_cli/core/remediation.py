@@ -374,6 +374,12 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
     "finish the uninstall",
     before="if the source is unreachable, move each listed file aside or delete it",
 )
+UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
+    "uninstall-evidence-trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
+    "delete the files marked deletable and keep the rest",
+    before="if the source is gone for good",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 MARKETPLACE_DUPLICATE_ALIAS = _entry(

@@ -1,6 +1,9 @@
-"""Deletion requires deployment evidence, never a lockfile hash alone (req-lk-024).
+"""Deletion requires deployment evidence; a lockfile hash alone authorizes it only under consent.
 
-Amendment 0.1.69 (issue #3701), adopted 2026-11-20. The oracles drive
+req-lk-024.
+
+Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.76
+consent exception (issue #4295). The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
 equality with the locked render authorizes the deletion; a file that
@@ -9,6 +12,7 @@ differs from its evidence is kept.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -46,7 +50,9 @@ def _cleanup(root: Path, evidence: DeploymentEvidence, path: Path):
 @pytest.mark.req("req-lk-024")
 def test_spec_states_hash_alone_never_authorizes_deletion() -> None:
     assert_spec_contains("**[req-lk-024]** When a conforming **consumer** implementation deletes a")
-    assert_spec_contains("lockfile content hash alone MUST NOT authorize the deletion")
+    assert_spec_contains(
+        "under the consent exception below, a lockfile content hash alone MUST NOT"
+    )
 
 
 @pytest.mark.req("req-lk-024")
@@ -96,3 +102,187 @@ def test_file_differing_from_its_evidence_is_kept(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "edited by the user\n"
     assert result.skipped_user_edit == [_PATH]
     assert "edited since APM deployed it" in messages
+
+
+def _consent_evidence(
+    root: Path, path: Path, *, render, recorded=None, receipts=None, readable: bool = True
+) -> DeploymentEvidence:
+    return DeploymentEvidence(
+        deploy_root=root,
+        receipts=receipts or {},
+        render=render,
+        owners={_PATH: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={
+            _PATH: frozenset({compute_file_hash(path)} if recorded is None else recorded)
+        },
+        receipts_readable=readable,
+    )
+
+
+@pytest.mark.req("req-lk-024")
+def test_spec_states_the_per_invocation_consent_exception() -> None:
+    """Proposed amendment 0.1.76 (issue #4295)."""
+    assert_spec_contains("One consent exception applies, only to an uninstall the user explicitly")
+    assert_spec_contains("MUST NOT infer consent from another option,")
+    assert_spec_contains(
+        "compared per [req-lk-016](#req-lk-016) (a bare hexadecimal value reads as"
+    )
+
+
+@pytest.mark.req("req-lk-024")
+@pytest.mark.parametrize("consent", [False, True])
+def test_consent_deletes_only_unevidenced_bytes_equal_to_the_single_recorded_hash(
+    tmp_path: Path, consent: bool
+) -> None:
+    path = _deployed(tmp_path)
+    evidence = _consent_evidence(tmp_path, path, render=lambda _owner: None)
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.exists() is not consent
+    assert result.deleted == ([_PATH] if consent else [])
+    assert evidence.consented_deletions() == ([_PATH] if consent else [])
+    # Each deletion is named exactly once, at whichever boundary reports first.
+    assert evidence.take_consented_deletions() == ([_PATH] if consent else [])
+    assert evidence.take_consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_never_overrides_a_render_that_lacks_the_path(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = _consent_evidence(root, path, render=lambda _owner: render)
+    evidence.consent_to_lockfile_hashes()
+
+    result, messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert f"Kept {_PATH}" in messages
+
+
+_OTHER = "sha256:" + "0" * 64
+
+
+def _no_render(_owner: str) -> None:
+    return None
+
+
+@pytest.mark.req("req-lk-024")
+@pytest.mark.parametrize(
+    "case",
+    [
+        "no-recorded-hash",
+        "two-distinct-hashes",
+        "other-algorithm",
+        "unreadable-receipts",
+        "differing-receipt",
+        "edited-after-preview",
+        "symbolic-link",
+    ],
+)
+def test_consent_keeps_every_file_the_exception_does_not_cover(tmp_path: Path, case: str) -> None:
+    root = tmp_path / "project"
+    path = _deployed(root)
+    digest = compute_file_hash(path)
+    options: dict[str, object] = {}
+    if case == "no-recorded-hash":
+        options["recorded"] = frozenset()
+    elif case == "two-distinct-hashes":
+        options["recorded"] = frozenset({digest, _OTHER})
+    elif case == "other-algorithm":
+        options["recorded"] = frozenset({digest.replace("sha256:", "sha512:")})
+    elif case == "unreadable-receipts":
+        options["readable"] = False
+    elif case == "differing-receipt":
+        options["receipts"] = {path.resolve().as_posix(): _OTHER}
+    elif case == "symbolic-link":
+        target = tmp_path / "elsewhere.md"
+        target.write_bytes(path.read_bytes())
+        path.unlink()
+        try:
+            os.symlink(target, path)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+    evidence = _consent_evidence(root, path, render=_no_render, **options)
+    evidence.consent_to_lockfile_hashes()
+    if case == "edited-after-preview":
+        assert evidence.consent_preview([_PATH]) == frozenset({_PATH})
+        path.write_text("edited after the preview\n", encoding="utf-8")
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert os.path.lexists(path) and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_a_bare_hex_recorded_hash_as_sha256(tmp_path: Path) -> None:
+    path = _deployed(tmp_path)
+    bare = compute_file_hash(path).removeprefix("sha256:").upper()
+    evidence = _consent_evidence(tmp_path, path, render=_no_render, recorded=frozenset({bare}))
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert result.deleted == [_PATH] and not path.exists()
+    assert evidence.consented_deletions() == [_PATH]
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_records_a_file_edited_after_the_preview_as_kept(tmp_path: Path) -> None:
+    """The deletion recheck, not the preview, decides what consent kept."""
+    path = _deployed(tmp_path)
+    evidence = _consent_evidence(tmp_path, path, render=_no_render)
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.consent_preview([_PATH]) == frozenset({_PATH})
+    path.write_text("edited after the preview\n", encoding="utf-8")
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.read_text(encoding="utf-8") == "edited after the preview\n"
+    assert result.deleted == [] and evidence.kept_under_consent() == frozenset({_PATH})
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_deletes_each_eligible_member_of_a_skill_directory_it_keeps(
+    tmp_path: Path,
+) -> None:
+    """A legacy lock lists the directory; one edited member keeps only itself."""
+    skill = ".agents/skills/alpha"
+    kept, gone = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    for member in (kept, gone):
+        (tmp_path / member).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / member).write_text(f"{member}\n", encoding="utf-8")
+    hashes = {member: compute_file_hash(tmp_path / member) for member in (kept, gone)}
+    (tmp_path / kept).write_text("my edit\n", encoding="utf-8")
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=_no_render,
+        owners={skill: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={member: frozenset({value}) for member, value in hashes.items()},
+    )
+    evidence.consent_to_lockfile_hashes()
+    diagnostics = DiagnosticCollector()
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert not (tmp_path / gone).exists() and gone in result.deleted
+    assert (tmp_path / kept).read_text(encoding="utf-8") == "my edit\n"
+    assert evidence.consented_deletions() == [gone]
+    assert evidence.kept_under_consent() == frozenset({kept})
