@@ -188,6 +188,11 @@ class GateMatrix(StepRunner):
                 for package in command.packages
                 if package == MIXED
             )
+        if self.state.denied_by_policy and command.exits == frozenset({1}):
+            # A refusal under the org deny names the denied packages and changes
+            # nothing (AGENTS.md included), so it holds for every primitive they
+            # ship: p-exec's bin/ and p-mixed's instruction too.
+            unobserved = frozenset()
         if command.op == "mcp-install" and self.state.gate("p-exec", "mcp") not in _MCP_LEVELS:
             # U7 credits the collateral primitives only: a first-party server
             # requested by name is never gated (U-FIRST-PARTY-MCP).
@@ -329,7 +334,7 @@ class GateMatrix(StepRunner):
             # A catalog command leaves every project byte, deployed or locked, alone.
             unchanged["project"] = ("*",)
         elif exit_code != 0:
-            unchanged["project"] = _DURABLE
+            unchanged["project"] = (*_DURABLE, _AGENTS_MD)
         elif command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
         if command.args == _RENDER and exit_code == 0:
