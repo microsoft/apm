@@ -220,6 +220,9 @@ def resolve_for_containment(path: Path) -> Path:
 class CheckRoot:
     """A trusted root resolved live for ONE containment check; keep it for one call only.
 
+    Threat model: the project root and its ancestors are trusted within one
+    check; everything below the root is observed live.
+
     ``resolve(path)`` returns ``resolve_for_containment(path)`` but, for a
     path below the root, lstats only the components under the root instead
     of re-walking the root prefix ``realpath`` just resolved. The root is

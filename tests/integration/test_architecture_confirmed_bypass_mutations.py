@@ -74,6 +74,19 @@ BYPASS_MUTATIONS: tuple[BypassMutation, ...] = (
         append=(f"\n\ndef has_symlink_component(path):  # {EXEMPT}\n    return False\n"),
     ),
     BypassMutation(
+        name="check-root-stored-on-session",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/core/deployment_ledger.py",
+        old="        self.root = project_root.resolve()\n",
+        new="        self.root = project_root.resolve()\n        self._check = CheckRoot(self.root)\n",
+    ),
+    BypassMutation(
+        name="check-root-module-cache",
+        rule_id="transport-platform-url-path-security",
+        path="src/apm_cli/install/deployed_paths.py",
+        append="\n\nPROJECT_CHECK = CheckRoot(Path.cwd())\n",
+    ),
+    BypassMutation(
         name="transport-selection-exemption",
         rule_id="transport-platform-git-semver-preflight",
         path="src/apm_cli/marketplace/ref_resolver.py",
