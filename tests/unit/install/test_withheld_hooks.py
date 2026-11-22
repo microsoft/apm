@@ -10,7 +10,6 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.exec_gate import ExecPolicyUnavailable
 from apm_cli.install.withheld_hooks import locked_withheld_hook_files, withheld_hook_files
 from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -121,10 +120,10 @@ def test_hook_paths_that_cannot_be_computed_fail_closed(tmp_path: Path) -> None:
     ("target_subset", "error", "reported"),
     [
         ([], PermissionError("bin/ unreadable"), True),
-        ([], ExecPolicyUnavailable("bin/ unreadable"), True),
+        ([], ValueError("bin/ unreadable"), True),
         (["claude"], PermissionError("bin/ unreadable"), False),
     ],
-    ids=["os-error", "policy-unavailable", "restricted-to-claude"],
+    ids=["os-error", "value-error", "restricted-to-claude"],
 )
 def test_an_unreadable_decision_fails_closed_where_copilot_is_eligible(
     tmp_path: Path, target_subset: list[str], error: Exception, reported: bool
