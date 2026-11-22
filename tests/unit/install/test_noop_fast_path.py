@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import posix
 import sys
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from apm_cli.install import noop_fast_path as fp
 from apm_cli.policy.discovery import PolicyFetchResult
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I2")]
+_REAL_STAT, _REAL_LSTAT = os.stat, os.lstat  # captured before any recorder runs
 _POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="no-op replay is POSIX-only")
 
 _SUMMARY = "No changes -- install state already up to date in 1.2s."
@@ -184,9 +184,9 @@ def test_a_run_without_the_noop_summary_records_no_stamp(project) -> None:
 
 @_POSIX_ONLY
 def test_an_instrumentation_gap_records_no_stamp(project, monkeypatch) -> None:
-    def unobserved_exists(path) -> bool:  # a C-level exists the probes cannot see
+    def unobserved_exists(path) -> bool:  # an exists the probes cannot see
         try:
-            posix.stat(os.fspath(path))
+            _REAL_STAT(os.fspath(path))
         except OSError:
             return False
         return True
@@ -309,7 +309,7 @@ def test_the_fast_path_is_off_by_default(project, monkeypatch) -> None:
         def __call__(self) -> None:
             seen.append(
                 (
-                    os.stat is posix.stat and os.lstat is posix.lstat,
+                    os.stat is _REAL_STAT and os.lstat is _REAL_LSTAT,
                     type(os.environ) is environ_class,
                     sys.stdout is stdout,
                 )
@@ -334,3 +334,34 @@ def test_only_a_plain_reinstall_is_eligible(monkeypatch) -> None:
     assert fp.eligible({"mcp_name": "srv"}) is False
     monkeypatch.setattr(sys, "argv", ["apm", "install", "--policy", "./org.yml"])
     assert fp.eligible({}) is False
+
+
+@_POSIX_ONLY
+def test_a_parent_component_path_records_no_stamp(project) -> None:
+    class _ParentInstall(_Install):
+        def __call__(self) -> None:
+            (self.root / ".." / self.root.name / "input.txt").read_text(encoding="utf-8")
+            super().__call__()
+
+    run = _ParentInstall(project)
+    for _ in range(3):
+        _install(run)
+    assert run.calls == 3
+    assert _stamps() == []
+
+
+@_POSIX_ONLY
+def test_an_existing_cache_root_is_not_chmodded(tmp_path: Path, monkeypatch) -> None:
+    """The cache owner leaves an existing 0o700 root alone, so a no-op can stay write-free."""
+    from apm_cli.cache.paths import get_cache_root
+
+    root = tmp_path / "cache"
+    root.mkdir()
+    root.chmod(0o700)
+    before = root.stat().st_ctime_ns
+    monkeypatch.setenv("APM_CACHE_DIR", str(root))
+    assert get_cache_root() == root.resolve()
+    assert root.stat().st_ctime_ns == before, "an unchanged cache root must not be chmodded"
+    root.chmod(0o755)
+    get_cache_root()
+    assert (root.stat().st_mode & 0o777) == 0o700, "a loosened cache root is still tightened"
