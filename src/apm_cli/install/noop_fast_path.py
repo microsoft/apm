@@ -296,6 +296,7 @@ def _stamp_mismatch(
         ("org policy", lambda: (lambda now: now is None or now != stamp.get("policy"))(policy())),
         ("deployed file hash", lambda: not deployed_hashes_intact(project_root)),
     ]
+    checks = checks[:1]  # TEMPORARY red-first mutation (W4 H8): revert in the next commit
     for reason, changed in checks:
         found = changed()
         if found:
