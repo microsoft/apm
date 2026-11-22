@@ -218,22 +218,32 @@ def resolve_for_containment(path: Path) -> Path:
 
 
 class CheckRoot:
-    """A trusted root resolved live for ONE containment check; never kept across checks.
+    """A trusted root resolved live for ONE containment check; keep it for one call only.
 
-    ``resolve(path)`` equals ``resolve_for_containment(path)`` but walks only
-    the components of *path* below the root: ``realpath`` would re-walk the
-    shared root prefix it just resolved. The walk lstats every suffix
-    component now and falls back to a full resolve on any symlink, ``..``,
-    missing component, path outside the root or non-POSIX platform, so the
-    result is the same sequential filesystem observation ``realpath`` makes.
+    ``resolve(path)`` returns ``resolve_for_containment(path)`` but, for a
+    path below the root, lstats only the components under the root instead
+    of re-walking the root prefix ``realpath`` just resolved. The root is
+    resolved once, at construction, and its identity (device, inode) is
+    re-verified after every suffix walk, so a root or ancestor swapped for a
+    link mid-check falls back to the full resolve. Any symlink, ``..`` or
+    ``.``, missing component, path outside the root, relative path or
+    non-POSIX platform also takes the full resolve.
     """
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.resolved = resolve_for_containment(root)
+        self._identity = self._stat_identity()
+
+    def _stat_identity(self) -> tuple[int, int] | None:
+        try:
+            st = os.stat(self.resolved)
+        except OSError:
+            return None
+        return st.st_dev, st.st_ino
 
     def resolve(self, path: Path) -> Path:
-        if os.name != "posix" or not path.is_absolute() or not self.root.is_absolute():
+        if os.name != "posix" or self._identity is None or not path.is_absolute():
             return resolve_for_containment(path)
         try:
             suffix = path.relative_to(self.root).parts
@@ -249,6 +259,8 @@ class CheckRoot:
                     return resolve_for_containment(path)
             except OSError:
                 return resolve_for_containment(path)
+        if self._stat_identity() != self._identity:
+            return resolve_for_containment(path)
         return Path(current)
 
     def within(self, candidate: Path, base: Path) -> bool:
