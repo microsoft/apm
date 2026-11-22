@@ -385,3 +385,37 @@ def test_audit_reports_symlinked_evidence_without_following_it(
     assert not check.passed
     assert any("Unusable MCP write evidence" in detail for detail in check.details)
     assert elsewhere.read_bytes() == before
+
+
+@pytest.mark.parametrize("writes", [{}, ""])
+def test_a_receipt_whose_writes_is_not_a_list_is_unusable(project: Path, writes) -> None:
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    data = json.loads(path.read_text())
+    data["writes"] = writes
+    path.write_text(json.dumps(data))
+    before = _config(project).read_bytes()
+
+    _retire(project, _Logger())
+
+    assert _config(project).read_bytes() == before
+    with pytest.raises(ValueError, match="Invalid MCP write evidence"):
+        McpWriteReceipts.open(project, user_scope=False)
+
+
+def test_a_config_the_remover_cannot_rewrite_keeps_the_entry(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.install.errors import RequiredIntegrationError
+
+    def refuse(*_args, **_kwargs):
+        raise RequiredIntegrationError("cannot rewrite")
+
+    _install_write(project, _Logger())
+    monkeypatch.setattr("apm_cli.integration.mcp_integrator._clean_json_mcp_config", refuse)
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert SERVER in _config(project).read_text() and not logger.removed
+    assert [w for w in logger.warnings if f"Kept MCP server '{SERVER}'" in w]

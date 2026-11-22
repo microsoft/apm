@@ -172,6 +172,8 @@ class McpWriteReceipts:
                 data = json.loads(store.path.read_text(encoding="utf-8"))
                 if not session.binds(data):
                     raise ValueError("it belongs to another checkout or installation")
+                if not isinstance(data["writes"], list):
+                    raise TypeError("writes must be a list")
                 for row in data["writes"]:
                     write = McpWrite.from_row(row)
                     store.writes[(write.runtime, write.name)] = write
@@ -302,6 +304,7 @@ class McpWriteReceipts:
 
         Returns the names of the servers whose entries were removed.
         """
+        from apm_cli.install.errors import RequiredIntegrationError
         from apm_cli.integration.mcp_integrator_install import _remove_native_entry
         from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
@@ -321,7 +324,11 @@ class McpWriteReceipts:
                 self.forget(write)
                 continue
             if presence and self.proven(write):
-                _remove_native_entry(self._client(write.runtime), write.key, logger)
+                try:
+                    _remove_native_entry(self._client(write.runtime), write.key, logger)
+                except RequiredIntegrationError:
+                    # A config the exact-key remover cannot rewrite keeps the entry.
+                    _log.debug("Could not remove MCP entry %s", write.key, exc_info=True)
                 self._entries.clear()
                 if self._presence(write) is False:
                     self.forget(write)
