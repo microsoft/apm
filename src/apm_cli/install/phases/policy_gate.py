@@ -294,12 +294,13 @@ def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_grap
             dependency_graph.resolution_errors.remove(error)
 
 
-def enforce_content_types(ctx: InstallContext) -> None:
-    """Judge ``manifest.content_types`` once every resolved package is on disk.
+def enforce_content_types(ctx: InstallContext, materialized) -> None:
+    """Judge ``manifest.content_types`` on the package images integrate will deploy.
 
-    Runs after download and before any deploy write, so a blocking policy
-    refuses the install with nothing deployed and the lockfile untouched
-    (``PolicyViolationError`` refuses the commit); ``warn`` reports and continues.
+    Runs once every package is acquired and normalized, before any deploy
+    write, so a blocking policy refuses the install with nothing deployed and
+    the lockfile untouched (``PolicyViolationError`` refuses the commit);
+    ``warn`` reports and continues.
     """
     fetch = getattr(ctx, "policy_fetch", None)
     policy = getattr(fetch, "policy", None)
@@ -310,17 +311,14 @@ def enforce_content_types(ctx: InstallContext) -> None:
         or getattr(ctx, "dry_run", False) is True
     ):
         return
-    from apm_cli.policy.content_types_check import check_content_types, package_content_roots
+    from apm_cli.policy.content_types_check import check_content_types
     from apm_cli.policy.install_preflight import emit_check_violations
     from apm_cli.policy.models import CIAuditResult
 
-    base = getattr(getattr(ctx, "apm_package", None), "package_path", None) or ctx.project_root
-    roots = package_content_roots(
-        ctx.deps_to_install,
-        base_dir=Path(base),
-        modules_dir=ctx.apm_modules_dir,
-        source_first=True,
-    )
+    roots = {
+        source.dep_key: (Path(materialization.package_info.install_path),)
+        for source, materialization in materialized
+    }
     check = check_content_types(roots, policy.manifest)
     if check.passed:
         return

@@ -801,6 +801,38 @@ class TestContentTypes:
         policy = ManifestPolicy(content_types={"allow": ["skill", "agents", "commands"]})
         (subject,) = check_content_types({"p": (root,)}, policy).violation_subjects()
         assert "rules" in subject.reason
+        allowed = ManifestPolicy(content_types={"allow": ["skill", "agent", "command", "Rules"]})
+        assert check_content_types({"p": (root,)}, allowed).passed
+
+    def test_plugin_manifest_components_at_custom_paths_count(self, tmp_path):
+        from apm_cli.policy.content_types_check import package_content_kinds
+
+        root = self._package(tmp_path, "personas/reviewer.md", "SKILL.md")
+        (root / "plugin.json").write_text(
+            '{"name": "p", "agents": "./personas/reviewer.md"}', encoding="utf-8"
+        )
+        assert package_content_kinds(root) == {"skill", "agent"}
+
+    @pytest.mark.parametrize(
+        ("parent", "child", "allowed"),
+        [
+            ({}, None, True),
+            ({"allow": ["instruction", "skill"]}, {"allow": ["instructions", "skills"]}, True),
+            ({"allow": ["skill"]}, {"allow": ["instructions"]}, False),
+        ],
+        ids=["absent-allow-stays-unrestricted", "aliases-intersect-by-kind", "disjoint"],
+    )
+    def test_inherited_allow_lists_merge_by_kind(self, tmp_path, parent, child, allowed):
+        from apm_cli.policy.content_types_check import check_content_types
+        from apm_cli.policy.inheritance import merge_policies
+        from apm_cli.policy.schema import ApmPolicy
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        merged = merge_policies(
+            ApmPolicy(manifest=ManifestPolicy(content_types=parent)),
+            ApmPolicy(manifest=ManifestPolicy(content_types=child)),
+        )
+        assert check_content_types({"p": (root,)}, merged.manifest).passed is allowed
 
     @pytest.mark.parametrize(
         ("allow", "passed"),

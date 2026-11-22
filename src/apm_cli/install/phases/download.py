@@ -150,10 +150,6 @@ def run(ctx: InstallContext) -> None:
 
     ctx.pre_download_results = _pre_download_results
     ctx.pre_downloaded_keys = builtins.set(_pre_download_results.keys())
-    # Every resolved package is on disk now and nothing is deployed yet.
-    from apm_cli.install.phases.policy_gate import enforce_content_types
-
-    enforce_content_types(ctx)
 
 
 def _report_cache_mismatch(ctx: InstallContext, dep_key: str, locked_dep, path) -> None:

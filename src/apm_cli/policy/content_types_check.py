@@ -34,22 +34,19 @@ _KIND_SUFFIXES = (
 _NOT_PACKAGE_CONTENT = frozenset({"apm_modules", ".git", "node_modules"})
 
 
+def content_kind(entry: str) -> str:
+    """The canonical kind an allow entry or source directory names (unknown names stay)."""
+    name = entry.strip().lower()
+    return _CONTENT_KINDS.get(name, name)
+
+
 def content_types_allow(policy: ManifestPolicy) -> frozenset[str] | None:
     """The primitive kinds ``manifest.content_types.allow`` admits; None when unrestricted."""
     allow = (policy.content_types or {}).get("allow")
     if allow is None:
         return None
     entries = allow if isinstance(allow, list | tuple) else [allow]
-    return frozenset(
-        _CONTENT_KINDS[entry.strip().lower()]
-        for entry in entries
-        if isinstance(entry, str) and entry.strip().lower() in _CONTENT_KINDS
-    )
-
-
-def _directory_kind(name: str) -> str:
-    """The kind a primitive source directory holds; an unnamed one is its own kind."""
-    return _CONTENT_KINDS.get(name, name)
+    return frozenset(content_kind(entry) for entry in entries if isinstance(entry, str))
 
 
 def package_content_kinds(package_path: Path) -> frozenset[str]:
@@ -74,34 +71,46 @@ def package_content_kinds(package_path: Path) -> frozenset[str]:
         if relative == (PLUGIN_HOOKS_CONFIG,):
             kinds.add("hook")
         elif relative[0] == ".apm" and len(relative) > 2:
-            kinds.add(_directory_kind(relative[1]))
+            kinds.add(content_kind(relative[1]))
         elif relative[0] in PLUGIN_ROOT_DIRS and len(relative) > 1:
-            kinds.add(_directory_kind(relative[0]))
-    return frozenset(kinds)
+            kinds.add(content_kind(relative[0]))
+    return frozenset(kinds | _declared_plugin_kinds(package_path))
+
+
+def _declared_plugin_kinds(package_path: Path) -> set[str]:
+    """Kinds a plugin manifest declares, so components at custom paths count (fail closed)."""
+    from ..deps.plugin_parser import parse_plugin_manifest
+    from ..utils.helpers import find_plugin_json
+
+    plugin_json = find_plugin_json(package_path, include_codex=True)
+    if plugin_json is None:
+        return set()
+    try:
+        manifest = parse_plugin_manifest(plugin_json)
+    except (OSError, ValueError):
+        return {"plugin-manifest"}
+    declared = {"agents", "skills", "commands", "hooks"} & {
+        key for key, value in manifest.items() if value not in (None, [], {}, "")
+    }
+    return {content_kind(key) for key in declared}
 
 
 def package_content_roots(
-    deps: Iterable, *, base_dir: Path, modules_dir: Path, source_first: bool
+    deps: Iterable, *, base_dir: Path, modules_dir: Path
 ) -> dict[str, tuple[Path, ...]]:
-    """Display name -> every directory whose content a package deploys from.
+    """Dependency key -> the directory ``audit --ci`` judges for it.
 
-    Install (*source_first*) judges a local package's source, which integrate
-    re-copies and deploys, together with any apm_modules copy (fail closed).
-    Audit judges the copy and falls back to the source. A package with no
-    content on disk maps to ``()``.
+    The apm_modules copy (what install deployed), else a local source; ``()``
+    when neither is on disk, which the check reports as unverifiable.
     """
     roots: dict[str, tuple[Path, ...]] = {}
     for dep in deps:
-        copy = dep.get_install_path(modules_dir)
-        source = None
+        candidates = [dep.get_install_path(modules_dir)]
         if dep.is_local and dep.local_path:
             local = Path(dep.local_path).expanduser()
-            source = local if local.is_absolute() else base_dir / local
-        if source_first:
-            found = [path for path in (source, copy) if path is not None and path.is_dir()]
-        else:
-            found = [next((p for p in (copy, source) if p is not None and p.is_dir()), None)]
-        roots[dep.get_display_name()] = tuple(path.resolve() for path in found if path)
+            candidates.append(local if local.is_absolute() else base_dir / local)
+        found = next((path for path in candidates if path.is_dir()), None)
+        roots[dep.get_unique_key()] = (found.resolve(),) if found else ()
     return roots
 
 
@@ -156,6 +165,5 @@ def audit_content_types(
         (locked.to_dependency_ref() for locked in lock.get_package_dependencies()),
         base_dir=project_root,
         modules_dir=modules_root or project_root / "apm_modules",
-        source_first=False,
     )
     return check_content_types(roots, policy)
