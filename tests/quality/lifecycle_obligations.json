@@ -25043,8 +25043,8 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:695",
-    "src/apm_cli/commands/compile/cli.py:729"
+    "src/apm_cli/commands/compile/cli.py:735",
+    "src/apm_cli/commands/compile/cli.py:769"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },

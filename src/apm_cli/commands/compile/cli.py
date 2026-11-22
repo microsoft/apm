@@ -693,6 +693,45 @@ def _validate_project(
             sys.exit(1)
 
 
+def _enforce_dependency_policy(logger: CommandLogger, source_root: Path) -> None:
+    """Refuse to compile while org policy denies an installed dependency.
+
+    Compile renders installed dependency content (and the files it deployed)
+    into agent context, so it applies the dependency check install, update
+    and uninstall apply (:func:`policy_denied_locked_packages`), routed
+    through the trust policy owner so an unusable policy fails closed as
+    install does. ``enforcement: warn`` reports and continues.
+    """
+    from ...deps.lockfile import LockFile, resolve_lockfile_path_for_read
+    from ...install.errors import PolicyViolationError
+    from ...install.exec_gate import policy_denied_locked_packages
+    from ...policy.outcome_routing import resolve_trust_policy
+
+    lockfile = LockFile.read(resolve_lockfile_path_for_read(source_root, read_only=True))
+    if lockfile is None or not any(key != "." for key in lockfile.dependencies):
+        return
+    try:
+        policy = resolve_trust_policy(source_root, logger=logger)
+    except PolicyViolationError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
+    denied = policy_denied_locked_packages(lockfile, policy) if policy is not None else {}
+    if not denied or getattr(policy, "enforcement", "block") == "off":
+        return
+    blocking = getattr(policy, "enforcement", "block") != "warn"
+    for key, reason in sorted(denied.items()):
+        message = f"{key}: {reason}"
+        logger.error(message) if blocking else logger.warning(message)
+    if blocking:
+        from ...core.remediation import COMPILE_DEPENDENCY_DENIED
+
+        logger.refusal(
+            "Compile blocked by org policy -- nothing was written. "
+            f"{COMPILE_DEPENDENCY_DENIED.sentence()}"
+        )
+        sys.exit(1)
+
+
 def _run_validation_mode(logger: CommandLogger, verbose: bool, source_root: Path) -> None:
     """Run validation-only mode (``--validate`` flag).
 
@@ -1555,6 +1594,8 @@ def compile(  # noqa: PLR0913 -- Click handler
         if validate:
             _run_validation_mode(logger, verbose, source_root)
             return
+
+        _enforce_dependency_policy(logger, source_root)
 
         if watch:
             _run_watch_mode(
