@@ -4965,7 +4965,7 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         ),
         (
             "src/apm_cli/install/mcp/command.py",
-            "        refuse_unrecorded_mcp_collisions(\n            [dep],",
+            "        refuse_projected_mcp_collisions(\n            [dep],",
             "        unchecked_mcp_collisions(\n            [dep],",
         ),
     ],

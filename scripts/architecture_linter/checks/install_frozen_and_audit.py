@@ -612,7 +612,7 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         (
             "src/apm_cli/install/mcp/command.py",
             "_refuse_native_mcp_collision",
-            "refuse_unrecorded_mcp_collisions",
+            "refuse_projected_mcp_collisions",
         ),
         (
             "src/apm_cli/install/mcp/integration.py",

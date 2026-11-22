@@ -240,10 +240,10 @@ def _refuse_native_mcp_collision(
 
     from ...deps.lockfile import resolve_lockfile_path_for_read
     from ..errors import MCPNativeConflictError
-    from .collision_preflight import refuse_unrecorded_mcp_collisions
+    from .collision_preflight import refuse_projected_mcp_collisions
 
     try:
-        refuse_unrecorded_mcp_collisions(
+        refuse_projected_mcp_collisions(
             [dep],
             lockfile=LockFile.read(resolve_lockfile_path_for_read(apm_dir, read_only=True)),
             project_root=apm_dir,
