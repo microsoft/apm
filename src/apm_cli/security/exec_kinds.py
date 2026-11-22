@@ -7,6 +7,9 @@ target skills root.
 
 from __future__ import annotations
 
+import posixpath
+from pathlib import PurePosixPath
+
 from .executables import (
     EXEC_TYPE_BIN,
     EXEC_TYPE_CANVAS,
@@ -32,13 +35,14 @@ def _skill_roots() -> tuple[tuple[str, ...], ...]:
     User scope honours relocated homes (``CLAUDE_CONFIG_DIR`` and friends)
     through the target-root owner, so recorded home-relative paths match.
     """
-    from pathlib import PurePosixPath
-
     from ..integration.skill_layout import with_every_skill_layout
     from ..integration.targets import KNOWN_TARGETS, scoped_profile_or_none
 
     profiles = []
     for profile in KNOWN_TARGETS.values():
+        # Dynamic roots (Cowork) record URI locators and may fail to resolve.
+        if not profile.supports("skills") or profile.user_root_resolver is not None:
+            continue
         profiles.append(profile)
         user_profile = scoped_profile_or_none(profile, user_scope=True)
         if user_profile is not None:
@@ -46,16 +50,22 @@ def _skill_roots() -> tuple[tuple[str, ...], ...]:
     roots = {
         profile.skills_rel_root
         for profile in with_every_skill_layout(profiles)
-        if profile.supports("skills") and profile.user_root_resolver is None
+        if profile.supports("skills")
     }
-    # PurePosixPath, as for recorded paths: CLAUDE_CONFIG_DIR=$HOME gives "./skills".
-    return tuple(PurePosixPath(root).parts for root in roots)
+    return tuple(_root_parts(root) for root in roots)
+
+
+def _root_parts(root: str) -> tuple[str, ...]:
+    """Components of a skills root as the lock records paths (POSIX, normalized).
+
+    A user root equal to HOME scopes to ``./skills``; a Windows root carries
+    backslashes. Both must match recorded ``skills/<skill>/bin/...`` paths.
+    """
+    return PurePosixPath(posixpath.normpath(root.replace("\\", "/"))).parts
 
 
 def _deployed_bin_file(path: str, skill_roots) -> bool:
     """True for ``<skills root>/<skill>/bin/...``, the only place bin/ deploys."""
-    from pathlib import PurePosixPath
-
     parts = PurePosixPath(path).parts
     for root in skill_roots:
         size = len(root)

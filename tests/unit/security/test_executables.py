@@ -941,6 +941,34 @@ def test_rebuild_retired_kinds_sees_user_scope_bin(tmp_path, monkeypatch, env, d
     )
 
 
+def test_rebuild_retired_kinds_skips_dynamic_root_resolution(monkeypatch):
+    """#4567: a Cowork root that cannot resolve never blocks naming other kinds."""
+    import dataclasses
+
+    from apm_cli.integration import targets
+
+    def unresolvable():
+        raise RuntimeError("several OneDrive mounts")
+
+    cowork = targets.KNOWN_TARGETS["copilot-cowork"]
+    broken = dataclasses.replace(cowork, user_root_resolver=unresolvable)
+    monkeypatch.setitem(targets.KNOWN_TARGETS, "copilot-cowork", broken)
+
+    assert exec_kinds.rebuild_retired_kinds(("hooks",), {"hooks"}, []) == ("hooks",)
+
+
+@pytest.mark.parametrize(
+    ("root", "recorded"),
+    [
+        pytest.param("./skills", "skills/p/bin/tool", id="user-root-is-home"),
+        pytest.param("..\\cfg\\skills", "../cfg/skills/p/bin/tool", id="windows-outside-home"),
+    ],
+)
+def test_skill_root_matches_recorded_bin_path(root, recorded):
+    """#4567: roots normalize like recorded lock paths (no ".", forward slashes)."""
+    assert exec_kinds._deployed_bin_file(recorded, (exec_kinds._root_parts(root),))
+
+
 @pytest.mark.parametrize(
     ("kinds", "expected"),
     [
