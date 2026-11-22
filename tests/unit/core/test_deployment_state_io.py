@@ -225,6 +225,37 @@ def test_departing_proof_superseding_a_generic_row_is_consumed_once(tmp_path: Pa
     assert reconciler.diagnostics.error_count == 0
 
 
+def test_generic_row_with_several_concrete_proofs_keeps_every_target_record(
+    tmp_path: Path,
+) -> None:
+    """A live generic row superseded on two targets keeps both concrete rows (#4703)."""
+    value = ".github/instructions/shared.instructions.md"
+    copilot = _locator(value)
+    claude = _locator(value, target="claude")
+    generic = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="legacy-generic",
+        value=value,
+        runtime=None,
+        scope="project",
+    )
+    prior = DeploymentLedger(
+        records={generic.key: _record(generic, owners=("kept",), active="kept")}
+    )
+    reconciler = _reconciler(tmp_path)
+
+    reconciled = reconciler.reconcile(
+        prior,
+        [_materialization("kept", copilot), _materialization("kept", claude)],
+        _intent(active=frozenset({"copilot", "claude"}), owners=frozenset({"kept"})),
+    )
+
+    assert copilot.key in reconciled.ledger.records
+    assert claude.key in reconciled.ledger.records
+    assert reconciled.failed == ()
+    assert reconciler.diagnostics.error_count == 0
+
+
 def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     tmp_path: Path,
 ) -> None:

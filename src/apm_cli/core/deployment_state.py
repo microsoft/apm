@@ -276,12 +276,11 @@ class DeploymentReconciler:
             proofs = successful.get(key)
             if proofs is None:
                 proofs = self._superseding_generic_proofs(prior, successful_by_value)
-                # The generic row now owns these proofs; the per-key pass below
-                # must not process them a second time (#4703).
-                superseded_success_keys.update(proof.locator.key for proof in proofs or ())
             if self._departing_only(proofs, intent):
                 # A departing owner's proof neither establishes nor erases
-                # ownership: keep the row's remaining owners, else drop it (#4703).
+                # ownership: keep the row's remaining owners, else drop it, and
+                # the per-key pass must not process those proofs again (#4703).
+                superseded_success_keys.update(proof.locator.key for proof in proofs or ())
                 preserved = self._filter_absent_owners(prior, intent)
                 if preserved is None:
                     removed.append(prior.locator)
