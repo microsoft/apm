@@ -166,6 +166,10 @@ _CLOSED_PROXY = "http://127.0.0.1:9"
 _NO_DRY_RUN = frozenset({"lock", "marketplace", "approve-deny"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
 _KEEPING = frozenset({"lock", "compile", "marketplace"})
+# Ops that act with a local bundle in place: they keep it (keeps_local_bundles).
+_BUNDLE_OPS = frozenset({"lock", "compile"})
+# A local package that ships only an instruction (author_doc).
+DOC_PACKAGE = "p-doc"
 # Forms a marketplace catalog declares: ``apm marketplace update`` acts on their source.
 # Local catalogs: a directory (marketplace-local) and a direct marketplace.json file
 # (marketplace-file); each lists one plugin carrying every observable primitive.
@@ -231,11 +235,16 @@ CHOICES = (
     Choice("native", "p-native-claude", _NATIVE, frozenset({"skill", "mcp"})),
     Choice("native", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
     Choice("native", "p-native-claude-exec", _NATIVE, frozenset({"skill", "hook", "lsp"})),
+    Choice("local-path", DOC_PACKAGE, frozenset({"other-file"})),
     Choice("pkg-registry", "p-skill", _SKILL),
     Choice("pkg-registry", "p-exec", _EXEC),
     Choice("mcp-registry", "p-registry", frozenset({"mcp"})),
     *(
-        Choice(form, package, frozenset({"skill", "hook", "bin", "mcp", "lsp", "canvas"}))
+        Choice(
+            form,
+            package,
+            frozenset({"skill", "hook", "bin", "mcp", "lsp", "canvas", "other-file"}),
+        )
         for form, (_, package) in LOCAL_CATALOGS.items()
     ),
     Choice("inline-mcp", INLINE_SERVER, frozenset({"mcp"})),
@@ -247,13 +256,17 @@ CHOICES = (
         for package, kind in (("p-lsp", "lsp"), ("p-canvas", "canvas"))
         for form in ("shorthand", "marketplace-object", "pkg-registry")
     ),
+    # The native plugin with bin/ from the world's git catalog (a skill next to an
+    # executable, so approve decides it).
+    Choice("marketplace-object", "p-native-claude-bin", _NATIVE, frozenset({"skill", "bin"})),
 )
 _BY_FORM: dict[str, Choice] = {}
 for _choice in CHOICES:
     _BY_FORM.setdefault(_choice.form, _choice)
-_SWAPPED = ("p-lsp", "p-canvas")
-_REMOTE_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form != "local-path")
-_LOCAL_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form == "local-path")
+_SWAPPED = ("p-lsp", "p-canvas", "p-native-claude-bin")
+_LOCAL_FORMS = frozenset({"local-path", "native"})
+_REMOTE_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form not in _LOCAL_FORMS)
+_LOCAL_SWAPS = tuple(c for c in CHOICES if c.package in _SWAPPED and c.form in _LOCAL_FORMS)
 _REMOTE_FORMS = frozenset(
     {
         "shorthand",
@@ -318,7 +331,7 @@ def applies(op: str, form: str) -> bool:
     if op == "approve-deny":
         return form in _DECIDED_FORMS
     if form == "bundle":
-        return op == "install"
+        return op == "install" or op in _BUNDLE_OPS
     return not (form in _MCP_FORMS and op == "uninstall")
 
 
@@ -494,8 +507,12 @@ def _mcp_servers(observation: Observation) -> frozenset[str]:
 KNOWN_CELLS: tuple[KnownCell, ...] = ()
 
 
+def _instruction_text(package: str) -> str:
+    return f'---\napplyTo: "**"\n---\n\nFollow the {package} conventions.\n'
+
+
 def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Path:
-    """A local catalog listing one plugin that carries skill, hook, bin, MCP, LSP and canvas.
+    """A local catalog listing one plugin: skill, hook, bin, MCP, LSP, canvas and an instruction.
 
     Returns the source ``apm marketplace add`` takes: the catalog directory, or (with
     *as_file*) its ``marketplace.json``, whose relative plugin sources resolve from
@@ -524,6 +541,7 @@ def author_catalog(root: Path, name: str, package: str, *, as_file: bool) -> Pat
         ],
     )
     factory.add_skill(plugin, package, skill_text(package, f"Use {package}."))
+    factory.add_instruction(plugin, package, _instruction_text(package))
     factory.add_hook(plugin, "session", SESSION_HOOK)
     factory.add_canvas(plugin, package, CANVAS, assets={PurePosixPath("icon.txt"): b"c\n"})
     script = plugin.root / "bin" / package
@@ -656,6 +674,8 @@ class SourceMachine(MachineBase):
                 "id": f"lifecycle/{choice.package}",
                 "version": "1.0.0",
             }
+        if choice.package == DOC_PACKAGE:
+            return str(self.author_doc())
         return packages[choice.package].spec
 
     def host_url(self) -> str:
@@ -953,7 +973,7 @@ class SourceMachine(MachineBase):
 
         had = self.slots.get(choice.slot)
         self.edit(f"declare-{choice.form}", change)
-        if had is not None and had.form != choice.form and "local-path" in {had.form, choice.form}:
+        if had is not None and had.form != choice.form and _LOCAL_FORMS & {had.form, choice.form}:
             self.prune_pending = True  # the checkout moves between _local/ and a remote path
         self.entries[choice.slot] = entry
         self.slots[choice.slot] = choice
@@ -1003,8 +1023,36 @@ class SourceMachine(MachineBase):
     )
     def reconcile(self, op: str, dry_run: bool) -> None:
         args = ("--yes",) if op == "update" else ()
-        choices = [c for c in self._choices() if c.form != "bundle"]
-        self.command(op, args, choices, dry_run)
+        choices = [c for c in self._choices() if applies(op, c.form)]
+        bundles = op in _BUNDLE_OPS and any(c.form == "bundle" for c in choices)
+        self.command(
+            op, args, choices, dry_run, verify=self.keeps_local_bundles if bundles else None
+        )
+
+    def keeps_local_bundles(self, step: Step) -> None:
+        """lock and compile keep every local bundle's deployment-ledger record (a bundle has no
+        manifest entry, so nothing may resolve it away)."""
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        def bundles(observation: Observation) -> frozenset[str]:
+            lock = observation.lock
+            if lock is None:
+                return frozenset()
+            return DeploymentLedgerCodec.local_bundle_values(
+                DeploymentLedgerCodec.from_lockfile(lock)
+            )
+
+        recorded, kept = bundles(step.before), bundles(step.after)
+        assert kept == recorded, f"{step.op.name}: {sorted(recorded)} -> {sorted(kept)}"
+
+    def author_doc(self) -> Path:
+        """A local package that ships only an instruction (other-file), authored once."""
+        root = self.bench.world.root / "authored" / DOC_PACKAGE
+        if not root.exists():
+            factory = LocalPackageFactory(root.parent)
+            package = factory.create(DOC_PACKAGE, version="1.0.0")
+            factory.add_instruction(package, DOC_PACKAGE, _instruction_text(DOC_PACKAGE))
+        return root
 
     def gate_off_pass(self) -> None:
         """No executables gate: every declared form deploys without approval (GATE=none).
@@ -1428,6 +1476,7 @@ def replay_spine(machine: SourceMachine) -> None:
         "p-native-claude",
         "p-native-claude-bin",
         "p-native-claude-exec",
+        DOC_PACKAGE,
     ):
         machine.uninstall(slot, True)
     for slot in _MCP_SERVERS:

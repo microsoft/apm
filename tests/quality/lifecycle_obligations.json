@@ -6868,6 +6868,7 @@
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|marketplace-object|bin",
     "T3|approve-deny|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -6922,11 +6923,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|marketplace-object|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=bin": {
    "credited_by": [
@@ -7350,6 +7355,7 @@
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|audit|marketplace-object|bin",
     "T3|audit|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -7728,11 +7734,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|compile|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -7772,11 +7782,15 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=compile|SRC=local-path|PRIM=other-file": {
+   "credited_by": [
+    "T3|compile|local-path|other-file"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=local-path|PRIM=skill": {
    "family": "T3",
@@ -7809,11 +7823,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=marketplace-file|PRIM=other-file": {
+   "credited_by": [
+    "T3|compile|file-mkt|other-file"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=marketplace-file|PRIM=skill": {
    "credited_by": [
@@ -7828,6 +7846,7 @@
   },
   "T3|OP=compile|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|compile|marketplace-object|bin",
     "T3|compile|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -7889,11 +7908,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=marketplace-local|PRIM=other-file": {
+   "credited_by": [
+    "T3|compile|local-mkt|other-file"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=compile|SRC=marketplace-local|PRIM=skill": {
    "credited_by": [
@@ -8156,6 +8179,7 @@
   },
   "T3|OP=install|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|install|marketplace-object|bin",
     "T3|install|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -8484,11 +8508,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|lock|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -8498,25 +8526,37 @@
    "strength": "e2e"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "T3|lock|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|lock|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=mcp": {
+   "credited_by": [
+    "T3|lock|bundle|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=lock|SRC=local-bundle|PRIM=skill": {
    "family": "T3",
@@ -8641,6 +8681,7 @@
   },
   "T3|OP=lock|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|lock|marketplace-object|bin",
     "T3|lock|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -8971,6 +9012,7 @@
   },
   "T3|OP=marketplace|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|marketplace|marketplace-object|bin",
     "T3|marketplace|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -9298,6 +9340,7 @@
   },
   "T3|OP=prune|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|prune|marketplace-object|bin",
     "T3|prune|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -9733,6 +9776,7 @@
   },
   "T3|OP=uninstall|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|uninstall|marketplace-object|bin",
     "T3|uninstall|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -10165,6 +10209,7 @@
   },
   "T3|OP=update|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|update|marketplace-object|bin",
     "T3|update|plugin-at-mkt|bin"
    ],
    "family": "T3",
@@ -11453,11 +11498,15 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-bundle|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|compile|bundle"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=compile|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -14907,6 +14956,7 @@
     "T3|approve-deny|file-mkt|hook",
     "T3|approve-deny|file-mkt|lsp",
     "T3|approve-deny|file-mkt|mcp",
+    "T3|approve-deny|file-mkt|other-file",
     "T3|approve-deny|file-mkt|skill",
     "T5|real|approve-deny|file-mkt"
    ],
@@ -14919,8 +14969,10 @@
   },
   "pair|OP=approve-deny|SRC=marketplace-git": {
    "credited_by": [
+    "T3|approve-deny|marketplace-object|bin",
     "T3|approve-deny|marketplace-object|canvas",
     "T3|approve-deny|marketplace-object|lsp",
+    "T3|approve-deny|marketplace-object|skill",
     "T3|approve-deny|plugin-at-mkt|bin",
     "T3|approve-deny|plugin-at-mkt|hook",
     "T3|approve-deny|plugin-at-mkt|mcp",
@@ -14941,6 +14993,7 @@
     "T3|approve-deny|local-mkt|hook",
     "T3|approve-deny|local-mkt|lsp",
     "T3|approve-deny|local-mkt|mcp",
+    "T3|approve-deny|local-mkt|other-file",
     "T3|approve-deny|local-mkt|skill",
     "T5|real|approve-deny|local-mkt"
    ],
@@ -15337,6 +15390,7 @@
     "T3|audit|file-mkt|hook",
     "T3|audit|file-mkt|lsp",
     "T3|audit|file-mkt|mcp",
+    "T3|audit|file-mkt|other-file",
     "T3|audit|file-mkt|skill",
     "T5|dry-run|audit|file-mkt",
     "T5|real|audit|file-mkt"
@@ -15350,6 +15404,7 @@
   },
   "pair|OP=audit|SRC=marketplace-git": {
    "credited_by": [
+    "T3|audit|marketplace-object|bin",
     "T3|audit|marketplace-object|canvas",
     "T3|audit|marketplace-object|lsp",
     "T3|audit|marketplace-object|skill",
@@ -15375,6 +15430,7 @@
     "T3|audit|local-mkt|hook",
     "T3|audit|local-mkt|lsp",
     "T3|audit|local-mkt|mcp",
+    "T3|audit|local-mkt|other-file",
     "T3|audit|local-mkt|skill",
     "T5|dry-run|audit|local-mkt",
     "T5|real|audit|local-mkt"
@@ -16175,11 +16231,20 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=compile|SRC=local-bundle": {
+   "credited_by": [
+    "T3|compile|bundle|bin",
+    "T3|compile|bundle|hook",
+    "T3|compile|bundle|lsp",
+    "T3|compile|bundle|mcp",
+    "T5|dry-run|compile|bundle",
+    "T5|real|compile|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=compile|SRC=local-path": {
    "family": "pair",
@@ -16196,6 +16261,7 @@
     "T3|compile|file-mkt|hook",
     "T3|compile|file-mkt|lsp",
     "T3|compile|file-mkt|mcp",
+    "T3|compile|file-mkt|other-file",
     "T3|compile|file-mkt|skill",
     "T5|dry-run|compile|file-mkt",
     "T5|real|compile|file-mkt"
@@ -16209,6 +16275,7 @@
   },
   "pair|OP=compile|SRC=marketplace-git": {
    "credited_by": [
+    "T3|compile|marketplace-object|bin",
     "T3|compile|marketplace-object|canvas",
     "T3|compile|marketplace-object|lsp",
     "T3|compile|marketplace-object|skill",
@@ -16234,6 +16301,7 @@
     "T3|compile|local-mkt|hook",
     "T3|compile|local-mkt|lsp",
     "T3|compile|local-mkt|mcp",
+    "T3|compile|local-mkt|other-file",
     "T3|compile|local-mkt|skill",
     "T5|dry-run|compile|local-mkt",
     "T5|real|compile|local-mkt"
@@ -16732,6 +16800,7 @@
     "T3|install|file-mkt|hook",
     "T3|install|file-mkt|lsp",
     "T3|install|file-mkt|mcp",
+    "T3|install|file-mkt|other-file",
     "T3|install|file-mkt|skill",
     "T5|dry-run|install|file-mkt",
     "T5|real|install|file-mkt",
@@ -16759,6 +16828,7 @@
   },
   "pair|OP=install|SRC=marketplace-git": {
    "credited_by": [
+    "T3|install|marketplace-object|bin",
     "T3|install|marketplace-object|canvas",
     "T3|install|marketplace-object|lsp",
     "T3|install|marketplace-object|skill",
@@ -16799,6 +16869,7 @@
     "T3|install|local-mkt|hook",
     "T3|install|local-mkt|lsp",
     "T3|install|local-mkt|mcp",
+    "T3|install|local-mkt|other-file",
     "T3|install|local-mkt|skill",
     "T5|dry-run|install|local-mkt",
     "T5|real|install|local-mkt",
@@ -17255,11 +17326,19 @@
    "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|SRC=local-bundle": {
+   "credited_by": [
+    "T3|lock|bundle|bin",
+    "T3|lock|bundle|hook",
+    "T3|lock|bundle|lsp",
+    "T3|lock|bundle|mcp",
+    "T5|real|lock|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=lock|SRC=local-path": {
    "family": "pair",
@@ -17276,6 +17355,7 @@
     "T3|lock|file-mkt|hook",
     "T3|lock|file-mkt|lsp",
     "T3|lock|file-mkt|mcp",
+    "T3|lock|file-mkt|other-file",
     "T3|lock|file-mkt|skill",
     "T5|real|lock|file-mkt"
    ],
@@ -17288,6 +17368,7 @@
   },
   "pair|OP=lock|SRC=marketplace-git": {
    "credited_by": [
+    "T3|lock|marketplace-object|bin",
     "T3|lock|marketplace-object|canvas",
     "T3|lock|marketplace-object|lsp",
     "T3|lock|marketplace-object|skill",
@@ -17311,6 +17392,7 @@
     "T3|lock|local-mkt|hook",
     "T3|lock|local-mkt|lsp",
     "T3|lock|local-mkt|mcp",
+    "T3|lock|local-mkt|other-file",
     "T3|lock|local-mkt|skill",
     "T5|real|lock|local-mkt"
    ],
@@ -17634,6 +17716,7 @@
     "T3|marketplace|file-mkt|hook",
     "T3|marketplace|file-mkt|lsp",
     "T3|marketplace|file-mkt|mcp",
+    "T3|marketplace|file-mkt|other-file",
     "T3|marketplace|file-mkt|skill",
     "T5|real|marketplace|file-mkt"
    ],
@@ -17646,6 +17729,7 @@
   },
   "pair|OP=marketplace|SRC=marketplace-git": {
    "credited_by": [
+    "T3|marketplace|marketplace-object|bin",
     "T3|marketplace|marketplace-object|canvas",
     "T3|marketplace|marketplace-object|lsp",
     "T3|marketplace|marketplace-object|skill",
@@ -17680,6 +17764,7 @@
     "T3|marketplace|local-mkt|hook",
     "T3|marketplace|local-mkt|lsp",
     "T3|marketplace|local-mkt|mcp",
+    "T3|marketplace|local-mkt|other-file",
     "T3|marketplace|local-mkt|skill",
     "T5|real|marketplace|local-mkt"
    ],
@@ -18699,6 +18784,7 @@
     "T3|prune|file-mkt|hook",
     "T3|prune|file-mkt|lsp",
     "T3|prune|file-mkt|mcp",
+    "T3|prune|file-mkt|other-file",
     "T3|prune|file-mkt|skill",
     "T5|dry-run|prune|file-mkt",
     "T5|real|prune|file-mkt"
@@ -18712,6 +18798,7 @@
   },
   "pair|OP=prune|SRC=marketplace-git": {
    "credited_by": [
+    "T3|prune|marketplace-object|bin",
     "T3|prune|marketplace-object|canvas",
     "T3|prune|marketplace-object|lsp",
     "T3|prune|marketplace-object|skill",
@@ -18737,6 +18824,7 @@
     "T3|prune|local-mkt|hook",
     "T3|prune|local-mkt|lsp",
     "T3|prune|local-mkt|mcp",
+    "T3|prune|local-mkt|other-file",
     "T3|prune|local-mkt|skill",
     "T5|dry-run|prune|local-mkt",
     "T5|real|prune|local-mkt"
@@ -19187,6 +19275,7 @@
     "T3|uninstall|file-mkt|hook",
     "T3|uninstall|file-mkt|lsp",
     "T3|uninstall|file-mkt|mcp",
+    "T3|uninstall|file-mkt|other-file",
     "T3|uninstall|file-mkt|skill",
     "T5|dry-run|uninstall|file-mkt",
     "T5|real|uninstall|file-mkt"
@@ -19200,6 +19289,7 @@
   },
   "pair|OP=uninstall|SRC=marketplace-git": {
    "credited_by": [
+    "T3|uninstall|marketplace-object|bin",
     "T3|uninstall|marketplace-object|canvas",
     "T3|uninstall|marketplace-object|lsp",
     "T3|uninstall|marketplace-object|skill",
@@ -19225,6 +19315,7 @@
     "T3|uninstall|local-mkt|hook",
     "T3|uninstall|local-mkt|lsp",
     "T3|uninstall|local-mkt|mcp",
+    "T3|uninstall|local-mkt|other-file",
     "T3|uninstall|local-mkt|skill",
     "T5|dry-run|uninstall|local-mkt",
     "T5|real|uninstall|local-mkt"
@@ -19671,6 +19762,7 @@
     "T3|update|file-mkt|hook",
     "T3|update|file-mkt|lsp",
     "T3|update|file-mkt|mcp",
+    "T3|update|file-mkt|other-file",
     "T3|update|file-mkt|skill",
     "T5|dry-run|update|file-mkt",
     "T5|real|update|file-mkt"
@@ -19684,6 +19776,7 @@
   },
   "pair|OP=update|SRC=marketplace-git": {
    "credited_by": [
+    "T3|update|marketplace-object|bin",
     "T3|update|marketplace-object|canvas",
     "T3|update|marketplace-object|lsp",
     "T3|update|marketplace-object|skill",
@@ -19710,6 +19803,7 @@
     "T3|update|local-mkt|hook",
     "T3|update|local-mkt|lsp",
     "T3|update|local-mkt|mcp",
+    "T3|update|local-mkt|other-file",
     "T3|update|local-mkt|skill",
     "T5|dry-run|update|local-mkt",
     "T5|real|update|local-mkt"
@@ -22710,6 +22804,7 @@
   "pair|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
     "T5|dry-run|audit|bundle",
+    "T5|dry-run|compile|bundle",
     "T5|dry-run|install|bundle"
    ],
    "family": "pair",
@@ -22895,7 +22990,9 @@
    "credited_by": [
     "T3|approve-deny|bundle|bin",
     "T3|audit|bundle|bin",
-    "T3|install|bundle|bin"
+    "T3|compile|bundle|bin",
+    "T3|install|bundle|bin",
+    "T3|lock|bundle|bin"
    ],
    "family": "pair",
    "issue": "#4096",
@@ -24015,14 +24112,23 @@
   },
   "pair|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|marketplace-object|bin",
     "T3|approve-deny|plugin-at-mkt|bin",
+    "T3|audit|marketplace-object|bin",
     "T3|audit|plugin-at-mkt|bin",
+    "T3|compile|marketplace-object|bin",
     "T3|compile|plugin-at-mkt|bin",
+    "T3|install|marketplace-object|bin",
     "T3|install|plugin-at-mkt|bin",
+    "T3|lock|marketplace-object|bin",
     "T3|lock|plugin-at-mkt|bin",
+    "T3|marketplace|marketplace-object|bin",
     "T3|marketplace|plugin-at-mkt|bin",
+    "T3|prune|marketplace-object|bin",
     "T3|prune|plugin-at-mkt|bin",
+    "T3|uninstall|marketplace-object|bin",
     "T3|uninstall|plugin-at-mkt|bin",
+    "T3|update|marketplace-object|bin",
     "T3|update|plugin-at-mkt|bin"
    ],
    "family": "pair",
@@ -24110,6 +24216,7 @@
   },
   "pair|SRC=marketplace-git|PRIM=skill": {
    "credited_by": [
+    "T3|approve-deny|marketplace-object|skill",
     "T3|audit|marketplace-object|skill",
     "T3|compile|marketplace-object|skill",
     "T3|install|marketplace-object|skill",
