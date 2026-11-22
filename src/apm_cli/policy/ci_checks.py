@@ -1479,7 +1479,8 @@ def _check_hook_approval_pins(
     """
     from ..constants import APM_MODULES_DIR
     from ..install.errors import PolicyViolationError
-    from ..install.exec_gate import locked_hook_pin_mismatches, locked_withheld_hook_files
+    from ..install.exec_gate import locked_hook_pin_mismatches
+    from ..install.withheld_hooks import locked_withheld_hook_files
     from ..security.executables import resolve_project_exec_allow_map
 
     modules_root = (
@@ -1488,12 +1489,16 @@ def _check_hook_approval_pins(
         else project_root / APM_MODULES_DIR
     )
 
+    resolved: list[Any] = []
+
     def trust_ctx() -> Any:
-        # Resolved only when a locked package deploys hook files.
-        allow = resolve_project_exec_allow_map(
-            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
-        )
-        return getattr(allow, "trust_context", None)
+        # Resolved once, and only when a locked package declares executables.
+        if not resolved:
+            allow = resolve_project_exec_allow_map(
+                deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+            )
+            resolved.append(getattr(allow, "trust_context", None))
+        return resolved[0]
 
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
@@ -1507,12 +1512,14 @@ def _check_hook_approval_pins(
             name="hook-approval-pins",
             passed=False,
             message=(
-                f"{len(withheld)} file(s) sit at the hook path of a package whose hooks the "
-                "executables gate withholds, and apm.lock.yaml does not record them -- "
+                f"{len(withheld)} unrecorded file(s) or unchecked hook path(s) of a package "
+                "whose hooks the executables gate withholds -- "
                 f"{remediation.WITHHELD_HOOK_FILE_UNRECORDED.clause()}"
             ),
             details=[
-                f"{path}: hook path of {key} (hooks {reason}); not recorded in apm.lock.yaml"
+                f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
+                if path
+                else f"{key}: {reason}"
                 for path, key, reason in withheld
             ]
             + [mismatch.describe() for mismatch in mismatches],

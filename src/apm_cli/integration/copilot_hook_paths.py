@@ -21,11 +21,12 @@ def copilot_hook_destinations(
 ) -> list[Path]:
     """Every file ``integrate_package_hooks`` would write for *package_info*.
 
-    Computed from the package's own hook sources; nothing is written.
+    Computed from the package's own hook sources through the read-only shared
+    selector (no routing refusal); nothing is written.
     """
     package_name = integrator._get_package_name(package_info, project_root)
-    hook_files = integrator.select_hook_sources_for_target(package_info, "copilot").descriptors_for(
-        "copilot"
-    )
+    hook_files = integrator.select_deployable_hook_sources(
+        package_info.install_path, ("copilot",)
+    ).descriptors_for("copilot")
     hooks_dir = project_root / (target.root_dir if target else ".github") / "hooks"
     return [copilot_hook_target(hooks_dir, package_name, f) for f in hook_files]
