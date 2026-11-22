@@ -750,7 +750,7 @@ def withheld_executable_reason(
     exec_type: str,
     kind: str,
     *,
-    denied: bool,
+    denied: bool | None,
     user_scope: bool = False,
     outcome: str = "skipped",
 ) -> str:
@@ -758,11 +758,18 @@ def withheld_executable_reason(
 
     The one wording install and pack (#4714) print for a parked executable:
     a denied type points to ``apm policy explain``, any other is approvable.
+    ``denied=None`` (the caller cannot tell which) points to the explanation,
+    which names the verdict of each type and how to allow it.
     """
     from apm_cli.security.trust import approve_command, explain_command
 
+    explain = explain_command(label, user_scope=user_scope)
+    if denied is None:
+        return (
+            f"{kind} {outcome} (withheld by the executables gate). "
+            f"Run '{explain}' to see why and how to allow it."
+        )
     if denied:
-        explain = explain_command(label, user_scope=user_scope)
         return f"{kind} {outcome} (denied). Run '{explain}' to see which deny applies."
     from apm_cli.core import remediation
     from apm_cli.security.executables import EXEC_TYPE_BIN, EXEC_TYPE_CANVAS, EXEC_TYPE_HOOKS

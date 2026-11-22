@@ -927,25 +927,53 @@ def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, 
     return (EXEC_TYPE_CANVAS,) if canvas else ()
 
 
-def _warn_parked_executables(dep: LockedDependency, install_path: Path, logger=None) -> None:
-    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714)."""
+def _warn_parked_executables(
+    dep: LockedDependency, install_path: Path, logger=None, *, format_carries: bool = True
+) -> None:
+    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714).
+
+    *format_carries* is False for a bundle format that cannot carry canvas
+    extensions at all, so approving alone would not ship them.
+    """
     from ..install.exec_gate import withheld_executable_reason
-    from ..security.executables import TRUST_DENIED
 
     for exec_type in _gate_parked_types(install_path, dep):
-        label = dep.get_canonical_dependency_string()
+        label = dep.get_unique_key()
         reason = withheld_executable_reason(
             label,
             exec_type,
             "canvas extension(s)",
-            denied=dep.exec_status == TRUST_DENIED,
+            denied=_canvas_denied(dep, install_path),
             outcome="not packed",
         )
         message = f"dependency {label}: {reason}"
+        if not format_carries:
+            message += (
+                " The agent-plugin format does not carry canvas extensions;"
+                " pack with '--format claude-plugin' to ship them."
+            )
         if logger:
             logger.warning(message)
         else:
             _rich_warning(message, symbol="warning")
+
+
+def _canvas_denied(dep: LockedDependency, install_path: Path) -> bool | None:
+    """Whether the lock row's worst-case status is the canvas's own verdict.
+
+    ``exec_status`` is the worst case across executable types: a denied row
+    proves the canvas denied only when canvas is the package's one executable
+    type; otherwise it is unknown (``None``).
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, scan_package_executables
+
+    if dep.exec_status != TRUST_DENIED:
+        return False
+    try:
+        declared = set(scan_package_executables(install_path, dep.repo_url, "").exec_types)
+    except Exception:
+        return None
+    return True if declared <= {EXEC_TYPE_CANVAS} else None
 
 
 def _cache_config_kinds(install_path: Path) -> tuple[str, ...]:

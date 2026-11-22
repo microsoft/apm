@@ -379,7 +379,7 @@ def export_agent_plugin_bundle(
 
             dep_name = dep.repo_url
             install_path = _dep_install_path(dep, apm_modules_dir)
-            _warn_parked_executables(dep, install_path, logger)
+            _warn_parked_executables(dep, install_path, logger, format_carries=False)
             if dep.deployed_files:
                 dep_components, dep_dropped = _portable_components(
                     _collect_deployed_components(project_root, dep)

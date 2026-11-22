@@ -9,6 +9,7 @@ experimental flag and passes ``--trust-canvas-extensions`` at install.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -99,3 +100,35 @@ def test_a_gate_parked_canvas_is_omitted_not_a_provenance_gap(
         return
     assert "[!] dependency org/canvas: canvas extension(s) not packed" in printed
     assert remedy in printed
+
+
+def test_a_mixed_denied_row_does_not_claim_the_canvas_is_denied(tmp_path: Path, capfd) -> None:
+    """exec_status is the worst case: denied hooks beside a parked canvas (#4714 review)."""
+    cache = _canvas_cache(tmp_path)
+    hook = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo"}]}]}}
+    (cache / ".apm" / "hooks").mkdir(parents=True)
+    (cache / ".apm" / "hooks" / "session.json").write_text(json.dumps(hook))
+    dep = LockedDependency(repo_url="org/canvas", exec_status="denied")
+
+    _warn_parked_executables(dep, cache)
+    printed = " ".join(capfd.readouterr().out.split())
+
+    assert "canvas extension(s) not packed (withheld by the executables gate)" in printed
+    assert "(denied)" not in printed
+    assert "Run 'apm policy explain org/canvas' to see why and how to allow it" in printed
+
+
+def test_the_hint_keeps_the_dependency_host_and_names_the_carrying_format(
+    tmp_path: Path, capfd
+) -> None:
+    """The remedy selects the installed dependency; agent-plugin cannot carry canvas."""
+    cache = _canvas_cache(tmp_path)
+    dep = LockedDependency(
+        repo_url="org/canvas", host="git.example.com", exec_status="gated_pending_approval"
+    )
+
+    _warn_parked_executables(dep, cache, format_carries=False)
+    printed = " ".join(capfd.readouterr().out.split())
+
+    assert "Run 'apm approve git.example.com/org/canvas'" in printed
+    assert "pack with '--format claude-plugin' to ship them" in printed
