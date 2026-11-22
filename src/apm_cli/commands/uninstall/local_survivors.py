@@ -1,5 +1,6 @@
-"""Surviving local declarations that share a removed package's install slot, and
-what a surviving package ships."""
+"""What survives an uninstall: the surviving direct declarations, the surviving
+local declarations that share a removed package's install slot, and what a
+surviving package ships."""
 
 from __future__ import annotations
 
@@ -47,3 +48,53 @@ def survivor_ships_hooks(lockfile: object, key: str, modules_dir: Path) -> bool:
     except (ValueError, PathTraversalError):
         return False
     return install_path.is_dir() and bool(HookIntegrator().find_hook_files(install_path))
+
+
+def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
+    """Parse apm.yml's direct APM dependencies, excluding *packages_to_remove*.
+
+    Seeds the forward reachability walk (see
+    :func:`apm_cli.deps.reachability.compute_forward_reachable_keys`) with
+    the project's SURVIVING direct dependencies. For the real uninstall
+    path and ``--dry-run`` preview, *apm_yml_path* is still pre-edit.
+    Identity subtraction turns the pre-edit dependency list into the
+    correct post-removal survivor set, mirroring the identity
+    matching ``_validate_uninstall_packages`` already uses.
+
+    Returns ``(production_refs, dev_refs)`` so the walk can apply install's
+    ``is_dev`` rule. Returns empty lists -- never raises -- if *apm_yml_path* is ``None``,
+    missing, or malformed; the project's own manifest is a Step-1/3
+    concern here, not part of this walk's fail-closed contract, which
+    covers the manifests visited DURING the walk, not this seed step.
+    The single survivor projection: ``apm audit --ci``'s allow-list advice
+    (#4570) proves its uninstall against the same survivors.
+    """
+    if apm_yml_path is None:
+        return [], []
+
+    removed_identities = set()
+    for pkg in packages_to_remove:
+        try:
+            removed_identities.add(_parse_dependency_entry(pkg).get_identity())
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+
+    import yaml
+
+    from ...utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(apm_yml_path) or {}
+    except (FileNotFoundError, yaml.YAMLError):
+        return [], []
+
+    refs: dict[str, list] = {"dependencies": [], "devDependencies": []}
+    for section_name, section_refs in refs.items():
+        for dep_entry in data.get(section_name, {}).get("apm", []) or []:
+            try:
+                ref = _parse_dependency_entry(dep_entry)
+            except (ValueError, TypeError, AttributeError, KeyError):
+                continue
+            if ref.get_identity() not in removed_identities:
+                section_refs.append(ref)
+    return refs["dependencies"], refs["devDependencies"]

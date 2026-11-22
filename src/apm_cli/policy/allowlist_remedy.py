@@ -309,7 +309,7 @@ def _survivors(
 
     Uninstall's own survivor projection, so the proof and the command agree.
     """
-    from ..commands.uninstall.engine import read_survivor_direct_refs
+    from ..commands.uninstall.local_survivors import read_survivor_direct_refs
 
     return read_survivor_direct_refs(manifest_file(project.project_root), removed)
 

@@ -27,6 +27,7 @@ _CLI = "src/apm_cli/commands/uninstall/cli.py"
 _ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 _SHRINK = "src/apm_cli/commands/uninstall/selection_shrink.py"
 _REMEDY = "src/apm_cli/policy/allowlist_remedy.py"
+_SURVIVORS = "src/apm_cli/commands/uninstall/local_survivors.py"
 _REFUSAL_OWNER = "uninstall_evidence_refusals"
 # DeploymentEvidence.refusals is defined in cleanup.py and asked only by the owner.
 _REFUSAL_CALLERS = frozenset({"src/apm_cli/integration/cleanup.py", _SHRINK})
@@ -44,6 +45,7 @@ _ROUTES = (
     (_REMEDY, "_deployment_paths_validate", "uninstall_unvalidated_paths"),
     (_REMEDY, "_lockfile_writable", "refuse_lockfile_before_mutation"),
     (_REMEDY, "_survivors", "read_survivor_direct_refs"),
+    (_SURVIVORS, "read_survivor_direct_refs", "load_yaml"),
     (_ENGINE, "_uninstall_orphan_decision", "read_survivor_direct_refs"),
     (_ENGINE, "project_shrunk_selections", "read_survivor_direct_refs"),
     (_ENGINE, "_sync_integrations_after_uninstall", "resolve_project_exec_allow_map"),
