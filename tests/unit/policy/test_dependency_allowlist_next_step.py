@@ -163,3 +163,30 @@ def test_sarif_carries_the_next_step_and_other_checks_are_unchanged(tmp_path: Pa
         "d",
     ]
     assert stderr[3:6] == ["[x] lockfile-exists: m", "    - d", "[x] 2 of 2 check(s) failed"]
+
+
+def test_an_edited_deployed_file_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [
+            LockedDependency(
+                repo_url="acme/evil-pkg",
+                depth=1,
+                deployed_files=[deployed],
+                deployed_file_hashes={deployed: "sha256:" + "0" * 64},
+            )
+        ],
+    )
+    (root / deployed).parent.mkdir(parents=True)
+    (root / deployed).write_text("# edited by the user\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()

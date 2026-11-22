@@ -11,7 +11,9 @@ another policy rule:
   dependencies the lock traces it to;
 * the uninstall orphan owner removes every denied transitive dependency and
   no surviving package still reaches a denied one (forward reachability);
-* no removed entry satisfies a package the policy requires.
+* no removed entry satisfies a package the policy requires;
+* every deployed file the uninstall would delete has deployment evidence
+  (a user-edited file makes uninstall refuse).
 
 Anything it cannot prove falls back to the admin-only advice.
 """
@@ -199,7 +201,45 @@ def _uninstall_clears(
         return False
     if not set(paths.values()) <= set(direct.removed_paths):
         return False
-    return denied_keys - set(roots) <= transitive.removed_keys
+    if not denied_keys - set(roots) <= transitive.removed_keys:
+        return False
+    cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
+    return _deletions_have_evidence(cleanup_keys, project)
+
+
+def _deletions_have_evidence(cleanup_keys: set[str], project: AllowlistProject) -> bool:
+    """Whether uninstall's deployment-evidence preflight would let these deletions through.
+
+    ``apm uninstall`` refuses before any change when a deployed file it would
+    delete (for example one the user edited) has no deployment evidence; that
+    uninstall would leave the audit red, so its advice is not offered.
+    """
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..integration.cleanup import DeploymentEvidence
+    from ..utils.diagnostics import DiagnosticCollector
+
+    lock = project.lock
+    selected = DeploymentLedgerCodec.cleanup_snapshot(lock, cleanup_keys)
+    others = DeploymentLedgerCodec.cleanup_snapshot(
+        lock, DeploymentLedgerCodec.valid_owner_keys(lock, excluded_dependency_keys=cleanup_keys)
+    )
+    candidates = (set(selected.paths) | set(selected.hashes)) - set(others.paths)
+    candidates -= set(others.hashes) | set(lock.local_deployed_files)
+    if not candidates:
+        return True
+    try:
+        evidence = DeploymentEvidence.collect(
+            project.project_root,
+            user_scope=False,
+            lockfile=lock,
+            lockfile_root=project.project_root,
+            diagnostics=DiagnosticCollector(),
+            kept=(),
+        )
+        evidence.prepare(sorted(candidates))
+        return not evidence.refusals(sorted(candidates))
+    except (OSError, ValueError):
+        return False
 
 
 def _survivors(
