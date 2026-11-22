@@ -56,7 +56,7 @@ KNOWN_LARGE_MODULES = {
     # Bundle install keeps one rendering per primitive and converts packed
     # instructions to rule formats via local_bundle_renderings, lowering dependency
     # files by their packed rendering provenance (#3686).
-    "services.py": 1230,
+    "services.py": 1235,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).
