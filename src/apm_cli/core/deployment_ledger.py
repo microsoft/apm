@@ -34,7 +34,7 @@ from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
-    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
     from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.skill_adoption import LockedSkillSources
     from apm_cli.integration.targets import TargetProfile
@@ -1500,6 +1500,20 @@ class DeploymentLedgerCodec:
             lockfile,
             prior_bundle_paths,
             prior_ledger=prior_ledger,
+        )
+
+    @staticmethod
+    def load_observes_per_row_projection(dependencies: Sequence[LockedDependency]) -> bool:
+        """Whether loading *dependencies* row by row can leave a non-empty ledger.
+
+        Per-row invalidation during a lockfile load only rebuilds rows when a
+        URI receipt or local-bundle provenance appears; otherwise every step
+        leaves the empty default the load then replaces.
+        """
+        return any(
+            dep.get_unique_key() == _LOCAL_BUNDLE_OWNER
+            or any("://" in path for path in dep.deployed_files)
+            for dep in dependencies
         )
 
     @staticmethod
