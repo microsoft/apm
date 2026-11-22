@@ -12,9 +12,16 @@ test sets ``auth.helper_credential``.
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 from apm_cli.core.auth import AuthContext, AuthResolver
+
+# Parallel downloads call try_with_fallback from several threads. Unserialized,
+# two patches of the same module global interleave: the later enter saves the
+# earlier mock as "original" and restores it on exit, leaving
+# azure_cli.get_bearer_provider a MagicMock for the rest of the worker (#4762).
+_BEARER_PATCH_LOCK = threading.RLock()
 
 
 def _unavailable_provider() -> MagicMock:
@@ -53,7 +60,10 @@ def install_simulated_ado_chain(auth: MagicMock) -> MagicMock:
         )
         resolver = AuthResolver(token_manager=token_manager)
         resolver.resolve = lambda *_a, **_k: context
-        with patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=auth.bearer_provider):
+        with (
+            _BEARER_PATCH_LOCK,
+            patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=auth.bearer_provider),
+        ):
             return resolver.try_with_fallback(host, operation, **kwargs)
 
     auth.try_with_fallback.side_effect = _try_with_fallback

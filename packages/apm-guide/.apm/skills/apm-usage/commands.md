@@ -576,19 +576,20 @@ Claude's complete instruction selection passes the compiled-output security
 check before suppression or cleanup, including dry-run; critical hidden
 characters fail compilation without changing its root.
 
-After a project install stages dependency instructions for Gemini, Codex,
-OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint naming
-`apm compile` and the root context files it will update. Targets such as Claude
-that receive instructions directly in a native rules directory do not print
-this hint.
+After a project install stages dependency instructions for Claude, Gemini,
+Codex, OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint
+naming `apm compile` and the root context files it will update (for Claude:
+`Run 'apm compile' to update AGENTS.md / CLAUDE.md.`). For Claude the hint also
+fires when install routed a local `.apm/` instruction to `AGENTS.md` that no
+compiled `AGENTS.md` carries yet; a no-op reinstall after compile stays quiet.
 
 `apm compile --watch` live-reloads `apm.yml`: editing `target:` / `targets:` mid-session takes effect on the next file event without restarting the watcher. The CLI `--target` flag, when passed to `apm compile --watch`, still outranks `apm.yml`. Re-resolution is gated on the changed file's basename being `apm.yml`, so `.instructions.md` edits do not pay an extra resolver round-trip and a stray `backup_apm.yml` cannot trigger a reload. When root files are retained, each recompile reports both the retained count and any other outputs generated (or planned in dry-run mode). `--clean` is ignored in watch mode and the watcher prints an explicit `[!]` warning at startup (`--clean is ignored in watch mode; run 'apm compile --clean' separately to remove orphaned outputs.`); run `apm compile --clean` separately between watch sessions to remove orphans.
 
 `--single-agents` keeps target-specific root content separate when several targets are requested; for example, Claude's root summary is never appended to `AGENTS.md`.
 
-When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules.
+**Claude routing.** At project scope, `apm install` writes only path-scoped instructions (file-type globs such as `**/*.py`, wildcard directories such as `src/**/*.py`, comma lists) to `.claude/rules/<name>.md`. Always-on (`applyTo: "**"` or none) and single literal directory instructions (`src/test/**`, `docs/**/*`) go to `AGENTS.md`: `apm compile --target claude` writes always-on ones to the root `AGENTS.md` and each directory one to exactly `<dir>/AGENTS.md` (never hoisted; multi-target compiles keep the shared `AGENTS.md` placement), plus a `CLAUDE.md` beside each that imports `@AGENTS.md`. A directory instruction stays in `.claude/rules/` when its directory does not exist or `compilation.strategy` is `single-file`; `--single-agents` leaves directory instructions out of the root file with a warning (Claude Code reads `AGENTS.md` only through that import while a `CLAUDE.md` exists). `CLAUDE.md` holds no instructions; the root one keeps dependency `@import` paths, and embeds the constitution only when APM did not write the root `AGENTS.md`. A Claude-only compile omits instructions already in `.claude/rules/` from `AGENTS.md`; multi-target compiles keep every instruction in the shared `AGENTS.md`. A hand-authored root `CLAUDE.md` without `@AGENTS.md`, or a hand-authored root `AGENTS.md` without `compilation.agents_md.mode: managed_section`, keeps every instruction in `.claude/rules/` and `apm install` warns once with the fix (add `@AGENTS.md` to `CLAUDE.md`, or set `managed_section` for `AGENTS.md`), then rerun `apm install` and `apm compile`. A hand-authored `CLAUDE.md` that already imports `@AGENTS.md` is left untouched. User scope (`-g`) keeps every instruction in `~/.claude/rules/`. A nested `AGENTS.md` loads only when Claude opens a file in that folder.
 
-**Deduplication override.** Pass `--force-instructions` (alias: `--no-dedup`) to always include the instructions section in `CLAUDE.md`, regardless of `.claude/rules/` contents.
+**Deduplication override.** Pass `--force-instructions` (alias: `--no-dedup`) to put every instruction in `AGENTS.md`, regardless of `.claude/rules/` contents.
 
 **Dependency memory.** Claude imports package-root `CLAUDE.md` files using
 manifest and lockfile materialization paths at any depth, including ADO,
@@ -601,7 +602,7 @@ source and output must be on the same filesystem drive.
 For scoped frozen replay and recovery, see the
 [install reference](https://microsoft.github.io/apm/reference/cli/install/#deploy-location).
 
-**Stale `CLAUDE.md` removal (`--clean`).** When `.claude/rules/` is populated and an APM-generated `CLAUDE.md` (identified by the `<!-- Generated by APM CLI -->` marker) is present, `apm compile --target claude --clean` removes that stale file if no constitution or dependency import keeps `CLAUDE.md` active; otherwise it regenerates the file. Hand-authored `CLAUDE.md` files (no marker) are never deleted; a warning is emitted instead so you know the duplicate context remains.
+**Stale `CLAUDE.md` removal (`--clean`).** When `.claude/rules/` holds every instruction (so compile writes no `AGENTS.md`) and an APM-generated `CLAUDE.md` (identified by the `<!-- Generated by APM CLI -->` marker) is present, `apm compile --target claude --clean` removes that stale file if no constitution or dependency import keeps `CLAUDE.md` active; otherwise it regenerates the file. Hand-authored `CLAUDE.md` files (no marker) are never deleted; a warning is emitted instead so you know the duplicate context remains.
 
 **Dry-run preview.** Use `--dry-run` with `--clean` to preview what would be removed without touching any files. If a hand-authored `CLAUDE.md` would block deletion, the preview surfaces that outcome as well.
 

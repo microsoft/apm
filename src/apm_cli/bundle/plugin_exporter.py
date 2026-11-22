@@ -1100,6 +1100,52 @@ def _collect_lsp_servers(
     return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
+def _deployed_path(source: Path, project_root: Path, rendered: dict[Path, str]) -> str | None:
+    """Return the deployed (project-relative) path a packed source was read from.
+
+    Rules rendered into a pack temp root (*rendered*) keep their deployed path.
+    """
+    if source in rendered:
+        return rendered[source]
+    try:
+        return portable_relpath(source, project_root)
+    except ValueError:
+        return None
+
+
+def _routed_rule_components(
+    lockfile, project_root: Path, dependency_keys: set[str], rendered: dict[Path, str]
+) -> dict[str, list[tuple[Path, str]]]:
+    """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
+
+    A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
+    plugin pack mapped to ``instructions/``; render them through the same
+    projection so the bundle keeps those bytes. Only *dependency_keys* (the
+    dependencies the bundle ships) render. Keyed by dependency key.
+    """
+    import atexit
+    import tempfile
+
+    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+
+    components: dict[str, list[tuple[Path, str]]] = {}
+    routed = routed_claude_rules(lockfile, project_root, dependency_keys=dependency_keys)
+    if not routed:
+        return components
+    rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
+    atexit.register(shutil.rmtree, rendered_root, ignore_errors=True)
+    for dep_key, rules in routed.items():
+        dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
+        write_routed_claude_rules(dep_root, rules)
+        rendered.update({dep_root / rel: rel for rel in rules})
+        components[dep_key] = [
+            (dep_root / rel, plugin_rel)
+            for rel in sorted(rules)
+            if (plugin_rel := _plugin_rel_for_deployed_path(rel, None)) is not None
+        ]
+    return components
+
+
 def export_plugin_bundle(
     project_root: Path,
     output_dir: Path,
@@ -1182,16 +1228,22 @@ def export_plugin_bundle(
 
     apm_modules_dir = project_root / "apm_modules"
 
+    # Prefer lockfile is_dev flag (covers transitive deps);
+    # fall back to apm.yml URL matching for older lockfiles
+    packed_deps = [
+        dep
+        for dep in (lockfile.get_all_dependencies() if lockfile else [])
+        if not (
+            getattr(dep, "is_dev", False)
+            or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+        )
+    ]
+    rendered_rules: dict[Path, str] = {}
+    routed_rules = _routed_rule_components(
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}, rendered_rules
+    )
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
-            # Prefer lockfile is_dev flag (covers transitive deps);
-            # fall back to apm.yml URL matching for older lockfiles
-            if (
-                getattr(dep, "is_dev", False)
-                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
-            ):
-                continue
-
+        for dep in packed_deps:
             dep_name = dep.repo_url
 
             # Provenance rule (issue #1999 follow-up): a dependency's content
@@ -1201,6 +1253,7 @@ def export_plugin_bundle(
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
             _warn_parked_executables(dep, install_path, logger)
+            dep_routed = routed_rules.get(dep.get_unique_key(), [])
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
@@ -1211,7 +1264,7 @@ def export_plugin_bundle(
                         "were not found among its installed files. "
                         f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
-            elif _cache_would_contribute_primitives(install_path, dep):
+            elif not dep_routed and _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
                 # recorded none of them: a stale or partial install. Refuse
                 # to pack the cache -- fail loudly with a fix.
@@ -1233,7 +1286,7 @@ def export_plugin_bundle(
             _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
             dep_components = _drop_duplicate_renderings(
-                dep_components, project_root, dropped_renderings
+                dep_components + dep_routed, project_root, rendered_rules, dropped_renderings
             )
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
@@ -1282,7 +1335,9 @@ def export_plugin_bundle(
     ):
         _warn_no_local_primitives(logger)
 
-    own_components = _drop_duplicate_renderings(own_components, project_root, dropped_renderings)
+    own_components = _drop_duplicate_renderings(
+        own_components, project_root, rendered_rules, dropped_renderings
+    )
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
     hook_resources.validate_outputs(
         file_map,
@@ -1419,7 +1474,7 @@ def export_plugin_bundle(
         "plugin",
         target or "all",
         bundle_files=bundle_files,
-        renderings=_packed_renderings(file_map, project_root),
+        renderings=_packed_renderings(file_map, project_root, rendered_rules),
     )
     write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
@@ -1445,7 +1500,10 @@ def export_plugin_bundle(
 
 
 def _drop_duplicate_renderings(
-    components: list[tuple[Path, str]], project_root: Path, dropped: list[str]
+    components: list[tuple[Path, str]],
+    project_root: Path,
+    rendered: dict[Path, str],
+    dropped: list[str],
 ) -> list[tuple[Path, str]]:
     """Keep one rendering per primitive of one package (#3686).
 
@@ -1456,10 +1514,10 @@ def _drop_duplicate_renderings(
     one plugin path (Claude ``commands/x.md`` and Copilot ``prompts/x.prompt.md``)
     keep the preferred one, named by its deployed path when dropped.
     """
-    components = _drop_same_path_renderings(components, project_root, dropped)
+    components = _drop_same_path_renderings(components, project_root, rendered, dropped)
     duplicates = duplicate_plugin_renderings(
         {
-            rel: deployed_rendering_extension(portable_relpath(source, project_root))
+            rel: deployed_rendering_extension(_deployed_path(source, project_root, rendered) or "")
             for source, rel in components
         }
     )
@@ -1468,7 +1526,10 @@ def _drop_duplicate_renderings(
 
 
 def _drop_same_path_renderings(
-    components: list[tuple[Path, str]], project_root: Path, dropped: list[str]
+    components: list[tuple[Path, str]],
+    project_root: Path,
+    rendered: dict[Path, str],
+    dropped: list[str],
 ) -> list[tuple[Path, str]]:
     """Keep the preferred of several deployed renderings that share one plugin path.
 
@@ -1477,7 +1538,7 @@ def _drop_same_path_renderings(
     """
     by_rel: dict[str, list[tuple[int | None, int, str]]] = {}
     for index, (source, rel) in enumerate(components):
-        deployed = portable_relpath(source, project_root)
+        deployed = _deployed_path(source, project_root, rendered) or ""
         by_rel.setdefault(rel, []).append((deployed_rendering_rank(deployed), index, deployed))
     skip: set[int] = set()
     for members in by_rel.values():
@@ -1489,7 +1550,9 @@ def _drop_same_path_renderings(
     return [component for index, component in enumerate(components) if index not in skip]
 
 
-def _packed_renderings(file_map: dict[str, tuple[Path, str]], project_root: Path) -> dict[str, str]:
+def _packed_renderings(
+    file_map: dict[str, tuple[Path, str]], project_root: Path, rendered: dict[Path, str]
+) -> dict[str, str]:
     """Record the deploying target's extension of every packed file (#3686).
 
     Taken from the final *file_map* winner, after rendering deduplication and
@@ -1498,11 +1561,8 @@ def _packed_renderings(file_map: dict[str, tuple[Path, str]], project_root: Path
     """
     renderings: dict[str, str] = {}
     for rel, (source, _owner) in file_map.items():
-        try:
-            deployed = portable_relpath(source, project_root)
-        except ValueError:
-            continue
-        if extension := deployed_rendering_extension(deployed):
+        deployed = _deployed_path(source, project_root, rendered)
+        if deployed and (extension := deployed_rendering_extension(deployed)):
             renderings[rel] = extension
     return renderings
 

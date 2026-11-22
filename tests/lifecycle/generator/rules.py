@@ -282,7 +282,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "target (#4517) and an added one. A changed TGT with FROZEN maps to one refusal cell, "
         "witnessed by the T-6a history scenario",
         (
-            Ev("src/apm_cli/install/service.py", 659, "no longer declares target(s)"),
+            Ev("src/apm_cli/install/service.py", 668, "no longer declares target(s)"),
             Ev(
                 "src/apm_cli/install/frozen_withdrawal.py",
                 273,
