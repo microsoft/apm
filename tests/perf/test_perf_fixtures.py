@@ -192,3 +192,15 @@ def test_harness_writes_json_and_markdown(tmp_path: Path) -> None:
     assert set(by_journey) == {"boot-version", "install-cold", "install-frozen", "compile"}
     assert by_journey["install-cold"]["traffic"]["requests"] > 0
     assert by_journey["boot-version"]["traffic"]["requests"] == 0
+
+
+def test_serving_two_trees_with_shared_slugs_is_refused(tmp_path: Path) -> None:
+    small = build_tree(TREE_RECIPES["tree-10"], tmp_path / "small")
+    large = build_tree(TREE_RECIPES["tree-50"], tmp_path / "large")
+
+    with (
+        pytest.raises(ValueError, match="reuses slugs"),
+        serve_offline((small, large), tmp_path / "world"),
+    ):
+        pass
+    assert (tmp_path / "world" / "repositories" / "tree-10").is_dir()

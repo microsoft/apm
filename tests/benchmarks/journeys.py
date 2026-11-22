@@ -57,7 +57,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
-from tests.fixtures.perf.generator import consumer_manifest  # noqa: E402
+from tests.fixtures.perf.generator import consumer_manifest, write_lf  # noqa: E402
 
 LOCAL_JOURNEYS = ("compile", "audit", "pack", "install-bundle")
 NETWORK_JOURNEYS = (
@@ -101,7 +101,7 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
         shutil.rmtree(directory, ignore_errors=True)
         template.mkdir(parents=True)
         text = consumer_manifest("real-consumer", list(REAL_PACKAGES), ("copilot",))
-        (template / "apm.yml").write_text(text, encoding="utf-8")
+        write_lf(template / "apm.yml", text)
         return Fixture(name, template, (".",), real=True, stats={"packages": len(REAL_PACKAGES)})
     if name in TREE_RECIPES:
         recipe = TREE_RECIPES[name]
@@ -306,7 +306,7 @@ def _setup_install_bundle(ctx: Context) -> None:
     shutil.rmtree(consumer, ignore_errors=True)
     consumer.mkdir()
     text = consumer_manifest("bundle-consumer", [], ("copilot",))
-    (consumer / "apm.yml").write_text(text, encoding="utf-8")
+    write_lf(consumer / "apm.yml", text)
 
 
 def _install_bundle_steps(ctx: Context) -> list[Step]:
@@ -426,7 +426,7 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     prof.parent.mkdir(parents=True, exist_ok=True)
     for index, (argv, cwd) in enumerate(journey.steps(ctx)):
         target = prof if index == 0 else prof.with_suffix(f".{index}.prof")
-        subprocess.run(
+        result = subprocess.run(
             [python, "-m", "cProfile", "-o", str(target), str(apm), *argv],
             cwd=cwd,
             env=ctx.world.env,
@@ -434,6 +434,9 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
             timeout=_COMMAND_TIMEOUT_S,
             check=False,
         )
+        if result.returncode != 0 or not target.is_file():
+            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
+            return None
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
             pstats.Stats(str(prof), stream=handle).sort_stats("cumulative").print_stats(40)
@@ -458,6 +461,11 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             error = output
             break
     valid = [s for s in samples if s.load_ok and s.returncode == 0]
+    if not valid and not error:
+        error = (
+            f"no valid sample: 1-min load stayed >= --max-load {args.max_load} "
+            f"in all {len(samples)} run(s)"
+        )
     walls = [s.wall_s for s in valid]
     record = {
         "fixture": ctx.fixture.name,
@@ -472,7 +480,7 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
         "error": error,
     }
     if args.profile and not error:
-        record["profile"] = _profile(ctx, journey, Path(args.out))
+        record["profile"] = _profile(ctx, journey, Path(args.out).resolve())
     return record
 
 
@@ -579,15 +587,26 @@ def _progress(record: dict) -> None:
 
 
 def _cli_sha(report: dict) -> str:
-    """The measured CLI's commit (``apm --version`` prints it), else the harness SHA."""
+    """The measured CLI's commit as ``apm --version`` prints it, or ``unknown``.
+
+    A wheel-installed CLI prints no commit; the harness SHA is recorded separately
+    and never stands in for it.
+    """
     version = report["meta"]["apm_version"]
     if version.endswith(")") and "(" in version:
-        return version.rsplit("(", 1)[1][:-1]
-    return report["meta"]["sha"][:12]
+        sha = version.rsplit("(", 1)[1][:-1].strip()
+        if sha and all(c in "0123456789abcdef" for c in sha.lower()):
+            return sha
+    return "unknown"
 
 
 def _write(report: dict, out: Path) -> None:
-    stem = f"journeys-{_cli_sha(report)}"
+    cli = _cli_sha(report)
+    stem = (
+        f"journeys-{cli}"
+        if cli != "unknown"
+        else f"journeys-cli-unknown-{report['meta']['sha'][:12]}"
+    )
     (out / f"{stem}.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (out / f"{stem}.md").write_text(render_markdown(report), encoding="utf-8")
 
@@ -666,7 +685,7 @@ def verify_real(args: argparse.Namespace) -> int:
             project = work / f"p{index}"
             project.mkdir(parents=True)
             text = consumer_manifest("verify", [spec], ("copilot",))
-            (project / "apm.yml").write_text(text, encoding="utf-8")
+            write_lf(project / "apm.yml", text)
             result = subprocess.run(
                 [*apm, "install"],
                 cwd=project,

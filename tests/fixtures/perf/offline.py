@@ -105,7 +105,14 @@ def serve_offline(
         fixtures = (fixtures,)
     repositories: dict[str, Path] = {}
     for fixture in fixtures:
-        repositories.update(publish_repositories(fixture, directory / "repositories"))
+        published = publish_repositories(fixture, directory / "repositories")
+        overlap = sorted(set(published) & set(repositories))
+        if overlap:
+            raise ValueError(
+                f"{fixture.recipe.name} reuses slugs another served fixture owns: "
+                f"{overlap[:3]}...; serve one tree per world or give recipes distinct owners"
+            )
+        repositories.update(published)
     isolated, env = isolated_environment(directory / "env", base_env)
     (directory / "services").mkdir(parents=True, exist_ok=True)
     services = WorldServices(repositories).start(directory / "services")

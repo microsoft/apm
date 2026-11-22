@@ -249,7 +249,7 @@ def author_package(
         factory.add_skill(package, skill, _skill(prose, skill))
         reference = package.root / "skills" / skill / "references" / "guide.md"
         reference.parent.mkdir(parents=True)
-        reference.write_text(prose.body(f"{skill} guide"), encoding="ascii")
+        write_lf(reference, prose.body(f"{skill} guide"))
     for i in range(mix.prompts):
         factory.add_prompt(package, f"{name}-prompt-{i}", _prompt(prose, f"{name}-prompt-{i}"))
     if mix.hook_every > 0 and index % mix.hook_every == 0:
@@ -313,6 +313,11 @@ def plan_tree(recipe: TreeRecipe) -> tuple[list[list[str]], dict[str, list[str]]
     return levels, {name: sorted(children) for name, children in edges.items()}
 
 
+def write_lf(path: Path, text: str) -> None:
+    """Write *text* as UTF-8 with LF newlines on every platform (byte-stable fixtures)."""
+    path.write_bytes(text.encode("utf-8"))
+
+
 def consumer_manifest(name: str, dependencies: list[str], targets: tuple[str, ...]) -> str:
     document = {
         "name": name,
@@ -342,8 +347,8 @@ def build_tree(recipe: TreeRecipe, root: Path) -> TreeFixture:
     project = root / "project"
     project.mkdir(parents=True)
     direct = [f"{recipe.owner}/{name}#{recipe.tag}" for name in levels[0]]
-    (project / "apm.yml").write_text(
-        consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets), encoding="utf-8"
+    write_lf(
+        project / "apm.yml", consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets)
     )
     return TreeFixture(
         recipe=recipe,
@@ -384,9 +389,9 @@ def build_monorepo(recipe: MonorepoRecipe, root: Path) -> MonorepoFixture:
         deps = [f"{prefix}/{n}" for n in sorted(chosen_local)]
         deps += [remote.spec(n) for n in sorted(chosen_remote)]
         project.mkdir(parents=True, exist_ok=True)
-        (project / "apm.yml").write_text(
+        write_lf(
+            project / "apm.yml",
             consumer_manifest(f"{recipe.name}-{project.name}", deps, recipe.targets),
-            encoding="utf-8",
         )
         remote_by_root[project] = tuple(sorted(chosen_remote))
         if project != repo:
@@ -401,13 +406,47 @@ def build_monorepo(recipe: MonorepoRecipe, root: Path) -> MonorepoFixture:
     )
 
 
+def _publish_env(extra: Mapping[str, str]) -> dict[str, str]:
+    """Host-independent git: no system/global config, ignore rules, filters or GIT_* leaks."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    if os.environ.get("GIT_EXEC_PATH"):
+        # A relocatable git finds its helpers only through GIT_EXEC_PATH.
+        env["GIT_EXEC_PATH"] = os.environ["GIT_EXEC_PATH"]
+    env.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0",
+            **_GIT_IDENTITY,
+            **extra,
+        }
+    )
+    return env
+
+
+_PINNED_CONFIG = (
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    f"core.excludesFile={os.devnull}",
+    "-c",
+    f"core.attributesFile={os.devnull}",
+    "-c",
+    "core.autocrlf=false",
+    "-c",
+    "core.safecrlf=false",
+    "-c",
+    "core.filemode=true",
+)
+
+
 def _git(*args: str, env: Mapping[str, str]) -> str:
     git = shutil.which("git") or "git"
     result = subprocess.run(
-        (git, "-c", "commit.gpgsign=false", *args),
+        (git, *_PINNED_CONFIG, *args),
         capture_output=True,
         text=True,
-        env={**os.environ, **_GIT_IDENTITY, **env},
+        env=_publish_env(env),
         check=False,
         timeout=120,
     )
@@ -417,14 +456,18 @@ def _git(*args: str, env: Mapping[str, str]) -> str:
 
 
 def commit_bare(bare: Path, tree: Path, *, tag: str | None) -> str:
-    """Create bare repository *bare* holding *tree* as one commit on main (+ *tag*)."""
-    _git("init", "-q", "--bare", "--initial-branch=main", str(bare), env={})
+    """Create bare repository *bare* holding *tree* as one commit on main (+ *tag*).
+
+    Git runs with host configuration disabled, so the committed bytes and SHAs
+    do not depend on the machine (see ``_publish_env``).
+    """
+    _git("init", "-q", "--bare", "--template=", "--initial-branch=main", str(bare), env={})
     index = {
         "GIT_DIR": str(bare),
         "GIT_INDEX_FILE": str(bare / "perf-index"),
         "GIT_WORK_TREE": str(tree),
     }
-    _git("add", "-A", "--", ".", env=index)
+    _git("add", "-A", "--force", "--", ".", env=index)
     tree_sha = _git("write-tree", env=index)
     (bare / "perf-index").unlink()
     commit = _git("commit-tree", tree_sha, "-m", f"publish {tree.name}", env={"GIT_DIR": str(bare)})
@@ -435,12 +478,17 @@ def commit_bare(bare: Path, tree: Path, *, tag: str | None) -> str:
 
 
 def publish_repositories(fixture: TreeFixture, directory: Path) -> dict[str, Path]:
-    """Commit every package of *fixture* as a bare repository; return ``slug -> bare``."""
-    directory.mkdir(parents=True, exist_ok=True)
+    """Commit every package of *fixture* as a bare repository; return ``slug -> bare``.
+
+    Bare repositories live under ``directory/<recipe name>/`` and are rebuilt on
+    every call, so a changed recipe never serves stale content.
+    """
+    root = directory / fixture.recipe.name
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
     served: dict[str, Path] = {}
     for name, tree in sorted(fixture.packages.items()):
-        bare = directory / f"{fixture.recipe.owner}__{name}.git"
-        if not bare.exists():
-            commit_bare(bare, tree, tag=fixture.recipe.tag)
+        bare = root / f"{fixture.recipe.owner}__{name}.git"
+        commit_bare(bare, tree, tag=fixture.recipe.tag)
         served[fixture.slug(name)] = bare
     return served
