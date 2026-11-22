@@ -7,24 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.38.0] - 2026-11-23
+## [0.38.0] - 2026-11-22
 
 ### Highlights
 
-- Root `apm.yml` `marketplaces:` map, guarded by the new `marketplace.allow` policy. (#4006)
-- Private hosted marketplace catalogs authenticate by name, and opt-in `APM_STRICT_HOST_CREDENTIALS` pins GitHub tokens to their host. (#4020, #4615)
-- A failed or interrupted `apm install` now restores every file it wrote and leaves `apm.lock.yaml` untouched. (#4612)
-- Upgrade note: non-dotted IPv4 `http://` registry hosts no longer count as private. (#4521)
+- `apm install` and `apm update` run up to 3x faster on large projects; a no-op install of 200 packages drops from 133 to 44 seconds. (#4735)
+- `apm install --policy` and `apm update --policy` enforce an explicit policy file, URL or `owner/repo`, failing closed if it cannot load. (#4001)
+- Root `apm.yml` `marketplaces:` guarded by the new `marketplace.allow` policy, and private hosted marketplace catalogs that authenticate by name. (#4006, #4020)
+- Upgrade notes: re-run `apm approve` once for packages with hooks, and non-dotted IPv4 `http://` registry hosts no longer count as private. (#4688, #4521)
 
 ### Breaking changes and upgrade notes
 
+- Hook approvals now pin every file deployed with the hook; existing hook approvals show as changed once, so run `apm approve <pkg>` again. (#4688)
 - `http://` registry URLs with an integer, hex or leading-zero IPv4 host (`http://167772161/apm`) are no longer private; use `http://10.0.0.1/apm` or set `insecure: true`. (#4521)
 
 ### Added
 
+- `apm install --policy` and `apm update --policy` enforce a local, URL or `owner/repo` policy, tighten-only with discovered policy, failing closed if it cannot load. (closes #1925, #4001)
 - `APM_STRICT_HOST_CREDENTIALS=1` keeps GitHub token variables on the configured host; other `github.com` and `*.ghe.com` hosts need their own sign-in. (closes #4324, #4615)
 - Root `apm.yml` `marketplaces:` resolve without registration and win over same-named registrations and stale locks; policy `marketplace.allow` restricts their origins. (closes #2903, #4006)
-- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/`, deriving a missing description; agents with an empty name or body are skipped with a warning. (closes #3714, #4007, #4613)
+- `apm install <bundle>` renders bundle agents to Codex TOML in `.codex/agents/`, deriving missing descriptions and skipping agents with an empty name or body. (closes #3714, #4007, #4613)
 - Private hosted `marketplace.json` catalogs added with `--name` authenticate via `APM_MARKETPLACE_TOKEN_<NAME>` (Bearer) or `APM_MARKETPLACE_USER_<NAME>` and `APM_MARKETPLACE_PASS_<NAME>` (Basic). (closes #3300, #4020)
 - The CLI reference lists every deprecation with its replacement, deprecating version and removal horizon; warning text is unchanged. (closes #4019, #4035)
 - The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, verified end to end on every PR. (#4015)
@@ -32,12 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- OpenAPM native plugin activation profile Part C records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
+- `apm install` and `apm update` run up to 3x faster on large projects: a no-op install of 200 packages drops from 133 to 44 seconds. (closes #4733, #4735)
 - A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (closes #4282, #4612)
-- OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
-- An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
-- Nightly mutation testing covers 13 owner modules, one shard each, and fails when an owner's kill rate drops below its recorded floor. (#4121, #4585)
-- A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (#4612)
+- `apm install` refuses before writing anything when a managed file it would replace lacks deployment evidence, naming every such file. (closes #4381, #4652)
+- `apm install` refuses a self-defined MCP server that collides with an existing native connection before writing any file. (closes #4268, #4745)
+- OpenAPM native plugin activation profile Part C records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 
 ### Fixed
 
@@ -48,25 +49,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` deploys an approved package that declares both hooks and LSP servers instead of failing. (closes #4658, #4680)
 - `apm install --target` narrowed to fewer runtimes keeps still-declared MCP servers on the other runtimes instead of removing them. (closes #4562, #4666)
 - `apm install` retires the hook files a denied package deployed even when `apm.lock.yaml` is missing; edited files stay and `apm audit --ci` reports them. (#4644)
+- A failed MCP or LSP configuration write during `apm install` restores the deployed files, configs and `apm.lock.yaml`; connection collisions are unchanged. (closes #4594, #4681)
+- A failed lockfile write after `apm update` or `apm deps update` restores the deployed files and leaves `apm.lock.yaml` unchanged. (closes #4664, #4686)
+- `apm install` replaces each deployed file atomically, so a running hook or script never reads a partially written file. (closes #4691, #4712)
+- A refused `apm install --frozen` on a widened target set no longer leaves merged hook configuration (`.claude/`, `.gemini/`) on disk. (closes #4638, #4682)
+- `apm install` narrowed by `--target` names each stale skill copy it keeps in an inactive target, with the command that refreshes it. (closes #4692, #4708)
+- A failed `apm install` on a same-name user LSP entry leaves `apm.lock.yaml` unchanged when no other LSP server was written. (closes #4697, #4705)
+- A refused native plugin registration no longer adds an empty `mcp_target_servers` field to `apm.lock.yaml`. (closes #4685, #4689)
+- On macOS and Linux, backslash local paths (`.\pkg`, `..\pkg`, `~\pkg`) install like their `/` forms instead of failing with a traversal error. (closes #4699, #4707)
 - `apm install --frozen` and `apm audit --ci` accept a plugin installed from a local marketplace directory or `marketplace.json` file. (closes #4639, #4655)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4620)
 - `apm uninstall` no longer writes `apm.yml` or `.apm/` into a surviving local dependency's source directory; it validates a staged copy. (closes #4566, #4649)
 - `apm uninstall` after a target change no longer deploys unrecorded files to the new target; it says to run `apm install` instead. (closes #4636, #4663)
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content. (closes #4556, #4580)
+- `apm install <bundle>` and `apm pack` apply org `dependencies.deny`, and a local bundle's canvas follows the executables gate like its hooks. (#4645)
+- Reinstalling a local bundle after `apm.lock.yaml` is lost no longer leaves MCP lock state that `apm audit --ci` and `apm install --frozen` reject. (closes #4634, #4657)
+- `apm pack` ships a package's root `skills/` when `.apm/` authors no skill, so the bundle carries the skills a path install deploys. (closes #4709, #4713)
+- Claude hook bundles keep a nested `package.json`, so a nested ES module hook runs with its own module type. (closes #2950, #4672)
 - `apm audit --ci` and `apm install` accept required packages declared as explicit registry-proxy URLs (`<proxy-host>/owner/repo`) under `required-packages-deployed`. (closes #4037, #4067)
 - `apm outdated` lists refs separately for dependencies that share a host and path but use different providers. (closes #4560, #4622)
 - `apm marketplace list` no longer creates `~/.apm/marketplaces.json` when no marketplace is registered; only registration changes write it. (closes #4600, #4616)
 - `apm pack`, `apm marketplace check` and `apm outdated` print `marketplace.outputs` list-form and output-path conflict warnings, once each. (closes #4046, #4062)
+- Marketplace entries routed to a package registry install by name and replay with `apm install --frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
 - A rebound marketplace refusal under `apm install -g` prints runnable re-record steps instead of telling you to restore `~/.apm/apm.lock.yaml` from version control. (#4555)
 - The marketplace docs explain that a bare `owner/repo` plugin on a `*.ghe.com` marketplace needs `GITHUB_HOST` set to that host; `default_host:` does not admit it. (closes #3970, #4656)
 - On Windows, a policy cache write that overlaps a concurrent cache read no longer leaves the cached org policy unusable. (closes #4601, #4643)
 - Git credential-helper tokens up to 16384 characters, such as enterprise IdP tokens from Git Credential Manager, now authenticate instead of failing as "no credential". (closes #4391, #4587)
 - `apm runtime setup codex` retries transient GitHub API failures instead of failing on the first one. (#4573)
-- `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
-- `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content, so restores keep tracked files clean. (closes #4556, #4580)
-- The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
-- Catalog entries routed to a package registry install by name in registry form and replay with `--frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
-- `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
+- An HTTP lifecycle script that finishes late logs to the `scripts.log` of the APM home it fired under, not a later one. (closes #4706, #4717)
 
 ### Security
 
