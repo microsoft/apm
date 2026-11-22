@@ -573,6 +573,8 @@ class TestCompileClaudeMdConstitutionInjectionFailure(unittest.TestCase):
     def test_compile_claude_md_constitution_injection_failure(self):
         """Constitution injection failure in _compile_claude_md is swallowed
         and logged at debug level, compilation still succeeds."""
+        # A hand-authored root AGENTS.md makes CLAUDE.md carry the constitution.
+        (Path(self.tmp) / "AGENTS.md").write_text("# Team AGENTS.md\n")
         compiler = AgentsCompiler(self.tmp)
         primitives = _make_primitives(
             _make_instruction(
@@ -641,15 +643,19 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
 
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def _assert_agents_md_carries_instruction(self):
+        """Claude reads the instruction from AGENTS.md through the CLAUDE.md import."""
+        root = Path(self.tmp_resolved)
+        self.assertIn("@AGENTS.md", (root / "CLAUDE.md").read_text().splitlines())
+        self.assertIn("Use type hints.", (root / "AGENTS.md").read_text())
+
     def test_instructions_included_without_rules_dir(self):
         """Without .claude/rules/, instructions appear in CLAUDE.md."""
         compiler = AgentsCompiler(self.tmp_resolved)
         config = CompilationConfig(target="claude", dry_run=False)
         result = compiler.compile(config)
         self.assertTrue(result.success)
-        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        self.assertTrue(claude_md.exists())
-        self.assertIn("## Project Standards", claude_md.read_text())
+        self._assert_agents_md_carries_instruction()
 
     def test_instructions_skipped_with_populated_rules_dir(self):
         """With .claude/rules/ containing .md files, instructions are skipped."""
@@ -676,10 +682,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         result = compiler.compile(config)
         self.assertTrue(result.success)
 
-        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        self.assertTrue(claude_md.exists())
-        content = claude_md.read_text()
-        self.assertIn("## Project Standards", content)
+        self._assert_agents_md_carries_instruction()
 
     def test_instructions_not_skipped_with_non_md_files_in_rules_dir(self):
         """Non-.md files in .claude/rules/ do not trigger instruction skipping."""
@@ -693,10 +696,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         result = compiler.compile(config)
         self.assertTrue(result.success)
 
-        claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-        self.assertTrue(claude_md.exists())
-        content = claude_md.read_text()
-        self.assertIn("## Project Standards", content)
+        self._assert_agents_md_carries_instruction()
 
     def test_skip_instructions_dry_run(self):
         """Dry-run respects skip_instructions when .claude/rules/ is populated."""
@@ -780,9 +780,7 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
             self.assertTrue(result.success)
 
             # Instructions should NOT be skipped (symlink escapes project root)
-            claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
-            self.assertTrue(claude_md.exists())
-            self.assertIn("## Project Standards", claude_md.read_text())
+            self._assert_agents_md_carries_instruction()
         finally:
             shutil.rmtree(external_dir, ignore_errors=True)
 

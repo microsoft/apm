@@ -78,6 +78,10 @@ COMPONENT_ONLY: dict[str, str] = {
     "kept-mcp-entries": "needs a deleted lockfile and an edited MCP entry; covered by "
     "tests/lifecycle/scenarios/test_mcp_write_receipts.py and the audit --ci kept-mcp-entries "
     "check test in tests/unit/install/test_mcp_write_receipts.py",
+    "withheld-hook-paths-unchecked": "the reported state is an unreadable or misplaced hook "
+    "directory; tests/unit/install/test_withheld_hooks.py pins the unchecked rows",
+    "withheld-hook-file-unrecorded": "executed by test_ownership_siblings::"
+    "test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected",
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"
     "test_policy_fetch_failure_remediation_clears_the_block",
     "rendering-changed": "needs a locked file rendered by an older APM version",

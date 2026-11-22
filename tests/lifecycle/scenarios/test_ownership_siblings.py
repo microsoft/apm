@@ -603,6 +603,40 @@ def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> N
     scenario.finish()
 
 
+def test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected(
+    lifecycle_world,
+) -> None:
+    """A gated package's hook file restored by a checkout without a lockfile stays put.
+
+    No lock record proves APM wrote it, so install keeps it but names it, and
+    ``audit --ci`` fails naming it until the file is gone.
+    """
+    scenario = _hook_package(lifecycle_world)
+    rel = ".github/hooks/h-hook-session.json"
+    hook = lifecycle_world.project / rel
+    committed = hook.read_bytes()
+    scenario.run("deny h-hook")
+    scenario.run("install")
+    assert not hook.exists()
+    scenario.user_write(rel, committed.decode("ascii"))
+    _forget_lock(scenario)
+    scenario.run(
+        "install",
+        keep={"project": (rel,)},
+        says=[rf"Kept {re.escape(rel)}: it sits at h-hook's hook path"],
+    )
+    assert hook.read_bytes() == committed
+    audit = scenario.run("audit --ci", read_only=True, exit=1)
+    text = " ".join(audit.output.split())
+    assert re.search(rf"{re.escape(rel)}: hook path of \S*h-hook \(hooks denied\)", text), text
+    assert "delete each named file you did not write yourself" in text, text
+    # The printed remedy: delete the file, then the advised audit passes.
+    hook.unlink()
+    scenario.release_user_write(rel)
+    scenario.run("audit --ci", read_only=True, exit=0)
+    scenario.finish()
+
+
 @pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
 def test_an_edited_hook_outlives_a_closed_gate_announced_and_detected(
     lifecycle_world, gate
