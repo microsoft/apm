@@ -47,6 +47,9 @@ pytestmark = [
 _FAST_ENV = "APM_INSTALL_FAST_PATH"
 _HIT = "[i] install fast path: replayed a verified no-op"
 _ELAPSED = re.compile(r"\b\d+\.\ds\b")
+# The fast path re-discovers org policy live before falling through, so the
+# pipeline then reports the same policy as served from the cache it just filled.
+_POLICY_CACHE_AGE = re.compile(r" \(cached, fetched \d+s ago\)")
 
 
 def _declare(world: World, *keys: str) -> None:
@@ -112,6 +115,7 @@ def _without_identity(node: object, root: str) -> object:
 
 def _normalized(world: World, text: str) -> str:
     text = text.replace(str(world.root), "<ROOT>")
+    text = _POLICY_CACHE_AGE.sub("", text)
     return _ELAPSED.sub("<T>", text)
 
 
@@ -185,7 +189,8 @@ def _revoke_user_approval(world: World) -> None:
 
 
 def _user_deny(world: World) -> None:
-    denied = driver.run(world, ("deny", f"{ORG}/p-exec"), scope="user")
+    # A personal deny from the project: user store only, apm.yml untouched.
+    denied = driver.run(world, ("deny", "--user", "p-exec"))
     assert denied.returncode == 0, denied.stdout + denied.stderr
 
 
@@ -274,6 +279,7 @@ def test_replayed_noop_writes_nothing_and_matches_the_full_noop(
     before = _state(fast)
     world_cache = json.dumps(sorted(_digest(fast.home).items()))
     fast.services.reset()
+    full.services.reset()
     replayed = _run(fast, ("install",), fast="1")
     reference = _run(full, ("install",), fast="0")
     assert replayed.returncode == reference.returncode == 0
@@ -283,4 +289,12 @@ def test_replayed_noop_writes_nothing_and_matches_the_full_noop(
     assert json.dumps(sorted(_digest(fast.home).items())) == world_cache, (
         "a replayed no-op must not write HOME, caches included"
     )
-    assert fast.services.egress_log() == [], "a replayed no-op must not reach the network"
+
+    # The only network a replay may use is the live org-policy re-discovery,
+    # which the full no-op makes too.
+    def requests(world: World) -> set[tuple[str, str]]:
+        return {(str(e["host"]), str(e["path"])) for e in world.services.egress_log()}
+
+    extra = requests(fast) - requests(full)
+    assert not extra, f"a replayed no-op reached the network beyond policy discovery: {extra}"
+    assert all("apm-policy" in path for _, path in requests(fast)), requests(fast)
