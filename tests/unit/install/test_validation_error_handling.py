@@ -248,12 +248,32 @@ class TestGenericHostAmbiguousSubpathHint:
     def test_unrecognised_selfhosted_ambiguous_path_returns_hint(self, monkeypatch) -> None:
         from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
 
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
         monkeypatch.delenv("GITLAB_HOST", raising=False)
         monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
         reason = _generic_host_ambiguous_subpath_hint(self._dep())
         assert reason is not None
         assert "GITLAB_HOST=gitlab.company.com" in reason
         assert "APM_GITLAB_HOSTS" in reason
+        assert (
+            "If this is GitHub Enterprise Server, set GITHUB_HOST=gitlab.company.com, "
+            "write github.com/ before apm.yml entries for packages on GitHub, and re-run."
+        ) in reason
+
+    def test_configured_github_host_keeps_it_and_recommends_object_form(self, monkeypatch) -> None:
+        from apm_cli.install.validation import _generic_host_ambiguous_subpath_hint
+
+        monkeypatch.setenv("GITHUB_HOST", "ghes.corp.example")
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        reason = _generic_host_ambiguous_subpath_hint(self._dep())
+        assert reason is not None
+        assert (
+            "GITHUB_HOST already names ghes.corp.example; keep it and, if this is another "
+            "GitHub Enterprise Server, add this package as an explicit 'git:' + 'path:' "
+            "entry in apm.yml."
+        ) in reason
+        assert "set GITHUB_HOST=" not in reason
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,9 @@
-"""Tests for ``apm targets`` CLI command (commands/targets.py)."""
+"""Tests for ``apm targets`` CLI command (commands/targets.py).
+
+The command and target detection run for real against a project tree in
+``tmp_path``: harness signals (``CLAUDE.md``, ``.github/copilot-instructions.md``)
+and ``apm.yml`` declarations decide what is active, as they do for install.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +16,6 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.commands.targets import targets
-from apm_cli.core.target_detection import ResolvedTargets, Signal
 
 pytestmark = pytest.mark.component
 
@@ -19,18 +23,39 @@ pytestmark = pytest.mark.component
 # Helpers
 # ---------------------------------------------------------------------------
 
+_SIGNAL_FILES = {
+    "claude": "CLAUDE.md",
+    "copilot": ".github/copilot-instructions.md",
+}
 
-def _resolved(target_list: list[str]) -> ResolvedTargets:
-    return ResolvedTargets(targets=target_list, source="auto-detect", auto_create=True)
+
+def _project(root: Path, *harnesses: str, manifest_targets: list[str] | None = None) -> Path:
+    """A project with the named harness signals and, optionally, apm.yml targets."""
+    for harness in harnesses:
+        signal = root / _SIGNAL_FILES[harness]
+        signal.parent.mkdir(parents=True, exist_ok=True)
+        signal.write_text("# harness\n", encoding="utf-8")
+    if manifest_targets is not None:
+        (root / "apm.yml").write_text(
+            f"name: demo\nversion: 1.0.0\ntargets: [{', '.join(manifest_targets)}]\n",
+            encoding="utf-8",
+        )
+    return root
 
 
-def _signal(target: str, source: str) -> Signal:
-    return Signal(target=target, source=source)
+def _rows(output: str) -> dict[str, dict]:
+    return {row["target"]: row for row in json.loads(output)}
 
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
+
+
+@pytest.fixture
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
 # ---------------------------------------------------------------------------
@@ -39,117 +64,76 @@ def runner() -> CliRunner:
 
 
 class TestTargetsTableOutput:
-    def test_table_headers_present(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, [])
+    def test_table_headers_present(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
         assert "TARGET" in result.output
         assert "STATUS" in result.output
         assert "DEPLOY DIR" in result.output
 
-    def test_active_target_shown_as_active(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, [])
+    def test_active_target_shown_as_active(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
-        assert "active" in result.output
-        assert "claude" in result.output
+        claude_row = next(line for line in result.output.splitlines() if "claude" in line)
+        assert "active" in claude_row.split()
+        assert "CLAUDE.md" in claude_row
 
     def test_grok_build_directory_is_displayed_as_active(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
-        (tmp_path / ".grok").mkdir()
-        with patch("pathlib.Path.cwd", return_value=tmp_path):
-            result = runner.invoke(targets, [])
+        (project / ".grok").mkdir()
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
         grok_row = next(line for line in result.output.splitlines() if "grok-build" in line)
         assert "active" in grok_row
         assert ".grok/" in grok_row
 
-    def test_inactive_target_shows_needs(self, runner: CliRunner, tmp_path: Path) -> None:
+    def test_inactive_target_shows_needs(self, runner: CliRunner, project: Path) -> None:
         """Inactive targets show 'needs <signal>' in the source column."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, [])
+        _project(project, "claude")
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
-        assert "inactive" in result.output
-        # At least one "needs" annotation for a target with a canonical signal
-        assert "needs" in result.output
+        cursor_row = next(line for line in result.output.splitlines() if "cursor" in line)
+        assert "inactive" in cursor_row
+        assert "needs .cursor/" in cursor_row
 
-    def test_active_with_no_signal_source(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Active target with no matching signal still renders without error."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["copilot"])
-            ),
-            # No signals returned → active_source will be None
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, [])
+    def test_manifest_target_without_signal_reports_the_manifest(
+        self, runner: CliRunner, project: Path
+    ) -> None:
+        """A declared target with no harness signal is active, sourced from apm.yml."""
+        _project(project, manifest_targets=["copilot"])
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
-        assert "copilot" in result.output
-        assert "active" in result.output
+        copilot_row = next(line for line in result.output.splitlines() if "copilot" in line)
+        assert "active" in copilot_row.split()
+        assert "apm.yml" in copilot_row
 
     def test_inactive_target_with_no_canonical_signal(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
         """Inactive target without a CANONICAL_SIGNAL entry shows blank source col."""
-        # Patch CANONICAL_SIGNAL so one target has no entry
+        # Every shipped target has a signal; narrow the table to one that lacks it.
         with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
             patch(
                 "apm_cli.core.target_detection.CANONICAL_SIGNAL",
-                # Remove copilot's entry so it has no signal hint
                 {"claude": "CLAUDE.md", "cursor": ".cursor/"},
             ),
-            patch(
-                "apm_cli.core.target_detection.CANONICAL_TARGETS_ORDERED",
-                ["copilot"],
-            ),
+            patch("apm_cli.core.target_detection.CANONICAL_TARGETS_ORDERED", ["copilot"]),
         ):
             result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
+        copilot_row = next(line for line in result.output.splitlines() if "copilot" in line)
+        assert "inactive" in copilot_row
+        assert "needs" not in copilot_row
 
-    def test_empty_active_shows_info_hint(self, runner: CliRunner, tmp_path: Path) -> None:
+    def test_empty_active_shows_info_hint(self, runner: CliRunner, project: Path) -> None:
         """When no targets are active, a hint about harness config is printed."""
-        with (
-            patch("apm_cli.core.target_detection.resolve_targets", return_value=_resolved([])),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
-        ):
-            result = runner.invoke(targets, [])
+        result = runner.invoke(targets, [])
         assert result.exit_code == 0, result.output
-        mock_info.assert_called_once()
-        call_text = mock_info.call_args[0][0]
-        assert "harness" in call_text.lower() or "targets" in call_text.lower()
+        assert "Create a harness config" in result.output
+        assert "declare `targets:` in apm.yml" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -159,58 +143,31 @@ class TestTargetsTableOutput:
 
 class TestTargetsErrorPaths:
     def test_ambiguous_harness_falls_back_to_detect_signals(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
-        from apm_cli.core.errors import AmbiguousHarnessError
-
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets",
-                side_effect=AmbiguousHarnessError("ambiguous"),
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[
-                    _signal("claude", "CLAUDE.md"),
-                    _signal("copilot", ".github/"),
-                ],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, [])
+        """Two harness signals are ambiguous for install; targets shows both active."""
+        _project(project, "claude", "copilot")
+        result = runner.invoke(targets, ["--json"])
         assert result.exit_code == 0, result.output
-        # Both detected targets should be included in the active set
-        assert "claude" in result.output
-        assert "copilot" in result.output
+        rows = _rows(result.output)
+        assert rows["claude"]["status"] == "active"
+        assert rows["claude"]["source"] == "CLAUDE.md"
+        assert rows["copilot"]["status"] == "active"
+        assert rows["copilot"]["source"] == ".github/copilot-instructions.md"
 
-    def test_no_harness_error_yields_empty_active(self, runner: CliRunner, tmp_path: Path) -> None:
-        from apm_cli.core.errors import NoHarnessError
-
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets",
-                side_effect=NoHarnessError("no harness"),
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-            patch("apm_cli.utils.console._rich_info"),
-        ):
-            result = runner.invoke(targets, [])
+    def test_no_harness_error_yields_empty_active(self, runner: CliRunner, project: Path) -> None:
+        result = runner.invoke(targets, ["--json"])
         assert result.exit_code == 0, result.output
-        assert "inactive" in result.output
+        assert {row["status"] for row in _rows(result.output).values()} == {"inactive"}
 
-    def test_usage_error_yields_empty_active(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets",
-                side_effect=click.UsageError("bad"),
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-            patch("apm_cli.utils.console._rich_info"),
+    def test_usage_error_yields_empty_active(self, runner: CliRunner, project: Path) -> None:
+        # No project input reaches this branch today; it guards future resolver errors.
+        with patch(
+            "apm_cli.core.target_detection.resolve_targets", side_effect=click.UsageError("bad")
         ):
-            result = runner.invoke(targets, [])
+            result = runner.invoke(targets, ["--json"])
         assert result.exit_code == 0, result.output
+        assert {row["status"] for row in _rows(result.output).values()} == {"inactive"}
 
 
 # ---------------------------------------------------------------------------
@@ -219,123 +176,62 @@ class TestTargetsErrorPaths:
 
 
 class TestTargetsJsonOutput:
-    def test_json_flag_emits_valid_json(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json"])
+    def test_json_flag_emits_valid_json(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert isinstance(data, list)
         assert any(row["target"] == "claude" for row in data)
 
-    def test_json_active_target_has_correct_status(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json"])
-        data = json.loads(result.output)
-        claude_row = next(r for r in data if r["target"] == "claude")
+    def test_json_active_target_has_correct_status(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json"])
+        claude_row = _rows(result.output)["claude"]
         assert claude_row["status"] == "active"
         assert claude_row["source"] == "CLAUDE.md"
 
     def test_json_all_includes_agent_skills_meta_target(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json", "--all"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         meta = [r for r in data if r.get("target") == "agent-skills"]
         assert len(meta) == 1
         assert meta[0]["meta_target"] is True
 
-    def test_json_without_all_excludes_agent_skills(
-        self, runner: CliRunner, tmp_path: Path
-    ) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json"])
+    def test_json_without_all_excludes_agent_skills(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json"])
         data = json.loads(result.output)
         assert not any(r.get("target") == "agent-skills" for r in data)
 
     def test_json_all_agent_skills_inactive_when_not_in_active(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
         """agent-skills meta-target shows 'inactive' when not in active list."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
-        data = json.loads(result.output)
-        meta = next(r for r in data if r.get("target") == "agent-skills")
+        _project(project, manifest_targets=["claude"])
+        result = runner.invoke(targets, ["--json", "--all"])
+        meta = _rows(result.output)["agent-skills"]
         assert meta["status"] == "inactive"
+        assert meta["source"] is None
 
     def test_json_all_agent_skills_active_when_in_active(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
         """agent-skills meta-target shows 'active' when in active list."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets",
-                return_value=_resolved(["claude", "agent-skills"]),
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
-        data = json.loads(result.output)
-        meta = next(r for r in data if r.get("target") == "agent-skills")
+        _project(project, manifest_targets=["claude", "agent-skills"])
+        result = runner.invoke(targets, ["--json", "--all"])
+        meta = _rows(result.output)["agent-skills"]
         assert meta["status"] == "active"
+        assert meta["source"] == "apm.yml"
 
-    def test_json_all_includes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
+    def test_json_all_includes_grok_bot(self, runner: CliRunner, project: Path) -> None:
         """grok-bot is a stable explicit-only target, surfaced only via --all."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json", "--all"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         grok_bot = [r for r in data if r.get("target") == "grok-bot"]
@@ -344,24 +240,15 @@ class TestTargetsJsonOutput:
         assert grok_bot[0]["meta_target"] is False
 
     def test_json_all_lists_catalog_explicit_only_targets(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
         """Stable explicit-only targets appear under --all; experimental ones do not."""
         from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json", "--all"])
         assert result.exit_code == 0, result.output
-        rows = {r["target"]: r for r in json.loads(result.output)}
+        rows = _rows(result.output)
 
         expected = {
             "agent-skills": (".agents/", True),
@@ -376,45 +263,24 @@ class TestTargetsJsonOutput:
             if cap.experimental_flag:
                 assert name not in rows
 
-    def test_json_without_all_excludes_grok_bot(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets", return_value=_resolved(["claude"])
-            ),
-            patch(
-                "apm_cli.core.target_detection.detect_signals",
-                return_value=[_signal("claude", "CLAUDE.md")],
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json"])
+    def test_json_without_all_excludes_grok_bot(self, runner: CliRunner, project: Path) -> None:
+        _project(project, "claude")
+        result = runner.invoke(targets, ["--json"])
         data = json.loads(result.output)
         assert not any(r.get("target") == "grok-bot" for r in data)
 
     def test_json_all_grok_bot_active_when_in_active(
-        self, runner: CliRunner, tmp_path: Path
+        self, runner: CliRunner, project: Path
     ) -> None:
-        """grok-bot shows 'active' when explicitly resolved (e.g. via --target)."""
-        with (
-            patch(
-                "apm_cli.core.target_detection.resolve_targets",
-                return_value=_resolved(["grok-bot"]),
-            ),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json", "--all"])
-        data = json.loads(result.output)
-        grok_bot = next(r for r in data if r.get("target") == "grok-bot")
+        """grok-bot shows 'active' when apm.yml declares it."""
+        _project(project, manifest_targets=["grok-bot"])
+        result = runner.invoke(targets, ["--json", "--all"])
+        grok_bot = _rows(result.output)["grok-bot"]
         assert grok_bot["status"] == "active"
+        assert grok_bot["source"] == "apm.yml"
 
-    def test_json_inactive_target_has_null_source(self, runner: CliRunner, tmp_path: Path) -> None:
-        with (
-            patch("apm_cli.core.target_detection.resolve_targets", return_value=_resolved([])),
-            patch("apm_cli.core.target_detection.detect_signals", return_value=[]),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-        ):
-            result = runner.invoke(targets, ["--json"])
+    def test_json_inactive_target_has_null_source(self, runner: CliRunner, project: Path) -> None:
+        result = runner.invoke(targets, ["--json"])
         data = json.loads(result.output)
         # All rows should be inactive with null source
         for row in data:
