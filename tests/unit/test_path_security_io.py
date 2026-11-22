@@ -199,14 +199,21 @@ class TestGetInstallPathContainment:
 class TestResolvedContainment:
     """One resolution per side, then a pure containment verdict (rt-06)."""
 
-    def test_relative_path_or_none(self, tmp_path: Path) -> None:
+    def test_relative_path_leads_back_to_the_same_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a" / "b.md"
+        target.parent.mkdir(parents=True)
+        target.write_text("inside\n", encoding="utf-8")
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "b.md").write_text("outside\n", encoding="utf-8")
         base = resolve_for_containment(tmp_path / "base")
-        inside = resolve_for_containment(tmp_path / "base" / "a" / "b.md")
+
+        relative = resolved_relative_within(resolve_for_containment(target), base)
         outside = resolve_for_containment(tmp_path / "other" / "b.md")
 
-        assert resolved_relative_within(inside, base) == "a/b.md"
+        assert relative == "a/b.md"
+        assert (base / relative).read_text(encoding="utf-8") == "inside\n"
         assert resolved_relative_within(outside, base) is None
-        assert resolved_relative_within(base, base) == "."
+        assert outside.read_text(encoding="utf-8") == "outside\n"
 
     @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
     def test_link_out_of_the_base_is_outside(self, tmp_path: Path) -> None:
