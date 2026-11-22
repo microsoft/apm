@@ -784,7 +784,16 @@ class TestConfigListingFlagGating:
         assert "external.skillspector.llm: false" in output
         assert "external.skillspector.args: --model m1" in output
         assert "external.sarif" not in output
-        assert "registry.corp.url: https://registry.corp.example" in output
+        from urllib.parse import urlparse
+
+        url_lines = [
+            line.split(":", 1)[1].strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("registry.corp.url:")
+        ]
+        assert len(url_lines) == 1
+        listed = urlparse(url_lines[0])
+        assert (listed.scheme, listed.hostname) == ("https", "registry.corp.example")
         assert "registry.corp.token:" in output
         assert "s3cret-tok" not in output
 
