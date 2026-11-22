@@ -169,3 +169,80 @@ def test_global_compile_stops_when_policy_refuses(tmp_path: Path, monkeypatch) -
     render.assert_not_called()
     assert ("error", "acme/denied: org policy: denied by pattern") in logger.lines
     assert not (apm_home / "AGENTS.md").exists()
+
+
+def test_a_package_declared_in_one_root_and_installed_in_the_other_is_judged(
+    tmp_path: Path,
+) -> None:
+    """--root: the source manifest declares it, the redirected root installed it, no lock."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "apm.yml").write_text(
+        yaml.safe_dump({"name": "p", "version": "1.0.0", "dependencies": {"apm": ["acme/denied"]}}),
+        encoding="utf-8",
+    )
+    redirected = tmp_path / "redirected"
+    (redirected / "apm_modules" / "acme" / "denied").mkdir(parents=True)
+    logger = _Logger()
+    with (
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="block")),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            side_effect=lambda subjects, _policy: {
+                key: "org policy: denied" for key, _ in subjects
+            },
+        ),
+    ):
+        allowed = _dependency_policy_allows(logger, [source, redirected])
+
+    assert allowed is False
+    assert ("error", "acme/denied: org policy: denied") in logger.lines
+    assert not (source / "AGENTS.md").exists()
+
+
+def test_a_package_a_pre_compile_script_installs_is_judged_before_rendering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The early check passed on an empty project; the script then installed a denied package."""
+    from apm_cli.commands.compile import cli as compile_cli
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+
+    class _Runner:
+        def scripts_for_event(self, _event):
+            return []
+
+        def fire(self, _event, _payload):
+            _project(tmp_path)  # the script installs a package the org denies
+
+    logger = _Logger()
+    with (
+        patch("apm_cli.core.lifecycle_scripts.build_runner_from_context", return_value=_Runner()),
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="block")),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            return_value={"acme/denied": "org policy: denied by pattern"},
+        ),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        compile_cli._run_compilation(
+            logger,
+            None,
+            "AGENTS.md",
+            False,
+            False,
+            None,
+            True,
+            False,
+            False,
+            False,
+            True,
+            False,
+            source_root=tmp_path,
+            run_scripts=True,
+        )
+
+    assert exit_info.value.code == 1
+    assert ("error", "acme/denied: org policy: denied by pattern") in logger.lines
+    assert not (tmp_path / "AGENTS.md").exists()

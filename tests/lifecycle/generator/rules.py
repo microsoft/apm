@@ -92,7 +92,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
         Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
     ),
-    "compile": (Ev(_COMPILE, 1383, '"--target"'), Ev(_COMPILE, 1393, '"--dry-run"')),
+    "compile": (Ev(_COMPILE, 1436, '"--target"'), Ev(_COMPILE, 1446, '"--dry-run"')),
     "lock": (
         Ev("src/apm_cli/commands/lock.py", 115, '"--update"'),
         Ev("src/apm_cli/commands/lock.py", 122, '"--no-policy"'),
@@ -155,7 +155,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 861, '"--global"'),
-    "compile": Ev(_COMPILE, 1492, '"--global"'),
+    "compile": Ev(_COMPILE, 1545, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
@@ -245,7 +245,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
-        (Ev(_COMPILE, 791, "def _run_validation_mode"), Ev(_COMPILE, 825, "get_mcp_dependencies")),
+        (Ev(_COMPILE, 844, "def _run_validation_mode"), Ev(_COMPILE, 878, "get_mcp_dependencies")),
     ),
     "U-FIRST-PARTY-MCP": (
         "an MCP server the project declares in its own apm.yml is first-party: the "

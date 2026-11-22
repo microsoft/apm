@@ -629,8 +629,12 @@ def _pre_compile_then_validate(
     """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
     if not run or source_root is None:
         return
+    roots = [source_root, Path.cwd()]
+    judged = frozenset(_policy_subjects(roots, user_scope=False))
     _fire_pre_compile(logger, verbose, source_root)
     _validate_project(logger, False, source_root, allow_empty=clean)
+    # A script may have installed packages after the early check: judge those.
+    _enforce_dependency_policy(logger, roots, skip=judged)
 
 
 def _validate_project(
@@ -734,8 +738,53 @@ def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, A
     return sorted(subjects.items())
 
 
+def _declared_across_roots(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Declared dependencies of any root's manifest installed under any root's apm_modules.
+
+    With ``--root`` the renderer reads the source manifest and the redirected
+    installation together, so a package can be declared in one root and
+    installed only in the other.
+    """
+    from ...core.scope import scope_manifest_path
+    from ...models.apm_package import APMPackage
+
+    found: dict[str, Any] = {}
+    if len(roots) < 2:
+        return found
+    for root in roots:
+        manifest = scope_manifest_path(root, user_scope=user_scope)
+        if not manifest.is_file():
+            continue
+        try:
+            declared = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except ValueError:
+            continue  # compile reports an invalid manifest itself
+        for dep in declared:
+            if dep.is_marketplace:
+                continue  # resolves at install; the lock names it
+            if any(dep.get_install_path(other / "apm_modules").is_dir() for other in roots):
+                found.setdefault(dep.get_unique_key(), dep)
+    return found
+
+
+def _policy_subjects(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Every installed package compile renders from *roots*, keyed by lock key."""
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = {
+        key: ref
+        for root in unique_roots
+        for key, ref in _rendered_dependencies(root, user_scope=user_scope)
+    }
+    subjects.update(_declared_across_roots(unique_roots, user_scope=user_scope))
+    return subjects
+
+
 def _dependency_policy_allows(
-    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+    logger: CommandLogger,
+    roots: list[Path],
+    *,
+    user_scope: bool = False,
+    skip: frozenset[str] = frozenset(),
 ) -> bool:
     """Whether org policy lets compile render what is installed under *roots*.
 
@@ -744,6 +793,7 @@ def _dependency_policy_allows(
     and uninstall apply, routed through the trust policy owner so an unusable
     policy fails closed as install does. ``enforcement: warn`` reports and
     allows. Reports each denied package and the remediation when it refuses.
+    Packages in *skip* were already judged by this command.
     """
     from ...core.remediation import COMPILE_DEPENDENCY_DENIED
     from ...core.scope import manifest_root
@@ -752,11 +802,8 @@ def _dependency_policy_allows(
     from ...policy.outcome_routing import resolve_trust_policy
 
     unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
-    subjects = {
-        key: ref
-        for root in unique_roots
-        for key, ref in _rendered_dependencies(root, user_scope=user_scope)
-    }
+    subjects = _policy_subjects(unique_roots, user_scope=user_scope)
+    subjects = {key: ref for key, ref in subjects.items() if key not in skip}
     if not subjects:
         return True
     try:
@@ -783,10 +830,14 @@ def _dependency_policy_allows(
 
 
 def _enforce_dependency_policy(
-    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+    logger: CommandLogger,
+    roots: list[Path],
+    *,
+    user_scope: bool = False,
+    skip: frozenset[str] = frozenset(),
 ) -> None:
     """Exit 1 before anything is written when org policy refuses the compile."""
-    if not _dependency_policy_allows(logger, roots, user_scope=user_scope):
+    if not _dependency_policy_allows(logger, roots, user_scope=user_scope, skip=skip):
         sys.exit(1)
 
 
