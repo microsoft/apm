@@ -4054,7 +4054,7 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-claude-agents-md-routing",
         rule_id="install-deployment-claude-agents-md-routing",
         path="src/apm_cli/integration/instruction_integrator.py",
-        old="blocker = claude_agents_md_blocker(live_root)",
+        old="blocker = claude_agents_md_blocker(live_root, cache=self._routing_cache)",
         new="blocker = None",
         intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
     ),
