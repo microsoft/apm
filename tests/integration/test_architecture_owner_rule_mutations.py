@@ -2342,6 +2342,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Executable trust loses its canonical project-context resolver.",
     ),
     MutationCase(
+        guard_id="install-deployment-explicit-policy-source-owner",
+        rule_id="install-deployment-explicit-policy-source-owner",
+        path="src/apm_cli/policy/explicit_source.py",
+        old="inheritance.merge_policies(discovered.policy, explicit.policy)",
+        new="inheritance.merge_policies(explicit.policy, discovered.policy)",
+        intent="The explicit --policy source becomes the parent and can loosen org policy.",
+    ),
+    MutationCase(
         guard_id="install-deployment-frozen-flag-reader",
         rule_id="install-deployment-frozen-flag-reader",
         path="src/apm_cli/install/phases/cleanup.py",
