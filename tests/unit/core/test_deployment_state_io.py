@@ -256,6 +256,27 @@ def test_generic_row_with_several_concrete_proofs_keeps_every_target_record(
     assert reconciler.diagnostics.error_count == 0
 
 
+def test_ownerless_proof_still_reports_missing_ownership(tmp_path: Path) -> None:
+    """An ownerless materialization is not a departing owner's proof (#4703)."""
+    locator = _locator(".github/instructions/f-doc.instructions.md")
+    prior = DeploymentLedger(
+        records={locator.key: _record(locator, owners=("kept",), active="kept")}
+    )
+    ownerless = MaterializationResult(
+        locator=locator,
+        owners=frozenset(),
+        status=MaterializationStatus.WRITTEN,
+        content_hash="sha256:new",
+        validation=NativePayloadValidation(valid=True, contract="native-v1"),
+    )
+    reconciler = _reconciler(tmp_path)
+
+    reconciled = reconciler.reconcile(prior, [ownerless], _intent(owners=frozenset({"kept"})))
+
+    assert reconciled.failed == (locator,)
+    assert reconciler.diagnostics.error_count == 1
+
+
 def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     tmp_path: Path,
 ) -> None:

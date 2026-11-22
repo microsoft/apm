@@ -98,19 +98,16 @@ def _report_uninstall_outcome(
     A reported package failure leaves the uninstall incomplete, so the command
     exits non-zero instead of claiming success (#4703).
     """
-    from ...install.outcome import diagnostic_error_count
-
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
+    diagnostics = getattr(logger, "diagnostics", None)
     package_failures = (
-        diagnostic_error_count(logger.diagnostics) + integration_cleanup.package_failures
-    )
+        diagnostics.failed_package_count if diagnostics is not None else 0
+    ) + integration_cleanup.package_failures
     if package_failures:
-        logger.error(
-            f"Uninstall incomplete: {_count_noun(package_failures, 'package failure')} "
-            "reported above."
-        )
+        noun = "package" if package_failures == 1 else "packages"
+        logger.error(f"Uninstall incomplete: {package_failures} {noun} failed (see above).")
     elif not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
             logger.success(f"Uninstall complete: {summary}")

@@ -505,8 +505,13 @@ class DeploymentReconciler:
     def _departing_only(
         proofs: list[MaterializationResult] | None, intent: DeploymentIntent
     ) -> bool:
-        """Whether every current proof comes from an owner this run removes (#4703)."""
+        """Whether every current proof comes from an owner this run removes (#4703).
+
+        An ownerless proof is not departing: it still reaches the ownership error.
+        """
         if not proofs or intent.desired_owners is None:
+            return False
+        if not all(proof.owners for proof in proofs):
             return False
         return not any(owner in intent.desired_owners for proof in proofs for owner in proof.owners)
 

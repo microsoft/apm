@@ -79,7 +79,9 @@ def test_reported_package_failure_makes_uninstall_incomplete(
     logger = MagicMock()
     logger.diagnostics = DiagnosticCollector()
     for _ in range(logged):
+        # Two errors for one package are one failed package, as the summary says.
         logger.diagnostics.error("Materialization has no ownership metadata", package="pkg")
+        logger.diagnostics.error("Could not remove a tracked file", package="pkg")
     cleanup = IntegrationCleanupOutcome({}, {}, [], 0, package_failures=reintegrated)
 
     incomplete = _report_uninstall_outcome(
@@ -88,7 +90,7 @@ def test_reported_package_failure_makes_uninstall_incomplete(
 
     assert incomplete is True
     logger.success.assert_not_called()
-    logger.error.assert_called_once_with("Uninstall incomplete: 1 package failure reported above.")
+    logger.error.assert_called_once_with("Uninstall incomplete: 1 package failed (see above).")
 
 
 def test_critical_security_block_counts_as_survivor_failure() -> None:
@@ -102,3 +104,17 @@ def test_critical_security_block_counts_as_survivor_failure() -> None:
 
     assert diagnostics.error_count == 0
     assert diagnostics.failed_package_count == 1
+
+
+def test_failed_package_count_matches_the_error_summary() -> None:
+    """Attributed packages count once; an unattributed error counts on its own (#4703)."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    diagnostics = DiagnosticCollector()
+    diagnostics.error("first", package="pkg")
+    diagnostics.error("second", package="pkg")
+    diagnostics.security("Hidden characters", package="pkg", severity="critical")
+    diagnostics.security("Hidden characters", package="blocked", severity="critical")
+    diagnostics.error("no package attached")
+
+    assert diagnostics.failed_package_count == 3
