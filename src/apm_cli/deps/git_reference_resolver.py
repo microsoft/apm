@@ -260,8 +260,8 @@ class GitReferenceResolver:
 
         # Read ``git`` from the module dict: a test double or an already
         # loaded GitPython is honoured, but this probe never imports GitPython.
-        _git_module = loaded_git_module(vars(_gd))
-        g = _git_module.cmd.Git() if _git_module is not None else None
+        _git_cls = getattr(getattr(loaded_git_module(vars(_gd)), "cmd", None), "Git", None)
+        g = _git_cls() if _git_cls is not None else None
         ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
         def _run_remote(url: str, env: dict[str, str]) -> str:

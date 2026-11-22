@@ -144,8 +144,8 @@
     {
       "id": "git-clone-connect-retry",
       "decision": "Bounded same-action HTTPS connection retry below auth and protocol selection",
-      "owner": "deps/clone_engine.py (CloneEngine); deps/git_lazy.py (git_command_error: GitCommandError matching without importing GitPython)",
-      "selectors": ["src/apm_cli/deps/clone_engine.py", "src/apm_cli/deps/git_lazy.py"],
+      "owner": "deps/clone_engine.py (CloneEngine)",
+      "selectors": ["src/apm_cli/deps/clone_engine.py"],
       "guards": ["transport-platform-clone-connect-retry"]
     },
     {

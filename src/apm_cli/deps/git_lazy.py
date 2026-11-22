@@ -22,10 +22,10 @@ def git_command_error() -> type[Exception]:
     A ``GitCommandError`` instance can only exist after GitPython was imported,
     so while ``git.exc`` is not loaded a never-raised placeholder is equivalent.
     """
-    module = sys.modules.get("git.exc")
-    if module is None:
-        return _GitPythonNotLoaded
-    return module.GitCommandError
+    # Another thread may still be executing ``git.exc``; until the class exists
+    # no instance of it can have been raised either.
+    error = getattr(sys.modules.get("git.exc"), "GitCommandError", None)
+    return _GitPythonNotLoaded if error is None else error
 
 
 def new_git_command_error(*args: object, **kwargs: object) -> Exception:
@@ -36,12 +36,19 @@ def new_git_command_error(*args: object, **kwargs: object) -> Exception:
 
 
 def loaded_git_module(namespace: dict[str, Any]) -> Any:
-    """Return the ``git`` module bound in *namespace* or already imported, else None.
+    """Return the ``git`` module bound in *namespace* or fully imported, else None.
 
-    Test doubles patched onto a module's ``git`` attribute win; this never
+    Test doubles patched onto a module's ``git`` attribute win. A ``git``
+    module another thread is still importing counts as not loaded. This never
     imports GitPython itself.
     """
-    return namespace.get("git") or sys.modules.get("git")
+    bound = namespace.get("git")
+    if bound is not None:
+        return bound
+    module = sys.modules.get("git")
+    if module is None or getattr(getattr(module, "__spec__", None), "_initializing", False):
+        return None
+    return module
 
 
 def bind_git_name(namespace: dict[str, Any], name: str) -> Any:

@@ -10,13 +10,17 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.runner import run_selected_rules
+
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-cli-startup-import-budget")]
 
-_PROBE = """
+ROOT = Path(__file__).resolve().parents[2]
+
+_SETUP_PROBE = """
 import json, sys
 import apm_cli.commands.install
 import apm_cli.deps.bare_cache
@@ -28,44 +32,55 @@ GitHubPackageDownloader(auth_resolver=AuthResolver())
 print(json.dumps(sorted(m for m in sys.modules if m == "git" or m.startswith("git."))))
 """
 
+# First failure in a run: the handler is evaluated while GitPython is unloaded,
+# then the raise path imports it; the real error must still be caught.
+_TRANSITION_PROBE = """
+import sys
+from apm_cli.deps.git_lazy import git_command_error, new_git_command_error
+placeholder = git_command_error()
+print("loaded-before", "git" in sys.modules)
+try:
+    raise new_git_command_error(["git", "ls-remote"], 128, stderr="denied")
+except git_command_error() as exc:
+    print("caught", type(exc).__name__, exc.status, placeholder is not type(exc))
+"""
 
-def test_install_downloader_setup_does_not_import_gitpython() -> None:
+
+def _run(probe: str) -> list[str]:
     result = subprocess.run(
-        [sys.executable, "-c", _PROBE],
+        [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
         timeout=120,
         check=False,
     )
     assert result.returncode == 0, result.stderr[-2000:]
-    assert json.loads(result.stdout.splitlines()[-1]) == []
+    return result.stdout.splitlines()
 
 
-def test_git_command_error_matches_real_errors_once_gitpython_is_loaded() -> None:
-    from git.exc import GitCommandError
-
-    from apm_cli.deps.git_lazy import git_command_error, new_git_command_error
-
-    assert git_command_error() is GitCommandError
-    error = new_git_command_error(["git", "ls-remote"], 128, stderr="denied")
-    caught = None
-    try:
-        raise error
-    except git_command_error() as exc:
-        caught = exc
-    assert isinstance(caught, GitCommandError)
+def test_install_downloader_setup_does_not_import_gitpython() -> None:
+    assert json.loads(_run(_SETUP_PROBE)[-1]) == []
 
 
-def test_gitpython_names_remain_patchable_module_attributes() -> None:
-    import git
+def test_first_git_failure_is_caught_after_lazy_import() -> None:
+    assert _run(_TRANSITION_PROBE) == [
+        "loaded-before False",
+        "caught GitCommandError 128 True",
+    ]
 
-    from apm_cli.deps import bare_cache, github_downloader
 
-    assert github_downloader.Repo is git.Repo
-    assert github_downloader.git is git
-    assert bare_cache.Repo is git.Repo
-    assert issubclass(github_downloader.GitProgressReporter, git.RemoteProgress)
-    double = MagicMock()
-    with patch("apm_cli.deps.github_downloader.Repo", double):
-        assert github_downloader.Repo is double
-    assert github_downloader.Repo is git.Repo
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/apm_cli/deps/github_downloader.py",
+        "src/apm_cli/deps/clone_engine.py",
+        "src/apm_cli/deps/bare_cache.py",
+        "src/apm_cli/deps/git_reference_resolver.py",
+    ],
+)
+def test_startup_rule_rejects_an_eager_gitpython_import(path: str) -> None:
+    source = (ROOT / path).read_text(encoding="utf-8")
+    rule = "registry_delegation.cli_startup_imports"
+    report = run_selected_rules(ROOT, (rule,), source_overrides={path: "import git\n" + source})
+    assert report.failures == ()
+    assert any(item.rule_id == rule and item.path == path for item in report.violations)
