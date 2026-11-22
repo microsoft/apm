@@ -40,6 +40,7 @@ from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import driver
 from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.model.expected import expected_deployed, expected_exit, expected_lock_rows
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
@@ -151,7 +152,7 @@ class Known:
     match: str
 
     def __post_init__(self) -> None:
-        assert re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
 
 
 # A Claude-format plugin installs whole to .agents/plugins/<name>/ for claude and
@@ -321,7 +322,7 @@ def mcp_server_problems(scenario: Scenario, names: Iterable[str]) -> list[str]:
 @contextmanager
 def known_defect(tracking: str, match: str) -> Iterator[None]:
     """A block that must keep failing with *match* until *tracking* is fixed (strict)."""
-    assert re.fullmatch(r"#\d+", tracking), tracking
+    assert TRACKING.fullmatch(tracking) and match, (tracking, match)
     try:
         yield
     except AssertionError as exc:
@@ -915,22 +916,24 @@ class Credit:
 
     def __post_init__(self) -> None:
         assert self.node.startswith(f"{NODE_ROOT}/test_"), self.node
-        assert self.tracking is None or re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert self.tracking is None or TRACKING.fullmatch(self.tracking), self.tracking
 
 
 def credits(
     module_file: str,
     rows: Mapping[str, Iterable[Mapping[str, str]]],
-    known: Mapping[str, str] | None = None,
+    known: Mapping[str, Known] | None = None,
 ) -> tuple[Credit, ...]:
     """``CREDITS`` of one module: test id (``name[param]``) -> the assignments it proves.
 
-    *known* maps a test id to the issue of the strict known cell it carries.
+    *known* maps a test id to the strict known cell it carries (issue and signature).
     """
     module = f"{NODE_ROOT}/{Path(module_file).name}"
     known = known or {}
     return tuple(
-        Credit(f"{module}::{test}", dict(assignment), known.get(test))
+        Credit(
+            f"{module}::{test}", dict(assignment), known[test].tracking if test in known else None
+        )
         for test, assignments in rows.items()
         for assignment in assignments
     )

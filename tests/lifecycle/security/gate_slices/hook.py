@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice
 
 _PROJECT = {"project": (".github/hooks/p-exec-session.json",)}
@@ -16,7 +17,7 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_XFAIL: dict[str, str] = {}
+_XFAIL: dict[str, KnownFailure] = {}
 _ANNOUNCE = {
     # A bundle approval pins the whole bundle digest: a changed definition reads
     # as a bundle that is not approved yet.
@@ -66,7 +67,7 @@ SLICE = GateSlice(
             surface=surface,
             announce=_ANNOUNCE.get(f"G|{path}|{change}|hook"),
             smoke=f"G|{path}|{change}|hook" in _SMOKE,
-            xfail=_XFAIL.get(f"G|{path}|{change}|hook", ""),
+            xfail=_XFAIL.get(f"G|{path}|{change}|hook"),
             ungoverned=_UNGOVERNED.get(f"G|{path}|{change}|hook", ""),
         )
         for path, (changes, surface) in _PATHS.items()

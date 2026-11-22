@@ -46,6 +46,7 @@ from hypothesis.stateful import initialize, rule, run_state_machine_as_test
 
 from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle.generator.rules import FIRST_PARTY_MCP_CELL
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.machines._kit import (
     Bench,
     KnownCell,
@@ -1630,5 +1631,6 @@ def test_source_generated_sequences_keep_cross_cutting_laws(
     )
 
 
-# T3/T5 cells whose oracle fails on main -> tracking issue (a strict known cell discharges them).
-KNOWN_CELLS_BY_ID: dict[str, str] = {}
+# T3/T5/X cells whose oracle fails on main -> their known failure (tracking issue and
+# failure signature); the generator marks the obligations they imply known-failing.
+KNOWN_CELLS_BY_ID: dict[str, KnownFailure] = {}

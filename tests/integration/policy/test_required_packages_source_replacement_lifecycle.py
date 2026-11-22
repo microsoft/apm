@@ -40,6 +40,7 @@ pytestmark = [
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only fixture"),
+    pytest.mark.e2e,
 ]
 
 ORIGINAL = "example-org/app"

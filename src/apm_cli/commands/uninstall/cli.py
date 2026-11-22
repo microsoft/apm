@@ -5,7 +5,7 @@ import contextlib
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import click
 
@@ -54,6 +54,7 @@ from .engine import (
     _removed_lock_key,
     _stage_shared_local_survivors,
     _sync_integrations_after_uninstall,
+    _uninstall_orphan_decision,
     _validate_uninstall_packages,
     gate_retired_hook_survivors,
     manifest_dependency_entries,
@@ -66,7 +67,9 @@ from .selection_shrink import (
 )
 
 
-def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: int) -> str:
+def _uninstall_summary(
+    removed_count: int, retained_count: int, orphan_count: int, still_needed_count: int = 0
+) -> str:
     """Return the final summary, counting each package once."""
     summary = f"removed {_count_noun(removed_count, 'package')}"
     if orphan_count:
@@ -79,7 +82,138 @@ def _uninstall_summary(removed_count: int, retained_count: int, orphan_count: in
     if retained_count:
         retained = _count_noun(retained_count, "package")
         summary += f"; removed {retained} from the selected profile only"
+    if still_needed_count:
+        kept = _count_noun(still_needed_count, "declaration")
+        summary += f"; removed {kept} whose package another dependency still needs"
     return summary
+
+
+def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list) -> list:
+    """Return every apm.yml declaration of *packages_to_remove* (#3693, #4749).
+
+    Still-needed packages are dropped from the manifest too, so the caller
+    passes them alongside the packages that are uninstalled for real.
+    """
+    return list(manifest_declarations_of(declarations, packages_to_remove))
+
+
+class _StillNeededRepair(NamedTuple):
+    """Orphan-owner repair for still-needed rows: new parents and subtree depths."""
+
+    parents: dict
+    depths: dict
+
+
+_NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {})
+
+
+def _split_still_needed_packages(
+    lockfile, packages_to_remove: list, modules_dir, apm_yml_path, logger
+) -> tuple[list, list, _StillNeededRepair]:
+    """Split removals into full removals and declarations a survivor still needs.
+
+    A removed direct dependency that a surviving package still declares keeps
+    its lock row, ``apm_modules`` copy and deployed files; only its manifest
+    declaration goes, and the orphan owner's repair re-parents the row
+    (#4749). Returns ``(removed, still_needed, repair)``.
+    """
+    if not lockfile or not packages_to_remove or not modules_dir.exists():
+        return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
+    decision = _uninstall_orphan_decision(
+        lockfile, packages_to_remove, modules_dir, apm_yml_path, logger, warn_on_incomplete=False
+    )
+    if not decision.rescued_roots:
+        return packages_to_remove, [], _NO_STILL_NEEDED_REPAIR
+    still_needed = [
+        package
+        for package in packages_to_remove
+        if _removed_lock_key(package, lockfile) in decision.rescued_roots
+    ]
+    removed = [package for package in packages_to_remove if package not in still_needed]
+    parents = {
+        key: repair for key, repair in decision.repairs.items() if key in decision.rescued_roots
+    }
+    return removed, still_needed, _StillNeededRepair(parents, dict(decision.rescued_depths))
+
+
+def _split_removals(
+    packages_to_remove: list, lockfile, paths: tuple, logger, *, user_scope: bool
+) -> tuple[list, list, list, _StillNeededRepair]:
+    """Split the selection into full, selected-profile and declaration-only removals."""
+    removed, retained = _split_selected_profile_packages(
+        packages_to_remove, lockfile, user_scope=user_scope
+    )
+    modules_dir, apm_yml_path = paths
+    removed, still_needed, repairs = _split_still_needed_packages(
+        lockfile, removed, modules_dir, apm_yml_path, logger
+    )
+    return removed, retained, still_needed, repairs
+
+
+def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
+    """Re-parent each still-needed row and move its subtree one level down."""
+    updated = False
+    for key, (parent, local_path, dev_only) in repair.parents.items():
+        kept = lockfile.get_dependency(key)
+        if kept is None:
+            continue
+        kept.resolved_by = parent
+        kept.is_dev = dev_only
+        if local_path is not None:
+            kept.local_path = local_path
+        if kept.replacement is not None:
+            # The removed declaration's own request goes; surviving parents' stay.
+            kept.replacement.drop_root_requests()
+        updated = True
+    for key, depth in repair.depths.items():
+        kept = lockfile.get_dependency(key)
+        if kept is not None and kept.depth != depth:
+            kept.depth = depth
+            updated = True
+    return updated
+
+
+def _surviving_declarations(current_deps: list, packages_to_remove: list) -> list:
+    """Declarations apm.yml keeps once every removed declaration goes."""
+    surviving = list(current_deps)
+    for declaration in manifest_declarations_of(current_deps, packages_to_remove):
+        surviving.remove(declaration)
+    return surviving
+
+
+def _still_needed_summary(
+    selections: tuple[list, list, list],
+    orphan_removed: int,
+    repair: _StillNeededRepair,
+    lockfile,
+    logger,
+) -> str:
+    """Report still-needed packages and return the final uninstall summary."""
+    removed, retained, still_needed = selections
+    _report_still_needed_packages(still_needed, repair, lockfile, logger, dry_run=False)
+    return _uninstall_summary(len(removed), len(retained), orphan_removed, len(still_needed))
+
+
+def _report_still_needed_packages(
+    still_needed: list,
+    repair: _StillNeededRepair,
+    lockfile,
+    logger: CommandLogger,
+    *,
+    dry_run: bool,
+) -> None:
+    """Explain why a removed declaration's package stays installed."""
+    for package in still_needed:
+        label = _dependency_public_label(package)
+        parent = repair.parents.get(_removed_lock_key(package, lockfile), (None,))[0]
+        needed_by = f"{parent} still depends on it" if parent else "another dependency needs it"
+        if dry_run:
+            logger.progress(
+                f"Dry run: Would remove {label} from apm.yml only; it stays installed "
+                f"because {needed_by}"
+            )
+        else:
+            logger.progress(f"{label} stays installed because {needed_by}")
 
 
 def _report_uninstall_outcome(
@@ -589,7 +723,7 @@ def _refuse_uninstall_without_evidence(
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
-    if not lockfile or not cleanup_keys:
+    if not lockfile or (not cleanup_keys and not shrunk):
         return
     # Hash-tracked skill members count too: directory cleanup deletes them.
     selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
@@ -752,8 +886,9 @@ def _dry_run_with_selected_profile(
     *,
     surviving_dependencies: list,
     lockfile=None,
+    still_needed: tuple[list, _StillNeededRepair] = ((), _NO_STILL_NEEDED_REPAIR),
 ) -> None:
-    """Preview full removals and selected-profile-only removals."""
+    """Preview full, selected-profile-only and declaration-only removals."""
     if packages_to_remove:
         _dry_run_uninstall(
             packages_to_remove,
@@ -764,6 +899,9 @@ def _dry_run_with_selected_profile(
             lockfile=lockfile,
         )
     _report_selected_profile_packages(retained_packages, logger, dry_run=True)
+    _report_still_needed_packages(
+        list(still_needed[0]), still_needed[1], lockfile, logger, dry_run=True
+    )
 
 
 def _retire_selected_profile_packages(
@@ -1044,12 +1182,21 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         selected_package_labels = tuple(
             _dependency_lifecycle_label(package) for package in packages_to_remove
         )
-        packages_to_remove, retained_packages = _split_selected_profile_packages(
-            packages_to_remove, lockfile, user_scope=scope is InstallScope.USER
+        (
+            packages_to_remove,
+            retained_packages,
+            still_needed_packages,
+            still_needed_repairs,
+        ) = _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
         )
-        surviving_deps = list(current_deps)
-        for declaration in manifest_declarations_of(current_deps, packages_to_remove):
-            surviving_deps.remove(declaration)
+        surviving_deps = _surviving_declarations(
+            current_deps, [*packages_to_remove, *still_needed_packages]
+        )
         removed_keys = builtins.set()
         for package in packages_to_remove:
             removed_keys.add(_removed_lock_key(package, lockfile))
@@ -1106,6 +1253,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 apm_yml_path,
                 surviving_dependencies=surviving_deps,
                 lockfile=lockfile,
+                still_needed=(still_needed_packages, still_needed_repairs),
             )
             return
 
@@ -1118,7 +1266,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             removed_keys | builtins.set(projected_orphans) | profile_keys,
             profile_survivors,
             staged_local_refreshes,
-            (packages_to_remove, modules_dir, apm_yml_path),
+            ([*packages_to_remove, *still_needed_packages], modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
         )
@@ -1150,7 +1298,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             )
             # Survivors whose selection shrinks are redeployed in full below.
             refreshed_survivor_keys |= _shrink_surviving_selections(
-                lockfile, packages_to_remove, modules_dir, apm_yml_path, logger
+                lockfile,
+                [*packages_to_remove, *still_needed_packages],
+                modules_dir,
+                apm_yml_path,
+                logger,
             )
         except (OSError, PathTraversalError, LocalSurvivorRefreshError, CodexNativeError) as exc:
             _report_package_removal_failure(logger, exc, user_scope=scope is InstallScope.USER)
@@ -1199,7 +1351,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         profile_lock_updated = _retire_selected_profile_packages(
             lockfile, profile_keys, profile_survivors, retained_packages, logger
         )
-        if not packages_to_remove:
+        if not packages_to_remove and not still_needed_packages:
             _finish_selected_profile_uninstall(
                 lockfile=lockfile,
                 lockfile_path=lockfile_path,
@@ -1220,7 +1372,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             ("dependencies.apm", prod_deps),
             ("devDependencies.apm", dev_deps),
         ):
-            for declaration in manifest_declarations_of(declarations, packages_to_remove):
+            for declaration in _manifest_declarations_to_drop(
+                declarations, [*packages_to_remove, *still_needed_packages]
+            ):
                 declarations.remove(declaration)
                 package_label = _dependency_public_label(declaration)
                 _progress_once(
@@ -1280,6 +1434,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 if orphan_key in lockfile.dependencies:
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
+            lockfile_updated |= _reparent_still_needed(lockfile, still_needed_repairs)
 
         # Step 10: Sync integrations
         cleaned = {
@@ -1426,8 +1581,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
 
         # Final summary: count each package once, whichever stores it left.
-        summary = _uninstall_summary(
-            len(packages_to_remove), len(retained_packages), orphan_removed
+        summary = _still_needed_summary(
+            (packages_to_remove, retained_packages, still_needed_packages),
+            orphan_removed,
+            still_needed_repairs,
+            lockfile,
+            logger,
         )
         if compile_inputs is not None:
             hint_compile_after_removal(compile_inputs, modules_dir, logger)
