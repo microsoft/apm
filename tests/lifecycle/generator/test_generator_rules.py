@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import itertools
 import json
 import subprocess
 from functools import cache
@@ -313,12 +312,15 @@ def test_parallel_prs_crediting_adjacent_cells_merge_cleanly(tmp_path: Path) -> 
     """Two PRs that credit neighbouring cells merge to exactly their regenerated union."""
     base = json.loads(_generated()[0])
     keys = list(base["obligations"])
-    first = next(
-        key
-        for key, after in itertools.pairwise(keys)
-        if base["obligations"][key]["status"] == base["obligations"][after]["status"] == "baseline"
-    )
-    second = keys[keys.index(first) + 1]
+    # Two neighbouring cells in baseline: the ledger may hold none, so demote them.
+    first, second = keys[0], keys[1]
+    for key in (first, second):
+        record = base["obligations"][key]
+        base["obligations"][key] = {
+            name: value
+            for name, value in record.items()
+            if name not in ("credited_by", "tracking", "witness")
+        } | {"status": "baseline"}
     ours, theirs, union = (copy.deepcopy(base) for _ in range(3))
     _promote(ours, first, "ours")
     _promote(theirs, second, "theirs")

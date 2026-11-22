@@ -883,26 +883,30 @@ class SourceMachine(MachineBase):
         docs = [c for c in choices if "other-file" in c.prims and acts(op, c)]
         if not docs or op == "uninstall":
             return
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
         lock = step.after.lock
-        recorded = (
-            {path for dep in lock.get_package_dependencies() for path in dep.deployed_files}
-            if lock is not None
-            else set()
-        )
+        recorded: set[str] = set()
+        if lock is not None:
+            recorded |= {p for dep in lock.get_package_dependencies() for p in dep.deployed_files}
+            recorded |= set(lock.local_deployed_files)
+            recorded |= set(DeploymentLedgerCodec.local_bundle_paths(lock))
+            recorded |= set(DeploymentLedgerCodec.deployed_file_hashes(lock))
         for choice in docs:
+            # A local bundle deploys its source package's instruction (p-pack-bundle -> p-pack).
+            name = _MODELED_BUNDLES.get(choice.package, choice.package)
             for target in sorted(self.model.targets):
                 mapping = KNOWN_TARGETS[target].primitives.get("instructions")
                 if mapping is None:
                     continue
                 relative = (
-                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/"
-                    f"{choice.package}{mapping.extension}"
+                    f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/{name}{mapping.extension}"
                 )
                 path = step.after.deploy_root / relative
                 where = f"{op} {choice.form} {choice.package}: {relative}"
                 assert path.is_file(), f"{where} is not deployed"
                 text = path.read_text(encoding="utf-8")
-                assert f"Follow the {choice.package} conventions." in text, f"{where}: {text!r}"
+                assert f"Follow the {name} conventions." in text, f"{where}: {text!r}"
                 assert relative in recorded, f"{where} is not recorded in the lock"
 
     def egress(self, step: Step) -> None:
