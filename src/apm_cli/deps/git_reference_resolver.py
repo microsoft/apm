@@ -30,8 +30,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from git.exc import GitCommandError
-
 from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.auth_outcome import (
     RepositoryNotFoundError,
@@ -54,6 +52,7 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from .git_lazy import git_command_error, loaded_git_module, new_git_command_error
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
 from .transport_selection import ProtocolPreference, initial_transport_scheme
@@ -259,11 +258,14 @@ class GitReferenceResolver:
         # this method.
         from . import github_downloader as _gd
 
-        g = _gd.git.cmd.Git()
+        # Read ``git`` from the module dict: a test double or an already
+        # loaded GitPython is honoured, but this probe never imports GitPython.
+        _git_module = loaded_git_module(vars(_gd))
+        g = _git_module.cmd.Git() if _git_module is not None else None
         ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
         def _run_remote(url: str, env: dict[str, str]) -> str:
-            if type(g).__module__.startswith("unittest.mock"):
+            if g is not None and type(g).__module__.startswith("unittest.mock"):
                 return g.ls_remote(*ls_args, url, env=env)
             from ..utils.git_env import git_remote_refs
 
@@ -271,7 +273,7 @@ class GitReferenceResolver:
             if result.returncode != 0:
                 # auth-delegated: try_with_fallback (or the caller's resolved
                 # context) selects this environment.
-                raise GitCommandError(
+                raise new_git_command_error(
                     [get_git_executable(), "ls-remote", *ls_args, url],
                     result.returncode,
                     stderr=result.stderr,
@@ -282,7 +284,7 @@ class GitReferenceResolver:
             try:
                 output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
-            except GitCommandError as exc:
+            except git_command_error() as exc:
                 return ("err", exc)
 
         ado_chain = is_ado and not use_ssh
@@ -312,7 +314,7 @@ class GitReferenceResolver:
                     unauth_first=True,
                     base_env=host.git_env,
                 )
-            except (GitCommandError, OSError) as exc:
+            except (git_command_error(), OSError) as exc:
                 outcome = ("err", exc)
         elif ado_chain:
 
@@ -332,7 +334,7 @@ class GitReferenceResolver:
                     remote_url=transport_attempt.effective_url or remote_url,
                     base_env=host.git_env,
                 )
-            except (GitCommandError, OSError, AdoAuthChainExhaustedError) as exc:
+            except (git_command_error(), OSError, AdoAuthChainExhaustedError) as exc:
                 outcome = ("err", exc)
             ado_attempts = getattr(outcome[1], "attempts", None) if outcome[0] == "err" else None
         else:
@@ -608,7 +610,7 @@ class GitReferenceResolver:
                     resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
                     ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
 
-                except GitCommandError:
+                except git_command_error():
                     try:
                         host._clone_with_fallback(
                             dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
@@ -647,7 +649,7 @@ class GitReferenceResolver:
                                 f"{dep_ref.repo_url}: {sanitized_error}"
                             )
 
-                    except GitCommandError as e:
+                    except git_command_error() as e:
                         if "Authentication failed" in str(
                             e
                         ) or "remote: Repository not found" in str(e):
