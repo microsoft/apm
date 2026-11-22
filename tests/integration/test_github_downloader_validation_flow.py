@@ -466,6 +466,15 @@ class TestDownloadSubdirectoryPersistentCache:
 
         dl = _make_downloader()
         dl.shared_clone_cache = None
+        # A distinct per-remote credential: it must reach the cache env, so a
+        # dropped resolver result cannot hide behind the empty downloader env.
+        per_remote_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Bearer per-remote-sentinel",
+        }
+        dl.auth_resolver.uses_public_github_anonymous_first.return_value = False
+        dl.auth_resolver.git_env_for_remote.return_value = per_remote_env
         persistent_cache = MagicMock()
         persistent_cache.get_checkout.return_value = cached_checkout
         dl.persistent_git_cache = persistent_cache
@@ -491,7 +500,15 @@ class TestDownloadSubdirectoryPersistentCache:
             "https://gitlab.com/spiritt/tenants/spiritt/agent-cfg"
         )
         call_kwargs = persistent_cache.get_checkout.call_args.kwargs
-        assert call_kwargs["env"] == dl._git_env_dict()
+        env = call_kwargs["env"]
+        assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer per-remote-sentinel"
+        assert env["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        assert env != dl._git_env_dict()
+        resolver = dl.auth_resolver
+        assert resolver.git_env_for_remote.call_args.args[0] in (
+            resolver.resolve_for_dep.return_value,
+            resolver.resolve_for_remote.return_value,
+        )
         assert call_kwargs["sparse_paths"] == ["packages/my-pkg"]
         assert "locked_sha" in call_kwargs
 
