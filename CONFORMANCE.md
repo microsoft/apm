@@ -45,7 +45,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | Class | Active | Partial | Skipped | Xfail | Text-only | Unbound |
 |-------|-------:|--------:|--------:|------:|----------:|--------:|
 | Producer | 9 | 0 | 0 | 0 | 3 | 0 |
-| Consumer | 110 | 1 | 3 | 0 | 3 | 0 |
+| Consumer | 111 | 1 | 2 | 0 | 3 | 0 |
 | Registry | 0 | 0 | 0 | 0 | 1 | 0 |
 | Governance | 22 | 0 | 0 | 0 | 0 | 0 |
 
@@ -97,7 +97,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-mf-013](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-013) | MUST | 4.5 | consumer | active | 2 / 3 | - |
 | [req-mf-014](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-014) | MUST | 4.2.3 | producer | active | 1 / 2 | - |
 | [req-mf-015](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-015) | MUST | 4.2.3 | producer | active | 2 / 3 | - |
-| [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | skipped | 0 / 1 | - |
+| [req-mf-016](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-016) | MUST | 4.3.5 | consumer | active | 1 / 2 | - |
 | [req-mf-017](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-017) | MUST | 4.7 | producer | active | 11 / 12 | - |
 | [req-mf-018](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-018) | MUST | 4.6.1 | consumer | active | 5 / 6 | - |
 | [req-mf-019](docs/src/content/docs/specs/openapm-v0.1.md#req-mf-019) | MUST | 4.2.4 | consumer | active | 1 / 2 | - |
@@ -193,7 +193,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-tg-004](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-004) | MUST | 4.2.1 | consumer | active | 2 / 3 | - |
 | [req-tg-005](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-005) | MUST | 8.5 | consumer | active | 13 / 14 | - |
 | [req-tg-006](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-006) | MUST | 8.5 | consumer | active | 2 / 2 | - |
-| [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 1 / 1 | - |
+| [req-tg-007](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-007) | MUST | 8.5 | consumer | active | 2 / 2 | - |
 | [req-tg-008](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-008) | MUST | 8.5.3 | consumer | active | 8 / 8 | - |
 | [req-tg-009](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-009) | MUST | 8.5.1 | consumer | active | 2 / 2 | - |
 | [req-tg-010](docs/src/content/docs/specs/openapm-v0.1.md#req-tg-010) | MUST | 8.5.4 | consumer | active | 3 / 4 | - |

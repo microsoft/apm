@@ -26,14 +26,15 @@ from apm_cli.core.deployment_state import (
     require_local_bundle_hash,
     validate_deployment_rows,
 )
-from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     has_symlink_component,
+    resolve_for_containment,
+    resolved_relative_within,
 )
-from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.scope import InstallScope
@@ -353,17 +354,23 @@ class DeploymentMaterializationSession:
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
 
+    def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
+        return DeploymentLedgerCodec.locator_for_path(
+            candidate,
+            project_root=self.root,
+            target=target,
+            scope=self.scope,
+            candidate_resolved=True,
+        )
+
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
+        candidate = resolve_for_containment(path)
         for target in targets:
             if not target.supports("skills"):
                 continue
-            try:
-                ensure_path_within(path, target.skills_deploy_path(self.root))
-            except PathTraversalError:
-                continue
-            return DeploymentLedgerCodec.locator_for_path(
-                path, project_root=self.root, target=target, scope=self.scope
-            )
+            skills_root = resolve_for_containment(target.skills_deploy_path(self.root))
+            if resolved_relative_within(candidate, skills_root) is not None:
+                return self._encode(candidate, target)
         return None
 
     def _write_locator(
@@ -381,14 +388,10 @@ class DeploymentMaterializationSession:
                     for mapping in target.primitives.values()
                     if mapping.deploy_root
                 )
+            candidate = resolve_for_containment(path)
             for root in roots:
-                try:
-                    ensure_path_within(path, root)
-                except PathTraversalError:
-                    continue
-                return DeploymentLedgerCodec.locator_for_path(
-                    path, project_root=self.root, target=target, scope=self.scope
-                )
+                if resolved_relative_within(candidate, resolve_for_containment(root)) is not None:
+                    return self._encode(candidate, target)
         return None
 
     @staticmethod
@@ -920,7 +923,7 @@ def trusted_receipt_baselines(
     return baselines
 
 
-class DeploymentLedgerCodec:
+class DeploymentLedgerCodec(RowProjection):
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod
@@ -1751,8 +1754,12 @@ class DeploymentLedgerCodec:
         target: TargetProfile,
         runtime: str | None = None,
         scope: InstallScope,
+        candidate_resolved: bool = False,
     ) -> DeploymentLocator:
-        """Encode a path without forcing external roots into project strings."""
+        """Encode a path without forcing external roots into project strings.
+
+        ``candidate_resolved``: *path* was just resolved; roots are always resolved live.
+        """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
             return DeploymentLocator(
@@ -1763,33 +1770,26 @@ class DeploymentLedgerCodec:
                 scope=scope_value,
             )
 
-        candidate = Path(path).resolve()
-        root = project_root.resolve()
-        try:
-            project_path = ensure_path_within(candidate, root)
-        except PathTraversalError:
-            project_path = None
-        if project_path is not None:
+        root = resolve_for_containment(project_root)
+        candidate = Path(path) if candidate_resolved else resolve_for_containment(Path(path))
+        relative = resolved_relative_within(candidate, root)
+        if relative is not None:
             return DeploymentLocator(
                 kind=LocatorKind.PROJECT_RELATIVE,
                 target=target.name,
-                value=portable_relpath(project_path, root),
+                value=relative,
                 runtime=runtime,
                 scope=scope_value,
             )
 
         deploy_root = target.managed_deploy_root
         if deploy_root is not None:
-            resolved_deploy_root = deploy_root.resolve()
-            try:
-                target_path = ensure_path_within(candidate, resolved_deploy_root)
-            except PathTraversalError:
-                target_path = None
-            if target_path is not None:
+            relative = resolved_relative_within(candidate, resolve_for_containment(deploy_root))
+            if relative is not None:
                 return DeploymentLocator(
                     kind=LocatorKind.TARGET_RELATIVE,
                     target=target.name,
-                    value=portable_relpath(target_path, resolved_deploy_root),
+                    value=relative,
                     runtime=runtime,
                     scope=scope_value,
                 )

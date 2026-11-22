@@ -1466,8 +1466,13 @@ def _check_hook_approval_pins(
     user_scope: bool,
     no_policy: bool,
     prepared_replay: PreparedCiAuditReplay | None,
+    targets: Sequence[TargetProfile] = (),
 ) -> CheckResult:
     """Fail when a locked hook file's pinned approval no longer admits it (#4188).
+
+    Also fails when a file the lock does not record sits at the hook path of
+    a package whose hooks the gate withholds (a denied or unapproved
+    package): install keeps such a file and announces it, never deletes it.
 
     Routes through the owner ``apm install --frozen`` uses, so both commands
     reach one verdict with one remediation.
@@ -1475,6 +1480,7 @@ def _check_hook_approval_pins(
     from ..constants import APM_MODULES_DIR
     from ..install.errors import PolicyViolationError
     from ..install.exec_gate import locked_hook_pin_mismatches
+    from ..install.withheld_hooks import locked_withheld_hook_files
     from ..security.executables import resolve_project_exec_allow_map
 
     modules_root = (
@@ -1483,17 +1489,50 @@ def _check_hook_approval_pins(
         else project_root / APM_MODULES_DIR
     )
 
+    resolved: list[Any] = []
+
     def trust_ctx() -> Any:
-        # Resolved only when a locked package deploys hook files.
-        allow = resolve_project_exec_allow_map(
-            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
-        )
-        return getattr(allow, "trust_context", None)
+        # Resolved once, and only when a locked package declares executables.
+        if not resolved:
+            allow = resolve_project_exec_allow_map(
+                deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+            )
+            resolved.append(getattr(allow, "trust_context", None))
+        return resolved[0]
 
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
+        withheld = locked_withheld_hook_files(
+            lock, modules_root, trust_ctx, deployment_root, targets
+        )
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    if withheld:
+        files = [row for row in withheld if row[0]]
+        unchecked = [row for row in withheld if not row[0]]
+        message = []
+        if files:
+            message.append(
+                f"{len(files)} file(s) sit at the hook path of a package whose hooks the "
+                "executables gate withholds, and apm.lock.yaml does not record them -- "
+                f"{remediation.WITHHELD_HOOK_FILE_UNRECORDED.clause()}"
+            )
+        if unchecked:
+            message.append(
+                f"{len(unchecked)} withheld package(s) whose hook paths cannot be checked -- "
+                f"{remediation.WITHHELD_HOOK_PATHS_UNCHECKED.clause()}"
+            )
+        return CheckResult(
+            name="hook-approval-pins",
+            passed=False,
+            message="; ".join(message),
+            details=[
+                f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
+                for path, key, reason in files
+            ]
+            + [f"{key}: {reason}" for _, key, reason in unchecked]
+            + [mismatch.describe() for mismatch in mismatches],
+        )
     if not mismatches:
         return CheckResult(
             name="hook-approval-pins",
@@ -1684,7 +1723,8 @@ def run_baseline_checks(
             )
         )
         or _run(
-            # 8c: locked hooks still admitted by their approval pins (#4188)
+            # 8c: locked hooks still admitted by their approval pins (#4188),
+            # and no unrecorded file at a withheld package's hook path
             _check_hook_approval_pins(
                 project_root,
                 deployment_root,
@@ -1693,6 +1733,7 @@ def run_baseline_checks(
                 user_scope=user_scope,
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
+                targets=resolved_targets,
             )
         )
         or _run(

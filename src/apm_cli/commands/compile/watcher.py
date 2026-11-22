@@ -211,6 +211,12 @@ class APMFileHandler:
             dry_run=self.dry_run,
             target=effective_target,
         )
+        from .cli import _dependency_policy_allows, _forget_compile_policy
+
+        # Policy or installed packages can change during a watch session.
+        _forget_compile_policy(self.logger)
+        if not _dependency_policy_allows(self.logger, [Path(".")]):
+            return
         report_staged_hash_drift(self.logger, Path("."))
         result = AgentsCompiler(".").compile(config, logger=self.logger)
         retained_outputs = _report_retained_watch_outputs(

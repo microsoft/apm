@@ -326,6 +326,43 @@ def test_dependency_unique_key_cannot_drop_the_port(
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "DeploymentLedgerCodec.load_observes_per_row_projection(dependencies)",
+            'any("://" in path for dep in dependencies for path in dep.deployed_files)',
+            id="loader-rederives-verdict",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/lockfile.py",
+            "lock.add_dependency(dep, project_ledger=project_per_row)",
+            "lock.add_dependency(dep, project_ledger=False)",
+            id="loader-hardcodes-skip",
+        ),
+        pytest.param(
+            "src/apm_cli/core/legacy_lock_evidence.py",
+            "cls._legacy_locator(path).kind is LocatorKind.URI",
+            '"://" in path',
+            id="codec-rederives-uri-locator",
+        ),
+    ],
+)
+def test_lockfile_load_row_projection_routes_through_ledger_codec(
+    path: str, original: str, replacement: str
+) -> None:
+    """Skipping per-row legacy projection on load is the ledger codec's decision (#4733)."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    rule = "install-deployment-provenance-state"
+    report = run_selected_rules(
+        ROOT, (rule,), source_overrides={path: source.replace(original, replacement)}
+    )
+    assert report.failures == ()
+    assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "original", "replacement"),
+    [
+        pytest.param(
             "src/apm_cli/compilation/root_context_protection.py",
             "if not lexical_root and path.name in accepted_markers_by_name:",
             "if False:",
@@ -1902,6 +1939,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The facts provider skips the session and re-parses content it already built.",
     ),
     MutationCase(
+        guard_id="contracts-tooling-local-identity",
+        rule_id="contracts-tooling-local-identity",
+        path="src/apm_cli/deps/reachability.py",
+        old="                ref = transitive_local_identity(",
+        new="                ref = replace(",
+        intent="The reachability walk re-keys a local edge itself instead of calling the owner.",
+    ),
+    MutationCase(
         guard_id="contracts-tooling-local-path-anchor",
         rule_id="contracts-tooling-local-path-anchor",
         path="src/apm_cli/install/sources.py",
@@ -2305,6 +2350,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="    return get_apm_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)\n",
         new="    return Path.home() if user_scope else Path.cwd()\n",
         intent="A -g local bundle keeps its lock under the home directory instead of APM_HOME.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="            if routes_to_agents_md(",
+        new="            if True or routes_to_agents_md(",
+        intent="Install widens Claude routing beyond the owner's verdict.",
     ),
     MutationCase(
         guard_id="install-deployment-cleanup-ownership-release",
@@ -3997,6 +4050,14 @@ CASE_IDS: tuple[str, ...] = tuple(case.guard_id for case in MUTATIONS)
 # Multiple routing edges extend existing owners; they do not allocate competing
 # registry guards. Execute these through the same source-override mutation seam.
 USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
+    MutationCase(
+        guard_id="install-deployment-claude-agents-md-routing",
+        rule_id="install-deployment-claude-agents-md-routing",
+        path="src/apm_cli/integration/instruction_integrator.py",
+        old="blocker = claude_agents_md_blocker(live_root)",
+        new="blocker = None",
+        intent="Install routes Claude instructions to AGENTS.md past a hand-authored CLAUDE.md.",
+    ),
     MutationCase(
         guard_id="contracts-tooling-root-context-write-eligibility",
         rule_id="contracts-tooling-root-context-write-eligibility",

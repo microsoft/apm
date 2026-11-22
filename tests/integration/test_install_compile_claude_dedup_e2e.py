@@ -142,7 +142,9 @@ def test_clean_flag_removes_stale_apm_generated_claude_md(
     # Populate .claude/rules/ manually so dedup fires without a full install.
     rules_dir = proj / ".claude" / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
-    (rules_dir / "style.md").write_text("Use type hints everywhere.\n", encoding="utf-8")
+    (rules_dir / "style.md").write_text(
+        '---\npaths:\n  - "**/*.py"\n---\n\nUse type hints everywhere.\n', encoding="utf-8"
+    )
 
     # Write a stale APM-generated CLAUDE.md with the marker.
     (proj / "CLAUDE.md").write_text(
