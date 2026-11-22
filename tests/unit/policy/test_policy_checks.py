@@ -765,3 +765,50 @@ class TestUnmanagedClassification:
 
 
 # -- Group 2: run_policy_checks malformed-manifest tests -----------
+
+
+class TestContentTypes:
+    """manifest.content_types.allow names primitive kinds a package may ship."""
+
+    @staticmethod
+    def _package(root, *files: str):
+        for relative in files:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+        return root
+
+    def test_kinds_come_from_the_shipped_primitive_files(self, tmp_path):
+        from apm_cli.policy.policy_checks import package_content_kinds
+
+        root = self._package(
+            tmp_path,
+            ".apm/instructions/a.instructions.md",
+            ".apm/prompts/p.md",
+            "skills/s/SKILL.md",
+            "hooks/h.json",
+            "apm_modules/dep/x.agent.md",
+        )
+        assert package_content_kinds(root) == {"instruction", "prompt", "skill", "hook"}
+
+    @pytest.mark.parametrize(
+        ("allow", "passed"),
+        [
+            (None, True),
+            (["skill"], False),
+            (["skills", "Instructions"], True),
+            ([], False),
+        ],
+        ids=["unrestricted", "skill-only", "aliases", "empty-allows-nothing"],
+    )
+    def test_a_package_passes_only_when_every_kind_is_allowed(self, tmp_path, allow, passed):
+        from apm_cli.policy.policy_checks import check_content_types
+
+        root = self._package(tmp_path / "pkg", "SKILL.md", ".apm/instructions/i.instructions.md")
+        policy = ManifestPolicy(content_types=None if allow is None else {"allow": allow})
+        check = check_content_types({"acme/pkg": root}, policy)
+        assert check.passed is passed
+        if not passed:
+            (subject,) = check.violation_subjects()
+            assert subject.ref == "acme/pkg"
+            assert "instruction" in subject.reason and "manifest.content_types" in subject.reason

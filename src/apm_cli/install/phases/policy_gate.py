@@ -14,6 +14,7 @@ AFTER the targets phase when the effective target is known
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.errors import PolicyViolationError
@@ -291,3 +292,56 @@ def _drop_policy_refused_replacement_errors(ctx: InstallContext, dependency_grap
         error = errors.get(dep_ref.get_unique_key())
         if error in dependency_graph.resolution_errors:
             dependency_graph.resolution_errors.remove(error)
+
+
+def enforce_content_types(ctx: InstallContext) -> None:
+    """Judge ``manifest.content_types`` once every resolved package is on disk.
+
+    Runs after download and before any deploy write, so a blocking policy
+    refuses the install with nothing deployed and the lockfile untouched
+    (``PolicyViolationError`` refuses the commit); ``warn`` reports and continues.
+    """
+    fetch = getattr(ctx, "policy_fetch", None)
+    policy = getattr(fetch, "policy", None)
+    if (
+        not ctx.policy_enforcement_active
+        or policy is None
+        or policy.manifest.content_types is None
+        or getattr(ctx, "dry_run", False) is True
+    ):
+        return
+    from apm_cli.policy.install_preflight import emit_check_violations
+    from apm_cli.policy.models import CIAuditResult
+    from apm_cli.policy.policy_checks import check_content_types
+
+    check = check_content_types(_package_roots(ctx), policy.manifest)
+    if check.passed:
+        return
+    severity = "block" if policy.enforcement == "block" else "warn"
+    if ctx.logger:
+        emit_check_violations(ctx.logger, check, severity=severity, source=fetch.source)
+    if severity == "block":
+        raise PolicyViolationError(
+            "Install blocked by org policy manifest.content_types -- see violations above. "
+            "Remove the packages that ship those content types from apm.yml (run "
+            "'apm policy status' to see the active policy), then re-run the install.",
+            audit_result=CIAuditResult(checks=[check]),
+            policy_source=fetch.source or "unknown",
+        )
+
+
+def _package_roots(ctx: InstallContext) -> dict[str, Path]:
+    """Display key -> directory of each resolved package's content (local source or apm_modules)."""
+    base = Path(
+        getattr(getattr(ctx, "apm_package", None), "package_path", None) or ctx.project_root
+    )
+    roots: dict[str, Path] = {}
+    for dep in ctx.deps_to_install:
+        if dep.is_local and dep.local_path:
+            path = Path(dep.local_path).expanduser()
+            path = path if path.is_absolute() else base / path
+        else:
+            path = dep.get_install_path(ctx.apm_modules_dir)
+        if path.is_dir():
+            roots[dep.get_display_name()] = path.resolve()
+    return roots

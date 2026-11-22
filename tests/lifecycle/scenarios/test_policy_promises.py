@@ -1,0 +1,123 @@
+"""Org-policy field promises the generated corpus has no factor for yet (QL gap sweep).
+
+PROMISE: P-INV-I4 -- an org policy restriction never widens what install deploys
+(source: docs/src/content/docs/reference/policy-schema.md).
+PROMISE: P-INV-I7 -- a refused or restricted install names its cause.
+
+Each row authors its own packages and serves its own ``apm-policy.yml`` from a
+unique org (``_serve_policy``), so the shared world variants stay untouched.
+A promise row is paired with a control row that proves the fixture really
+deploys what the promise restricts, so the promise row can never pass
+vacuously. Rows whose promise is under private tracking are strict xfail.
+"""
+
+from __future__ import annotations
+
+import subprocess
+
+import pytest
+import yaml
+
+from tests.lifecycle import driver
+from tests.lifecycle.world import use_policy
+from tests.utils.local_package import LocalPackageFactory
+
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.lifecycle_smoke,
+    pytest.mark.promise("P-INV-I4", "P-INV-I7"),
+]
+
+
+def _serve_policy(world, org: str, document: dict) -> None:
+    """Serve *document* as ``<org>/.github/apm-policy.yml`` and point the project at *org*."""
+    tree = world.root / f"policy-src-{org}"
+    tree.mkdir()
+    (tree / "apm-policy.yml").write_text(yaml.safe_dump(document), encoding="utf-8")
+    world.services.publish(f"{org}/.github", tree, tag=None)
+    git = ("git", "-C", str(world.project))
+    if not (world.project / ".git").exists():
+        subprocess.run((*git, "init", "-q", "--initial-branch=main"), env=world.env, check=True)
+    remotes = subprocess.run(
+        (*git, "remote"), env=world.env, capture_output=True, text=True, check=True
+    ).stdout.split()
+    verb = "set-url" if "origin" in remotes else "add"
+    url = f"https://github.com/{org}/consumer.git"
+    subprocess.run((*git, "remote", verb, "origin", url), env=world.env, check=True)
+
+
+def _skill(factory: LocalPackageFactory, package, name: str) -> None:
+    factory.add_skill(
+        package, name, f"---\nname: {name}\ndescription: {name}.\n---\n\nUse {name}.\n"
+    )
+
+
+# A transitive MCP server reaches a project three ways: the one-run flag admits a
+# self-defined one, an approval pins it, or a plain registry server needs neither.
+
+
+def _text(result) -> str:
+    return " ".join((result.stdout + result.stderr).split())
+
+
+# -- G2: manifest.content_types (policy-schema.md, manifest section) ---------------
+
+
+def _skill_and_instruction(world) -> str:
+    factory = LocalPackageFactory(world.root / "g2")
+    package = factory.create("t-typed", version="1.0.0")
+    _skill(factory, package, "t-typed")
+    factory.add_instruction(
+        package, "t-typed", '---\napplyTo: "**"\n---\n\nKeep the typed instruction.\n'
+    )
+    return str(package.root)
+
+
+def _instruction_deployed(world) -> bool:
+    return any(
+        path.is_file() and "apm_modules" not in path.parts
+        for path in world.project.rglob("t-typed.instructions.md")
+    )
+
+
+def test_content_types_control_an_instruction_deploys(lifecycle_world) -> None:
+    """Control: with no content-type restriction the package's instruction deploys."""
+    use_policy(lifecycle_world, "allow")
+    spec = _skill_and_instruction(lifecycle_world)
+    result = driver.run(lifecycle_world, ["install", spec])
+    assert result.returncode == 0, _text(result)
+    assert _instruction_deployed(lifecycle_world), _text(result)
+
+
+def test_content_types_allow_list_keeps_other_types_out(lifecycle_world) -> None:
+    """manifest.content_types {allow: [skill]} -- an instruction is never deployed."""
+    _serve_policy(
+        lifecycle_world,
+        "policy-g2-skills-only",
+        {
+            "name": "g2",
+            "version": "1.0",
+            "enforcement": "block",
+            "manifest": {"content_types": {"allow": ["skill"]}},
+        },
+    )
+    spec = _skill_and_instruction(lifecycle_world)
+    project = lifecycle_world.project
+    before = {
+        name: (project / name).read_bytes() if (project / name).exists() else None
+        for name in ("apm.yml", "apm.lock.yaml")
+    }
+    result = driver.run(lifecycle_world, ["install", spec])
+    assert result.returncode == 1, _text(result)
+    assert not _instruction_deployed(lifecycle_world), _text(result)
+    # A refusal before any deploy write: no skill either, and apm.yml and the lock unchanged.
+    assert not (lifecycle_world.project / ".agents/skills/t-typed").exists(), _text(result)
+    after = {
+        name: (project / name).read_bytes() if (project / name).exists() else None
+        for name in before
+    }
+    assert after == before, "a refused install changed apm.yml or apm.lock.yaml"
+    text = _text(result)
+    assert "content_types" in text and "policy-g2-skills-only" in text, text
+    assert "instruction" in text, text
