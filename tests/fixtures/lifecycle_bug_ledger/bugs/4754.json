@@ -1,0 +1,16 @@
+{
+  "issue": 4754,
+  "fixed_in": "Unreleased",
+  "summary": "apm prune --dry-run did not evaluate the gate retirement owner (install/exec_gate.py gate_retirements) for locked native plugins, so the preview reported nothing to prune while a real prune retired a revoked plugin; a gate evaluation error was reduced to a verbose line and prune kept the plugin. The dry run now lists each native root and declaration a real prune would remove, and a gate evaluation error stops prune with exit 1.",
+  "failure_modes": [
+    "cleanup",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_plugin_retirement_lifecycle.py::test_prune_dry_run_previews_a_native_plugin_the_gate_would_retire",
+    "tests/unit/test_prune_command.py::TestPruneCommand::test_prune_fails_closed_when_the_native_gate_check_errors"
+  ]
+}

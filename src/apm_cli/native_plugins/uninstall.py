@@ -81,8 +81,18 @@ def retire_disallowed_native_survivors(
     return set(native)
 
 
+class NativeGateCheckError(RuntimeError):
+    """The gate retirement check for locked native plugins could not run."""
+
+
 def retire_gated_native_plugins(
-    lockfile: Any, modules_dir: Path, manifest_path: Path, deploy_root: Path, logger: Any
+    lockfile: Any,
+    modules_dir: Path,
+    manifest_path: Path,
+    deploy_root: Path,
+    logger: Any,
+    *,
+    dry_run: bool = False,
 ) -> bool:
     """Drop the record of each native plugin the current gates no longer admit (prune).
 
@@ -90,7 +100,11 @@ def retire_gated_native_plugins(
     plugin would stay declared, and a missing root would be redeployed from its
     locked bytes. The verdict is the gate retirement owner's, as for uninstall;
     the native reconcile then removes the root and its declarations. Returns
-    whether a record was dropped, so the caller persists the lock.
+    whether a record was (or, with *dry_run*, would be) dropped, so the caller
+    persists the lock. With *dry_run* the lock is left untouched and each
+    retirement is reported as a dry-run notice. A failure to evaluate the gate
+    raises :class:`NativeGateCheckError`: prune must not keep a plugin the gate
+    may no longer admit without saying so (#4754).
     """
     from apm_cli.install.exec_gate import gate_retirements
     from apm_cli.models.apm_package import APMPackage
@@ -103,10 +117,14 @@ def retire_gated_native_plugins(
             lockfile, modules_dir, apm_package, deploy_root, user_scope=False
         )
     except Exception as exc:
-        logger.verbose_detail(f"Native gate retirement skipped: {type(exc).__name__}: {exc}")
-        return False
+        raise NativeGateCheckError(
+            "Could not check locked native plugins against the current approvals "
+            f"and policy: {type(exc).__name__}: {exc}"
+        ) from exc
     if retirements is None:
         return False
+    if dry_run:
+        return _preview_gated_native_plugins(lockfile, retirements, logger)
     before = {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
     hooks = dict(retirements.hook_packages)
     retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
@@ -114,3 +132,30 @@ def retire_gated_native_plugins(
     for key in sorted(retired & (set(hooks) | set(retirements.denied_packages))):
         logger.warning(f"{key} native plugin is no longer allowed; removing it")
     return bool(retired)
+
+
+def _preview_gated_native_plugins(lockfile: Any, retirements: Any, logger: Any) -> bool:
+    """Report the native roots and declarations a real prune would retire."""
+    from apm_cli.claude_plugins.registrar import native_ownership
+    from apm_cli.native_plugins.record import PLUGINS_RELATIVE
+    from apm_cli.native_plugins.scopes import PROJECT_SETTINGS_RELATIVE
+
+    owned = native_ownership(lockfile)
+    reasons = {
+        **retirements.native_packages,
+        **retirements.hook_packages,
+        **retirements.denied_packages,
+    }
+    retiring = sorted(set(reasons) & set(owned))
+    for key in retiring:
+        own = owned[key]
+        harnesses = own.harnesses if own.declared is None else own.declared
+        settings = sorted(
+            PROJECT_SETTINGS_RELATIVE[h] for h in harnesses if h in PROJECT_SETTINGS_RELATIVE
+        )
+        where = f" and its declarations in {', '.join(settings)}" if settings else ""
+        logger.dry_run_notice(
+            f"remove native plugin {own.record.name} ({reasons[key]}): "
+            f"{PLUGINS_RELATIVE}/{own.record.name}{where}"
+        )
+    return bool(retiring)

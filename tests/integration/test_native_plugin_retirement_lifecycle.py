@@ -13,6 +13,8 @@ deployed root under ``.agents/plugins/`` and its ``enabledPlugins`` entry in
   names it;
 - #4444: ``apm update`` after the plugin's definition changed since approval
   retires it.
+- #4754: ``apm prune --dry-run`` after the approval is revoked names the root
+  and settings declaration a real prune removes, and changes nothing.
 """
 
 from __future__ import annotations
@@ -168,6 +170,38 @@ def test_update_refuses_a_native_plugin_the_org_policy_denies(
     assert _PLUGIN in output, _evidence(result)
     assert "denied by pattern" in output, _evidence(result)
     assert _native_surface(lifecycle_world), "a refused update keeps the deployed state"
+
+
+def _project_bytes(world: World) -> dict[str, bytes]:
+    return {
+        path.relative_to(world.project).as_posix(): path.read_bytes()
+        for path in sorted(world.project.rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+
+
+def test_prune_dry_run_previews_a_native_plugin_the_gate_would_retire(
+    lifecycle_world: World,  # noqa: F811
+) -> None:
+    """#4754: prune --dry-run names the root and declarations prune would remove."""
+    _arrange(lifecycle_world)
+    _revoke(lifecycle_world)
+    before = _project_bytes(lifecycle_world)
+
+    preview = _apm(lifecycle_world, "prune", "--dry-run")
+
+    assert preview.returncode == 0, _evidence(preview)
+    assert _project_bytes(lifecycle_world) == before, "a dry run changes nothing"
+    output = " ".join(preview.stdout.split())
+    assert f"[dry-run] remove native plugin {_PLUGIN}" in output, _evidence(preview)
+    assert f".agents/plugins/{_PLUGIN}" in output, _evidence(preview)
+    assert ".claude/settings.json" in output, _evidence(preview)
+    assert "Nothing to prune" not in output, _evidence(preview)
+
+    result = _apm(lifecycle_world, "prune")
+
+    assert result.returncode == 0, _evidence(result)
+    assert not _native_surface(lifecycle_world), _evidence(result)
 
 
 def test_update_retires_a_native_plugin_whose_definition_changed(
