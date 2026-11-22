@@ -178,8 +178,22 @@ def _reset_console_state():
     ``Console`` class is patched can also leave a ``MagicMock`` clock
     behind. Rich progress then compares mock timestamps in later tests.
     """
+    reset_console_singletons()
+    yield
+    reset_console_singletons()
+
+
+def reset_console_singletons() -> None:
+    """Drop every cached console so the next one reads the current environment.
+
+    Rich fixes a console's width when it is built. The themed console that
+    ``commands/_helpers._get_console`` returns is a module singleton, so a
+    console built by an earlier test (under another ``COLUMNS``) would render
+    every later table on the worker at that width (#4773).
+    """
     import rich
 
+    from apm_cli.utils import themed_console
     from apm_cli.utils.console import _reset_console
 
     # ``rich._console`` is Rich's process-global default console (the one
@@ -188,9 +202,7 @@ def _reset_console_state():
     # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
     _reset_console()
     rich._console = None
-    yield
-    _reset_console()
-    rich._console = None
+    themed_console._console = None
 
 
 @pytest.fixture(autouse=True)
@@ -380,6 +392,8 @@ _LAZY_CONSUMERS = (
     "apm_cli.deps.git_reference_resolver",
     "apm_cli.deps.git_semver_resolver",
     "apm_cli.deps.github_downloader",
+    "apm_cli.install.integrity",
+    "apm_cli.install.legacy_plugin_compat",
     "apm_cli.install.phases.claude_plugins",
     "apm_cli.install.phases.cleanup",
     "apm_cli.install.phases.codex_plugins",

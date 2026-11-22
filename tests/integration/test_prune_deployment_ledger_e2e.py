@@ -74,11 +74,12 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
     environment = isolated.subprocess_env()
     package_factory = LocalPackageFactory(isolated.package_root)
 
+    # Path-scoped rules keep a .claude/rules/ ledger row per package (#3939).
     alpha = package_factory.create("alpha-kit", targets=("claude",))
     package_factory.add_instruction(
         alpha,
         "alpha",
-        "---\napplyTo: '**'\n---\n# Alpha rule\n",
+        "---\napplyTo: '**/*.md'\n---\n# Alpha rule\n",
     )
     package_factory.add_hook(alpha, "alpha", _hook("echo alpha-hook"))
 
@@ -86,7 +87,7 @@ def test_prune_cascades_dependency_state_and_audit_sees_no_ghost(
     package_factory.add_instruction(
         beta,
         "beta",
-        "---\napplyTo: '**'\n---\n# Beta rule\n",
+        "---\napplyTo: '**/*.md'\n---\n# Beta rule\n",
     )
     package_factory.add_skill(
         beta,

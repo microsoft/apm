@@ -1,7 +1,5 @@
 """Comprehensive tests for enhanced primitive discovery with dependencies."""
 
-import os
-
 # Test imports - using absolute imports since we may not have proper package setup
 import sys
 import tempfile
@@ -14,7 +12,6 @@ import yaml
 pytestmark = pytest.mark.component
 
 # Add src to path for testing
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 try:
     from apm_cli.models.apm_package import APMPackage, DependencyReference  # noqa: F401

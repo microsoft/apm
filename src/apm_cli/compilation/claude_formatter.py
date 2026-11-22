@@ -1,8 +1,9 @@
 """CLAUDE.md formatter for Claude Memory integration.
 
-This module generates CLAUDE.md files following the Claude Memory documentation format,
-using the same distributed strategy as AGENTS.md compilation. It produces a parallel
-output format specifically optimized for Claude's project memory system.
+Instructions reach Claude Code through the compiled AGENTS.md output, the
+same files every other harness reads (#3939). Each generated CLAUDE.md
+imports ``@AGENTS.md`` and, at the root, installed dependency memory, so
+both load on every Claude Code version.
 """
 
 import builtins
@@ -17,11 +18,11 @@ from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
 from ..utils.path_security import ensure_path_within, validate_path_segments
 from ..utils.paths import portable_link_relpath, resolve_base_and_source_dirs
 from ..version import get_version
+from .claude_agents_md import AGENTS_MD_IMPORT
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
 from .footer import build_generation_footer
 from .link_resolver import UnifiedLinkResolver
-from .template_builder import build_attributed_instructions
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -62,8 +63,8 @@ class ClaudeFormatter:
     """Formatter for generating CLAUDE.md files from APM primitives.
 
     Generates CLAUDE.md files following Claude's Memory format with:
+    - an ``@AGENTS.md`` import of the sibling AGENTS.md
     - @import syntax for dependencies
-    - Grouped project standards from instructions
 
     Note: Agents/workflows are handled separately as .github/agents/ files,
     not included in CLAUDE.md (same as AGENTS.md behavior).
@@ -88,18 +89,26 @@ class ClaudeFormatter:
         self.errors: builtins.list[str] = []
         self.link_resolver = UnifiedLinkResolver(self.source_dir)
 
-    def format_distributed(
+    def format_agents_md_imports(
         self,
         primitives: PrimitiveCollection,
-        placement_map: builtins.dict[Path, builtins.list[Instruction]],
+        agents_md_paths: builtins.set[Path],
         config: dict | None = None,
     ) -> ClaudeCompilationResult:
-        """Format primitives into distributed CLAUDE.md files.
+        """Format CLAUDE.md files that import their sibling AGENTS.md (#3939).
+
+        Claude Code reads ``AGENTS.md`` natively only while no ``CLAUDE.md``
+        counts, and never before v2.1.277. Each generated ``CLAUDE.md``
+        imports ``@AGENTS.md`` so the shared output loads on every version:
+        the root file always, nested files next to each nested ``AGENTS.md``
+        APM writes.
 
         Args:
-            primitives (PrimitiveCollection): Collection of primitives to compile.
-            placement_map (Dict[Path, List[Instruction]]): Directory to instructions mapping.
-            config (Optional[dict]): Configuration options.
+            primitives (PrimitiveCollection): Primitives being compiled.
+            agents_md_paths (Set[Path]): ``AGENTS.md`` files this compile writes.
+            config (Optional[dict]): ``source_attribution`` toggles cosmetic
+                annotations; ``include_constitution`` embeds the constitution
+                when no generated root ``AGENTS.md`` carries it.
 
         Returns:
             ClaudeCompilationResult: Result of the CLAUDE.md compilation.
@@ -109,57 +118,49 @@ class ClaudeFormatter:
 
         try:
             config = config or {}
-            source_attribution = config.get("source_attribution", True)
-            skip_instructions = config.get("skip_instructions", False)
-
-            # Reset any previous state so contexts from earlier compile passes
-            # can't leak into later calls and rewrite links incorrectly.
+            source_attribution = config.get("source_attribution", False)
+            include_constitution = config.get("include_constitution", False)
             self.link_resolver.context_registry.clear()
-
-            # Register context/memory fragments so embedded links to them
-            # (e.g. ".context.md") resolve to their actual on-disk location,
-            # mirroring the AGENTS.md distributed compiler.
             self.link_resolver.register_contexts(primitives)
 
-            # Generate Claude placements from the placement map
-            placements = self._generate_placements(
-                placement_map, primitives, source_attribution=source_attribution
+            agents_dirs = {path.parent for path in agents_md_paths}
+            dependencies = self._collect_dependencies()
+            constitution = include_constitution and bool(read_constitution(self.source_dir))
+            placements = []
+            if (
+                self.base_dir in agents_dirs
+                or (self.base_dir / "AGENTS.md").is_file()
+                or dependencies
+                or constitution
+            ):
+                placements.append(
+                    ClaudePlacement(
+                        claude_path=self.base_dir / "CLAUDE.md",
+                        instructions=[],
+                        dependencies=dependencies,
+                        is_root=True,
+                    )
+                )
+            placements.extend(
+                ClaudePlacement(claude_path=directory / "CLAUDE.md", instructions=[])
+                for directory in sorted(agents_dirs - {self.base_dir})
             )
-
-            # Generate content for each placement.
-            # When instructions are skipped (already in .claude/rules/), only
-            # emit root CLAUDE.md if it has other content (constitution or
-            # dependencies); subdirectory placements are omitted entirely.
-            has_constitution = bool(read_constitution(self.base_dir))
-            content_map = {}
-            for placement in placements:
-                if skip_instructions:
-                    if not placement.is_root:
-                        continue
-                    if not placement.dependencies and not has_constitution:
-                        continue
-                content = self._generate_claude_content(
+            content_map = {
+                placement.claude_path: self._generate_claude_content(
                     placement,
-                    primitives,
-                    skip_instructions=skip_instructions,
+                    include_constitution=constitution,
                     source_attribution=source_attribution,
                 )
-                content_map[placement.claude_path] = content
-
-            # Filter placements to only those that produced content so stats
-            # and downstream consumers see an accurate picture.
-            emitted_placements = [p for p in placements if p.claude_path in content_map]
-
-            # Compile statistics
-            stats = self._compile_stats(emitted_placements, primitives)
+                for placement in placements
+            }
 
             return ClaudeCompilationResult(
                 success=len(self.errors) == 0,
-                placements=emitted_placements,
+                placements=placements,
                 content_map=content_map,
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
-                stats=stats,
+                stats=self._compile_stats(placements, primitives),
             )
 
         except Exception as e:
@@ -172,78 +173,6 @@ class ClaudeFormatter:
                 errors=self.errors.copy(),
                 stats={},
             )
-
-    def _generate_placements(
-        self,
-        placement_map: builtins.dict[Path, builtins.list[Instruction]],
-        primitives: PrimitiveCollection,
-        source_attribution: bool = True,
-    ) -> builtins.list[ClaudePlacement]:
-        """Generate CLAUDE.md file placements from the placement map.
-
-        Args:
-            placement_map (Dict[Path, List[Instruction]]): Directory to instructions mapping.
-            primitives (PrimitiveCollection): Full primitive collection.
-            source_attribution (bool): Whether to include source attribution.
-
-        Returns:
-            List[ClaudePlacement]: List of placement results.
-        """
-        placements = []
-
-        # Handle empty placement map with constitution or dependencies
-        if not placement_map:
-            constitution = read_constitution(self.source_dir)
-            dependencies = self._collect_dependencies()
-            if constitution or dependencies:
-                root_path = self.base_dir / "CLAUDE.md"
-                placement = ClaudePlacement(
-                    claude_path=root_path,
-                    instructions=[],
-                    agents=list(primitives.chatmodes),
-                    dependencies=dependencies,
-                    coverage_patterns=set(),
-                    source_attribution={},
-                    is_root=True,
-                )
-                placements.append(placement)
-        else:
-            # Determine which directories get which agents (chatmodes)
-            # Root directory gets all agents
-            root_agents = list(primitives.chatmodes)
-
-            for dir_path, instructions in placement_map.items():
-                claude_path = dir_path / "CLAUDE.md"
-
-                # Build source attribution map if enabled
-                source_map = {}
-                if source_attribution:
-                    for instruction in instructions:
-                        source_info = getattr(instruction, "source", "local")
-                        source_map[str(instruction.file_path)] = source_info
-
-                # Extract coverage patterns
-                patterns = set()
-                for instruction in instructions:
-                    if instruction.apply_to:
-                        patterns.add(instruction.apply_to)
-
-                # Root directory gets agents and dependencies
-                is_root = dir_path == self.base_dir
-
-                placement = ClaudePlacement(
-                    claude_path=claude_path,
-                    instructions=instructions,
-                    agents=root_agents if is_root else [],
-                    dependencies=self._collect_dependencies() if is_root else [],
-                    coverage_patterns=patterns,
-                    source_attribution=source_map,
-                    is_root=is_root,
-                )
-
-                placements.append(placement)
-
-        return placements
 
     def _collect_dependencies(self) -> builtins.list[str]:
         """Import installed package-root memory, independent of path depth."""
@@ -300,17 +229,16 @@ class ClaudeFormatter:
     def _generate_claude_content(
         self,
         placement: ClaudePlacement,
-        primitives: PrimitiveCollection,
         *,
-        skip_instructions: bool = False,
+        include_constitution: bool = False,
         source_attribution: bool = False,
     ) -> str:
         """Generate CLAUDE.md content for a specific placement.
 
         Args:
-            placement (ClaudePlacement): Placement result with instructions.
-            primitives (PrimitiveCollection): Full primitive collection.
-            skip_instructions (bool): If True, omit the Project Standards section.
+            placement (ClaudePlacement): Placement to render.
+            include_constitution (bool): Embed the constitution in the root
+                file (only when no generated root AGENTS.md carries it).
             source_attribution (bool): Controls the opt-in cosmetic annotations
                 only: when True, the APM Version comment and the footer are
                 included; when False (default) they are omitted to reduce token
@@ -337,6 +265,10 @@ class ClaudeFormatter:
             sections.append(f"<!-- APM Version: {get_version()} -->")
         sections.append("")
 
+        # Claude reads the imported AGENTS.md first, then the rest (#3939).
+        sections.append(AGENTS_MD_IMPORT)
+        sections.append("")
+
         # Dependencies section (only for root CLAUDE.md)
         if placement.dependencies:
             sections.append("## Dependencies")
@@ -344,8 +276,7 @@ class ClaudeFormatter:
                 sections.append(dep)
             sections.append("")
 
-        # Constitution section (only for root CLAUDE.md)
-        if placement.is_root:
+        if placement.is_root and include_constitution:
             constitution = read_constitution(self.source_dir)
             if constitution:
                 sections.append("## Constitution")
@@ -353,37 +284,14 @@ class ClaudeFormatter:
                 sections.append(constitution.strip())
                 sections.append("")
 
-        # Project Standards section (grouped by pattern).
-        # Skipped when instructions are already deployed to .claude/rules/ by
-        # `apm install`, since Claude Code reads both locations and would see
-        # duplicate content.
-        if placement.instructions and not skip_instructions:
-            sections.append("## Project Standards")
-            sections.append("")
-
-            sections.extend(
-                build_attributed_instructions(
-                    placement.instructions,
-                    placement.source_attribution,
-                    self.source_dir,
-                    section_heading_prefix="###",
-                )
-            )
-
-        # Agents/workflows go to .github/agents/ as separate files, not here.
-
         # Footer is opt-in (cosmetic).
         if source_attribution:
             sections.extend(build_generation_footer())
 
         content = "\n".join(sections)
 
-        # Resolve context/memory links (".context.md", ".memory.md") to their
-        # actual on-disk location, mirroring the AGENTS.md distributed
-        # compiler (distributed_compiler.py). Without this, embedded
-        # relative links are emitted verbatim -- correct only when CLAUDE.md
-        # happens to live in the same directory as their source file, and
-        # broken for any dependency-sourced or non-root placement.
+        # Resolve context/memory links (".context.md", ".memory.md") in the
+        # embedded constitution to their actual on-disk location.
         content = self.link_resolver.resolve_links_for_compilation(
             content=content,
             source_file=placement.claude_path.parent,
@@ -415,24 +323,3 @@ class ClaudeFormatter:
             "total_dependencies": total_deps,
             "primitives_found": primitives.count(),
         }
-
-
-def format_claude_md(
-    primitives: PrimitiveCollection,
-    placement_map: builtins.dict[Path, builtins.list[Instruction]],
-    base_dir: str = ".",
-    config: dict | None = None,
-) -> ClaudeCompilationResult:
-    """Convenience function to format CLAUDE.md files.
-
-    Args:
-        primitives (PrimitiveCollection): Collection of primitives.
-        placement_map (Dict[Path, List[Instruction]]): Directory to instructions mapping.
-        base_dir (str): Base directory for compilation.
-        config (Optional[dict]): Configuration options.
-
-    Returns:
-        ClaudeCompilationResult: Result of the CLAUDE.md compilation.
-    """
-    formatter = ClaudeFormatter(base_dir)
-    return formatter.format_distributed(primitives, placement_map, config)
