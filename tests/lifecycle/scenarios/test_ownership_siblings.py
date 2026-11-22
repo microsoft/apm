@@ -486,10 +486,13 @@ def test_operations_beside_a_users_skill_keep_its_bytes(lifecycle_world, deploye
     else:
         act("pack", "pack", ("project:.github/plugin*", "project:build*"))
     inline = f"install --mcp p-inline -- {INERT_COMMAND} --stdio"
+    # The first MCP write records its evidence against this checkout's
+    # installation identity, created here when nothing was deployed before (#4737).
+    identity = ("project:.apm-local*",) if deployed == "unowned" else ()
     act(
         inline,
         "mcp-install",
-        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml"),
+        ("project:.mcp.json", "project:apm.yml", "project:apm.lock.yaml", *identity),
     )
     act("install p-exec-bundle", "bundle-install", ("project:apm_modules*",))
     scenario.run("install p-exec")
