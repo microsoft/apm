@@ -38,6 +38,18 @@ def _clear_cache():
     clear_apm_yml_cache()
 
 
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """The download boundary fails locally: evidence replays never reach the network."""
+
+    def _no_network(*_args, **_kwargs):
+        raise RuntimeError("offline: package downloads are disabled in this test")
+
+    monkeypatch.setattr(
+        "apm_cli.deps.github_downloader.GitHubPackageDownloader.download_package", _no_network
+    )
+
+
 def _locked(key: str, parent: str | None = None) -> LockedDependency:
     return LockedDependency(repo_url=key, depth=2 if parent else 1, resolved_by=parent)
 
