@@ -28,7 +28,7 @@ import pytest
 import yaml
 
 from tests.lifecycle.oracles import Evidence, check_obligation
-from tests.lifecycle.scenarios._kit import Scenario, credits
+from tests.lifecycle.scenarios._kit import Scenario, credits, mcp_server_problems
 from tests.lifecycle.world import use_policy
 
 pytestmark = [
@@ -129,6 +129,9 @@ def test_one_command_on_an_mcp_owner(lifecycle_world, row, owner) -> None:
     step = scenario.run(line, credit=[_assignment(op, lock, owner)])
     assert step.result.returncode == 0, step.output
     _assert_ownership(lifecycle_world.project, owner, row)
+    if row == "mcp-install":
+        problems = mcp_server_problems(scenario, {"p-inline"})
+        assert not problems, f"{problems}\n{step.output}"
     scenario.finish()
 
 
@@ -166,6 +169,8 @@ def test_user_scope_copilot_owner(lifecycle_world) -> None:
     scenario.source_moved()
     step = scenario.run(_INLINE, credit=[_assignment("mcp-install", "absent", "copilot", "user")])
     assert step.result.returncode == 0, step.output
+    problems = mcp_server_problems(scenario, {"p-inline"})
+    assert not problems, f"{problems}\n{step.output}"
     scenario.finish()
 
 

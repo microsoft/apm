@@ -252,8 +252,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "2026-11-22): both exit 0 under the deny and bin/ never deploys at project scope "
         "(U_BIN_PIN), so any absence witness there is vacuous",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 725, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 726, "InstallScope.USER"),
         ),
     ),
     "U9": (
@@ -301,7 +301,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "target (#4517) and an added one. A changed TGT with FROZEN maps to one refusal cell, "
         "witnessed by the T-6a history scenario",
         (
-            Ev("src/apm_cli/install/service.py", 659, "no longer declares target(s)"),
+            Ev("src/apm_cli/install/service.py", 668, "no longer declares target(s)"),
             Ev(
                 "src/apm_cli/install/frozen_withdrawal.py",
                 273,

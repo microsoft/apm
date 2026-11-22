@@ -37,6 +37,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.lockfile import LockFile
+from apm_cli.integration.targets import KNOWN_TARGETS
 from tests.lifecycle import driver
 from tests.lifecycle.generator.witnesses import implied
 from tests.lifecycle.model.expected import expected_deployed, expected_exit, expected_lock_rows
@@ -75,11 +76,26 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
+# Surfaces a native Claude plugin never uses: its skills load from the plugin.
+_NATIVE_ELSEWHERE = frozenset({("user", "skill", "claude")})
+
+
+def _skill_root(target: str) -> str | None:
+    """Where *target* deploys skills (``deploy_root`` or its root dir, plus ``skills``)."""
+    profile = KNOWN_TARGETS.get(target)
+    mapping = profile.primitives.get("skills") if profile is not None else None
+    if mapping is None:
+        return None
+    return f"{mapping.deploy_root or profile.root_dir}/{mapping.subdir}"
+
+
 # The file each declared target reads the scope's MCP servers from (Gemini's
 # project-scope file is opt-in: adapters/client/gemini.py).
 MCP_CONFIGS: Mapping[tuple[str, str], str] = {
     ("project", "copilot"): ".mcp.json",
     ("project", "claude"): ".mcp.json",
+    # The retired vscode alias resolves to copilot, which owns .mcp.json (#4100).
+    ("project", "vscode"): ".mcp.json",
     ("user", "copilot"): ".copilot/mcp-config.json",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
@@ -381,7 +397,7 @@ class Scenario:
             for kind in kinds:
                 for target in self.model.targets:
                     surface = SURFACE_GLOBS.get((self.scope, kind, target))
-                    if surface is None:
+                    if surface is None or not self._observable(package, kind, target):
                         continue
                     shared = isinstance(surface, tuple)  # a shared file names its entry
                     hits = self._hits(package, surface, users)
@@ -393,6 +409,15 @@ class Scenario:
                         if not shared:
                             managed.update(found)
         return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _observable(self, package: str, kind: str, target: str) -> bool:
+        """Whether *package*'s *kind* for *target* lands on its SURFACE_GLOBS path.
+
+        A native Claude plugin's skills stay inside the registered plugin
+        (Claude loads them from there), never under ~/.claude/skills.
+        """
+        native = "native" in self.kinds.get(package, ())
+        return not (native and (self.scope, kind, target) in _NATIVE_ELSEWHERE)
 
     def _hits(self, package: str, surface: str | tuple[str, str], users) -> list[Path]:
         """Files at *surface* that carry *package*, minus the user's own files."""
@@ -412,10 +437,12 @@ class Scenario:
         """``pkg/kind/target`` cells deployed for a target apm.yml no longer declares.
 
         Only surfaces exclusive to that target count: a path a declared target
-        shares (the same glob for the same kind) belongs to the declared one.
+        shares (the same glob, skills root or MCP file) belongs to the declared one.
         """
         users = self._user_files()
         found = set()
+        skill_roots = {_skill_root(target) for target in self.model.targets}
+        mcp_files = {MCP_CONFIGS.get((self.scope, target)) for target in self.model.targets}
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 live = {SURFACE_GLOBS.get((self.scope, kind, t)) for t in self.model.targets}
@@ -423,6 +450,12 @@ class Scenario:
                     if scope != self.scope or surface_kind != kind:
                         continue
                     if target in self.model.targets or surface in live:
+                        continue
+                    if kind == "skill" and _skill_root(target) in skill_roots:
+                        continue
+                    if kind == "mcp" and MCP_CONFIGS.get((self.scope, target)) in mcp_files:
+                        continue
+                    if not self._observable(package, kind, target):
                         continue
                     if self._hits(package, surface, users):
                         found.add(f"{package}/{kind}/{target}")
@@ -478,15 +511,22 @@ class Scenario:
             "/".join(cell)
             for cell in expected_deployed(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
+            and self._observable(cell[0], cell[1], cell[2])
         )
 
-    def assert_deployed(self) -> None:
-        """The model's cells are deployed, and no target apm.yml dropped keeps any."""
+    def assert_deployed(self, *, unproven_kept: bool = False) -> None:
+        """The model's cells are deployed, and no target apm.yml dropped keeps any.
+
+        *unproven_kept*: the lockfile was lost before this reconcile, so APM cannot
+        prove it wrote a dropped target's files and keeps them (DEPLOYED=
+        present-provenance-unknown, P-LAW-ownership.preserve_unowned).
+        """
         observed, _, _ = self.deployed()
         wanted = self.expected_cells()
         assert observed == wanted, f"deployed {sorted(observed)}, model {sorted(wanted)}"
-        left = self.undeclared_target_cells()
-        assert not left, f"an undeclared target keeps {sorted(left)}"
+        if not unproven_kept:
+            left = self.undeclared_target_cells()
+            assert not left, f"an undeclared target keeps {sorted(left)}"
 
     # -- steps -------------------------------------------------------------------
 

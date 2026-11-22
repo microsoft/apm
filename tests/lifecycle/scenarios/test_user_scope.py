@@ -19,7 +19,13 @@ import json
 
 import pytest
 
-from tests.lifecycle.scenarios._kit import Scenario, assert_changes, credits, known_defect
+from tests.lifecycle.scenarios._kit import (
+    Scenario,
+    assert_changes,
+    credits,
+    known_defect,
+    mcp_server_problems,
+)
 from tests.lifecycle.scenarios._sources import SOURCES, from_source
 from tests.lifecycle.scenarios.test_network_offline import go_offline
 from tests.lifecycle.world import use_policy
@@ -28,6 +34,7 @@ from tests.lifecycle.world.services import REGISTRY_SERVER
 
 pytestmark = [
     pytest.mark.e2e,
+    pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I1", "P-INV-I5"),
 ]
@@ -61,11 +68,33 @@ def test_a_first_install_from_each_source_deploys_under_home(lifecycle_world, sr
         scenario, name = _user(lifecycle_world, "p-skill"), "p-skill"
     else:
         scenario, name = from_source(lifecycle_world, src, scope="user")
-    step = scenario.run(f"install {name}", credit=[_source_credit(src)])
+    if src == "native-plugin":
+        # The plugin ships an MCP server, so the user-scope gate parks the whole
+        # plugin until it is approved; the approved install is the source credit.
+        scenario.run(f"install {name}")
+        scenario.run(f"approve {name}")
+        step = scenario.run("install", credit=[_source_credit(src)])
+    else:
+        step = scenario.run(f"install {name}", credit=[_source_credit(src)])
     scenario.assert_deployed()
     assert not any(item.startswith("project:") for item in step.changed), step.changed
     if src != "native-plugin":
         assert (lifecycle_world.home / _SKILL).is_file(), step.output
+    if src == "native-plugin":
+        assert scenario.lock_names(), "the user lock records the native plugin"
+        path = lifecycle_world.home / ".claude/settings.json"
+        claude = sorted(
+            entry.relative_to(lifecycle_world.home).as_posix()
+            for entry in (lifecycle_world.home / ".claude").rglob("*")
+        )
+        assert path.is_file(), f"Claude settings not written; ~/.claude: {claude}\n{step.output}"
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        enabled = {
+            key.split("@")[0]
+            for key, on in (settings.get("enabledPlugins") or {}).items()
+            if on is True
+        }
+        assert name in enabled, f"{name} is not enabled for Claude: {settings}"
     if src == "pkg-registry":
         sources = {dep.source for dep in scenario.lock().get_package_dependencies()}
         assert sources == {"registry"}, f"SRC=pkg-registry resolved through {sources}"
@@ -88,6 +117,9 @@ def test_install_mcp_configures_a_user_scope_server(lifecycle_world, src) -> Non
     assert step.result.returncode == 0, step.output
     config = json.loads((lifecycle_world.home / _COPILOT_MCP).read_text(encoding="utf-8"))
     assert server in (config.get("mcpServers") or {}), config
+    names = {server, REGISTRY_SERVER} if src == "mcp-registry" else {server}
+    problems = mcp_server_problems(scenario, names)
+    assert not problems, f"{problems}\n{step.output}"
     assert not any(item.startswith("project:") for item in step.changed), step.changed
     scenario.finish()
 

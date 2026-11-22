@@ -26,6 +26,7 @@ from tests.lifecycle.world import use_policy
 
 pytestmark = [
     pytest.mark.e2e,
+    pytest.mark.lifecycle_smoke,
     pytest.mark.requires_apm_binary,
     pytest.mark.promise("P-INV-I1", "P-INV-I4"),
 ]
