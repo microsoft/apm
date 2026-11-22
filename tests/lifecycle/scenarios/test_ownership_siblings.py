@@ -542,7 +542,7 @@ _EDITED_EXEC = [
 
 
 _EDITED_EXEC_KNOWN = Known("#4626", r"I1-X2: the user's bytes were changed")
-_MCP_ENTRY_KNOWN = Known("#4268", r"failed install changed (the manifest|durable files)")
+_MCP_ENTRY_KNOWN = Known("#4759", r"failed install changed (the manifest|durable files)")
 
 
 def test_edited_executable_files_are_kept(lifecycle_world) -> None:
@@ -692,7 +692,7 @@ def test_a_users_mcp_entry_blocks_a_server_of_the_same_name(lifecycle_world, src
     """A user's MCP entry of the same name is never taken over.
 
     An inline server refuses, but writes before it detects the conflict
-    (#4268); a registry server keeps the user's entry and says it skipped.
+    (#4759; #4268 closed the install path only); a registry server keeps the user's entry and says it skipped.
     """
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (), policy="allow")
