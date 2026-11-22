@@ -628,6 +628,11 @@ def _i4_keep_gap(surface: str, after: Observation, output: str) -> str | None:
     return None
 
 
+# Compile records which routed instructions each Claude AGENTS.md it wrote carries, in
+# APM home so the repository gains no file (#4805; core/agents_md_compile_record.py).
+_COMPILE_HOME_RECORD = ".apm/compiled-agents-md"
+
+
 def _i5_write_set(
     before: Observation, after: Observation, result, model, op: Operation
 ) -> list[Violation] | None:
@@ -638,6 +643,8 @@ def _i5_write_set(
     for root_id, snapshot in before.artifacts.snapshots:
         observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
         allowed = op.allowed.get(root_id, ())
+        if root_id == "home" and op.name == "compile" and not op.read_only:
+            allowed = (*allowed, _COMPILE_HOME_RECORD)
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path

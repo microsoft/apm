@@ -125,8 +125,10 @@ def _kit_package(factory: LocalPackageFactory, name: str) -> LocalPackage:
     }
     factory.add_hook(package, "session", hook)
     factory.add_canvas(package, name, _CANVAS.replace("p-canvas", name))
+    # A file-type glob keeps a per-file rule on every target; Claude routes '**' to
+    # AGENTS.md through compile (#4005), so M-SOURCE's rule evidence needs a scoped one.
     factory.add_instruction(
-        package, name, f'---\napplyTo: "**"\n---\n\nFollow the {name} conventions.\n'
+        package, name, f'---\napplyTo: "**/*.py"\n---\n\nFollow the {name} conventions.\n'
     )
     return package
 
