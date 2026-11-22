@@ -448,3 +448,14 @@ def pytest_testnodedown(node, error) -> None:
     collected = getattr(node.config, "_apm_worker_mock_globals", set())
     collected.update(found)
     node.config._apm_worker_mock_globals = collected
+
+
+_KNOWN_CELLS_PLUGIN = "apm-known-cells"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Enforce KnownFailure signatures on every strict known cell (tests/lifecycle/known.py)."""
+    from tests.lifecycle import known
+
+    if not config.pluginmanager.has_plugin(_KNOWN_CELLS_PLUGIN):
+        config.pluginmanager.register(known, _KNOWN_CELLS_PLUGIN)
