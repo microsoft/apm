@@ -123,8 +123,8 @@ def check_content_types(
         roots = tuple(roots)
         if not roots:
             reason = (
-                "its content is not on disk, so org policy manifest.content_types cannot "
-                "be verified; run apm install, then re-run"
+                "its content is not on disk, so org policy manifest.content_types "
+                "cannot be verified"
             )
         else:
             blocked = frozenset().union(*map(package_content_kinds, roots)) - allow
