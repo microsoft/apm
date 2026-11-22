@@ -964,7 +964,12 @@ class InstructionIntegrator(BaseIntegrator):
 
 
 def routed_claude_rule_renders(
-    lockfile, project_root: Path, modules_root: Path, *, include_local: bool, verified: bool = False
+    lockfile,
+    project_root: Path,
+    modules_root: Path,
+    *,
+    include_local: bool,
+    verified: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Return ``{dependency key: {rule path: content}}`` #3939 routed to AGENTS.md.
 
@@ -973,8 +978,9 @@ def routed_claude_rule_renders(
     ``.claude/rules/`` files a pre-#3939 install deployed for it. Pack ships
     them; cleanup proves a legacy rule file against them. A dependency whose
     edge or own ``targets:`` exclude Claude renders nothing, as at install.
-    With *verified* (pack), a cached copy that contradicts its locked
-    ``content_hash`` is refused: ``apm_modules`` is not attested.
+    With *verified* (pack), only rules the lock does not already record as deployed are
+    returned, and they render only from a cached copy that matches its
+    locked ``content_hash``: ``apm_modules`` is not attested.
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.package_resolution import effective_dependency_selection
@@ -1005,22 +1011,31 @@ def routed_claude_rule_renders(
         )
         if not selection.targets:
             continue
-        if verified:
-            _require_locked_source(lockfile, dep, install_path, project_root)
         package_info = PackageInfo(
             package=package, install_path=install_path, dependency_ref=dep_ref
         )
         rendered = InstructionIntegrator().render_agents_md_routed_rules(package_info, project_root)
+        if verified:
+            deployed = set(dep.deployed_files)
+            rendered = {path: text for path, text in rendered.items() if path not in deployed}
+            if rendered:
+                _require_locked_source(lockfile, dep, install_path, project_root)
         if rendered:
             rules[dep.get_unique_key()] = rendered
     return rules
 
 
 def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:
-    """Refuse to render from a cached copy that contradicts its locked content hash."""
-    from apm_cli.core.remediation import PACK_INSTALLED_FILE_TAMPERED
+    """Refuse to render from a cached copy its locked content hash does not attest."""
+    from apm_cli.core.remediation import PACK_DEPENDENCY_UNATTESTED, PACK_INSTALLED_FILE_TAMPERED
     from apm_cli.install.source_helpers import locked_content_mismatch
 
+    if not getattr(dep, "content_hash", None):
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: apm.lock.yaml records no content hash "
+            "for it, so its Claude rules cannot be rendered from the apm_modules cache. "
+            f"{PACK_DEPENDENCY_UNATTESTED.sentence()}"
+        )
     key = dep.get_unique_key()
     if locked_content_mismatch(key, dep, install_path, lockfile=lockfile):
         cached = portable_relpath(install_path, project_root)

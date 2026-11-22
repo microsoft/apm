@@ -387,3 +387,36 @@ class TestPackRoutedRules:
         )
 
         assert bool(rules) is rendered
+
+    @staticmethod
+    def _cached_kit(tmp_path, instruction="---\napplyTo: '**'\n---\n# Style\n"):
+        package = tmp_path / "apm_modules" / "owner" / "kit"
+        (package / ".apm" / "instructions").mkdir(parents=True)
+        (package / "apm.yml").write_text("name: kit\nversion: 1.0.0\n", encoding="utf-8")
+        (package / ".apm" / "instructions" / "style.instructions.md").write_text(
+            instruction, encoding="utf-8"
+        )
+        return package
+
+    def test_pack_refuses_routed_rules_without_a_locked_content_hash(self, tmp_path):
+        """No ``content_hash`` means nothing attests the cache the rule renders from."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+        from apm_cli.integration.instruction_integrator import routed_claude_rule_renders
+
+        self._cached_kit(tmp_path)
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/kit", resolved_commit="a" * 40))
+
+        with pytest.raises(ValueError, match="records no content hash"):
+            routed_claude_rule_renders(
+                lockfile, tmp_path, tmp_path / "apm_modules", include_local=False, verified=True
+            )
+
+        # A lock that already records the rule as deployed packs it from disk.
+        lockfile.dependencies["owner/kit"].deployed_files = [".claude/rules/style.md"]
+        assert (
+            routed_claude_rule_renders(
+                lockfile, tmp_path, tmp_path / "apm_modules", include_local=False, verified=True
+            )
+            == {}
+        )

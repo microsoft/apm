@@ -73,14 +73,13 @@ def routed_claude_rules(
         return {}
     from ..integration.instruction_integrator import routed_claude_rule_renders
 
-    rules: dict[str, dict[str, str]] = {}
-    for key, rendered in routed_claude_rule_renders(
-        lockfile, project_root, project_root / "apm_modules", include_local=False, verified=True
-    ).items():
-        deployed = set(lockfile.dependencies[key].deployed_files)
-        missing = {path: text for path, text in rendered.items() if path not in deployed}
-        if missing:
-            rules[key] = missing
+    rules = routed_claude_rule_renders(
+        lockfile,
+        project_root,
+        project_root / "apm_modules",
+        include_local=False,
+        verified=True,
+    )
     if active is None and rules:
         from ..utils.console import _rich_warning
 
