@@ -24,8 +24,23 @@ from apm_cli.cache.git_cache import (
 )
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 _REAL_RUN = subprocess.run
+
+
+@pytest.fixture(autouse=True)
+def _isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every git child, setup included, under a bounded environment.
+
+    The runner's GIT_DIR, global config (signing, transport policy) and
+    credential state never reach the fixtures, probes or cache calls.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in isolated.process_environment.items():
+        monkeypatch.setenv(name, value)
 
 
 def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -320,7 +335,7 @@ class TestLsRemoteResolve:
         sha = "2" * 40
         child = _GitChild(_done(stdout=f"{sha}\trefs/heads/main\n"))
         monkeypatch.setattr("subprocess.run", child)
-        explicit_env = {"PATH": os.environ["PATH"], "APM_MARKER": "explicit", "GIT_DIR": "/x"}
+        explicit_env = {**os.environ, "APM_MARKER": "explicit", "GIT_DIR": "/x"}
 
         result = cache._ls_remote_resolve("https://example.com/repo.git", "main", env=explicit_env)
 
