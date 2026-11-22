@@ -226,26 +226,33 @@ def test_unreceipted_pre_existing_file_is_still_skipped(scene: HarnessScene) -> 
     assert _DEPLOYED not in (lock.get("local_deployed_files") or []), lock
 
 
-def test_first_upgraded_install_updates_a_migrated_user_root_skill(scene: HarnessScene) -> None:
+@pytest.mark.parametrize(
+    ("skill", "target"),
+    [("research", "copilot"), ("skills", "copilot"), ("research", "grok-bot")],
+    ids=["copilot", "skill-named-skills", "grok-bot-workflows-root"],
+)
+def test_first_upgraded_install_updates_a_migrated_user_root_skill(
+    scene: HarnessScene, skill: str, target: str
+) -> None:
     """Case 3 for a skill directory: an edited source replaces the 0.37 deployed bytes."""
-    source = scene.isolated.config_root / "skills" / "research" / "SKILL.md"
+    source = scene.isolated.config_root / "skills" / skill / "SKILL.md"
     source.parent.mkdir(parents=True)
     source.write_text(
-        "---\nname: research\ndescription: Research skill\n---\nVersion one.\n", encoding="utf-8"
+        f"---\nname: {skill}\ndescription: Research skill\n---\nVersion one.\n", encoding="utf-8"
     )
-    _install(scene)
+    _install(scene, target=target)
     deployed = [
         path
         for path in scene.home.rglob("SKILL.md")
-        if path.parent.name == "research" and scene.isolated.config_root not in path.parents
+        if path.parent.name == skill and scene.isolated.config_root not in path.parents
     ]
     assert len(deployed) == 1, deployed
     _as_037_state(scene, deployed[0])
     source.write_text(
-        "---\nname: research\ndescription: Research skill\n---\nVersion two.\n", encoding="utf-8"
+        f"---\nname: {skill}\ndescription: Research skill\n---\nVersion two.\n", encoding="utf-8"
     )
 
-    upgraded = _install(scene)
+    upgraded = _install(scene, target=target)
 
     assert "skipped" not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
     assert deployed[0].read_text(encoding="utf-8").rstrip().endswith("Version two.")

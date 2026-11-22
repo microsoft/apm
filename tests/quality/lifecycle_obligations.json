@@ -25057,7 +25057,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:908"
+    "src/apm_cli/core/deployment_ledger.py:923"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
