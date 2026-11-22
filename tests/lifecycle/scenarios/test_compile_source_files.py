@@ -1,10 +1,11 @@
 """``compile`` keeps a remote package's file primitive (other-file) (#4096).
 
 PROMISE: P-INV-I1 -- after ``apm compile`` the lock still matches what is
-deployed: a git or git-marketplace package's instruction stays under the
-target's instruction root with its text and stays recorded in the lock; a
-native Claude plugin's agent stays in its registered plugin with the lock's
-fingerprint unchanged.
+deployed: a git or git-marketplace package's instruction, and a native Claude
+plugin's agent, stay under the target's primitive root with their text and
+stay recorded in the lock. At project scope APM normalizes a Claude plugin
+into its primitives (claude_plugins/admission.py registers a plugin natively
+only at user scope), so the agent deploys under ``.claude/agents``.
 PROMISE: P-INV-I5 -- compile writes only its compiled context, never a
 deployed primitive or the lock.
 
@@ -94,7 +95,7 @@ def _scenario(world, src: str) -> tuple[Scenario, str]:
         return Scenario(
             world,
             {_NATIVE: spec},
-            kinds={_NATIVE: ("native",)},
+            kinds={_NATIVE: ("other-file",)},
             policy="allow",
             targets=("claude",),
         ), _NATIVE
@@ -122,31 +123,31 @@ def _marked(world) -> dict[str, bytes]:
     return found
 
 
-def _assert_instruction(scenario: Scenario) -> str:
-    """The instruction sits under copilot's instruction root, with its text, in the lock."""
-    mapping = KNOWN_TARGETS["copilot"].primitives["instructions"]
-    relative = f"{KNOWN_TARGETS['copilot'].root_dir}/{mapping.subdir}/{_DOC}{mapping.extension}"
+# SRC -> (package, target, primitive) whose deployed file carries MARKER.
+_DEPLOYED = {
+    "git": (_DOC, "copilot", "instructions"),
+    "marketplace-git": (_DOC, "copilot", "instructions"),
+    "native-plugin": (_NATIVE, "claude", "agents"),
+}
+
+
+def _assert_deployed(scenario: Scenario, src: str) -> None:
+    """The file primitive sits under its target's root, with its text, in the lock."""
+    package, target, primitive = _DEPLOYED[src]
+    mapping = KNOWN_TARGETS[target].primitives[primitive]
+    relative = f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/{package}{mapping.extension}"
     path = scenario.deploy_root / relative
-    assert path.is_file(), f"{relative} is not deployed"
+    assert path.is_file(), f"{src}: {relative} is not deployed"
     assert MARKER in path.read_text(encoding="utf-8"), relative
     recorded = {p for dep in scenario.lock().get_package_dependencies() for p in dep.deployed_files}
-    assert relative in recorded, f"{relative} is not recorded in the lock: {sorted(recorded)}"
-    return relative
-
-
-def _assert_native(scenario: Scenario) -> None:
-    rows = [d for d in scenario.lock().get_package_dependencies() if d.native_plugin is not None]
-    assert [d.native_plugin.name for d in rows] == [_NATIVE], rows
+    assert relative in recorded, f"{src}: {relative} is not in the lock: {sorted(recorded)}"
 
 
 @pytest.mark.parametrize("src", _SOURCES)
 def test_compile_keeps_a_remote_package_file_primitive(lifecycle_world, src) -> None:
     scenario, name = _scenario(lifecycle_world, src)
     scenario.run(f"install {name}", **source_fields(src))
-    if src == "native-plugin":
-        _assert_native(scenario)
-    else:
-        _assert_instruction(scenario)
+    _assert_deployed(scenario, src)
     before = _marked(lifecycle_world)
     assert before, "the package's file primitive is deployed nowhere"
     lock_before = scenario.lock_path.read_bytes()
@@ -158,10 +159,7 @@ def test_compile_keeps_a_remote_package_file_primitive(lifecycle_world, src) -> 
     after = _marked(lifecycle_world)
     kept = {key: after.get(key) == data for key, data in before.items()}
     assert all(kept.values()), f"compile changed a deployed file primitive: {kept}"
-    if src == "native-plugin":
-        _assert_native(scenario)
-    else:
-        _assert_instruction(scenario)
+    _assert_deployed(scenario, src)
     scenario.finish()
 
 
