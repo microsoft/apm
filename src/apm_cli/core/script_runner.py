@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from apm_cli.core.scope import manifest_file
 
@@ -19,6 +19,10 @@ from ..runtime.utils import find_runtime_binary
 from .project_name import resolve_bootstrap_project_name
 from .remediation import DEPENDENCIES_NOT_INSTALLED
 from .token_manager import setup_runtime_environment
+
+
+def _folded(path: Path) -> PurePath:
+    return PurePath(str(path).casefold())
 
 
 class ScriptRunner:
@@ -245,7 +249,9 @@ class ScriptRunner:
         """
         # Find all .prompt.md files in the command using regex
         prompt_files = re.findall(r"(\S+\.prompt\.md)", command)
-        self._require_dependency_policy([Path(prompt_file) for prompt_file in prompt_files])
+        # Judge the file the compiler opens, not the token as written: a bare name
+        # resolves under .github/prompts, .apm/prompts or an installed package.
+        self._require_dependency_policy([self.compiler.resolve(name) for name in prompt_files])
         compiled_prompt_files = []
         runtime_content = None
 
@@ -825,13 +831,14 @@ class ScriptRunner:
         root = Path.cwd()
         subjects: dict[str, object] = dict(extra or ())
         if paths:
-            resolved = [path.resolve() for path in paths]
-            relative = {portable_relpath(path, root) for path in paths}
+            # Case-folded, so a token typed in another case on a case-insensitive
+            # filesystem is still attributed (elsewhere it can only over-attribute).
+            resolved = [_folded(path.resolve()) for path in paths]
+            relative = {portable_relpath(path, root).casefold() for path in paths}
             for installed in installed_dependency_subjects(root, user_scope=False):
-                owned_root = installed.root.resolve()
-                if relative & installed.deployed or any(
-                    path.is_relative_to(owned_root) for path in resolved
-                ):
+                owned_root = _folded(installed.root.resolve())
+                deployed = {path.casefold() for path in installed.deployed}
+                if relative & deployed or any(path.is_relative_to(owned_root) for path in resolved):
                     subjects.setdefault(installed.key, installed.ref)
         if not subjects:
             return
@@ -1064,6 +1071,13 @@ class PromptCompiler:
             f.write(compiled_content)
 
         return str(output_path)
+
+    def resolve(self, prompt_file: str) -> Path:
+        """The file :meth:`compile` reads for *prompt_file*, or the token as a path if none."""
+        try:
+            return self._resolve_prompt_file(prompt_file)
+        except FileNotFoundError:
+            return Path(prompt_file)
 
     def _resolve_prompt_file(self, prompt_file: str) -> Path:
         """Resolve prompt file path, checking local directory first, then common directories, then dependencies.

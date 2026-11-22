@@ -121,3 +121,25 @@ def test_a_declared_marketplace_dependency_still_lets_a_denied_prompt_be_judged(
         ScriptRunner()._auto_compile_prompts(f"copilot -p {prompt}", {})
 
     assert not (project / ".apm" / "compiled").exists(), "nothing was compiled"
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["audit.prompt.md", "plan.prompt.md", ".apm/prompts/review.prompt.md"],
+    ids=["deployed-bare-name", "package-prompts-dir", "package-root-fallback"],
+)
+def test_a_prompt_name_the_compiler_resolves_into_a_denied_package_is_refused(
+    project: Path, token: str
+) -> None:
+    """The compiler resolves a short token to a package file; that file is what is judged."""
+    plan = project / "apm_modules" / "acme" / "denied" / "prompts" / "plan.prompt.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("---\ndescription: p\n---\nPlan.\n", encoding="utf-8")
+    with (
+        patch(_RESOLVE, return_value=_DENY),
+        patch("apm_cli.install.exec_gate.policy_denied_dependencies", side_effect=_deny),
+        pytest.raises(RuntimeError, match=r"acme/denied: org policy"),
+    ):
+        ScriptRunner()._auto_compile_prompts(f"copilot -p {token}", {})
+
+    assert not (project / ".apm" / "compiled").exists(), "nothing was compiled"
