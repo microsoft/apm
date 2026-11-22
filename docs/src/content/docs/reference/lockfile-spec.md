@@ -273,7 +273,10 @@ catalog. `discovered_via` + `marketplace_plugin_name` associate a declaration
 with one locked coordinate, not a durable catalog trust identity. Install
 replays that coordinate without contacting the catalog while the declaration's
 `name`, `marketplace` and `version` still match it; `apm update` resolves the
-catalog again.
+catalog again. A registry-routed catalog entry is locked as a `source: registry`
+row with no `resolved_commit`: its exact `version`, `resolved_url` and
+`resolved_hash` are the locked evidence, and any declared `version` must still
+accept the locked version.
 
 `source_url` is that identity: the catalog's canonical origin, recorded for
 every remote catalog kind (hosted `marketplace.json`, GitHub, GitLab, Azure
