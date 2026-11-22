@@ -140,11 +140,14 @@ class TestCorruptLockfile:
         from_sibling = _local("_local/lib-05", "../lib-05", resolved_by="_local/lib-04")
         child = _local("_local/lib-06", "../lib-06", resolved_by="_local/lib-05")
         lock = _lockfile(sibling, from_root, from_sibling, child)
+        for name in ("lib-04", "lib-05", "lib-06"):
+            (tmp_path / "packages" / name).mkdir(parents=True)
+            (tmp_path / "packages" / name / "apm.yml").write_text(f"name: {name}\n")
 
-        assert (
-            resolve_local_dep_dir(child, lock, tmp_path)
-            == (tmp_path / "packages" / "lib-06").resolve()
-        )
+        resolved = resolve_local_dep_dir(child, lock, tmp_path)
+
+        assert resolved == (tmp_path / "packages" / "lib-06").resolve()
+        assert (resolved / "apm.yml").exists()
 
     def test_parents_anchoring_to_different_directories_stay_ambiguous(
         self, tmp_path: Path
