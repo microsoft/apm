@@ -614,6 +614,7 @@ def _safe_remove_skill_directory(
     diagnostics,
     dep_key: str,
     failed_path_retained: bool,
+    protected: frozenset[str] = frozenset(),
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -626,7 +627,10 @@ def _safe_remove_skill_directory(
       authorizes its bytes (APM-deployed, unmodified).
 
     When the directory contains user-created or user-edited files, removal
-    is skipped with a diagnostic listing the blocking entries.
+    is skipped with a diagnostic listing the blocking entries. A member in
+    *protected* (a surviving dependency still deploys it) is never removed:
+    the directory's other proven members are removed one by one and the
+    directory stays (#4750).
     """
     if not skill_dir.exists():
         return
@@ -657,6 +661,8 @@ def _safe_remove_skill_directory(
     # scripts/, assets/, references/ subdirectories). Member claims extend the
     # directory claim, so project paths and cowork:// URIs share one rule.
     blocking: list[str] = []
+    proven: list[tuple[str, Path]] = []
+    shared: list[str] = []
     # True while every blocking entry is user content (untracked and never
     # deployed); then nothing APM-owned remains and ownership is released.
     user_content_only = True
@@ -673,6 +679,10 @@ def _safe_remove_skill_directory(
             continue
         if child.is_dir():
             continue
+        if child_rel in protected:
+            # A surviving dependency still deploys it: never this removal's to delete.
+            shared.append(child_rel)
+            continue
         if child_rel not in recorded_hashes and child_rel not in all_stale:
             # Never tracked by APM: user content.
             blocking.append(child_rel)
@@ -681,6 +691,8 @@ def _safe_remove_skill_directory(
         if evidence.verdict(child_rel, child) != AUTHORIZED:
             blocking.append(child_rel)
             user_content_only = False
+        else:
+            proven.append((child_rel, child))
 
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
@@ -708,6 +720,14 @@ def _safe_remove_skill_directory(
         (result.released if release else result.skipped_unmanaged).append(rel_path)
         return
 
+    if shared:
+        # The survivor's members stay; this owner's proven members go one by one.
+        if _remove_proven_members(proven, evidence, result, diagnostics, dep_key):
+            result.released.append(rel_path)
+        else:
+            result.skipped_unmanaged.append(rel_path)
+        return
+
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
     try:
@@ -718,6 +738,40 @@ def _safe_remove_skill_directory(
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+
+
+def _remove_proven_members(
+    proven: list[tuple[str, Path]],
+    evidence: DeploymentEvidence,
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+) -> bool:
+    """Remove each proven member of a skill directory that must itself stay.
+
+    The deletion gates run again immediately before each unlink, so a file
+    changed since the directory scan is kept and named, never removed.
+    Returns whether every member was removed.
+    """
+    complete = True
+    for member_rel, member in proven:
+        verdict = evidence.verdict(member_rel, member)
+        if verdict != AUTHORIZED:
+            _keep_without_evidence(result, diagnostics, member_rel, verdict, dep_key)
+            complete = False
+            continue
+        try:
+            write_seam.unlink(member)
+            result.deleted.append(member_rel)
+            result.deleted_targets.append(member)
+        except OSError as exc:
+            complete = False
+            result.failed.append(member_rel)
+            diagnostics.warn(
+                f"Could not remove {member_rel}: {exc}. Fix the file, then retry.",
+                package=dep_key,
+            )
+    return complete
 
 
 def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained):
@@ -848,7 +902,9 @@ def remove_stale_deployed_files(
             owner in a finally block; omitted callers retire immediately.
         live_paths: Paths still deployed after this run. A stale path that is
             only another spelling of one of them on this filesystem is renamed
-            to the live spelling (``aliased``) instead of deleted.
+            to the live spelling (``aliased``) instead of deleted. A skill
+            directory member among them (for example one a surviving
+            dependency still deploys) is never removed (#4750).
 
     Returns:
         :class:`CleanupResult` describing what happened. The caller is
@@ -881,7 +937,9 @@ def remove_stale_deployed_files(
     # files (safe rmtree).
     _deferred_dirs: list[tuple[str, Path]] = []
     absent_targets: list[Path] = []
+    live_paths = list(live_paths)
     live_index = SpellingAliasIndex(live_paths)
+    protected = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
 
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
@@ -1062,6 +1120,7 @@ def remove_stale_deployed_files(
             diagnostics,
             dep_key,
             failed_path_retained,
+            protected,
         )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).

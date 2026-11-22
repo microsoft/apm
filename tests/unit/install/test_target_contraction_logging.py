@@ -305,3 +305,91 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_selected_removal_keeps_a_skill_member_a_surviving_dependency_deploys(tmp_path):
+    """#4750: the departing owner's skill directory holds a survivor's member; it stays."""
+    skill = ".agents/skills/alpha"
+    own_rel, shared_rel = f"{skill}/SKILL.md", f"{skill}/shared.md"
+    own_abs, shared_abs = tmp_path / own_rel, tmp_path / shared_rel
+    own_abs.parent.mkdir(parents=True)
+    own_abs.write_text("# alpha\n", encoding="utf-8")
+    shared_abs.write_bytes(b"# shared by the survivor\n")
+    hashes = {own_rel: compute_file_hash(own_abs), shared_rel: compute_file_hash(shared_abs)}
+
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[shared_rel],
+        deployed_file_hashes={shared_rel: hashes[shared_rel]},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[skill],
+        deployed_file_hashes=hashes,
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+    )
+
+    assert shared_abs.read_bytes() == b"# shared by the survivor\n"
+    assert not own_abs.exists()
+    assert lockfile.dependencies[survivor.get_unique_key()].deployed_files == [shared_rel]
+
+
+def test_selected_removal_keeps_a_member_edited_between_check_and_unlink(tmp_path):
+    """#4750: each member is rechecked immediately before its unlink; a late edit stays."""
+    skill = ".agents/skills/alpha"
+    own_rel, late_rel, shared_rel = (f"{skill}/{name}" for name in ("SKILL.md", "notes.md", "s.md"))
+    for rel, body in ((own_rel, "# alpha\n"), (late_rel, "notes\n"), (shared_rel, "shared\n")):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(body, encoding="utf-8")
+    hashes = {rel: compute_file_hash(tmp_path / rel) for rel in (own_rel, late_rel, shared_rel)}
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[shared_rel],
+        deployed_file_hashes={shared_rel: hashes[shared_rel]},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[skill],
+        deployed_file_hashes=hashes,
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
+    checked = evidence.verdict
+
+    def scan_then_user_edits(claim, physical, **kwargs):
+        verdict = checked(claim, physical, **kwargs)
+        if claim == late_rel and physical.read_text(encoding="utf-8") == "notes\n":
+            physical.write_text("edited after the check\n", encoding="utf-8")
+        return verdict
+
+    evidence.verdict = scan_then_user_edits  # the user's edit lands right after the check
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+    )
+
+    assert (tmp_path / late_rel).read_text(encoding="utf-8") == "edited after the check\n"
+    assert (tmp_path / shared_rel).read_text(encoding="utf-8") == "shared\n"
+    assert not (tmp_path / own_rel).exists()
