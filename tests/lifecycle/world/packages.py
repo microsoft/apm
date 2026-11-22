@@ -30,6 +30,8 @@ PACKAGE_NAMES = (
     "p-canvas",
     "p-native-claude-bin",
     "p-native-claude-exec",
+    "p-kit",
+    "p-pack",
 )
 # The packages whose source is a git repository on the world's local HTTPS server
 # (also listed in the world marketplace).
@@ -101,6 +103,32 @@ def _lsp_package(factory: LocalPackageFactory) -> LocalPackage:
         "extensionToLanguage": {".fixture": "fixture"},
     }
     return factory.create("p-lsp", version="1.0.0", lsp_dependencies=[server])
+
+
+def _kit_package(factory: LocalPackageFactory, name: str) -> LocalPackage:
+    """A package carrying one of each deployable kind except bin and MCP: skill, session
+    hook, canvas, instruction (other-file) and an LSP server ("<pkg>-server").
+
+    p-kit is published to the package registry and p-pack is packed as a local bundle
+    (distinct names: an installed bundle owns its LSP server name), so M-SOURCE can
+    decide, audit, compile and lock each kind from those sources."""
+    server = {
+        "name": f"{name}-server",
+        "command": INERT_COMMAND,
+        "args": ["--stdio"],
+        "extensionToLanguage": {".kit": "kit"},
+    }
+    package = factory.create(name, version="1.0.0", lsp_dependencies=[server])
+    factory.add_skill(package, name, _skill(name, f"Use {name}."))
+    hook = {
+        "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": f"echo {name}"}]}]}
+    }
+    factory.add_hook(package, "session", hook)
+    factory.add_canvas(package, name, _CANVAS.replace("p-canvas", name))
+    factory.add_instruction(
+        package, name, f'---\napplyTo: "**"\n---\n\nFollow the {name} conventions.\n'
+    )
+    return package
 
 
 def _native_claude(root: Path) -> None:
@@ -201,6 +229,8 @@ def author_packages(root: Path) -> dict[str, AuthoredPackage]:
     _native_claude_bin(claude_bin)
     claude_exec = root / "p-native-claude-exec"
     _native_claude_exec(claude_exec)
+    kit = _kit_package(factory, "p-kit")
+    pack = _kit_package(factory, "p-pack")
     authored = {
         "p-skill": (skill.root, {"skill"}),
         "p-exec": (exec_.root, {"hook", "bin", "mcp"}),
@@ -213,6 +243,8 @@ def author_packages(root: Path) -> dict[str, AuthoredPackage]:
         "p-canvas": (canvas.root, {"canvas"}),
         "p-native-claude-bin": (claude_bin, {"native", "bin", "skill"}),
         "p-native-claude-exec": (claude_exec, {"native", "skill", "hook", "lsp"}),
+        "p-kit": (kit.root, {"skill", "hook", "canvas", "lsp", "other-file"}),
+        "p-pack": (pack.root, {"skill", "hook", "canvas", "lsp", "other-file"}),
     }
     assert tuple(authored) == PACKAGE_NAMES
     return {
