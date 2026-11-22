@@ -17,6 +17,7 @@ import ast
 import re
 from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.agent_plugin_scan_primitives import _call_name
 from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
@@ -1470,40 +1471,26 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                         "identity instructions must materialize the prepared canonical parse",
                     )
                 )
-            # The decoded-frontmatter scan lives in one owner both instruction
-            # preparation and local bundle rule rendering call (#3686).
             prepare_function = facts.tree_index.function(
                 "InstructionIntegrator.decoded_frontmatter_blocked"
             )
             prepare_scope = (
                 facts.tree_index.own_scope(prepare_function) if prepare_function is not None else ()
             )
+            # One decoded-frontmatter scan owner, called with force=force (#3686).
             caller = facts.tree_index.function("InstructionIntegrator._prepare_instruction")
             owner_calls = [
                 node
                 for node in (facts.tree_index.own_scope(caller) if caller is not None else ())
                 if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "decoded_frontmatter_blocked"
+                and _call_name(node) == "self.decoded_frontmatter_blocked"
+                and _keyword_is_name(node, "force", "force")
             ]
+            calls = [node for node in prepare_scope if isinstance(node, ast.Call)]
             security_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "SecurityGate"
-                and node.func.attr == "scan_text"
+                node for node in calls if _call_name(node) == "SecurityGate.scan_text"
             ]
-            json_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "json"
-                and node.func.attr == "dumps"
-            ]
+            json_calls = [node for node in calls if _call_name(node) == "json.dumps"]
             force_value = (
                 next(
                     (item.value for item in security_calls[0].keywords if item.arg == "force"),
