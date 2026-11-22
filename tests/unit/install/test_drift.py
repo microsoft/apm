@@ -710,15 +710,20 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
 
 
-@pytest.mark.parametrize(("user_scope", "expected"), [(False, ["."]), (True, [])])
+@pytest.mark.parametrize(
+    ("user_scope", "user_root_has_apm", "expected"),
+    [(False, False, ["."]), (True, True, ["."]), (True, False, [])],
+    ids=["project", "user-root-apm", "user-root-empty"],
+)
 def test_run_replay_includes_root_apm_without_local_deployed_files(
-    monkeypatch, tmp_path, user_scope, expected
+    monkeypatch, tmp_path, user_scope, user_root_has_apm, expected
 ):
-    """Project-scope replay integrates root .apm/ like install does (#3369).
+    """Replay integrates the root .apm/ like install does (#3369, #3772).
 
     Root hooks merge into shared configs and record no local_deployed_files,
     so the lockfile synthesizes no self-entry. Replay must still integrate
-    the project's own .apm/ content, without rewriting the lockfile.
+    the root's own .apm/ content, without rewriting the lockfile. At user
+    scope that root is the user source root, not the project.
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.install.drift import ReplayConfig, run_replay
@@ -726,6 +731,9 @@ def test_run_replay_includes_root_apm_without_local_deployed_files(
     project_root = tmp_path / "proj"
     (project_root / ".apm" / "hooks").mkdir(parents=True)
     (project_root / "apm.yml").write_text("name: proj\ntargets: [claude]\n", encoding="utf-8")
+    user_root = tmp_path / "home"
+    (user_root / (".apm/hooks" if user_root_has_apm else "")).mkdir(parents=True)
+    monkeypatch.setattr("apm_cli.install.drift.get_source_root", lambda _scope: user_root)
     lockfile_path = project_root / "apm.lock.yaml"
     LockFile().write(lockfile_path)
     lock_bytes = lockfile_path.read_bytes()
