@@ -112,6 +112,9 @@ def test_uninstall_keeps_a_direct_dependency_another_package_still_needs(
     # e stays locked, now attributed to the package that still needs it.
     assert set(after) == {"test/d", "test/e", "test/f"}
     assert after["test/e"]["resolved_by"] == "test/d"
+    # No longer direct: one level below its new parent, as install records it.
+    assert before["test/e"].get("depth", 1) == 1
+    assert after["test/e"]["depth"] == 2
     assert after["test/e"]["resolved_commit"] == before["test/e"]["resolved_commit"]
     assert set(after["test/e"].get("deployed_files") or []) == e_files
     assert (world.project / "apm_modules" / "test" / "e" / "apm.yml").is_file()
@@ -130,6 +133,9 @@ def test_uninstall_keeps_a_direct_dependency_another_package_still_needs(
     world.apm("audit", "--ci")
     assert lock_bytes(world.project) == lock_after
     assert tree_digest(world.project) == tree_after
+    # I2: a full install re-resolves the graph and writes the same lockfile.
+    world.apm("install")
+    assert lock_bytes(world.project) == lock_after
 
 
 def test_uninstall_still_removes_a_dependency_nothing_else_needs(

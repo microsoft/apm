@@ -330,6 +330,34 @@ def test_uninstalling_one_diamond_parent_shrinks_to_the_survivor_selection_then_
         assert locked(project, bundle) is None
 
 
+def test_uninstalling_a_direct_dependency_a_parent_still_selects_shrinks_to_that_edge(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4749: the direct edge leaves the union; the bundle stays with pkg-a's skills."""
+    world = _world(tmp_path, apm_binary_path)
+    bundle = world.publish("bundle", skills=_SKILLS).slug
+    a = world.publish("pkg-a", dependencies=[_edge(bundle, skills=["alpha"])]).slug
+    project = world.project("consumer", dependencies=[a, bundle])
+    skills_root = project / _PROJECT_SKILLS
+    with world.serve() as env:
+        world.run(INSTALL, cwd=project, env=env, scenario_id="4749-install")
+        assert skill_dirs(skills_root) == sorted(_SKILLS)
+        assert locked(project, bundle).get("depth", 1) == 1
+
+        world.run(("uninstall", bundle), cwd=project, env=env, scenario_id="4749-uninstall")
+        assert skill_dirs(skills_root) == ["alpha"]
+        entry = locked(project, bundle)
+        assert entry["skill_subset"] == ["alpha"]
+        assert entry["depth"] == 2
+        recorded = deployment_values(project)
+        for gone in ("beta", "gamma", "delta"):
+            assert not any(f"/skills/{gone}" in value for value in recorded), recorded
+        _assert_audit_green(world, project, env, "4749-audit")
+        lock_after = lock_path(project).read_bytes()
+        world.run((*INSTALL, "--frozen"), cwd=project, env=env, scenario_id="4749-frozen")
+        assert lock_path(project).read_bytes() == lock_after
+
+
 def _tree_bytes(*roots: Path) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     for root in roots:

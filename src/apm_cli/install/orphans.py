@@ -115,7 +115,9 @@ class OrphanRemovalDecision:
     ``superseded_roots`` pairs each released root with the retained package
     subtrees it still hosts. ``rescued_roots`` are an uninstall's own removal
     roots that a surviving package still reaches: only their declaration goes,
-    their lock row stays (re-parented through ``repairs``) with its content.
+    their lock row stays (re-parented through ``repairs``) with its content,
+    and ``rescued_depths`` gives the depth it and its subtree take below the
+    new parent.
     """
 
     operation: OrphanOperation
@@ -139,6 +141,7 @@ class OrphanRemovalDecision:
     repairs: Mapping[str, tuple[str, str | None, bool]] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    rescued_depths: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
     reachability: ReachabilityResult | None = None
 
     @property
@@ -554,8 +557,8 @@ def _decide_uninstall(
     shared/diamond-dependency rescue). The removal roots themselves are
     asked too: a root a surviving package still declares is a
     ``rescued_root`` whose declaration alone goes (#4749). An incomplete walk
-    keeps every descendant candidate and rescues no root this run; with
-    replacement evidence it refuses instead. ``repairs`` maps each rescued
+    keeps every descendant candidate and rescues only the roots it already
+    reached; with replacement evidence it refuses instead. ``repairs`` maps each rescued
     key to the ``(parent_repo_url, local_path, dev_only)`` of the surviving
     node that reached it; only the real run may persist them.
     """
@@ -589,11 +592,8 @@ def _decide_uninstall(
         dev_refs=probe.dev_refs,
     )
     if not walk.complete:
-        if not candidate_orphans:
-            # Only roots were asked: an unverifiable survivor rescues none,
-            # so the removal proceeds exactly as before (no descendant to keep).
-            return OrphanRemovalDecision(operation=operation)
-        if lockfile.replacements is not None:
+        unreached_roots = candidate_roots - walk.reachable
+        if lockfile.replacements is not None and (candidate_orphans or unreached_roots):
             unverifiable = sorted({key for key, _reason in walk.unverifiable})
             details = ", ".join(unverifiable[:3])
             if len(unverifiable) > 3:
@@ -603,19 +603,23 @@ def _decide_uninstall(
                 f"({len(unverifiable)} manifest(s): {details}). Restore missing or "
                 "invalid package manifests before uninstalling."
             )
+        # A root the partial walk already reached is still needed: reaching
+        # it is proof. Unreached roots go as before, and every descendant
+        # candidate is kept because the walk cannot prove it unused.
+        rescued_roots = candidate_roots & walk.reachable
+        repairs = _rescue_repairs(walk, rescued_roots)
         return OrphanRemovalDecision(
             operation=operation,
             candidate_keys=candidate_orphans,
             retained_keys=candidate_orphans,
-            reachability=walk,
+            rescued_roots=rescued_roots,
+            repairs=MappingProxyType(repairs),
+            rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+            reachability=walk if candidate_orphans else None,
         )
     rescued = candidate_orphans & walk.reachable
     rescued_roots = candidate_roots & walk.reachable
-    repairs = {
-        key: (*walk.reachable_via[key], key in walk.dev_only)
-        for key in rescued | rescued_roots
-        if key in walk.reachable_via
-    }
+    repairs = _rescue_repairs(walk, rescued | rescued_roots)
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=candidate_orphans,
@@ -623,8 +627,50 @@ def _decide_uninstall(
         rescued_keys=rescued,
         rescued_roots=rescued_roots,
         repairs=MappingProxyType(repairs),
+        rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
         reachability=walk,
     )
+
+
+def _rescue_repairs(walk, keys: frozenset[str]) -> dict:
+    """Map each rescued key to the surviving parent that reached it."""
+    return {
+        key: (*walk.reachable_via[key], key in walk.dev_only)
+        for key in keys
+        if key in walk.reachable_via
+    }
+
+
+def _rescued_root_depths(
+    lockfile: LockFile, rescued_roots: frozenset[str], repairs: Mapping
+) -> dict[str, int]:
+    """Depth each re-parented root and its locked subtree take (#4749).
+
+    A rescued root is no longer direct. As install records it, its depth is
+    its new parent's depth plus one, and each entry recorded under it follows.
+    """
+    replacements = lockfile.replacements
+    dependencies = lockfile.get_package_dependencies()
+    by_identity = {lockfile_parent_identity(dep, replacements): dep for dep in dependencies}
+    children = _build_children_index(lockfile)
+    depths: dict[str, int] = {}
+    queue = []
+    for key in sorted(rescued_roots):
+        dep = lockfile.get_dependency(key)
+        if dep is None or key not in repairs:
+            continue
+        parent = by_identity.get(repairs[key][0])
+        depths[key] = max(parent.depth if parent is not None else 1, 1) + 1
+        queue.append(dep)
+    while queue:
+        dep = queue.pop()
+        depth = depths[dep.get_unique_key()] + 1
+        for child in children.get(lockfile_parent_identity(dep, replacements), ()):
+            child_key = child.get_unique_key()
+            if child_key not in depths:
+                depths[child_key] = depth
+                queue.append(child)
+    return depths
 
 
 def _locked_root_keys(lockfile: LockFile, roots: Sequence[object]) -> frozenset[str]:
