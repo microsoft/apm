@@ -14,7 +14,10 @@ another policy rule:
 * no removed entry, through its ``replace:`` source, satisfies a package the
   policy requires;
 * every deployed file the uninstall would delete has deployment evidence
-  (a user-edited file makes uninstall refuse).
+  (a user-edited file makes uninstall refuse), judged by uninstall's own
+  candidate and refusal owner;
+* uninstall's survivor preflight resolves the project's org policy (it
+  rediscovers it, whatever policy this audit was given).
 
 The proof reads the live ``apm_modules/`` the suggested uninstall acts on,
 never audit's scratch replay; without it the advice is admin-only, as is
@@ -28,6 +31,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from ..core.scope import manifest_file
 
 if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
@@ -212,30 +217,35 @@ def _uninstall_clears(
     if not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
-    return _deletions_have_evidence(cleanup_keys, project)
+    return _deletions_have_evidence(cleanup_keys, removed, project) and (
+        _uninstall_policy_resolves(removed, project)
+    )
 
 
-def _deletions_have_evidence(cleanup_keys: set[str], project: AllowlistProject) -> bool:
+def _deletions_have_evidence(
+    cleanup_keys: set[str], removed: list[object], project: AllowlistProject
+) -> bool:
     """Whether uninstall's deployment-evidence preflight would let these deletions through.
 
     ``apm uninstall`` refuses before any change when a deployed file it would
-    delete (for example one the user edited) has no deployment evidence; that
-    uninstall would leave the audit red, so its advice is not offered.
+    delete (one the user edited, including a skill a shrinking survivor
+    selection retires) has no deployment evidence; that uninstall would leave
+    the audit red, so its advice is not offered. The candidates and the
+    refusal come from uninstall's own owner.
     """
-    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..commands.uninstall.engine import project_shrunk_selections
+    from ..commands.uninstall.selection_shrink import (
+        uninstall_deletion_candidates,
+        uninstall_evidence_refusals,
+    )
     from ..integration.cleanup import DeploymentEvidence
     from ..utils.diagnostics import DiagnosticCollector
 
     lock = project.lock
-    selected = DeploymentLedgerCodec.cleanup_snapshot(lock, cleanup_keys)
-    others = DeploymentLedgerCodec.cleanup_snapshot(
-        lock, DeploymentLedgerCodec.valid_owner_keys(lock, excluded_dependency_keys=cleanup_keys)
-    )
-    candidates = (set(selected.paths) | set(selected.hashes)) - set(others.paths)
-    candidates -= set(others.hashes) | set(lock.local_deployed_files)
-    if not candidates:
-        return True
     try:
+        shrunk = project_shrunk_selections(
+            lock, removed, project.modules_dir, manifest_file(project.project_root)
+        )
         evidence = DeploymentEvidence.collect(
             project.project_root,
             user_scope=False,
@@ -244,10 +254,35 @@ def _deletions_have_evidence(cleanup_keys: set[str], project: AllowlistProject) 
             diagnostics=DiagnosticCollector(),
             kept=(),
         )
-        evidence.prepare(sorted(candidates))
-        return not evidence.refusals(sorted(candidates))
+        evidence.prepare(uninstall_deletion_candidates(lock, cleanup_keys, shrunk=shrunk))
+        return not uninstall_evidence_refusals(evidence, lock, cleanup_keys, shrunk=shrunk)
     except (OSError, ValueError):
         return False
+
+
+def _uninstall_policy_resolves(removed: list[object], project: AllowlistProject) -> bool:
+    """Whether uninstall's survivor preflight resolves the org policy it reintegrates under.
+
+    With surviving dependencies, ``apm uninstall`` rediscovers the project's
+    org policy and aborts before removing anything when the outcome blocks
+    (for example ``policy.fetch_failure_default: block`` with no reachable
+    policy), whatever policy this audit was given.
+    """
+    if not any(_survivors(removed, project)):
+        return True
+    from ..install.errors import PolicyViolationError
+    from ..models.apm_package import APMPackage
+    from ..security.executables import resolve_project_exec_allow_map
+
+    try:
+        package = APMPackage.from_apm_yml(manifest_file(project.project_root))
+    except Exception:
+        return True  # uninstall skips the trust preflight when apm.yml cannot load
+    try:
+        resolve_project_exec_allow_map(project.project_root, package, user_scope=False)
+    except PolicyViolationError:
+        return False
+    return True
 
 
 def _survivors(

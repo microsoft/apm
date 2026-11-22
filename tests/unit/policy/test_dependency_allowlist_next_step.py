@@ -237,3 +237,61 @@ def test_without_a_live_apm_modules_the_replay_tree_proves_nothing(tmp_path: Pat
 
     assert _stderr(capsys, check)[4] == _ADMIN_ONLY
     assert check.remediations == ()
+
+
+def test_a_survivor_shrink_that_retires_an_edited_skill_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    skills = [".agents/skills/alpha", ".agents/skills/beta"]
+    files = [f"{skill}/SKILL.md" for skill in skills]
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        skill_subset=["alpha", "beta"],
+        deployed_files=[*skills, *files],
+        deployed_file_hashes={path: "sha256:" + "0" * 64 for path in files},
+    )
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "skills": ["beta"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "skills": ["alpha"]}],
+        },
+    )
+    for path in files:
+        (root / path).parent.mkdir(parents=True)
+        (root / path).write_text("# edited by the user\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_policy_uninstall_cannot_resolve_falls_back_to_the_admin(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        policy={"fetch_failure_default": "block"},
+    )
+
+    def _outage(*_args, **_kwargs):
+        raise OSError("HTTP 503 fetching policy from contoso/.github")
+
+    # The network boundary: the policy repository is down for this run.
+    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", _outage)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()

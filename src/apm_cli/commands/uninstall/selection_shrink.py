@@ -111,6 +111,71 @@ def shrink_retired_paths(lockfile, shrunk: dict) -> set[str]:
     return shrink_path_split(lockfile, shrunk)[0]
 
 
+def _collect_deployed_cleanup_state(
+    lockfile,
+    dependency_keys: set[str],
+) -> tuple[set[str], dict[str, str]]:
+    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.base_integrator import BaseIntegrator
+
+    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
+    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+
+
+def uninstall_deletion_candidates(
+    lockfile, cleanup_keys: set[str], *, shrunk=None, preserved=()
+) -> list[str]:
+    """Return the deployed paths uninstalling *cleanup_keys* would delete (#3701, #4313).
+
+    The removed packages' files no survivor still owns (hash-tracked skill
+    members count too: directory cleanup deletes them), plus the files a
+    shrinking survivor selection (*shrunk*) retires. Read-only: uninstall's
+    evidence preflight and ``apm audit --ci``'s allow-list advice (#4570) share it.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...integration.base_integrator import BaseIntegrator
+
+    if not lockfile or not cleanup_keys:
+        return []
+    selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
+    survivors, survivor_hashes = _collect_deployed_cleanup_state(
+        lockfile,
+        DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
+    )
+    candidates = (selected | set(selected_hashes)) - survivors - set(survivor_hashes)
+    if shrunk:
+        others, other_hashes = _collect_deployed_cleanup_state(
+            lockfile,
+            DeploymentLedgerCodec.valid_owner_keys(
+                lockfile, excluded_dependency_keys=set(cleanup_keys) | set(shrunk)
+            ),
+        )
+        retired, retained = shrink_path_split(lockfile, shrunk)
+        retired = BaseIntegrator.normalize_managed_files(retired) or set()
+        # A path another shrinking survivor keeps deploying is not deleted.
+        retained = BaseIntegrator.normalize_managed_files(retained) or set()
+        candidates |= retired - others - set(other_hashes) - retained
+    candidates -= set(lockfile.local_deployed_files)
+    candidates -= set(preserved or ())
+    return sorted(candidates)
+
+
+def uninstall_evidence_refusals(
+    evidence, lockfile, cleanup_keys: set[str], *, shrunk=None, preserved=()
+) -> list[tuple[str, str]]:
+    """Return ``(claim, verdict)`` for each file uninstall would refuse to delete.
+
+    The single owner of uninstall's deployment-evidence refusal (#3701): the
+    command refuses before any change when this is non-empty, and the audit
+    withholds its ``apm uninstall`` advice for the same reason (#4570).
+    """
+    candidates = uninstall_deletion_candidates(
+        lockfile, cleanup_keys, shrunk=shrunk, preserved=preserved
+    )
+    return evidence.refusals(candidates) if candidates else []
+
+
 def _shrink_surviving_selections(
     lockfile, packages_to_remove, apm_modules_dir, apm_yml_path, logger
 ) -> set[str]:

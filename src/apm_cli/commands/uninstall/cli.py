@@ -62,9 +62,10 @@ from .engine import (
     project_shrunk_selections,
 )
 from .selection_shrink import (
+    _collect_deployed_cleanup_state,
     _shrink_surviving_selections,
-    shrink_path_split,
     shrink_retired_paths,
+    uninstall_evidence_refusals,
 )
 
 
@@ -123,18 +124,6 @@ def _snapshot_compile_inputs(deploy_root, manifest_path, modules_dir, scope):
     with contextlib.suppress(Exception):
         manifest_target = package_target_selection(APMPackage.from_apm_yml(manifest_path))
     return snapshot_compile_inputs(deploy_root, manifest_target, modules_dir)
-
-
-def _collect_deployed_cleanup_state(
-    lockfile,
-    dependency_keys: set[str],
-) -> tuple[set[str], dict[str, str]]:
-    """Snapshot selected deployment paths and hashes before lockfile mutation."""
-    from ...core.deployment_ledger import DeploymentLedgerCodec
-    from ...integration.base_integrator import BaseIntegrator
-
-    snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
-    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
 
 
 @dataclass(frozen=True)
@@ -587,35 +576,13 @@ def _refuse_uninstall_without_evidence(
     apm.lock.yaml change, so a refusal leaves all of them as they were.
     Files a shrinking survivor selection (*shrunk*) retires count too (#4313).
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
-    from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
     if not lockfile or not cleanup_keys:
         return
-    # Hash-tracked skill members count too: directory cleanup deletes them.
-    selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
-    survivors, survivor_hashes = _collect_deployed_cleanup_state(
-        lockfile,
-        DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
+    refused = uninstall_evidence_refusals(
+        evidence, lockfile, cleanup_keys, shrunk=shrunk, preserved=preserved_values
     )
-    candidates = (selected | builtins.set(selected_hashes)) - survivors
-    candidates -= builtins.set(survivor_hashes)
-    if shrunk:
-        others, other_hashes = _collect_deployed_cleanup_state(
-            lockfile,
-            DeploymentLedgerCodec.valid_owner_keys(
-                lockfile, excluded_dependency_keys=cleanup_keys | builtins.set(shrunk)
-            ),
-        )
-        retired, retained = shrink_path_split(lockfile, shrunk)
-        retired = BaseIntegrator.normalize_managed_files(retired) or builtins.set()
-        # A path another shrinking survivor keeps deploying is not deleted.
-        retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
-        candidates |= retired - others - builtins.set(other_hashes) - retained
-    candidates -= builtins.set(lockfile.local_deployed_files)
-    candidates -= builtins.set(preserved_values or ())
-    refused = evidence.refusals(sorted(candidates))
     if not refused:
         return
     _cleanup_staged_local_refreshes(staged_refreshes, modules_dir)
