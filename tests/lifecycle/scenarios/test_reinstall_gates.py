@@ -63,11 +63,16 @@ def test_reinstall_enforces_changed_org_policy(lifecycle_world: World) -> None:
 
     use_policy(world, "exec-deny-all")  # only the org policy behind the git remote moves
     assert _inputs(world) == converged, "the policy change must not touch apm.yml or the lock"
+    # Before the re-install the deployed hook violates the tightened policy (I3: audit
+    # --ci fails where install must act).
+    audit, audit_output = _run(world, "audit", "--ci", exit=1)
+    assert audit.returncode == 1, audit_output
+    assert _inputs(world) == converged, "audit must not write apm.yml or the lock"
     _, output = _run(world, "install")
     assert not hook.exists(), f"a tightened org policy leaves the hook deployed\n{output}"
     assert "deny" in output.lower(), f"the retirement is not announced\n{output}"
-    audit, audit_output = _run(world, "audit", "--ci", exit=1)
-    assert audit.returncode == 1, audit_output
+    # Converged under the new policy: audit --ci agrees with install (I3).
+    _run(world, "audit", "--ci")
 
 
 def test_reinstall_retires_executable_after_out_of_band_approval_removal(
