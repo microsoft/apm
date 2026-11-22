@@ -1489,6 +1489,55 @@ def _check_local_bundle_hooks(
     )
 
 
+class _PolicyRouteBlocks(Exception):
+    """The audit's policy-outcome route blocks on its one discovery."""
+
+
+def _audit_trust_provider(
+    project_root: Path,
+    manifest: APMPackage,
+    user_scope: bool,
+    policy_fetch: Callable[[], Any] | None,
+    fallback: Callable[[], Any],
+) -> Callable[[], Any]:
+    """The executables trust context judged on the audit's own policy discovery.
+
+    *policy_fetch* is the one discovery ``apm audit --ci`` routes its policy
+    outcome from; it is classified exactly as that route classifies it, so a
+    deferral here always coincides with the route failing the audit (#4821).
+    Without it (no audit-level discovery) *fallback* resolves the context.
+    """
+    resolved: list[Any] = []
+
+    def provide() -> Any:
+        if resolved:
+            return resolved[0]
+        if policy_fetch is None:
+            resolved.append(fallback())
+            return resolved[0]
+        from ..core.scope import scope_manifest_path
+        from ..install.exec_gate import trust_context_for_policy
+        from .outcome_routing import classify_discovery_outcome
+        from .project_config import read_project_fetch_failure_default
+
+        route = classify_discovery_outcome(
+            policy_fetch(),
+            fetch_failure_default=read_project_fetch_failure_default(project_root),
+        )
+        if route.blocks:
+            raise _PolicyRouteBlocks(route.outcome)
+        resolved.append(
+            trust_context_for_policy(
+                scope_manifest_path(project_root, user_scope=user_scope),
+                route.policy,
+                getattr(manifest, "allow_executables", None),
+            )
+        )
+        return resolved[0]
+
+    return provide
+
+
 def _check_hook_approval_pins(
     project_root: Path,
     deployment_root: Path,
@@ -1499,6 +1548,7 @@ def _check_hook_approval_pins(
     no_policy: bool,
     prepared_replay: PreparedCiAuditReplay | None,
     targets: Sequence[TargetProfile] = (),
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CheckResult:
     """Fail when a locked hook file's pinned approval no longer admits it (#4188).
 
@@ -1539,12 +1589,19 @@ def _check_hook_approval_pins(
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
     try:
         withheld = locked_withheld_hook_files(
-            lock, modules_root, trust_ctx, deployment_root, targets, user_scope=user_scope
+            lock,
+            modules_root,
+            _audit_trust_provider(project_root, manifest, user_scope, policy_fetch, trust_ctx),
+            deployment_root,
+            targets,
+            user_scope=user_scope,
         )
-    except PolicyViolationError:
-        # The org policy blocks this audit; its outcome route reports that one
-        # finding and fails, rather than this check repeating the cause (#4821).
+    except _PolicyRouteBlocks:
+        # The audit's own policy route blocks on this same discovery and fails,
+        # reporting the cause once; this check does not repeat it (#4821).
         withheld = []
+    except PolicyViolationError as exc:
+        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
     if withheld:
         entries = [row for row in withheld if row[0] and ENTRY_REASON in row[2]]
         files = [row for row in withheld if row[0] and ENTRY_REASON not in row[2]]
@@ -1606,6 +1663,7 @@ def run_baseline_checks(
     replay_error_owner: str | None = None,
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1616,6 +1674,8 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     *replay_error_owner* names the later check that reports *prepared_replay_error*
     in full (``drift``); without it the first check that needs the replay does.
+    *policy_fetch* is the one org policy discovery ``apm audit --ci`` routes
+    its policy outcome from, so checks that judge trust use the same result.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..constants import APM_MODULES_DIR
@@ -1790,6 +1850,7 @@ def run_baseline_checks(
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
                 targets=resolved_targets,
+                policy_fetch=policy_fetch,
             )
         )
         or _run(

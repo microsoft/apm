@@ -569,6 +569,24 @@ def exec_policy_from_discovery(discover: Callable[[], Any]) -> Any:
     return getattr(fetch, "policy", None)
 
 
+def trust_context_for_policy(
+    manifest_path: Path, policy: Any, fallback_allow_executables: Any = None
+) -> Any:
+    """The executables trust context under an already-routed org *policy*.
+
+    For a caller that routed one policy discovery itself (``apm audit --ci``)
+    and must judge trust on that same result; never writes.
+    """
+    from apm_cli.security.executables import exec_trust_context_for_project
+
+    return exec_trust_context_for_project(
+        manifest_path,
+        policy=policy,
+        fallback_allow_executables=fallback_allow_executables,
+        migrate_user_legacy=False,
+    )
+
+
 def discovered_exec_policy(deploy_root: Path) -> Any:
     """Return the org policy the gate applies at *deploy_root* (see above)."""
     from apm_cli.policy.discovery import discover_policy_with_chain
