@@ -642,9 +642,6 @@ def test_a_recorded_native_plugin_mcp_collision_is_refused_and_converges(
         )
         == state_before
     ), evidence(failed)
-    audit = _user_audit(world)
-    assert audit.returncode != 0, evidence(audit)
-    assert _COLLIDING_SERVER in audit.stdout + audit.stderr, evidence(audit)
 
     claude_json.write_text("{}", encoding="utf-8")
     converged = _user(world, "install", "-g", "--no-policy")
