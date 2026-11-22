@@ -240,6 +240,27 @@ def _routes(observations) -> dict[str, int]:
 # -- journeys ------------------------------------------------------------------
 
 
+def _wait4_with_deadline(proc: subprocess.Popen, timeout_s: float) -> tuple[int, object]:
+    """``wait4`` the child (CPU of it and its waited-for descendants), bounded.
+
+    A child still running at the deadline is killed and reaped, and the
+    command fails like ``subprocess.run(timeout=...)`` would.
+    """
+    deadline = time.monotonic() + timeout_s
+    delay = 0.005
+    while True:
+        pid, status, usage = os.wait4(proc.pid, os.WNOHANG)
+        if pid:
+            return status, usage
+        if time.monotonic() >= deadline:
+            proc.kill()
+            _, killed, _ = os.wait4(proc.pid, 0)
+            proc.returncode = os.waitstatus_to_exitcode(killed)
+            raise subprocess.TimeoutExpired(proc.args, timeout_s)
+        time.sleep(delay)
+        delay = min(delay * 2, 0.1)
+
+
 @dataclass
 class Context:
     fixture: Fixture
@@ -290,7 +311,7 @@ class Context:
             tempfile.TemporaryFile() as err,
         ):
             proc = subprocess.Popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
-            _, status, usage = os.wait4(proc.pid, 0)
+            status, usage = _wait4_with_deadline(proc, _COMMAND_TIMEOUT_S)
             proc.returncode = os.waitstatus_to_exitcode(status)
             out.seek(0)
             err.seek(0)
@@ -946,6 +967,11 @@ def verify_real(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _explicit_options(argv: list[str]) -> set[str]:
+    """Destination names of the ``--options`` the caller actually passed."""
+    return {arg[2:].split("=", 1)[0].replace("-", "_") for arg in argv if arg.startswith("--")}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tests.benchmarks.journeys")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1004,11 +1030,11 @@ def main(argv: list[str] | None = None) -> int:
         return verify_real(args)
     if args.preset == "scoreboard":
         # The preset replaces defaults only; explicit flags (e.g. --runs 1) still win.
-        defaults = vars(parser.parse_args(["run"]))
+        given = _explicit_options(argv if argv is not None else sys.argv[1:])
         for key, value in SCOREBOARD_PRESET.items():
-            if getattr(args, key) == defaults[key]:
+            if key not in given:
                 setattr(args, key, value)
-        if args.rtt_journeys == defaults["rtt_journeys"]:
+        if "rtt_journeys" not in given:
             args.rtt_journeys = args.journeys.split(",")
         args.counts = True
     report = run(args)

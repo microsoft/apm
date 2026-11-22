@@ -164,7 +164,17 @@ def report(args: argparse.Namespace) -> int:
         Path(args.json).write_text(
             json.dumps({"meta": meta, "rows": rows}, indent=2) + "\n", encoding="utf-8"
         )
-    return 1 if not rows or any(r["base"]["errors"] or r["new"]["errors"] for r in rows) else 0
+    return 1 if not rows or any(_incomplete(r, args) for r in rows) else 0
+
+
+def _incomplete(row: dict, args: argparse.Namespace) -> bool:
+    """A failed sample, or fewer samples than the requested runners x pairs."""
+    if row["base"]["errors"] or row["new"]["errors"]:
+        return True
+    if str(args.shards).isdigit() and str(args.pairs).isdigit():
+        expected = int(args.shards) * int(args.pairs)
+        return any(row[side]["samples"] < expected for side in SIDES)
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:

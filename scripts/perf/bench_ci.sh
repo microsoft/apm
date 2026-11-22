@@ -47,13 +47,18 @@ fetch() {
     sleep 10
   done
   echo "[i] run https://github.com/$REPO/actions/runs/$run_id" >&2
-  gh run watch "$run_id" --repo "$REPO" --interval 30 --exit-status >/dev/null 2>&1 || true
+  local status=0
+  gh run watch "$run_id" --repo "$REPO" --interval 30 --exit-status >/dev/null 2>&1 || status=$?
   local out; out="$(mktemp -d)"
   gh run download "$run_id" --repo "$REPO" --name perf-bench-result --dir "$out" \
     || die "no result artifact (see the run log)"
   cat "$out/summary.md"
   echo "[i] json: $out/perf-bench-result.json" >&2
   git push --quiet "$URL" --delete "$branch" 2>/dev/null || true
+  if [ "$status" -ne 0 ]; then
+    echo "[x] the run failed: the table above is incomplete evidence" >&2
+    return "$status"
+  fi
 }
 
 case "${1:-}" in
