@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import pytest
 import requests
 
-from apm_cli.core.invocation_memo import invocation_scope
+from apm_cli.core.invocation_memo import invocation_memo, invocation_scope
 from apm_cli.policy.discovery import discover_policy
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-outcome-routing")]
@@ -29,9 +29,12 @@ class _FakePolicyServer:
         self.status = status
         self.exc = exc
         self.urls: list[str] = []
+        self.auth_headers: list[str | None] = []
 
-    def __call__(self, method: str, url: str, **_kwargs: object) -> requests.Response:
+    def __call__(self, method: str, url: str, **kwargs: object) -> requests.Response:
         self.urls.append(url)
+        headers = kwargs.get("headers") or {}
+        self.auth_headers.append(dict(headers).get("Authorization"))
         if self.exc is not None:
             raise self.exc
         response = requests.Response()
@@ -127,3 +130,46 @@ def test_a_404_is_not_reused_for_another_host(server, tmp_path):
     hosts = [urlsplit(url).hostname for url in server.urls[fetched:]]
     assert hosts
     assert all(host == "ghe.example.com" for host in hosts)
+
+
+def test_the_reused_404_is_the_authenticated_answer(server, tmp_path):
+    """The memo stores the whole auth chain's outcome, never an anonymous attempt."""
+    with invocation_scope():
+        assert _discover(tmp_path) == "absent"
+        fetched = len(server.auth_headers)
+        assert _discover(tmp_path) == "absent"
+
+    assert len(server.auth_headers) == fetched
+    assert any(header and "test-token" in header for header in server.auth_headers)
+
+
+def test_the_scope_is_closed_and_cleared_on_exit():
+    with invocation_scope():
+        invocation_memo("probe")["key"] = "value"
+        assert invocation_memo("probe") == {"key": "value"}
+
+    assert invocation_memo("probe") is None
+    with invocation_scope():
+        assert invocation_memo("probe") == {}
+    assert invocation_memo("probe") is None
+
+
+def test_each_cli_invocation_gets_a_fresh_scope_closed_at_exit(monkeypatch):
+    import click
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    @click.command("memo-probe")
+    def probe() -> None:
+        memo = invocation_memo("probe")
+        click.echo(f"seen={sorted(memo)}")
+        memo["mark"] = True
+
+    monkeypatch.setenv("APM_E2E_TESTS", "1")  # skips the update notice
+    monkeypatch.setitem(cli.commands, "memo-probe", probe)
+    results = [CliRunner().invoke(cli, ["memo-probe"], obj={}) for _ in range(2)]
+
+    assert [result.exit_code for result in results] == [0, 0]
+    assert [result.output for result in results] == ["seen=[]\n", "seen=[]\n"]
+    assert invocation_memo("probe") is None
