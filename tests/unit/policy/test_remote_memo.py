@@ -7,6 +7,7 @@ CLI opens one invocation scope per command; outside it every read is live.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pytest
 from apm_cli.core.invocation_memo import invocation_scope
 from apm_cli.policy import _remote
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-remote-origin-reader")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-remote-origin-reader")]
 
 _URL = "https://github.com/contoso/app.git"
 
@@ -46,8 +47,21 @@ def test_one_command_run_reads_each_remote_once(tmp_path: Path, git_calls) -> No
             _remote._extract_org_host_port_from_git_remote(tmp_path)
         _remote._git_remote_origin_url(other)
     assert git_calls == [("remote", "get-url", "origin")] * 2
-    _remote._git_remote_origin_url(tmp_path)
+    with invocation_scope():
+        _remote._git_remote_origin_url(tmp_path)
     assert len(git_calls) == 3, "the next command run must read the remote live again"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_the_memo_key_keeps_parent_components(tmp_path: Path, git_calls) -> None:
+    """'..' is not collapsed: apparent/link/.. and apparent are different directories."""
+    (tmp_path / "physical" / "child").mkdir(parents=True)
+    (tmp_path / "apparent").mkdir()
+    (tmp_path / "apparent" / "link").symlink_to(tmp_path / "physical" / "child")
+    with invocation_scope():
+        _remote._git_remote_origin_url(tmp_path / "apparent" / "link" / "..")
+        _remote._git_remote_origin_url(tmp_path / "apparent")
+    assert len(git_calls) == 2, "two distinct directories must each be read"
 
 
 def test_a_failed_read_is_not_retried_within_the_run(tmp_path: Path, monkeypatch) -> None:
