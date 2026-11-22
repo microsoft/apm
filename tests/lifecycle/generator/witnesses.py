@@ -208,12 +208,22 @@ def machine_cells() -> list[MachineCell]:
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
+            if witness == GATE_BUNDLE_SPINE:
+                assignment = {**assignment, "SRC": "local-bundle"}
             tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
+            if assignment["GATE"] == "denied-dependency":
+                # A refusal proves its GATE level only, never a success cell.
+                continue
             if witness == GATE_PACK_SPINE:
                 # A real pack over the primitive also proves the OP x PRIM pair.
                 context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
                 cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
+            if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
+                # An install that deploys the primitive proves what it acts on: a
+                # local bundle carrying that primitive (OP x SRC x PRIM and its pairs).
+                source = {"OP": assignment["OP"], "SRC": "local-bundle", "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", source, tracking))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)

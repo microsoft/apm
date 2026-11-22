@@ -38,21 +38,26 @@ from tests.lifecycle.oracles import (
 from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.builder import _pack_bundle
 from tests.lifecycle.world.packages import INERT_COMMAND
+from tests.lifecycle.world.scopes import use_policy
 from tests.utils.local_package import LocalPackageFactory
 
 MIX, LSP = "p-bmix", "p-lsp"
 BUNDLES = (MIX, LSP)
 # Credited kinds; ``other-file`` is the p-bmix instruction, checked by path.
 KINDS: Mapping[str, frozenset[str]] = {
-    MIX: frozenset({"skill", "other-file", "hook", "mcp"}),
+    MIX: frozenset({"skill", "other-file", "hook", "mcp", "canvas"}),
     LSP: frozenset({"lsp"}),
 }
 OBSERVED: Mapping[str, frozenset[str]] = {
-    MIX: frozenset({"skill", "hook", "mcp"}),
+    MIX: frozenset({"skill", "hook", "mcp", "canvas"}),
     LSP: frozenset({"lsp"}),
 }
-EXEC_TYPES: Mapping[str, tuple[str, ...]] = {MIX: ("hooks", "mcp"), LSP: ("lsp",)}
+EXEC_TYPES: Mapping[str, tuple[str, ...]] = {MIX: ("canvas", "hooks", "mcp"), LSP: ("lsp",)}
+# The org policy that denies every bundle by name (world policy variant).
+BUNDLE_DENY_POLICY = "deny-all-deps"
 _PLAIN = frozenset({"skill", "other-file"})
+# Project paths a refused install must leave byte-identical.
+_DURABLE = ("apm.yml", "apm.lock.yaml", "apm_modules", ".agents", ".github", ".mcp.json")
 _INSTRUCTION = ".github/instructions/p-bmix.instructions.md"
 _PENDING = Path("apm_modules") / ".local-bundle-pending.json"
 _HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo bmix"}]}]}}
@@ -71,6 +76,7 @@ def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
     package = factory.create(MIX, version="1.0.0", mcp_dependencies=[server])
     factory.add_instruction(package, MIX, '---\napplyTo: "**"\n---\n\nKeep the bundle mixed.\n')
     factory.add_hook(package, "session", _HOOK)
+    factory.add_canvas(package, MIX, "export default function render() {\n  return 'p-bmix';\n}\n")
     factory.set_targets(package, ["copilot"])
     # A package with a .apm/ tree packs only .apm/ sources (plugin_exporter.py).
     skill = package.root / ".apm" / "skills" / MIX / "SKILL.md"
@@ -90,8 +96,11 @@ class BundleState:
     decisions: dict[str, str] = field(default_factory=dict)
     revoked: set[str] = field(default_factory=set)
     exec_deployed: set[str] = field(default_factory=set)
+    denied_by_policy: bool = False
 
     def gate(self, bundle: str, kind: str) -> str:
+        if self.denied_by_policy:
+            return "denied-dependency"
         if kind in _PLAIN:
             return "revoked-after-deploy" if bundle in self.revoked else "none"
         if not self.gate_on:
@@ -152,6 +161,9 @@ class GateBundles(StepRunner):
         if self.dry:
             self._advance(bundle)
             return
+        if self.state.denied_by_policy:
+            self._refused(bundle, cells)
+            return
         step = self.step(
             ("install", str(self.archives[bundle])),
             exits={0},
@@ -172,6 +184,36 @@ class GateBundles(StepRunner):
                 evidence=evidence,
             )
         self._advance(bundle)
+
+    def _refused(self, bundle: str, cells: list[str]) -> None:
+        """Under an org dependency deny the bundle install refuses and changes nothing."""
+        step = self.step(
+            ("install", str(self.archives[bundle])), exits={1}, cells=cells, mutating=False
+        )
+        output = step.result.stdout + step.result.stderr
+        assert "Install blocked by org policy" in output, output
+        evidence = Evidence(
+            unchanged={"project": _DURABLE, "outside": ("*",)},
+            output_matches=(r"Policy violation: \S*" + bundle,),
+            exit=1,
+        )
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+
+    def deny_by_policy(self) -> None:
+        """The org policy denies both bundles by name (an input edit)."""
+        if not self.dry:
+            self.edit(
+                "policy-deny-bundles", lambda: use_policy(self.bench.world, BUNDLE_DENY_POLICY)
+            )
+        self.state.denied_by_policy = True
 
     def _advance(self, bundle: str) -> None:
         self.state.applied[bundle] = {k: self.state.gate(bundle, k) for k in KINDS[bundle] - _PLAIN}
@@ -255,6 +297,8 @@ def replay_bundles(machine: GateBundles) -> None:
     both()  # revoked after deploy: executables retire, plain files stay
     machine.gate_off()
     both()  # no layer opts into the gate
+    machine.deny_by_policy()
+    both()  # the org denies the bundles: each install refuses, nothing changes
 
 
 def bundle_cells() -> frozenset[str]:
@@ -366,6 +410,9 @@ class GatePack(StepRunner):
         self.credited.update(cells)
         if self.dry:
             return
+        if self.level == "denied-dependency":
+            self._refused(cells)
+            return
         step = self.step(
             ("pack", "--dry-run"), exits={0, 1}, cells=cells, read_only=True, mutating=False
         )
@@ -388,6 +435,32 @@ class GatePack(StepRunner):
                 result=step.result,
                 evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
             )
+
+    def _refused(self, cells: list[str]) -> None:
+        """Under an org dependency deny pack refuses and ships nothing."""
+        step = self.step(
+            ("pack", "--dry-run"), exits={1}, cells=cells, read_only=True, mutating=False
+        )
+        evidence = Evidence(
+            unchanged={"project": ("*",), "outside": ("*",)},
+            output_matches=(r"Pack blocked by org policy", r"Nothing was packed"),
+            exit=1,
+        )
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+
+    def deny_by_policy(self) -> None:
+        """The org policy denies every dependency of the pack project (an input edit)."""
+        if not self.dry:
+            self.edit("policy-deny-deps", lambda: use_policy(self.bench.world, BUNDLE_DENY_POLICY))
+        self.level = "denied-dependency"
 
     def _reference(self, step: Step, cells: list[str]) -> bool:
         """R: pack exits 0; a strict known cell must fail on its step, and only it."""
@@ -422,6 +495,8 @@ def replay_pack(machine: GatePack) -> None:
     machine.gate_off()
     machine.install()
     machine.pack()
+    machine.deny_by_policy()
+    machine.pack()  # the org denies every dependency: pack refuses, ships nothing
 
 
 def pack_cells() -> frozenset[str]:
