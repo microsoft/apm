@@ -3,8 +3,6 @@
 import sys
 from pathlib import Path
 
-from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
-
 # Build-time constants (will be injected during build)
 # This avoids TOML parsing overhead during runtime
 __BUILD_VERSION__ = None
@@ -83,6 +81,8 @@ def get_build_sha() -> str:
         import subprocess
         from importlib.metadata import distributions
 
+        from apm_cli.utils.git_env import get_git_executable, git_subprocess_env
+
         try:
             module_path = Path(__file__).resolve()
             repo_root = module_path.parent.parent.parent
@@ -131,5 +131,11 @@ def get_build_sha() -> str:
     return ""
 
 
-# For backward compatibility
-__version__ = get_version()
+def __getattr__(name: str):
+    # Backward-compatible ``__version__``, resolved on first access so importing
+    # this module does not read installed package metadata.
+    if name == "__version__":
+        value = get_version()
+        globals()["__version__"] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -49,7 +49,6 @@ from ..utils.themed_console import _get_console, _rich_blank_line  # noqa: F401
 from ..utils.version_checker import check_for_updates
 from ..version import get_version
 from ..version_output import print_version  # noqa: F401 -- compatibility re-export
-from .deps._utils import _scan_installed_packages
 
 # Thin compatibility aliases only; core/project_name.py remains the AC18 owner.
 _resolve_bootstrap_project_name = _project_name.resolve_bootstrap_project_name
@@ -78,6 +77,17 @@ RESET = Style.RESET_ALL
 # -------------------------------------------------------------------
 # TTY detection
 # -------------------------------------------------------------------
+
+
+def _scan_installed_packages(apm_modules_dir: Path) -> list:
+    """Delegate to ``commands.deps._utils``, imported on first call.
+
+    Importing the ``commands.deps`` package loads every ``apm deps`` verb, which
+    ``apm install`` and the other verbs that import this module never need.
+    """
+    from .deps._utils import _scan_installed_packages as scan
+
+    return scan(apm_modules_dir)
 
 
 def _is_interactive():

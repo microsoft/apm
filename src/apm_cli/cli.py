@@ -168,7 +168,7 @@ _LAZY_COMMANDS: tuple[tuple[str, str, str, str | None, str | None, bool], ...] =
     ),
     (
         "deps",
-        "apm_cli.commands",
+        "apm_cli.commands.deps",
         "deps",
         "Manage APM package dependencies",
         None,
