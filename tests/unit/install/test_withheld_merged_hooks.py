@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -185,8 +186,8 @@ def test_a_malformed_event_list_fails_closed(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "document",
-    [[], {"hooks": []}, {"hooks": {"SessionStart": None}}],
-    ids=["not-an-object", "container-not-an-object", "event-not-a-list"],
+    [[], {"hooks": []}, {"hooks": None}, {"hooks": {"SessionStart": None}}],
+    ids=["not-an-object", "container-not-an-object", "null-container", "event-not-a-list"],
 )
 def test_a_malformed_config_shape_fails_closed_without_a_sidecar(
     tmp_path: Path, document: object
@@ -216,3 +217,55 @@ def test_invalid_ownership_metadata_fails_closed(tmp_path: Path) -> None:
         withheld_merged_hook_entries(info, project, targets)
 
     assert json.loads(settings.read_text(encoding="utf-8")) == data
+
+
+def test_a_blank_marker_attributes_nothing(tmp_path: Path) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    for path in project.rglob("apm-hooks.json"):
+        path.unlink()
+    settings = project / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["hooks"]["SessionStart"][0]["_apm_source"] = "  "
+    settings.write_text(json.dumps(data), encoding="utf-8")
+
+    assert withheld_merged_hook_entries(info, project, targets) == [
+        ".claude/settings.json: SessionStart"
+    ]
+    assert json.loads(settings.read_text(encoding="utf-8")) == data
+
+
+def test_a_user_config_root_outside_home_is_scanned(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    external = tmp_path / "claude-config"
+    claude = replace(KNOWN_TARGETS["claude"], root_dir=str(external))
+    package = tmp_path / "modules" / "h-hook"
+    (package / "hooks").mkdir(parents=True)
+    (package / "hooks" / "session.json").write_text(json.dumps(_HOOK), encoding="utf-8")
+    info = SimpleNamespace(install_path=package, package=SimpleNamespace(name="h-hook"))
+    home = tmp_path / "home"
+    external.mkdir()
+    home.mkdir()
+    HookIntegrator().integrate_hooks_for_target(claude, info, home, user_scope=True)
+    for path in external.rglob("apm-hooks.json"):
+        path.unlink()
+
+    found = withheld_merged_hook_entries(info, home, [claude], user_scope=True)
+
+    assert found == [f"{(external / 'settings.json').as_posix()}: SessionStart"]
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions")
+def test_an_unreadable_hook_source_directory_fails_closed_on_install(tmp_path: Path) -> None:
+    info, project, targets = _deployed(tmp_path, ("claude",))
+    for path in project.rglob("apm-hooks.json"):
+        path.unlink()
+    hooks_source = Path(info.install_path) / "hooks"
+    hooks_source.chmod(0)
+    try:
+        with pytest.raises(HookPathsUnknown, match="Permission denied"):
+            withheld_merged_hook_entries(info, project, targets)
+    finally:
+        hooks_source.chmod(0o755)
+
+    assert (project / ".claude" / "settings.json").is_file()

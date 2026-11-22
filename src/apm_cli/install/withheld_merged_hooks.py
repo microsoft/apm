@@ -55,8 +55,12 @@ def withheld_merged_hook_entries(
         json_path = project_root / target.root_dir / config.config_filename
         if not (json_path.is_file() or json_path.is_symlink()):
             continue
-        rel = json_path.relative_to(project_root).as_posix()
-        _require_parent_inside(json_path, project_root, rel)
+        if user_scope and Path(target.root_dir).is_absolute():
+            # A supported user root outside $HOME (CLAUDE_CONFIG_DIR, CODEX_HOME).
+            rel = json_path.as_posix()
+        else:
+            rel = json_path.relative_to(project_root).as_posix()
+            _require_parent_inside(json_path, project_root, rel)
         if not user_scope and has_symlink_component(project_root, json_path):
             raise HookPathsUnknown(f"{rel} is reached through a symlink; inspect it manually")
         try:
@@ -71,6 +75,8 @@ def withheld_merged_hook_entries(
                 source = entry.get("_apm_source") if isinstance(entry, dict) else None
                 if source is not None and not isinstance(source, str):
                     raise HookPathsUnknown(f"{rel}: event {event!a} has invalid ownership metadata")
+                if isinstance(source, str) and not source.strip():
+                    source = None  # a blank marker attributes nothing
                 matches = isinstance(entry, dict) and integrator._hook_entry_content_key(
                     entry
                 ) in wanted.get(event, ())
@@ -92,9 +98,9 @@ def _owned_view(json_path: Path, config: Any, user_scope: bool) -> dict:
     data = json.loads(json_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("the config is not a JSON object")
-    container = data.get(config.event_container_key)
-    if container is None:
+    if config.event_container_key not in data:
         return {}
+    container = data[config.event_container_key]
     if not isinstance(container, dict):
         raise ValueError(f"'{config.event_container_key}' is not an object")
     for event, entries in container.items():
@@ -132,7 +138,10 @@ def _rendered_keys(
         "codex": formats._to_codex_hook_entries,
         "gemini": formats._to_gemini_hook_entries,
     }
+    from apm_cli.install.withheld_hooks import _require_readable_hook_dirs
+
     keys: dict[str, set[str]] = {}
+    _require_readable_hook_dirs(install_path)
     sources = integrator.select_deployable_hook_sources(install_path, (key,))
     for hook_file in sources.descriptors_for(key):
         data = integrator._parse_hook_json(hook_file)
