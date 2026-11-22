@@ -28,7 +28,7 @@ RULE_NOOP_REPLAY = "install-deployment-noop-replay-owner"
 
 _OWNER = "src/apm_cli/install/noop_fast_path.py"
 _RECORDER = "src/apm_cli/install/noop_recorder.py"
-# Imports the owner only when APM_INSTALL_FAST_PATH enables it (default off).
+# Imports the owner when apm install runs (on unless APM_INSTALL_FAST_PATH=0).
 _GATE = "src/apm_cli/install/pipeline_entry.py"
 _ENGAGER = "src/apm_cli/commands/install.py"
 _SOURCE_TREE = "src/apm_cli/"

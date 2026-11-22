@@ -1,8 +1,8 @@
-"""Default-off costs nothing: unflagged, apm install never loads the fast path (#4770).
+"""Loading the CLI never loads the no-op fast path (#4770).
 
-A fresh interpreter imports the install command the way the CLI does. With
-``APM_INSTALL_FAST_PATH`` unset the fast-path modules stay unimported, so no
-audit hook, stat probe or recorder can exist; with it set they load.
+A fresh interpreter imports the install command the way the CLI does. The
+fast-path modules load only when ``apm install`` runs, so no audit hook, stat
+probe or recorder exists for any other command, whatever the flag says.
 """
 
 from __future__ import annotations
@@ -33,19 +33,11 @@ def _probe(flag: str | None) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-c", _PROBE], env=env, capture_output=True, text=True)
 
 
-def test_unset_flag_never_imports_the_fast_path() -> None:
-    result = _probe(None)
+@pytest.mark.parametrize("flag", [None, "1", "0"])
+def test_importing_the_install_command_never_loads_the_fast_path(flag) -> None:
+    result = _probe(flag)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1]) == {
         "fast_path": False,
         "recorder": False,
-    }
-
-
-def test_set_flag_engages_the_fast_path() -> None:
-    result = _probe("1")
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
-        "fast_path": True,
-        "recorder": True,
     }

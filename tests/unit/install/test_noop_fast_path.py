@@ -299,9 +299,19 @@ def test_windows_always_runs_the_full_install(project, monkeypatch) -> None:
     assert run.calls == 3
 
 
-def test_the_fast_path_is_off_by_default(project, monkeypatch) -> None:
-    """Unset, install runs exactly as before: no recorder, no discovery, no stamp."""
+@_POSIX_ONLY
+def test_the_fast_path_is_on_by_default(project, monkeypatch, capsys) -> None:
     monkeypatch.delenv("APM_INSTALL_FAST_PATH")
+    run = _Install(project)
+    _converge(run)
+    _install(run)
+    assert run.calls == 2, "an unset flag replays a verified no-op"
+    assert "install fast path" not in capsys.readouterr().err, "only trace reports decisions"
+
+
+def test_a_disabled_fast_path_leaves_the_install_untouched(project, monkeypatch) -> None:
+    """``=0``: install runs exactly as before: no recorder, no discovery, no stamp."""
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "0")
     discovered: list[Path] = []
     monkeypatch.setattr(
         "apm_cli.policy.outcome_routing.discover_trust_policy",
@@ -325,7 +335,7 @@ def test_the_fast_path_is_off_by_default(project, monkeypatch) -> None:
     for _ in range(3):
         _install(run)
     assert run.calls == 3
-    assert seen == [(True, True, True)] * 3, "no fast-path code may wrap an unflagged install"
+    assert seen == [(True, True, True)] * 3, "no fast-path code may wrap a disabled install"
     assert discovered == []
     assert _stamps() == []
 

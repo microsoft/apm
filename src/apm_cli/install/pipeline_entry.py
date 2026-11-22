@@ -10,6 +10,7 @@ resolution, policy gate and commit gate, then stops before the first write;
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import tempfile
 from collections.abc import Iterator
@@ -186,19 +187,17 @@ def install_pipeline_options(
     )
 
 
-_FAST_PATH_ENV = "APM_INSTALL_FAST_PATH"
-_FAST_PATH_ON = frozenset({"1", "true", "yes", "on", "trace"})
-
-
 def noop_fast_path(command: Any) -> Any:
-    """Engage the opt-in no-op install fast path (#4770) on ``apm install``.
+    """Engage the no-op install fast path (#4770) on ``apm install``.
 
-    Decided once, when the command module loads: with ``APM_INSTALL_FAST_PATH``
-    unset (the default) *command* is returned untouched and the fast-path
-    modules are never imported, so an install pays nothing for it.
+    The fast-path modules load only when the command runs, so other commands
+    pay nothing for it; ``APM_INSTALL_FAST_PATH=0`` turns it off.
     """
-    if os.environ.get(_FAST_PATH_ENV, "").strip().lower() not in _FAST_PATH_ON:
-        return command
-    from apm_cli.install.noop_fast_path import fast_path
 
-    return fast_path(command)
+    @functools.wraps(command)
+    def install(*args: Any, **kwargs: Any) -> Any:
+        from apm_cli.install.noop_fast_path import run_with_fast_path
+
+        return run_with_fast_path(kwargs, lambda: command(*args, **kwargs))
+
+    return install

@@ -7,7 +7,7 @@ byte-identical (source: tests/lifecycle/oracles.py, src/apm_cli/install/
 noop_fast_path.py module docstring).
 
 Differential oracle: two clones of one world run the same steps, one with the
-fast path on and one with ``APM_INSTALL_FAST_PATH=1`` and one with it off (the full pipeline).
+fast path on (the default) and one with ``APM_INSTALL_FAST_PATH=0`` (the full pipeline).
 Both converge (install, then two no-ops; the fast world proves its third run
 replayed), then the same change is applied to both and ``apm install`` runs.
 Exit code, output (paths and the elapsed time normalized) and the bytes of

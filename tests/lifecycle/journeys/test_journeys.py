@@ -1466,19 +1466,19 @@ def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
         run.close()
 
 
-# Journeys that must hold unchanged with the opt-in no-op install fast path on
-# (#4770, QL H8): every converged install may replay, every drift must not.
+# Journeys PR CI proves with the default-on no-op install fast path at every
+# head (#4770, QL H8): every converged install may replay, every drift must not.
 _FAST_PATH_JOURNEYS = ("J12",)
 
 
-@pytest.mark.lifecycle_smoke  # PR CI proves J12 with the flag on at every head (QL H8)
+@pytest.mark.lifecycle_smoke  # PR CI proves J12 with the fast path at every head (QL H8)
 @pytest.mark.parametrize(
     "path",
     [p for p in _params() if p.id in _FAST_PATH_JOURNEYS],
 )
 def test_journey_with_install_fast_path_on(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins
-    lifecycle_world.env["APM_INSTALL_FAST_PATH"] = "1"
+    lifecycle_world.env.pop("APM_INSTALL_FAST_PATH", None)  # the default: on
     index = load_index()
     assert check_journey_file(path, index) == []
     journey = load_journey(path)

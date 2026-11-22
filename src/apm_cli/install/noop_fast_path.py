@@ -28,7 +28,7 @@ its outputs; a run whose inputs are byte-identical repeats it exactly.
 Replay (a hit) additionally re-runs, every time: org policy discovery with
 its unchanged cache-freshness rules, and the lockfile's deployed-file
 content-hash verification (``verify_deployed_file_hashes``). It writes
-nothing. Off by default: ``APM_INSTALL_FAST_PATH=1`` turns it on.
+nothing. On by default: ``APM_INSTALL_FAST_PATH=0`` turns it off.
 
 Trust boundary: stamps live in the user's cache root, like the cached
 package contents themselves; a same-user process that can write the cache
@@ -37,7 +37,6 @@ can already alter what an install deploys.
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import os
@@ -77,13 +76,12 @@ def _disabled() -> bool:
         # os.path.exists and friends are C functions on Windows: the probe
         # recorder cannot observe them, so the fast path never engages.
         return True
-    return os.environ.get(_DISABLE_ENV, "").strip().lower() not in _ENABLED
+    return os.environ.get(_DISABLE_ENV, "").strip().lower() in _DISABLED
 
 
-# Off by default until a clean replay is measured and signed (#4770):
-# ``APM_INSTALL_FAST_PATH=1`` enables it; ``=trace`` enables it and reports each
-# decision on stderr (tests, benchmarks).
-_ENABLED = frozenset({"1", "true", "yes", "on", "trace"})
+# On by default (#4770). ``APM_INSTALL_FAST_PATH=0`` turns it off; ``=trace``
+# keeps it on and reports each decision on stderr (tests, benchmarks).
+_DISABLED = frozenset({"0", "false", "no", "off"})
 
 
 def eligible(options: dict[str, Any]) -> bool:
@@ -462,13 +460,3 @@ def _finish(recording: _Recording, root: Path, trace: bool) -> None:
     if trace:
         detail = "recorded" if saved else f"not recorded {recording.recorder.violations[:8]}"
         sys.stderr.write(f"[i] install fast path: {detail}\n")
-
-
-def fast_path(command: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorate the ``install`` click callback with the no-op fast path."""
-
-    @functools.wraps(command)
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
-        return run_with_fast_path(kwargs, lambda: command(*args, **kwargs))
-
-    return wrapped
