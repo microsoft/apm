@@ -337,6 +337,11 @@ class GitCache:
         cleanup_incomplete(self._db_root)
         cleanup_incomplete(self._checkouts_root)
 
+    @property
+    def read_only(self) -> bool:
+        """True for a reader (``apm audit --ci``) that never writes the cache."""
+        return self._read_only
+
     def get_checkout(
         self,
         url: str,

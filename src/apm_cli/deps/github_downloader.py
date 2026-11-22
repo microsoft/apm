@@ -1886,20 +1886,19 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
-                # A shard keeps unresolvable links as text; the clone path
-                # below then raises the strict diagnostic (#3457).
-                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
-                from ..utils.file_ops import robust_copy2, robust_copytree
+                # Hash-verified against the entry's seal, then cloned or
+                # linked. A shard keeps unresolvable links as text; the clone
+                # path below then raises the strict diagnostic (#3457).
+                from ..cache.tree_store import materialize_cached_checkout
 
-                for item in _cached.iterdir():
-                    if item.name == ".git":
-                        continue
-                    src = _cached / item.name
-                    dst = target_path / item.name
-                    if src.is_dir():
-                        robust_copytree(src, dst)
-                    else:
-                        robust_copy2(src, dst)
+                materialize_cached_checkout(
+                    _cached,
+                    target_path,
+                    validate_links=lambda: validate_materialized_symlinks(
+                        "git", _cached, None, env=self._git_env_dict()
+                    ),
+                    read_only=bool(getattr(_persistent_cache, "read_only", False)),
+                )
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)

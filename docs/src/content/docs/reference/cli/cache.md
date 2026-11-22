@@ -200,6 +200,23 @@ private repository was rejected), APM discards the shard and retries with
 credentials, and rebuilds an incomplete shard left by an earlier version on
 its next use.
 
+Each full checkout carries a seal (`.git/apm-seal.json`): the SHA-256
+of every file and the result of its symlink check. Every install
+re-hashes the checkout against its seal before using it. A checkout that
+no longer matches is discarded and rebuilt, never copied into
+`apm_modules/`.
+
+On macOS (APFS), APM fills `apm_modules/<pkg>/` with copy-on-write
+clones of the checkout, so editing a file there never changes the cache.
+Elsewhere it uses a reflink where the filesystem supports one (btrfs,
+XFS) and a plain copy otherwise (ext4, NTFS).
+`APM_MATERIALIZE=link` uses hard links instead: the fastest option, but
+the link shares the cached file, so an in-place edit in `apm_modules/`
+also changes the cache (APM then discards that checkout on its next use)
+and every other project linked to it. Only use it when nobody edits
+`apm_modules/` by hand. Removing `apm_modules/` or pruning the cache
+never deletes content the other still uses.
+
 The cache root is created with mode `0700` and validated to be
 absolute with no NUL bytes before use.
 
@@ -209,6 +226,7 @@ absolute with no NUL bytes before use.
 |---|---|
 | `APM_CACHE_DIR` | Override the cache root. Must be an absolute path. |
 | `APM_NO_CACHE` | When set to `1`, `true`, or `yes`, route all cache I/O to a temp directory cleaned at process exit. |
+| `APM_MATERIALIZE` | How cached checkouts reach `apm_modules/`: `clone` (copy-on-write; default on macOS), `copy` (default elsewhere), or `link` (hard links; see [Cache layout](#cache-layout)). |
 | `XDG_CACHE_HOME` | Honored on Linux and (when explicitly set) macOS. |
 
 ## Coming from npm?

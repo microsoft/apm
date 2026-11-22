@@ -87,6 +87,7 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `APM_NO_CACHE` | `1`/`true`/`yes` disables read and write of the cache for the current invocation. | unset | Equivalent to `--no-cache` on commands that support it. |
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
 | `APM_HOME` | Override the root for APM-owned user metadata and configuration. | `~/.apm` | Must be writable. Does not redirect files deployed to agent targets. |
+| `APM_MATERIALIZE` | How cached git checkouts reach `apm_modules/`: `clone`, `copy` or `link` (hard links that share the cached files). | `clone` on macOS, else `copy` | See [`apm cache`](../cli/cache/#cache-layout) before using `link`. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
 | `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
