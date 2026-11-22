@@ -49,6 +49,8 @@ COMMIT_SITES = frozenset(
     {
         ("src/apm_cli/install/bundle_admission.py", "record_unpacked_files"),
         ("src/apm_cli/commands/prune.py", "prune"),
+        # Native records the gates dropped, staged after the survivor preflight (#3921).
+        ("src/apm_cli/commands/prune.py", "_resync_native_plugins"),
         ("src/apm_cli/commands/uninstall/cli.py", "_persist_uninstall_lockfile"),
         ("src/apm_cli/commands/uninstall/cli.py", "_abort_if_retained_target_cleanup_paths"),
         ("src/apm_cli/commands/update.py", "_annotate_lockfile_revision_tags"),

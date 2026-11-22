@@ -27,6 +27,7 @@ from apm_cli.core.remediation import (
 from apm_cli.core.scope import InstallScope, get_deploy_root, is_user_scope
 from apm_cli.native_plugins.layout import (
     NativeLayoutError,
+    attributes_enabled,
     deploy_plugin,
     discard_replaced,
     plugins_root,
@@ -242,10 +243,13 @@ class _Rollback:
         self.created: list[str] = []
         self.replaced: dict[str, Path] = {}
         self.settings: dict[Path, bytes | None] = {}
+        self.attributes = False
 
     def snapshot(self, extra: Collection[Path] = ()) -> None:
         """Record every settings file this run may write, harness and legacy alike."""
         self.settings = {path: snapshot_settings(path) for path in (*self.settings_paths, *extra)}
+        with contextlib.suppress(NativeLayoutError, OSError, UnicodeDecodeError):
+            self.attributes = attributes_enabled(self.root)
 
     def commit(self) -> None:
         """Settings committed: the moved-aside previous roots are no longer needed."""
@@ -271,6 +275,9 @@ class _Rollback:
                     [name for name in prior_names if (self.root / name).exists()],
                     owned=True,
                 )
+            # Restored plugin roots stay byte-pinned: keep git from converting them.
+            with contextlib.suppress(NativeLayoutError, OSError):
+                write_attributes(self.root, enabled=self.attributes)
         with contextlib.suppress(OSError):
             prune_empty(self.root)
 

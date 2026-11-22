@@ -79,3 +79,38 @@ def retire_disallowed_native_survivors(
     for key in denied | set(hooks) | set(native):
         lockfile.dependencies[key].native_plugin = None
     return set(native)
+
+
+def retire_gated_native_plugins(
+    lockfile: Any, modules_dir: Path, manifest_path: Path, deploy_root: Path, logger: Any
+) -> bool:
+    """Drop the record of each native plugin the current gates no longer admit (prune).
+
+    ``apm prune`` skips install's gate, so without this a revoked or denied
+    plugin would stay declared, and a missing root would be redeployed from its
+    locked bytes. The verdict is the gate retirement owner's, as for uninstall;
+    the native reconcile then removes the root and its declarations. Returns
+    whether a record was dropped, so the caller persists the lock.
+    """
+    from apm_cli.install.exec_gate import gate_retirements
+    from apm_cli.models.apm_package import APMPackage
+
+    if lockfile is None or not any(d.native_plugin for d in lockfile.dependencies.values()):
+        return False
+    try:
+        apm_package = APMPackage.from_apm_yml(manifest_path)
+        retirements = gate_retirements(
+            lockfile, modules_dir, apm_package, deploy_root, user_scope=False
+        )
+    except Exception as exc:
+        logger.verbose_detail(f"Native gate retirement skipped: {type(exc).__name__}: {exc}")
+        return False
+    if retirements is None:
+        return False
+    before = {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
+    hooks = dict(retirements.hook_packages)
+    retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
+    retired = before - {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
+    for key in sorted(retired & (set(hooks) | set(retirements.denied_packages))):
+        logger.warning(f"{key} native plugin is no longer allowed; removing it")
+    return bool(retired)

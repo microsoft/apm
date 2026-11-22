@@ -319,3 +319,62 @@ def test_uninstalling_a_sibling_keeps_a_local_native_plugin_whole(
     assert locked["native_plugin"]["root"] == f".agents/plugins/{_PLUGIN}"
     # No closing `audit --ci`: the survivor preflight still normalizes the local
     # source in place (apm.yml, .apm/), a pre-existing defect tracked in #4566.
+
+
+def test_prune_retires_a_native_plugin_whose_approval_was_revoked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I4: prune never keeps or redeploys a native plugin the gate no longer admits.
+
+    CELL: OP=prune SRC=local PRIM=plugin(hooks) SCOPE=project TGT=claude,copilot
+    GATE=revoked-after-deploy. Prune skips install's gate, so it asks the gate
+    retirement owner, as uninstall does; even with the root missing, nothing
+    is redeployed from the locked bytes.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    plugin = project / "plugins" / _PLUGIN
+    for relative, text in _FILES.items():
+        path = plugin / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="ascii")
+    (plugin / "hooks/session-start").chmod(0o755)
+    plugin_dep = f"./plugins/{_PLUGIN}"
+    manifest = {
+        "name": "consumer",
+        "version": "1.0.0",
+        "targets": ["claude", "copilot"],
+        "dependencies": {"apm": [plugin_dep]},
+        "executables": {},
+    }
+    (project / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str, expect: int = 0) -> CommandResult:
+        result = runner.run(args, cwd=project, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == expect, _evidence(result)
+        return result
+
+    root = project / ".agents/plugins" / _PLUGIN
+    apm("install")
+    apm("approve", "--all")
+    apm("install")
+    assert root.is_dir()
+    # Revoke the approval and lose the deployed root: prune must not bring it back.
+    (project / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    shutil.rmtree(root)
+    pruned = apm("prune")
+    flat = " ".join((pruned.stdout + pruned.stderr).split())
+    assert f"{plugin_dep}" in flat and "no longer allowed" in flat, _evidence(pruned)
+    assert not root.exists()
+    for settings in _SETTINGS:
+        path = project / settings
+        declared = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        assert not any(v is True for v in declared.get("enabledPlugins", {}).values()), settings
+    (locked,) = load_yaml(project / "apm.lock.yaml")["dependencies"]
+    assert locked.get("native_plugin") is None
+    # The next install parks it again, as for any unapproved plugin.
+    apm("install")
+    assert not root.exists()
