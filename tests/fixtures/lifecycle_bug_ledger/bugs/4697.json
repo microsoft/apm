@@ -1,0 +1,18 @@
+{
+  "issue": 4697,
+  "fixed_in": "Unreleased",
+  "summary": "apm install failing on a same-name user LSP entry still committed apm.lock.yaml (a gated row flipped to deployed); a conflict that wrote no server now refuses the commit, so the lockfile stays byte-identical.",
+  "failure_modes": [
+    "outcome",
+    "transaction"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lsp_user_entry_lifecycle.py::test_an_mcp_write_stays_recorded_when_a_user_lsp_entry_conflicts",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_lsp_entry_is_never_taken_over",
+    "tests/unit/install/test_lsp_integration.py::TestRunLspIntegration::test_user_entry_conflict_refuses_only_an_install_that_wrote_nothing"
+  ]
+}
