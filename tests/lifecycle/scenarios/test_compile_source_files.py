@@ -1,11 +1,11 @@
 """``compile`` keeps a remote package's file primitive (other-file) (#4096).
 
 PROMISE: P-INV-I1 -- after ``apm compile`` the lock still matches what is
-deployed: a git or git-marketplace package's instruction, and a native Claude
-plugin's agent, stay under the target's primitive root with their text and
-stay recorded in the lock. At project scope APM normalizes a Claude plugin
-into its primitives (claude_plugins/admission.py registers a plugin natively
-only at user scope), so the agent deploys under ``.claude/agents``.
+deployed: a git or git-marketplace package's instruction stays under the
+target's primitive root with its text and stays recorded in the lock. A Claude
+plugin deploys whole to ``.agents/plugins/<plugin>/`` at project scope too
+(#4559), so its agent stays inside that root, which the lock's ``native_plugin``
+record names (its fingerprint pins the bytes).
 PROMISE: P-INV-I5 -- compile writes only its compiled context, never a
 deployed primitive or the lock.
 
@@ -123,24 +123,26 @@ def _marked(world) -> dict[str, bytes]:
     return found
 
 
-# SRC -> (package, target, primitive) whose deployed file carries MARKER.
-_DEPLOYED = {
-    "git": (_DOC, "copilot", "instructions"),
-    "marketplace-git": (_DOC, "copilot", "instructions"),
-    "native-plugin": (_NATIVE, "claude", "agents"),
-}
+_PLUGIN_ROOT = f".agents/plugins/{_NATIVE}"
 
 
 def _assert_deployed(scenario: Scenario, src: str) -> None:
-    """The file primitive sits under its target's root, with its text, in the lock."""
-    package, target, primitive = _DEPLOYED[src]
-    mapping = KNOWN_TARGETS[target].primitives[primitive]
-    relative = f"{KNOWN_TARGETS[target].root_dir}/{mapping.subdir}/{package}{mapping.extension}"
+    """The file primitive sits under its root, with its text, and the lock records it."""
+    dependencies = scenario.lock().get_package_dependencies()
+    if src == "native-plugin":
+        relative = f"{_PLUGIN_ROOT}/agents/{_NATIVE}.md"
+        rows = [
+            (d.native_plugin.name, d.native_plugin.root) for d in dependencies if d.native_plugin
+        ]
+        assert rows == [(_NATIVE, _PLUGIN_ROOT)], rows
+    else:
+        mapping = KNOWN_TARGETS["copilot"].primitives["instructions"]
+        relative = f"{KNOWN_TARGETS['copilot'].root_dir}/{mapping.subdir}/{_DOC}{mapping.extension}"
+        recorded = {p for dep in dependencies for p in dep.deployed_files}
+        assert relative in recorded, f"{src}: {relative} is not in the lock: {sorted(recorded)}"
     path = scenario.deploy_root / relative
     assert path.is_file(), f"{src}: {relative} is not deployed"
     assert MARKER in path.read_text(encoding="utf-8"), relative
-    recorded = {p for dep in scenario.lock().get_package_dependencies() for p in dep.deployed_files}
-    assert relative in recorded, f"{src}: {relative} is not in the lock: {sorted(recorded)}"
 
 
 @pytest.mark.parametrize("src", _SOURCES)
