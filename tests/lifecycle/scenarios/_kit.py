@@ -48,6 +48,7 @@ from tests.lifecycle.oracles import (
     Operation,
     check_cross_cutting,
     check_obligation,
+    install_memo_path,
     operation_for,
     user_kept_cells,
 )
@@ -138,7 +139,9 @@ def changed_paths(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> fr
     for root_id, snapshot in before.snapshots:
         diff = snapshot.diff(after.snapshot(root_id))
         for path in diff.added | diff.removed | diff.changed:
-            if not _bookkeeping(path):
+            # QL ruling (#4775), see oracles._MEMO_TREES: memo adds/changes only.
+            memo = install_memo_path(root_id, path) and path not in diff.removed
+            if not _bookkeeping(path) and not memo:
                 changed.add(f"{root_id}:{path}")
     return frozenset(changed)
 

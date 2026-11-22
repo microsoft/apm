@@ -134,15 +134,22 @@ def _converge(world: World, *, fast: bool) -> None:
     for attempt in range(4):
         trace = fast and attempt == 3
         mode = "trace" if trace else ("1" if fast else "0")
+        stamps = _stamp_bytes(world)
         result = _run(world, ("install",), fast=mode)
         assert result.returncode == 0, result.stdout + result.stderr
         if trace:
+            assert _stamp_bytes(world) == stamps != {}, "a replay is a byte no-op, stamps included"
             assert _HIT in result.stderr, (
                 "the converged fourth install must replay the recorded no-op:\n"
                 + result.stdout
                 + result.stderr
             )
             assert "No changes -- install state already up to date" in result.stdout
+
+
+def _stamp_bytes(world: World) -> dict[str, bytes]:
+    stamps = world.cache_root / "noop_v1"
+    return {p.name: p.read_bytes() for p in sorted(stamps.glob("*"))} if stamps.is_dir() else {}
 
 
 def _approve_exec(world: World) -> None:
@@ -168,6 +175,41 @@ def _tamper(world: World) -> None:
 
 def _delete(world: World) -> None:
     _first_deployed(world).unlink()
+
+
+def _stamps(world: World) -> list[Path]:
+    return sorted((world.cache_root / "noop_v1").glob("*.json"))
+
+
+def _garbage_stamp_then_tamper(world: World) -> None:
+    """A garbage stamp is no stamp: the changed input still runs the full install."""
+    for stamp in _stamps(world):
+        stamp.write_bytes(b"\x00{not a stamp")
+    _tamper(world)
+
+
+def _forged_stamp_then_tamper(world: World) -> None:
+    """A stamp re-forged to the tampered inputs: only the live checks stand.
+
+    Every recorded input is re-fingerprinted after the tamper, so the stamp's
+    own comparisons pass; the live deployed-hash check must still refuse it.
+    """
+    from apm_cli.install import noop_recorder as recorder
+
+    _tamper(world)
+    fingerprints = {
+        "reads": recorder._file_digest,
+        "listed": recorder._listing,
+        "probed": recorder._probe,
+        "resolved": recorder._resolution,
+    }
+    for stamp in _stamps(world):
+        data = json.loads(stamp.read_text(encoding="utf-8"))
+        if data.get("pending"):
+            continue
+        for name, fingerprint in fingerprints.items():
+            data[name] = {key: fingerprint(key) for key in data[name]}
+        stamp.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _user_config(world: World) -> Path:
@@ -201,6 +243,8 @@ def _policy(variant: str) -> Callable[[World], None]:
 # change id -> (arrange both worlds, change applied between the runs)
 CHANGES: dict[str, Callable[[World], None]] = {
     "tampered-deployed-file": _tamper,
+    "garbage-stamp-then-tampered-file": _garbage_stamp_then_tamper,
+    "forged-stamp-then-tampered-file": _forged_stamp_then_tamper,
     "deleted-deployed-file": _delete,
     "user-deny-after-approval": _user_deny,
     "revoked-user-approval": _revoke_user_approval,

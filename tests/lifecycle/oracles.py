@@ -97,9 +97,19 @@ _BOOKKEEPING_NAMES = frozenset({".apm-lifecycle.lock", "last_version_check", "de
 # First-run state any command may CREATE (never change): the user config and
 # the version-check cache directory.
 _FIRST_RUN_CREATES = frozenset({".apm/config.json", "config.json", ".cache", ".cache/apm"})
+# QL ruling (#4775): only ADDED or CHANGED files of the no-op install memo
+# (<cache root>/noop_v1) are exempt; removal stays a violation. Do not widen:
+# the fixed-point oracle (scenarios/test_cache_presence._assert_memo_fixed_point,
+# security/test_noop_fast_path._converge) proves a converged memo writes nothing.
+_MEMO_TREES = {"cache": "noop_v1", "home": ".cache/apm/noop_v1"}
 
 
-def _durable_changes(before, after) -> set[str]:
+def install_memo_path(root_id: str, path: str) -> bool:
+    tree = _MEMO_TREES.get(root_id)
+    return tree is not None and (path == tree or path.startswith(tree + "/"))
+
+
+def _durable_changes(before, after, root_id: str) -> set[str]:
     """Changed paths of one root, without bookkeeping or first-run creations."""
     difference = before.diff(after)
     bookkeeping = {
@@ -121,6 +131,7 @@ def _durable_changes(before, after) -> set[str]:
         if path.rsplit("/", 1)[-1] not in _BOOKKEEPING_NAMES
         and not (path in difference.added and path in _FIRST_RUN_CREATES)
         and not (path in difference.added and holds_only_bookkeeping(path))
+        and not (path not in difference.removed and install_memo_path(root_id, path))
     }
 
 
@@ -626,7 +637,7 @@ def _i5_write_set(
         return None
     found = []
     for root_id, snapshot in before.artifacts.snapshots:
-        observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
+        observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id), root_id)
         allowed = op.allowed.get(root_id, ())
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
@@ -843,7 +854,7 @@ def _changed_paths(before: ArtifactSnapshotSet, after: ArtifactSnapshotSet) -> l
     """Changed files, comparing the lockfile semantically (generation time may move)."""
     changed = []
     for root_id, snapshot in before.snapshots:
-        for path in sorted(_durable_changes(snapshot, after.snapshot(root_id))):
+        for path in sorted(_durable_changes(snapshot, after.snapshot(root_id), root_id)):
             if path.rsplit("/", 1)[-1] != "apm.lock.yaml":
                 changed.append(f"{root_id}:{path}")
     return changed
