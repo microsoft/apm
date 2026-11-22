@@ -15,6 +15,7 @@ audit reports them first.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -297,7 +298,9 @@ def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHoo
     for value in item.hook_files:
         hook_file = contained_bundle_path(project_root, value, prefixes)
         if hook_file is not None and hook_file.is_file():
-            hook_file.unlink()
+            # A failed removal leaves the file on disk; it is retained below.
+            with contextlib.suppress(OSError):
+                hook_file.unlink()
         literal = Path(value) if Path(value).is_absolute() else Path(project_root) / value
         if literal.is_symlink() or literal.exists():
             kept.add(value)
@@ -392,17 +395,59 @@ def _bundle_script_rows(
     lock_paths: Collection[str], targets: Any, slug: str, project_root: Path
 ) -> set[str]:
     """Return the lock rows of hook scripts the hook integrator copied for *slug*."""
-    prefixes = tuple(
-        f"{target.root_dir}/hooks/{middle}{slug}/"
-        for target in targets or ()
-        if callable(getattr(target, "supports", None)) and target.supports("hooks")
-        for middle in ("", "scripts/")
-    )
+    prefixes = tuple(f"{base}{slug}/" for base in _script_bases(targets))
     return {
         value
         for value in lock_paths
         if _relative_value(value, project_root).startswith(prefixes) and prefixes
     }
+
+
+def _script_bases(targets: Any) -> tuple[str, ...]:
+    """Each hook target's script directory parent: merged ``hooks/``, per-file ``hooks/scripts/``.
+
+    The hook integrator copies a merged target's scripts to ``hooks/<slug>/``
+    and a per-file target's to ``hooks/scripts/<slug>/``; only the layout a
+    target actually uses is matched, so a slug named ``scripts`` never covers
+    another bundle's per-file scripts.
+    """
+    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+    return tuple(
+        f"{target.root_dir}/hooks/" + ("" if target.name in _MERGE_HOOK_TARGETS else "scripts/")
+        for target in targets or ()
+        if callable(getattr(target, "supports", None)) and target.supports("hooks")
+    )
+
+
+def bundle_hook_leftovers(
+    project_root: Path, targets: Any, lock_paths: Collection[str]
+) -> dict[str, set[str]]:
+    """Return slugs whose hook ownership outlived their registration, with the evidence.
+
+    A partially retired bundle can keep sidecar markers or script claims after
+    its native entries are gone; uninstall must still reach them. A bundle whose
+    hooks were only parked has neither, so it is not reported.
+    """
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    found: dict[str, set[str]] = {}
+    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
+        for entries in (sidecar or {}).values():
+            for entry in entries if isinstance(entries, list) else ():
+                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
+                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
+                    found.setdefault(parsed[0], set())
+    bases = _script_bases(targets)
+    for value in lock_paths:
+        rel = _relative_value(value, Path(project_root))
+        for base in bases:
+            slug, sep, _rest = (
+                rel[len(base) :].partition("/") if rel.startswith(base) else ("", "", "")
+            )
+            if slug and sep:
+                found.setdefault(slug, set()).add(value)
+    return found
 
 
 def _relative_value(value: str, project_root: Path) -> str:

@@ -65,6 +65,21 @@ def _deployed(bundle_scope: _BundleScope) -> dict[str, Any]:
     )
 
 
+def _owned(bundle_scope: _BundleScope) -> dict[str, tuple[str, ...]]:
+    """Every slug with hook ownership left, including partial-retirement leftovers."""
+    from ...install.local_bundle_hook_trust import bundle_hook_leftovers, local_bundle_paths
+
+    owned = {
+        slug: tuple(sorted(state.hook_files)) for slug, state in _deployed(bundle_scope).items()
+    }
+    leftovers = bundle_hook_leftovers(
+        bundle_scope.root, bundle_scope.targets, local_bundle_paths(bundle_scope.lock_dir)
+    )
+    for slug, evidence in leftovers.items():
+        owned[slug] = tuple(sorted({*owned.get(slug, ()), *evidence}))
+    return owned
+
+
 def _installed_slugs(bundle_scope: _BundleScope) -> set[str]:
     from ...install.local_bundle_pending import recorded_bundle_slugs
 
@@ -89,6 +104,18 @@ def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: 
     package_id, key = identity
     deployed = _deployed(bundle_scope)
     matches = sorted(slug for slug, state in deployed.items() if key in state.keys)
+    if not matches:
+        # Installed while the executables gate admitted everything: no content
+        # identity was recorded, so an alias cannot be told apart by path.
+        keyless = sorted(slug for slug, state in deployed.items() if state.keys == {None})
+        if keyless and keyless != [package_id]:
+            logger.error(
+                f"'{Path(package).name}' cannot be matched to an installed local bundle: "
+                f"{', '.join(keyless)} recorded no content identity (installed while the "
+                "executables gate admitted every bundle); no changes were made. "
+                f"{_by_name_remedy(scope).sentence()}"
+            )
+            sys.exit(1)
     if len(matches) > 1:
         logger.error(
             f"'{Path(package).name}' matches {len(matches)} installed local bundles "
@@ -177,11 +204,6 @@ def select_local_bundles(
     return list(dict.fromkeys(slugs)), bundle_scope
 
 
-@dataclass(frozen=True)
-class _Unconfirmed:
-    hook_files: tuple[str, ...]
-
-
 def _refuse_unsafe_cleanup(bundle_scope: _BundleScope, *, logger: Any, dry_run: bool) -> None:
     """Refuse before any write when hook configs or the lockfile cannot be safely rewritten."""
     from ...deps.lockfile import LockFile, get_lockfile_path, refuse_lockfile_before_mutation
@@ -216,7 +238,7 @@ def uninstall_local_bundles(
     from ...install.local_bundle_pending import drop_bundle_exec_type
 
     root, targets, lock_dir = bundle_scope.root, bundle_scope.targets, bundle_scope.lock_dir
-    deployed = _deployed(bundle_scope)
+    deployed = _owned(bundle_scope)
     missing = [slug for slug in slugs if slug not in deployed]
     for slug in missing:
         logger.error(
@@ -241,16 +263,16 @@ def uninstall_local_bundles(
         retired = retire_bundle_hooks(root, targets, slug, lock_dir=lock_dir, reason=None)
         if retired.failed_paths:
             unconfirmed[slug] = retired.failed_paths
-    left = _deployed(bundle_scope)
+    left = _owned(bundle_scope)
     for slug, paths in unconfirmed.items():
-        left.setdefault(slug, _Unconfirmed(paths))
+        left[slug] = tuple(sorted({*left.get(slug, ()), *paths}))
     # Pending state goes only for a bundle whose hooks are confirmed gone.
     for slug in slugs:
         if slug not in left:
             drop_bundle_exec_type(lock_dir, slug, "hooks")
     if failed := [slug for slug in slugs if slug in left]:
         for slug in failed:
-            files = ", ".join(sorted(left[slug].hook_files)) or "merged hook configuration"
+            files = ", ".join(left[slug]) or "merged hook configuration"
             logger.error(
                 f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
                 "they stay recorded. Remove or repair those files, then retry."

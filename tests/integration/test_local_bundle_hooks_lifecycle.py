@@ -10,6 +10,7 @@ dependency is installed or uninstalled.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -853,3 +854,101 @@ def test_uninstall_user_bundle_ignores_an_unrelated_invalid_user_root(
     text = output(world.apm(world.isolated.work_root, "uninstall", "-g", "hookpkg"))
     assert "Removed hooks from local bundle 'hookpkg'" in text, text
     assert _hook_entries(home) == {}
+
+
+def _claims(world: MarketplacePackWorld, project: Path) -> list[str]:
+    return world.lock(project).get("local_deployed_files") or []
+
+
+def test_uninstall_bundle_named_scripts_keeps_sibling_copilot_scripts(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a bundle named 'scripts' matches only its own per-file script layout."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("scripts-alias-consumer", targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    world.apm(consumer, "install", str(bundle), "--as", "scripts")
+    sibling = [
+        c for c in _claims(world, consumer) if c.startswith(".github/hooks/scripts/hookpkg/")
+    ]
+    assert sibling, _claims(world, consumer)
+
+    world.apm(consumer, "uninstall", "scripts")
+    assert _copilot_hook_files(consumer) == ["hookpkg-hooks.json"]
+    claims = _claims(world, consumer)
+    assert all(c in claims and (consumer / c).is_file() for c in sibling), claims
+    assert not [c for c in claims if c.startswith(".github/hooks/scripts/scripts/")], claims
+
+
+def test_uninstall_bundle_path_with_the_gate_off_never_guesses_an_alias(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: with no recorded content identity, a path that could name an alias is refused."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, _key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("gate-off-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle))
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash", "Bash"]}
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "hookpkg, team-hooks recorded no content identity" in refused, refused
+    assert "Run 'apm uninstall <installed-name>'" in refused, refused
+    assert tree_bytes(consumer) == before
+
+    # The printed remedy, by installed name, removes exactly that copy.
+    world.apm(consumer, "uninstall", "team-hooks")
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash"]}
+    # A single default-named copy is still selected by its path.
+    world.apm(consumer, "uninstall", str(bundle))
+    assert _hook_entries(consumer) == {}
+
+
+def test_uninstall_bundle_reaches_a_partially_retired_bundle(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: sidecar markers and script claims left after native entries go stay reachable."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "partial-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    # A retirement that rewrote settings.json but not its sidecar.
+    write(consumer / ".claude" / "settings.json", "{}\n")
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    sidecar = consumer / ".claude" / "apm-hooks.json"
+    assert not sidecar.exists() or "local-bundle::hookpkg" not in sidecar.read_text()
+    assert not (consumer / script).exists()
+    assert script not in _claims(world, consumer)
+
+
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0, reason="needs a non-root user")
+def test_uninstall_bundle_retains_a_hook_file_it_cannot_delete(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#3700 review: a hook file whose removal fails is retained and named, not a crash."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("locked-consumer", targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    hooks_dir = consumer / ".github" / "hooks"
+    hooks_dir.chmod(0o555)
+    try:
+        result = world.apm(consumer, "uninstall", str(bundle), expect=1)
+    finally:
+        hooks_dir.chmod(0o755)
+    text = output(result)
+    assert "could not all be removed (.github/hooks/hookpkg-hooks.json" in text, text
+    assert "Traceback" not in text and "Error uninstalling" not in text, text
+    claims = _claims(world, consumer)
+    assert ".github/hooks/hookpkg-hooks.json" in claims
+    assert "local-bundle::hookpkg" in (consumer / ".github" / "apm-hooks.json").read_text()
+    scripts = [c for c in claims if c.endswith("/x.sh")]
+    assert scripts and all((consumer / c).is_file() for c in scripts), claims
