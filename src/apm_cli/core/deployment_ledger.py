@@ -168,25 +168,6 @@ def materialization_evidence_paths(project_root: Path, scope: InstallScope) -> t
     return state_path, root / LOCAL_STATE_DIR / "installation"
 
 
-def _skill_dir_entry(
-    physical: Path, root: Path, target_name: str, targets: Sequence[TargetProfile]
-) -> tuple[str, ...]:
-    """Return the skill directory entry a normal lock records beside a member (#3772)."""
-    from apm_cli.install.deployed_paths import deployed_path_entry
-
-    for target in targets:
-        if target.name != target_name or not target.supports("skills"):
-            continue
-        skills_root = target.skills_deploy_path(root)
-        try:
-            parts = physical.relative_to(skills_root.resolve()).parts
-        except ValueError:
-            continue
-        if len(parts) > 1:
-            return (deployed_path_entry(skills_root / parts[0], root, [target]),)
-    return ()
-
-
 class DeploymentMaterializationSession:
     """Installation-local rendered-write evidence, subordinate to current ownership.
 
@@ -426,7 +407,7 @@ class DeploymentMaterializationSession:
         lockfile commits. Returns *prior* plus the adopted lock values; a frozen
         replay verifies and adopts nothing.
         """
-        from apm_cli.install.deployed_paths import deployed_path_entry
+        from apm_cli.install.deployed_paths import deployed_path_entry, skill_dir_entry
 
         adopted = set(prior)
         if self.scope.value != "user" or self.verify_only:
@@ -444,7 +425,7 @@ class DeploymentMaterializationSession:
                     self._claims[value] = [record]
                     self._bindings[key] = [".", self._claim_signature(value)]
                     self._migrated[key], self._dirty = value, True
-                    skill_dir = _skill_dir_entry(
+                    skill_dir = skill_dir_entry(
                         Path(physical), self.root, record.locator.target, targets
                     )
                     adopted.update((value, *skill_dir))

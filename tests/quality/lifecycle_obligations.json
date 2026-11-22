@@ -26943,7 +26943,7 @@
   },
   "E3": {
    "evidence": [
-    "src/apm_cli/install/services.py:827",
+    "src/apm_cli/install/services.py:836",
     "src/apm_cli/install/services.py:1016"
    ],
    "text": "file primitives are equivalent except compile-staging routing (FILEROUTE)"
@@ -27001,7 +27001,7 @@
   },
   "U3": {
    "evidence": [
-    "src/apm_cli/core/deployment_ledger.py:923"
+    "src/apm_cli/core/deployment_ledger.py:907"
    ],
    "text": "edited is defined relative to a receipt; present with unknown provenance has no lock"
   },
