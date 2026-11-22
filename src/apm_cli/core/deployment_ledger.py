@@ -27,6 +27,7 @@ from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned,
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
+    ResolvedRoots,
     ensure_path_within,
     has_symlink_component,
     resolve_for_containment,
@@ -177,9 +178,7 @@ class DeploymentMaterializationSession:
 
     def __init__(self, project_root: Path, scope: InstallScope, lockfile: LockFile | None) -> None:
         self.root = project_root.resolve()
-        # Deploy roots under self.root, resolved once per session (one run);
-        # candidate paths are still resolved live for every containment check.
-        self._resolved_roots: dict[Path, Path] = {}
+        self._roots = ResolvedRoots()
         self.scope = scope
         self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
         # Containment is anchored one level above APM_HOME (``$HOME`` by
@@ -334,28 +333,19 @@ class DeploymentMaterializationSession:
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
 
-    def _trusted_root(self, root: Path) -> Path:
-        """*root* resolved once per session; a stale entry can only refuse, never admit."""
-        resolved = self._resolved_roots.get(root)
-        if resolved is None:
-            resolved = self._resolved_roots[root] = resolve_for_containment(root)
-        return resolved
+    def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
+        return DeploymentLedgerCodec.locator_for_path(
+            candidate, project_root=self.root, target=target, scope=self.scope, inputs_resolved=True
+        )
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
         candidate = resolve_for_containment(path)
         for target in targets:
             if not target.supports("skills"):
                 continue
-            skills_root = self._trusted_root(target.skills_deploy_path(self.root))
-            if resolved_relative_within(candidate, skills_root) is None:
-                continue
-            return DeploymentLedgerCodec.locator_for_path(
-                candidate,
-                project_root=self.root,
-                target=target,
-                scope=self.scope,
-                inputs_resolved=True,
-            )
+            skills_root = self._roots(target.skills_deploy_path(self.root))
+            if resolved_relative_within(candidate, skills_root) is not None:
+                return self._encode(candidate, target)
         return None
 
     def _write_locator(
@@ -375,15 +365,8 @@ class DeploymentMaterializationSession:
                 )
             candidate = resolve_for_containment(path)
             for root in roots:
-                if resolved_relative_within(candidate, self._trusted_root(root)) is None:
-                    continue
-                return DeploymentLedgerCodec.locator_for_path(
-                    candidate,
-                    project_root=self.root,
-                    target=target,
-                    scope=self.scope,
-                    inputs_resolved=True,
-                )
+                if resolved_relative_within(candidate, self._roots(root)) is not None:
+                    return self._encode(candidate, target)
         return None
 
     @staticmethod
@@ -497,7 +480,7 @@ class DeploymentMaterializationSession:
             return None
         if key in self._written:
             return record.content_hash
-        value = deployed_path_entry(path, self.root, targets, project_root_resolved=True)
+        value = deployed_path_entry(path, self.root, targets)
         if (
             not self._claims.get(value)
             or record.active_owner not in self._valid_owners
@@ -566,7 +549,7 @@ class DeploymentMaterializationSession:
                 (
                     DeploymentRecord(locator, (owner,), owner, content_hash),
                     path.resolve().as_posix(),
-                    deployed_path_entry(path, self.root, targets, project_root_resolved=True),
+                    deployed_path_entry(path, self.root, targets),
                 )
             )
         for record, physical, value in prepared:
@@ -1730,9 +1713,7 @@ class DeploymentLedgerCodec(RowProjection):
     ) -> DeploymentLocator:
         """Encode a path without forcing external roots into project strings.
 
-        ``inputs_resolved`` declares that *path* and *project_root* were both
-        just produced by :func:`resolve_for_containment`, so they are not
-        resolved a second time.
+        ``inputs_resolved``: *path* and *project_root* are already resolved.
         """
         scope_value = getattr(scope, "value", str(scope))
         if isinstance(path, str) and "://" in path:
@@ -1744,13 +1725,9 @@ class DeploymentLedgerCodec(RowProjection):
                 scope=scope_value,
             )
 
-        # Resolve each side once: the containment verdict and the relative
-        # form both read these, so the filesystem is observed once per call.
-        if inputs_resolved:
-            candidate, root = Path(path), project_root
-        else:
-            candidate = resolve_for_containment(Path(path))
-            root = resolve_for_containment(project_root)
+        candidate, root = Path(path), project_root
+        if not inputs_resolved:
+            candidate, root = resolve_for_containment(candidate), resolve_for_containment(root)
         relative = resolved_relative_within(candidate, root)
         if relative is not None:
             return DeploymentLocator(

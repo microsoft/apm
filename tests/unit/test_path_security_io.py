@@ -215,6 +215,17 @@ class TestResolvedContainment:
         assert resolved_relative_within(outside, base) is None
         assert outside.read_text(encoding="utf-8") == "outside\n"
 
+    def test_extended_prefix_on_one_side_still_contains(self, tmp_path: Path) -> None:
+        target = tmp_path / "base" / "a.md"
+        target.parent.mkdir()
+        target.write_text("inside\n", encoding="utf-8")
+        prefixed_base = Path("\\\\?\\" + str(resolve_for_containment(tmp_path / "base")))
+
+        relative = resolved_relative_within(resolve_for_containment(target), prefixed_base)
+
+        assert relative == "a.md"
+        assert (tmp_path / "base" / relative).read_text(encoding="utf-8") == "inside\n"
+
     @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
     def test_link_out_of_the_base_is_outside(self, tmp_path: Path) -> None:
         (tmp_path / "base").mkdir()
