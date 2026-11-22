@@ -146,17 +146,18 @@ def _settings_bytes(project: Path) -> dict[str, bytes | None]:
 
 
 @pytest.mark.parametrize(
-    ("names", "user_edit"),
+    ("names", "user_edit", "removed"),
     [
-        (("tool",), None),
-        (("tool",), "drop-entry"),
-        (("tool", "other"), None),
-        (("tool", "other"), "set-false"),
+        (("tool",), None, ("acme/tool",)),
+        (("tool",), "drop-entry", ("acme/tool",)),
+        (("tool", "other"), None, ("acme/tool",)),
+        (("tool", "other"), "set-false", ("acme/tool",)),
+        (("tool", "other"), "set-false", ("acme/tool", "acme/other")),
     ],
-    ids=["last", "last-entry-absent", "survivor", "survivor-user-false"],
+    ids=["last", "last-entry-absent", "survivor", "survivor-user-false", "orphan-user-false"],
 )
 def test_the_settings_preview_names_exactly_the_files_retirement_changes(
-    tmp_path: Path, names: tuple[str, ...], user_edit: str | None
+    tmp_path: Path, names: tuple[str, ...], user_edit: str | None, removed: tuple[str, ...]
 ) -> None:
     """#4754: the prune --dry-run settings preview matches what the reconcile writes."""
     import copy
@@ -180,7 +181,10 @@ def test_the_settings_preview_names_exactly_the_files_retirement_changes(
         claude.write_text(json.dumps(document, indent=2), encoding="utf-8")
     previous = native_ownership(lock)
     following = copy.deepcopy(lock)
+    # A gate retirement drops the record; an orphan prune drops the whole row.
     following.dependencies["acme/tool"].native_plugin = None
+    for key in removed[1:]:
+        del following.dependencies[key]
     before = _settings_bytes(project)
 
     preview = preview_project_settings_changes(
@@ -198,3 +202,31 @@ def test_the_settings_preview_names_exactly_the_files_retirement_changes(
 
     assert set(preview) == {path for path, data in before.items() if after[path] != data}
     assert preview
+
+
+def test_the_settings_preview_refuses_a_moved_marketplace_binding(tmp_path: Path) -> None:
+    """#4754: a binding conflict the reconcile refuses is a preview error, not a change."""
+    import copy
+
+    from apm_cli.claude_plugins.registrar import (
+        native_ownership,
+        preview_project_settings_changes,
+    )
+    from apm_cli.native_plugins.settings import NativeSettingsError
+
+    project, modules, lock = _deployed_project(tmp_path, ("tool", "other"))
+    claude = project / ".claude/settings.json"
+    document = json.loads(claude.read_text(encoding="utf-8"))
+    for entry in document["extraKnownMarketplaces"].values():
+        entry["source"] = {"source": "directory", "path": "./elsewhere"}
+    claude.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    following = copy.deepcopy(lock)
+    following.dependencies["acme/tool"].native_plugin = None
+
+    with pytest.raises(NativeSettingsError):
+        preview_project_settings_changes(
+            modules_dir=modules,
+            previous=native_ownership(lock),
+            lockfile=following,
+            deploy_root=project,
+        )

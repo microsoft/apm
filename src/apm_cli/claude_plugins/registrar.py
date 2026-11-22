@@ -619,6 +619,7 @@ def preview_project_settings_changes(
     changed = []
     for harness, target in settings_paths.items():
         change = preview_declaration(target, declarations[harness])
+        _refuse_binding(change, target, marketplace)
         if change.changed or change.flipped:
             changed.append(_display_path(target, deploy_root, False))
     return tuple(changed)

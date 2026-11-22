@@ -40,7 +40,11 @@ from ..integration.base_integrator import BaseIntegrator
 from ..integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
 from ..models.apm_package import APMPackage, package_target_selection
 from ..models.dependency.materialization import MaterializationPathCollisionError
-from ..native_plugins.uninstall import NativeGateCheckError, retire_gated_native_plugins
+from ..native_plugins.uninstall import (
+    NativeGateCheckError,
+    preview_native_settings,
+    retire_gated_native_plugins,
+)
 from ..utils.path_security import safe_rmtree
 from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
@@ -311,6 +315,13 @@ def prune(ctx, dry_run):
                         f"remove owner(s) {', '.join(sorted(removed_owners))}"
                     )
                     logger.verbose_detail(f"    ledger key: {locator.key}")
+            preview_native_settings(
+                lockfile,
+                planned_pruned_keys | set(missing_orphaned_keys) | set(native_retired),
+                apm_modules_dir,
+                project_root,
+                logger,
+            )
             logger.success("Dry run complete - no changes made")
             return
 
