@@ -42,11 +42,12 @@
     },
     {
       "id": "legacy-mcp-ownership-key-migration",
-      "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption",
-      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints)",
+      "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption; machine-local per-entry MCP write evidence and its use when apm.lock.yaml is absent",
+      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries)",
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
-        "src/apm_cli/install/mcp/native_entry.py"
+        "src/apm_cli/install/mcp/native_entry.py",
+        "src/apm_cli/install/mcp/write_receipts.py"
       ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
@@ -136,7 +137,7 @@
     {
       "id": "install-commit-order",
       "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
-      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the lazy deploy journal (#4282): from InstallTransaction.journal_deploy_writes before the integrate phase it listens at the integrator write seam (integration/write_seam.py, which every integrator file write calls first) and records the prior bytes or absence of each path the first time it is written (install/deploy_snapshot.py stores the units under the APM home install-snapshots directory); rollback restores them and discards the staged lockfile; release_deploy_targets after the install-time audit keeps the journal only until the staged lockfile commits; the next install reaps a journal a killed install left; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159); check_before_deploy also plans the gated file writes (prompts, agents, commands, instructions) of every package through the write seam's planning mode and refuses before any write when OverwriteGate would keep a managed file without deployment evidence (#4381); a failed MCP or LSP reconciliation (install/phases/services.py, while the lockfile is still staged) rolls the transaction back, except an MCP collision, and then registers no native plugin (#4594); check_before_deploy also refuses an MCP collision before any write: install/mcp/collision_preflight.py projects each self-defined server the lockfile never recorded through compare_native_mcp_connection as unmanaged and reports it with _report_native_conflict, the MCP write path keeping the same comparison as its backstop (#4268)",
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the lazy deploy journal (#4282): from InstallTransaction.journal_deploy_writes before the integrate phase it listens at the integrator write seam (integration/write_seam.py, which every integrator file write calls first) and records the prior bytes or absence of each path the first time it is written (install/deploy_snapshot.py stores the units under the APM home install-snapshots directory); rollback restores them and discards the staged lockfile; release_deploy_targets after the install-time audit keeps the journal only until the staged lockfile commits; the next install reaps a journal a killed install left; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159); check_before_deploy also plans the gated file writes (prompts, agents, commands, instructions) of every package through the write seam's planning mode and refuses before any write when OverwriteGate would keep a managed file without deployment evidence (#4381); a failed MCP or LSP reconciliation (install/phases/services.py, while the lockfile is still staged) rolls the transaction back, except an MCP collision, and then registers no native plugin (#4594); check_before_deploy also refuses an MCP collision before any write: install/mcp/collision_preflight.py projects each self-defined server the lockfile never recorded through compare_native_mcp_connection as unmanaged (#4268), and each registry server whose render needs no prompted value and each recorded server against every recorded baseline (#4741), reporting a conflict with _report_native_conflict; run_mcp_integration runs the same projection for service-only installs, and the MCP write path keeps the same comparison as its backstop",
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
@@ -269,11 +270,12 @@
     {
       "id": "executable-item-admission",
       "decision": "Admission of one dependency-declared executable item (MCP server or hook file): org/user/project deny ladder AND manifest approval AND definition fingerprint match, for install, update, install --frozen, apm audit --ci, apm approve and the install prompt; the lockfile is evidence, never consent (#3902)",
-      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188)",
+      "owner": "security/trust.py (admit, McpAdmission, hook_file_filter, pinned_exec_status, record_pins, recorded_hook_pin_mismatches); integration/mcp_config_view.py derive(admission=...) and InstallService._frozen_mcp_reasons consume it; install --frozen (InstallService.enforce_frozen_hook_pins) and audit --ci (hook-approval-pins) verify locked hook pins through install/exec_gate.py locked_hook_pin_mismatches (#4188); unrecorded files at a withheld package's hook path are named by install/withheld_hooks.py (install warns, audit --ci hook-approval-pins fails, nothing deleted)",
       "selectors": [
         "src/apm_cli/security/trust.py",
         "src/apm_cli/install/exec_gate.py",
         "src/apm_cli/install/installed_dependencies.py",
+        "src/apm_cli/install/withheld_hooks.py",
         "src/apm_cli/install/plan_admission.py"
       ],
       "guards": [
@@ -466,6 +468,13 @@
         "install-deployment-local-bundle-hook-trust",
         "install-deployment-local-bundle-hook-retirement"
       ]
+    },
+    {
+      "id": "claude-agents-md-instruction-routing",
+      "decision": "Which Claude project instructions load from AGENTS.md instead of .claude/rules/, and which hand-authored root files block that route (#3939)",
+      "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
+      "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
+      "guards": ["install-deployment-claude-agents-md-routing"]
     }
   ]
 }

@@ -22,7 +22,19 @@ apm compile [OPTIONS]
 writes one set of root context files plus per-harness rules per
 resolved target.
 
-For Claude, the root `CLAUDE.md` also imports installed packages' root
+For a Claude-only target, compile writes always-on instructions to the root
+`AGENTS.md` and each single-directory instruction (for example `src/test/**`)
+to exactly `src/test/AGENTS.md`, plus a `CLAUDE.md` next to each generated `AGENTS.md`
+that imports it with `@AGENTS.md`. With `--single-agents`, directory
+instructions are left out of the root file with a warning. `CLAUDE.md` carries no
+instructions itself. Path-scoped instructions (for example `**/*.py`) stay in
+`.claude/rules/`, deployed by `apm install`; a Claude-only compile omits them
+from `AGENTS.md`. A hand-authored `CLAUDE.md` is never overwritten; if it does
+not import `@AGENTS.md`, compile warns, because Claude Code does not load
+`AGENTS.md` while such a `CLAUDE.md` exists. See
+[Claude Code](https://code.claude.com/docs/en/memory#agents-md).
+
+The root `CLAUDE.md` also imports installed packages' root
 `CLAUDE.md` files using manifest and lockfile paths, including transitive
 packages, ADO `org/project/repo` layouts, and deeper repository or subdirectory
 paths. Nested documentation is not imported as a separate package. Without
@@ -166,7 +178,7 @@ without a valid Build ID, hand-authored files, and symbolic links are retained.
 | `--no-links` | Skip markdown link resolution. |
 | `--with-constitution` / `--no-constitution` | Include or omit the Spec Kit `memory/constitution.md` block at the top. Default: included. When disabled, an existing block is preserved but not regenerated. |
 | `--local-only` | Ignore `apm_modules/`; compile only `.apm/` primitives. |
-| `--force-instructions` / `--no-force-instructions` (alias: `--no-dedup`) | Include instructions in `CLAUDE.md`, `AGENTS.md`, and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. `--no-force-instructions` (the default) keeps deduplication on. |
+| `--force-instructions` / `--no-force-instructions` (alias: `--no-dedup`) | Include instructions in `AGENTS.md` and `.github/copilot-instructions.md` even when `.claude/rules/`, `.github/instructions/`, or `.agents/rules/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compatible alias for `--force-instructions`. `--no-force-instructions` (the default) keeps deduplication on. |
 | `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm update`, not `apm compile`. |
 
 ### Modes
@@ -382,7 +394,7 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | Target | Compile outputs |
 |--------|-----------------|
 | `copilot` | `AGENTS.md`, `.github/copilot-instructions.md` |
-| `claude` | `CLAUDE.md` |
+| `claude` | `AGENTS.md`, `CLAUDE.md` (imports `@AGENTS.md`) |
 | `grok-build` | `AGENTS.md` |
 | `cursor` | `AGENTS.md` |
 | `codex` | `AGENTS.md` |

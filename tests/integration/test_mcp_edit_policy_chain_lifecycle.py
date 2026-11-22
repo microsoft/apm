@@ -20,7 +20,7 @@ from tests.integration._mcp_chain_kit import (
     stdio_server,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 
 def _project_texts(chain: Chain, *relatives: str) -> list[str]:

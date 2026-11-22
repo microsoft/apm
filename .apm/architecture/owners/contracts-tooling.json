@@ -98,8 +98,9 @@
     {
       "id": "cached-policy-shape",
       "decision": "Cached policy shape, that a cached policy document is verified against its recorded fingerprint and the project policy.hash pin before any command uses it (#4218), and the APM_POLICY_DISABLE switch reader",
-      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry, the only policy cache reader, verifying through policy/_cache_verify.py _cached_policy_verified; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env)",
+      "owner": "policy/discovery.py (_policy_to_dict via _serialize_policy; _read_cache_entry, the only policy cache reader, verifying through policy/_cache_verify.py _cached_policy_verified; ADO_POLICY_PROJECT; ADO_POLICY_REPOSITORY; policy_disabled_by_env); a GitHub Contents 404 is reused only within one command run through core/invocation_memo.py (invocation_scope opened once by cli.py, memoized_per_invocation), never persisted",
       "selectors": [
+        "src/apm_cli/core/invocation_memo.py",
         "src/apm_cli/policy/discovery.py",
         "src/apm_cli/policy/_cache_verify.py",
         "src/apm_cli/policy/_cached_candidates.py"

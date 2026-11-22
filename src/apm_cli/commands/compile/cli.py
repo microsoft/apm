@@ -1315,6 +1315,11 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
                                 from ...compilation.output_writer import CompiledOutputWriter
 
                                 CompiledOutputWriter().write(output_path, final_content)
+                            from ...compilation.claude_agents_md import refresh_compiled_digest
+
+                            refresh_compiled_digest(
+                                compiler.base_dir, compiler.base_dir / output_path
+                            )
                         except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)
@@ -1496,9 +1501,8 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
     "no_dedup",
     default=False,
     help=(
-        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
-        "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, in .github/copilot-instructions.md even when the "
+        "Include instructions in AGENTS.md even when .claude/rules/ or "
+        ".github/instructions/ already deliver them, in .github/copilot-instructions.md even when the "
         "matching .github/instructions/ file is deployed, or in .agents/rules/ "
         "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "

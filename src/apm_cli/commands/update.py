@@ -396,7 +396,7 @@ def _run_mcp_lsp_integration(
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
     from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
-    from apm_cli.install.mcp import run_mcp_integration
+    from apm_cli.install.mcp import journal_mcp_writes, run_mcp_integration
     from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
 
@@ -435,28 +435,29 @@ def _run_mcp_lsp_integration(
     prepared_lsp.require_capable_target()
 
     try:
-        _mcp_count, _mcp_apm_config = run_mcp_integration(
-            apm_package=apm_package,
-            mcp_deps=apm_package.get_all_mcp_dependencies(),
-            apm_modules_path=apm_modules_path,
-            lock_path=lock_path,
-            old_mcp_servers=old_mcp_servers,
-            old_mcp_configs=old_mcp_configs,
-            old_mcp_provenance=old_mcp_provenance,
-            old_mcp_target_servers=old_mcp_target_servers,
-            trust_transitive_mcp=trust_transitive_mcp,
-            project_root=project_root,
-            user_scope=user_scope,
-            should_install=True,
-            logger=logger,
-            diagnostics=diagnostics,
-            verbose=verbose,
-            explicit_target=effective_target,
-            target_decision=target_decision,
-            scope=scope,
-            executable_context=(effective_allow_executables, effective_allow_resolved),
-            pre_install_lock=existing_lock,
-        )
+        with journal_mcp_writes(project_root, user_scope=user_scope, logger=logger):
+            _mcp_count, _mcp_apm_config = run_mcp_integration(
+                apm_package=apm_package,
+                mcp_deps=apm_package.get_all_mcp_dependencies(),
+                apm_modules_path=apm_modules_path,
+                lock_path=lock_path,
+                old_mcp_servers=old_mcp_servers,
+                old_mcp_configs=old_mcp_configs,
+                old_mcp_provenance=old_mcp_provenance,
+                old_mcp_target_servers=old_mcp_target_servers,
+                trust_transitive_mcp=trust_transitive_mcp,
+                project_root=project_root,
+                user_scope=user_scope,
+                should_install=True,
+                logger=logger,
+                diagnostics=diagnostics,
+                verbose=verbose,
+                explicit_target=effective_target,
+                target_decision=target_decision,
+                scope=scope,
+                executable_context=(effective_allow_executables, effective_allow_resolved),
+                pre_install_lock=existing_lock,
+            )
     except PolicyBlockError:
         logger.refusal("MCP server(s) blocked by org policy. MCP configs were NOT written.")
         logger.render_summary()

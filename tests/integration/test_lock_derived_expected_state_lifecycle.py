@@ -247,8 +247,11 @@ _COMMITTED = (".git", "apm_modules")
 
 
 def _claude_plugin(root: Path, name: str) -> Path:
+    """A plugin with a root-only plugin.json: at project scope it keeps the split
+    route whose portable MCP and LSP state this proves; a Claude-format plugin
+    deploys intact instead (#3921)."""
     write(
-        root / ".claude-plugin/plugin.json",
+        root / "plugin.json",
         json.dumps({"name": name, "version": "1.0.0", "description": "plugin root fixture"}),
     )
     write(

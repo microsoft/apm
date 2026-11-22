@@ -142,38 +142,63 @@ workspace-only runtimes. If no selected target supports user scope, the command
 exits `2` before creating or changing the user manifest, lockfile, or runtime
 configuration.
 
-`apm install -g --target claude` installs Claude plugins intact: it copies the
-approved plugin root to `~/.agents/plugins/<plugin>/`, generates
-`~/.agents/plugins/.claude-plugin/marketplace.json`, and writes only
-`extraKnownMarketplaces` and `enabledPlugins` into Claude's `settings.json`. No
-`claude` CLI is needed. A plugin APM cannot install intact (unapproved
-executables, declared plugin `dependencies`, a skill subset, symlinks,
-`monitors/` or `workflows/`) is parked: not deployed or declared, a warning
+`apm install` installs native plugins intact: Claude plugins
+(`.claude-plugin/plugin.json`) targeting `claude` (or `copilot` at project
+scope), and Agent Plugins targeting `copilot`. It copies the approved plugin
+root from `apm_modules` to `.agents/plugins/<plugin>/`, generates
+`.agents/plugins/.claude-plugin/marketplace.json`, and writes only
+`extraKnownMarketplaces.apm-p-<hash>` (path `./.agents/plugins`) and
+`enabledPlugins["<plugin>@apm-p-<hash>"]` into `.claude/settings.json` (targets
+`claude`) and `.github/copilot/settings.json` (targets `copilot`). Commit
+`.agents/plugins/`, both settings files and `apm.lock.yaml`: a fresh clone
+loads the plugins without APM after folder trust. With `-g`, APM uses `~/.agents/plugins/`, an absolute path, `apm-u-<hash>`,
+`~/.claude/settings.json` (`CLAUDE_CONFIG_DIR`) for Claude plugins and
+`~/.copilot/settings.json` (`COPILOT_HOME`) for Agent Plugins. No `claude` or
+`copilot` CLI is needed. Copilot also reads `.claude/settings.json` (lower
+priority), so for a plugin targeting `claude` but not `copilot` APM writes its
+own `false` into `.github/copilot/settings.json`; APM owns that Copilot key for
+every plugin it declares to Claude, follows `targets:`, and warns when it
+overrides a value it did not write. A `--target` run that excludes a native
+plugin keeps its previous lock entry and deployed root, with a note.
+
+At project scope a plugin without `.claude-plugin/plugin.json` or with a
+`skills:` selection deploys loose instead. A plugin APM cannot install intact
+(unapproved executables, declared plugin `dependencies`, symlinks, `monitors/`
+or `workflows/`; with `-g`, also a skill subset or no
+`.claude-plugin/plugin.json`) is parked: not deployed or declared, a warning
 names the package and the next step, and the install continues (exit 0). To
-approve a parked plugin, run `cd ~/.apm && apm approve <package>` (or
-`--pending`). `bin/` deploys inside the plugin root under the same approval
-and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP and LSP servers the
-plugin ships are loaded by Claude from the plugin, not written by APM; the
-whole-plugin approval covers them, and a server org MCP policy blocks, or an
-MCP entry APM cannot read (`.mcpb`/`.dxt`, URL, unreadable file), parks the
-plugin (`enforcement: block`). A transitive plugin with MCP servers needs a pin
-or `--trust-transitive-mcp`, even with no `executables` block. An explicit `false` in
-`enabledPlugins` is kept. `apm.lock.yaml` records each as `native_plugin`. See
-[admission limits](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+approve a parked plugin, run `apm approve <package>` (from `~/.apm` for `-g`;
+or `--pending`). `bin/` deploys inside the plugin root under the same approval
+and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP
+and LSP servers the plugin ships are loaded by the harness from the plugin, not
+written by APM for Claude or Copilot; the whole-plugin approval covers them,
+and a server org MCP policy blocks, or an MCP entry APM cannot read
+(`.mcpb`/`.dxt`, URL, unreadable file), parks the plugin
+(`enforcement: block`). A transitive plugin with MCP servers needs a pin or
+`--trust-transitive-mcp`, even with no `executables` block. Two plugins whose
+names match ignoring case fail the install, naming both dependencies.
+`apm.lock.yaml` records each as `native_plugin`, the only ownership record: APM removes only entries the
+previous lock produced, keeps user entries and never changes an explicit
+`false`. Invalid settings JSON fails the install with nothing written. See
+[native plugins](https://microsoft.github.io/apm/consumer/install-plugins/#native-plugins).
 
 `apm audit --ci` checks both the source and the deployed copy against that
 fingerprint (each publisher file's path, bytes and executable bit, excluding
 APM's root `apm.yml` and `.apm/`). Same-revision content
 changes are refused, not adopted. Run audit from the user manifest directory with
 Claude included in that manifest's targets; see the [user-plugin audit recipe](https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#apm-managed-claude-user-plugins).
+`apm audit --ci` checks both the `apm_modules` source and the deployed copy
+against that fingerprint (paths and bytes at project scope, plus executable bits
+at user scope). Same-revision content changes are refused, not adopted. For
+user scope, run audit from the user manifest directory with Claude in its
+targets.
 
-An existing package-owned loose Claude hook blocks native transition without
-changing hook settings or ownership. Explicitly uninstall the package with
-`apm uninstall --global <package>`, then reinstall with the original targets;
-repair unreadable settings or ownership records first. APM never automatically
-deletes retained-target hooks to migrate them.
+A plugin whose hooks were installed loose is refused with `Cannot switch <pkg>
+to a native plugin. Hook settings were preserved. Run: apm uninstall <pkg> &&
+apm install <pkg>` (with `--global` at user scope). A plugin without loose
+hooks switches automatically and its stale loose files are removed.
 
-Global uninstall removes the plugin roots and Claude settings keys the previous
+Uninstall and prune remove the plugin roots and settings keys the previous
 lockfile recorded; your explicit `false`, your own entries and roots you edited
 stay. If updating Claude settings fails, settings are left unchanged and the
 previous lockfile is restored; fix the reported cause and rerun the same
@@ -187,6 +212,12 @@ repair, reconcile remaining declarations with
 `apm install --global --target claude` for Claude-only installs; for mixed
 targets, retain the full original `--target` list. Do not re-add removed
 package arguments.
+stay. If updating settings fails, settings are left unchanged and the previous
+lockfile is restored; fix the reported cause and rerun the same command.
+The first `apm install` that targets `copilot` and declares every plugin the
+earlier `apm` marketplace (pointing at `apm_modules`) enabled retires it and its
+ledger in one rollback unit; other commands keep it and warn to run `apm install`. `apm deps list` reports
+`N native plugin(s) activated from .agents/plugins`.
 
 Cursor and OpenCode user configs are `~/.cursor/mcp.json` and
 `~/.config/opencode/opencode.json`. Global MCP cleanup removes only names
@@ -576,19 +607,20 @@ Claude's complete instruction selection passes the compiled-output security
 check before suppression or cleanup, including dry-run; critical hidden
 characters fail compilation without changing its root.
 
-After a project install stages dependency instructions for Gemini, Codex,
-OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint naming
-`apm compile` and the root context files it will update. Targets such as Claude
-that receive instructions directly in a native rules directory do not print
-this hint.
+After a project install stages dependency instructions for Claude, Gemini,
+Codex, OpenCode, or explicit-only Hermes, `apm install` prints an `[i]` hint
+naming `apm compile` and the root context files it will update (for Claude:
+`Run 'apm compile' to update AGENTS.md / CLAUDE.md.`). For Claude the hint also
+fires when install routed a local `.apm/` instruction to `AGENTS.md` that no
+compiled `AGENTS.md` carries yet; a no-op reinstall after compile stays quiet.
 
 `apm compile --watch` live-reloads `apm.yml`: editing `target:` / `targets:` mid-session takes effect on the next file event without restarting the watcher. The CLI `--target` flag, when passed to `apm compile --watch`, still outranks `apm.yml`. Re-resolution is gated on the changed file's basename being `apm.yml`, so `.instructions.md` edits do not pay an extra resolver round-trip and a stray `backup_apm.yml` cannot trigger a reload. When root files are retained, each recompile reports both the retained count and any other outputs generated (or planned in dry-run mode). `--clean` is ignored in watch mode and the watcher prints an explicit `[!]` warning at startup (`--clean is ignored in watch mode; run 'apm compile --clean' separately to remove orphaned outputs.`); run `apm compile --clean` separately between watch sessions to remove orphans.
 
 `--single-agents` keeps target-specific root content separate when several targets are requested; for example, Claude's root summary is never appended to `AGENTS.md`.
 
-When `apm install` has already deployed instructions to `.claude/rules/`, `apm compile --target claude` omits the Project Standards section from `CLAUDE.md` to avoid Claude Code seeing every instruction twice. Detection is a simple glob (`.claude/rules/*.md`). `CLAUDE.md` is still generated when it carries a constitution block or dependency `@import` paths -- only the instructions section is suppressed. An informational log message is emitted when zero `CLAUDE.md` files are generated because all content was already deployed via rules.
+**Claude routing.** At project scope, `apm install` writes only path-scoped instructions (file-type globs such as `**/*.py`, wildcard directories such as `src/**/*.py`, comma lists) to `.claude/rules/<name>.md`. Always-on (`applyTo: "**"` or none) and single literal directory instructions (`src/test/**`, `docs/**/*`) go to `AGENTS.md`: `apm compile --target claude` writes always-on ones to the root `AGENTS.md` and each directory one to exactly `<dir>/AGENTS.md` (never hoisted; multi-target compiles keep the shared `AGENTS.md` placement), plus a `CLAUDE.md` beside each that imports `@AGENTS.md`. A directory instruction stays in `.claude/rules/` when its directory does not exist or `compilation.strategy` is `single-file`; `--single-agents` leaves directory instructions out of the root file with a warning (Claude Code reads `AGENTS.md` only through that import while a `CLAUDE.md` exists). `CLAUDE.md` holds no instructions; the root one keeps dependency `@import` paths, and embeds the constitution only when APM did not write the root `AGENTS.md`. A Claude-only compile omits instructions already in `.claude/rules/` from `AGENTS.md`; multi-target compiles keep every instruction in the shared `AGENTS.md`. A hand-authored root `CLAUDE.md` without `@AGENTS.md`, or a hand-authored root `AGENTS.md` without `compilation.agents_md.mode: managed_section`, keeps every instruction in `.claude/rules/` and `apm install` warns once with the fix (add `@AGENTS.md` to `CLAUDE.md`, or set `managed_section` for `AGENTS.md`), then rerun `apm install` and `apm compile`. A hand-authored `CLAUDE.md` that already imports `@AGENTS.md` is left untouched. User scope (`-g`) keeps every instruction in `~/.claude/rules/`. A nested `AGENTS.md` loads only when Claude opens a file in that folder.
 
-**Deduplication override.** Pass `--force-instructions` (alias: `--no-dedup`) to always include the instructions section in `CLAUDE.md`, regardless of `.claude/rules/` contents.
+**Deduplication override.** Pass `--force-instructions` (alias: `--no-dedup`) to put every instruction in `AGENTS.md`, regardless of `.claude/rules/` contents.
 
 **Dependency memory.** Claude imports package-root `CLAUDE.md` files using
 manifest and lockfile materialization paths at any depth, including ADO,
@@ -601,7 +633,7 @@ source and output must be on the same filesystem drive.
 For scoped frozen replay and recovery, see the
 [install reference](https://microsoft.github.io/apm/reference/cli/install/#deploy-location).
 
-**Stale `CLAUDE.md` removal (`--clean`).** When `.claude/rules/` is populated and an APM-generated `CLAUDE.md` (identified by the `<!-- Generated by APM CLI -->` marker) is present, `apm compile --target claude --clean` removes that stale file if no constitution or dependency import keeps `CLAUDE.md` active; otherwise it regenerates the file. Hand-authored `CLAUDE.md` files (no marker) are never deleted; a warning is emitted instead so you know the duplicate context remains.
+**Stale `CLAUDE.md` removal (`--clean`).** When `.claude/rules/` holds every instruction (so compile writes no `AGENTS.md`) and an APM-generated `CLAUDE.md` (identified by the `<!-- Generated by APM CLI -->` marker) is present, `apm compile --target claude --clean` removes that stale file if no constitution or dependency import keeps `CLAUDE.md` active; otherwise it regenerates the file. Hand-authored `CLAUDE.md` files (no marker) are never deleted; a warning is emitted instead so you know the duplicate context remains.
 
 **Dry-run preview.** Use `--dry-run` with `--clean` to preview what would be removed without touching any files. If a hand-authored `CLAUDE.md` would block deletion, the preview surfaces that outcome as well.
 
@@ -692,7 +724,7 @@ rewriting files. Explicit `--file` remains user-directed.
 
 `apm audit` runs **drift detection by default** (issue #1071). It replays `apm install` cache-only into a temporary scratch tree and diffs the result against your working tree. It catches four failure modes: (1) `.apm/` source added without re-running `apm install`, (2) hand-edits to deployed files that diverge from canonical source, (3) orphan files left after their source was removed, and (4) `unrecorded` files that install deploys but no lockfile entry claims. The scan is read-only -- never writes to your project, lockfile, or live `apm_modules/`. Build IDs, CRLF line endings, and BOMs are normalized away so they cannot trigger false positives.
 
-Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. Cache files remain outside deployed-file tracking, and native registration files are not covered by this content comparison.
+Native Copilot Agent Plugins replay through the canonical package loader, with or without a plugin `apm.yml`. A clean install or reinstall can audit successfully. Set the consumer's `targets: [copilot]` in `apm.yml`; audit has no `--target` flag. Invalid native manifests fail replay instead of entering legacy conversion. Admitted local native cache units are compared with a scratch copy of their original source using install's validated copying; modified or missing cached skills fail audit. Remote native units use the recorded package content hash, including in cold-cache CI. Run `apm install` to restore drift or establish a missing remote hash. The deployed copy under `.agents/plugins/` is checked against the lock's `native_plugin` fingerprint; settings files are not covered by this content comparison.
 
 Bare `apm audit` uses the warmed local cache and skips drift with an informational message when the cache is absent; run `apm install` before relying on non-CI drift. `apm audit --ci` is stricter: in a project with `apm.yml` and `apm.lock.yaml` but no `apm_modules/`, it prepares a lock-pinned scratch install for `skill-subset-consistency`, `config-consistency`, and drift without touching the checkout. No checkout install is required first, but local dependency sources must be available at their declared paths. Windows long and native 8.3 spellings of the same project retain project scope; they do not require a global install. Auditing the actual user metadata workspace (`~/.apm`) still refuses missing modules when its lockfile records packages or local bundle staging and requires `apm install --global`; a user lockfile with only MCP/LSP servers or `~/.apm` content needs no `apm_modules/`. Missing gitignored deployed outputs do not fail `deployed-files-present`, so repos that gitignore them can use audit-only CI too. Without committed deployed bytes, that pattern lacks deployed-byte integrity and drift coverage; use full-install CI when outputs need to be materialized.
 

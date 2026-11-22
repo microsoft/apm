@@ -27,6 +27,15 @@ from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .build_id import has_valid_build_id, stabilize_build_id
+from .claude_agents_md import (
+    claude_md_imports_agents_md,
+    is_claude_only_target,
+    pin_directory_placements,
+    record_compiled_instructions,
+    user_claude_md_imports_agents_md,
+    without_claude_rule_instructions,
+    without_directory_instructions,
+)
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import (
     AGENTS_MD_GENERATED_MARKER,
@@ -338,6 +347,8 @@ class AgentsCompiler:
         self._source_inventory: CompileInventory | None = None
         self._deploy_inventory: CompileInventory | None = None
         self._protected_root_context_paths: set[Path] = set()
+        self._agents_md_outputs: set[Path] = set()
+        self._claude_consumes_agents_md = False
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
@@ -392,6 +403,7 @@ class AgentsCompiler:
         self.warnings.clear()
         self.errors.clear()
         self._protected_root_context_paths.clear()
+        self._agents_md_outputs.clear()
         self._logger = logger
         # Placement is valid only for this invocation's primitive snapshot.
         self._distributed_placement = None
@@ -463,10 +475,23 @@ class AgentsCompiler:
                 frozenset({"agents", "claude", "gemini"}) if root_outputs is None else root_outputs
             )
 
+            agents_failed = False
+            # Claude reads these AGENTS.md outputs, so compile records their coverage.
+            self._claude_consumes_agents_md = "claude" in requested_outputs and (
+                should_compile_claude_md(routing_target)
+            )
             if "agents" in requested_outputs and should_compile_agents_md(routing_target):
-                results.append(self._compile_agents_md(config, primitives))
+                agents_result = self._compile_agents_md(config, primitives)
+                results.append(agents_result)
+                agents_failed = not agents_result.success
 
-            if "claude" in requested_outputs and should_compile_claude_md(routing_target):
+            # CLAUDE.md imports the AGENTS.md just written; after a failed
+            # AGENTS.md batch no shim may point at a missing file (#4787).
+            if (
+                "claude" in requested_outputs
+                and should_compile_claude_md(routing_target)
+                and not agents_failed
+            ):
                 results.append(self._compile_claude_md(config, primitives))
 
             if "gemini" in requested_outputs and should_compile_gemini_md(routing_target):
@@ -515,6 +540,24 @@ class AgentsCompiler:
         Returns:
             CompilationResult: Result of the AGENTS.md compilation.
         """
+        if is_claude_only_target(config.target) and not config.no_dedup:
+            claude_primitives = without_claude_rule_instructions(
+                primitives, self.base_dir, lambda msg: self._log("warning", msg)
+            )
+            if claude_primitives is not primitives:
+                self._log(
+                    "progress",
+                    "Instructions already in .claude/rules/ -- omitting them from"
+                    " AGENTS.md to avoid duplicate context",
+                    symbol="info",
+                )
+            primitives = claude_primitives
+        if is_claude_only_target(config.target) and (
+            config.strategy != "distributed" or config.single_agents
+        ):
+            primitives = without_directory_instructions(
+                primitives, lambda msg: self.warnings.append(msg)
+            )
         # Handle distributed compilation (Task 7 - new default behavior)
         if config.strategy == "distributed" and not config.single_agents:
             result = self._compile_distributed(config, primitives)
@@ -619,6 +662,13 @@ class AgentsCompiler:
                 distributed_compiler,
             ),
         }
+        if is_claude_only_target(config.target):
+            distributed_config["placement_map"] = pin_directory_placements(
+                distributed_config["placement_map"],
+                self.base_dir,
+                lambda msg: self.warnings.append(msg),
+                source_dir=self.source_dir,
+            )
 
         # Compile distributed
         distributed_result = distributed_compiler.compile_distributed(
@@ -744,6 +794,7 @@ class AgentsCompiler:
         nested_git_skips = max(0, skipped_agents_count - protected_agents_count)
         distributed_result.stats["root_context_files_protected"] = protected_agents_count
         if config.dry_run:
+            self._agents_md_outputs.update(pending_outputs)
             distributed_result.stats["agents_files_generated"] = len(pending_outputs)
             distributed_result.stats["nested_git_placements_skipped"] = nested_git_skips
             return CompilationResult(
@@ -766,8 +817,18 @@ class AgentsCompiler:
                     preserve_line_endings=preserve_line_endings,
                 )
                 successful_writes = len(pending_outputs)
+                self._agents_md_outputs.update(pending_outputs)
             except (OSError, CompiledOutputPolicyError) as exc:
                 self.errors.append(f"Failed to write distributed output batch: {exc}")
+        if successful_writes and self._claude_consumes_agents_md:
+            record_compiled_instructions(
+                self.base_dir,
+                {
+                    placement.agents_path: [] if skip_instructions else placement.instructions
+                    for placement in distributed_result.placements
+                    if placement.agents_path in pending_outputs
+                },
+            )
 
         if not self.errors and config.clean_orphaned and cleanup_paths:
             cleanup_messages = distributed_compiler._cleanup_orphaned_files(cleanup_paths)
@@ -822,8 +883,16 @@ class AgentsCompiler:
             config.agents_md_mode != "managed_section"
             and self._hand_authored_root_context_blocks_write(output_file)
         )
+        errors_before = len(self.errors)
         if not config.dry_run and not write_blocked:
             self._write_output_file_with_config(output_path, content, config)
+        written = len(self.errors) == errors_before
+        if not write_blocked and written and output_file.name == "AGENTS.md":
+            self._agents_md_outputs.add(output_file)
+            if not config.dry_run and self._claude_consumes_agents_md:
+                record_compiled_instructions(
+                    self.base_dir, {output_file: list(primitives.instructions)}
+                )
 
         # Compile statistics
         stats = self._compile_stats(primitives, template_data)
@@ -886,11 +955,12 @@ class AgentsCompiler:
     def _compile_claude_md(
         self, config: CompilationConfig, primitives: PrimitiveCollection
     ) -> CompilationResult:
-        """Compile CLAUDE.md files (Claude Code target).
+        """Compile CLAUDE.md files that import AGENTS.md (Claude Code target).
 
-        Uses ClaudeFormatter to generate CLAUDE.md files following Claude's
-        Memory format with @import syntax, grouped project standards, and
-        workflows section for agents/roles.
+        Instructions reach Claude through the AGENTS.md outputs compiled just
+        before this step (#3939); path-scoped ones stay in ``.claude/rules/``.
+        Each CLAUDE.md imports its sibling ``@AGENTS.md`` so both load on
+        every Claude Code version, plus dependency memory at the root.
 
         Args:
             config (CompilationConfig): Compilation configuration.
@@ -902,94 +972,59 @@ class AgentsCompiler:
         errors = self.validate_primitives(primitives)
         self.errors.extend(errors)
 
-        # Create Claude formatter
         claude_formatter = ClaudeFormatter(str(self.base_dir), source_dir=str(self.source_dir))
-
-        # Honor compilation.strategy=single-file (and the --single-agents flag)
-        # by collapsing all instructions into a single root CLAUDE.md, mirroring
-        # the gate in _compile_agents_md. Without this, single-file mode is
-        # silently ignored for the Claude target and per-subdirectory CLAUDE.md
-        # files are emitted via the distributed placement path (issue #1445).
-        #
-        # DistributedAgentsCompiler is only constructed on the distributed
-        # branch -- single-file mode does not use its placement analysis and
-        # the later display block guards on `distributed_compiler is not None`.
-        distributed_compiler = None
-        if config.strategy != "distributed" or config.single_agents:
-            placement_map = {self.base_dir: list(primitives.instructions)}
-        else:
-            from .distributed_compiler import DistributedAgentsCompiler
-
-            distributed_compiler = DistributedAgentsCompiler(
-                str(self.base_dir),
-                exclude_patterns=config.exclude,
-                source_dir=str(self.source_dir),
-                source_inventory=self._source_inventory,
-                deploy_inventory=self._deploy_inventory,
-                managed_section_markers=config.managed_section_markers,
-            )
-            placement_map = self._get_distributed_placement(
-                config,
-                primitives,
-                distributed_compiler,
-            )
-
-        # Skip instructions in CLAUDE.md when they are already deployed to
-        # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
-        # --force-instructions / --no-dedup lets users opt out of this behaviour.
-        if config.no_dedup:
-            skip_instructions = False
-            self._log(
-                "progress",
-                "Including instructions in CLAUDE.md (--force-instructions overrides deduplication)",
-                symbol="info",
-            )
-        else:
-            expected_filenames = _build_expected_rule_filenames("claude", primitives)
-
-            skip_instructions = _detect_deployed_instructions(
-                self.base_dir / ".claude" / "rules",
-                self.base_dir,
-                lambda msg: self._log("warning", msg),
-                expected_filenames=expected_filenames,
-            )
-            if skip_instructions:
-                self._log(
-                    "progress",
-                    "Instructions already in .claude/rules/ -- omitting from CLAUDE.md"
-                    " to avoid duplicate context",
-                    symbol="info",
-                )
-
-        # Format CLAUDE.md files
-        claude_config = {
-            "source_attribution": config.source_attribution,
-            "debug": config.debug,
-            "skip_instructions": skip_instructions,
-        }
-        claude_result = claude_formatter.format_distributed(
-            primitives, placement_map, claude_config
+        # No AGENTS.md output means .claude/rules/ already covers every instruction.
+        skip_instructions = bool(primitives.instructions) and not self._agents_md_outputs
+        root_agents_written = self.base_dir / "AGENTS.md" in self._agents_md_outputs
+        claude_result = claude_formatter.format_agents_md_imports(
+            primitives,
+            self._agents_md_outputs,
+            {
+                "source_attribution": config.source_attribution,
+                "include_constitution": not root_agents_written,
+            },
         )
 
+        user_imports = {
+            path
+            for path in claude_result.content_map
+            if user_claude_md_imports_agents_md(path, self.base_dir)
+        }
+        claude_result.content_map = {
+            path: content
+            for path, content in claude_result.content_map.items()
+            if path not in user_imports
+        }
         protected_claude_paths = {
             path
             for path in claude_result.content_map
             if self._hand_authored_root_context_blocks_write(path)
         }
-        if protected_claude_paths:
+        if protected_claude_paths or user_imports:
+            retained = protected_claude_paths | user_imports
             claude_result.content_map = {
                 path: content
                 for path, content in claude_result.content_map.items()
-                if path not in protected_claude_paths
+                if path not in retained
             }
             claude_result.placements = [
                 placement
                 for placement in claude_result.placements
-                if placement.claude_path not in protected_claude_paths
+                if placement.claude_path not in retained
             ]
             claude_result.stats = claude_formatter._compile_stats(
                 claude_result.placements, primitives
             )
+            for path in sorted(protected_claude_paths):
+                agents_md = path.parent / "AGENTS.md"
+                if agents_md in self._agents_md_outputs and not claude_md_imports_agents_md(
+                    path, self.base_dir
+                ):
+                    rel = portable_relpath(path, self.base_dir)
+                    self.warnings.append(
+                        f"Claude Code will not load {portable_relpath(agents_md, self.base_dir)}"
+                        f" while {rel} does not import it: add '@AGENTS.md' to {rel}."
+                    )
 
         # NOTE: Claude commands are now generated at install time via CommandIntegrator,
         # not at compile time. This keeps behavior consistent with VSCode prompt integration.
@@ -1032,7 +1067,7 @@ class AgentsCompiler:
             # the APM marker, mirroring the Copilot root-instructions convention.
             # Only show the preview when no CLAUDE.md would be written -- a project
             # WITH a constitution emits a CLAUDE.md and should NOT show a removal preview.
-            if would_emit_no_claude_md and config.clean_orphaned:
+            if would_emit_no_claude_md and config.clean_orphaned and not user_imports:
                 det = self._detect_stale_claude_md()
                 if det.exists:
                     if det.read_error is not None:
@@ -1094,7 +1129,7 @@ class AgentsCompiler:
         pending_outputs: dict[Path, str] = {}
         for claude_path, content in claude_result.content_map.items():
             final_content = content
-            if config.with_constitution:
+            if config.with_constitution and not root_agents_written:
                 try:
                     from .injector import ConstitutionInjector
 
@@ -1133,6 +1168,8 @@ class AgentsCompiler:
                 no_output_message = (
                     "CLAUDE.md not generated -- protected hand-authored file retained"
                 )
+            elif user_imports:
+                no_output_message = "CLAUDE.md retained -- it already imports @AGENTS.md"
             elif skip_instructions:
                 no_output_message = (
                     "CLAUDE.md not generated -- Claude Code reads .claude/rules/"
@@ -1148,7 +1185,7 @@ class AgentsCompiler:
             # only reached when NOT in dry-run; no config.dry_run guard is needed.
             # Gate on clean_orphaned so plain `apm compile` (no --clean) does NO
             # extra disk I/O and emits NO stale-file warnings (non-destructive by design).
-            if config.clean_orphaned and not protected_claude_paths:
+            if config.clean_orphaned and not (protected_claude_paths or user_imports):
                 det = self._detect_stale_claude_md()
                 if det.exists:
                     if det.read_error is not None:
@@ -1175,51 +1212,13 @@ class AgentsCompiler:
                         )
                         all_warnings.append(warning)
                         self._log("warning", warning)
-        elif distributed_compiler is None and files_written > 0 and not config.dry_run:
-            # Single-file strategy bypasses the distributed display formatter
-            # (which has no analysis to render). Emit a minimal progress line
-            # so users get a confirmation that single-file mode took effect.
+        elif files_written > 0:
             noun = "file" if files_written == 1 else "files"
             self._log(
                 "progress",
-                f"CLAUDE.md compiled ({files_written} {noun})",
+                f"Generated {files_written} CLAUDE.md {noun} (imports AGENTS.md)",
                 symbol="success",
             )
-
-        # Display CLAUDE.md compilation output using standard formatter
-        # Get proper compilation results from distributed compiler (has optimization decisions)
-        # Skip formatter output when deduplication filtered out all placements to
-        # avoid contradicting the "not generated" log message above.
-        from ..output.formatters import CompilationFormatter
-        from ..output.models import CompilationResults
-
-        compilation_results = (
-            distributed_compiler.get_compilation_results_for_display(is_dry_run=config.dry_run)
-            if distributed_compiler is not None
-            else None
-        )
-        if compilation_results and not would_emit_no_claude_md:
-            # Update target name for CLAUDE.md output
-            formatter_results = CompilationResults(
-                project_analysis=compilation_results.project_analysis,
-                optimization_decisions=compilation_results.optimization_decisions,
-                placement_summaries=compilation_results.placement_summaries,
-                optimization_stats=compilation_results.optimization_stats,
-                warnings=all_warnings,
-                errors=all_errors,
-                is_dry_run=config.dry_run,
-                target_name="CLAUDE.md",
-            )
-
-            # Use the same formatter as AGENTS.md
-            formatter = CompilationFormatter(use_color=True)
-            if config.debug or config.trace:
-                output = formatter.format_verbose(formatter_results)
-            elif config.dry_run:
-                output = formatter.format_dry_run(formatter_results)
-            else:
-                output = formatter.format_default(formatter_results)
-            self._log("progress", output)
 
         # Generate summary content for result object
         summary_lines = [
@@ -1229,7 +1228,7 @@ class AgentsCompiler:
         ]
         for placement in claude_result.placements:
             rel_path = portable_relpath(placement.claude_path, self.base_dir)
-            summary_lines.append(f"- {rel_path} ({len(placement.instructions)} instructions)")
+            summary_lines.append(f"- {rel_path} (imports AGENTS.md)")
 
         return CompilationResult(
             success=len(all_errors) == 0,

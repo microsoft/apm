@@ -17,8 +17,10 @@ Layout:
     registry.py     ``--registry`` validation, precedence, env override
     warnings.py     F5 SSRF + F7 shell-metachar install-time warnings
     writer.py       Idempotent ``apm.yml`` MCP entry persistence
+    write_receipts.py  Machine-local evidence of the MCP entries install wrote
 """
 
 from .integration import run_mcp_integration
+from .write_receipts import journal_mcp_writes
 
-__all__ = ["run_mcp_integration"]
+__all__ = ["journal_mcp_writes", "run_mcp_integration"]
