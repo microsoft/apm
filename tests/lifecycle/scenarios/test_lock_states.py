@@ -301,7 +301,11 @@ def test_deployed_state_under_a_drifted_lock(lifecycle_world, lock, deployed) ->
         drift = ("toggle", "stamp") if refused else ("toggle",)
     else:
         drift = (_DRIFT[lock],)
-    row = Row(drift, "install", (_pair(lock, DEPLOYED=deployed),), refused)
+    # The user's file sits where p-skill deploys: install p-skill must meet it and
+    # refuse to take it over (a newer lock refuses before that).
+    line = "install p-skill" if deployed == "unowned" and not refused else "install"
+    refusal = refused or deployed == "unowned"
+    row = Row(drift, line, (_pair(lock, DEPLOYED=deployed),), refusal)
     play(scenario, (row,), keep=_KEEP)
     if deployed == "absent":
         deployed_now = (lifecycle_world.project / _CHILD_SKILL).is_file()
@@ -439,6 +443,12 @@ def test_sources_under_a_drifted_lock(lifecycle_world, world, lock) -> None:
             # The root inline server apm.yml declares comes back with the rest.
             problems = mcp_server_problems(scenario, {"p-inline"})
             assert not problems, problems
+        # Every source package the world declares has its lock row again, a parked
+        # native plugin included.
+        rows = scenario.lock_names()
+        sources = [name.split(":")[0] for name in scenario.specs if name != _TOGGLE]
+        missing = [name for name in sources if not any(name in row for row in rows)]
+        assert not missing, f"lock rows missing for {missing}: {sorted(rows)}"
     scenario.finish()
 
 

@@ -280,16 +280,41 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
 _CLAUDE_LSP = ".claude/skills/apm-lsp/.claude-plugin/plugin.json"
 
 
-def test_a_claude_lsp_surface_needs_the_servers_entry(lifecycle_world) -> None:
-    """Negative control: Claude's LSP plugin file counts for p-lsp only with its server."""
-    scenario = Scenario(lifecycle_world, ("p-lsp",), targets=("claude",))
-    path = lifecycle_world.project / _CLAUDE_LSP
-    path.parent.mkdir(parents=True)
-    for servers in ({}, {"p-lsp-server": {"command": "x"}}):
-        path.write_text(json.dumps({"name": "apm-lsp", "lspServers": servers}), encoding="ascii")
-        observed, _, _ = scenario.deployed()
-        named = "p-lsp-server" in path.read_text(encoding="ascii")
-        assert ("p-lsp/lsp/claude" in observed) == named, (servers, sorted(observed))
+# (cell, file, a document that only mentions the package, one that holds its entry).
+_CLAUDE_CONTROLS = (
+    (
+        "p-lsp/lsp/claude",
+        _CLAUDE_LSP,
+        {"name": "apm-lsp", "description": "p-lsp-server", "lspServers": {}},
+        {"name": "apm-lsp", "lspServers": {"p-lsp-server": {"command": "x"}}},
+    ),
+    (
+        "p-exec/mcp/claude",
+        ".mcp.json",
+        {"note": "p-exec-mcp", "mcpServers": {}},
+        {"mcpServers": {"p-exec-mcp": {"command": "x"}}},
+    ),
+    (
+        "p-exec/hook/claude",
+        ".claude/apm-hooks.json",
+        {"SessionStart": [{"command": "echo p-exec"}]},
+        {"SessionStart": [{"_apm_source": "_local/p-exec", "command": "echo p-exec"}]},
+    ),
+)
+
+
+def test_claude_surfaces_count_only_their_own_entries(lifecycle_world) -> None:
+    """Negative controls: Claude's shared LSP, MCP and hook files count for a package
+    only when its entry sits where Claude reads it, never on a bare mention."""
+    scenario = Scenario(lifecycle_world, ("p-lsp", "p-exec"), targets=("claude",))
+    for cell, relative, mention, entry in _CLAUDE_CONTROLS:
+        path = lifecycle_world.project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for document in (mention, entry):
+            path.write_text(json.dumps(document), encoding="ascii")
+            observed, _, _ = scenario.deployed()
+            written = json.loads(path.read_text(encoding="ascii"))
+            assert (cell in observed) == (written == entry), (cell, written, sorted(observed))
 
 
 CREDITS = credits(
