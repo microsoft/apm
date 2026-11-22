@@ -45,8 +45,9 @@ _PLUGINS = ".agents/plugins"
 _POLICY = "deny-native"
 # Steps under the org deny that keep bin/ although the deny should retire it:
 # a user-scope command discovers no org policy (#3703).
+_USER_SCOPE_DENY = "#3703"
 KNOWN_DD: dict[str, str] = {
-    f"G1|{op}|bin|denied-dependency|user": "#3703"
+    f"G1|{op}|bin|denied-dependency|user": _USER_SCOPE_DENY
     for op in ("install", "install-frozen", "mcp-install", "lock", "update")
 }
 
@@ -99,8 +100,10 @@ class GateBin(StepRunner):
         self.state = BinState()
         self.credited: set[str] = set()
         self.known = tuple(
-            KnownCell(cell, "I4", issue, "still deployed but not allowed", self._applies(cell))
-            for cell, issue in KNOWN_DD.items()
+            KnownCell(
+                cell, "I4", _USER_SCOPE_DENY, "still deployed but not allowed", self._applies(cell)
+            )
+            for cell in KNOWN_DD
         )
         self._cell = ""
 
