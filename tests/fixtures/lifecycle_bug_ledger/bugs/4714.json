@@ -1,0 +1,17 @@
+{
+  "issue": 4714,
+  "fixed_in": "Unreleased",
+  "summary": "apm pack refused a project whose canvas dependency the executable gate parked (unapproved, denied or revoked after deploy) as a stale install, and its 'apm install' remedy looped; pack now omits the parked canvas and names it with a remedy that works.",
+  "failure_modes": [
+    "outcome",
+    "routing"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_pack_parked_executables.py::test_pack_omits_a_parked_canvas_and_its_hint_restores_it",
+    "tests/unit/bundle/test_plugin_exporter_canvas.py::test_a_gate_parked_canvas_is_omitted_not_a_provenance_gap"
+  ]
+}

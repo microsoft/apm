@@ -51,6 +51,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "kept-file next step",
     "bundle-hooks-approved": _BUNDLE,
     "bundle-hooks-unadmitted": _BUNDLE,
+    "compile-dependency-denied": "covered by test_compile_dependency_policy_lifecycle, "
+    "which asserts the refusal names the denied package and apm.yml",
     "content-hash-unverified": "needs a legacy (version 1-3) lockfile whose carried bytes "
     "cannot be verified",
     "content-hashes-missing": _POLICY,

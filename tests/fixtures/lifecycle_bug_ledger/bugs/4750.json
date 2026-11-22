@@ -1,0 +1,19 @@
+{
+  "issue": 4750,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall removed a whole skill directory when every member looked APM-owned, including a member a surviving dependency still deploys; it now keeps every member a surviving dependency deploys, removes the departing package's other members one by one, and rechecks each file immediately before removing it.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/integration/test_uninstall_shared_skill_member_lifecycle.py::test_uninstall_keeps_a_skill_member_a_surviving_package_deploys",
+    "tests/unit/install/test_target_contraction_logging.py::test_selected_removal_keeps_a_skill_member_a_surviving_dependency_deploys",
+    "tests/unit/install/test_target_contraction_logging.py::test_selected_removal_keeps_a_member_edited_between_check_and_unlink",
+    "tests/unit/install/test_target_contraction_logging.py::test_selected_removal_keeps_a_survivor_member_claimed_in_another_spelling",
+    "tests/unit/install/test_target_contraction_logging.py::test_selected_removal_keeps_a_member_whose_parent_became_a_link"
+  ]
+}

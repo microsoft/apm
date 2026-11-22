@@ -92,7 +92,7 @@ ACCEPTS_EVIDENCE: Mapping[str, tuple[Ev, ...]] = {
         Ev("src/apm_cli/commands/prune.py", 85, '"--dry-run"'),
         Ev("src/apm_cli/commands/prune.py", 92, "def prune(ctx, dry_run)"),
     ),
-    "compile": (Ev(_COMPILE, 1287, '"--target"'), Ev(_COMPILE, 1297, '"--dry-run"')),
+    "compile": (Ev(_COMPILE, 1446, '"--target"'), Ev(_COMPILE, 1456, '"--dry-run"')),
     "lock": (
         Ev("src/apm_cli/commands/lock.py", 115, '"--update"'),
         Ev("src/apm_cli/commands/lock.py", 122, '"--no-policy"'),
@@ -155,7 +155,7 @@ USER_SCOPE_EVIDENCE: Mapping[str, Ev] = {
     "install": Ev(_INSTALL, 933, '"--global"'),
     "update": Ev("src/apm_cli/commands/update.py", 675, '"--global"'),
     "uninstall": Ev("src/apm_cli/commands/uninstall/cli.py", 971, '"--global"'),
-    "compile": Ev(_COMPILE, 1396, '"--global"'),
+    "compile": Ev(_COMPILE, 1555, '"--global"'),
     "lock": Ev("src/apm_cli/commands/lock.py", 107, '"--global"'),
     "approve-deny": Ev(_APPROVE, 239, '"--user"'),
     # U5: pack has no --global (options 163-301).
@@ -234,9 +234,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "must-cover and --check fails until a reviewed change updates the pin. The "
         "closed-world pins of the bin/ writer and unpack live with the gate tables (T3)",
         (
-            Ev("src/apm_cli/install/exec_gate.py", 713, "PackageType.MARKETPLACE_PLUGIN"),
-            Ev("src/apm_cli/install/exec_gate.py", 714, "InstallScope.USER"),
-            Ev("src/apm_cli/install/exec_gate.py", 717, 'target.name == "claude"'),
+            Ev("src/apm_cli/install/exec_gate.py", 725, "PackageType.MARKETPLACE_PLUGIN"),
+            Ev("src/apm_cli/install/exec_gate.py", 726, "InstallScope.USER"),
+            Ev("src/apm_cli/install/exec_gate.py", 729, 'target.name == "claude"'),
         ),
     ),
     "U9": (
@@ -245,7 +245,7 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
     ),
     "U10": (
         "compile renders hook/mcp/lsp only; --validate reads MCP declarations",
-        (Ev(_COMPILE, 695, "def _run_validation_mode"), Ev(_COMPILE, 729, "get_mcp_dependencies")),
+        (Ev(_COMPILE, 854, "def _run_validation_mode"), Ev(_COMPILE, 888, "get_mcp_dependencies")),
     ),
     "U-MKT": (
         "marketplace commands act on catalogs, never on deployed primitives: add, list, "
