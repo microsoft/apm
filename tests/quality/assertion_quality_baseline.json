@@ -995,7 +995,7 @@
       "tests/unit/policy/test_audit_claim_paths.py": 2,
       "tests/unit/policy/test_cache_merged_effective.py": 13,
       "tests/unit/policy/test_ci_checks.py": 6,
-      "tests/unit/policy/test_discovery.py": 67,
+      "tests/unit/policy/test_discovery.py": 45,
       "tests/unit/policy/test_discovery_io.py": 63,
       "tests/unit/policy/test_discovery_logic.py": 27,
       "tests/unit/policy/test_discovery_policy_resolution_io.py": 7,
