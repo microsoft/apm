@@ -835,7 +835,7 @@ SITE_SLICES["approve"] = SiteSlice(
         "empty/block": Expect(
             1, (*_routed_block("empty"), _NOTHING_WRITTEN), forbids=(_APPROVE_MISS,)
         ),
-        "empty/warn": Expect(0, forbids=(_APPROVE_MISS,)),
+        "empty/warn": Expect(0, (_not_applied("empty"),)),
         "found": Expect(0, forbids=(_APPROVE_MISS,)),
         "disabled": Expect(0, forbids=(_APPROVE_MISS,)),
         "malformed/block": Expect(1, (*_routed_block("malformed"), _NOTHING_WRITTEN)),
