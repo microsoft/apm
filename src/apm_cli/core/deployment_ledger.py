@@ -23,7 +23,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -877,7 +877,7 @@ def trusted_receipt_baselines(
     return baselines
 
 
-class DeploymentLedgerCodec:
+class DeploymentLedgerCodec(RowProjection):
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod
