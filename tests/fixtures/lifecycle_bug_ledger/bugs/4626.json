@@ -20,6 +20,8 @@
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_kept_canvas_edit_holds_back_its_other_members",
     "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryHoldsEveryTarget::test_unedited_target_is_not_upgraded_past_the_shared_baseline",
     "tests/lifecycle/scenarios/test_ownership_siblings.py::test_an_edited_member_the_upgrade_drops_keeps_the_bundle_whole",
-    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryKindsSurviveTheHold::test_two_blocked_edits_on_two_targets_both_stay_blocked"
+    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryKindsSurviveTheHold::test_two_blocked_edits_on_two_targets_both_stay_blocked",
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_kept_manifest_lsp_edit_fails_and_names_what_it_wrote",
+    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryReviewThree::test_a_held_server_a_target_cannot_render_is_not_claimed_there"
   ]
 }

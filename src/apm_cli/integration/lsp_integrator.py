@@ -28,6 +28,7 @@ from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import umask_file_mode
 from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -178,6 +179,8 @@ class _PreparedTargetConfig:
     matching: tuple[str, ...] = ()
     # Managed server name -> "drift" | "blocked" | "unproven" for an entry kept (#4626).
     kept: dict[str, str] = field(default_factory=dict)
+    # Servers held at a locked render this target cannot express: not written (#4626).
+    withheld: tuple[str, ...] = ()
 
 
 @dataclass
@@ -846,11 +849,13 @@ class LSPIntegrator:
         preserved: list[str] = []
         matching: list[str] = []
         kept: dict[str, str] = {}
+        withheld: list[str] = []
         for name, server_config in servers.items():
             if name in held:
                 # One recorded baseline per server: hold every target at it (#4626).
                 server_config = (locked_servers or {}).get(name)
                 if server_config is None:
+                    withheld.append(name)
                     continue
             # A same-name entry APM does not manage is user content: never
             # overwrite it (and so never claim it).
@@ -879,7 +884,7 @@ class LSPIntegrator:
                 if force
                 or locked_servers is None
                 or name not in existing
-                or name not in managed_names
+                or (name not in managed_names and name not in (legacy_server_names or ()))
                 else LSPIntegrator._kept_entry_kind(
                     existing[name], locked_servers.get(name), server_config
                 )
@@ -898,6 +903,7 @@ class LSPIntegrator:
             owner_only=user_scope,
             preserved=tuple(preserved),
             matching=tuple(matching),
+            withheld=tuple(withheld),
             kept=kept,
         )
 
@@ -930,6 +936,16 @@ class LSPIntegrator:
         return LSPIntegrator._render_plugin_roots(
             servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
         )
+
+    @staticmethod
+    def _blocking_keeps(prepared_targets: list) -> builtins.set:
+        """Servers kept as a blocked or unproven edit: they fail the install (#4626)."""
+        return {
+            name
+            for _runtime, _spec, prepared in prepared_targets
+            for name, kind in prepared.kept.items()
+            if kind != "drift"
+        }
 
     @staticmethod
     def _hold_kept_servers(prepared_targets: list, inputs: dict) -> list:
@@ -1331,9 +1347,11 @@ class LSPIntegrator:
         )
         changed_servers: builtins.set = builtins.set()
         preserved: dict[str, builtins.set] = {}
+        written: list[str] = []
         for runtime, spec, prepared in prepared_targets:
-            if record is not None and (prepared.preserved or prepared.matching):
-                record.kept_unowned[runtime] = {*prepared.preserved, *prepared.matching}
+            unwritten = {*prepared.preserved, *prepared.matching, *prepared.withheld}
+            if record is not None and unwritten:
+                record.kept_unowned.setdefault(runtime, builtins.set()).update(unwritten)
             for name in prepared.matching:
                 logger.verbose_detail(
                     f"LSP server '{name}' already matches the {runtime} entry in "
@@ -1351,8 +1369,11 @@ class LSPIntegrator:
                         "entries."
                     )
             try:
+                previous = prepared.path.read_bytes() if prepared.path.is_file() else None
                 changed = LSPIntegrator._write_prepared_target_config(prepared)
                 changed_servers.update(changed)
+                if prepared.path.read_bytes() != previous:
+                    written.append(portable_relpath(prepared.path, project_root_path))
                 if changed:
                     noun = "server" if len(changed) == 1 else "servers"
                     logger.progress(
@@ -1397,6 +1418,21 @@ class LSPIntegrator:
                         "Review the path and permissions, then retry."
                     ) from exc
 
+        blocking = LSPIntegrator._blocking_keeps(prepared_targets)
+        if blocking and written:
+            # Name what the failed install still wrote, as file-level keeps do (#4626).
+            logger.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for label in written:
+                getattr(logger, "error_detail", logger.info)(f"  {label}")
+        if blocking and diagnostics is None and not preserved:
+            # No collector counts the keep: fail the install here (#4626).
+            from apm_cli.install.errors import LSPUserEntryConflictError
+
+            raise LSPUserEntryConflictError(
+                "LSP installation incomplete: kept " + ", ".join(sorted(blocking)),
+                preserved={},
+                wrote_servers=bool(changed_servers),
+            )
         if preserved:
             from apm_cli.install.errors import LSPUserEntryConflictError
 

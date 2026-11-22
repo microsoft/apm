@@ -727,11 +727,14 @@ def _i7_x2_kept_writes(op: Operation, result: CommandResult) -> frozenset[str] |
     text = f"{result.stdout}\n{result.stderr}"
     if not _KEPT_LINE.search(text):
         return None
-    match = _KEPT_WRITTEN.search(text)
-    if match is None:
-        return frozenset()
-    written = frozenset(line.strip() for line in match.group(2).splitlines() if line.strip())
-    return written if len(written) == int(match.group(1)) else None
+    written: set[str] = set()
+    # File-level keeps (finalize) and LSP entry keeps each list what they wrote.
+    for match in _KEPT_WRITTEN.finditer(text):
+        listed = {line.strip() for line in match.group(2).splitlines() if line.strip()}
+        if len(listed) != int(match.group(1)):
+            return None
+        written |= listed
+    return frozenset(written)
 
 
 def _i7_x2_retirement(

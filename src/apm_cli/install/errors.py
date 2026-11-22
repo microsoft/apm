@@ -61,7 +61,8 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
 
 
 class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
-    """Same-name LSP entries APM did not write were preserved (#4628).
+    """Same-name LSP entries APM did not write were preserved (#4628), or
+    managed entries a user edited were kept with no collector to count them (#4626).
 
     *preserved* maps each runtime to the server names left as the user wrote
     them; every other server in the install was still configured, and

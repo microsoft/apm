@@ -1448,6 +1448,49 @@ def test_an_edited_member_the_upgrade_drops_keeps_the_bundle_whole(lifecycle_wor
     scenario.finish()
 
 
+def _declare_root_lsp(world, revision: str) -> None:
+    """Declare two LSP servers in the project's own apm.yml (no APM packages)."""
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["dependencies"]["lsp"] = [
+        {
+            "name": name,
+            "command": INERT_COMMAND,
+            "args": ["--stdio", f"--{revision}"],
+            "extensionToLanguage": {f".{name}": name},
+        }
+        for name in ("root-a", "root-b")
+    ]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_a_kept_manifest_lsp_edit_fails_and_names_what_it_wrote(lifecycle_world) -> None:
+    """Manifest-only LSP: one edited server blocks its update (exit 1), the other updates."""
+    world = lifecycle_world
+    scenario, tree = _start(world, {})
+    _declare_root_lsp(world, "v1")
+    scenario.source_moved()
+    scenario.run("install")
+    config = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
+    config["lspServers"]["root-a"]["args"] = ["--stdio", "--mine"]
+    edited = config["lspServers"]["root-a"]
+    scenario.user_write(_LSP, json.dumps(config, indent=2) + "\n")
+    scenario.release_user_write(_LSP)
+    locked = scenario.lock().lsp_configs["root-a"]
+    _declare_root_lsp(world, "v2")
+    scenario.source_moved()
+
+    step = scenario.run("install", exit=1)
+    _kept(step, f"LSP server 'root-a' in {_LSP}")
+    assert f"This install wrote 1 file(s), recorded in apm.lock.yaml: {_LSP}" in step.output
+    servers = json.loads((world.project / _LSP).read_text(encoding="utf-8"))["lspServers"]
+    assert servers["root-a"] == edited
+    assert servers["root-b"]["args"] == ["--stdio", "--v2"]
+    assert scenario.lock().lsp_configs["root-a"] == locked, "a kept edit became the baseline"
+    tree.assert_intact("manifest LSP keep")
+    scenario.finish()
+
+
 def test_unproven_mismatch_is_kept(lifecycle_world) -> None:
     """Without a receipt or locked render proving APM wrote it, a mismatch is kept; exit 1."""
     scenario, tree = _exec_scenario(lifecycle_world)
