@@ -433,3 +433,69 @@ def test_i1_fails_a_verified_tree_the_lock_has_no_native_plugin_record_for(tmp_p
     # Same bytes and fingerprint, but the lock's only record names another root.
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"}, recorded_name="other")
     _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+
+
+# P-OWN-executable-item-admission: an approval pins the definition of what it
+# admits. A hook's definition is every file deployed with it (its script, the
+# modules the script imports, the package.json files that set their module
+# type), so a change to any of them parks the hook until it is approved again.
+_BUNDLE_HOOK = {
+    "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "node ./run.mjs"}]}]}
+}
+
+
+def _bundled_hook(root: Path) -> Path:
+    """h-bundle: a hook whose script imports a helper under a package module type."""
+    from tests.utils.local_package import LocalPackageFactory
+
+    package = LocalPackageFactory(root).create("h-bundle", version="1.0.0")
+    hooks = package.root / ".apm" / "hooks"
+    (hooks / "lib").mkdir(parents=True)
+    (hooks / "run.mjs").write_text("import './lib/helper.mjs';\n", encoding="ascii")
+    (hooks / "lib" / "helper.mjs").write_text("export const ok = 1;\n", encoding="ascii")
+    (hooks / "lib" / "package.json").write_text('{"type": "module"}\n', encoding="ascii")
+    (package.root / "package.json").write_text('{"type": "module"}\n', encoding="ascii")
+    (hooks / "run.json").write_text(json.dumps(_BUNDLE_HOOK), encoding="ascii")
+    return package.root
+
+
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        (".apm/hooks/lib/helper.mjs", "export const ok = 2;\n"),
+        (".apm/hooks/lib/package.json", '{"type": "commonjs"}\n'),
+        ("package.json", '{"type": "commonjs"}\n'),
+    ],
+    ids=["imported-module", "nested-package-json", "package-json"],
+)
+def test_an_approved_hook_reparks_when_any_file_of_its_bundle_changes(
+    lifecycle_template, tmp_path: Path, relative: str, content: str
+) -> None:
+    """Install parks the changed hook and retires it (I4); approving it again re-pins it."""
+    from tests.lifecycle.machines._kit import StepRunner
+    from tests.lifecycle.model.state import ModelState
+
+    bench = Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project")
+    source = _bundled_hook(bench.world.root / "hook-bundle")
+    kinds = {"h-bundle": frozenset({"hook"})}
+    unapproved = ModelState(declared=frozenset({"h-bundle"}))
+    approved = ModelState(
+        declared=frozenset({"h-bundle"}), decisions={("h-bundle", "hook"): "allowed"}
+    )
+    runner = StepRunner(bench, unapproved, kinds)
+    hook = bench.deploy_root / ".github" / "hooks" / "h-bundle-run.json"
+
+    runner.step(("install", str(source)), exits={0}, mutating=True)
+    runner.step(("approve", str(source)), exits={0})
+    runner.step(("install",), exits={0}, model=approved, mutating=True)
+    assert hook.is_file(), "the approved hook did not deploy"
+
+    runner.edit("change-" + relative, lambda: (source / relative).write_text(content, "ascii"))
+    step = runner.step(("install",), exits={0}, model=unapproved, mutating=True)
+    assert not hook.exists(), "a hook whose bundle changed stayed deployed"
+    output = " ".join((step.result.stdout + step.result.stderr).split())
+    assert "definition changed" in output, output
+
+    runner.step(("approve", str(source)), exits={0})
+    runner.step(("install",), exits={0}, model=approved, mutating=True)
+    assert hook.is_file(), "re-approving the changed hook did not deploy it"
