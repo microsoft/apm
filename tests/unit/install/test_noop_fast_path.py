@@ -295,11 +295,33 @@ def test_windows_always_runs_the_full_install(project, monkeypatch) -> None:
 
 
 def test_the_fast_path_is_off_by_default(project, monkeypatch) -> None:
+    """Unset, install runs exactly as before: no recorder, no discovery, no stamp."""
     monkeypatch.delenv("APM_INSTALL_FAST_PATH")
-    run = _Install(project)
+    discovered: list[Path] = []
+    monkeypatch.setattr(
+        "apm_cli.policy.outcome_routing.discover_trust_policy",
+        lambda root: discovered.append(root) or PolicyFetchResult(outcome="disabled"),
+    )
+    stdout, environ_class = sys.stdout, type(os.environ)
+    seen: list[tuple[bool, bool, bool]] = []
+
+    class _Untouched(_Install):
+        def __call__(self) -> None:
+            seen.append(
+                (
+                    os.stat is posix.stat and os.lstat is posix.lstat,
+                    type(os.environ) is environ_class,
+                    sys.stdout is stdout,
+                )
+            )
+            super().__call__()
+
+    run = _Untouched(project)
     for _ in range(3):
         _install(run)
     assert run.calls == 3
+    assert seen == [(True, True, True)] * 3, "no fast-path code may wrap an unflagged install"
+    assert discovered == []
     assert _stamps() == []
 
 
