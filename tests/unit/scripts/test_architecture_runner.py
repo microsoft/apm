@@ -846,6 +846,7 @@ transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
 transport-platform-egress-route-policy
 transport-platform-git-cache-identity
+transport-platform-git-cache-materialization
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight
 transport-platform-github-credential-class

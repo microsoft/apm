@@ -88,6 +88,7 @@
     "P-OWN-frozen-install-mutation-eligibility": "architecture owner (install-deployment.json): Frozen install mutation eligibility and post-deploy deployed-hash re-verification (req-lk-017)",
     "P-OWN-generated-content-footer-wording": "architecture owner (contracts-tooling.json): Generated-content footer ownership wording",
     "P-OWN-generated-python-artifact-membership": "architecture owner (contracts-tooling.json): Generated Python bytecode membership across copy, inventory, and cleanup",
+    "P-OWN-git-cache-checkout-materialization": "architecture owner (transport-auth-platform.json): Verify-before-reuse and materialization of cached Git checkouts into apm_modules",
     "P-OWN-git-cache-key-normalization": "architecture owner (transport-auth-platform.json): Git repository cache-key normalization",
     "P-OWN-git-child-repository-isolation": "architecture owner (transport-auth-platform.json): Git child-process repository location and URL rewrite safety",
     "P-OWN-git-clone-connect-retry": "architecture owner (transport-auth-platform.json): Bounded same-action HTTPS connection retry below auth and protocol selection",

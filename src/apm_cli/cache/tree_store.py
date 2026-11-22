@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import stat
 import sys
@@ -52,6 +53,7 @@ _GIT_DIR = ".git"
 _CHUNK = 1 << 20
 MATERIALIZE_ENV = "APM_MATERIALIZE"
 _STRATEGIES = ("clone", "link", "copy")
+_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 
 
 class TreeIntegrityError(RuntimeError):
@@ -150,9 +152,21 @@ def _validated_rel(value: object) -> str:
     return value
 
 
+def _file_record(raw: object) -> FileRecord:
+    """Parse one seal file record strictly: no coercion of a malformed field."""
+    if not isinstance(raw, list) or len(raw) != 4:
+        raise ValueError(f"invalid seal file record {raw!r}")
+    path, digest, size, executable = raw
+    if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+        raise ValueError(f"invalid seal digest {digest!r}")
+    if type(size) is not int or size < 0 or type(executable) is not bool:
+        raise ValueError(f"invalid seal size or mode in {raw!r}")
+    return FileRecord(_validated_rel(path), digest, size, executable)
+
+
 def _refuse_linked_seal(entry: Path) -> None:
-    """The seal and its ``.git`` parent must be real entries inside *entry*."""
-    for path in (entry / _GIT_DIR, seal_path(entry)):
+    """The entry, its ``.git`` and the seal must be real paths, not links."""
+    for path in (entry, entry / _GIT_DIR, seal_path(entry)):
         if path.is_symlink():
             raise TreeIntegrityError(f"cache entry {entry} has a linked seal path: {path}")
 
@@ -175,16 +189,13 @@ def read_seal(entry: Path) -> TreeSeal | None:
         data = json.loads(text)
         if data.get("version") != _SEAL_VERSION:
             raise ValueError(f"unsupported seal version {data.get('version')!r}")
-        files = tuple(
-            FileRecord(_validated_rel(path), str(digest), int(size), bool(executable))
-            for path, digest, size, executable in data["files"]
-        )
+        if not isinstance(data["files"], list) or not isinstance(data["dirs"], list):
+            raise ValueError("files and dirs must be lists")
+        files = tuple(_file_record(raw) for raw in data["files"])
         dirs = tuple(_validated_rel(path) for path in data["dirs"])
         failures = data.get("link_failures")
         if failures is not None and not isinstance(failures, list):
             raise ValueError("link_failures must be a list or null")
-        if not isinstance(data["files"], list) or not isinstance(data["dirs"], list):
-            raise ValueError("files and dirs must be lists")
         link_failures = (
             None if failures is None else tuple(_validated_rel(path) for path in failures)
         )
@@ -319,6 +330,16 @@ def copy_checkout(entry: Path, dest: Path) -> MaterializeStats:
     return stats
 
 
+def _evict(entry: Path) -> None:
+    """Remove a refused entry; a linked entry loses only the link, never its target."""
+    if entry.is_symlink():
+        entry.unlink()
+        return
+    from ..utils.file_ops import robust_rmtree
+
+    robust_rmtree(entry, ignore_errors=True)
+
+
 def materialize_cached_checkout(
     entry: Path,
     dest: Path,
@@ -348,9 +369,7 @@ def materialize_cached_checkout(
             seal = verified_seal(entry)
         except TreeIntegrityError:
             _log.warning("[!] Evicting cache entry that no longer matches its seal: %s", entry)
-            from ..utils.file_ops import robust_rmtree
-
-            robust_rmtree(entry, ignore_errors=True)
+            _evict(entry)
             raise
         if seal is None:
             validate_links()

@@ -3629,6 +3629,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Shared clone cache keys on a raw URL instead of the normalized identity.",
     ),
     MutationCase(
+        guard_id="transport-platform-git-cache-materialization",
+        rule_id="transport-platform-git-cache-materialization",
+        path="src/apm_cli/cache/tree_store.py",
+        old="            seal = verified_seal(entry)\n",
+        new="            seal = read_seal(entry)\n",
+        intent="A writable cache read trusts the stored seal without re-hashing the entry.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-child-environment",
         rule_id="transport-platform-git-child-environment",
         path="src/apm_cli/utils/git_env.py",

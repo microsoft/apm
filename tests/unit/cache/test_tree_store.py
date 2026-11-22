@@ -23,7 +23,10 @@ from apm_cli.utils import reflink
 from apm_cli.utils.path_security import PathTraversalError, safe_rmtree
 from apm_cli.utils.reflink import reflink_supported
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-git-cache-checkout-materialization"),
+]
 
 _FILES = {
     "apm.yml": b"name: pkg\nversion: 1.0.0\n",
@@ -358,5 +361,51 @@ def test_seal_with_a_malformed_link_verdict_is_evicted(tmp_path, monkeypatch, ba
         _materialize(entry, tmp_path / "dest", calls)
 
     assert calls == []
+    assert not entry.exists()
+    assert list((tmp_path / "dest").iterdir()) == []
+
+
+def test_linked_entry_root_is_refused_and_only_the_link_is_evicted(tmp_path, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("symlink creation needs privileges on Windows")
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "copy")
+    external = _entry(tmp_path / "external" / "checkout")
+    entry = tmp_path / "cache" / "full"
+    entry.parent.mkdir(parents=True)
+    entry.symlink_to(external, target_is_directory=True)
+    dest = tmp_path / "dest"
+
+    with pytest.raises(TreeIntegrityError, match="linked seal path"):
+        _materialize(entry, dest)
+
+    assert not entry.is_symlink()
+    assert not entry.exists()
+    assert (external / "apm.yml").read_bytes() == _FILES["apm.yml"]
+    assert not (external / ".git" / tree_store.SEAL_NAME).exists()
+    assert list(dest.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda record: record.__setitem__(2, record[2] + 0.5),
+        lambda record: record.__setitem__(3, "false"),
+        lambda record: record.__setitem__(2, True),
+        lambda record: record.__setitem__(1, "not-a-digest"),
+        lambda record: record.pop(),
+    ],
+    ids=["fractional-size", "string-mode", "bool-size", "bad-digest", "short-record"],
+)
+def test_seal_with_a_malformed_file_record_is_evicted(tmp_path, monkeypatch, mutate):
+    monkeypatch.setenv(tree_store.MATERIALIZE_ENV, "copy")
+    entry = _entry(tmp_path / "cache" / "full")
+    _materialize(entry, tmp_path / "seed")
+    data = json.loads(seal_path(entry).read_text(encoding="utf-8"))
+    mutate(data["files"][0])
+    seal_path(entry).write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(TreeIntegrityError, match="malformed seal"):
+        _materialize(entry, tmp_path / "dest")
+
     assert not entry.exists()
     assert list((tmp_path / "dest").iterdir()) == []
