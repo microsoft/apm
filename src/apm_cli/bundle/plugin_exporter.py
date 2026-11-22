@@ -47,6 +47,7 @@ from .packer import PackResult
 from .plugin_layout import (
     PLUGIN_ROOT_DIRS,
     deployed_rendering_extension,
+    deployed_rendering_rank,
     duplicate_plugin_renderings,
     find_plugin_root_sources,
 )
@@ -704,7 +705,13 @@ def _plugin_rel_for_deployed_path(
     else:
         return None
 
-    if plugin_parts[0] == "commands" and plugin_parts[-1].endswith(".prompt.md"):
+    # A target's own commands keep their name; only prompt renderings rename.
+    native_command = len(parts) >= 3 and parts[0].startswith(".") and parts[1] == "commands"
+    if (
+        not native_command
+        and plugin_parts[0] == "commands"
+        and plugin_parts[-1].endswith(".prompt.md")
+    ):
         plugin_parts[-1] = _rename_prompt(plugin_parts[-1])
     return PurePosixPath(*plugin_parts).as_posix()
 
@@ -1445,8 +1452,11 @@ def _drop_duplicate_renderings(
     A multi-target install deploys a primitive once per target (for example
     ``.claude/agents/rv.md`` and ``.github/agents/rv.agent.md``); the bundle
     carries only the rendering :mod:`.plugin_layout` prefers. Each file's
-    deployed path names the target that rendered it.
+    deployed path names the target that rendered it. Renderings that export to
+    one plugin path (Claude ``commands/x.md`` and Copilot ``prompts/x.prompt.md``)
+    keep the preferred one, named by its deployed path when dropped.
     """
+    components = _drop_same_path_renderings(components, project_root, dropped)
     duplicates = duplicate_plugin_renderings(
         {
             rel: deployed_rendering_extension(portable_relpath(source, project_root))
@@ -1455,6 +1465,28 @@ def _drop_duplicate_renderings(
     )
     dropped.extend(sorted(duplicates))
     return [component for component in components if component[1] not in duplicates]
+
+
+def _drop_same_path_renderings(
+    components: list[tuple[Path, str]], project_root: Path, dropped: list[str]
+) -> list[tuple[Path, str]]:
+    """Keep the preferred of several deployed renderings that share one plugin path.
+
+    Only files every target rendered are ranked; any other shared path stays a
+    collision for :func:`_merge_file_map` to report.
+    """
+    by_rel: dict[str, list[tuple[int | None, int, str]]] = {}
+    for index, (source, rel) in enumerate(components):
+        deployed = portable_relpath(source, project_root)
+        by_rel.setdefault(rel, []).append((deployed_rendering_rank(deployed), index, deployed))
+    skip: set[int] = set()
+    for members in by_rel.values():
+        if len(members) < 2 or any(rank is None for rank, _index, _path in members):
+            continue
+        for _rank, index, deployed in sorted(members)[1:]:
+            skip.add(index)
+            dropped.append(deployed)
+    return [component for index, component in enumerate(components) if index not in skip]
 
 
 def _packed_renderings(file_map: dict[str, tuple[Path, str]], project_root: Path) -> dict[str, str]:

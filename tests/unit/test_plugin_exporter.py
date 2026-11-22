@@ -1153,6 +1153,37 @@ class TestExportPluginBundle:
         pack = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())["pack"]
         assert pack["renderings"] == expected
 
+    @pytest.mark.parametrize(
+        ("claude", "copilot", "packed"),
+        [
+            ("review.md", "review.prompt.md", "review.md"),
+            # A dotted prompt stem: the Claude command keeps its own name.
+            ("review.prompt.md", "review.prompt.prompt.md", "review.prompt.md"),
+        ],
+    )
+    def test_claude_and_copilot_commands_pack_once(self, tmp_path, claude, copilot, packed):
+        """#3686: one command rendering per primitive, the Claude one, without a collision."""
+        project = _setup_plugin_project(tmp_path)
+        deployed = []
+        for root, name, body in (
+            (".claude/commands", claude, "claude"),
+            (".github/prompts", copilot, "copilot"),
+        ):
+            path = project / root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+            deployed.append(f"{root}/{name}")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/cmd", depth=1, deployed_files=deployed)]
+        )
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning:
+            result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert sorted(p.name for p in (result.bundle_path / "commands").iterdir()) == [packed]
+        assert (result.bundle_path / "commands" / packed).read_text() == "claude"
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.
 

@@ -99,6 +99,21 @@ def deployed_rendering_extension(deployed_rel: str) -> str | None:
     (``.github/prompts/review.prompt.md`` -> ``commands/review.md``) reports
     ``.md``.
     """
+    suffix = deployed_rendering_suffix(deployed_rel)
+    return _PLUGIN_EXPORT_SUFFIX.get(suffix, suffix) if suffix else None
+
+
+def deployed_rendering_rank(deployed_rel: str) -> int | None:
+    """Rank a deployed rendering by :data:`PLUGIN_RENDERING_PREFERENCE` (lower is kept)."""
+    suffix = deployed_rendering_suffix(deployed_rel)
+    for preference in PLUGIN_RENDERING_PREFERENCE.values():
+        if suffix in preference:
+            return preference.index(suffix)
+    return None
+
+
+def deployed_rendering_suffix(deployed_rel: str) -> str | None:
+    """Return the deploying target's own extension for *deployed_rel*, if any."""
     from ..integration.targets import KNOWN_TARGETS
 
     kinds = {
@@ -111,7 +126,7 @@ def deployed_rendering_extension(deployed_rel: str) -> str | None:
             if kind not in kinds or not mapping.subdir or not mapping.extension:
                 continue
             if deployed_rel.startswith(prefix) and deployed_rel.endswith(mapping.extension):
-                return _PLUGIN_EXPORT_SUFFIX.get(mapping.extension, mapping.extension)
+                return mapping.extension
     return None
 
 
