@@ -846,23 +846,26 @@ def _kept_mcp_entries(
 
     Empty when nothing was kept, so audit output is unchanged for every other project.
     """
-    from ..install.mcp.write_receipts import kept_mcp_writes
+    from ..install.mcp.write_receipts import kept_mcp_writes, unusable_mcp_evidence
 
     kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
-    if not kept:
+    details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
+    # Unusable evidence keeps every entry it lists, so it is reported too.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope)
+    if unusable is not None:
+        details.append(unusable)
+    if not details:
         return ()
     check = CheckResult(
         name="kept-mcp-entries",
         passed=False,
         message=(
-            f"{len(kept)} MCP entr(ies) APM wrote for servers it no longer deploys were kept "
-            "because APM cannot confirm they are unchanged -- "
+            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
+            "longer deploys because it cannot confirm them -- "
             f"{remediation.KEPT_MCP_ENTRIES.clause()}"
         ),
         remediations=(remediation.KEPT_MCP_ENTRIES,),
-        details=[
-            f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept
-        ],
+        details=details,
     )
     return (check,)
 
@@ -1626,7 +1629,7 @@ def run_baseline_checks(
                 deployment_root, LockFile(), resolved_targets, user_scope=user_scope
             )
         )
-        result.checks.extend(_kept_mcp_entries(project_root, LockFile(), user_scope=user_scope))
+        result.checks.extend(_kept_mcp_entries(deployment_root, LockFile(), user_scope=user_scope))
         return result
 
     if lock is None or manifest is None:
@@ -1699,7 +1702,7 @@ def run_baseline_checks(
         )
         # 7c: MCP entries kept without a lockfile because they could not be proven (#4737)
         or any(
-            _run(check) for check in _kept_mcp_entries(project_root, lock, user_scope=user_scope)
+            _run(check) for check in _kept_mcp_entries(deployment_root, lock, user_scope=user_scope)
         )
     ):
         return result

@@ -176,7 +176,7 @@ the [policy schema](../policy-schema/).
 ### `kept-mcp-entries`
 
 - **What it verifies.** That no MCP entry is left over that an install without `apm.lock.yaml` kept because it could not confirm the entry is the one APM wrote for a server it no longer deploys (the entry changed since, or this machine's record of it is unusable). It appears only when such an entry exists.
-- **Fails when.** A kept entry is still in its config and the lockfile does not manage its server. The detail names the server, the config file and the runtime.
+- **Fails when.** A kept entry is still in its config and the lockfile does not manage its server, or this machine's MCP write record cannot be used. The detail names the server, the config file and the runtime, or the unusable record file.
 - **Remediation.** Remove each entry you no longer use, or declare the server again, then run `apm install`. Audit does not change the native configuration.
 
 ### `content-integrity`

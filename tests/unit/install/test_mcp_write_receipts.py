@@ -203,3 +203,112 @@ def test_a_symlinked_evidence_file_is_refused(project: Path, tmp_path: Path) -> 
 
     with pytest.raises(PathTraversalError):
         McpWriteReceipts.open(project, user_scope=False)
+
+
+def test_the_exact_written_key_is_recorded_not_an_identical_user_entry(project: Path) -> None:
+    """A registry server written under its short key never claims the user's full-name entry."""
+    full = "owner/demo"
+    _write_entries(project, {full: ENTRY})
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        _write_entries(project, {**_existing(project), "demo": ENTRY})
+        note_mcp_write("copilot", full, mcp_native_hash(ENTRY), None)
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert set(_servers(project)) == {full}, "the user's identical entry must stay"
+    assert logger.removed == {full}
+
+
+def test_an_unreadable_config_keeps_its_evidence(project: Path) -> None:
+    _install_write(project, _Logger())
+    _config(project).write_text("{not json")
+    logger = _Logger()
+
+    _retire(project, logger)
+    forget_removed_mcp_writes(project, user_scope=False)
+
+    assert _config(project).read_text() == "{not json"
+    assert [w for w in logger.warnings if "cannot read that config" in w]
+    assert McpWriteReceipts.open(project, user_scope=False).writes, "evidence was dropped"
+    _write_entries(project, {SERVER: ENTRY})
+    _retire(project, _Logger())
+    assert _servers(project) == {}, "repaired config: the proven entry is retired"
+
+
+def test_a_removal_that_does_not_happen_keeps_the_record(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import apm_cli.integration.mcp_integrator_install as install_module
+
+    _install_write(project, _Logger())
+    monkeypatch.setattr(install_module, "_remove_native_entry", lambda *a, **k: None)
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert SERVER in _servers(project) and not logger.removed
+    assert [w for w in logger.warnings if "could not confirm its removal" in w]
+    kept = kept_mcp_writes(project, user_scope=False, managed=())
+    assert [write.name for write, _ in kept] == [SERVER]
+
+
+def test_exact_key_removal_handles_hermes_yaml_and_opencode_v2(project: Path) -> None:
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator_install import _remove_native_entry
+
+    hermes = ClientFactory.create_client("hermes", project_root=project, user_scope=True)
+    hermes_cfg = Path(hermes.get_config_path())
+    hermes_cfg.parent.mkdir(parents=True)
+    hermes_cfg.write_text("mcp_servers:\n  demo:\n    command: x\n  keep:\n    command: y\n")
+    opencode = ClientFactory.create_client("opencode", project_root=project, user_scope=False)
+    opencode_cfg = Path(opencode.get_config_path())
+    v2 = {"mcp": {"servers": {"demo": {"command": ["x"]}, "keep": {"command": ["y"]}}}}
+    opencode_cfg.write_text(json.dumps(v2))
+
+    _remove_native_entry(hermes, "demo", NullCommandLogger())
+    _remove_native_entry(opencode, "demo", NullCommandLogger())
+
+    import yaml
+
+    assert set(yaml.safe_load(hermes_cfg.read_text())["mcp_servers"]) == {"keep"}
+    assert set(json.loads(opencode_cfg.read_text())["mcp"]["servers"]) == {"keep"}
+
+
+def test_audit_reports_unusable_evidence(project: Path) -> None:
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.policy.ci_checks import _kept_mcp_entries
+
+    _install_write(project, _Logger())
+    McpWriteReceipts.open(project, user_scope=False).path.write_text("{not json")
+
+    (check,) = _kept_mcp_entries(project, LockFile(), user_scope=False)
+
+    assert check.name == "kept-mcp-entries" and not check.passed
+    assert any("Invalid MCP write evidence" in detail for detail in check.details)
+
+
+def test_audit_reads_user_scope_evidence_from_the_deployment_root(project: Path) -> None:
+    from apm_cli.factory import ClientFactory
+    from apm_cli.policy.ci_checks import run_baseline_checks
+
+    home = Path.home()
+    config = Path(
+        ClientFactory.create_client("copilot", project_root=home, user_scope=True).get_config_path()
+    )
+    config.parent.mkdir(parents=True, exist_ok=True)
+    with journal_mcp_writes(home, user_scope=True, logger=_Logger()):
+        config.write_text(json.dumps({"mcpServers": {SERVER: ENTRY}}))
+        note_mcp_write("copilot", SERVER, mcp_native_hash(ENTRY))
+    config.write_text(json.dumps({"mcpServers": {SERVER: {**ENTRY, "args": ["--edited"]}}}))
+    retire_undeclared_mcp_writes(
+        set(), project_root=home, user_scope=True, exclude=None, logger=_Logger()
+    )
+    apm_home = home / ".apm"
+    apm_home.mkdir(exist_ok=True)
+    (apm_home / "apm.yml").write_text("name: user\nversion: 1.0.0\n")
+
+    result = run_baseline_checks(apm_home, ci_mode=True)
+
+    kept = [check for check in result.checks if check.name == "kept-mcp-entries"]
+    assert kept and not kept[0].passed, [check.name for check in result.checks]

@@ -38,10 +38,9 @@ _log = logging.getLogger(__name__)
 _CANONICAL_HASH = re.compile(r"sha256:[0-9a-f]{64}")
 _VERSION = 1
 
-# (runtime, server name, fingerprint) of each entry the current install wrote.
-_journal: ContextVar[list[tuple[str, str, str | None]] | None] = ContextVar(
-    "apm_mcp_write_journal", default=None
-)
+# (runtime, server name, fingerprint, requested info) of each entry the current install wrote.
+_Write = tuple[str, str, str | None, dict | None]
+_journal: ContextVar[list[_Write] | None] = ContextVar("apm_mcp_write_journal", default=None)
 
 
 class McpWriteEvidenceError(ValueError):
@@ -103,11 +102,17 @@ class McpWrite:
         )
 
 
-def note_mcp_write(runtime: str, name: str, content_hash: str | None) -> None:
-    """Record that the current install wrote *name* for *runtime* (no-op outside a journal)."""
+def note_mcp_write(
+    runtime: str, name: str, content_hash: str | None, requested_info: dict | None = None
+) -> None:
+    """Record that the current install wrote *name* for *runtime* (no-op outside a journal).
+
+    *requested_info* is the server info the adapter wrote from; it selects the
+    exact native key the adapter used.
+    """
     journal = _journal.get()
     if journal is not None:
-        journal.append((runtime, name, content_hash))
+        journal.append((runtime, name, content_hash, requested_info))
 
 
 @contextmanager
@@ -202,14 +207,19 @@ class McpWriteReceipts:
 
             client = self._client(runtime)
             try:
-                self._entries[runtime] = (
+                entries = (
                     dict(MCPConflictDetector(client).get_existing_server_configs())
                     if client is not None
                     else None
                 )
             except Exception:
                 _log.debug("Unreadable MCP config for %s", runtime, exc_info=True)
-                self._entries[runtime] = None
+                entries = None
+            # Adapter readers return no entries for a config they cannot parse:
+            # that is not proof the entries are gone.
+            if entries == {} and not _parses(self._config(runtime)):
+                entries = None
+            self._entries[runtime] = entries
         return self._entries[runtime]
 
     def _fingerprint(self, runtime: str, key: str) -> str | None:
@@ -232,32 +242,20 @@ class McpWriteReceipts:
 
     # -- evidence ----------------------------------------------------------------
 
-    def record(self, writes: Iterable[tuple[str, str, str | None]]) -> None:
-        """Record entries this install wrote, read back from their config."""
+    def record(self, writes: Iterable[_Write]) -> None:
+        """Record entries this install wrote under the exact key the adapter used."""
+        from apm_cli.install.mcp.ownership import _native_config_key
+
         self._entries.clear()
-        for runtime, name, content_hash in writes:
+        for runtime, name, content_hash, requested_info in writes:
             client = self._client(runtime)
             if client is None:
                 continue
-            candidates = dict.fromkeys(
-                (
-                    name,
-                    client.determine_config_key(name, None, None),
-                )
-            )
-            existing = self._existing(runtime) or {}
-            key = next(
-                (
-                    candidate
-                    for candidate in candidates
-                    if candidate in existing
-                    and (
-                        content_hash is None
-                        or self._fingerprint(runtime, candidate) == content_hash
-                    )
-                ),
-                None,
-            )
+            key: str | None = _native_config_key(client, name, requested_info=requested_info)
+            if key not in (self._existing(runtime) or {}) or (
+                content_hash is not None and self._fingerprint(runtime, key) != content_hash
+            ):
+                key = None
             self.writes[(runtime, name)] = McpWrite(
                 runtime, name, self._config(runtime), key, content_hash
             )
@@ -301,14 +299,25 @@ class McpWriteReceipts:
             if write.name in declared or write.runtime == exclude:
                 continue
             if self._existing(write.runtime) is None:
+                logger.warning(
+                    f"Kept MCP server '{write.name}' in {self.display(write)}: APM cannot "
+                    "read that config to confirm the entry, so its record is kept."
+                )
                 continue
             if not self._present(write):
                 self.forget(write)
             elif self.proven(write):
                 _remove_native_entry(self._client(write.runtime), write.key, logger)
                 self._entries.clear()
-                self.forget(write)
-                removed.add(write.name)
+                if self._existing(write.runtime) is not None and not self._present(write):
+                    self.forget(write)
+                    removed.add(write.name)
+                else:
+                    self.mark_kept(write)
+                    logger.warning(
+                        f"Kept MCP server '{write.name}' in {self.display(write)}: APM could "
+                        "not confirm its removal. Remove the entry if you no longer use it."
+                    )
             else:
                 self.mark_kept(write)
                 logger.warning(
@@ -392,6 +401,43 @@ def forget_removed_mcp_writes(project_root: Path, *, user_scope: bool) -> None:
         store.save()
     except (OSError, ValueError):
         _log.debug("MCP write evidence left unchanged after cleanup", exc_info=True)
+
+
+def unusable_mcp_evidence(project_root: Path, *, user_scope: bool) -> str | None:
+    """Read-only: why this installation's MCP write evidence exists but cannot be used."""
+    try:
+        McpWriteReceipts.open(project_root, user_scope=user_scope)
+    except McpWriteEvidenceError as exc:
+        return str(exc)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _parses(config: str | None) -> bool:
+    """Whether the config file at *config* is absent, empty or well-formed."""
+    if config is None:
+        return True
+    path = Path(config)
+    try:
+        if not path.is_file():
+            return True
+        text = path.read_text(encoding="utf-8")
+        if not text.strip():
+            return True
+        if path.suffix == ".toml":
+            import tomllib
+
+            tomllib.loads(text)
+        elif path.suffix in {".yaml", ".yml"}:
+            import yaml
+
+            yaml.safe_load(text)
+        elif path.suffix == ".json":
+            json.loads(text)
+    except Exception:
+        return False
+    return True
 
 
 def kept_mcp_writes(
