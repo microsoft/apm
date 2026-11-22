@@ -200,6 +200,49 @@ def native_policy_violation(root: Path, policy: Any) -> str | None:
     return _mcp_policy_violation(Path(root), manifest, policy)
 
 
+def _native_retire_reason(verdict: Any, root: Path, package_info: Any, policy: Any) -> str | None:
+    """Why install would park this native plugin now, or ``None`` while it is admitted."""
+    from apm_cli.install.exec_gate import bin_deploy_denial
+
+    bin_rule = bin_deploy_denial(package_info, policy) if (root / "bin").exists() else None
+    why = (
+        (verdict.reason if not verdict.allowed else None)
+        or native_policy_violation(root, policy)
+        or (f"org policy {bin_rule} blocks its bin/ executables" if bin_rule else None)
+    )
+    return None if why is None else str(why)
+
+
+def _judged_root(record: Any, install_path: Path, modules_dir: Path) -> tuple[Path | None, str]:
+    """The root to judge: the ``apm_modules`` source, else the deployed copy it verified.
+
+    Without its source, the deployed root is judged only while it still carries
+    the lock record's fingerprint; a missing root has nothing to retire, and a
+    root that differs fails closed (the returned reason).
+    """
+    from apm_cli.core.scope import InstallScope, get_deploy_root
+    from apm_cli.native_plugins.layout import plugins_root
+    from apm_cli.native_plugins.scopes import PROJECT_MARKETPLACE_PATH
+
+    if install_path.is_dir():
+        return install_path, ""
+    user_scope = record.marketplace_path != PROJECT_MARKETPLACE_PATH
+    deploy_root = get_deploy_root(InstallScope.USER) if user_scope else Path(modules_dir).parent
+    deployed = plugins_root(deploy_root) / record.name
+    if deployed.is_symlink() or not deployed.is_dir():
+        return None, ""
+    try:
+        observed = fingerprint_native_claude_source(deployed, portable=not user_scope)
+    except ClaudeNativePluginError:
+        observed = None
+    if observed != record.fingerprint:
+        return None, (
+            "its apm_modules source is missing and the deployed copy differs from "
+            "apm.lock.yaml, so its approval cannot be checked"
+        )
+    return deployed, ""
+
+
 def locked_native_retired(
     lockfile: Any, modules_dir: Path, trust_ctx: Callable[[], Any], policy: Any
 ) -> dict[str, str]:
@@ -208,46 +251,64 @@ def locked_native_retired(
     Judged by install's own owners: the trust owner's whole-plugin admission
     (a deny, a revoked or changed pin, an MCP or bin/ grant now missing), the
     org MCP policy under ``enforcement: block`` and the org ``bin_deploy`` rule
-    for a plugin that ships ``bin/``. A package that cannot be read is left to
-    install, which reports it.
+    for a plugin that ships ``bin/``. Without its ``apm_modules`` source the
+    verified deployed root is judged instead (:func:`_judged_root`). A package
+    that cannot be read is left to install, which reports it.
     """
     from apm_cli.install.drift import _build_package_info
-    from apm_cli.install.exec_gate import (
-        ExecPolicyUnavailable,
-        bin_deploy_denial,
-        resolve_package_key,
-    )
+    from apm_cli.install.exec_gate import ExecPolicyUnavailable, resolve_package_key
     from apm_cli.security.trust import admit_native_plugin
 
     retired: dict[str, str] = {}
     for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
         if key == "." or dep.native_plugin is None:
             continue
-        install_path = dep.to_dependency_ref().get_install_path(modules_dir)
-        if not install_path.is_dir():
+        root, unverified = _judged_root(
+            dep.native_plugin, dep.to_dependency_ref().get_install_path(modules_dir), modules_dir
+        )
+        if unverified:
+            retired[key] = unverified
+        if root is None:
             continue
         try:
-            package_info = _build_package_info(dep, install_path)
+            package_info = _build_package_info(dep, root)
             pkg_key = resolve_package_key(package_info, key)
             verdict = admit_native_plugin(
                 trust_ctx(),
                 tuple(dict.fromkeys((pkg_key, pkg_key.split("#", 1)[0]))),
-                install_path,
+                root,
                 transitive=(dep.depth or 1) > 1,
             )
         except (ExecPolicyUnavailable, OSError, ValueError):
             continue
-        bin_rule = (
-            bin_deploy_denial(package_info, policy) if (install_path / "bin").exists() else None
-        )
-        retired_why = (
-            (verdict.reason if not verdict.allowed else None)
-            or native_policy_violation(install_path, policy)
-            or (f"org policy {bin_rule} blocks its bin/ executables" if bin_rule else None)
-        )
-        if retired_why is not None:
-            retired[key] = str(retired_why)
+        why = _native_retire_reason(verdict, root, package_info, policy)
+        if why is not None:
+            retired[key] = why
     return retired
+
+
+def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) -> None:
+    """Refuse a run that would carry a native plugin the gates no longer admit (#3921).
+
+    A run whose targets never reach a native plugin (``--target copilot`` on a
+    Claude-only plugin) keeps its row whole. It may only while install's own
+    verdict still admits the plugin; otherwise the run fails before any write.
+    """
+    from apm_cli.install.plan_admission import native_plugin_verdict
+    from apm_cli.install.template import effective_allow_map
+
+    verdict = native_plugin_verdict(dep_key, package_info, effective_allow_map(ctx), ctx=ctx)
+    if verdict is None:
+        return
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    why = _native_retire_reason(verdict, Path(package_info.install_path), package_info, policy)
+    if why is not None:
+        raise ClaudeNativePluginError(
+            f"Native plugin '{dep_key}' is no longer allowed ({why}), and this run's "
+            "targets do not reach it, so it cannot be retired here. Run 'apm install' "
+            "with its targets to retire it, approve it with 'apm approve', or remove it "
+            "with 'apm uninstall'."
+        )
 
 
 def _intact_source(

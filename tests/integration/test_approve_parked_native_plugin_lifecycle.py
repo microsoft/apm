@@ -201,6 +201,31 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     assert not _claude_deployed(world, plugin), _evidence(retired)
 
 
+def test_a_narrowed_run_refuses_to_carry_a_denied_claude_plugin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """--target copilot never reaches a user Claude plugin, so it cannot keep it once denied."""
+    world = _World(tmp_path, apm_binary_path, "user", "claude")
+    plugin = _claude_plugin(world.packages)
+    installed = _parked_install(world, plugin)
+    approved = world.run_hint(installed.stdout, r"Approve: (apm approve -g \S+)")
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", "-g")
+    assert deployed.returncode == 0, _evidence(deployed)
+    assert _claude_deployed(world, plugin), _evidence(deployed)
+    denied = world.apm("deny", "-g", str(plugin))
+    assert denied.returncode == 0, _evidence(denied)
+
+    narrowed = world.apm("install", "-g", "--target", "copilot")
+    assert narrowed.returncode == 1, _evidence(narrowed)
+    assert "is no longer allowed" in narrowed.stdout + narrowed.stderr, _evidence(narrowed)
+    assert _claude_deployed(world, plugin), _evidence(narrowed)
+
+    retired = world.apm("install", "-g")
+    assert retired.returncode == 0, _evidence(retired)
+    assert not _claude_deployed(world, plugin), _evidence(retired)
+
+
 def _codex_world(tmp_path: Path, apm_binary_path: Path) -> tuple[_World, Path]:
     world = _World(tmp_path, apm_binary_path, "user", "codex")
     stand_in = write_codex_stand_in(world.packages.parent / "codex-bin")
