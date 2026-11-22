@@ -3,7 +3,7 @@
 Closes the regression-trap gap flagged by the review panel for PR #1149:
 no integration-with-fixtures tier coverage exercised the GitLab REST v4
 raw-file path through ``GitHubPackageDownloader.download_package``. The
-unit tests in ``tests/test_github_downloader.py`` cover the strategy
+unit tests in ``tests/unit/deps/test_github_downloader.py`` cover the strategy
 class directly, but they bypass ``download_package``, virtual-file
 package materialisation, and lockfile entry construction.
 
@@ -39,6 +39,8 @@ import pytest
 from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.component
 
 _CRED_FILL_PATCH = patch(
     "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",

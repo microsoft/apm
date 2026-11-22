@@ -16,6 +16,8 @@ import subprocess
 import pytest
 import yaml
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture
 def temp_project(tmp_path):

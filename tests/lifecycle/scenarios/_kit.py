@@ -39,6 +39,7 @@ import yaml
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.model.expected import expected_deployed, expected_exit, expected_lock_rows
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
@@ -87,7 +88,27 @@ class Known:
     match: str
 
     def __post_init__(self) -> None:
-        assert re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
+
+
+# A Claude-format plugin installs whole to .agents/plugins/<name>/ for claude and
+# copilot at project scope (#3921): its carried kinds have no loose surface there.
+# The observation still looks for them, so a loose deploy fails the model.
+_CLAUDE_NATIVE = frozenset({"p-native-claude", "p-native-claude-bin"})
+_WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
+
+
+def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
+    """``expected_deployed`` with the #3921 project-scope native projection applied."""
+    return frozenset(
+        cell
+        for cell in expected_deployed(model, kinds)
+        if not (
+            model.scope == "project"
+            and cell[0].split(":")[0] in _CLAUDE_NATIVE
+            and cell[2] in _WHOLE_PLUGIN_TARGETS
+        )
+    )
 
 
 @dataclass
@@ -101,7 +122,7 @@ class StepModel:
     seen: set[str]
 
     def allowed_surfaces(self) -> frozenset[str]:
-        return frozenset("/".join(cell) for cell in expected_deployed(self.model, self.kinds))
+        return frozenset("/".join(cell) for cell in projected_cells(self.model, self.kinds))
 
     def converged_before(self) -> bool:
         return self.converged
@@ -191,7 +212,7 @@ def assert_changes(changed: Iterable[str], patterns: Iterable[str], *, label: st
 @contextmanager
 def known_defect(tracking: str, match: str) -> Iterator[None]:
     """A block that must keep failing with *match* until *tracking* is fixed (strict)."""
-    assert re.fullmatch(r"#\d+", tracking), tracking
+    assert TRACKING.fullmatch(tracking) and match, (tracking, match)
     try:
         yield
     except AssertionError as exc:
@@ -406,7 +427,7 @@ class Scenario:
         """``pkg/kind/target`` cells the model allows, limited to observable surfaces."""
         return frozenset(
             "/".join(cell)
-            for cell in expected_deployed(self.model, self.kinds)
+            for cell in projected_cells(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
         )
 
@@ -706,22 +727,24 @@ class Credit:
 
     def __post_init__(self) -> None:
         assert self.node.startswith(f"{NODE_ROOT}/test_"), self.node
-        assert self.tracking is None or re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert self.tracking is None or TRACKING.fullmatch(self.tracking), self.tracking
 
 
 def credits(
     module_file: str,
     rows: Mapping[str, Iterable[Mapping[str, str]]],
-    known: Mapping[str, str] | None = None,
+    known: Mapping[str, Known] | None = None,
 ) -> tuple[Credit, ...]:
     """``CREDITS`` of one module: test id (``name[param]``) -> the assignments it proves.
 
-    *known* maps a test id to the issue of the strict known cell it carries.
+    *known* maps a test id to the strict known cell it carries (issue and signature).
     """
     module = f"{NODE_ROOT}/{Path(module_file).name}"
     known = known or {}
     return tuple(
-        Credit(f"{module}::{test}", dict(assignment), known.get(test))
+        Credit(
+            f"{module}::{test}", dict(assignment), known[test].tracking if test in known else None
+        )
         for test, assignments in rows.items()
         for assignment in assignments
     )

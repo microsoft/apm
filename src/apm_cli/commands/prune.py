@@ -7,7 +7,6 @@ from pathlib import Path
 import click
 
 from apm_cli.core.remediation import (
-    COPILOT_PLUGIN_REGISTRATION_STALE,
     HOOK_CONFIG_STALE,
     PROJECT_MANIFEST_MISSING,
     PRUNE_INCOMPLETE,
@@ -152,6 +151,13 @@ def prune(ctx, dry_run):
             project_root = Path.cwd()
             lockfile_path = get_lockfile_path(project_root)
             lockfile = LockFile.read(lockfile_path)
+            native_before = _native_ownership(lockfile, lockfile_path)
+            from ..native_plugins.uninstall import retire_gated_native_plugins
+
+            # A gate-retired native record makes this a lock-changing prune (#3921).
+            native_retired = not dry_run and retire_gated_native_plugins(
+                lockfile, apm_modules_dir, manifest_file(project_root), project_root, logger
+            )
         except LockfileFormatError as e:
             logger.error(str(e))
             sys.exit(1)
@@ -214,9 +220,17 @@ def prune(ctx, dry_run):
             and not missing_orphaned_keys
             and not owner_violations
             and not absent_staging
+            and not native_retired
         ):
             logger.nothing_to_prune()
-            _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
+            _resync_native_plugins(
+                project_root,
+                apm_modules_dir,
+                lockfile,
+                logger,
+                dry_run,
+                native_before,
+            )
             return
 
         planned_pruned_keys = set(decision.removed_keys)
@@ -426,7 +440,14 @@ def prune(ctx, dry_run):
                 )
                 sys.exit(1)
 
-        _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run)
+        _resync_native_plugins(
+            project_root,
+            apm_modules_dir,
+            lockfile,
+            logger,
+            dry_run,
+            native_before,
+        )
 
         logger.render_summary()
 
@@ -493,26 +514,38 @@ def prune(ctx, dry_run):
         _retire_native_registration(registration_token)
 
 
-def _resync_native_plugins(project_root, apm_modules_dir, lockfile, logger, dry_run: bool) -> None:
-    """Rebuild APM's Copilot plugin registration from surviving locked state."""
-    try:
-        from ..agent_plugins.errors import AgentPluginError
-        from ..copilot_plugins.registrar import resync_native_plugins
-        from ..copilot_plugins.settings import CopilotSettingsCollisionError
+def _native_ownership(lockfile, lockfile_path):
+    """Native ownership and lock bytes before prune mutates the lock (req-na-004)."""
+    from ..claude_plugins.registrar import native_ownership
 
-        resync_native_plugins(
-            project_root=project_root,
-            modules_dir=apm_modules_dir,
+    if lockfile is None:
+        return None, None
+    return native_ownership(lockfile), lockfile_path.read_bytes()
+
+
+def _resync_native_plugins(
+    project_root, apm_modules_dir, lockfile, logger, dry_run: bool, native_before
+) -> None:
+    """Retire pruned and gate-retired native plugins through the shared owner."""
+    from ..claude_plugins.admission import ClaudeNativePluginError
+    from ..native_plugins.uninstall import reconcile_after_uninstall
+
+    ownership, lock_bytes = native_before
+    try:
+        reconcile_after_uninstall(
+            deploy_root=project_root,
+            modules_dir=apm_modules_dir.absolute(),
             scope=InstallScope.PROJECT,
             lockfile=lockfile,
             logger=logger,
+            ownership=ownership,
+            lock_bytes=lock_bytes,
+            lockfile_path=get_lockfile_path(project_root),
             dry_run=dry_run,
         )
-    except (CopilotSettingsCollisionError, AgentPluginError, OSError) as registration_error:
-        logger.warning(
-            f"GitHub Copilot plugin registration could not be updated: {registration_error} "
-            f"{COPILOT_PLUGIN_REGISTRATION_STALE.sentence()}"
-        )
+    except ClaudeNativePluginError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
 
 
 def _publish_native_registration(project_root: Path):

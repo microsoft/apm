@@ -32,6 +32,8 @@ DOWNLOAD = "src/apm_cli/install/phases/download.py"
 MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 # A no-op update runs install when a copy contradicts the lock (#4385).
 UPDATE = "src/apm_cli/commands/update.py"
+# Pack renders Claude rules routed to AGENTS.md only from attested copies (#4005).
+ROUTED_RULES = "src/apm_cli/integration/instruction_integrator.py"
 
 # (path, function, callee, purpose): each consumer asks the verdict owner.
 _ROUTES = (
@@ -50,7 +52,7 @@ _ROUTES = (
 # Closed world: who may call each half of the verdict.
 _ALLOWED_CALLERS = {
     "locked_content_mismatch(": frozenset(
-        {OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD, MCP_VIEW, UPDATE}
+        {OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD, MCP_VIEW, UPDATE, ROUTED_RULES}
     ),
     "matches_fresh_legacy_plugin_hash(": frozenset({OWNER, LEGACY}),
 }

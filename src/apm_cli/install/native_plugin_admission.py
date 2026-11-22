@@ -117,7 +117,7 @@ def finalize_native_plugin(
     )
 
     # For a natively registered plugin, PRESENCE IS DEPLOYMENT: Copilot loads the
-    # WHOLE directory live from apm_modules, so every component the trust owner
+    # WHOLE deployed copy of the plugin root, so every component the trust owner
     # finds (root mcp.json, .apm/ layout, native root layout) gates registration.
     present_types = (
         set(native_plugin_exec_types(Path(install_path))) if install_path is not None else set()
@@ -148,10 +148,75 @@ def finalize_native_plugin(
             f"are not approved. {approve.sentence()}",
             package=package_name,
         )
+        _record_rejected(ctx, package_info)
         return result
 
     result["native_plugin"] = True
+    queue_native_agent_plugin(ctx, package_name, package_info, diagnostics)
     return result
+
+
+def _record_rejected(ctx: InstallContext | None, package_info: Any) -> None:
+    """Name a refused Agent Plugin, so its legacy registration retires (#3921)."""
+    plugin = getattr(getattr(package_info, "package", None), "agent_plugin", None)
+    name = getattr(getattr(plugin, "identity", None), "name", None)
+    if ctx is not None and isinstance(name, str):
+        ctx.native_rejected_names.add(name)
+
+
+def queue_native_agent_plugin(
+    ctx: InstallContext | None,
+    package_name: str,
+    package_info: Any,
+    diagnostics: DiagnosticCollector,
+) -> None:
+    """Hand an admitted Agent Plugin to the shared native owner (#3921).
+
+    Copilot loads it from the deployed profile root like any other native
+    plugin; the lock records its root and digest. A plugin whose name is not
+    a safe path segment, or whose root holds a symlink, is refused with one
+    diagnostic and never declared (req-na-002).
+    """
+    if ctx is None:
+        return
+    from pathlib import Path
+
+    from apm_cli.claude_plugins.admission import (
+        ClaudeNativePlugin,
+        ClaudeNativePluginError,
+        fingerprint_native_claude_source,
+        queue_native_claude,
+    )
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.native_plugins.record import NativePluginRecordError, is_safe_plugin_name
+    from apm_cli.native_plugins.scopes import COPILOT
+
+    package = getattr(package_info, "package", None)
+    plugin = getattr(package, "agent_plugin", None)
+    name = getattr(getattr(plugin, "identity", None), "name", None)
+    root = Path(package_info.install_path)
+    try:
+        if not is_safe_plugin_name(name):
+            raise NativePluginRecordError(f"its name {name!r} is not a safe plugin name")
+        fingerprint = fingerprint_native_claude_source(
+            root, portable=not is_user_scope(getattr(ctx, "scope", None))
+        )
+    except (ClaudeNativePluginError, NativePluginRecordError) as exc:
+        diagnostics.warn(
+            f"Agent Plugin not activated for GitHub Copilot: {exc}. Fix the plugin, or "
+            "exclude copilot from this dependency's targets.",
+            package=package_name,
+        )
+        _record_rejected(ctx, package_info)
+        return
+    queue_native_claude(
+        ctx,
+        package_name,
+        ClaudeNativePlugin(
+            package_name, name, root.resolve(), fingerprint, harnesses=frozenset({COPILOT})
+        ),
+        diagnostics,
+    )
 
 
 def verify_native_plugin_cache(

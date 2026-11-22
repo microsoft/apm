@@ -22,6 +22,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 _QUOTED = re.compile(r"^lockfile_version: '(\d+)'$", re.MULTILINE)
@@ -36,7 +37,7 @@ def test_unquoted_lockfile_version_replays_unchanged(tmp_path: Path, apm_binary_
     rules.mkdir(parents=True)
     dump_yaml({"name": "alpha", "version": "1.0.0"}, package / "apm.yml")
     (rules / "alpha.instructions.md").write_text(
-        '---\napplyTo: "**"\n---\n# alpha\n', encoding="ascii"
+        '---\napplyTo: "**/*.md"\n---\n# alpha\n', encoding="ascii"
     )
     dump_yaml(
         {

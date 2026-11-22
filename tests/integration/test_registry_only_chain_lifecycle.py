@@ -34,6 +34,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX git shim"),
+    pytest.mark.e2e,
 ]
 
 

@@ -41,6 +41,9 @@ def _make_package_info(package_dir, name="test-pkg"):
     )
 
 
+_PY_SCOPED = "---\napplyTo: '**/*.py'\n---\n\n"
+
+
 class TestInstructionIntegrator:
     """Test instruction integration logic."""
 
@@ -1137,7 +1140,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1174,7 +1177,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "test.instructions.md").write_text("# Test")
+        (inst_dir / "test.instructions.md").write_text(_PY_SCOPED + "# Test")
 
         pkg_info = _make_package_info(pkg)
         self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1188,7 +1191,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "security.instructions.md").write_text("# Security")
+        (inst_dir / "security.instructions.md").write_text(_PY_SCOPED + "# Security")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1203,8 +1206,8 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
-        (inst_dir / "testing.instructions.md").write_text("# Testing")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
+        (inst_dir / "testing.instructions.md").write_text(_PY_SCOPED + "# Testing")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1235,7 +1238,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# APM rules")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# APM rules")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(
@@ -1257,7 +1260,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# APM rules")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# APM rules")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(
@@ -1279,7 +1282,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Updated")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Updated")
 
         pkg_info = _make_package_info(pkg)
         managed = {".claude/rules/python.md"}
@@ -1295,7 +1298,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1328,9 +1331,27 @@ class TestClaudeRulesIntegration:
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
 
-    def test_unconditional_rule_has_no_frontmatter(self):
-        """Instructions without applyTo become unconditional rules."""
+    def test_unconditional_rule_routes_to_agents_md(self):
+        """Project instructions without applyTo load from AGENTS.md, not rules (#3939)."""
         (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "general.instructions.md").write_text(
+            "---\ndescription: General guidelines\n---\n\n# General\n\nAlways lint."
+        )
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.target_paths == []
+        assert not (self.project_root / ".claude" / "rules" / "general.md").exists()
+
+    def test_unconditional_rule_has_no_frontmatter(self):
+        """A blocked AGENTS.md route keeps unconditional rules without frontmatter."""
+        (self.project_root / ".claude").mkdir()
+        (self.project_root / "CLAUDE.md").write_text("# Team notes\n")
 
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
