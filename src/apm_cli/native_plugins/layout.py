@@ -99,7 +99,8 @@ _C_ESCAPES.update({"\\": "\\", '"': '"'})
 
 def _read_rules(path: Path) -> list[str]:
     """Lines of a ``.gitattributes``; git skips a UTF-8 BOM and never decodes."""
-    return path.read_text(encoding="utf-8-sig", errors="surrogateescape").splitlines()
+    text = path.read_text(encoding="utf-8", errors="surrogateescape")
+    return (text[1:] if text.startswith("\ufeff") else text).splitlines()
 
 
 def _unquote(line: str) -> tuple[str, str] | None:
