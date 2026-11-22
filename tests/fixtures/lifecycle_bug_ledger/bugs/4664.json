@@ -1,0 +1,14 @@
+{
+  "issue": 4664,
+  "fixed_in": "Unreleased",
+  "summary": "apm update and apm deps update completed their install transaction, discarding its deploy journal, before their own lockfile writer committed, so a failed lockfile write left the new deploys on disk under the old apm.lock.yaml; a transaction completed inside an open writer now keeps its journal until the lockfile reaches disk and restores every deployed path when that commit fails.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_lockfile_commit_point_lifecycle.py::test_a_failed_lockfile_write_after_an_update_restores_deploys_and_the_lock"
+  ]
+}

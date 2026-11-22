@@ -163,8 +163,12 @@ def _collect_apm_components(
     # agents/ -> agents/
     _collect_flat(apm_dir / "agents", "agents", components, skipped=skipped_links)
 
-    # skills/ -> skills/ (preserve sub-directory structure)
-    _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
+    # skills/ -> skills/ (preserve sub-directory structure). When .apm/ authors
+    # no skill, the root skills/ install deploys is packed instead (#4709).
+    if _packs_root_skills(apm_dir.parent):
+        _collect_recursive(apm_dir.parent / "skills", "skills", components, skipped=skipped_links)
+    else:
+        _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
     _collect_recursive(
@@ -184,6 +188,30 @@ def _collect_apm_components(
     _collect_recursive(apm_dir / "extensions", "extensions", components, skipped=skipped_links)
 
     return components
+
+
+def _packs_root_skills(package_root: Path) -> bool:
+    """Whether pack takes skills from root ``skills/`` beside an ``.apm/`` tree.
+
+    Only when ``.apm/skills/`` authors no skill and the root ``skills/`` holds
+    one: the skills a path install deploys then come from the root (see
+    ``SkillIntegrator.skill_source_paths``). With skills in both, ``.apm/``
+    stays the publishing source and the root directory is reported skipped.
+    """
+    from ..integration.skill_integrator import SkillIntegrator
+
+    root = package_root / "skills"
+    authored = package_root / ".apm" / "skills"
+    # A skill is a directory holding a SKILL.md file, as install counts them.
+    if root.is_symlink() or (
+        authored.is_dir()
+        and any(child.is_dir() and (child / "SKILL.md").is_file() for child in authored.iterdir())
+    ):
+        return False
+    return any(
+        source.parent == root
+        for source in SkillIntegrator.skill_source_paths(package_root).values()
+    )
 
 
 def _collect_root_plugin_components(
@@ -230,6 +258,8 @@ def _warn_skipped_source_links(project_root: Path, links: list[Path], logger=Non
 def _warn_skipped_root_components(project_root: Path, logger=None) -> None:
     """Explain why plugin-native root sources are not packed."""
     for source in find_plugin_root_sources(project_root):
+        if source == "skills" and _packs_root_skills(project_root):
+            continue
         if source == "hooks.json":
             message = (
                 "Skipping root-level hooks.json because .apm/ is present. "
@@ -918,26 +948,62 @@ def _warn_parked_executables(dep: LockedDependency, install_path: Path, logger=N
             _rich_warning(message, symbol="warning")
 
 
-def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
-    """Return True if the unattested cache holds hooks-config or MCP-config.
+def _cache_config_kinds(install_path: Path) -> tuple[str, ...]:
+    """Return the config kinds (``hooks``, ``MCP``) the unattested cache holds.
 
     Hooks/MCP *configuration* (``.apm/hooks/*.json``, root ``hooks.json`` /
-    ``hooks/``, ``.mcp.json``) is merged into shared host settings by
-    ``apm install`` and is never recorded in the lockfile ``deployed_files``.
-    Because plugin pack now emits only lockfile-attested content, such config
-    is dropped from the bundle. This probe drives a transition warning that
-    names the dependency whose cached config will NOT be packed; it never
-    copies cache bytes. Hook *scripts* recorded in ``deployed_files`` are
-    unaffected and still pack.
+    ``hooks/``, ``.mcp.json``) is never copied from the cache: plugin pack
+    emits only lockfile-attested content. This probe drives a transition
+    warning that names the dependency whose cached config will NOT be packed;
+    it never copies cache bytes.
     """
     if not install_path.is_dir():
-        return False
+        return ()
+    kinds: list[str] = []
+    if _collect_hooks_from_apm(install_path / ".apm") or _collect_hooks_from_root(install_path):
+        kinds.append("hooks")
     # A dependency's own .mcp.json is authored by that package, not rendered by APM.
     if _collect_mcp(install_path, exclude_apm_managed=False):
-        return True
-    if _collect_hooks_from_apm(install_path / ".apm"):
-        return True
-    return bool(_collect_hooks_from_root(install_path))
+        kinds.append("MCP")
+    return tuple(kinds)
+
+
+def _packs_hook_config(components: list[tuple[Path, str]]) -> bool:
+    """Whether *components* carry a hooks config file (``hooks.json`` or ``hooks/*.json``)."""
+    for _source, rel in components:
+        parts = PurePosixPath(rel).parts
+        if parts == ("hooks.json",) or (
+            len(parts) == 2 and parts[0] == "hooks" and parts[1].endswith(".json")
+        ):
+            return True
+    return False
+
+
+def _warn_unpacked_dependency_config(
+    dep: LockedDependency,
+    install_path: Path,
+    dep_components: list[tuple[Path, str]],
+    logger=None,
+) -> None:
+    """Name the dependency hooks/MCP config the bundle will not carry (#2013).
+
+    A hooks file the lockfile attests (``deployed_files`` plus its hash) packs
+    with the dependency's components, so only hook config that reaches no
+    packed hooks file is named, and MCP config, which install merges into
+    shared settings and never attests.
+    """
+    kinds = [
+        kind
+        for kind in _cache_config_kinds(install_path)
+        if kind != "hooks" or not _packs_hook_config(dep_components)
+    ]
+    if kinds:
+        _emit_pack_warning(
+            f"dependency {dep.repo_url} contributed {'/'.join(kinds)} config that "
+            "is not attested in apm.lock.yaml; it will NOT be packed. "
+            "Attested primitives (skills/agents/etc.) are unaffected.",
+            logger,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1120,21 +1186,10 @@ def export_plugin_bundle(
                 # MCP-only or hooks-config-only package). Skip it cleanly.
                 dep_components = []
 
-            # Transition warning (#2013): dependency hooks/MCP *config* lives in
-            # the unattested cache and is never packed. Name the dependency so
-            # an author who relied on it merging into shared settings is not
-            # surprised by the silent exclusion. Attested primitives are packed
-            # regardless of this warning.
-            if _cache_would_contribute_hooks_or_mcp(install_path):
-                _warn = (
-                    f"dependency {dep.repo_url} contributed hooks/MCP config that "
-                    "is not attested in apm.lock.yaml; it will NOT be packed. "
-                    "Attested primitives (skills/agents/etc.) are unaffected."
-                )
-                if logger:
-                    logger.warning(_warn)
-                else:
-                    _rich_warning(_warn, symbol="warning")
+            # Transition warning (#2013): name dependency hooks/MCP config the
+            # bundle will not carry, so an author who relied on it merging into
+            # shared settings is not surprised by the exclusion.
+            _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 

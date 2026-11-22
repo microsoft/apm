@@ -110,6 +110,7 @@ fallback. See
 | Flag | Default | Description |
 |---|---|---|
 | `--no-policy` | off | Skip org policy enforcement for this invocation. Loudly logged. Does not bypass `apm audit --ci`. Env: `APM_POLICY_DISABLE=1`. |
+| `--policy SOURCE` | none | Also enforce this policy: a local path, `owner/repo`, or `https://` URL (same forms as `apm audit --policy`). It combines with any auto-discovered org policy and can only add constraints. Use it on remotes auto-discovery cannot reach (plain git) and in air-gapped installs (a local path needs no network). A source that cannot be loaded (unreachable, missing, malformed, or publishing no policy) fails the command before anything is written, whatever `policy.fetch_failure_default` says; a cached copy within the stale-cache window counts as loaded. Not valid with `--global` or `--no-policy`. See [Enforce a policy discovery cannot reach](../../../enterprise/apm-policy/#enforce-a-policy-discovery-cannot-reach). |
 | `--audit <off\|warn\|block>` | (config/policy) | Run a content audit over the files this install deploys. `warn` records findings in the summary; `block` halts the install on critical findings and restores the files it deployed to their previous bytes. Overrides your `audit-on-install` config but cannot relax an org policy floor. Requires the `external-scanners` experimental flag. |
 | `--no-audit` | off | Disable the install-time audit for this invocation (equivalent to `--audit off`). Cannot relax an org policy `block` floor. |
 | `--trust-transitive-mcp` | off | Deploy, for this run only, MCP servers from transitive packages that are self-defined or set their own `registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys, including a pinned one whose definition changed. Install warns that consent is not saved: the next install without the flag removes them. To keep one, run [`apm approve`](../approve/#pinned-approvals) on its package and commit `apm.yml`. The flag never writes `apm.yml` and does not bypass the executables gate or org policy. |
@@ -236,7 +237,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Ctrl-C or SIGTERM, before `apm.lock.yaml` is written, it puts every written
   file back, removes the directories it created and left empty, keeps
   `apm.lock.yaml` unchanged and prints
-  `Deployed files restored to their previous state.` A failure after the
+  `Deployed files restored to their previous state.` A refused `--frozen`
+  install restores them the same way. A failure after the
   lockfile is written (for example an MCP connection collision) keeps the
   deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore: `apm audit --ci` reports the files the lockfile does not
@@ -306,7 +308,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   aside (or delete it if it holds no edits), then run `apm install`. That
   rewrites only that skill; edited files elsewhere are kept.
   Invalid evidence fails explicitly.
-- **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) the file is kept and named, the files that could be written are written and recorded, the kept file keeps its previous lockfile entry, and install exits `1`. Move the file aside and rerun `apm install` to restore it, or run `apm export-patch` to keep the edit as an upstream patch (project scope). Install never suggests `--force` here: it would also deploy despite critical security findings. A project last installed by an APM before 0.37 upgrades automatically: its lockfile hash proves a file APM wrote when the file still holds those bytes and git tracks it unchanged, so install re-renders it once and records receipts. An edited file is kept and named; install exits `1` only when the package brings new content for it. `apm install --frozen` verifies such a project without rewriting it.
+- **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) install refuses before writing anything: it names every such file, leaves every deployed file and `apm.lock.yaml` unchanged, and exits `1`. Move the file aside and rerun `apm install` to restore it, or run `apm export-patch` to keep the edit as an upstream patch (project scope). Install never suggests `--force` here: it would also deploy despite critical security findings. A project last installed by an APM before 0.37 upgrades automatically: its lockfile hash proves a file APM wrote when the file still holds those bytes and git tracks it unchanged, so install re-renders it once and records receipts. An edited file is kept and named; install exits `1` only when the package brings new content for it. `apm install --frozen` verifies such a project without rewriting it.
   Creating this state requires filesystem hard-link support. State-write failures
   fail the install, which restores the files it wrote.
   Audit and dry-run never establish this authority. Frozen install may record
@@ -461,7 +463,16 @@ the same hook merge a source install uses, once the exact bundle key printed by
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. `apm uninstall` does not remove local-bundle content. A
+them first. Canvas extensions a bundle deploys (with the `canvas` experimental
+flag) follow the same approval, re-check and retirement; a reinstall retires
+the extensions the new bundle content no longer ships. Retiring one bundle's
+extensions never removes another bundle's or anything outside the target's
+extensions directory, and an extension you edited is kept.
+Org policy `dependencies.deny` applies to the bundle's package
+name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
+denied bundle is refused before any file is written. A bundle whose
+`apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
+remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
 whole and registers it without locating or executing Copilot. Stable Copilot

@@ -19,6 +19,16 @@ POLICY_SOURCE_FORMS_HELP = (
     "local file path."
 )
 
+# ``apm install`` / ``apm update`` --policy: an explicit source composed
+# with auto-discovery (#1925), never a replacement for it.
+EXPLICIT_POLICY_SOURCE_HELP = (
+    "Also enforce this policy, combined with auto-discovered org policy "
+    "(tighten-only: it can add constraints, never remove them). "
+    + POLICY_SOURCE_FORMS_HELP
+    + " A source that cannot be loaded fails the command before any write. "
+    "Not valid with --global."
+)
+
 # One-line help for ``policy.dependencies.require_pinned_constraint``.
 # Kept alongside POLICY_SOURCE_FORMS_HELP so docs/tests share one
 # source of truth.  ASCII only per

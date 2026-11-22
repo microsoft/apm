@@ -10,7 +10,7 @@ from pathlib import Path
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
-from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
@@ -99,16 +99,55 @@ def _is_root_hook_descriptor(
     return stem == "hooks" or stem.startswith("hooks-") or stem.endswith("-hooks")
 
 
+def _walk_dereferencing(source_root: Path, package_root: Path) -> list[Path]:
+    """List files under *source_root* as local materialization lays them out.
+
+    In-package symlinks (files and directories) appear under their link
+    names, as the local package copy dereferences them; a link that escapes
+    *package_root*, dangles or cycles raises ``PathTraversalError``, as that
+    copy aborts.
+    """
+    package_root = package_root.resolve()
+    found: list[Path] = []
+    pending = [(source_root, frozenset({source_root.resolve()}))]
+    while pending:
+        directory, visited = pending.pop()
+        for entry in directory.iterdir():
+            target = entry
+            if entry.is_symlink():
+                try:
+                    target = ensure_path_within(entry.resolve(strict=True), package_root)
+                except OSError as exc:
+                    raise PathTraversalError(f"Unresolvable hook bundle link {entry}") from exc
+            if target.is_dir():
+                if target.resolve() in visited:
+                    raise PathTraversalError(f"Circular hook bundle link {entry}")
+                pending.append((entry, visited | {target.resolve()}))
+            elif target.is_file():
+                found.append(entry)
+    return sorted(found)
+
+
 def iter_deployable_hook_bundle_files(
     source_root: Path,
     *,
     descriptor_files: set[Path] | None = None,
     exclude_json_files: bool = False,
     include_package_metadata: bool = False,
+    dereference_within: Path | None = None,
 ) -> Iterator[Path]:
-    """Yield source files that hook bundle materialization may copy."""
+    """Yield source files that hook bundle materialization may copy.
+
+    With *dereference_within*, in-package symlinks are followed as the local
+    package copy follows them (see :func:`_walk_dereferencing`).
+    """
     descriptors = descriptor_files or set()
-    for source_file in sorted(source_root.rglob("*")):
+    candidates = (
+        sorted(source_root.rglob("*"))
+        if dereference_within is None
+        else _walk_dereferencing(source_root, dereference_within)
+    )
+    for source_file in candidates:
         if exclude_json_files and source_file.suffix.lower() == ".json":
             _log.debug(
                 "Skipping JSON hook bundle asset %s for recursive-scanner target",
@@ -116,7 +155,7 @@ def iter_deployable_hook_bundle_files(
             )
             continue
         if (
-            source_file.is_symlink()
+            (source_file.is_symlink() and dereference_within is None)
             or not source_file.is_file()
             or source_file.name == MARKER_FILENAME
             or (source_file.name == "package.json" and not include_package_metadata)

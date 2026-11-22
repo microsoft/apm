@@ -1,7 +1,6 @@
 """Shared component-collection surface for bundle output profiles."""
 
 from .plugin_exporter import (
-    _cache_would_contribute_hooks_or_mcp,
     _cache_would_contribute_primitives,
     _collect_apm_components,
     _collect_deployed_components,
@@ -19,11 +18,11 @@ from .plugin_exporter import (
     _warn_parked_executables,
     _warn_skipped_root_components,
     _warn_skipped_source_links,
+    _warn_unpacked_dependency_config,
     _write_bundle_sources,
 )
 
 __all__ = [
-    "_cache_would_contribute_hooks_or_mcp",
     "_cache_would_contribute_primitives",
     "_collect_apm_components",
     "_collect_deployed_components",
@@ -41,5 +40,6 @@ __all__ = [
     "_warn_parked_executables",
     "_warn_skipped_root_components",
     "_warn_skipped_source_links",
+    "_warn_unpacked_dependency_config",
     "_write_bundle_sources",
 ]
