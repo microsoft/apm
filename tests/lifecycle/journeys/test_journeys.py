@@ -124,6 +124,7 @@ from tests.lifecycle.world.clone import clone, remove_tree
 from tests.lifecycle.world.scopes import use_policy
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshot, ArtifactSnapshotSet
+from tests.utils.isolated_apm_environment import DURABLE_ENVIRONMENT_ROOTS
 from tests.utils.lifecycle_state import LifecycleStateSnapshot
 from tests.utils.local_scripted_https_proxy import ScriptedResponse
 
@@ -1075,6 +1076,10 @@ class JourneyRun:
             text = f"{ran.stdout}\n{ran.stderr}"
             found += [f"advice {advice!r} does not print {p!r}" for p in promises if p not in text]
             found += [f"diagnostic advice changed {path}" for path in _raw_changes(before, after)]
+            # The step's forbidden lines hold for the advice and the reruns too.
+            forbidden = [_sub(str(line)) for line in facts.step.get("forbidden_lines") or ()]
+            raw = f"{ran.result.stdout}\n{ran.result.stderr}"
+            found += [f"advice {advice!r} prints forbidden {f!r}" for f in forbidden if f in raw]
             for command in failing:
                 again = self._execute(command.line, probe).result
                 if again.returncode != command.result.returncode:
@@ -1082,11 +1087,18 @@ class JourneyRun:
                         f"after the advice {command.line!r} exits {again.returncode}, "
                         f"not {command.result.returncode}"
                     )
+                rerun = f"{again.stdout}\n{again.stderr}"
+                found += [
+                    f"rerun {command.line!r} prints forbidden {f!r}"
+                    for f in forbidden
+                    if f in rerun
+                ]
             facts.record(
                 "O8b",
                 Evidence(
                     exit=ran.result.returncode,
                     output_matches=[re.escape(p) for p in promises],
+                    output_forbids=[re.escape(f) for f in forbidden],
                 ),
                 ran.result,
             )
@@ -1097,10 +1109,24 @@ class JourneyRun:
 
     @staticmethod
     def _durable(world) -> ArtifactSnapshotSet:
-        """Every durable root a diagnostic command could write: project, HOME, APM_HOME."""
-        roots = {"project": world.project, "home": world.home}
-        if not world.apm_home.is_relative_to(world.home):
-            roots["apm_home"] = world.apm_home
+        """Every durable root a diagnostic command could write.
+
+        The project, HOME, APM_HOME, the cache and every durable root the
+        environment selects (tests/utils/isolated_apm_environment.py
+        DURABLE_ENVIRONMENT_ROOTS: XDG, cache, GitHub and Azure config). A root
+        inside another is covered by it.
+        """
+        candidates = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
+        if world.cache_root is not None:
+            candidates["cache"] = world.cache_root
+        for name in DURABLE_ENVIRONMENT_ROOTS:
+            if world.env.get(name):
+                candidates[name.lower()] = Path(world.env[name])
+        resolved = {name: path.resolve() for name, path in candidates.items()}
+        roots: dict[str, Path] = {}
+        for name, path in sorted(resolved.items(), key=lambda item: len(item[1].parts)):
+            if not any(path.is_relative_to(kept) for kept in roots.values()):
+                roots[name] = path
         return ArtifactSnapshotSet.capture(roots)
 
     def _remediate(self, world, actions, text: str) -> list[str]:
@@ -1552,6 +1578,26 @@ def test_journey_files_agree_with_the_index() -> None:
                     f"{path.stem} step {step['n']}: {p}" for p in docs_problems(step["docs"])
                 ]
     assert problems == []
+
+
+@pytest.mark.parametrize("variable", ["APM_CACHE_DIR", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"])
+def test_o8b_sees_a_write_under_an_environment_root_outside_home(
+    lifecycle_world, variable: str
+) -> None:
+    """O8b's no-write check covers every durable root the environment selects."""
+    world = lifecycle_world
+    selected = Path(world.env.get(variable) or world.root / variable.lower())
+    selected.mkdir(parents=True, exist_ok=True)
+    probe = replace(world, env={**world.env, variable: str(selected)})
+    assert not selected.resolve().is_relative_to(world.home.resolve()), "a root outside HOME"
+    written = selected / "written-by-advice.txt"
+    assert not written.exists(), "the root starts without the file"
+    before = JourneyRun._durable(probe)
+    written.write_text("x\n", encoding="ascii")
+    after = JourneyRun._durable(probe)
+
+    changes = _raw_changes(before, after)
+    assert any(path.endswith("written-by-advice.txt") for path in changes), changes
 
 
 @pytest.mark.parametrize("path", _params())
