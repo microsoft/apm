@@ -75,6 +75,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "managed-paths-unresolved": _FAULT,
     "native-mcp-ownership-unrecorded": "covered by the audit --ci native-mcp-ownership "
     "check tests in tests/unit/policy/test_ci_checks.py",
+    "withheld-hook-paths-unchecked": "the reported state is an unreadable or misplaced hook "
+    "directory; tests/unit/install/test_withheld_hooks.py pins the unchecked rows",
     "withheld-hook-file-unrecorded": "executed by test_ownership_siblings::"
     "test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected",
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"

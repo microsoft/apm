@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,7 +11,11 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
-from apm_cli.install.withheld_hooks import locked_withheld_hook_files, withheld_hook_files
+from apm_cli.install.withheld_hooks import (
+    HookPathsUnknown,
+    locked_withheld_hook_files,
+    withheld_hook_files,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-executable-item-admission")]
@@ -157,3 +162,40 @@ def test_a_symlinked_hook_path_is_named_as_the_link(
 
     assert found == [".github/hooks/h-hook-session.json"]
     assert (hooks / "h-hook-session.json").is_symlink()
+
+
+def test_a_hooks_directory_outside_the_project_is_never_named_for_deletion(
+    tmp_path: Path,
+) -> None:
+    package = _package(tmp_path / "modules", "session.json")
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "h-hook-session.json").write_text("{}", encoding="utf-8")
+    (project / ".github").mkdir(parents=True)
+    (project / ".github" / "hooks").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(HookPathsUnknown, match="resolves outside the project"):
+        withheld_hook_files(package, project, [KNOWN_TARGETS["copilot"]], recorded=set())
+
+    assert (outside / "h-hook-session.json").read_text(encoding="utf-8") == "{}"
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions")
+def test_an_unreadable_hook_source_directory_fails_closed(tmp_path: Path) -> None:
+    lock, modules, project = _locked(tmp_path, [])
+    hooks_source = next(modules.rglob("hooks"))
+    hooks_source.chmod(0)
+    try:
+        # A glob over the unreadable directory finds no hooks: the package
+        # looks like it declares no executables.
+        with patch("apm_cli.install.exec_gate.current_exec_decision", return_value=(None, ())):
+            found = locked_withheld_hook_files(
+                lock, modules, lambda: None, project, [KNOWN_TARGETS["copilot"]]
+            )
+    finally:
+        hooks_source.chmod(0o755)
+
+    assert [(path, key) for path, key, _ in found] == [("", "acme/h-hook")]
+    assert "cannot be read" in found[0][2]
+    assert (project / ".github" / "hooks" / "h-hook-session.json").is_file()

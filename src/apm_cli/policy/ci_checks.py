@@ -1508,20 +1508,29 @@ def _check_hook_approval_pins(
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
     if withheld:
+        files = [row for row in withheld if row[0]]
+        unchecked = [row for row in withheld if not row[0]]
+        message = []
+        if files:
+            message.append(
+                f"{len(files)} file(s) sit at the hook path of a package whose hooks the "
+                "executables gate withholds, and apm.lock.yaml does not record them -- "
+                f"{remediation.WITHHELD_HOOK_FILE_UNRECORDED.clause()}"
+            )
+        if unchecked:
+            message.append(
+                f"{len(unchecked)} withheld package(s) whose hook paths cannot be checked -- "
+                f"{remediation.WITHHELD_HOOK_PATHS_UNCHECKED.clause()}"
+            )
         return CheckResult(
             name="hook-approval-pins",
             passed=False,
-            message=(
-                f"{len(withheld)} unrecorded file(s) or unchecked hook path(s) of a package "
-                "whose hooks the executables gate withholds -- "
-                f"{remediation.WITHHELD_HOOK_FILE_UNRECORDED.clause()}"
-            ),
+            message="; ".join(message),
             details=[
                 f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
-                if path
-                else f"{key}: {reason}"
-                for path, key, reason in withheld
+                for path, key, reason in files
             ]
+            + [f"{key}: {reason}" for _, key, reason in unchecked]
             + [mismatch.describe() for mismatch in mismatches],
         )
     if not mismatches:

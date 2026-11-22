@@ -40,15 +40,49 @@ def withheld_hook_files(
         if getattr(target, "name", None) != "copilot":
             continue
         try:
+            _require_readable_hook_dirs(Path(package_info.install_path))
             destinations = copilot_hook_destinations(integrator, package_info, project_root, target)
         except (OSError, ValueError) as exc:
             raise HookPathsUnknown(str(exc)) from exc
         for path in destinations:
             # Lexical, never resolved: a symlink is named as the link itself.
             rel = path.relative_to(project_root).as_posix()
-            if rel not in recorded and (path.is_file() or path.is_symlink()):
-                found.add(rel)
+            if rel in recorded or not (path.is_file() or path.is_symlink()):
+                continue
+            _require_parent_inside(path, project_root, rel)
+            found.add(rel)
     return sorted(found)
+
+
+def _require_readable_hook_dirs(package_root: Path) -> None:
+    """Raise ``OSError`` for a hook source directory that exists but cannot be listed.
+
+    A glob over an unreadable directory finds nothing, which would read as
+    "no hooks" and skip the package.
+    """
+    import os
+
+    for hooks_dir in (package_root / ".apm" / "hooks", package_root / "hooks"):
+        if hooks_dir.is_dir():
+            with os.scandir(hooks_dir) as entries:
+                next(entries, None)
+
+
+def _require_parent_inside(path: Path, project_root: Path, rel: str) -> None:
+    """Raise :class:`HookPathsUnknown` when *path*'s directory leaves the project.
+
+    Only the parent chain is resolved, never the leaf, so a symlinked hook
+    file is still named as itself; a symlinked hooks directory pointing
+    elsewhere is never named for deletion.
+    """
+    try:
+        inside = path.parent.resolve().is_relative_to(project_root.resolve())
+    except (OSError, RuntimeError):
+        inside = False
+    if not inside:
+        raise HookPathsUnknown(
+            f"the directory of {rel} resolves outside the project; inspect it manually"
+        )
 
 
 def locked_withheld_hook_files(
@@ -93,6 +127,7 @@ def locked_withheld_hook_files(
         if not install_path.is_dir():
             continue
         try:
+            _require_readable_hook_dirs(install_path)
             package_info = _build_package_info(dep, install_path)
             status, allowed = current_exec_decision(trust_ctx, package_info, dep.get_unique_key())
         except (ExecPolicyUnavailable, OSError, ValueError) as exc:
@@ -138,7 +173,11 @@ def announce_withheld_hook_files(
     """
     if logger is None:
         return
-    from apm_cli.core.remediation import WITHHELD_HOOK_FILE_UNRECORDED, kept_file_message
+    from apm_cli.core.remediation import (
+        WITHHELD_HOOK_FILE_UNRECORDED,
+        WITHHELD_HOOK_PATHS_UNCHECKED,
+        kept_file_message,
+    )
 
     package = getattr(package_info, "package", None)
     label = getattr(package, "name", None) or package_name or "unknown"
@@ -149,7 +188,7 @@ def announce_withheld_hook_files(
     except HookPathsUnknown as exc:
         logger.warning(
             f"{label}: cannot check its hook paths for files apm.lock.yaml does not record "
-            f"({exc}); 'apm audit --ci' fails until they can be checked.",
+            f"({exc}). {WITHHELD_HOOK_PATHS_UNCHECKED.sentence()}",
             symbol="warning",
         )
         return
