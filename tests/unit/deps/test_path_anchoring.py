@@ -146,6 +146,18 @@ class TestCorruptLockfile:
             == (tmp_path / "packages" / "lib-06").resolve()
         )
 
+    def test_parents_anchoring_to_different_directories_stay_ambiguous(
+        self, tmp_path: Path
+    ) -> None:
+        """#4731: two same-named libraries in different directories still fail."""
+        sibling = _local("_local/lib-04", "./packages/lib-04")
+        from_root = _local("_local/lib-05", "./packages/lib-05")
+        elsewhere = _local("_local/lib-05", "../vendor/lib-05", resolved_by="_local/lib-04")
+        child = _local("_local/lib-06", "../lib-06", resolved_by="_local/lib-05")
+
+        with pytest.raises(LocalResolutionError, match="ambiguous resolved_by parent"):
+            resolve_local_dep_dir(child, _lockfile(sibling, from_root, elsewhere, child), tmp_path)
+
     def test_cycle_raises(self, tmp_path: Path) -> None:
         a = _local("_local/a", "../a", resolved_by="_local/b")
         b = _local("_local/b", "../b", resolved_by="_local/a")
