@@ -312,9 +312,13 @@ def enforce_content_types(ctx: InstallContext) -> None:
         return
     from apm_cli.policy.install_preflight import emit_check_violations
     from apm_cli.policy.models import CIAuditResult
-    from apm_cli.policy.policy_checks import check_content_types
+    from apm_cli.policy.policy_checks import check_content_types, package_content_roots
 
-    check = check_content_types(_package_roots(ctx), policy.manifest)
+    base = getattr(getattr(ctx, "apm_package", None), "package_path", None) or ctx.project_root
+    roots = package_content_roots(
+        ctx.deps_to_install, base_dir=Path(base), modules_dir=ctx.apm_modules_dir
+    )
+    check = check_content_types(roots, policy.manifest)
     if check.passed:
         return
     severity = "block" if policy.enforcement == "block" else "warn"
@@ -328,20 +332,3 @@ def enforce_content_types(ctx: InstallContext) -> None:
             audit_result=CIAuditResult(checks=[check]),
             policy_source=fetch.source or "unknown",
         )
-
-
-def _package_roots(ctx: InstallContext) -> dict[str, Path]:
-    """Display key -> directory of each resolved package's content (local source or apm_modules)."""
-    base = Path(
-        getattr(getattr(ctx, "apm_package", None), "package_path", None) or ctx.project_root
-    )
-    roots: dict[str, Path] = {}
-    for dep in ctx.deps_to_install:
-        if dep.is_local and dep.local_path:
-            path = Path(dep.local_path).expanduser()
-            path = path if path.is_absolute() else base / path
-        else:
-            path = dep.get_install_path(ctx.apm_modules_dir)
-        if path.is_dir():
-            roots[dep.get_display_name()] = path.resolve()
-    return roots

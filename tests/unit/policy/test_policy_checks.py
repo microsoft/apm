@@ -791,6 +791,17 @@ class TestContentTypes:
         )
         assert package_content_kinds(root) == {"instruction", "prompt", "skill", "hook"}
 
+    def test_plugin_root_and_unnamed_apm_dirs_fail_closed(self, tmp_path):
+        from apm_cli.policy.policy_checks import check_content_types, package_content_kinds
+
+        root = self._package(
+            tmp_path, "SKILL.md", "agents/reviewer.md", "commands/c.md", ".apm/rules/r.md"
+        )
+        assert package_content_kinds(root) == {"skill", "agent", "command", "rules"}
+        policy = ManifestPolicy(content_types={"allow": ["skill", "agents", "commands"]})
+        (subject,) = check_content_types({"p": root}, policy).violation_subjects()
+        assert "rules" in subject.reason
+
     @pytest.mark.parametrize(
         ("allow", "passed"),
         [

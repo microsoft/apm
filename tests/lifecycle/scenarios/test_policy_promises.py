@@ -14,6 +14,7 @@ vacuously. Rows whose promise is under private tracking are strict xfail.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -121,3 +122,41 @@ def test_content_types_allow_list_keeps_other_types_out(lifecycle_world) -> None
     text = _text(result)
     assert "content_types" in text and "policy-g2-skills-only" in text, text
     assert "instruction" in text, text
+
+
+_SKILLS_ONLY = {
+    "name": "g2",
+    "version": "1.0",
+    "enforcement": "block",
+    "manifest": {"content_types": {"allow": ["skill"]}},
+}
+
+
+def test_content_types_refuse_a_plugin_root_agent(lifecycle_world) -> None:
+    """A plugin-format agents/ directory is an agent: allow [skill] refuses it before deploy."""
+    _serve_policy(lifecycle_world, "policy-g2-root-agent", _SKILLS_ONLY)
+    factory = LocalPackageFactory(lifecycle_world.root / "g2-agent")
+    package = factory.create("t-agent", version="1.0.0")
+    _skill(factory, package, "t-agent")
+    agents = Path(package.root) / "agents"
+    agents.mkdir()
+    (agents / "reviewer.md").write_text("---\nname: reviewer\n---\n\nReview.\n", encoding="utf-8")
+    result = driver.run(lifecycle_world, ["install", str(package.root)])
+    assert result.returncode == 1, _text(result)
+    deployed = [
+        p for p in lifecycle_world.project.rglob("reviewer*") if "apm_modules" not in p.parts
+    ]
+    assert not deployed, deployed
+    assert "content_types" in _text(result) and "agent" in _text(result), _text(result)
+
+
+def test_audit_ci_fails_a_lock_that_ships_a_disallowed_content_type(lifecycle_world) -> None:
+    """A package installed outside the policy still fails audit --ci under it."""
+    _serve_policy(lifecycle_world, "policy-g2-audit", _SKILLS_ONLY)
+    spec = _skill_and_instruction(lifecycle_world)
+    installed = driver.run(lifecycle_world, ["install", "--no-policy", spec])
+    assert installed.returncode == 0, _text(installed)
+    assert _instruction_deployed(lifecycle_world), _text(installed)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode != 0, _text(audit)
+    assert "content-types" in _text(audit) and "instruction" in _text(audit), _text(audit)
