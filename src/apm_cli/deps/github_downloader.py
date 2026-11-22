@@ -423,7 +423,9 @@ class GitHubPackageDownloader:
                     sparse_paths=sparse_paths,
                 )
 
-            checkout = self.auth_resolver.try_with_fallback(
+            pinned = getattr(type(cache), "pinned_checkout", None)
+            hit = pinned(cache, repository_url, locked_sha, sparse_paths) if pinned else None
+            checkout = hit or self.auth_resolver.try_with_fallback(
                 dep_ref.host or default_host(),
                 _checkout,
                 org=org,
@@ -1911,9 +1913,9 @@ class GitHubPackageDownloader:
                     resolved_ref.resolved_commit or resolved_ref.ref_name,
                     locked_sha=resolved_ref.resolved_commit,
                 )
-                # A shard keeps unresolvable links as text; the clone path
-                # below then raises the strict diagnostic (#3457).
-                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
+                # Shards keep bad links as text; the clone path below raises (#3457).
+                _sha, _env = resolved_ref.resolved_commit, self._git_env_dict()
+                validate_materialized_symlinks("git", _cached, None, env=_env, clean_for=_sha)
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():

@@ -478,6 +478,27 @@ def _write_link_plan(
             dest.chmod(mode | ((mode & 0o444) >> 2))
 
 
+_LINKS_CLEAN_MARKER = "apm-links-clean"
+
+
+def _links_clean_marker(repo_dir: Path) -> Path | None:
+    git_dir = repo_dir / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        return None
+    return git_dir / _LINKS_CLEAN_MARKER
+
+
+def _links_recorded_clean(repo_dir: Path, sha: str) -> bool:
+    marker = _links_clean_marker(repo_dir)
+    if marker is None or marker.is_symlink() or not marker.is_file():
+        return False
+    try:
+        recorded = marker.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return recorded == sha.strip().lower()
+
+
 def materialize_tracked_symlinks(
     git_exe: str,
     repo_dir: Path,
@@ -487,6 +508,7 @@ def materialize_tracked_symlinks(
     timeout: int = 30,
     extra_git_args: list[str] | None = None,
     strict: bool = True,
+    record_clean_for: str | None = None,
 ) -> list[str]:
     """Replace each tracked link in *paths* with its target content (#3457).
 
@@ -507,6 +529,11 @@ def materialize_tracked_symlinks(
     stay as Git link text for :func:`validate_materialized_symlinks` to
     reject when a package is selected from a shared checkout.
 
+    With ``record_clean_for`` (a commit SHA) and the whole repository in
+    scope, a tree with no unresolvable link is recorded in ``.git`` so that
+    :func:`validate_materialized_symlinks` can trust it for that commit
+    instead of listing the tree again on every cache hit.
+
     Returns the repository-relative links that were materialized.
     """
     plans, failures = _plan_tracked_symlinks(
@@ -526,6 +553,9 @@ def materialize_tracked_symlinks(
     )
     for link in sorted(plans):
         _write_link_plan(repo_dir, plans[link], checkout_bytes)
+    marker = _links_clean_marker(repo_dir)
+    if record_clean_for and paths is None and not failures and marker is not None:
+        marker.write_text(record_clean_for.lower() + "\n", encoding="ascii")
     return sorted(plans)
 
 
@@ -537,8 +567,16 @@ def validate_materialized_symlinks(
     env: dict[str, str] | None,
     timeout: int = 30,
     extra_git_args: list[str] | None = None,
+    clean_for: str | None = None,
 ) -> None:
-    """Reject escaping, broken or cyclic tracked links in *paths* before copy."""
+    """Reject escaping, broken or cyclic tracked links in *paths* before copy.
+
+    ``clean_for`` names the commit a verified cache checkout holds; a
+    whole-repository check is then answered by the clean record
+    :func:`materialize_tracked_symlinks` wrote for that commit, if any.
+    """
+    if clean_for and paths is None and _links_recorded_clean(repo_dir, clean_for):
+        return
     _, failures = _plan_tracked_symlinks(
         git_exe, repo_dir, paths, env=env, timeout=timeout, extra_git_args=extra_git_args
     )

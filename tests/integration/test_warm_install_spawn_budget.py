@@ -1,11 +1,13 @@
-"""Warm-cache installs spawn no git or gh process and make no avoidable request.
+"""Warm-cache installs spawn nothing per dependency and make no avoidable request.
 
 The floor guard for the warm journeys on the tree-10 offline mirror: once the
 cache holds every pinned commit, a no-op install and a ``--frozen`` replay need
-neither a subprocess nor the network, and a fresh install without a lockfile
-needs only one ref resolution per dependency (a tag may move, so it is always
-asked). A PATH shim counts every git/gh process the CLI starts itself (nested
-git invocations are not counted); the offline proxy counts every request.
+no network and no per-dependency process. The only process left is org-policy
+discovery reading the project's git remote, once per command. A fresh install
+without a lockfile also resolves each ref once (a tag may move, so it is always
+asked), which builds the git TLS settings once per process. A PATH shim counts
+every git/gh process the CLI starts itself (nested git invocations are not
+counted); the offline proxy counts every request.
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ pytestmark = [
 ]
 
 _SHIMMED = ("git", "gh")
+# The fixture project is not a git repository: no 'origin', then no remote.
+_REMOTE_READ = ["git remote get-url origin", "git remote"]
+_TLS_PROBE = "git config --null --show-scope --list"
 _TIMEOUT_S = 600
 
 
@@ -97,17 +102,17 @@ def _fresh(tree, seed: Path, destination: Path, *, lockfile: bool) -> Path:
     return destination
 
 
-def test_a_no_op_install_spawns_nothing_and_requests_nothing(warm) -> None:
+def test_a_no_op_install_reads_the_remote_once_and_requests_nothing(warm) -> None:
     journey, _tree, seed = warm
     before = (seed / "apm.lock.yaml").read_bytes()
 
     spawns, requests = journey.run(seed, "install")
 
-    assert (spawns, requests) == ([], 0)
+    assert (spawns, requests) == (_REMOTE_READ, 0)
     assert (seed / "apm.lock.yaml").read_bytes() == before
 
 
-def test_a_frozen_replay_from_a_warm_cache_spawns_nothing_and_requests_nothing(
+def test_a_frozen_replay_from_a_warm_cache_spawns_nothing_per_dependency(
     warm, tmp_path: Path
 ) -> None:
     journey, tree, seed = warm
@@ -115,19 +120,21 @@ def test_a_frozen_replay_from_a_warm_cache_spawns_nothing_and_requests_nothing(
 
     spawns, requests = journey.run(project, "install", "--frozen")
 
-    assert (spawns, requests) == ([], 0)
+    assert (spawns, requests) == (_REMOTE_READ, 0)
     assert (project / "apm.lock.yaml").read_bytes() == (seed / "apm.lock.yaml").read_bytes()
     assert sorted(p.name for p in (project / "apm_modules").rglob("apm.yml")) == sorted(
         p.name for p in (seed / "apm_modules").rglob("apm.yml")
     )
 
 
-def test_a_warm_install_spawns_nothing_and_resolves_each_ref_once(warm, tmp_path: Path) -> None:
+def test_a_warm_install_spawns_nothing_per_dependency_and_resolves_each_ref_once(
+    warm, tmp_path: Path
+) -> None:
     journey, tree, seed = warm
     project = _fresh(tree, seed, tmp_path / "warm", lockfile=False)
 
     spawns, requests = journey.run(project, "install")
 
-    assert spawns == []
+    assert sorted(spawns) == sorted([*_REMOTE_READ, _TLS_PROBE])
     assert requests <= len(tree.packages)
     assert (project / "apm.lock.yaml").read_bytes() == (seed / "apm.lock.yaml").read_bytes()

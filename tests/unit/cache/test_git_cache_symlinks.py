@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -217,3 +218,70 @@ def test_bare_materialization_resolves_links_over_caller_env(tmp_path: Path) -> 
     assert tree_bytes(installed) == EXPECTED_PKG
     assert compute_package_hash(installed) == GOLDEN_PKG_HASH
     assert (consumer / "pkg").is_dir()
+
+
+def _ls_tree_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def recording_run(argv, *args, **kwargs):
+        if "ls-tree" in argv:
+            calls.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_run)
+    return calls
+
+
+def test_a_clean_shard_is_validated_on_hit_without_listing_its_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, sha = build_link_origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), sha, locked_sha=sha)
+    calls = _ls_tree_calls(monkeypatch)
+
+    validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for=sha)
+    assert calls == []
+
+    validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for="0" * 40)
+    validate_materialized_symlinks("git", checkout, ["pkg"], env=neutral_git_env(), clean_for=sha)
+    assert len(calls) == 2, "another commit or a scoped check lists the tree again"
+
+
+def test_a_shard_with_an_unresolvable_link_is_never_recorded_clean(tmp_path: Path) -> None:
+    origin, sha = build_link_origin(tmp_path, {"pkg/escape.md": "../../outside.md"})
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), sha, locked_sha=sha)
+
+    with pytest.raises(ValueError, match=r"pkg/escape\.md.*outside the repository"):
+        validate_materialized_symlinks("git", checkout, None, env=neutral_git_env(), clean_for=sha)
+
+
+def test_a_pinned_hit_needs_no_git_and_refreshes_recency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, sha = build_link_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
+    os.utime(checkout.parent, (0, 0))
+
+    def no_git(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a pinned hit must not run git")
+
+    monkeypatch.setattr(subprocess, "run", no_git)
+    hit = cache.pinned_checkout(str(origin), sha.upper())
+
+    assert hit == checkout
+    assert checkout.parent.stat().st_mtime > 0
+    assert cache.pinned_checkout(str(origin), sha, ["pkg"]) is None
+    assert cache.pinned_checkout(str(origin), "main") is None
+    assert cache.pinned_checkout(str(origin), "0" * 40) is None
+    assert GitCache(tmp_path / "cache", refresh=True).pinned_checkout(str(origin), sha) is None
+
+
+def test_a_pinned_hit_refuses_a_shard_that_fails_verification(tmp_path: Path) -> None:
+    origin, sha = build_link_origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), sha, locked_sha=sha)
+    (checkout / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="ascii")
+
+    assert cache.pinned_checkout(str(origin), sha) is None

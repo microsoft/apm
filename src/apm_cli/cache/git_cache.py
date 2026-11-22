@@ -409,6 +409,33 @@ class GitCache:
             promisor_url=url if use_partial else None,
         )
 
+    def pinned_checkout(
+        self, url: str, locked_sha: str | None, sparse_paths: list[str] | None = None
+    ) -> Path | None:
+        """Return the verified full checkout of a pinned SHA, or ``None``.
+
+        The cache-hit half of :meth:`get_checkout` for a locked commit: it
+        reads only the shard (HEAD and pins), so a hit needs no git process,
+        credentials or network. Anything else (sparse variants, refresh,
+        read-only caches, a missing or unverified shard) returns ``None`` and
+        the caller takes the full :meth:`get_checkout` path.
+        """
+        if sparse_paths or self._refresh or self._read_only:
+            return None
+        if not locked_sha or not _SHA_RE.match(locked_sha):
+            return None
+        sha = locked_sha.lower()
+        checkout_dir = self._checkouts_root / cache_shard_key(url) / sha / _variant_key(None)
+        if not (
+            checkout_dir.is_dir()
+            and verify_checkout_sha(checkout_dir, sha)
+            and _checkout_has_materialization_pins(checkout_dir)
+        ):
+            return None
+        with shard_lock(checkout_dir):
+            _log.debug("Cache HIT: %s @ %s [pinned]", _sanitize_url(url), sha[:12])
+            return self._record_checkout_access(checkout_dir)
+
     def _read_only_checkout(
         self,
         shard_key: str,
@@ -963,6 +990,7 @@ class GitCache:
                     env=subprocess_env,
                     extra_git_args=_safe_git_args(),
                     strict=False,
+                    record_clean_for=sha,
                 )
             except (RuntimeError, ValueError):
                 from ..utils.file_ops import robust_rmtree
