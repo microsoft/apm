@@ -269,18 +269,12 @@ def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
 # designed refusal (H5): if frozen ever accepts a target change, the cell fails.
 
 
-# A widened refusal leaves merged hook config behind (I7); strict until #4638.
-_FROZEN_LEFT_HOOK_CONFIG = Known(
-    "#4638", r"^failed install-frozen changed durable files: .*apm-hooks\.json"
-)
-
-
 @pytest.mark.parametrize("tgt", sorted(TARGET_HISTORIES))
 def test_frozen_refuses_a_target_change(lifecycle_world, tgt) -> None:
     scenario = _history(lifecycle_world, tgt)
     narrowed, widened = FROZEN_TARGET_CHANGE_MESSAGES
     if tgt.endswith("widened"):
-        step = scenario.run("install --frozen", exit=1, known={"I7": _FROZEN_LEFT_HOOK_CONFIG})
+        step = scenario.run("install --frozen", exit=1)
         assert re.search(widened, " ".join(step.output.split())), step.output
         scenario.finish()
         return
