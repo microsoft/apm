@@ -289,9 +289,9 @@ def _write(path: Path, data: bytes) -> None:
 def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) -> bool:
     """The ``apm audit --ci`` baseline owner on the applied state.
 
-    Every deployed byte was just re-hashed against the lockfile; when all of it
-    is ASCII the content scan cannot find anything (the scanner flags only
-    non-ASCII codepoints), so it is skipped as proven.
+    Every deployed byte was just re-hashed against the lockfile and is ASCII
+    (anything else declined), so the content scan cannot find anything: the
+    scanner flags only non-ASCII codepoints. It is skipped as proven.
     """
     from apm_cli.install.exec_gate import exec_policy_from_discovery
     from apm_cli.policy.ci_checks import run_baseline_checks
@@ -348,6 +348,9 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         files = _plan_files(project_root, lock, store, ascii_ok, receipts)
         extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
         ascii_ok[0] = ascii_ok[0] and all(data.isascii() for _p, data in extras)
+        if not ascii_ok[0]:
+            # The content scanner flags only non-ASCII codepoints: any such byte takes the full run.
+            raise Decline("non-ASCII deployed content")
         for checkout, install_path, sha in packages:
             _copy_package(checkout, install_path, sha)
         for path, data, _d, _o in files:
@@ -356,7 +359,7 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
             _write(path, data)
         if not (
             noop_diff._copies_valid(project_root, lock)
-            and _audit_passes(project_root, fetch, content_integrity=not ascii_ok[0])
+            and _audit_passes(project_root, fetch, content_integrity=False)
             and noop_diff._policy_checks_pass(project_root, fetch)
         ):
             raise Decline("post-apply audit")
