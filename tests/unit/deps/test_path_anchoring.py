@@ -102,8 +102,8 @@ class TestParentWalk:
         lockfile = _lockfile(*dependencies)
         with patch.object(
             path_anchoring,
-            "_find_parent",
-            wraps=path_anchoring._find_parent,
+            "_find_parents",
+            wraps=path_anchoring._find_parents,
         ) as find_parent:
             resolved = resolve_local_dep_dirs(lockfile, tmp_path)
 
@@ -132,6 +132,19 @@ class TestCorruptLockfile:
         child = _local("_local/child", "../child", resolved_by="_local/dup")
         with pytest.raises(LocalResolutionError, match="ambiguous"):
             resolve_local_dep_dir(child, _lockfile(dup_a, dup_b, child), tmp_path)
+
+    def test_parents_anchoring_to_one_directory_are_one_parent(self, tmp_path: Path) -> None:
+        """#4731: ./packages/lib from the root and ../lib from a sibling are one parent."""
+        sibling = _local("_local/lib-04", "./packages/lib-04")
+        from_root = _local("_local/lib-05", "./packages/lib-05")
+        from_sibling = _local("_local/lib-05", "../lib-05", resolved_by="_local/lib-04")
+        child = _local("_local/lib-06", "../lib-06", resolved_by="_local/lib-05")
+        lock = _lockfile(sibling, from_root, from_sibling, child)
+
+        assert (
+            resolve_local_dep_dir(child, lock, tmp_path)
+            == (tmp_path / "packages" / "lib-06").resolve()
+        )
 
     def test_cycle_raises(self, tmp_path: Path) -> None:
         a = _local("_local/a", "../a", resolved_by="_local/b")
