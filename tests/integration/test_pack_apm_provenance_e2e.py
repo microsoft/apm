@@ -23,6 +23,7 @@ from apm_cli.utils.content_hash import compute_file_hash
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_e2e_mode,
+    pytest.mark.e2e,
 ]
 
 

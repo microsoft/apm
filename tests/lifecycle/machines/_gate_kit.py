@@ -73,9 +73,22 @@ _PROJECT_HOME = (
 )
 # At user scope receipts and logs live under APM_HOME; HOME gets the deploy dir.
 _USER_HOME = (".copilot", ".apm-local", ".local/state/gh", ".cache/apm")
+# A reconcile also deploys the native plugin root (#3921).
 _RECONCILE_WRITES = {
-    "project": {"project": ("apm.lock.yaml", "apm_modules", ".github", ".gitignore", ".apm-local")},
-    "user": {"apm-home": ("apm.lock.yaml", "apm_modules", "deployment-receipts", "logs")},
+    "project": {
+        "project": (
+            "apm.lock.yaml",
+            "apm_modules",
+            ".github",
+            ".gitignore",
+            ".apm-local",
+            ".agents/plugins",
+        )
+    },
+    "user": {
+        "apm-home": ("apm.lock.yaml", "apm_modules", "deployment-receipts", "logs"),
+        "home": (".agents/plugins",),
+    },
 }
 _STORE_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("config.json",)}}
 _MANIFEST_WRITES = {"project": {"project": ("apm.yml",)}, "user": {"apm-home": ("apm.yml",)}}

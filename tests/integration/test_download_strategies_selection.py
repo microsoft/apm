@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate
@@ -18,6 +19,8 @@ from apm_cli.deps.transport_selection import (
 )
 from apm_cli.models.apm_package import DependencyReference
 from tests.utils.simulated_ado_chain import install_simulated_ado_chain
+
+pytestmark = pytest.mark.component
 
 
 def make_host(

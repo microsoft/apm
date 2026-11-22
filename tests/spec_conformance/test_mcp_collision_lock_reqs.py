@@ -83,7 +83,12 @@ def test_actual_write_receipt_respects_lock_write_suppression(
 def test_partial_mcp_conflict_persistence_respects_lock_write_suppression(
     tmp_path: Path, frozen_context: bool
 ) -> None:
-    """A reachable partial-write branch records intent but cannot rewrite a frozen lock."""
+    """A reachable partial-write branch records intent but cannot rewrite a frozen lock.
+
+    The install preflight refuses every collision it can project before any
+    write (#4268, #4741); the branch stays reachable for a pair it declines
+    (a registry render that needs prompted values), simulated here.
+    """
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root
     declaration = {
@@ -113,7 +118,12 @@ def test_partial_mcp_conflict_persistence_respects_lock_write_suppression(
     lock_before = lock_path.read_bytes()
     context = suppress_lockfile_writes() if frozen_context else nullcontext([])
 
-    with patch.dict(os.environ, isolated.subprocess_env(), clear=True), context as attempts:
+    unprojectable = patch("apm_cli.install.mcp.collision_preflight._requested", return_value=None)
+    with (
+        patch.dict(os.environ, isolated.subprocess_env(), clear=True),
+        unprojectable,
+        context as attempts,
+    ):
         package = APMPackage.from_mapping(
             {
                 "name": "collision-lock-consumer",

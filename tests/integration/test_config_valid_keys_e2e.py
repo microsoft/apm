@@ -14,6 +14,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):

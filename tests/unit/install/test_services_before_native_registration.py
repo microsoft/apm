@@ -71,7 +71,7 @@ def _install_tail(ctx: InstallContext, *, declare_fails: bool = False) -> list[s
         if declare_fails:
             raise ClaudeNativePluginError("could not write Claude settings")
 
-    with patch.object(claude_plugins, "reconcile_claude_plugins", side_effect=declare):
+    with patch.object(claude_plugins, "reconcile_native_plugins", side_effect=declare):
         try:
             with lockfile_write_scope(LockfileWriter.INSTALL):
                 LockFile().write(lock_path)

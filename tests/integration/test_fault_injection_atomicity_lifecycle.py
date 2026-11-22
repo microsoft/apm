@@ -31,6 +31,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX permissions and signals"),
+    pytest.mark.e2e,
 ]
 
 _TARGET_ROOTS = (".github", ".claude", ".cursor", ".agents")
