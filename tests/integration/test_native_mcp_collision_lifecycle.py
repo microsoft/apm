@@ -455,7 +455,11 @@ def test_partial_install_retains_deferred_names_in_active_target(
     apm_binary_path: Path,
     target: str,
 ) -> None:
-    """A user-edited recorded claim refuses before any write, then retires cleanly (#4741)."""
+    """A user-edited recorded claim refuses before any write, then retires cleanly (#4741).
+
+    The later refused retirement records the entry it wrote, so APM owns it
+    and the final removal retires it (#4792).
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([{**_http(), "name": "old"}, _http()])
     _success(scenario.install(targets=target))
@@ -476,6 +480,8 @@ def test_partial_install_retains_deferred_names_in_active_target(
     assert "Preserved MCP connection(s) notes" in kept_output, kept_output
     assert set(scenario.servers(target)) == {"new", "notes", "old"}
     assert scenario.servers(target)["notes"] == personal
+    # The refused retirement still records the entry it wrote (#4792).
+    assert scenario.lock().mcp_target_servers == {target: ["new", "notes", "old"]}
     path = scenario.path(target)
     if target == "claude":
         document = json.loads(path.read_text(encoding="utf-8"))
@@ -487,6 +493,11 @@ def test_partial_install_retains_deferred_names_in_active_target(
         path.write_text(tomlkit.dumps(document), encoding="utf-8")
     _success(scenario.install(targets=target))
     assert set(scenario.servers(target)) == {"new"}
+    assert scenario.lock().mcp_target_servers == {target: ["new"]}
+    scenario.declare([])
+    _success(scenario.install(targets=target))
+    assert scenario.servers(target) == {}
+    assert scenario.lock().mcp_target_servers == {}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])

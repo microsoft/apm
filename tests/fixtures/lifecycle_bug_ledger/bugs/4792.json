@@ -11,6 +11,7 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/integration/test_native_mcp_collision_lifecycle.py::test_a_refused_retirement_records_the_entry_it_wrote"
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_a_refused_retirement_records_the_entry_it_wrote",
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_partial_install_retains_deferred_names_in_active_target"
   ]
 }
