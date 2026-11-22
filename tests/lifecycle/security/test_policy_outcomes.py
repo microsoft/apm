@@ -596,8 +596,9 @@ SITE_SLICES["lifecycle-scripts"] = SiteSlice(
     arrange=_trusted_script,
     command=lambda world: "apm compile",
     classes={
+        # Compile judges the installed packages first and fails closed, as install does.
         "cache_miss_fetch_fail/block": Expect(
-            0, (r"Lifecycle scripts suppressed by org policy",), absent=(SCRIPT_MARKER,), smoke=True
+            1, (TRUST_BLOCK + "no enforceable",), absent=(SCRIPT_MARKER,), smoke=True
         ),
         "cache_miss_fetch_fail/warn": Expect(
             0,

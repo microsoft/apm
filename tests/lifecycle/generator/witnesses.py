@@ -4,7 +4,8 @@ The state machines credit their own cell ids through
 ``oracles.check_obligation``: M-SOURCE ``T3|<op>|<form>|<kind>``,
 ``T5|<dry-run|real>|<op>|<form>`` and the context ids
 ``X|<op>|<form>|<FACTOR>=<value>`` and the rule cells it witnesses directly
-(``rule|...``), M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>``,
+(``rule|...``), M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>`` (its lockfile spine and
+its drift spine: stale and absent lockfiles, side-door commands),
 the M-GATE matrix ``G1|<op>|<prim>|<gate>|<scope>``.
 This module translates each machine id into the factor assignment it proves
 and lists the generated obligations that assignment implies (every pair and
@@ -16,6 +17,10 @@ known cell with an owning issue makes the obligation ``known-failing``.
 A GATE matrix id credits only the implied ids that name GATE (its anchor):
 the step proves what the gate level did to that command, so a refusal under
 a dependency deny never discharges a success cell without a GATE value.
+A lockfile cell also carries what its step acted on (``lock_context``: source,
+primitive, gate level, target, network, prior deployment) and credits only the
+implied ids that name LOCK (its anchor), so a refused write under a newer
+lockfile never discharges a success cell.
 
 Machine vocabulary that has no factor value here (``deps``/``outdated``
 reads, ``corrupt``/``symlink`` locks, the ``native`` kind) implies nothing.
@@ -48,6 +53,8 @@ FORM_SOURCES: Mapping[str, str] = {
     "pkg-registry": "pkg-registry",
     "mcp-registry": "mcp-registry",
     "inline-mcp": "inline-mcp",
+    "local-mkt": "marketplace-local",
+    "file-mkt": "marketplace-file",
 }
 # M-SCOPE-LOCK op -> (OP, modifiers).
 LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
@@ -61,13 +68,35 @@ LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "remove": ("uninstall", ("SELECT",)),
     "audit": ("audit", ()),
     "audit-ci": ("audit", ()),
+    "deny": ("approve-deny", ()),
+    "mcp-install": ("mcp-install", ()),
+    "bundle": ("bundle-install", ()),
+    "marketplace": ("marketplace", ()),
 }
-LOCK_STATES: Mapping[str, str] = {"consistent": "consistent", "newer": "newer-generator"}
+LOCK_STATES: Mapping[str, str] = {
+    "consistent": "consistent",
+    "newer": "newer-generator",
+    "stale": "stale",
+    "absent": "absent",
+}
+DRIFT_SPINE = (
+    "tests/lifecycle/machines/test_m_scope_lock.py::"
+    "test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[{scope}]"
+)
 GATE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[{scope}]"
 )
-# M-GATE matrix op -> (OP, modifiers).
+GATE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
+)
+GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
+GATE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+)
+# M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "bundle": ("bundle-install", ()),
+    "pack": ("pack", ()),
     "install": ("install", ()),
     "install-frozen": ("install", ("FROZEN",)),
     "update": ("update", ()),
@@ -80,6 +109,7 @@ GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "approve": ("approve-deny", ()),
     "deny": ("approve-deny", ()),
     "mcp-install": ("mcp-install", ()),
+    "marketplace": ("marketplace", ()),
 }
 
 
@@ -116,15 +146,25 @@ def _source_assignment(key: str) -> dict[str, str] | None:
     return {**assignment, "DRYRUN": ON} if mode == "dry-run" else assignment
 
 
-def _lock_assignment(key: str) -> dict[str, str] | None:
+def _lock_assignment(key: str, *, context: bool = False) -> dict[str, str] | None:
+    from tests.lifecycle.machines.test_m_scope_lock import lock_context
+
     _, op, scope, lock = key.split("|")
     if op not in LOCK_OPS or lock not in LOCK_STATES:
         return None
     name, modifiers = LOCK_OPS[op]
-    return {"OP": name, "SCOPE": scope, "LOCK": LOCK_STATES[lock], **dict.fromkeys(modifiers, ON)}
+    return {
+        **(lock_context(op, lock) if context else {}),
+        "OP": name,
+        "SCOPE": scope,
+        "LOCK": LOCK_STATES[lock],
+        **dict.fromkeys(modifiers, ON),
+    }
 
 
 def _gate_assignment(key: str) -> dict[str, str]:
+    if key.startswith("rule|"):
+        return {}
     _, op, prim, gate, scope, *_ = key.split("|")
     name, flags = GATE_OPS[op]
     return {"OP": name, "PRIM": prim, "GATE": gate, "SCOPE": scope, **dict.fromkeys(flags, ON)}
@@ -133,7 +173,10 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines._gate_bin import bin_cells
+    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
+    from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
     known_source = getattr(test_m_source, "KNOWN_CELLS_BY_ID", {})
@@ -144,13 +187,27 @@ def machine_cells() -> list[MachineCell]:
         assignment = _source_assignment(key)
         if assignment:
             cells.append(MachineCell(key, SOURCE_SPINE, "T-2", assignment, known_source.get(key)))
+    spines = ((SCOPE_LOCK_SPINE, test_m_scope_lock.t4_cells), (DRIFT_SPINE, drift_cells))
     for scope in test_m_scope_lock.SCOPES:
-        for key in sorted(test_m_scope_lock.t4_cells(scope)):
-            assignment = _lock_assignment(key)
-            if assignment:
-                witness = SCOPE_LOCK_SPINE.format(scope=scope)
+        for spine, enumerate_cells in spines:
+            witness = spine.format(scope=scope)
+            for key in sorted(enumerate_cells(scope)):
                 tracking = getattr(test_m_scope_lock, "KNOWN_T4", {}).get(key)
-                cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+                assignment = _lock_assignment(key)
+                if assignment:
+                    cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+                    # The step's context, credited only on the ids that name LOCK.
+                    context = _lock_assignment(key, context=True) or {}
+                    cells.append(MachineCell(key, witness, "T-3", context, tracking, "LOCK"))
+    side_doors = (
+        (GATE_BUNDLE_SPINE, bundle_cells()),
+        (GATE_PACK_SPINE, pack_cells()),
+        (GATE_BIN_SPINE, bin_cells()),
+    )
+    for witness, keys in side_doors:
+        for key in sorted(keys):
+            assignment = _gate_assignment(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
@@ -169,12 +226,18 @@ def implied(assignment: Mapping[str, str]) -> Iterator[str]:
             yield cell_id(family, {name: assignment[name] for name in factors})
 
 
-def credited_ids(cell: MachineCell) -> Iterator[str]:
-    """Obligation ids a receipt of *cell* can discharge: a rule cell names itself."""
+def credits(cell: MachineCell) -> Iterator[str]:
+    """Obligation ids a receipt of *cell* discharges.
+
+    A rule cell id (``rule|...``) is its own obligation and implies nothing
+    else; an anchored cell credits only the implied ids that name its anchor.
+    """
     if cell.id.startswith("rule|"):
         yield cell.id
-    else:
-        yield from implied(cell.assignment)
+        return
+    for key in implied(cell.assignment):
+        if not cell.anchor or f"|{cell.anchor}=" in key:
+            yield key
 
 
 @dataclass(frozen=True)
@@ -194,9 +257,7 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
-        for key in credited_ids(cell):
-            if cell.anchor and f"|{cell.anchor}=" not in key:
-                continue
+        for key in credits(cell):
             if key in obligations:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
@@ -220,10 +281,13 @@ SCENARIO_MODULES = (
     "test_cache_presence",
     "test_concurrency",
     "test_failure_phase",
+    "test_file_routing",
     "test_graph_version",
     "test_history_upgrade",
+    "test_network_offline",
     "test_ownership_siblings",
     "test_platform",
+    "test_policy_pairs",
 )
 
 

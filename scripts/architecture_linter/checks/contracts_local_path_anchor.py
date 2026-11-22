@@ -5,7 +5,8 @@
 root, or nothing (a root-declared relative path at user scope). The guard is
 closed-world: no other function may combine a user-scope test with an
 ``is_absolute()`` test on a ``local_path``, nor restate the refusal text, and the three install
-consumers must call the owner.
+consumers must call the owner. ``deps/local_identity.transitive_local_identity``
+likewise owns the node key of a declared local edge (#4731).
 """
 
 from __future__ import annotations
@@ -111,6 +112,75 @@ def check_local_path_anchor(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+IDENTITY_RULE = "contracts-tooling-local-identity"
+IDENTITY_OWNER = "src/apm_cli/deps/local_identity.py"
+IDENTITY_SYMBOL = "transitive_local_identity"
+_ANCHOR_HELPERS = frozenset({"portable_anchor_identity", "_portable_anchor_identity"})
+_ANCHOR_DELEGATE = ("src/apm_cli/deps/apm_resolver.py", "_portable_anchor_identity")
+IDENTITY_CONSUMERS = {
+    "src/apm_cli/deps/apm_resolver.py": "APMDependencyResolver.build_dependency_tree",
+    "src/apm_cli/install/local_content_verdict.py": "local_content_reasons",
+    "src/apm_cli/deps/reachability.py": "compute_forward_reachable_keys",
+}
+
+
+def _called_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
+
+
+def _calls(node: ast.AST, names: frozenset[str]) -> bool:
+    return any(
+        isinstance(item, ast.Call) and _called_name(item) in names for item in ast.walk(node)
+    )
+
+
+def _anchor_bypasses(provider: FactsProvider) -> list[Violation]:
+    """Only the identity owner may turn an anchored directory into a node key."""
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        if path == IDENTITY_OWNER:
+            continue
+        index = provider.tree_index(path)
+        if index is None or index.root is None:
+            continue
+        for node in index.functions():
+            if (path, getattr(node, "name", "")) == _ANCHOR_DELEGATE:
+                continue
+            body = ast.Module(body=node.body, type_ignores=[])
+            if _calls(body, _ANCHOR_HELPERS):
+                findings.append(
+                    _summary(
+                        IDENTITY_RULE,
+                        path,
+                        f"{node.name} derives a local anchored identity; "
+                        f"call {IDENTITY_SYMBOL} ({IDENTITY_OWNER})",
+                    )
+                )
+    return findings
+
+
+def check_local_identity(provider: FactsProvider) -> tuple[Violation, ...]:
+    """One anchored directory is one dependency, keyed only by the identity owner."""
+    findings = _anchor_bypasses(provider)
+    for path, symbol in IDENTITY_CONSUMERS.items():
+        facts, failures = checked_facts(provider, path, IDENTITY_RULE, require_python=True)
+        findings.extend(failures)
+        if facts is None or facts.tree_index is None:
+            continue
+        function = facts.tree_index.function(symbol)
+        if function is None or not _calls(function, frozenset({IDENTITY_SYMBOL})):
+            findings.append(
+                _summary(
+                    IDENTITY_RULE, path, f"{symbol} must key local edges via {IDENTITY_SYMBOL}"
+                )
+            )
+    return tuple(findings)
+
+
 RULES = (
     Rule(
         id=RULE,
@@ -118,5 +188,12 @@ RULES = (
         guard_ids=(RULE,),
         description="Relative local paths anchor on the declaring package via one owner.",
         check=check_local_path_anchor,
+    ),
+    Rule(
+        id=IDENTITY_RULE,
+        group="contracts_tests",
+        guard_ids=(IDENTITY_RULE,),
+        description="One anchored local directory is one dependency, keyed by one owner.",
+        check=check_local_identity,
     ),
 )
