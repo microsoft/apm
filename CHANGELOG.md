@@ -11,15 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- `apm install` and `apm update` run up to 3x faster on large projects; a no-op install of 200 packages drops from 133 to 44 seconds. (#4735)
+- `apm install` runs up to 3x faster on large projects and recognises its own earlier writes after a branch round trip. (#4735, #4730)
 - Project-scope installs deploy Claude-format plugins whole and declare them in Claude Code and GitHub Copilot settings. (#4559)
-- `--policy` enforces an explicit policy, failing closed, and org dependency policy now also gates `apm compile`, `apm run`, `apm preview` and `apm pack`. (#4001, #4724, #4734, #4645)
+- `--policy` enforces an explicit policy, failing closed, and org dependency policy now also gates `apm compile`, `apm run`, `apm preview`, `apm pack` and local bundles. (#4001, #4724, #4734, #4645, #4769)
 - Upgrade notes: Claude instructions move to `AGENTS.md`, hook packages need `apm approve` once, and non-dotted IPv4 `http://` registry hosts are no longer private. (#4005, #4688, #4521)
 
 ### Breaking changes and upgrade notes
 
 - Hook approvals now pin every file deployed with the hook; existing hook approvals show as changed once, so run `apm approve <pkg>` again. (#4688)
 - Claude `**` and directory instructions move from `.claude/rules/` to `AGENTS.md`, imported by `CLAUDE.md`: run `apm install` then `apm compile`; hand-authored `CLAUDE.md` needs `@AGENTS.md`. (closes #3939, #4787, #4005, #4805)
+- Under a blocking `dependencies.allow`, `apm install <bundle>` refuses bundles recording a disallowed package or none; install an allowed package or update the policy. (closes #4646, #4769)
 - `http://` registry URLs with an integer, hex or leading-zero IPv4 host (`http://167772161/apm`) are no longer private; use `http://10.0.0.1/apm` or set `insecure: true`. (#4521)
 
 ### Added
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The registries reference documents the enterprise publish, install and cold-CI `--frozen` workflow, verified end to end on every PR. (#4015)
 - `apm compile` and `apm audit` warn when a deployed file links to a missing `apm_modules/` target, naming the file and `apm install` as the fix. (closes #3143, #4676)
 - Project-scope `apm install` deploys Claude-format plugins whole to `.agents/plugins/` and declares them in Claude Code and GitHub Copilot settings. (closes #3921, #4559)
+- After switching branches and back without reinstalling, `apm install` deploys a source edit to a skill directly instead of asking to move it aside. (closes #4428, #4730)
 
 ### Changed
 
