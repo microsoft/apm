@@ -282,12 +282,14 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "an MCP server the project declares in its own apm.yml is first-party: the "
         "executables gate governs servers from dependencies and never parks it, so every "
         "executable-gate level of an MCP source is one must-cover cell that witnesses it "
-        "(an org policy dependency deny still applies)",
+        "(an org policy dependency deny still applies). apm approve / apm deny decide only "
+        "installed packages, so approve-deny of an MCP source maps there too (R5)",
         (
             Ev(_MCP_VIEW, 1220, "Parked MCP server '{name}' from transitive package"),
             Ev(_MCP_VIEW, 1232, "Parked MCP server '{name}' ({package})"),
             Ev("docs/src/content/docs/enterprise/control-executables.mdx", 19, "from dependencies"),
             Ev("docs/src/content/docs/consumer/install-mcp-servers.md", 168, "Re-declare it"),
+            Ev("src/apm_cli/commands/approve.py", 1397, "apm_modules"),
         ),
     ),
     "U11": (
@@ -524,6 +526,9 @@ def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str]
         cell.get("OP") == "mcp-install" and cell.get("PRIM") == "mcp" and "SRC" not in cell
     )
     if first_party and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+        return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
+    # R5: approve / deny decide only installed packages, never a root-declared server.
+    if cell.get("SRC") in MCP_SOURCES and cell.get("OP") == "approve-deny" and "GATE" not in cell:
         return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
     return None
 

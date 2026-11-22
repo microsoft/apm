@@ -994,6 +994,12 @@
     "E3"
    ]
   },
+  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=mcp": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=other-file": {
    "maps_to": "T3|OP=approve-deny|SRC=local-bundle|PRIM=skill",
    "rules": [
@@ -1022,6 +1028,12 @@
    "maps_to": "T3|OP=approve-deny|SRC=marketplace-local|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=mcp": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
    ]
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=other-file": {
@@ -2216,6 +2228,18 @@
    "maps_to": "pair|OP=approve-deny|PRIM=skill",
    "rules": [
     "E3"
+   ]
+  },
+  "pair|OP=approve-deny|SRC=inline-mcp": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
+   ]
+  },
+  "pair|OP=approve-deny|SRC=mcp-registry": {
+   "maps_to": "rule|U-FIRST-PARTY-MCP|root-declared-mcp-not-gated",
+   "rules": [
+    "U-FIRST-PARTY-MCP"
    ]
   },
   "pair|OP=approve-deny|UPDATE=on": {
@@ -6602,19 +6626,16 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "T3|OP=approve-deny|SRC=inline-mcp|PRIM=mcp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -6624,25 +6645,37 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "T3|approve-deny|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|approve-deny|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|bundle|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=local-bundle|PRIM=skill": {
    "family": "T3",
@@ -6700,53 +6733,81 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=canvas": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=hook": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=lsp": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-file|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=canvas": {
    "family": "T3",
@@ -6756,11 +6817,15 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=hook": {
+   "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=lsp": {
    "family": "T3",
@@ -6770,11 +6835,15 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-git|PRIM=skill": {
    "family": "T3",
@@ -6784,60 +6853,81 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=canvas": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=hook": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=lsp": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=marketplace-local|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "T3|OP=approve-deny|SRC=mcp-registry|PRIM=mcp": {
-   "family": "T3",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -6854,25 +6944,37 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|approve-deny|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "T3|approve-deny|pkg-registry|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -6882,11 +6984,15 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|approve-deny|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=lsp": {
    "family": "T3",
@@ -6896,11 +7002,15 @@
    "strength": "e2e"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|approve-deny|pkg-registry|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=approve-deny|SRC=pkg-registry|PRIM=skill": {
    "family": "T3",
@@ -6956,18 +7066,26 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T3|OP=audit|SRC=inline-mcp|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|inline-mcp|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|bundle|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=canvas": {
    "family": "T3",
@@ -6977,25 +7095,37 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=hook": {
+   "credited_by": [
+    "T3|audit|bundle|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=lsp": {
+   "credited_by": [
+    "T3|audit|bundle|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|bundle|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=local-bundle|PRIM=skill": {
    "family": "T3",
@@ -7053,53 +7183,81 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|file-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=canvas": {
+   "credited_by": [
+    "T3|audit|file-mkt|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=hook": {
+   "credited_by": [
+    "T3|audit|file-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=lsp": {
+   "credited_by": [
+    "T3|audit|file-mkt|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|file-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-file|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|file-mkt|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|plugin-at-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=canvas": {
    "family": "T3",
@@ -7109,11 +7267,15 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=hook": {
+   "credited_by": [
+    "T3|audit|plugin-at-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=lsp": {
    "family": "T3",
@@ -7123,74 +7285,114 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|plugin-at-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-git|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|marketplace-object|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|local-mkt|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=canvas": {
+   "credited_by": [
+    "T3|audit|local-mkt|canvas"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=hook": {
+   "credited_by": [
+    "T3|audit|local-mkt|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=lsp": {
+   "credited_by": [
+    "T3|audit|local-mkt|lsp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|local-mkt|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=marketplace-local|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|local-mkt|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=mcp-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|mcp-registry|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|native|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=hook": {
    "family": "T3",
@@ -7207,25 +7409,37 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|native|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=native-plugin|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|native|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=bin": {
+   "credited_by": [
+    "T3|audit|pkg-registry|bin"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=canvas": {
    "family": "T3",
@@ -7235,11 +7449,15 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=hook": {
+   "credited_by": [
+    "T3|audit|pkg-registry|hook"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=lsp": {
    "family": "T3",
@@ -7249,18 +7467,26 @@
    "strength": "e2e"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=mcp": {
+   "credited_by": [
+    "T3|audit|pkg-registry|mcp"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=audit|SRC=pkg-registry|PRIM=skill": {
+   "credited_by": [
+    "T3|audit|pkg-registry|skill"
+   ],
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T3|OP=bundle-install|SRC=local-bundle|PRIM=bin": {
    "credited_by": [
@@ -10778,18 +11004,26 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T5|OP=audit|SRC=inline-mcp|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|inline-mcp"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=local-bundle|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|bundle"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=local-path|DRYRUN=on": {
    "family": "T5",
@@ -10800,46 +11034,71 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "T5|OP=audit|SRC=marketplace-file|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|file-mkt"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=marketplace-git|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|marketplace-object",
+    "T5|dry-run|audit|plugin-at-mkt"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=marketplace-local|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|local-mkt"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=mcp-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|mcp-registry"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=native-plugin|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|native"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=audit|SRC=pkg-registry|DRYRUN=on": {
+   "credited_by": [
+    "T5|dry-run|audit|pkg-registry"
+   ],
    "family": "T5",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "T5|OP=bundle-install|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
@@ -14210,19 +14469,20 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
-  "pair|OP=approve-deny|SRC=inline-mcp": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
   "pair|OP=approve-deny|SRC=local-bundle": {
+   "credited_by": [
+    "T3|approve-deny|bundle|bin",
+    "T3|approve-deny|bundle|hook",
+    "T3|approve-deny|bundle|lsp",
+    "T3|approve-deny|bundle|mcp",
+    "T5|real|approve-deny|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|SRC=local-path": {
    "family": "pair",
@@ -14233,46 +14493,80 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=approve-deny|SRC=marketplace-file": {
+   "credited_by": [
+    "T3|approve-deny|file-mkt|bin",
+    "T3|approve-deny|file-mkt|canvas",
+    "T3|approve-deny|file-mkt|hook",
+    "T3|approve-deny|file-mkt|lsp",
+    "T3|approve-deny|file-mkt|mcp",
+    "T3|approve-deny|file-mkt|skill",
+    "T5|real|approve-deny|file-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|SRC=marketplace-git": {
+   "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|bin",
+    "T3|approve-deny|plugin-at-mkt|hook",
+    "T3|approve-deny|plugin-at-mkt|mcp",
+    "T5|real|approve-deny|plugin-at-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|SRC=marketplace-local": {
+   "credited_by": [
+    "T3|approve-deny|local-mkt|bin",
+    "T3|approve-deny|local-mkt|canvas",
+    "T3|approve-deny|local-mkt|hook",
+    "T3|approve-deny|local-mkt|lsp",
+    "T3|approve-deny|local-mkt|mcp",
+    "T3|approve-deny|local-mkt|skill",
+    "T5|real|approve-deny|local-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
-  },
-  "pair|OP=approve-deny|SRC=mcp-registry": {
-   "family": "pair",
-   "issue": "#4096",
-   "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|SRC=native-plugin": {
+   "credited_by": [
+    "T3|approve-deny|native|bin",
+    "T3|approve-deny|native|mcp",
+    "T3|approve-deny|native|skill",
+    "T5|real|approve-deny|native"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|SRC=pkg-registry": {
+   "credited_by": [
+    "T3|approve-deny|pkg-registry|bin",
+    "T3|approve-deny|pkg-registry|hook",
+    "T3|approve-deny|pkg-registry|mcp",
+    "T5|real|approve-deny|pkg-registry"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=approve-deny|TGT=multi-narrowed": {
    "family": "pair",
@@ -14585,18 +14879,33 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=audit|SRC=inline-mcp": {
+   "credited_by": [
+    "T3|audit|inline-mcp|mcp",
+    "T5|dry-run|audit|inline-mcp",
+    "T5|real|audit|inline-mcp"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=local-bundle": {
+   "credited_by": [
+    "T3|audit|bundle|bin",
+    "T3|audit|bundle|hook",
+    "T3|audit|bundle|lsp",
+    "T3|audit|bundle|mcp",
+    "T5|dry-run|audit|bundle",
+    "T5|real|audit|bundle"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=local-path": {
    "family": "pair",
@@ -14607,46 +14916,102 @@
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
   "pair|OP=audit|SRC=marketplace-file": {
+   "credited_by": [
+    "T3|audit|file-mkt|bin",
+    "T3|audit|file-mkt|canvas",
+    "T3|audit|file-mkt|hook",
+    "T3|audit|file-mkt|lsp",
+    "T3|audit|file-mkt|mcp",
+    "T3|audit|file-mkt|skill",
+    "T5|dry-run|audit|file-mkt",
+    "T5|real|audit|file-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=marketplace-git": {
+   "credited_by": [
+    "T3|audit|marketplace-object|skill",
+    "T3|audit|plugin-at-mkt|bin",
+    "T3|audit|plugin-at-mkt|hook",
+    "T3|audit|plugin-at-mkt|mcp",
+    "T5|dry-run|audit|marketplace-object",
+    "T5|dry-run|audit|plugin-at-mkt",
+    "T5|real|audit|marketplace-object",
+    "T5|real|audit|plugin-at-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=marketplace-local": {
+   "credited_by": [
+    "T3|audit|local-mkt|bin",
+    "T3|audit|local-mkt|canvas",
+    "T3|audit|local-mkt|hook",
+    "T3|audit|local-mkt|lsp",
+    "T3|audit|local-mkt|mcp",
+    "T3|audit|local-mkt|skill",
+    "T5|dry-run|audit|local-mkt",
+    "T5|real|audit|local-mkt"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=mcp-registry": {
+   "credited_by": [
+    "T3|audit|mcp-registry|mcp",
+    "T5|dry-run|audit|mcp-registry",
+    "T5|real|audit|mcp-registry"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=native-plugin": {
+   "credited_by": [
+    "T3|audit|native|bin",
+    "T3|audit|native|mcp",
+    "T3|audit|native|skill",
+    "T5|dry-run|audit|native",
+    "T5|real|audit|native"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|SRC=pkg-registry": {
+   "credited_by": [
+    "T3|audit|pkg-registry|bin",
+    "T3|audit|pkg-registry|hook",
+    "T3|audit|pkg-registry|mcp",
+    "T3|audit|pkg-registry|skill",
+    "T5|dry-run|audit|pkg-registry",
+    "T5|real|audit|pkg-registry"
+   ],
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
   },
   "pair|OP=audit|TGT=multi-narrowed": {
    "family": "pair",
@@ -21553,6 +21918,7 @@
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|inline-mcp",
     "T5|dry-run|compile|inline-mcp",
     "T5|dry-run|install|inline-mcp",
     "T5|dry-run|prune|inline-mcp",
@@ -21799,6 +22165,7 @@
   },
   "pair|SRC=local-bundle|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|bundle",
     "T5|dry-run|install|bundle"
    ],
    "family": "pair",
@@ -21938,6 +22305,8 @@
   },
   "pair|SRC=local-bundle|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|bundle|bin",
+    "T3|audit|bundle|bin",
     "T3|install|bundle|bin"
    ],
    "family": "pair",
@@ -21956,6 +22325,8 @@
   },
   "pair|SRC=local-bundle|PRIM=hook": {
    "credited_by": [
+    "T3|approve-deny|bundle|hook",
+    "T3|audit|bundle|hook",
     "T3|install|bundle|hook"
    ],
    "family": "pair",
@@ -21967,6 +22338,8 @@
   },
   "pair|SRC=local-bundle|PRIM=lsp": {
    "credited_by": [
+    "T3|approve-deny|bundle|lsp",
+    "T3|audit|bundle|lsp",
     "T3|install|bundle|lsp"
    ],
    "family": "pair",
@@ -21978,6 +22351,8 @@
   },
   "pair|SRC=local-bundle|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|bundle|mcp",
+    "T3|audit|bundle|mcp",
     "T3|install|bundle|mcp"
    ],
    "family": "pair",
@@ -22425,6 +22800,7 @@
   },
   "pair|SRC=marketplace-file|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|file-mkt",
     "T5|dry-run|compile|file-mkt",
     "T5|dry-run|install|file-mkt",
     "T5|dry-run|prune|file-mkt",
@@ -22568,6 +22944,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|bin",
+    "T3|audit|file-mkt|bin",
     "T3|compile|file-mkt|bin",
     "T3|install|file-mkt|bin",
     "T3|lock|file-mkt|bin",
@@ -22585,6 +22963,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=canvas": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|canvas",
+    "T3|audit|file-mkt|canvas",
     "T3|compile|file-mkt|canvas",
     "T3|install|file-mkt|canvas",
     "T3|lock|file-mkt|canvas",
@@ -22602,6 +22982,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=hook": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|hook",
+    "T3|audit|file-mkt|hook",
     "T3|compile|file-mkt|hook",
     "T3|install|file-mkt|hook",
     "T3|lock|file-mkt|hook",
@@ -22619,6 +23001,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=lsp": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|lsp",
+    "T3|audit|file-mkt|lsp",
     "T3|compile|file-mkt|lsp",
     "T3|install|file-mkt|lsp",
     "T3|lock|file-mkt|lsp",
@@ -22636,6 +23020,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|mcp",
+    "T3|audit|file-mkt|mcp",
     "T3|compile|file-mkt|mcp",
     "T3|install|file-mkt|mcp",
     "T3|lock|file-mkt|mcp",
@@ -22653,6 +23039,8 @@
   },
   "pair|SRC=marketplace-file|PRIM=skill": {
    "credited_by": [
+    "T3|approve-deny|file-mkt|skill",
+    "T3|audit|file-mkt|skill",
     "T3|compile|file-mkt|skill",
     "T3|install|file-mkt|skill",
     "T3|lock|file-mkt|skill",
@@ -22803,6 +23191,8 @@
   },
   "pair|SRC=marketplace-git|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|marketplace-object",
+    "T5|dry-run|audit|plugin-at-mkt",
     "T5|dry-run|compile|marketplace-object",
     "T5|dry-run|compile|plugin-at-mkt",
     "T5|dry-run|install|marketplace-object",
@@ -22984,6 +23374,8 @@
   },
   "pair|SRC=marketplace-git|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|bin",
+    "T3|audit|plugin-at-mkt|bin",
     "T3|compile|plugin-at-mkt|bin",
     "T3|install|plugin-at-mkt|bin",
     "T3|lock|plugin-at-mkt|bin",
@@ -23008,6 +23400,8 @@
   },
   "pair|SRC=marketplace-git|PRIM=hook": {
    "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|hook",
+    "T3|audit|plugin-at-mkt|hook",
     "T3|compile|plugin-at-mkt|hook",
     "T3|install|plugin-at-mkt|hook",
     "T3|lock|plugin-at-mkt|hook",
@@ -23032,6 +23426,8 @@
   },
   "pair|SRC=marketplace-git|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|plugin-at-mkt|mcp",
+    "T3|audit|plugin-at-mkt|mcp",
     "T3|compile|plugin-at-mkt|mcp",
     "T3|install|plugin-at-mkt|mcp",
     "T3|lock|plugin-at-mkt|mcp",
@@ -23049,6 +23445,7 @@
   },
   "pair|SRC=marketplace-git|PRIM=skill": {
    "credited_by": [
+    "T3|audit|marketplace-object|skill",
     "T3|compile|marketplace-object|skill",
     "T3|install|marketplace-object|skill",
     "T3|lock|marketplace-object|skill",
@@ -23202,6 +23599,7 @@
   },
   "pair|SRC=marketplace-local|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|local-mkt",
     "T5|dry-run|compile|local-mkt",
     "T5|dry-run|install|local-mkt",
     "T5|dry-run|prune|local-mkt",
@@ -23345,6 +23743,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|bin",
+    "T3|audit|local-mkt|bin",
     "T3|compile|local-mkt|bin",
     "T3|install|local-mkt|bin",
     "T3|lock|local-mkt|bin",
@@ -23362,6 +23762,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=canvas": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|canvas",
+    "T3|audit|local-mkt|canvas",
     "T3|compile|local-mkt|canvas",
     "T3|install|local-mkt|canvas",
     "T3|lock|local-mkt|canvas",
@@ -23379,6 +23781,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=hook": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|hook",
+    "T3|audit|local-mkt|hook",
     "T3|compile|local-mkt|hook",
     "T3|install|local-mkt|hook",
     "T3|lock|local-mkt|hook",
@@ -23396,6 +23800,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=lsp": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|lsp",
+    "T3|audit|local-mkt|lsp",
     "T3|compile|local-mkt|lsp",
     "T3|install|local-mkt|lsp",
     "T3|lock|local-mkt|lsp",
@@ -23413,6 +23819,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|mcp",
+    "T3|audit|local-mkt|mcp",
     "T3|compile|local-mkt|mcp",
     "T3|install|local-mkt|mcp",
     "T3|lock|local-mkt|mcp",
@@ -23430,6 +23838,8 @@
   },
   "pair|SRC=marketplace-local|PRIM=skill": {
    "credited_by": [
+    "T3|approve-deny|local-mkt|skill",
+    "T3|audit|local-mkt|skill",
     "T3|compile|local-mkt|skill",
     "T3|install|local-mkt|skill",
     "T3|lock|local-mkt|skill",
@@ -23809,6 +24219,7 @@
   },
   "pair|SRC=native-plugin|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|native",
     "T5|dry-run|compile|native",
     "T5|dry-run|install|native",
     "T5|dry-run|prune|native",
@@ -23952,6 +24363,8 @@
   },
   "pair|SRC=native-plugin|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|native|bin",
+    "T3|audit|native|bin",
     "T3|compile|native|bin",
     "T3|install|native|bin",
     "T3|lock|native|bin",
@@ -23982,6 +24395,8 @@
   },
   "pair|SRC=native-plugin|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|native|mcp",
+    "T3|audit|native|mcp",
     "T3|compile|native|mcp",
     "T3|install|native|mcp",
     "T3|lock|native|mcp",
@@ -23998,6 +24413,8 @@
   },
   "pair|SRC=native-plugin|PRIM=skill": {
    "credited_by": [
+    "T3|approve-deny|native|skill",
+    "T3|audit|native|skill",
     "T3|compile|native|skill",
     "T3|install|native|skill",
     "T3|lock|native|skill",
@@ -24146,6 +24563,7 @@
   },
   "pair|SRC=pkg-registry|DRYRUN=on": {
    "credited_by": [
+    "T5|dry-run|audit|pkg-registry",
     "T5|dry-run|compile|pkg-registry",
     "T5|dry-run|install|pkg-registry",
     "T5|dry-run|prune|pkg-registry",
@@ -24289,6 +24707,8 @@
   },
   "pair|SRC=pkg-registry|PRIM=bin": {
    "credited_by": [
+    "T3|approve-deny|pkg-registry|bin",
+    "T3|audit|pkg-registry|bin",
     "T3|compile|pkg-registry|bin",
     "T3|install|pkg-registry|bin",
     "T3|lock|pkg-registry|bin",
@@ -24312,6 +24732,8 @@
   },
   "pair|SRC=pkg-registry|PRIM=hook": {
    "credited_by": [
+    "T3|approve-deny|pkg-registry|hook",
+    "T3|audit|pkg-registry|hook",
     "T3|compile|pkg-registry|hook",
     "T3|install|pkg-registry|hook",
     "T3|lock|pkg-registry|hook",
@@ -24335,6 +24757,8 @@
   },
   "pair|SRC=pkg-registry|PRIM=mcp": {
    "credited_by": [
+    "T3|approve-deny|pkg-registry|mcp",
+    "T3|audit|pkg-registry|mcp",
     "T3|compile|pkg-registry|mcp",
     "T3|install|pkg-registry|mcp",
     "T3|lock|pkg-registry|mcp",
@@ -24351,6 +24775,7 @@
   },
   "pair|SRC=pkg-registry|PRIM=skill": {
    "credited_by": [
+    "T3|audit|pkg-registry|skill",
     "T3|compile|pkg-registry|skill",
     "T3|install|pkg-registry|skill",
     "T3|lock|pkg-registry|skill",
@@ -26940,9 +27365,10 @@
     "src/apm_cli/integration/mcp_config_view.py:1220",
     "src/apm_cli/integration/mcp_config_view.py:1232",
     "docs/src/content/docs/enterprise/control-executables.mdx:19",
-    "docs/src/content/docs/consumer/install-mcp-servers.md:168"
+    "docs/src/content/docs/consumer/install-mcp-servers.md:168",
+    "src/apm_cli/commands/approve.py:1397"
    ],
-   "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies)"
+   "text": "an MCP server the project declares in its own apm.yml is first-party: the executables gate governs servers from dependencies and never parks it, so every executable-gate level of an MCP source is one must-cover cell that witnesses it (an org policy dependency deny still applies). apm approve / apm deny decide only installed packages, so approve-deny of an MCP source maps there too (R5)"
   },
   "U-MKT": {
    "evidence": [

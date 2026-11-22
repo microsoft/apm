@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -108,7 +108,7 @@ pytestmark = [
     ),
 ]
 
-OPS = ("install", "update", "uninstall", "prune", "compile", "lock", "marketplace")
+OPS = ("install", "update", "uninstall", "prune", "compile", "lock", "marketplace", "audit", "approve-deny")
 FORMS = (
     "shorthand",
     "git-object",
@@ -153,7 +153,7 @@ _MCP_NAMES = {
     INLINE_SERVER: frozenset({INLINE_SERVER}),
 }
 _CLOSED_PROXY = "http://127.0.0.1:9"
-_NO_DRY_RUN = frozenset({"lock", "marketplace"})
+_NO_DRY_RUN = frozenset({"lock", "marketplace", "approve-deny"})
 # Ops that do not resolve: they may keep what is deployed (``apm lock`` never deletes).
 _KEEPING = frozenset({"lock", "compile", "marketplace"})
 # Forms a marketplace catalog declares: ``apm marketplace update`` acts on their source.
@@ -250,13 +250,34 @@ KINDS: Mapping[str, frozenset[str]] = {
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
 
+def decides(choice: Choice) -> bool:
+    """Whether ``apm approve``/``apm deny`` decide *choice*: a package with executables.
+
+    A root-declared MCP server is first-party: the gate never governs it and
+    ``approve`` finds no installed package to decide (U-FIRST-PARTY-MCP).
+    """
+    return choice.form not in _MCP_FORMS and bool(choice.prims - UNGATED_KINDS)
+
+
+_DECIDED_FORMS = frozenset(c.form for c in CHOICES if decides(c))
+
+
 def applies(op: str, form: str) -> bool:
     """Whether *op* acts on a dependency of *form* (see the module docstring)."""
     if op == "marketplace":
         return form in _MARKET_FORMS
+    if op == "audit":
+        return True  # audit scans every deployed package, local bundles included
+    if op == "approve-deny":
+        return form in _DECIDED_FORMS
     if form == "bundle":
         return op == "install"
     return not (form in _MCP_FORMS and op == "uninstall")
+
+
+def acts(op: str, choice: Choice) -> bool:
+    """Whether *op* acts on the package of *choice* (its T3 cells)."""
+    return applies(op, choice.form) and (op != "approve-deny" or decides(choice))
 
 
 def t3_cells() -> frozenset[str]:
@@ -265,7 +286,7 @@ def t3_cells() -> frozenset[str]:
         f"T3|{op}|{choice.form}|{kind}"
         for op in OPS
         for choice in CHOICES
-        if applies(op, choice.form)
+        if acts(op, choice)
         for kind in choice.prims
     )
 
@@ -494,7 +515,10 @@ class SourceMachine(MachineBase):
         if names & _DIAMOND:
             names.add("p-child")
         return ModelState(
-            declared=frozenset(names), targets=self.model.targets, exec_gate=self.model.exec_gate
+            declared=frozenset(names),
+            decisions=self.model.decisions,
+            targets=self.model.targets,
+            exec_gate=self.model.exec_gate,
         )
 
     def remote(self) -> bool:
@@ -510,7 +534,7 @@ class SourceMachine(MachineBase):
     def cells(self, op: str, mode: str, choices: Collection[Choice]) -> list[str]:
         cells = []
         for choice in choices:
-            if not applies(op, choice.form):
+            if not acts(op, choice):
                 continue
             cells.append(f"T5|{mode}|{op}|{choice.form}")
             cells += [f"T3|{op}|{choice.form}|{kind}" for kind in choice.prims]
