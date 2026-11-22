@@ -1340,6 +1340,7 @@ def export_plugin_bundle(
         "plugin",
         target or "all",
         bundle_files=bundle_files,
+        renderings=_packed_renderings(file_map, project_root),
     )
     write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
@@ -1382,6 +1383,24 @@ def _drop_duplicate_renderings(
     )
     dropped.extend(sorted(duplicates))
     return [component for component in components if component[1] not in duplicates]
+
+
+def _packed_renderings(file_map: dict[str, tuple[Path, str]], project_root: Path) -> dict[str, str]:
+    """Record the deploying target's extension of every packed file (#3686).
+
+    Taken from the final *file_map* winner, after rendering deduplication and
+    collision resolution, so a consumer never lowers a file by the provenance
+    of a dropped or displaced one. Own sources carry no entry.
+    """
+    renderings: dict[str, str] = {}
+    for rel, (source, _owner) in file_map.items():
+        try:
+            deployed = portable_relpath(source, project_root)
+        except ValueError:
+            continue
+        if extension := deployed_rendering_extension(deployed):
+            renderings[rel] = extension
+    return renderings
 
 
 def _report_dropped_renderings(dropped: list[str], logger=None) -> None:

@@ -1193,6 +1193,39 @@ class TestLocalBundlePathRouting:
             "agents/rv.md"
         ]
 
+    @pytest.mark.parametrize(
+        ("pack_extra", "expected"),
+        [
+            # pack.renderings is authoritative, even against deployed_files.
+            ({"renderings": {"agents/rv.agent.md": ".md"}}, {"agents/rv.agent.md": ".md"}),
+            # An own source has no entry, so no deployed_files fallback applies.
+            ({"renderings": {}}, {}),
+            # Pre-renderings bundle: a path claimed with two extensions is dropped.
+            ({}, {"agents/rv.md": ".md"}),
+        ],
+    )
+    def test_rendering_provenance_prefers_the_packed_winner(
+        self, pack_extra: dict, expected: dict
+    ) -> None:
+        from apm_cli.bundle.local_bundle import LocalBundleInfo
+        from apm_cli.install.local_bundle_paths import bundle_rendering_extensions
+
+        lockfile = {
+            "pack": {"format": "plugin", **pack_extra},
+            "dependencies": [
+                {"deployed_files": [".claude/agents/rv.md", ".github/agents/rv.agent.md"]},
+                {"deployed_files": [".claude/agents/rv.agent.md"]},
+            ],
+        }
+        info = LocalBundleInfo(
+            source_dir=Path("."),
+            plugin_json={"id": "p"},
+            package_id="p",
+            lockfile=lockfile,
+            pack_targets=["claude"],
+        )
+        assert bundle_rendering_extensions(info) == expected
+
     def test_superseded_renderings_count_as_skipped(self, tmp_path: Path) -> None:
         """#3686: a rendering skipped for another one is counted in the install summary."""
         _project, result, _diagnostics = self._install_bundle_files(

@@ -18,7 +18,9 @@
     "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_agents_lower_by_rendering_provenance",
     "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_apm_instructions_render_to_the_target_rule_format",
     "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_native_claude_rule_with_dotted_stem_keeps_its_paths",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_rendering_provenance_prefers_the_packed_winner",
     "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_superseded_renderings_count_as_skipped",
+    "tests/unit/test_plugin_exporter.py::TestExportPluginBundle::test_pack_records_the_winning_rendering_provenance",
     "tests/unit/test_plugin_exporter_logic.py::TestDuplicatePluginRenderings::test_drops_only_other_target_renderings"
   ]
 }

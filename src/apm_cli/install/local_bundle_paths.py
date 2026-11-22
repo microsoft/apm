@@ -362,19 +362,25 @@ def _retarget_basename(
 
 
 def bundle_rendering_extensions(bundle_info: LocalBundleInfo) -> dict[str, str]:
-    """Map packed dependency files to the extension their deploying target gave them.
+    """Map packed files to the extension their deploying target gave them (#3686).
 
-    The bundle lockfile keeps each dependency's ``deployed_files`` (for example
-    ``.claude/agents/rv.agent.md``); this is the provenance that tells a
-    Claude agent named ``rv.agent`` apart from a Copilot rendering of ``rv``.
-    Unknown or unsafe entries are ignored; files without provenance (the
-    producer's own primitives) lower by suffix.
+    This provenance tells a Claude agent named ``rv.agent`` apart from a
+    Copilot rendering of ``rv``. ``pack.renderings`` (written from the final
+    packed winners) is authoritative; a path without an entry lowers by
+    suffix. Bundles packed before it fall back to the lockfile's
+    ``deployed_files``, ignoring a path that several deployed files claim
+    with different extensions.
     """
     from ..bundle.plugin_exporter import _plugin_rel_for_deployed_path
     from ..bundle.plugin_layout import deployed_rendering_extension
 
-    renderings: dict[str, str] = {}
     lock = bundle_info.lockfile if isinstance(bundle_info.lockfile, dict) else {}
+    recorded = (
+        (lock.get("pack") or {}).get("renderings") if isinstance(lock.get("pack"), dict) else None
+    )
+    if isinstance(recorded, dict):
+        return {k: v for k, v in recorded.items() if isinstance(k, str) and isinstance(v, str)}
+    candidates: dict[str, set[str]] = {}
     for dep in lock.get("dependencies") or []:
         for deployed in (dep.get("deployed_files") or []) if isinstance(dep, dict) else []:
             extension = deployed_rendering_extension(str(deployed))
@@ -383,8 +389,8 @@ def bundle_rendering_extensions(bundle_info: LocalBundleInfo) -> dict[str, str]:
             except ValueError:
                 continue
             if rel is not None:
-                renderings.setdefault(rel, extension)
-    return renderings
+                candidates.setdefault(rel, set()).add(extension)
+    return {rel: next(iter(exts)) for rel, exts in candidates.items() if len(exts) == 1}
 
 
 def superseded_bundle_renderings(

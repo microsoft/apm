@@ -1104,6 +1104,55 @@ class TestExportPluginBundle:
         content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
         assert content == "from-second"
 
+    @pytest.mark.parametrize(
+        ("deps", "force", "expected"),
+        [
+            # A's Copilot rendering is dropped; B's distinct Claude agent wins.
+            (
+                [
+                    ("acme/a", [(".claude", "rv.md"), (".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.md": ".md", "agents/rv.agent.md": ".md"},
+            ),
+            # Collision on agents/rv.agent.md: first writer (Copilot) wins.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                False,
+                {"agents/rv.agent.md": ".agent.md"},
+            ),
+            # --force: last writer (Claude) wins, and so does its provenance.
+            (
+                [
+                    ("acme/a", [(".github", "rv.agent.md")]),
+                    ("acme/b", [(".claude", "rv.agent.md")]),
+                ],
+                True,
+                {"agents/rv.agent.md": ".md"},
+            ),
+        ],
+    )
+    def test_pack_records_the_winning_rendering_provenance(self, tmp_path, deps, force, expected):
+        """#3686: pack.renderings follows the final packed file, never a dropped one."""
+        project = _setup_plugin_project(tmp_path)
+        locked = []
+        for repo_url, files in deps:
+            deployed = []
+            for root, name in files:
+                deployed += _write_deployed_agent_at(project, root, name, f"{repo_url} {root}")
+            locked.append(LockedDependency(repo_url=repo_url, depth=1, deployed_files=deployed))
+        _write_lockfile(project, locked)
+
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+            result = export_plugin_bundle(project, tmp_path / "build", force=force)
+
+        pack = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == expected
+
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.
 
