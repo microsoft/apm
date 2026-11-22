@@ -154,7 +154,8 @@ def prune(ctx, dry_run):
             native_before = _native_ownership(lockfile, lockfile_path)
             from ..native_plugins.uninstall import retire_gated_native_plugins
 
-            native_retired = retire_gated_native_plugins(
+            # A gate-retired native record makes this a lock-changing prune (#3921).
+            native_retired = not dry_run and retire_gated_native_plugins(
                 lockfile, apm_modules_dir, manifest_file(project_root), project_root, logger
             )
         except LockfileFormatError as e:
@@ -219,6 +220,7 @@ def prune(ctx, dry_run):
             and not missing_orphaned_keys
             and not owner_violations
             and not absent_staging
+            and not native_retired
         ):
             logger.nothing_to_prune()
             _resync_native_plugins(
@@ -228,7 +230,6 @@ def prune(ctx, dry_run):
                 logger,
                 dry_run,
                 native_before,
-                persist=native_retired,
             )
             return
 
@@ -446,7 +447,6 @@ def prune(ctx, dry_run):
             logger,
             dry_run,
             native_before,
-            persist=native_retired,
         )
 
         logger.render_summary()
@@ -524,19 +524,13 @@ def _native_ownership(lockfile, lockfile_path):
 
 
 def _resync_native_plugins(
-    project_root, apm_modules_dir, lockfile, logger, dry_run: bool, native_before, *, persist
+    project_root, apm_modules_dir, lockfile, logger, dry_run: bool, native_before
 ) -> None:
-    """Retire pruned and gate-retired native plugins through the shared owner.
-
-    *persist* stages the lock whose native records the gates dropped; the
-    prune writer scope commits it, and a failed reconcile restores the prior bytes.
-    """
+    """Retire pruned and gate-retired native plugins through the shared owner."""
     from ..claude_plugins.admission import ClaudeNativePluginError
     from ..native_plugins.uninstall import reconcile_after_uninstall
 
     ownership, lock_bytes = native_before
-    if persist and not dry_run and lockfile is not None:
-        lockfile.write(get_lockfile_path(project_root))
     try:
         reconcile_after_uninstall(
             deploy_root=project_root,
