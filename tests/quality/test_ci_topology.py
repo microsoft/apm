@@ -3531,6 +3531,29 @@ def _run_train_gate(step: WorkflowNode, tmp_path: Path, env: dict[str, str]) -> 
     return result.returncode
 
 
+def _assert_h4_step(step: WorkflowNode) -> None:
+    """Rule H4 runs on every pull request and reads the PR body only through env."""
+    assert step["name"] == "Known cells cite no issue this PR closes"
+    assert step["if"] == "github.event_name == 'pull_request'"
+    assert "continue-on-error" not in step
+    assert step["env"] == {"PR_BODY": "${{ github.event.pull_request.body }}"}
+    assert "${{" not in step["run"], "the PR body must never be inlined in run"
+    assert shell_commands(step) == [
+        ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"],
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "--extra",
+            "dev",
+            "python",
+            "-m",
+            "tests.quality.known_cell_closing",
+            "$RUNNER_TEMP/pr-body.md",
+        ],
+    ]
+
+
 def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> None:
     """ci.yml's Lint job and the train guard run the one lint-chain action."""
     lint = workflow_job(ci, "lint")
@@ -3540,8 +3563,10 @@ def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> No
         "actions/checkout",
         "astral-sh/setup-uv",
         LINT_CHAIN_ACTION,
+        "",
     ]
     assert lint_steps[2]["with"] == {"base-sha": LINT_CHAIN_BASE}
+    _assert_h4_step(lint_steps[3])
     guard = workflow_job(train, TRAIN_GUARD_JOB)
     chain = [step for step in _run_steps(guard) if step.get("uses") == LINT_CHAIN_ACTION]
     assert len(chain) == 1 and chain[0]["with"] == {"base-sha": TRAIN_BASE}
