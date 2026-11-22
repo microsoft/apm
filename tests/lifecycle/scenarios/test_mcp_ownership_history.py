@@ -129,6 +129,12 @@ def test_one_command_on_an_mcp_owner(lifecycle_world, row, owner) -> None:
     step = scenario.run(line, credit=[_assignment(op, lock, owner)])
     assert step.result.returncode == 0, step.output
     _assert_ownership(lifecycle_world.project, owner, row)
+    if row == "uninstall":
+        lock = scenario.lock()
+        rows = {dep.repo_url for dep in lock.get_package_dependencies()} if lock else set()
+        assert not any(url.rstrip("/").endswith("pkg") for url in rows), rows
+        manifest = (lifecycle_world.project / "apm.yml").read_text(encoding="utf-8")
+        assert "../pkg" not in manifest, manifest
     if row == "mcp-install":
         problems = mcp_server_problems(scenario, {"p-inline"})
         assert not problems, f"{problems}\n{step.output}"

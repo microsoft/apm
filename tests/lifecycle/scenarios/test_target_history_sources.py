@@ -277,6 +277,21 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     scenario.finish()
 
 
+_CLAUDE_LSP = ".claude/skills/apm-lsp/.claude-plugin/plugin.json"
+
+
+def test_a_claude_lsp_surface_needs_the_servers_entry(lifecycle_world) -> None:
+    """Negative control: Claude's LSP plugin file counts for p-lsp only with its server."""
+    scenario = Scenario(lifecycle_world, ("p-lsp",), targets=("claude",))
+    path = lifecycle_world.project / _CLAUDE_LSP
+    path.parent.mkdir(parents=True)
+    for servers in ({}, {"p-lsp-server": {"command": "x"}}):
+        path.write_text(json.dumps({"name": "apm-lsp", "lspServers": servers}), encoding="ascii")
+        observed, _, _ = scenario.deployed()
+        named = "p-lsp-server" in path.read_text(encoding="ascii")
+        assert ("p-lsp/lsp/claude" in observed) == named, (servers, sorted(observed))
+
+
 CREDITS = credits(
     __file__,
     {

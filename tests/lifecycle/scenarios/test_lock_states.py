@@ -172,6 +172,11 @@ def play(scenario: Scenario, rows, *, keep=None, **fields: object) -> None:
             **fields,
         )
         assert step.result.returncode == (1 if row.refusal else 0), step.output
+        if not row.refusal and any(item.get("GATE") == "allowed" for item in row.credit):
+            # An allowed-gate credit needs its own evidence: this step deployed the
+            # approved executables and wrote the lock (a later install cannot repair it).
+            assert scenario.lock_path.is_file(), step.output
+            scenario.assert_deployed()
 
 
 def _all_credits(rows) -> list[Mapping[str, str]]:

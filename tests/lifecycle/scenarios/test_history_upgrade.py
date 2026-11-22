@@ -215,6 +215,8 @@ def test_install_after_a_target_change(lifecycle_world, tgt) -> None:
     scenario.finish()
 
 
+# pack writes its bundle here, so the row reads exactly what this pack produced.
+_PACK_DIR = "build/history-pack"
 # Row -> (command after the target change, OP, packages whose units it proves,
 # factor overrides). Every row must exit 0: scenario-lane pairs are success pairs.
 HISTORY_ROWS = {
@@ -228,7 +230,7 @@ HISTORY_ROWS = {
     "audit": ("audit", "audit", _PACKAGES, {}),
     # pack refuses local-path dependencies (development only), so its history holds
     # only the git dependency.
-    "pack": ("pack", "pack", ("p-skill:git",), {}),
+    "pack": (f"pack -o {_PACK_DIR}", "pack", ("p-skill:git",), {}),
     "deny": ("deny p-exec", "approve-deny", ("p-exec",), {"GATE": "denied-executable"}),
     "install-dry-run": ("install --dry-run", "install", _PACKAGES, {"DRYRUN": "on"}),
     "install-force": ("install --force", "install", _PACKAGES, {"FORCE": "on"}),
@@ -250,6 +252,10 @@ def test_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     step = scenario.run(line, credit=_row_assignments(row, tgt))
     # Every row must succeed to earn its receipts (scenario-lane pairs are success pairs).
     assert step.result.returncode == 0, step.output
+    if row == "pack":
+        packed = sorted((lifecycle_world.project / _PACK_DIR).rglob("skills/p-skill/SKILL.md"))
+        assert len(packed) == 1, f"{packed}\n{step.output}"
+        assert "Use p-skill." in packed[0].read_text(encoding="utf-8"), step.output
     scenario.finish()
 
 
