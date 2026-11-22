@@ -4,6 +4,7 @@ import contextlib
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -1473,6 +1474,10 @@ class TestGitEnvironmentPlatformBehavior:
             assert cfg_path != "NUL"
             assert os.path.isfile(cfg_path)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="os.devnull is the Windows host's 'nul' under a faked darwin",
+    )
     def test_git_config_global_uses_dev_null_on_unix(self):
         """GIT_CONFIG_GLOBAL should be '/dev/null' on Unix."""
         with (
