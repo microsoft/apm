@@ -198,6 +198,32 @@ def test_departing_owner_proof_drops_a_row_no_owner_still_holds(tmp_path: Path) 
     assert reconciler.diagnostics.error_count == 0
 
 
+def test_departing_proof_superseding_a_generic_row_is_consumed_once(tmp_path: Path) -> None:
+    """A concrete departing proof that a generic row took is not re-processed (#4703)."""
+    concrete = _locator(".github/instructions/f-doc.instructions.md")
+    generic = DeploymentLocator(
+        kind=LocatorKind.PROJECT_RELATIVE,
+        target="legacy-generic",
+        value=concrete.value,
+        scope="project",
+    )
+    prior = DeploymentLedger(
+        records={generic.key: _record(generic, owners=("removed",), active="removed")}
+    )
+    reconciler = _reconciler(tmp_path)
+
+    reconciled = reconciler.reconcile(
+        prior,
+        [_materialization("removed", concrete, status=MaterializationStatus.UNCHANGED)],
+        _intent(owners=frozenset({"."})),
+    )
+
+    assert generic.key not in reconciled.ledger.records
+    assert concrete.key not in reconciled.ledger.records
+    assert reconciled.failed == ()
+    assert reconciler.diagnostics.error_count == 0
+
+
 def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
     tmp_path: Path,
 ) -> None:
