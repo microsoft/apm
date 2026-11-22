@@ -175,6 +175,23 @@ def test_multi_harness_plugin_installs_whole_at_project_scope(
     apm("install")
     assert snap() == converged
 
+    # A hand edit inside the native root is restored to the approved publisher
+    # bytes, never silently (I7): the plugin pin covers the whole root (#3191).
+    sibling = project / ".agents/plugins/NOTES.md"  # a user file outside the root
+    sibling.write_text("mine\n", encoding="ascii")
+    with_sibling = snap()
+    edited = root / "skills/using-sp-like/SKILL.md"
+    edited.write_text(_FILES["skills/using-sp-like/SKILL.md"] + "Mine.\n", encoding="ascii")
+    lock_before = (project / "apm.lock.yaml").read_bytes()
+    restored = apm("install")
+    flat = " ".join((restored.stdout + restored.stderr).split())
+    assert f"Restored .agents/plugins/{_PLUGIN}: its files differed" in flat, _evidence(restored)
+    assert edited.read_text(encoding="ascii") == _FILES["skills/using-sp-like/SKILL.md"]
+    assert (project / "apm.lock.yaml").read_bytes() == lock_before
+    assert sibling.read_text(encoding="ascii") == "mine\n"
+    assert snap() == with_sibling
+    sibling.unlink()
+
     # The SessionStart hook finds its skill through the intact plugin root.
     if os.name != "nt" and shutil.which("sh"):
         hook = subprocess.run(

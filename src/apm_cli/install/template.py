@@ -264,7 +264,6 @@ def preflight_agent_plugin_dry_run(
 ) -> None:
     """Reject a cached or local native package without mutating its source.
 
-    It ends with the Codex split-install report a real install would print.
     The native-registration capability is published for the duration of the
     preview so a project whose effective targets exclude ``copilot`` yields
     the SAME precise reason a real install would, instead of the generic
@@ -281,7 +280,6 @@ def preflight_agent_plugin_dry_run(
     from apm_cli.bundle.local_bundle import route_agent_plugin_package
     from apm_cli.copilot_plugins.capability import native_registration_scope
     from apm_cli.core.scope import get_modules_dir, is_user_scope
-    from apm_cli.install.phases.codex_plugins import report_codex_split_dry_run
     from apm_cli.models.apm_package import PackageInfo, package_target_selection
     from apm_cli.models.validation import validate_apm_package
 
@@ -340,7 +338,6 @@ def preflight_agent_plugin_dry_run(
                     )
                 except AgentPluginTargetExcludedError:
                     continue
-    report_codex_split_dry_run(ctx, dependencies, apm_package=apm_package)
 
 
 def _record_agent_plugin_boundary_diagnostic(
