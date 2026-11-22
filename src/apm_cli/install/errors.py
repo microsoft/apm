@@ -64,12 +64,23 @@ class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
     """Same-name LSP entries APM did not write were preserved (#4628).
 
     *preserved* maps each runtime to the server names left as the user wrote
-    them; every other server in the install was still configured.
+    them; every other server in the install was still configured, and
+    *wrote_servers* says whether any of them changed a config.
     """
 
-    def __init__(self, message: str, *, preserved: dict[str, set[str]]) -> None:
+    def __init__(
+        self, message: str, *, preserved: dict[str, set[str]], wrote_servers: bool = True
+    ) -> None:
         super().__init__(message)
         self.preserved = preserved
+        self.wrote_servers = wrote_servers
+
+
+class LSPUserEntryRefusal(LSPUserEntryConflictError):
+    """An LSP user-entry conflict that wrote no server: the install commits nothing (#4697)."""
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
 
 class RequiredIntegrationError(RuntimeError):

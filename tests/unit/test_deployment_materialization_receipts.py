@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -774,7 +775,6 @@ def test_control_file_appearing_during_creation_is_never_clobbered(
 def test_failed_rendering_never_promotes_a_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
-    import shutil
 
     from apm_cli.integration.skill_integrator import SkillIntegrator
     from apm_cli.utils import atomic_io, content_hash
@@ -793,7 +793,7 @@ def test_failed_rendering_never_promotes_a_receipt(
         raise OSError(f"injected {stage} failure")
 
     if stage == "copy":
-        monkeypatch.setattr(shutil, "copy2", fail)
+        monkeypatch.setattr(os, "replace", fail)
     elif stage == "rewrite":
         monkeypatch.setattr(integrator, "_resolve_markdown_links_in_skill_bundle", fail)
     elif stage == "hash":
