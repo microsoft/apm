@@ -57,6 +57,18 @@ def invocation_memo(name: str) -> dict[Any, Any] | None:
         return _memos.setdefault(name, {})
 
 
+def forget_invocation_memos() -> None:
+    """Drop every memo of the current invocation, keeping its scope open.
+
+    Called after user code (a lifecycle command script) runs mid-command: it
+    may have refreshed credentials or changed the git remote, so nothing
+    learned before it may answer a later lookup.
+    """
+    with _lock:
+        if _memos is not None:
+            _memos.clear()
+
+
 def memoized_per_invocation(
     name: str, *, keep: Callable[[Any], bool]
 ) -> Callable[[Callable[..., _T]], Callable[..., _T]]:

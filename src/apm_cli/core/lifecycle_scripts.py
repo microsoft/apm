@@ -603,6 +603,11 @@ class LifecycleScriptRunner:
                     self._logger.verbose_detail(
                         f"[i] Lifecycle script failed: {script.script_type} for {event_name}"
                     )
+        if len(http_scripts) < len(matching):
+            # A command script may have changed credentials or the git remote.
+            from apm_cli.core.invocation_memo import forget_invocation_memos
+
+            forget_invocation_memos()
 
         return dispatch_http_batch(
             http_scripts,

@@ -217,3 +217,20 @@ def test_concurrent_misses_fetch_once_and_rejected_results_retry(kept, expected_
 
     assert results == ["result-same"] * 8
     assert len(calls) == expected_calls
+
+
+def test_a_lifecycle_command_script_drops_memos_so_refreshed_credentials_apply(server, tmp_path):
+    """A pre-install script may refresh credentials; a 404 seen before it is not reused."""
+    import sys
+
+    from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner, ScriptEntry
+
+    script = ScriptEntry(
+        script_type="command", event="pre-install", command=f'"{sys.executable}" -c "pass"'
+    )
+    runner = LifecycleScriptRunner(scripts=[script], project_root=str(tmp_path))
+    with invocation_scope():
+        assert _discover(tmp_path) == "absent"
+        runner.fire("pre-install", LifecycleEvent(event="pre-install"))
+        server.status = 200  # the policy became visible to the refreshed credentials
+        assert _discover(tmp_path) == "found"
