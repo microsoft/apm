@@ -11,12 +11,13 @@ from scripts.merge_queue.api import REPO, Api
 from scripts.merge_queue.refs import parse_train_ref, prefix_refs, ref_train_id
 from scripts.merge_queue.train import WINDOW_START
 
-TESTING, GREEN, RED, ABORTED = "TESTING", "GREEN", "RED", "ABORTED"
+TESTING, GREEN, RED, ABORTED, LANDED = "TESTING", "GREEN", "RED", "ABORTED", "LANDED"
 TRANSITIONS = {
     TESTING: {GREEN, RED, ABORTED},
-    GREEN: set(),
+    GREEN: {LANDED, ABORTED},
     RED: set(),
     ABORTED: set(),
+    LANDED: set(),
 }
 _TRAILER = re.compile(
     r"^Apm-Train: t(?P<id>\d+) k=(?P<k>\d+) pr=#(?P<pr>\d+) head=(?P<head>[0-9a-f]{40})"
@@ -32,6 +33,7 @@ class Member:
     k: int
     sha: str
     tree: str = ""
+    merged: str = ""
 
 
 @dataclass
@@ -71,8 +73,38 @@ class State:
             key=lambda train: train.train_id,
         )
 
+    def proven(self) -> list[Train]:
+        """The landing backlog: GREEN trains in launch order, up to the first one still
+        TESTING (a later train was built on it and cannot land before it)."""
+        backlog = []
+        for train in sorted(self.trains.values(), key=lambda train: train.train_id):
+            if train.status == TESTING:
+                break
+            if train.status == GREEN:
+                backlog.append(train)
+        return backlog
+
+    def chain(self) -> list[Train]:
+        """Trains a new train must stack on when landing: testing, or proven but unlanded."""
+        return sorted(
+            (
+                t
+                for t in self.trains.values()
+                if t.status == TESTING
+                or (t.status == GREEN and not all(m.merged for m in t.members))
+            ),
+            key=lambda train: train.train_id,
+        )
+
     def queued_prs(self) -> set[int]:
-        return {m.pr for t in self.trains.values() if t.status == TESTING for m in t.members}
+        """PRs aboard a train that is testing or proven but not yet fully landed."""
+        return {
+            m.pr
+            for t in self.trains.values()
+            if t.status in (TESTING, GREEN)
+            for m in t.members
+            if not m.merged
+        }
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=1, sort_keys=True)
