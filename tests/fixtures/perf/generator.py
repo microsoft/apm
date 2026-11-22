@@ -317,6 +317,7 @@ def consumer_manifest(name: str, dependencies: list[str], targets: tuple[str, ..
     document = {
         "name": name,
         "version": "1.0.0",
+        "license": "MIT",
         "targets": list(targets),
         "dependencies": {"apm": dependencies},
     }

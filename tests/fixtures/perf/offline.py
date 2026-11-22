@@ -76,8 +76,14 @@ def isolated_environment(
     root: Path, base_env: Mapping[str, str] | None = None
 ) -> tuple[IsolatedApmEnvironment, dict[str, str]]:
     """A private HOME / APM_HOME / cache environment for benchmark children."""
-    isolated = IsolatedApmEnvironment.create(root, base_env=dict(base_env or os.environ))
+    base = dict(base_env or os.environ)
+    isolated = IsolatedApmEnvironment.create(root, base_env=base)
     env = dict(isolated.process_environment)
+    # A relocatable git (for example one bundled with an IDE) finds its helpers,
+    # such as git-remote-https, only through the parent's GIT_EXEC_PATH.
+    exec_path = base.get("GIT_EXEC_PATH")
+    if exec_path and Path(exec_path).is_dir():
+        env["GIT_EXEC_PATH"] = exec_path
     env.pop(_NETWORK_GUARD_ENV, None)
     for host_flag in ("CI", "GITHUB_ACTIONS"):
         env.pop(host_flag, None)

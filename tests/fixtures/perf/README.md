@@ -41,7 +41,9 @@ from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm`. The journeys are:
 - install: cold and warm cache, no-op, `--frozen` CI replay (committed
   lockfile, cold cache), `-g` cold and warm
 - `update -y`, `uninstall`
-- local: `compile`, `audit`, `pack`, `unpack`
+- local: `compile`, `audit`, `pack`, and `install-bundle` (the supported
+  unpack path: a fresh project runs `apm install <bundle>`; `apm unpack` refuses
+  bundles that carry hooks)
 
 It writes `journeys-<sha>.json` and `.md`. Each cell reports wall p50 and p90,
 request, round-trip and connect counts, and the 1-min load of every sample. It
@@ -63,8 +65,11 @@ uv run python -m tests.benchmarks.journeys run --fixtures real --runs 3
 
 A sample counts only when the 1-min load is under `--max-load` (default 30).
 Before each timed run, the harness waits up to `--load-wait-min` minutes for
-the load to drop. Local journeys run only at RTT 0, but their requests are
-still counted, so any network call from a local command shows up.
+the load to drop. All journeys run at RTT 0. Only the `--rtt-journeys` (default: install cold,
+warm and frozen, and update) repeat at the other RTTs. Requests are counted
+everywhere, so any network call from a local command shows up. On the
+monorepo, `-g` and pack journeys are skipped, because pack refuses local-path
+dependencies by design.
 
 In real-network mode, a counting CONNECT tunnel reports connects and bytes.
 Request counts need TLS termination, which only the offline mode has. Set

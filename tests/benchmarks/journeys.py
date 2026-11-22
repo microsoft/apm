@@ -41,6 +41,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -57,7 +59,7 @@ from tests.fixtures.perf import (  # noqa: E402
 )
 from tests.fixtures.perf.generator import consumer_manifest  # noqa: E402
 
-LOCAL_JOURNEYS = ("compile", "audit", "pack", "unpack")
+LOCAL_JOURNEYS = ("compile", "audit", "pack", "install-bundle")
 NETWORK_JOURNEYS = (
     "install-cold",
     "install-warm",
@@ -71,6 +73,8 @@ NETWORK_JOURNEYS = (
 BOOT_JOURNEYS = ("boot-version", "boot-help")
 ALL_JOURNEYS = BOOT_JOURNEYS + NETWORK_JOURNEYS + LOCAL_JOURNEYS
 _GLOBAL = ("install-global-cold", "install-global-warm")
+_PACKS = ("pack", "install-bundle")
+DEFAULT_RTT_JOURNEYS = ("install-cold", "install-warm", "install-frozen", "update")
 _COMMAND_TIMEOUT_S = 1800
 
 
@@ -292,24 +296,30 @@ def _setup_global_warm(ctx: Context) -> None:
     ctx.fresh_global()
 
 
-def _setup_unpack(ctx: Context) -> None:
+def _setup_install_bundle(ctx: Context) -> None:
+    """A plugin bundle packed from the installed project; a fresh consumer installs it."""
     ctx.installed()
-    root = ctx.roots()[0]
-    ctx.checked(["pack", "--format", "apm", "--archive", "-o", str(ctx.work / "dist-apm")], root)
-    target = ctx.work / "unpacked"
-    shutil.rmtree(target, ignore_errors=True)
-    target.mkdir()
+    dist = ctx.work / "dist-bundle"
+    shutil.rmtree(dist, ignore_errors=True)
+    ctx.checked(["pack", "--archive", "-o", str(dist)], ctx.roots()[0])
+    consumer = ctx.work / "bundle-consumer"
+    shutil.rmtree(consumer, ignore_errors=True)
+    consumer.mkdir()
+    text = consumer_manifest("bundle-consumer", [], ("copilot",))
+    (consumer / "apm.yml").write_text(text, encoding="utf-8")
 
 
-def _unpack_steps(ctx: Context) -> list[Step]:
-    (bundle,) = sorted((ctx.work / "dist-apm").iterdir())
-    return [(["unpack", str(bundle), "-o", str(ctx.work / "unpacked")], ctx.work / "unpacked")]
+def _install_bundle_steps(ctx: Context) -> list[Step]:
+    (bundle,) = sorted((ctx.work / "dist-bundle").iterdir())
+    return [(["install", str(bundle)], ctx.work / "bundle-consumer")]
 
 
 def _uninstall_steps(ctx: Context) -> list[Step]:
-    tree = ctx.fixture.trees[0] if ctx.fixture.trees else None
-    slug = tree.slug(tree.roots[0]) if tree else REAL_PACKAGES[0].split("#")[0]
-    return [(["uninstall", slug], ctx.roots()[0])]
+    """Uninstall the first remote direct dependency of the first root."""
+    root = ctx.roots()[0]
+    manifest = yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))
+    remote = [d for d in manifest["dependencies"]["apm"] if not d.startswith(".")]
+    return [(["uninstall", remote[0].split("#", 1)[0]], root)]
 
 
 def _setup_pack(ctx: Context) -> None:
@@ -352,7 +362,7 @@ JOURNEYS: dict[str, Journey] = {
             _setup_pack,
             lambda c: [(["pack", "--archive", "-o", str(c.work / "dist")], c.roots()[0])],
         ),
-        Journey("unpack", _setup_unpack, _unpack_steps),
+        Journey("install-bundle", _setup_install_bundle, _install_bundle_steps),
     )
 }
 
@@ -487,14 +497,17 @@ def resolve_apm(explicit: str | None) -> list[str]:
     raise SystemExit("no apm CLI found: pass --apm or set APM_BINARY_PATH")
 
 
-def _journeys_for(fixture: Fixture, rtt: float, first: bool, wanted: list[str]) -> list[str]:
+def _journeys_for(
+    fixture: Fixture, rtt: float, first: bool, wanted: list[str], rtt_journeys: list[str]
+) -> list[str]:
     names = []
     for name in wanted:
         if name in BOOT_JOURNEYS and not (first and rtt == 0):
             continue
-        if name in LOCAL_JOURNEYS and rtt != 0:
+        if rtt != 0 and name not in rtt_journeys:
             continue
-        if name in _GLOBAL and len(fixture.roots) > 1:
+        # A monorepo has several roots and local-path deps, which pack refuses by design.
+        if name in (*_GLOBAL, *_PACKS) and len(fixture.roots) > 1:
             continue
         names.append(name)
     return names
@@ -512,11 +525,15 @@ def run(args: argparse.Namespace) -> dict:
             "apm": apm[0],
             "apm_version": version.stdout.strip(),
             "python": platform.python_version(),
+            "git": subprocess.run(
+                ["git", "--version"], capture_output=True, text=True, check=False
+            ).stdout.strip(),
             "platform": platform.platform(),
             "cpus": os.cpu_count(),
             "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "runs": args.runs,
             "rtt_ms": args.rtt,
+            "rtt_journeys": args.rtt_journeys,
             "max_load": args.max_load,
             "uptime_start": _uptime(),
         },
@@ -534,7 +551,8 @@ def run(args: argparse.Namespace) -> dict:
             ctx.fresh_project()
             for rtt in rtts:
                 world.rtt_ms = rtt
-                for journey in _journeys_for(fixture, rtt, index == 0, wanted):
+                names = _journeys_for(fixture, rtt, index == 0, wanted, args.rtt_journeys)
+                for journey in names:
                     record = measure(ctx, JOURNEYS[journey], args)
                     report["results"].append(record)
                     _progress(record)
@@ -560,8 +578,16 @@ def _progress(record: dict) -> None:
         print(record["error"][-1500:], flush=True)
 
 
+def _cli_sha(report: dict) -> str:
+    """The measured CLI's commit (``apm --version`` prints it), else the harness SHA."""
+    version = report["meta"]["apm_version"]
+    if version.endswith(")") and "(" in version:
+        return version.rsplit("(", 1)[1][:-1]
+    return report["meta"]["sha"][:12]
+
+
 def _write(report: dict, out: Path) -> None:
-    stem = f"journeys-{report['meta']['sha'][:12]}"
+    stem = f"journeys-{_cli_sha(report)}"
     (out / f"{stem}.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (out / f"{stem}.md").write_text(render_markdown(report), encoding="utf-8")
 
@@ -573,7 +599,7 @@ def _cell(value) -> str:
 def render_markdown(report: dict) -> str:
     meta = report["meta"]
     lines = [
-        f"# APM journey benchmarks @ {meta['sha'][:12]}",
+        f"# APM journey benchmarks: CLI @ {_cli_sha(report)} (harness @ {meta['sha'][:12]})",
         "",
         f"- CLI: `{meta['apm_version']}` ({meta['apm']})",
         f"- Host: {meta['platform']}, {meta['cpus']} CPUs, Python {meta['python']}",
@@ -668,6 +694,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_parser.add_argument(
         "--rtt", default="0,30,100", type=lambda v: [float(x) for x in v.split(",")]
+    )
+    run_parser.add_argument(
+        "--rtt-journeys",
+        default=",".join(DEFAULT_RTT_JOURNEYS),
+        type=lambda v: v.split(","),
+        help="journeys also measured at non-zero RTT (all journeys run at RTT 0)",
     )
     run_parser.add_argument("--runs", type=int, default=5)
     run_parser.add_argument("--max-load", type=float, default=30.0)

@@ -23,6 +23,7 @@ from tests.utils.local_scripted_https_proxy import (
 
 pytestmark = [
     pytest.mark.component,
+    pytest.mark.promise("P-OWN-egress-route-policy"),
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
 ]
 

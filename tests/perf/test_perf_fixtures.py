@@ -30,7 +30,11 @@ from tests.fixtures.perf import (
     serve_offline,
 )
 
-pytestmark = [pytest.mark.e2e, pytest.mark.benchmark]
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.benchmark,
+    pytest.mark.promise("P-LAW-lockfile.frozen_preserves_bytes"),
+]
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -93,28 +97,41 @@ def test_generation_is_deterministic(tmp_path: Path) -> None:
     assert shas[0] == shas[1]
 
 
+def _install(apm: str, cwd: Path, env: dict[str, str], *flags: str) -> None:
+    result = subprocess.run(
+        [apm, "install", *flags],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_tree_10_offline_install_reports_requests(tmp_path: Path) -> None:
     apm = _apm()
     fixture = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    lockfile = fixture.project / "apm.lock.yaml"
     with serve_offline(fixture, tmp_path / "world") as world:
-        result = subprocess.run(
-            [apm, "install"],
-            cwd=fixture.project,
-            env=world.env,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
-        )
+        _install(apm, fixture.project, world.env)
         traffic = world.traffic().as_dict()
-    print(f"\n[tree-10 offline install] traffic={traffic}")
+        committed = lockfile.read_bytes()
+        shutil.rmtree(fixture.project / "apm_modules")
+        world.clear_cache()
+        world.reset_traffic()
+        _install(apm, fixture.project, world.env, "--frozen")
+        frozen_traffic = world.traffic().as_dict()
+    print(f"\n[tree-10 offline] install={traffic} install --frozen={frozen_traffic}")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    lock = yaml.safe_load((fixture.project / "apm.lock.yaml").read_text(encoding="utf-8"))
-    locked = json.dumps(lock)
-    assert all(f"perf-org/{name}" in locked for name in fixture.packages)
+    lock = yaml.safe_load(committed.decode("utf-8"))
+    locked = {entry["repo_url"] for entry in lock["dependencies"]}
+    assert locked == {fixture.slug(name) for name in fixture.packages}
+    assert lockfile.read_bytes() == committed
     assert traffic["requests"] > 0
     assert traffic["round_trips"] > traffic["requests"]
+    assert frozen_traffic["requests"] > 0
 
 
 def test_monorepo_roots_install_offline(tmp_path: Path) -> None:
