@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import shutil
 import tarfile
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,8 +104,13 @@ def lockless_bin_bundle(archive: Path, root: Path) -> Path:
     so an org refusal of this bundle is the policy's, not the manifest's.
     """
     root.mkdir()
-    with tarfile.open(archive, mode="r:gz") as tar:
-        tar.extractall(root, filter="data")
+    # ``apm pack --archive`` writes a zip or a gzipped tarball depending on the release.
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as bundle_zip:
+            bundle_zip.extractall(root)  # noqa: S202 -- the spine's own apm pack output
+    else:
+        with tarfile.open(archive, mode="r:gz") as tar:
+            tar.extractall(root, filter="data")
     (bundle,) = {path.parent for path in root.rglob("plugin.json")}
     (bundle / "apm.lock.yaml").unlink()
     tool = bundle / _BIN_TOOL
