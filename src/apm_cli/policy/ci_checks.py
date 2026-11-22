@@ -851,8 +851,9 @@ def _kept_mcp_entries(
     kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
     details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
     # Without a lockfile, unusable evidence keeps every entry it lists, so it is
-    # reported; with one, the lockfile governs cleanup and the record is unused.
-    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope) if lockless else None
+    # reported; with one, only evidence an earlier lockless install met (and
+    # kept every entry for) is still reported.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope, noted_only=not lockless)
     if unusable is not None:
         details.append(unusable)
     if not details:
