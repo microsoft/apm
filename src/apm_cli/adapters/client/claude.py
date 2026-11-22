@@ -595,6 +595,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             if data is None:
                 return False
             self._merge_and_normalize_updates(data, config_updates, managed_fields)
+            from .base import journal_config_write
+
+            journal_config_write(path)
             path.parent.mkdir(parents=True, exist_ok=True)
             write_json_config(path, data, default_trailing_newline=True, new_file_mode=0o600)
             _log.debug("Claude user-scope MCP config written to %s", path)

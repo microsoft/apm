@@ -33,6 +33,7 @@ from tests.lifecycle.generator.rules import (
     REFUSAL_MESSAGES,
     RULE_CELL_KNOWN,
     RULE_CELL_REFUSALS,
+    SCENARIO_REFUSALS,
     UNINSTALL_MCP_REFUSALS,
 )
 from tests.lifecycle.generator.space import Entry
@@ -530,7 +531,11 @@ def refusal_line(cell: Mapping[str, str]) -> str:
 
 
 def refusal_rows(obligations: Mapping[str, Entry], start: int) -> list[Row]:
-    refusals = [entry for entry in obligations.values() if entry.family == "refusal"]
+    refusals = [
+        entry
+        for entry in obligations.values()
+        if entry.family == "refusal" and entry.id not in SCENARIO_REFUSALS
+    ]
     steps = [
         Step(
             refusal_line(entry.cell),

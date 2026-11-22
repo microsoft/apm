@@ -39,9 +39,7 @@ _CODEX_NAME_RULE_LITERAL = re.compile(re.escape("[A-Za-z0-9][A-Za-z0-9._-]*"))
 # root .mcp.json excludes APM-managed servers by default, and the only opt-out
 # is a dependency's own authored file.
 _MCP_OPT_OUT = "exclude_apm_managed=False"
-_MCP_OPT_OUT_SITES = {
-    ("src/apm_cli/bundle/plugin_exporter.py", "_cache_would_contribute_hooks_or_mcp")
-}
+_MCP_OPT_OUT_SITES = {("src/apm_cli/bundle/plugin_exporter.py", "_cache_config_kinds")}
 _MCP_DEFAULT = "exclude_apm_managed: bool = True"
 # Authored sources only (#3966): apm.yml declarations ship from apm.yml, and a
 # lock claim hides a root entry only when its runtime writes root .mcp.json.

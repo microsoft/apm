@@ -23,7 +23,7 @@ from apm_cli.core.deployment_state import (
     DeploymentRecord,
     LocatorKind,
 )
-from apm_cli.core.legacy_lock_evidence import legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -738,17 +738,17 @@ class OverwriteGate:
                 self.session.record({path: legacy}, self.targets, self.owner, evidence_only=True)
         return True
 
-    def adopt_legacy(self, path: Path, claim: str) -> bool:
+    def legacy_adoptable(self, path: Path, claim: str) -> bool:
         """A frozen install keeps an unedited pre-0.37 render as it is (#4398)."""
-        adopted = (
-            self.session is not None
-            and self.session.verify_only
-            and self.session.legacy_owned(path, claim)
-        )
-        if adopted:
+        session = self.session
+        return session is not None and session.verify_only and session.legacy_owned(path, claim)
+
+    def adopt_legacy(self, path: Path, claim: str) -> bool:
+        """Record an adoptable pre-0.37 render as the bytes APM deployed (#4398)."""
+        adopted = self.legacy_adoptable(path, claim)
+        if adopted and self.session is not None:
             from apm_cli.utils.content_hash import compute_file_hash
 
-            # The lock proves APM deployed these bytes: record them as such.
             self.session.record({path: compute_file_hash(path)}, self.targets, self.owner)
             self.session.legacy_adopted += 1
         return adopted
@@ -877,7 +877,7 @@ def trusted_receipt_baselines(
     return baselines
 
 
-class DeploymentLedgerCodec:
+class DeploymentLedgerCodec(RowProjection):
     """Translate canonical deployment records to and from lockfile views."""
 
     @staticmethod
