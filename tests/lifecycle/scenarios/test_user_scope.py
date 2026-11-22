@@ -194,9 +194,9 @@ def test_a_target_change_at_user_scope_redeploys_under_home(lifecycle_world, cha
 
 _CHANGED = ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
 # #4744: dropping claude from targets: leaves the plugin bin deployed.
-_BIN_KNOWN = {
-    "multi-narrowed": Known("#4744", r"^a dropped claude target left the plugin bin"),
-}
+_BIN_ISSUE = "#4744"
+_BIN_MATCH = r"^a dropped claude target left the plugin bin"
+_BIN_KNOWN = {"multi-narrowed": Known(_BIN_ISSUE, _BIN_MATCH)}
 
 
 def _bin_credit(change: str) -> dict[str, str]:
@@ -221,8 +221,7 @@ def test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared(
     assert step.result.returncode == 0, step.output
     deployed = (lifecycle_world.home / _PLUGIN_BIN).is_file()
     if change in _BIN_KNOWN:
-        known = _BIN_KNOWN[change]
-        with known_defect(known.tracking, known.match):
+        with known_defect(_BIN_ISSUE, _BIN_MATCH):
             assert not deployed, f"a dropped claude target left the plugin bin\n{step.output}"
     else:
         assert deployed == ("claude" in after), step.output
