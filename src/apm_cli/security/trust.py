@@ -316,6 +316,9 @@ class McpAdmission:
                 policy = route.policy
                 if policy is None and (route.blocks or route.unresolved):
                     admission.policy_unavailable = route.outcome
+                elif route.unavailable_source:
+                    # A --policy source that did not load leaves the policy partial (#1925).
+                    admission.policy_unavailable = route.unavailable_source
             return exec_trust_context_for_project(
                 grants_manifest, policy=policy, logger=logger, include_user=include_user
             )

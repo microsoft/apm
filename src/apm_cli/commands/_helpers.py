@@ -4,6 +4,7 @@ This module must NOT import from any command module.
 """
 
 import builtins
+import functools
 import os
 import sys
 from collections.abc import Iterable
@@ -35,6 +36,8 @@ from ..models.manifest_bootstrap import bootstrap_config as _get_bootstrap_confi
 from ..models.manifest_bootstrap import (  # noqa: F401
     write_minimal_manifest as _create_minimal_apm_yml,
 )
+from ..policy._help_text import EXPLICIT_POLICY_SOURCE_HELP
+from ..policy.explicit_source import explicit_policy_scope
 from ..update_policy import get_update_hint_message, is_self_update_enabled
 from ..utils.atomic_io import (
     atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
@@ -565,3 +568,27 @@ trust_transitive_mcp_option = click.option(
         "their own registry or configuration (skip re-declaration requirement)"
     ),
 )
+
+
+# Shared by ``apm install`` and ``apm update``: an explicit policy source
+# composed with org policy auto-discovery (#1925). The decorator owns the
+# flag: it rejects combinations with no defined meaning and binds the source
+# for the whole invocation, so the command body never sees it.
+def explicit_policy_option(command):
+    @click.option(
+        "--policy",
+        "policy_source",
+        default=None,
+        metavar="SOURCE",
+        help=EXPLICIT_POLICY_SOURCE_HELP,
+    )
+    @functools.wraps(command)
+    def wrapper(*args, policy_source=None, **kwargs):
+        if policy_source and kwargs.get("global_"):
+            raise click.UsageError("--policy is not valid with --global (user scope)")
+        if policy_source and kwargs.get("no_policy"):
+            raise click.UsageError("--policy and --no-policy are mutually exclusive")
+        click.get_current_context().with_resource(explicit_policy_scope(policy_source))
+        return command(*args, **kwargs)
+
+    return wrapper

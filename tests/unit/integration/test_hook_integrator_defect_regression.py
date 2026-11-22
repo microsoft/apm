@@ -914,3 +914,27 @@ def test_undeclared_event_retires_safe_legacy_leaf_marker(
     assert stop_commands.count("echo stop") == (1 if legacy_retired else 2)
     sidecar = json.loads((claude / "apm-hooks.json").read_text(encoding="utf-8"))
     assert ("PreToolUse" in sidecar) is not legacy_retired
+
+
+@pytest.mark.parametrize("target", ["claude", "kiro", "copilot"])
+def test_a_withheld_hook_document_never_ships_as_a_bundle_asset(
+    tmp_path: Path, target: str
+) -> None:
+    """Only admitted documents deploy; a withheld sibling is a document, not an asset."""
+    package_path = tmp_path / "pkg"
+    hooks_dir = package_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "run.sh").write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    command = {"hooks": [{"type": "command", "command": "./run.sh"}]}
+    approved = hooks_dir / "approved.json"
+    approved.write_text(json.dumps({"hooks": {"Stop": [command]}}), encoding="utf-8")
+    withheld = hooks_dir / "withheld.json"
+    withheld.write_text(json.dumps({"hooks": {"Stop": [command]}}), encoding="utf-8")
+
+    selection = HookIntegrator.select_deployable_hook_sources(
+        package_path, (target,), hook_files=[approved]
+    )
+
+    assert withheld not in selection.bundle_for(target)
+    assert hooks_dir / "run.sh" in selection.bundle_for(target)
+    assert withheld.read_text(encoding="utf-8").startswith("{"), "selection is read-only"

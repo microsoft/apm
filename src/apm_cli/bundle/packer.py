@@ -56,6 +56,12 @@ def _bundle_file_paths(
     return paths
 
 
+def _with_warnings(warnings: list[str], result: PackResult) -> PackResult:
+    """Put *warnings* (org policy findings) ahead of the format's own pack warnings."""
+    result.warnings[:0] = warnings
+    return result
+
+
 def pack_bundle(
     project_root: Path,
     output_dir: Path,
@@ -90,35 +96,46 @@ def pack_bundle(
 
     Raises:
         FileNotFoundError: If ``apm.lock.yaml`` is missing.
-        ValueError: If deployed files referenced in the lockfile are missing on disk.
+        ValueError: If deployed files referenced in the lockfile are missing on disk,
+            or org policy refuses a locked dependency.
     """
     bundle_format = coerce_bundle_format(fmt)
+    # Org policy that refuses a dependency refuses to ship its content too.
+    from .pack_policy import pack_policy_preflight
+
+    policy_warnings = pack_policy_preflight(Path(project_root), logger)
 
     if bundle_format is BundleFormat.AGENT_PLUGIN:
         from .agent_plugin_exporter import export_agent_plugin_bundle
 
-        return export_agent_plugin_bundle(
-            project_root=project_root,
-            output_dir=output_dir,
-            target=target,
-            archive=archive,
-            archive_format=archive_format,
-            dry_run=dry_run,
-            force=force,
-            logger=logger,
+        return _with_warnings(
+            policy_warnings,
+            export_agent_plugin_bundle(
+                project_root=project_root,
+                output_dir=output_dir,
+                target=target,
+                archive=archive,
+                archive_format=archive_format,
+                dry_run=dry_run,
+                force=force,
+                logger=logger,
+            ),
         )
     if bundle_format is BundleFormat.CLAUDE_PLUGIN:
         from .claude_plugin_exporter import export_claude_plugin_bundle
 
-        return export_claude_plugin_bundle(
-            project_root=project_root,
-            output_dir=output_dir,
-            target=target,
-            archive=archive,
-            archive_format=archive_format,
-            dry_run=dry_run,
-            force=force,
-            logger=logger,
+        return _with_warnings(
+            policy_warnings,
+            export_claude_plugin_bundle(
+                project_root=project_root,
+                output_dir=output_dir,
+                target=target,
+                archive=archive,
+                archive_format=archive_format,
+                dry_run=dry_run,
+                force=force,
+                logger=logger,
+            ),
         )
 
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=dry_run)
@@ -271,6 +288,7 @@ def pack_bundle(
         return PackResult(
             bundle_path=bundle_path,
             files=[*unique_files, *rendered_files],
+            warnings=list(policy_warnings),
             lockfile_enriched=True,
             mapped_count=len(path_mappings),
             path_mappings=path_mappings,
@@ -417,4 +435,4 @@ def pack_bundle(
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 
-    return result
+    return _with_warnings(policy_warnings, result)

@@ -663,6 +663,7 @@ install-deployment-drift-claim-classification
 install-deployment-effective-selection
 install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-explicit-policy-source-owner
 install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
