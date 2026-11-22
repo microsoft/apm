@@ -348,6 +348,7 @@ class AgentsCompiler:
         self._deploy_inventory: CompileInventory | None = None
         self._protected_root_context_paths: set[Path] = set()
         self._agents_md_outputs: set[Path] = set()
+        self._claude_consumes_agents_md = False
 
     def _log(self, method: str, message: str, **kwargs):
         """Delegate to logger if available, else no-op."""
@@ -475,6 +476,10 @@ class AgentsCompiler:
             )
 
             agents_failed = False
+            # Claude reads these AGENTS.md outputs, so compile records their coverage.
+            self._claude_consumes_agents_md = "claude" in requested_outputs and (
+                should_compile_claude_md(routing_target)
+            )
             if "agents" in requested_outputs and should_compile_agents_md(routing_target):
                 agents_result = self._compile_agents_md(config, primitives)
                 results.append(agents_result)
@@ -815,7 +820,7 @@ class AgentsCompiler:
                 self._agents_md_outputs.update(pending_outputs)
             except (OSError, CompiledOutputPolicyError) as exc:
                 self.errors.append(f"Failed to write distributed output batch: {exc}")
-        if successful_writes and is_claude_only_target(config.target):
+        if successful_writes and self._claude_consumes_agents_md:
             record_compiled_instructions(
                 self.base_dir,
                 {
@@ -884,7 +889,7 @@ class AgentsCompiler:
         written = len(self.errors) == errors_before
         if not write_blocked and written and output_file.name == "AGENTS.md":
             self._agents_md_outputs.add(output_file)
-            if not config.dry_run and is_claude_only_target(config.target):
+            if not config.dry_run and self._claude_consumes_agents_md:
                 record_compiled_instructions(
                     self.base_dir, {output_file: list(primitives.instructions)}
                 )

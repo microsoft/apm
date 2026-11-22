@@ -89,6 +89,17 @@ class TestBlocker:
         )
         assert claude_agents_md_blocker(tmp_path) is None
 
+    def test_generated_agents_md_needs_markers_once_managed_section_is_on(self, tmp_path):
+        """Managed-section mode writes only between markers, even into a generated file."""
+        (tmp_path / "apm.yml").write_text(
+            "name: p\nversion: 1.0.0\ncompilation:\n  agents_md:\n    mode: managed_section\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "AGENTS.md").write_text(
+            f"# AGENTS.md\n{DISTRIBUTED_AGENTS_MD_GENERATED_MARKER}\n", encoding="utf-8"
+        )
+        assert "managed section" in claude_agents_md_blocker(tmp_path)
+
     @pytest.mark.parametrize(
         "body",
         [
@@ -189,16 +200,22 @@ def _deploy(tmp_path, package, **kwargs) -> list[str]:
     return sorted(path.name for path in result.target_paths)
 
 
-def _compile_package(project: Path, package: SimpleNamespace, *, source_dir: Path | None = None):
-    """Compile *package*'s instructions for Claude the way ``apm compile`` does."""
+def _compile_package(
+    project: Path,
+    package: SimpleNamespace | list[SimpleNamespace],
+    *,
+    source_dir: Path | None = None,
+    target: str = "claude",
+):
+    """Compile the packages' instructions the way ``apm compile`` does."""
     from apm_cli.primitives.parser import parse_primitive_file
 
     primitives = PrimitiveCollection()
-    apm_dir = package.install_path / ".apm"
-    for path in sorted(apm_dir.rglob("*.md")):
-        primitives.add_primitive(parse_primitive_file(path, source="dependency:pkg"))
+    for each in package if isinstance(package, list) else [package]:
+        for path in sorted((each.install_path / ".apm").rglob("*.md")):
+            primitives.add_primitive(parse_primitive_file(path, source="dependency:pkg"))
     compiler = AgentsCompiler(str(project), str(source_dir) if source_dir else None)
-    return compiler.compile(CompilationConfig(target="claude"), primitives)
+    return compiler.compile(CompilationConfig(target=target), primitives)
 
 
 class TestInstallRouting:
@@ -575,7 +592,7 @@ class TestRoutingFollowUps:
 
         assert self._stale(project, package) == set()
 
-    @pytest.mark.parametrize("edit", ["narrowed-scope", "shortened-body"])
+    @pytest.mark.parametrize("edit", ["narrowed-scope", "shortened-body", "emptied-body"])
     def test_scope_or_body_edit_after_compile_asks_again(self, tmp_path, edit):
         """A substring of the compiled text is not the compiled instruction (item 7)."""
         project = tmp_path / "project"
@@ -593,45 +610,85 @@ class TestRoutingFollowUps:
         text = source.read_text(encoding="utf-8")
         if edit == "narrowed-scope":
             source.write_text(text.replace("applyTo: '**'", "applyTo: 'src/**'"), "utf-8")
-        else:
+        elif edit == "shortened-body":
             source.write_text(text.replace("Use ASCII.\n", ""), encoding="utf-8")
+        else:
+            source.write_text(text.split("\n\n")[0] + "\n\n", encoding="utf-8")
 
         assert self._stale(project, package) == {"style.instructions.md"}
 
     @staticmethod
-    def _agents_md_reads(tmp_path, monkeypatch, rules: int) -> int:
-        project = tmp_path / f"project{rules}"
+    def _context_reads(tmp_path, monkeypatch, packages: int, rules: int) -> int:
+        """Reads of any AGENTS.md or CLAUDE.md while one install routes the packages."""
+        project = tmp_path / f"project{packages}x{rules}"
         (project / ".claude").mkdir(parents=True)
-        package = _package(tmp_path / f"pkg{rules}", {f"rule{i}": "**" for i in range(rules)})
-        assert _compile_package(project, package).success
-        agents_md = project / "AGENTS.md"
+        (project / "src").mkdir()
+        installed = [
+            _package(
+                tmp_path / f"pkg{packages}x{rules}-{k}",
+                {f"p{k}r{i}": ("src/**" if i % 2 else "**") for i in range(rules)},
+            )
+            for k in range(packages)
+        ]
+        assert _compile_package(project, installed).success
         reads: list[Path] = []
         real_open, real_read_bytes = Path.open, Path.read_bytes
 
+        def counted(path: Path) -> None:
+            if path.name in ("AGENTS.md", "CLAUDE.md") and project in path.parents:
+                reads.append(path)
+
         def counting_open(self, *args, **kwargs):
-            if self == agents_md:
-                reads.append(self)
+            counted(self)
             return real_open(self, *args, **kwargs)
 
         def counting_read_bytes(self):
-            if self == agents_md:
-                reads.append(self)
+            counted(self)
             return real_read_bytes(self)
 
+        integrator = InstructionIntegrator()
         with monkeypatch.context() as patched:
             patched.setattr(Path, "open", counting_open)
             patched.setattr(Path, "read_bytes", counting_read_bytes)
-            integrator = InstructionIntegrator()
-            integrator.integrate_instructions_for_target(KNOWN_TARGETS["claude"], package, project)
+            for package in installed:
+                integrator.integrate_instructions_for_target(
+                    KNOWN_TARGETS["claude"], package, project
+                )
         assert integrator.agents_md_stale == set()
         return len(reads)
 
-    def test_one_install_reads_the_compiled_agents_md_a_fixed_number_of_times(
+    def test_one_install_reads_each_context_file_a_fixed_number_of_times(
         self, tmp_path, monkeypatch
     ):
-        """Twenty routed instructions read AGENTS.md as often as one does (item 4)."""
-        one = self._agents_md_reads(tmp_path, monkeypatch, 1)
-        assert self._agents_md_reads(tmp_path, monkeypatch, 20) == one
+        """Instructions sharing a file, across packages, do not reread it (item 4)."""
+        few = self._context_reads(tmp_path, monkeypatch, packages=3, rules=2)
+        assert self._context_reads(tmp_path, monkeypatch, packages=3, rules=10) == few
+
+    def test_multi_target_compile_clears_the_reminder(self, tmp_path):
+        """Claude reads a shared AGENTS.md too, so compile records it (#4787 review)."""
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        package = _package(tmp_path, {"style": "**"})
+
+        assert _compile_package(project, package, target="all").success
+
+        assert self._stale(project, package) == set()
+
+    def test_a_rewrite_after_the_record_is_re_pinned(self, tmp_path):
+        """The CLI's constitution step rewrites AGENTS.md, then re-pins it (#4787 review)."""
+        from apm_cli.compilation.claude_agents_md import refresh_compiled_digest
+
+        project = tmp_path / "project"
+        (project / ".claude").mkdir(parents=True)
+        package = _package(tmp_path, {"style": "**"})
+        assert _compile_package(project, package).success
+        agents_md = project / "AGENTS.md"
+        agents_md.write_text(agents_md.read_text("utf-8") + "\nConstitution.\n", "utf-8")
+        assert self._stale(project, package) == {"style.instructions.md"}
+
+        refresh_compiled_digest(project, agents_md)
+
+        assert self._stale(project, package) == set()
 
     def test_compile_root_places_directory_guidance_from_the_source_tree(self, tmp_path):
         """``--root <empty dir>`` still writes src/AGENTS.md and its shim (item 5)."""

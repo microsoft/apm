@@ -86,6 +86,8 @@ class InstructionIntegrator(BaseIntegrator):
         self.agents_md_stale: set[str] = set()
         # One compiled-coverage snapshot per project root for this install.
         self._compiled_coverage: dict[Path, Any] = {}
+        # Routing verdicts per root and directory for this install (#4787).
+        self._routing_cache: dict = {}
 
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
@@ -562,11 +564,12 @@ class InstructionIntegrator(BaseIntegrator):
             if routes_to_agents_md(
                 self._parse_frontmatter(prepared_instructions[source].content)[0].get("applyTo"),
                 live_root,
+                cache=self._routing_cache,
             )
         }
         if not routed:
             return instruction_files
-        blocker = claude_agents_md_blocker(live_root)
+        blocker = claude_agents_md_blocker(live_root, cache=self._routing_cache)
         if blocker is not None:
             warned = (diagnostics, live_root)
             if diagnostics is not None and warned not in self._claude_blocker_warned:
