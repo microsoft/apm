@@ -51,9 +51,11 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
     COWORK_SKILLS_DIR_UNDETECTED,
+    KEPT_DELETE_MANUALLY,
     UNINSTALL_EVIDENCE_REINSTALL,
     UNINSTALL_EVIDENCE_REMOVE,
     UNINSTALL_EVIDENCE_TRUST_LOCKFILE,
+    kept_note,
 )
 from apm_cli.integration import write_seam
 from apm_cli.security.gate import is_python_bytecode_cache_path
@@ -1306,8 +1308,11 @@ def remove_stale_deployed_files(
         if evidence.consent_kept_link(stale_path, stale_target):
             result.skipped_unmanaged.append(stale_path)
             diagnostics.warn(
-                f"Kept {stale_path}: it is a symbolic link, which --trust-lockfile never removes. "
-                "Delete it manually if no longer needed.",
+                kept_note(
+                    stale_path,
+                    "it is a symbolic link, which --trust-lockfile never removes",
+                    KEPT_DELETE_MANUALLY,
+                ),
                 package=dep_key,
             )
             continue
