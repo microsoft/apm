@@ -15,6 +15,7 @@ enforcement; the byte assertions pin that precondition.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 import yaml
@@ -70,7 +71,10 @@ def test_reinstall_enforces_changed_org_policy(lifecycle_world: World) -> None:
     assert _inputs(world) == converged, "audit must not write apm.yml or the lock"
     _, output = _run(world, "install")
     assert not hook.exists(), f"a tightened org policy leaves the hook deployed\n{output}"
-    assert "deny" in output.lower(), f"the retirement is not announced\n{output}"
+    # The package-specific denial, not the policy banner (which names the deny policy).
+    assert re.search(r"p-exec: hooks skipped \(denied\)\. Run 'apm policy explain ", output), (
+        f"the hook denial is not announced for p-exec\n{output}"
+    )
     # Converged under the new policy: audit --ci agrees with install (I3).
     _run(world, "audit", "--ci")
 
@@ -97,6 +101,6 @@ def test_reinstall_retires_executable_after_out_of_band_approval_removal(
     assert _inputs(world) == converged, "the store change must not touch apm.yml or the lock"
     _, output = _run(world, "install")
     assert not hook.exists(), f"a withdrawn approval leaves the hook deployed\n{output}"
-    assert "p-exec" in output and ("not approved" in output or "skipped" in output.lower()), (
-        f"the retirement is not announced\n{output}"
+    assert re.search(r"p-exec: hooks skipped \(not approved in executables\.allow\)", output), (
+        f"the parked hook is not announced for p-exec\n{output}"
     )
