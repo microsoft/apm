@@ -90,6 +90,7 @@ class _FakeResolver:
         port=None,
         path=None,
         unauth_first=False,
+        base_env=None,
     ):
         self.calls.append(
             {
@@ -98,6 +99,7 @@ class _FakeResolver:
                 "port": port,
                 "path": path,
                 "unauth_first": unauth_first,
+                "base_env": base_env,
             }
         )
         return operation(self.token, self.git_env)
@@ -288,6 +290,7 @@ def test_fetch_ado_legacy_visualstudio_host(transport) -> None:
             id="network-error",
         ),
         pytest.param(text_body("not json{{", content_type="application/json"), id="invalid-json"),
+        pytest.param(status(302), id="redirect-without-location"),
         # An oversized body raises MarketplaceFetchError inside the REST
         # operation; it must degrade to the clone, not escape.
         pytest.param(

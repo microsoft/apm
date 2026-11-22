@@ -93,10 +93,22 @@ class ScriptedTransport:
         default_factory=list
     )
     requests: list[requests.PreparedRequest] = field(default_factory=list)
+    send_kwargs: list[dict] = field(default_factory=list)
 
     def on(self, predicate: Callable[[requests.PreparedRequest], bool], respond: Responder):
         self.routes.append((predicate, respond))
         return self
+
+    def sequence(self, *responders: Responder):
+        """Answer successive requests with *responders* in order."""
+        pending = list(responders)
+
+        def _next(request: requests.PreparedRequest) -> requests.Response:
+            if not pending:
+                raise AssertionError(f"no scripted response left for {request.url}")
+            return pending.pop(0)(request)
+
+        return self.always(_next)
 
     def on_host(self, host: str, respond: Responder):
         return self.on(lambda request: urlsplit(request.url or "").hostname == host, respond)
@@ -104,8 +116,9 @@ class ScriptedTransport:
     def always(self, respond: Responder):
         return self.on(lambda _request: True, respond)
 
-    def _send(self, _adapter, request, **_kwargs):
+    def _send(self, _adapter, request, **kwargs):
         self.requests.append(request)
+        self.send_kwargs.append(kwargs)
         for predicate, respond in self.routes:
             if predicate(request):
                 return respond(request)
