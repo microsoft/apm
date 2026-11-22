@@ -22,7 +22,11 @@ from dataclasses import dataclass, field
 
 Step = str | Mapping[str, object]
 # What a step that refuses on an out-of-date lock or a denied package prints.
-FROZEN_REFUSAL = r"out of sync|does not match|denied by pattern"
+# The last alternative is install --frozen's stale executables-decision refusal (#4053).
+FROZEN_REFUSAL = (
+    r"out of sync|does not match|denied by pattern"
+    r"|records an executables decision the gate no longer makes"
+)
 
 
 def default_arrange(key: str) -> list[Step]:
