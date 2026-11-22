@@ -1450,6 +1450,25 @@ def test_journey_files_agree_with_the_index() -> None:
 @pytest.mark.parametrize("path", _params())
 def test_journey(path: Path, lifecycle_world, journey_twins) -> None:
     del journey_twins
+    _run_journey(path, lifecycle_world)
+
+
+# Journeys that must hold unchanged with the opt-in no-op install fast path on
+# (#4770, QL H8): every converged install may replay, every drift must not.
+_FAST_PATH_JOURNEYS = ("J12",)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in _params() if p.id in _FAST_PATH_JOURNEYS],
+)
+def test_journey_with_install_fast_path_on(path: Path, lifecycle_world, journey_twins) -> None:
+    del journey_twins
+    lifecycle_world.env["APM_INSTALL_FAST_PATH"] = "1"
+    _run_journey(path, lifecycle_world)
+
+
+def _run_journey(path: Path, lifecycle_world) -> None:
     index = load_index()
     assert check_journey_file(path, index) == []
     journey = load_journey(path)
