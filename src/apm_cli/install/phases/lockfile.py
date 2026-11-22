@@ -212,6 +212,7 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._retire_undeclared_native_plugins(lockfile)
             self._attach_replacement_table(lockfile)
             # Restore local compatibility state first so the canonical ledger is
             # complete when MCP target rows are projected into it.
@@ -472,9 +473,7 @@ class LockfileBuilder:
         """Record each admitted native Claude plugin as its dependency's ownership.
 
         A run whose targets exclude Claude did not evaluate Claude admission, so
-        an existing record is carried forward instead of retiring the plugin,
-        unless apm.yml dropped claude: then the record goes and native
-        registration retires the plugin root (#4744).
+        an existing record is carried forward instead of retiring the plugin.
         """
         from apm_cli.claude_plugins.registrar import marketplace_binding
         from apm_cli.native_plugins.record import NativePluginRecord
@@ -490,8 +489,6 @@ class LockfileBuilder:
         existing = getattr(self.ctx, "existing_lockfile", None)
         if existing is None or any(t.name == "claude" for t in self.ctx.targets or ()):
             return
-        if self._claude_dropped(existing):
-            return
         for dep_key, locked in lockfile.dependencies.items():
             prior = existing.dependencies.get(dep_key)
             if (
@@ -503,17 +500,28 @@ class LockfileBuilder:
             ):
                 locked.native_plugin = prior.native_plugin
 
-    def _claude_dropped(self, existing: LockFile) -> bool:
-        """Whether apm.yml no longer declares claude though *existing* recorded it."""
-        from apm_cli.install.manifest_reconcile import declared_target_dropped
+    def _retire_undeclared_native_plugins(self, lockfile: LockFile) -> None:
+        """Drop native Claude records once apm.yml no longer declares claude (#4744).
 
+        The rule of target-scoped contraction (``manifest_reconcile``
+        ``_dropped_target_of``): claude is neither declared nor active in this
+        run. Applied to the merged lock, so a partial install retires untouched
+        plugins too; native registration then removes their roots and Claude
+        declarations. ``apm lock`` touches no deployed state, so it keeps them.
+        """
+        if self.ctx.lockfile_only or any(t.name == "claude" for t in self.ctx.targets or ()):
+            return
         package_path = getattr(getattr(self.ctx, "apm_package", None), "package_path", None)
-        return package_path is not None and declared_target_dropped(
-            Path(package_path),
-            existing,
-            "claude",
-            user_scope=is_user_scope(getattr(self.ctx, "scope", None)),
-        )
+        if package_path is None:
+            return
+        from apm_cli.install.manifest_reconcile import declared_target_names
+
+        scope = getattr(self.ctx, "scope", None)
+        declared = declared_target_names(Path(package_path), user_scope=is_user_scope(scope))
+        if not declared or "claude" in declared:
+            return
+        for locked in lockfile.dependencies.values():
+            locked.native_plugin = None
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

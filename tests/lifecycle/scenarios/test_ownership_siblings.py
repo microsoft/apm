@@ -200,10 +200,28 @@ _PLUGIN_ROOT = ".agents/plugins/p-native-claude-bin"
 _PLUGIN_BIN = f"{_PLUGIN_ROOT}/bin/p-native-claude-bin"
 
 
-def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world) -> None:
+# How the first commands after dropping claude reach the lock: a full install; `apm
+# lock` (keeps the plugin, it touches no deployed state) then install; a partial
+# install of another package, which merges the untouched plugin's row (#4744).
+_NARROW_PATHS = {
+    "install": ((), "install --trust-bin", ()),
+    "lock-then-install": (("lock",), "install --trust-bin", ()),
+    "partial-install": (
+        (),
+        "install --trust-bin p-skill",
+        ("home:.apm/apm.yml", "home:.apm/apm_modules/*", "home:.agents/skills/p-skill*"),
+    ),
+}
+
+
+@pytest.mark.parametrize("path", sorted(_NARROW_PATHS))
+def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world, path) -> None:
     """#4744: dropping claude retires the plugin bin/ only claude received; the rest stays."""
     use_policy(lifecycle_world, "allow")
-    specs = {"p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec}
+    specs = {
+        "p-native-claude-bin": lifecycle_world.packages["p-native-claude-bin:git"].spec,
+        "p-skill": lifecycle_world.packages["p-skill"].spec,
+    }
     scenario = Scenario(
         lifecycle_world, specs, scope="user", targets=("copilot", "claude"), policy="allow"
     )
@@ -213,13 +231,19 @@ def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world) -> None:
     home = lifecycle_world.home
     assert (home / _PLUGIN_BIN).is_file()
     kept = sorted(
-        path.relative_to(home).as_posix()
-        for path in (home / ".agents/skills").rglob("*")
-        if path.is_file()
+        item.relative_to(home).as_posix()
+        for item in (home / ".agents/skills").rglob("*")
+        if item.is_file()
     )
 
     scenario.set_targets("copilot")
-    step = scenario.run("install --trust-bin")
+    before, line, extra = _NARROW_PATHS[path]
+    for command in before:
+        scenario.run(command)
+        assert (home / _PLUGIN_BIN).is_file(), f"{command} touched deployed state"
+        lock = scenario.lock_path.read_text(encoding="utf-8")
+        assert _PLUGIN_ROOT in lock, f"{command} dropped the ownership of a deployed plugin"
+    step = scenario.run(line)
     assert not (home / _PLUGIN_BIN).exists(), f"dropping claude left the plugin bin\n{step.output}"
     lock = scenario.lock_path.read_text(encoding="utf-8")
     assert _PLUGIN_ROOT not in lock, "the lock still claims the retired plugin files"
@@ -230,13 +254,14 @@ def test_target_narrow_retires_a_user_scope_plugin_bin(lifecycle_world) -> None:
             "home:.apm/apm.lock.yaml",
             "home:.agents/plugins/*",
             "home:.claude/settings.json",
+            *extra,
         ),
-        label="narrow",
+        label=path,
     )
     settings = json.loads((home / ".claude/settings.json").read_text(encoding="utf-8"))
     assert not settings.get("enabledPlugins"), settings
-    for path in kept:
-        assert (home / path).is_file(), f"narrowing removed the copilot output {path}"
+    for item in kept:
+        assert (home / item).is_file(), f"narrowing removed the copilot output {item}"
     scenario.finish()
 
 
