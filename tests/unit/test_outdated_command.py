@@ -248,7 +248,10 @@ class TestOutdatedCommand:
                 [_remote_tag("v2.0.0"), _remote_tag("v1.0.0")],
             ]
 
-            result = self.runner.invoke(cli, ["outdated"], env={"COLUMNS": "80"})
+            # Rebuild the cached console inside the invocation so COLUMNS=80
+            # wins over whatever width an earlier test cached (#4773).
+            with patch("apm_cli.utils.themed_console._console", None):
+                result = self.runner.invoke(cli, ["outdated"], env={"COLUMNS": "80"})
 
             assert result.exit_code == 0
             assert "\u2026" not in result.output
