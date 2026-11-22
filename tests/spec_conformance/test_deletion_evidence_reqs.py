@@ -538,3 +538,84 @@ def test_consent_never_unlinks_a_link_it_classified_as_kept(tmp_path: Path) -> N
 
     assert link.is_symlink() and result.deleted == []
     assert target.read_text(encoding="utf-8") == "outside\n"
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_finds_an_owner_recorded_under_a_backslash_spelling(tmp_path: Path) -> None:
+    """An owner render that lacks the path keeps the file, whatever the lock spelling."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: None if owner is None else render,
+        owners={_PATH.replace("/", "\\"): ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
+_HOOK = ".github/hooks/pkg-apm.json"
+
+
+def _hook(root: Path) -> Path:
+    path = root / _HOOK
+    path.parent.mkdir(parents=True)
+    path.write_text('{"hooks": {}}\n', encoding="utf-8")
+    return path
+
+
+def _sync_hooks(root: Path, evidence: DeploymentEvidence) -> dict:
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    return HookIntegrator().sync_integration(
+        None, root, managed_files={_HOOK}, managed_file_hashes={}, evidence=evidence
+    )
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_kept_hook_is_not_reported_as_a_path_safety_failure(tmp_path: Path) -> None:
+    path = _hook(tmp_path)
+    evidence = DeploymentEvidence(deploy_root=tmp_path, receipts={}, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+
+    stats = _sync_hooks(tmp_path, evidence)
+
+    assert path.exists()
+    assert stats["errors"] == 0
+    assert _HOOK not in stats.get("unsafe_paths", [])
+
+
+@pytest.mark.req("req-lk-024")
+@pytest.mark.skipif(
+    os.name == "nt" or getattr(os, "geteuid", lambda: 1)() == 0,
+    reason="needs a POSIX directory that denies unlink",
+)
+def test_consent_never_hides_a_failed_deletion_of_a_hook_it_kept_earlier(tmp_path: Path) -> None:
+    """A claim kept in preflight, then authorized and failing to unlink, is a failure."""
+    path = _hook(tmp_path)
+    original = path.read_bytes()
+    receipts = {path.resolve().as_posix(): compute_file_hash(path)}
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts=receipts, render=_no_render, kept=()
+    )
+    evidence.consent_to_lockfile_hashes()
+    path.write_text("edited\n", encoding="utf-8")
+    assert [claim for claim, _ in evidence.refusals([_HOOK])] == [_HOOK]
+    path.write_bytes(original)
+    path.parent.chmod(0o555)
+    try:
+        stats = _sync_hooks(tmp_path, evidence)
+    finally:
+        path.parent.chmod(0o755)
+
+    assert path.exists()
+    assert stats["errors"] >= 1
+    assert _HOOK in stats.get("failed_paths", [])

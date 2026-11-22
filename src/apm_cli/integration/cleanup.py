@@ -112,7 +112,10 @@ class DeploymentEvidence:
         self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
-        self._owners = dict(owners or {})
+        # One spelling per path, as claims are looked up (#4295).
+        self._owners = {
+            path.replace("\\", "/").rstrip("/"): keys for path, keys in (owners or {}).items()
+        }
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
         self._recorded_hashes = dict(recorded_hashes or {})
@@ -348,7 +351,7 @@ class DeploymentEvidence:
 
     def _owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* or of its claimed skill directory."""
-        path = claim.rstrip("/")
+        path = claim.replace("\\", "/").rstrip("/")
         while path:
             if path in self._owners:
                 return self._owners[path]
@@ -583,6 +586,20 @@ def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) ->
     """
     kept = evidence.kept_under_consent() if evidence is not None else frozenset()
     return [path for path in retained if path.replace("\\", "/") not in kept]
+
+
+def consent_outcome(
+    cleanup: CleanupResult, evidence: DeploymentEvidence | None
+) -> tuple[list[str], list[str]]:
+    """Split *cleanup* into its failures and its path-safety refusals (#4295).
+
+    Consent waives only evidence-based retention: a deletion that was
+    authorized but failed stays a failure even for a claim consent kept
+    earlier (for example in the uninstall preflight), and a file consent kept
+    for its evidence is not a path-safety refusal.
+    """
+    failures = list(dict.fromkeys([*cleanup.failed, *unconsented(cleanup.retained, evidence)]))
+    return failures, unconsented(cleanup.skipped_unmanaged, evidence)
 
 
 def _hash_envelope(value: str) -> str:

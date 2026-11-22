@@ -1893,7 +1893,7 @@ class HookIntegrator(BaseIntegrator):
         ]
         hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import remove_synced_files, unconsented
+            from apm_cli.integration.cleanup import consent_outcome, remove_synced_files
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
@@ -1907,11 +1907,11 @@ class HookIntegrator(BaseIntegrator):
                 allow_final_symlink=True,
             )
             stats["files_removed"] += len(cleanup.deleted)
-            retained = unconsented(cleanup.retained, evidence)
+            retained, unsafe = consent_outcome(cleanup, evidence)
             if retained:
                 stats["errors"] += len(retained)
                 stats.setdefault("failed_paths", []).extend(retained)
-            stats.setdefault("unsafe_paths", []).extend(cleanup.skipped_unmanaged)
+            stats.setdefault("unsafe_paths", []).extend(unsafe)
             self.cleanup_empty_parents(cleanup.deleted_targets, stop_at=project_root)
         else:
             hooks_dir = project_root / ".github" / "hooks"
