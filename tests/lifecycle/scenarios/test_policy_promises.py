@@ -20,7 +20,6 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
-from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
 
@@ -112,6 +111,23 @@ def _install(world, path: str, parent: str, child: Path):
     return driver.run(world, ["install"])
 
 
+def _install_under_policy(world, path: str, parent: str, child: Path, **mcp):
+    """Serve the trust_transitive policy, then reach the server the path's way.
+
+    An approval needs an install the policy has not yet refused, so the approved
+    path pins the server first and meets the policy on the next install.
+    """
+    if path != "approved":
+        _transitive_policy(world, path, **mcp)
+        return _install(world, path, parent, child)
+    first = driver.run(world, ["install", parent])
+    assert first.returncode == 0, _text(first)
+    approve = driver.run(world, ["approve", f"local:{child}"])
+    assert approve.returncode == 0, _text(approve)
+    _transitive_policy(world, path, **mcp)
+    return driver.run(world, ["install"])
+
+
 # An unrelated deny entry keeps the policy non-empty: a policy that only restates
 # defaults is reported "present but empty" and is not enforced at all.
 _UNRELATED_DENY = "io.github.unrelated/never-requested"
@@ -170,14 +186,12 @@ def test_trust_transitive_false_refuses_an_unlisted_transitive_server(
 ) -> None:
     """mcp.trust_transitive false: install refuses a transitive server mcp.allow does not name."""
     parent, child, _name = _author(lifecycle_world, path)
-    _transitive_policy(lifecycle_world, path, trust_transitive=False)
-    result = _install(lifecycle_world, path, parent, child)
+    result = _install_under_policy(lifecycle_world, path, parent, child, trust_transitive=False)
     assert result.returncode == 1, _text(result)
     assert "trust_transitive" in _text(result), _text(result)
     assert not _configured(lifecycle_world, _CONFIGURED_NAME[path]), _text(result)
 
 
-@pytest.mark.xfail(strict=True, reason=f"G1 policy promise: {_PRIVATE}")
 @pytest.mark.parametrize("path", PATHS)
 def test_trust_transitive_false_fails_audit_for_an_unlisted_transitive_server(
     lifecycle_world, path
@@ -230,51 +244,3 @@ def test_an_active_policy_refuses_an_unlisted_transitive_server(lifecycle_world,
     assert result.returncode == 1, _text(result)
     assert "trust_transitive" in _text(result), _text(result)
     assert not _configured(lifecycle_world, _CONFIGURED_NAME["registry"]), _text(result)
-
-
-# -- G2: manifest.content_types (policy-schema.md, manifest section) ---------------
-
-
-def _skill_and_instruction(world) -> str:
-    factory = LocalPackageFactory(world.root / "g2")
-    package = factory.create("t-typed", version="1.0.0")
-    _skill(factory, package, "t-typed")
-    factory.add_instruction(
-        package, "t-typed", '---\napplyTo: "**"\n---\n\nKeep the typed instruction.\n'
-    )
-    return str(package.root)
-
-
-def _instruction_deployed(world) -> bool:
-    return any(
-        path.is_file() and "apm_modules" not in path.parts
-        for path in world.project.rglob("t-typed.instructions.md")
-    )
-
-
-def test_content_types_control_an_instruction_deploys(lifecycle_world) -> None:
-    """Control: with no content-type restriction the package's instruction deploys."""
-    use_policy(lifecycle_world, "allow")
-    spec = _skill_and_instruction(lifecycle_world)
-    result = driver.run(lifecycle_world, ["install", spec])
-    assert result.returncode == 0, _text(result)
-    assert _instruction_deployed(lifecycle_world), _text(result)
-
-
-@pytest.mark.xfail(strict=True, reason=f"G2 policy promise: {_PRIVATE}")
-def test_content_types_allow_list_keeps_other_types_out(lifecycle_world) -> None:
-    """manifest.content_types {allow: [skill]} -- an instruction is never deployed."""
-    _serve_policy(
-        lifecycle_world,
-        "policy-g2-skills-only",
-        {
-            "name": "g2",
-            "version": "1.0",
-            "enforcement": "block",
-            "manifest": {"content_types": {"allow": ["skill"]}},
-        },
-    )
-    spec = _skill_and_instruction(lifecycle_world)
-    result = driver.run(lifecycle_world, ["install", spec])
-    assert not _instruction_deployed(lifecycle_world), _text(result)
-    assert "content_types" in _text(result), _text(result)

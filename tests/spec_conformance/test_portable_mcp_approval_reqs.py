@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +14,8 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.models.dependency.mcp import MCPDependency
-from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
+from apm_cli.policy.policy_checks import mcp_policy_checks
+from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy, McpPolicy
 from apm_cli.security.executables import build_exec_trust_context
 from apm_cli.security.trust import McpAdmission
 from apm_cli.security.trust_fingerprint import mcp_definition_fingerprint
@@ -171,3 +173,37 @@ def test_frozen_install_reaches_the_install_verdict(tmp_path: Path) -> None:
     )
     assert reasons == []
     assert dependency.depth == 1
+
+
+@pytest.mark.req("req-sc-016")
+@pytest.mark.parametrize(
+    ("enforcement", "deployed"), [("block", False), ("warn", True)], ids=["block", "warn"]
+)
+def test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_allow(
+    tmp_path: Path, enforcement: str, deployed: bool
+) -> None:
+    assert_spec_contains(
+        "policy's `mcp.allow` matches the server name; (a), (b) and (c) do not",
+        "MUST emit a default-visible diagnostic naming the server, as for an",
+        "such server as a policy violation. A policy that sets no field imposes",
+    )
+    root, lock, _dependency = _project(tmp_path)
+    policy = ApmPolicy(enforcement=enforcement, mcp=McpPolicy(deny=("unrelated",)))
+    admission = McpAdmission(None, one_off=True, org_policy=lambda: policy)
+    refused = _view(tmp_path, root, lock, admission)
+    assert ("leaf-server" in refused.configs) is deployed
+    assert (refused.omissions.get("leaf-server") or {}).get("reason") == (
+        None if deployed else "policy-transitive"
+    )
+
+    listed = ApmPolicy(enforcement=enforcement, mcp=McpPolicy(allow=("leaf-server",)))
+    allowed = McpAdmission(None, one_off=True, org_policy=lambda: listed)
+    assert "leaf-server" in _view(tmp_path, root, lock, allowed).configs
+
+    transitive = replace(MCPDependency.from_dict(SERVER), resolved_by="leaf")
+    verdicts = {check.name: check.passed for check in mcp_policy_checks([transitive], policy)}
+    assert verdicts["mcp-trust-transitive"] is False
+    listed_verdicts = {
+        check.name: check.passed for check in mcp_policy_checks([transitive], listed)
+    }
+    assert listed_verdicts["mcp-trust-transitive"] is True

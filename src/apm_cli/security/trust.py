@@ -401,14 +401,18 @@ class McpAdmission:
         return self._org_policy_value
 
     def refuses_transitive(self, name: str) -> bool:
-        """Whether org ``mcp.trust_transitive: false`` refuses transitive server *name*.
+        """Whether org ``mcp.trust_transitive: false`` withholds transitive server *name*.
 
-        Under that policy a server a dependency at depth > 1 declares deploys
-        only when ``mcp.allow`` admits it: a registry reference, an approval
-        pin and ``--trust-transitive-mcp`` alike (req-sc-016).
+        Under that policy with ``enforcement: block`` a server a dependency at
+        depth > 1 declares deploys only when ``mcp.allow`` admits it: a
+        registry reference, an approval pin and ``--trust-transitive-mcp``
+        alike (req-sc-016).
         """
-        mcp = getattr(self.org_policy(), "mcp", None)
-        if mcp is None or mcp.trust_transitive:
+        policy = self.org_policy()
+        mcp = getattr(policy, "mcp", None)
+        # Under enforcement: warn the server deploys and the merged-set
+        # preflight warns, as for mcp.deny (policy_checks.mcp_policy_checks).
+        if mcp is None or mcp.trust_transitive or getattr(policy, "enforcement", None) != "block":
             return False
         from apm_cli.policy.matcher import check_mcp_allowed
 

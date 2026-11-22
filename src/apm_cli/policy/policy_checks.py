@@ -12,7 +12,7 @@ import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from apm_cli.core.scope import manifest_file
 
@@ -27,6 +27,9 @@ from .models import (
     PolicyRemedy,
     PolicySubject,
 )
+
+if TYPE_CHECKING:
+    from ..integration.mcp_config_view import CurrentMcpConfigView
 
 _logger = logging.getLogger(__name__)
 FAIL_CLOSED_POLICY_CHECKS = frozenset({"dependency-content-hashes"})
@@ -731,8 +734,60 @@ def _check_mcp_self_defined(
     )
 
 
+_TRUST_TRANSITIVE = "mcp-trust-transitive"
+_TRUST_TRANSITIVE_REASON = "transitive server not in mcp.allow (mcp.trust_transitive: false)"
+
+
+def _trust_transitive_result(names: Sequence[str]) -> CheckResult:
+    if not names:
+        return CheckResult(
+            name=_TRUST_TRANSITIVE,
+            passed=True,
+            message="No transitive MCP server outside mcp.allow",
+        )
+    return _subjects_result(
+        _TRUST_TRANSITIVE,
+        f"{len(names)} transitive MCP server(s) not in mcp.allow while "
+        "mcp.trust_transitive is false",
+        [PolicySubject(name, _TRUST_TRANSITIVE_REASON) for name in names],
+    )
+
+
+def _check_mcp_trust_transitive(mcp_deps: list, policy: McpPolicy) -> CheckResult:
+    """Check 10b: with ``mcp.trust_transitive`` false, transitive servers need mcp.allow.
+
+    A transitive server (one ``resolved_by`` a dependency, not declared in the
+    root apm.yml) passes only when ``mcp.allow`` lists it (req-sc-016).
+    """
+    from .matcher import check_mcp_allowed
+
+    if policy.trust_transitive:
+        return _trust_transitive_result(())
+    root = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
+    transitive = sorted({m.name for m in mcp_deps if getattr(m, "resolved_by", None)} - root)
+    return _trust_transitive_result(
+        [
+            name
+            for name in transitive
+            if policy.allow is None or not check_mcp_allowed(name, policy)[0]
+        ]
+    )
+
+
+def _parked_trust_transitive(view: CurrentMcpConfigView) -> CheckResult | None:
+    """Audit: transitive servers the trust owner withheld under ``mcp.trust_transitive``."""
+    from ..security.trust import REASON_POLICY_TRANSITIVE
+
+    parked = sorted(
+        name
+        for name, evidence in view.omissions.items()
+        if isinstance(evidence, Mapping) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+    )
+    return _trust_transitive_result(parked) if parked else None
+
+
 def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
-    """Run org MCP checks 7-10 (allow, deny, transport, self-defined) on *mcp_list*.
+    """Run org MCP checks 7-10b (allow, deny, transport, self-defined, trust_transitive).
 
     The one composition of the MCP checks: the install gate and the native
     Claude plugin route (which vets the servers a plugin declares) both use it.
@@ -742,6 +797,7 @@ def mcp_policy_checks(mcp_list: list, policy: ApmPolicy) -> list[CheckResult]:
         _check_mcp_denylist(mcp_list, policy.mcp),
         _check_mcp_transport(_effective_mcp_transports(mcp_list, policy.mcp), policy.mcp),
         _check_mcp_self_defined(mcp_list, policy.mcp),
+        _check_mcp_trust_transitive(mcp_list, policy.mcp),
     ]
 
 
@@ -1863,6 +1919,7 @@ def run_policy_checks(
     # recorded local-bundle servers), so policy judges the audit view's set,
     # as the install preflight judges the merged set.
     mcp_brought_in_by = None
+    trust_check: CheckResult | None = None
     if lock is None:
         mcp_deps = manifest.get_all_mcp_dependencies()
     else:
@@ -1873,6 +1930,7 @@ def run_policy_checks(
         )
         mcp_deps = list(view.kept_dependencies())
         mcp_brought_in_by = view.brought_in_by
+        trust_check = _parked_trust_transitive(view)
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)
@@ -1914,6 +1972,10 @@ def run_policy_checks(
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:
         return result
+    if trust_check is not None:
+        result.checks.append(trust_check)
+        if fail_fast and not trust_check.passed:
+            return result
 
     hash_check = _check_dependency_content_hashes(
         lock,
