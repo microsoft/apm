@@ -43,6 +43,7 @@ import contextlib
 import copy
 import io
 import os
+import posixpath
 import shlex
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -116,11 +117,14 @@ class DeploymentEvidence:
         # path pool their owners so none is dropped (#4295).
         self._owners: dict[str, tuple[str, ...]] = {}
         for path, keys in (owners or {}).items():
-            key = path.replace("\\", "/").rstrip("/")
+            key = _claim_key(path)
             self._owners[key] = tuple(dict.fromkeys((*self._owners.get(key, ()), *keys)))
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
-        self._recorded_hashes = dict(recorded_hashes or {})
+        self._recorded_hashes: dict[str, frozenset[str]] = {}
+        for path, values in (recorded_hashes or {}).items():
+            key = _claim_key(path)
+            self._recorded_hashes[key] = self._recorded_hashes.get(key, frozenset()) | values
         self._receipts_readable = receipts_readable
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
@@ -150,7 +154,10 @@ class DeploymentEvidence:
         Invalid receipt state authorizes nothing and is reported. *kept* names
         the members this install declared but left on disk; they are retained.
         """
-        from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
+        from apm_cli.core.deployment_ledger import (
+            DeploymentLedgerCodec,
+            DeploymentMaterializationSession,
+        )
         from apm_cli.core.scope import InstallScope
 
         scope = InstallScope.USER if user_scope else InstallScope.PROJECT
@@ -182,6 +189,11 @@ class DeploymentEvidence:
         for key, dependency in locked.dependencies.items():
             for path in dependency.deployed_files:
                 owners.setdefault(path.rstrip("/"), []).append(key)
+        # Canonical deployment rows name owners the legacy lists may omit.
+        for record in DeploymentLedgerCodec.from_lockfile(locked).records.values():
+            for key in record.owners:
+                if key in locked.dependencies:
+                    owners.setdefault(record.locator.value, []).append(key)
 
         def render(owner: str | None) -> Path | None:
             return _render_locked(locked, owner, lockfile_root, user_scope, diagnostics)
@@ -319,7 +331,7 @@ class DeploymentEvidence:
                 ):
                     refused.append((claim, SYMLINKED))
                     if self._lockfile_consent:
-                        self._consent_refused[claim.replace("\\", "/")] = None
+                        self._consent_refused[_claim_key(claim)] = None
                 continue
             if not physical.is_file():
                 continue
@@ -358,7 +370,7 @@ class DeploymentEvidence:
         that can show the file is checked before consent falls back (#4295).
         """
         owners: dict[str, None] = {}
-        path = claim.replace("\\", "/").rstrip("/")
+        path = _claim_key(claim)
         while path:
             owners.update(dict.fromkeys(self._owners.get(path, ())))
             path = path.rpartition("/")[0]
@@ -430,7 +442,7 @@ class DeploymentEvidence:
         """Whether *physical* is a link this consented uninstall classified as kept (#4295)."""
         return (
             self._lockfile_consent
-            and claim.replace("\\", "/") in self._consent_refused
+            and _claim_key(claim) in self._consent_refused
             and physical.is_symlink()
         )
 
@@ -453,7 +465,7 @@ class DeploymentEvidence:
 
         recorded = {
             _hash_envelope(value)
-            for value in self._recorded_hashes.get(claim.replace("\\", "/"), frozenset())
+            for value in self._recorded_hashes.get(_claim_key(claim), frozenset())
         }
         if not self._receipts_readable or len(recorded) != 1:
             return False
@@ -485,7 +497,7 @@ class DeploymentEvidence:
         """
         verdict = self._verdict(claim, physical, rendered_as=rendered_as)
         if verdict != AUTHORIZED and self._lockfile_consent:
-            self._consent_refused[claim.replace("\\", "/")] = None
+            self._consent_refused[_claim_key(claim)] = None
         return verdict
 
     def _verdict(self, claim: str, physical: Path, *, rendered_as: str | None) -> str:
@@ -614,6 +626,17 @@ def _hash_envelope(value: str) -> str:
     return value if ":" in value else f"sha256:{value}"
 
 
+def _claim_key(path: str) -> str:
+    """One spelling per claimed file for consent's hash, owner and refusal keys (#4295).
+
+    Backslashes become ``/`` and ``.`` segments and trailing slashes go, so
+    every spelling the cleanup validation accepts for a file shares one key.
+    """
+    scheme, sep, rest = path.replace("\\", "/").rpartition("://")
+    normalized = posixpath.normpath(rest) if rest else rest
+    return f"{scheme}{sep}{'' if normalized == '.' else normalized}"
+
+
 def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
     """Map each owned path to every hash apm.lock.yaml records for it under its owners."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -622,13 +645,12 @@ def _recorded_owner_hashes(lockfile: LockFile) -> dict[str, frozenset[str]]:
     hashes: dict[str, set[str]] = {}
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if record.content_hash and owners.intersection(record.owners):
-            key = record.locator.value.replace("\\", "/")
-            hashes.setdefault(key, set()).add(record.content_hash)
+            hashes.setdefault(_claim_key(record.locator.value), set()).add(record.content_hash)
     for dependency in lockfile.dependencies.values():
         for path, content_hash in dependency.deployed_file_hashes.items():
             if content_hash:
                 # One spelling per file, as cleanup looks it up (#4295).
-                hashes.setdefault(path.replace("\\", "/"), set()).add(content_hash)
+                hashes.setdefault(_claim_key(path), set()).add(content_hash)
     return {path: frozenset(values) for path, values in hashes.items()}
 
 

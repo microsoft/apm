@@ -608,6 +608,77 @@ def test_consent_checks_the_enclosing_directory_owner_too(tmp_path: Path) -> Non
     assert path.exists() and result.deleted == []
 
 
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_dot_segment_spellings_as_one_file(tmp_path: Path) -> None:
+    """A conflicting hash recorded under a ``./`` alias still blocks consent."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    head, _, name = _PATH.rpartition("/")
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            _PATH: frozenset({compute_file_hash(path)}),
+            f"{head}/./{name}": frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_tries_an_owner_only_the_canonical_rows_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment row's extra owner is rendered even when its legacy list omits the path."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    path = _deployed(tmp_path)
+    digest = compute_file_hash(path)
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url="owner/pkg", deployed_files=[_PATH], deployed_file_hashes={_PATH: digest}
+        )
+    )
+    lock.add_dependency(LockedDependency(repo_url="owner/second"))
+    first, second = lock.dependencies
+    row = {"kind": "project-relative", "target": "copilot", "value": _PATH, "runtime": None}
+    row |= {"scope": "project", "owners": [first, second], "active_owner": first}
+    lock.deployment_ledger = DeploymentLedgerCodec.from_rows([{**row, "content_hash": digest}])
+
+    def replay(config, _logger):
+        rendered = LockFile.read(config.lockfile_path)
+        if rendered is None or set(rendered.dependencies) != {second}:
+            raise OSError("source unreachable")
+        out = config.scratch_root / "second-render"
+        out.mkdir()
+        return out
+
+    monkeypatch.setattr("apm_cli.install.drift.run_replay", replay)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "apm-home"))
+    evidence = DeploymentEvidence.collect(
+        tmp_path,
+        user_scope=False,
+        lockfile=lock,
+        lockfile_root=tmp_path,
+        diagnostics=DiagnosticCollector(),
+        kept=(),
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(tmp_path, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
 _HOOK = ".github/hooks/pkg-apm.json"
 
 
