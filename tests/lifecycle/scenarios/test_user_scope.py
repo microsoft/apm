@@ -104,6 +104,18 @@ def test_approved_executables_deploy_under_home(lifecycle_world) -> None:
     scenario.finish()
 
 
+def test_an_approved_canvas_deploys_under_home(lifecycle_world) -> None:
+    scenario = _user(lifecycle_world, "p-canvas")
+    scenario.run("install p-canvas")
+    scenario.run("approve p-canvas")
+    credit = {**_FIRST, "OP": "install", "PRIM": "canvas", "GATE": "allowed"}
+    step = scenario.run("install", credit=[credit])
+    scenario.assert_deployed()
+    assert (lifecycle_world.home / ".copilot/extensions/p-canvas/extension.mjs").is_file()
+    assert "reload the Copilot session" in step.output, step.output
+    scenario.finish()
+
+
 _PLUGIN_BIN = ".agents/plugins/p-native-claude-bin/bin/p-native-claude-bin"
 
 
@@ -190,8 +202,9 @@ _USER_SKILL = "---\nname: p-skill\ndescription: The user's own p-skill.\n---\n\n
 @pytest.mark.parametrize("deployed", ("edited", "present-provenance-unknown", "unowned"))
 def test_install_keeps_the_users_skill_under_home(lifecycle_world, deployed) -> None:
     scenario = _user(lifecycle_world, "p-skill")
+    text = _USER_SKILL
     if deployed == "unowned":
-        scenario.user_write(_SKILL, _USER_SKILL)
+        scenario.user_write(_SKILL, text)
         line = "install --dry-run p-skill"
     else:
         scenario.run("install p-skill")
@@ -203,7 +216,9 @@ def test_install_keeps_the_users_skill_under_home(lifecycle_world, deployed) -> 
             scenario.lock_path.unlink()
             scenario.model = scenario.model.with_lock("absent")
         line = "install"
-    scenario.run(line, credit=[{**_USER, "DEPLOYED": deployed}], keep={"home": (_SKILL,)})
+    step = scenario.run(line, credit=[{**_USER, "DEPLOYED": deployed}], keep={"home": (_SKILL,)})
+    assert step.result.returncode == 0, step.output
+    assert (lifecycle_world.home / _SKILL).read_text(encoding="ascii") == text
     scenario.finish()
 
 
@@ -224,6 +239,9 @@ CREDITS = credits(
         },
         "test_approved_executables_deploy_under_home": [
             {**_FIRST, "OP": "install", "PRIM": p, "GATE": "allowed"} for p in _EXEC_PRIMS
+        ],
+        "test_an_approved_canvas_deploys_under_home": [
+            {**_FIRST, "OP": "install", "PRIM": "canvas", "GATE": "allowed"}
         ],
         "test_a_plugin_bin_deploys_under_home_once_trusted": [
             {**_FIRST, "OP": "install", "PRIM": "bin", "GATE": "allowed", "SRC": "git"}
