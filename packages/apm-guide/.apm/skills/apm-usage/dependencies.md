@@ -43,6 +43,10 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Local paths written with backslashes (`.\pkg`, `..\pkg`, `~\pkg`) are
+normalised to `/` on read and behave exactly like `./pkg`, `../pkg` and
+`~/pkg`. Windows drive-letter and UNC paths are not normalised.
+
 Bare `owner/repo` shorthand resolves against the manifest's top-level
 `default_host:` (bare hostname, e.g. `default_host: gitlab.com`), else
 `GITHUB_HOST`, else `github.com`. Each manifest uses its own value, and
@@ -391,7 +395,7 @@ as a dependency-confusion risk (#1326)
 before APM contacts the package repository or writes any file. This applies to
 `apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
 `apm update`. Bare entries are admitted when `GITHUB_HOST` is the marketplace
-host. Locked entries replay without the catalog; run
+host; a manifest `default_host:` does not admit them. Locked entries replay without the catalog; run
 `apm update` to re-check entries an older APM locked.
 
 Once the lockfile records an entry, `apm install` and `apm install --frozen`

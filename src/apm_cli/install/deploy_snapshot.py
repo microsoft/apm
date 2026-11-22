@@ -1,16 +1,21 @@
-"""Audit-gated snapshot of the paths an install writes before its last gate (#4085).
+"""Lazy pre-write journal of the paths one install touches (#4282).
 
-The install-time content audit (``phases/audit.py``) must scan the exact bytes
-integrators deployed, so its blocking verdict lands after deployment. When
-that audit is on, :class:`~apm_cli.install.transaction.InstallTransaction`
-captures every path the integrate, cleanup, lockfile and post-deps-local
-phases can write, before the first of them runs. A failure before the audit
-passes restores those paths byte for byte and removes the ones that did not
-exist; a pass discards the copy. When the audit is off nothing is captured.
+:class:`~apm_cli.install.transaction.InstallTransaction` listens at the
+integrator write seam (``integration/write_seam.py``). The first time a path
+is about to be created, replaced or removed, :meth:`DeployJournal.record`
+keeps its prior bytes (or notes that it was absent) in a store under the APM
+home ``install-snapshots`` directory. Paths the install never touches are not
+copied. :meth:`DeployJournal.restore` puts every recorded path back, newest
+first, and removes the directories the install created;
+:meth:`DeployJournal.discard` deletes the store once the install committed.
+
+A store a killed process left behind (``deploy-*``) is removed by
+:func:`reap_abandoned_journals` when the next install starts under the
+lifecycle lock. A store kept after a failed restore is marked retained
+(a ``RETAINED`` file inside it) and then renamed ``retained-*``; the reaper
+never deletes a marked store, so the copies survive even a failed rename.
 :func:`remove_empty_directories` also lets the transaction remove target roots
-a failed install created and left empty, at no copy cost (#4159).
-
-Only the transaction may call :func:`capture_audit_gated_snapshot`.
+a failed install created and left empty (#4159).
 """
 
 from __future__ import annotations
@@ -19,22 +24,23 @@ import contextlib
 import os
 import shutil
 import tempfile
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from apm_cli.utils.file_ops import robust_rmtree
 
-if TYPE_CHECKING:
-    from apm_cli.install.context import InstallContext
-
 _Kind = Literal["absent", "file", "dir", "symlink"]
+_STORE_PREFIX = "deploy-"
+_RETAINED_PREFIX = "retained-"
+_RETAINED_MARKER = "RETAINED"
 
 
 @dataclass(frozen=True)
 class _Unit:
-    """One captured path and how to put it back."""
+    """One recorded path and how to put it back."""
 
     path: Path
     kind: _Kind
@@ -70,52 +76,105 @@ def _remove(path: Path) -> None:
         path.unlink()
 
 
-class DeployTargetSnapshot:
-    """Byte-exact copy of a fixed set of deploy paths, kept outside them."""
+def reap_abandoned_journals(store_parent: Path) -> None:
+    """Delete the journals of installs that were killed before they finished.
 
-    def __init__(self, store: Path, units: tuple[_Unit, ...]) -> None:
-        self.store = store
-        self.units = units
+    Call only while holding the lifecycle lock: every install that could own a
+    live journal under this APM home is then this process.
+    """
+    with contextlib.suppress(OSError):
+        for store in store_parent.glob(f"{_STORE_PREFIX}*"):
+            retained = os.path.lexists(store / _RETAINED_MARKER)
+            if store.is_dir() and not store.is_symlink() and not retained:
+                shutil.rmtree(store, ignore_errors=True)
 
-    @classmethod
-    def capture(cls, paths: list[Path], store_parent: Path) -> DeployTargetSnapshot:
-        """Copy every path in *paths* (and record the absent ones) under a new store."""
-        store_parent.mkdir(parents=True, exist_ok=True)
-        store = Path(tempfile.mkdtemp(prefix="deploy-", dir=store_parent))
-        units: list[_Unit] = []
-        try:
-            for index, path in enumerate(paths):
-                copy = store / str(index)
-                ancestors = _absent_ancestors(path)
-                if path.is_symlink():
-                    units.append(_Unit(path, "symlink", None, os.readlink(path), ancestors))
-                elif path.is_dir():
+
+class DeployJournal:
+    """Prior state of every path one install touched, recorded on first touch."""
+
+    def __init__(self, store_parent: Path) -> None:
+        self.store_parent = Path(os.path.abspath(store_parent))
+        self.store: Path | None = None
+        self._units: list[_Unit] = []
+        self._recorded: set[Path] = set()
+        self._lock = threading.Lock()
+
+    @property
+    def units(self) -> tuple[_Unit, ...]:
+        """Return the recorded units, oldest first."""
+        return tuple(self._units)
+
+    def _covered(self, path: Path) -> bool:
+        """Whether *path* or one of its parents is already recorded."""
+        return path in self._recorded or any(p in self._recorded for p in path.parents)
+
+    def _store(self) -> Path:
+        if self.store is None:
+            self.store_parent.mkdir(parents=True, exist_ok=True)
+            self.store = Path(tempfile.mkdtemp(prefix=_STORE_PREFIX, dir=self.store_parent))
+        return self.store
+
+    def record(self, path: Path, *, contents: bool = True) -> None:
+        """Keep the prior state of *path* the first time it is touched.
+
+        With ``contents=False`` (a directory about to be created) only an
+        absent path is recorded: creating an existing directory changes nothing.
+        """
+        path = Path(os.path.abspath(path))
+        with self._lock:
+            if self._covered(path) or path.is_relative_to(self.store_parent):
+                return
+            exists = os.path.lexists(path)
+            if exists and not contents:
+                return
+            ancestors = _absent_ancestors(path)
+            if not exists:
+                unit = _Unit(path, "absent", None, None, ancestors)
+            elif path.is_symlink():
+                unit = _Unit(path, "symlink", None, os.readlink(path), ancestors)
+            else:
+                copy = self._store() / str(len(self._units))
+                if path.is_dir():
                     shutil.copytree(path, copy, symlinks=True)
-                    units.append(_Unit(path, "dir", copy, None, ancestors))
-                elif path.is_file():
+                    unit = _Unit(path, "dir", copy, None, ancestors)
+                else:
                     shutil.copy2(path, copy)
-                    units.append(_Unit(path, "file", copy, None, ancestors))
-                elif not os.path.lexists(path):
-                    units.append(_Unit(path, "absent", None, None, ancestors))
-        except BaseException:
-            shutil.rmtree(store, ignore_errors=True)
-            raise
-        return cls(store, tuple(units))
+                    unit = _Unit(path, "file", copy, None, ancestors)
+            self._units.append(unit)
+            self._recorded.add(path)
 
     def restore(self) -> list[tuple[Path, str]]:
-        """Put every captured path back; return the paths that could not be restored."""
+        """Put every recorded path back; return the paths that could not be restored."""
         issues: list[tuple[Path, str]] = []
-        for unit in self.units:
+        with self._lock:
+            units = list(reversed(self._units))
+        for unit in units:
             try:
                 self._restore_unit(unit)
             except OSError as exc:
                 issues.append((unit.path, f"could not restore: {exc}"))
-        remove_empty_directories(a for unit in self.units for a in unit.absent_ancestors)
-        if issues:
-            issues.append((self.store, "pre-install copies retained here for recovery"))
+        remove_empty_directories(a for unit in units for a in unit.absent_ancestors)
+        if issues and self.store is not None:
+            issues.append((self._retain(), "pre-install copies retained here for recovery"))
         else:
             self.discard()
         return issues
+
+    def _retain(self) -> Path:
+        """Rename the store so no later install reaps the copies a user still needs."""
+        if self.store is None:
+            raise RuntimeError("no store to retain")
+        # The marker keeps the copies from the reaper even if the rename fails.
+        (self.store / _RETAINED_MARKER).write_text(
+            "Pre-install copies kept after a failed restore.\n", encoding="ascii"
+        )
+        retained = self.store.with_name(_RETAINED_PREFIX + self.store.name[len(_STORE_PREFIX) :])
+        try:
+            self.store.rename(retained)
+        except OSError:
+            return self.store
+        self.store = retained
+        return retained
 
     @staticmethod
     def _restore_unit(unit: _Unit) -> None:
@@ -125,7 +184,8 @@ class DeployTargetSnapshot:
                 return
         if unit.kind == "symlink" and path.is_symlink() and os.readlink(path) == unit.link:
             return
-        _remove(path)
+        if os.path.lexists(path):
+            _remove(path)
         if unit.kind == "absent":
             return
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,107 +198,9 @@ class DeployTargetSnapshot:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
-        shutil.rmtree(self.store, ignore_errors=True)
+        store, self.store = self.store, None
+        if store is None:
+            return
+        shutil.rmtree(store, ignore_errors=True)
         with contextlib.suppress(OSError):
-            self.store.parent.rmdir()
-
-
-def _target_paths(ctx: InstallContext, base: Path, user_scope: bool) -> list[Path]:
-    """Return every path the active targets' integrators and hook reconcilers write."""
-    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
-    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
-
-    paths: list[Path] = []
-    for target in ctx.targets or ():
-        if target.resolved_deploy_root is not None:
-            # File-backed dynamic roots decode their locators; the others
-            # (copilot-app) store rows in an application database, not files.
-            if target.external_locator_decoder is not None:
-                paths.append(target.resolved_deploy_root)
-            continue
-        for primitive, mapping in target.primitives.items():
-            if primitive == "skills":
-                paths.append(target.skills_deploy_path(base))
-            elif mapping.deploy_root:
-                paths.append(base / mapping.deploy_root / mapping.subdir)
-            elif mapping.subdir:
-                paths.append(target.deploy_path(base, mapping.subdir))
-        if "hooks" in target.primitives:
-            paths.append(target.deploy_path(base, "hooks"))
-    # Merge-hook configs: active targets merge into them, and dropped targets
-    # are reconciled by the lockfile phase.
-    for name, config in _MERGE_HOOK_TARGETS.items():
-        profile = KNOWN_TARGETS.get(name)
-        scoped = scoped_profile_or_none(profile, user_scope=user_scope) if profile else None
-        if scoped is None or scoped.resolved_deploy_root is not None:
-            continue
-        target_dir = scoped.deploy_path(base)
-        paths.extend((target_dir / config.config_filename, target_dir / _APM_HOOKS_SIDECAR))
-    return paths
-
-
-def _claimed_paths(ctx: InstallContext, base: Path) -> list[Path]:
-    """Return the previous install's deployed claims that cleanup may remove."""
-    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-    from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
-
-    if ctx.existing_lockfile is None:
-        return []
-    paths = []
-    for claim in DeploymentLedgerCodec.legacy_deployed_file_claims(ctx.existing_lockfile):
-        text = str(claim)
-        if not text or "://" in text:
-            continue
-        with contextlib.suppress(PathTraversalError, ValueError):
-            ensure_path_within(base / text, base)
-            paths.append(base / text)
-    return paths
-
-
-def audit_gated_paths(ctx: InstallContext, store_parent: Path) -> list[Path]:
-    """Return the disjoint paths an install can write before its audit passes.
-
-    A path that contains the project root, ``apm_modules`` (owned by the
-    resolution journal) or the snapshot store is never captured.
-    """
-    from apm_cli.core.deployment_ledger import materialization_evidence_paths
-    from apm_cli.core.scope import InstallScope
-
-    base = Path(os.path.abspath(ctx.project_root))
-    user_scope = ctx.scope is InstallScope.USER
-    state_path, identity_path = materialization_evidence_paths(base, ctx.scope)
-    candidates = [
-        *_target_paths(ctx, base, user_scope),
-        *_claimed_paths(ctx, base),
-        state_path,
-        identity_path.parent,
-    ]
-    if not user_scope:
-        candidates.append(base / ".gitignore")
-    # A symlinked deploy path is restored as a link; its target holds the bytes.
-    candidates += [Path(os.path.realpath(p)) for p in candidates]
-    owned = [Path(os.path.abspath(p)) for p in (ctx.apm_modules_dir, store_parent) if p]
-    chosen: list[Path] = []
-    for path in sorted({Path(os.path.abspath(p)) for p in candidates}, key=lambda p: len(p.parts)):
-        if (
-            base.is_relative_to(path)
-            or any(p.is_relative_to(path) or path.is_relative_to(p) for p in owned)
-            or any(path.is_relative_to(kept) for kept in chosen)
-        ):
-            continue
-        chosen.append(path)
-    return chosen
-
-
-def capture_audit_gated_snapshot(ctx: InstallContext) -> DeployTargetSnapshot | None:
-    """Capture the deploy paths when the install-time audit can block, else ``None``."""
-    if ctx.dry_run or ctx.lockfile_only:
-        return None
-    from apm_cli.core.install_audit import decide_for_install
-
-    if decide_for_install(ctx).mode == "off":
-        return None
-    from apm_cli.core.scope import get_apm_home
-
-    store_parent = get_apm_home() / "install-snapshots"
-    return DeployTargetSnapshot.capture(audit_gated_paths(ctx, store_parent), store_parent)
+            store.parent.rmdir()

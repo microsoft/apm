@@ -89,6 +89,10 @@ class InstallContext:
     # Dependency keys routed to native Claude this run, admitted or parked.
     claude_native_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
+    # The caller's MCP/LSP reconciliation, run before native Claude
+    # registration commits the lockfile (install/phases/services.py, #4329).
+    reconcile_services: Any = None
+    service_failure: Exception | None = None
 
     dry_run: bool = False
     lockfile_only: bool = False
@@ -187,6 +191,8 @@ class InstallContext:
     # Cleanup refusals retain the original lockfile hash, not a hash of
     # user-edited bytes. Lockfile assembly consumes this after cleanup.
     package_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # Receipted files and hashes standing in for a package the prior lock does not record.
+    receipted_prior_deployments: dict[str, dict[str, str]] = field(default_factory=dict)
     # Managed files install kept without deployment evidence: (owner, entry) (#4360).
     kept_overwrites: list[tuple[str, str]] = field(default_factory=list)
     # Kept entries a pre-0.37 lock proves edited: "drift" or "blocked" (#4398).
@@ -241,6 +247,7 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
+    overwrite_preflight_refused: bool = False  # commit gate -- unproven overwrite (#4381)
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.

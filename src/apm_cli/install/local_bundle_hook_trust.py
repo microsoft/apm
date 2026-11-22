@@ -1,4 +1,4 @@
-"""Re-check local-bundle hooks against current executable trust (#4027).
+"""Re-check local-bundle hooks (and canvas) against current executable trust (#4027).
 
 A local bundle's hooks were admitted by one exact content-bound approval key,
 recorded with their ownership marker (see
@@ -195,14 +195,60 @@ def unadmitted_bundle_hooks(
     return result
 
 
+def contained_bundle_path(project_root: Path, value: str, prefixes: Collection[str]) -> Path | None:
+    """Return the in-project path a bundle record or lock row names, or ``None``.
+
+    Records and lock rows are committed files, so a value is acted on only
+    when it names a path under one of *prefixes* (project-relative roots such
+    as ``.github/hooks/``) with no ``.``/``..`` segment and no linked
+    component, and resolves inside *project_root*.
+    """
+    from pathlib import PureWindowsPath
+
+    from apm_cli.utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        has_symlink_component,
+    )
+
+    root = Path(project_root)
+    rel = _relative_value(value, root).replace("\\", "/")
+    parts = rel.split("/")
+    if (
+        not prefixes
+        or Path(rel).is_absolute()
+        or PureWindowsPath(rel).is_absolute()
+        or any(part in ("", ".", "..") for part in parts)
+        or not rel.startswith(tuple(prefixes))
+    ):
+        return None
+    path = root / rel
+    if has_symlink_component(root, path):
+        return None
+    try:
+        ensure_path_within(path, root)
+    except PathTraversalError:
+        return None
+    return path
+
+
+def _hooks_prefixes(targets: Any) -> tuple[str, ...]:
+    return tuple(
+        f"{target.root_dir}/hooks/"
+        for target in targets or ()
+        if callable(getattr(target, "supports", None)) and target.supports("hooks")
+    )
+
+
 def _retire_per_file(project_root: Path, targets: Any, item: UnadmittedBundleHooks) -> None:
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR
     from apm_cli.integration.hook_ownership import write_per_file_bundle_record
 
+    prefixes = tuple(f"{target.root_dir}/hooks/" for target in _per_file_targets(targets))
     for value in item.hook_files:
-        path = Path(value) if Path(value).is_absolute() else Path(project_root) / value
-        if path.is_file() and not path.is_symlink():
-            path.unlink()
+        hook_file = contained_bundle_path(project_root, value, prefixes)
+        if hook_file is not None and hook_file.is_file():
+            hook_file.unlink()
     for target in _per_file_targets(targets):
         sidecar = Path(project_root) / target.root_dir / _APM_HOOKS_SIDECAR
         if sidecar.is_file():
@@ -292,13 +338,15 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
-def _remove_unedited(project_root: Path, rows: Collection[str], recorded: dict[str, str]) -> None:
-    """Remove deployed files whose bytes still match the lock; edits are kept."""
+def _remove_unedited(
+    project_root: Path, rows: Collection[str], recorded: dict[str, str], prefixes: Collection[str]
+) -> None:
+    """Remove deployed files under *prefixes* whose bytes still match the lock; edits are kept."""
     from apm_cli.utils.content_hash import compute_file_hash
 
     for value in rows:
-        path = Path(value) if Path(value).is_absolute() else project_root / value
-        if not path.is_file() or path.is_symlink():
+        path = contained_bundle_path(project_root, value, prefixes)
+        if path is None or not path.is_file():
             continue
         digest = recorded.get(value)
         if digest is None or digest == compute_file_hash(path):
@@ -342,7 +390,7 @@ def retire_bundle_hooks(
     configs = tuple(sorted(state.hook_files)) if state else ()
     _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))
     recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
-    _remove_unedited(project_root, scripts, recorded)
+    _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
     if rows and lock_dir is not None:
         _drop_lock_rows(lock_dir, rows)
     if reason is not None:
@@ -403,15 +451,25 @@ def reconcile_scope_bundle_hooks(
     logger: Any = None,
     dry_run: bool = False,
 ) -> list[UnadmittedBundleHooks]:
-    """Re-check one scope's local-bundle hooks; install, update and prune call this."""
+    """Re-check one scope's local-bundle hooks and canvas extensions.
+
+    Install, update and prune call this. Returns the unadmitted hooks.
+    """
     from apm_cli.core.scope import get_apm_dir
+
+    from .local_bundle_canvas import retire_unadmitted_bundle_canvas
 
     root, targets, allow_provider = scope_bundle_hook_inputs(
         scope, apm_package, no_policy=no_policy, logger=logger
     )
-    return retire_unadmitted_bundle_hooks(
-        root, targets, allow_provider, lock_dir=get_apm_dir(scope), logger=logger, dry_run=dry_run
+    lock_dir = get_apm_dir(scope)
+    hooks = retire_unadmitted_bundle_hooks(
+        root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
     )
+    retire_unadmitted_bundle_canvas(
+        root, targets, allow_provider, lock_dir=lock_dir, logger=logger, dry_run=dry_run
+    )
+    return hooks
 
 
 def installed_local_bundles(scope: Any, apm_package: Any) -> tuple[list[str], int]:
