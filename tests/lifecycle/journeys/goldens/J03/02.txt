@@ -8,6 +8,7 @@ $ apm install --frozen
   |-- (files unchanged)
   [+] microsoft/apm-sample-package #v1.0.0 @<SHA8> (cached)
   |-- (files unchanged)
+[i] Instructions installed for claude. Run 'apm compile' to update AGENTS.md / CLAUDE.md.
 
 [i] No changes -- install state already up to date in <DUR>.
 [i] Deployed files verified against apm.lock.yaml.

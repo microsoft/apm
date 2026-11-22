@@ -183,8 +183,8 @@ the [policy schema](../policy-schema/).
 ### `hook-approval-pins`
 
 - **What it verifies.** That every hook file the lockfile records as deployed is still admitted by its pinned approval in `apm.yml` (see [pinned approvals](../cli/approve/#pinned-approvals)). It runs after `content-integrity` and uses the same check as `apm install --frozen`, so both reach one verdict.
-- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead.
-- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`.
+- **Fails when.** A pinned hook file's content no longer matches its pin, or its pin was removed, while `exec_status` still records the hooks as deployed. A deny is reported by the deny checks instead. It also fails when a file the lockfile does not record sits at one of a package's own hook destinations (such as `.github/hooks/<package>-<name>.json`) while the executables gate withholds that package's hooks (denied or not approved); the detail names the path. `apm install` keeps such a file and warns naming it, because no lock record proves APM wrote it.
+- **Remediation.** Re-approve the package with `apm approve <package>`, or run `apm install` to retire the hook, then commit `apm.yml` and `apm.lock.yaml`. For an unrecorded file at a withheld package's hook path, delete it if you did not write it yourself, then run `apm audit --ci`.
 
 ### `includes-consent`
 
