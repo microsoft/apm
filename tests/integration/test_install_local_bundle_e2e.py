@@ -1956,6 +1956,12 @@ class TestBundleMcpWiringE2E:
         def _capture(mcp_deps, **kwargs):
             captured["deps"] = list(mcp_deps)
             captured["kwargs"] = dict(kwargs)
+            # A real write claims each server on the runtimes it configures;
+            # the bundle records only servers it claims (#4634).
+            for runtime in ("copilot", "claude"):
+                kwargs["managed_target_servers"].setdefault(runtime, set()).update(
+                    dep.name for dep in mcp_deps
+                )
             return len(mcp_deps)
 
         def _capture_preflight(**kwargs):

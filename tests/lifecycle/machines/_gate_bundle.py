@@ -1,0 +1,361 @@
+"""M-GATE bundle spine: ``apm install <local bundle>`` at every gate level (#4095).
+
+PROMISE: P-INV-I4 -- a deny, revoked approval or the gate turning on never
+widens what a local bundle deploys; an approval of the exact bundle content
+deploys its executables (source: tests/lifecycle/oracles.py).
+PROMISE: P-OWN-executable-item-admission -- a local bundle's executables are
+admitted by its exact-content approval key; its plain files deploy whatever
+the gate decides (source: src/apm_cli/install/local_bundle_pending.py).
+CELL: OP=bundle-install x PRIM x GATE (T1).
+
+Two local bundles: ``p-bmix`` (a skill, an instruction, a hook and a stdio MCP
+server, packed at run time with ``apm pack``) and the world's ``p-lsp`` bundle
+(one LSP server). The spine installs both at five gate levels in turn:
+unapproved, denied before any deploy, allowed (``apm approve <key>``), revoked
+after deploy (``apm deny <key>``) and gate off. Every install runs I1-I9 and
+must leave exactly the model's observable deployed set, the instruction file
+where the gate keeps plain files, and the bundle's pending record while its
+executables are parked. ``bundle_cells`` labels the same script statically.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from tests.lifecycle.machines._kit import Bench, Step, StepRunner
+from tests.lifecycle.model.expected import expected_deployed
+from tests.lifecycle.model.state import ModelState
+from tests.lifecycle.oracles import Evidence, check_obligation
+from tests.lifecycle.rows import _SURFACE_GLOBS
+from tests.lifecycle.world.builder import _pack_bundle
+from tests.lifecycle.world.packages import INERT_COMMAND
+from tests.utils.local_package import LocalPackageFactory
+
+MIX, LSP = "p-bmix", "p-lsp"
+BUNDLES = (MIX, LSP)
+# Credited kinds; ``other-file`` is the p-bmix instruction, checked by path.
+KINDS: Mapping[str, frozenset[str]] = {
+    MIX: frozenset({"skill", "other-file", "hook", "mcp"}),
+    LSP: frozenset({"lsp"}),
+}
+OBSERVED: Mapping[str, frozenset[str]] = {
+    MIX: frozenset({"skill", "hook", "mcp"}),
+    LSP: frozenset({"lsp"}),
+}
+EXEC_TYPES: Mapping[str, tuple[str, ...]] = {MIX: ("hooks", "mcp"), LSP: ("lsp",)}
+_PLAIN = frozenset({"skill", "other-file"})
+_INSTRUCTION = ".github/instructions/p-bmix.instructions.md"
+_PENDING = Path("apm_modules") / ".local-bundle-pending.json"
+_HOOK = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo bmix"}]}]}}
+
+
+def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
+    """Author p-bmix and pack it as a local bundle (plugin format); return the archive."""
+    factory = LocalPackageFactory(root / "src")
+    server = {
+        "name": f"{MIX}-mcp",
+        "registry": False,
+        "transport": "stdio",
+        "command": INERT_COMMAND,
+        "args": ["--stdio"],
+    }
+    package = factory.create(MIX, version="1.0.0", mcp_dependencies=[server])
+    factory.add_instruction(package, MIX, '---\napplyTo: "**"\n---\n\nKeep the bundle mixed.\n')
+    factory.add_hook(package, "session", _HOOK)
+    factory.set_targets(package, ["copilot"])
+    # A package with a .apm/ tree packs only .apm/ sources (plugin_exporter.py).
+    skill = package.root / ".apm" / "skills" / MIX / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        f"---\nname: {MIX}\ndescription: Lifecycle bundle skill.\n---\n\nUse {MIX}.\n",
+        encoding="ascii",
+    )
+    return _pack_bundle(package.root, root / "bundle", dict(env))
+
+
+@dataclass
+class BundleState:
+    """The gate inputs the spine has set (pure)."""
+
+    gate_on: bool = True
+    decisions: dict[str, str] = field(default_factory=dict)
+    revoked: set[str] = field(default_factory=set)
+    exec_deployed: set[str] = field(default_factory=set)
+
+    def gate(self, bundle: str, kind: str) -> str:
+        if kind in _PLAIN:
+            return "revoked-after-deploy" if bundle in self.revoked else "none"
+        if not self.gate_on:
+            return "none"
+        if bundle in self.revoked:
+            return "revoked-after-deploy"
+        decision = self.decisions.get(bundle)
+        if decision == "allowed":
+            return "allowed"
+        return "denied-executable" if decision == "denied" else "unapproved-exec"
+
+    # Bundle -> the gate level each executable kind had at that bundle's last
+    # install: a bundle install reconciles only its own bundle (a side door).
+    applied: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    def model(self, installing: str) -> ModelState:
+        """What may be deployed right after ``apm install <installing>``."""
+        allowed = {}
+        for bundle in BUNDLES:
+            for kind in KINDS[bundle] - _PLAIN:
+                level = (
+                    self.gate(bundle, kind)
+                    if bundle == installing
+                    else self.applied.get(bundle, {}).get(kind, "unapproved-exec")
+                )
+                if level in ("none", "allowed"):
+                    allowed[(bundle, kind)] = "allowed"
+        installed = {installing, *self.applied}
+        return ModelState(declared=frozenset(installed), decisions=allowed)
+
+
+class GateBundles(StepRunner):
+    """Run (or, with no bench, only label) the bundle spine at project scope."""
+
+    def __init__(self, bench: Bench | None) -> None:
+        super().__init__(bench, ModelState(), OBSERVED)
+        self.dry = bench is None
+        self.state = BundleState()
+        self.credited: set[str] = set()
+        self.keys: dict[str, str] = {}
+        if bench is not None:
+            self.archives = {
+                MIX: author_bundle(bench.world.root / "gate-bundle", bench.world.env),
+                LSP: Path(bench.world.packages["p-lsp:bundle"].spec),
+            }
+
+    def cells(self, bundle: str) -> list[str]:
+        return sorted(
+            f"G1|bundle|{kind}|{self.state.gate(bundle, kind)}|project" for kind in KINDS[bundle]
+        )
+
+    # -- commands ----------------------------------------------------------------
+
+    def install(self, bundle: str) -> None:
+        """``apm install <bundle>``: check I1-I9 and the bundle's outcome, then credit."""
+        cells = self.cells(bundle)
+        self.credited.update(cells)
+        if self.dry:
+            self._advance(bundle)
+            return
+        step = self.step(
+            ("install", str(self.archives[bundle])),
+            exits={0},
+            cells=cells,
+            model=self.state.model(bundle),
+            mutating=True,
+        )
+        self.check_outcome(bundle, step)
+        present, absent = self._plain_evidence(bundle)
+        evidence = Evidence(unchanged={"outside": ("*",)}, present=present, absent=absent, exit=0)
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=evidence,
+            )
+        self._advance(bundle)
+
+    def _advance(self, bundle: str) -> None:
+        self.state.applied[bundle] = {k: self.state.gate(bundle, k) for k in KINDS[bundle] - _PLAIN}
+        if all(self.state.gate(bundle, k) in ("none", "allowed") for k in KINDS[bundle] - _PLAIN):
+            self.state.exec_deployed.add(bundle)
+        else:
+            self.state.exec_deployed.discard(bundle)
+
+    def _plain_evidence(self, bundle: str) -> tuple[dict, dict]:
+        if bundle != MIX:
+            return {}, {}
+        return {"project": [_INSTRUCTION, f".agents/skills/{MIX}/SKILL.md"]}, {}
+
+    def check_outcome(self, bundle: str, step: Step) -> None:
+        """Exactly the model's observable set is deployed; parked executables are pending."""
+        wanted = {
+            "/".join(cell)
+            for cell in expected_deployed(self.state.model(bundle), OBSERVED)
+            if (cell[1], cell[2]) in _SURFACE_GLOBS
+        }
+        assert set(step.after.deployed) == wanted, (
+            f"deployed {sorted(step.after.deployed)}, model {sorted(wanted)}"
+        )
+        parked = [k for k in KINDS[bundle] - _PLAIN if self.state.gate(bundle, k) != "allowed"]
+        record = self.bench.manifest_dir / _PENDING
+        bundles = (
+            json.loads(record.read_text(encoding="utf-8")).get("bundles") or {}
+            if record.is_file()
+            else {}
+        )
+        entry = next(
+            (
+                e
+                for e in bundles.values()
+                if str(e.get("approval_key", "")).startswith(bundle + "#")
+            ),
+            None,
+        )
+        if parked and self.state.gate_on:
+            assert entry is not None, f"{bundle}: parked executables are not pending: {bundles}"
+            assert set(EXEC_TYPES[bundle]) <= set(entry["exec_types"]), entry
+            self.keys[bundle] = entry["approval_key"]
+
+    def decide(self, verdict: str) -> None:
+        """``apm approve|deny <key>`` for both bundles (an input to the next installs)."""
+        for bundle in BUNDLES:
+            if not self.dry:
+                result = self.bench.run((verdict, self.keys[bundle]))
+                assert result.returncode == 0, result.stdout + result.stderr
+            self.state.decisions[bundle] = "allowed" if verdict == "approve" else "denied"
+            if verdict == "deny" and bundle in self.state.exec_deployed:
+                self.state.revoked.add(bundle)
+            if verdict == "approve":
+                self.state.revoked.discard(bundle)
+
+    def gate_off(self) -> None:
+        def change() -> None:
+            data = self.bench.manifest()
+            data.pop("executables", None)
+            self.bench.write_manifest(data)
+
+        if not self.dry:
+            self.edit("gate-off", change)
+        self.state.gate_on = False
+        self.state.decisions.clear()
+
+
+def replay_bundles(machine: GateBundles) -> None:
+    """Install both bundles at five gate levels; each level's installs earn its ids."""
+
+    def both() -> None:
+        for bundle in BUNDLES:
+            machine.install(bundle)
+
+    both()  # unapproved: the world's gate is on, nothing approved
+    machine.decide("deny")
+    both()  # denied before any deploy
+    machine.decide("approve")
+    both()  # allowed
+    machine.decide("deny")
+    both()  # revoked after deploy: executables retire, plain files stay
+    machine.gate_off()
+    both()  # no layer opts into the gate
+
+
+def bundle_cells() -> frozenset[str]:
+    """Every machine id the bundle spine credits (labels only, no CLI)."""
+    machine = GateBundles(None)
+    machine.keys = dict.fromkeys(BUNDLES, "")
+    replay_bundles(machine)
+    return frozenset(machine.credited)
+
+
+# -- pack: what a project bundles of its gated dependencies -----------------------
+
+PACKED = ("p-exec", "p-lsp")
+PACK_KINDS: Mapping[str, frozenset[str]] = {
+    "p-exec": frozenset({"hook", "mcp"}),
+    "p-lsp": frozenset({"lsp"}),
+}
+# The bundle path each deployed dependency executable packs to; pack never ships
+# an MCP server ``apm install`` manages (it ships only servers apm.yml defines).
+_PACKED_PATH = {"hook": "hooks/p-exec-session.json", "lsp": ".lsp.json"}
+
+
+class GatePack(StepRunner):
+    """``apm pack --dry-run`` over git dependencies at five gate levels (project scope)."""
+
+    def __init__(self, bench: Bench | None) -> None:
+        super().__init__(bench, ModelState(), PACK_KINDS)
+        self.dry = bench is None
+        self.level = "unapproved-exec"
+        self.credited: set[str] = set()
+
+    def specs(self) -> tuple[str, ...]:
+        return tuple(self.bench.world.packages[f"{name}:git"].spec for name in PACKED)
+
+    def level_model(self) -> ModelState:
+        allowed = self.level in ("none", "allowed")
+        decisions = {
+            (name, kind): "allowed" for name in PACKED for kind in PACK_KINDS[name] if allowed
+        }
+        return ModelState(declared=frozenset(PACKED), decisions=decisions)
+
+    def install(self, *names: str) -> None:
+        if not self.dry:
+            self.step(("install", *names), exits={0}, model=self.level_model(), mutating=True)
+
+    def decide(self, verdict: str, level: str) -> None:
+        if not self.dry:
+            result = self.bench.run((verdict, *(f"lifecycle/{name}" for name in PACKED)))
+            assert result.returncode == 0, result.stdout + result.stderr
+        self.level = level
+
+    def gate_off(self) -> None:
+        def change() -> None:
+            data = self.bench.manifest()
+            data.pop("executables", None)
+            self.bench.write_manifest(data)
+
+        if not self.dry:
+            self.edit("gate-off", change)
+        self.level = "none"
+
+    def pack(self) -> None:
+        """Pack ships exactly the executables the gate lets the project deploy."""
+        cells = sorted(
+            f"G1|pack|{kind}|{self.level}|project" for name in PACKED for kind in PACK_KINDS[name]
+        )
+        self.credited.update(cells)
+        if self.dry:
+            return
+        step = self.step(
+            ("pack", "--dry-run"), exits={0}, cells=cells, read_only=True, mutating=False
+        )
+        listed = {line.strip() for line in step.result.stdout.splitlines()}
+        shipped = self.level in ("none", "allowed")
+        for path in _PACKED_PATH.values():
+            assert (path in listed) == shipped, f"{self.level}: {path} packed={path in listed}"
+        assert not any("mcp" in line.lower() and line.endswith(".json") for line in listed), listed
+        for cell in cells:
+            check_obligation(
+                cell,
+                strength="e2e-evidence",
+                before=step.before,
+                after=step.after,
+                result=step.result,
+                evidence=Evidence(unchanged={"project": ("*",), "outside": ("*",)}, exit=0),
+            )
+
+
+def replay_pack(machine: GatePack) -> None:
+    """Pack at each gate level, after an install has reconciled that level."""
+    machine.install(*(() if machine.dry else machine.specs()))
+    machine.pack()  # unapproved
+    machine.decide("deny", "denied-executable")
+    machine.install()
+    machine.pack()
+    machine.decide("approve", "allowed")
+    machine.install()
+    machine.pack()
+    machine.decide("deny", "revoked-after-deploy")
+    machine.install()
+    machine.pack()
+    machine.gate_off()
+    machine.install()
+    machine.pack()
+
+
+def pack_cells() -> frozenset[str]:
+    machine = GatePack(None)
+    replay_pack(machine)
+    return frozenset(machine.credited)
