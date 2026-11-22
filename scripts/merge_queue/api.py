@@ -27,6 +27,8 @@ class Api(Protocol):
 
     def post(self, path: str, body: Mapping[str, Any]) -> Response: ...
 
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response: ...
+
     def delete(self, path: str) -> Response: ...
 
 
@@ -78,6 +80,9 @@ class GhApi:
 
     def post(self, path: str, body: Mapping[str, Any]) -> Response:
         return self._run(["-X", "POST", path, "--input", "-"], body)
+
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response:
+        return self._run(["-X", "PATCH", path, "--input", "-"], body)
 
     def delete(self, path: str) -> Response:
         return self._run(["-X", "DELETE", path])

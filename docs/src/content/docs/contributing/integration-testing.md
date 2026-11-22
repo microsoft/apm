@@ -723,6 +723,18 @@ python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
 python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
 ```
 
+Landing is off by default. `--land` (`scripts/merge_queue/landing.py`) also
+admin-merges proven trains in launch order with
+`gh pr merge --merge --admin --match-head-commit`. It does so only when main's
+tree is the tree the member was proven on, and the merge commit must carry the
+proven tree. Any drift, or a merge to main that the runner did not make, HALTs
+landing and records the reason in `landing.json`; trains keep testing. Two
+failed admin probes in a row pause landing until elevation returns.
+Before merging, `closure.py` requires the issues GitHub will close
+(`closingIssuesReferences` plus closing keywords in commit messages) to equal the
+ticket's `fixes`; a mismatch ejects the train unmerged. After the merge it closes
+any fix GitHub left open and retargets stacked PRs.
+
 ### Windows unit hang diagnostics
 
 The Windows unit steps in `.github/workflows/build-release.yml` and the PR
