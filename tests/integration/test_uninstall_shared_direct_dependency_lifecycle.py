@@ -133,8 +133,9 @@ def test_uninstall_keeps_a_direct_dependency_another_package_still_needs(
     world.apm("audit", "--ci")
     assert lock_bytes(world.project) == lock_after
     assert tree_digest(world.project) == tree_after
-    # I2: a full install re-resolves the graph and writes the same lockfile.
-    world.apm("install")
+    # I2: a full install re-resolves the graph and writes the same lockfile
+    # (--no-frozen: under CI=true an install with a lockfile defaults to frozen).
+    world.apm("install", "--no-frozen")
     assert lock_bytes(world.project) == lock_after
 
 
@@ -182,7 +183,7 @@ def _graph_world(
 def _assert_install_rewrites_nothing(world: ReplayWorld) -> None:
     """I2: the repaired lockfile is what a full install of the same graph writes."""
     lock_after_uninstall = lock_bytes(world.project)
-    world.apm("install")
+    world.apm("install", "--no-frozen")
     assert lock_bytes(world.project) == lock_after_uninstall
 
 
