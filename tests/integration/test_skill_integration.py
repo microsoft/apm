@@ -15,6 +15,7 @@ import pytest
 pytestmark = [
     pytest.mark.requires_github_token,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 

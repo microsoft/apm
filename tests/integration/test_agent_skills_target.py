@@ -29,6 +29,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from tests.utils.deployment_evidence import seed_receipts
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

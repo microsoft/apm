@@ -205,7 +205,7 @@ Conflict detection uses O(1) name-indexed lookups, so performance remains consta
 
 ## Testing
 
-Comprehensive test suite in `tests/test_enhanced_discovery.py` covers:
+Comprehensive test suite in `tests/unit/primitives/test_enhanced_discovery.py` covers:
 
 - Source tracking functionality
 - Conflict detection accuracy
@@ -217,5 +217,5 @@ Comprehensive test suite in `tests/test_enhanced_discovery.py` covers:
 Run tests with:
 
 ```bash
-python -m pytest tests/test_enhanced_discovery.py -v
+python -m pytest tests/unit/primitives/test_enhanced_discovery.py -v
 ```

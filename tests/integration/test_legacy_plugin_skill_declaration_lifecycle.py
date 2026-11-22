@@ -41,8 +41,12 @@ def _write_plugin(
     skills: tuple[str, ...],
     external_skills: tuple[str, ...] = (),
 ) -> None:
-    """Create a local legacy plugin with declared and undeclared skill sources."""
-    manifest_dir = root / ".claude-plugin"
+    """Create a local legacy plugin with declared and undeclared skill sources.
+
+    The root plugin.json keeps the split route that filters loose skills; a
+    .claude-plugin manifest installs whole at project scope (#3921).
+    """
+    manifest_dir = root
     manifest_dir.mkdir(parents=True)
     (root / "apm.yml").write_text(
         f"name: {root.name}\nversion: 1.0.0\n",

@@ -417,8 +417,12 @@ def _native_plugin(chain: Chain) -> None:
 
 
 def _registered(chain: Chain) -> bool:
-    settings = chain.project / ".github" / "copilot" / "settings.local.json"
-    return settings.exists() and _PLUGIN in settings.read_text(encoding="utf-8")
+    """Copilot enables the plugin from the committed project settings (#3921)."""
+    settings = chain.project / ".github" / "copilot" / "settings.json"
+    if not settings.exists():
+        return False
+    enabled = json.loads(settings.read_text(encoding="utf-8")).get("enabledPlugins", {})
+    return any(key.startswith(f"{_PLUGIN}@") and value is True for key, value in enabled.items())
 
 
 def _native_chain(tmp_path: Path, binary: Path, executables: dict) -> Chain:

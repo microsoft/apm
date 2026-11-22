@@ -34,7 +34,11 @@ clients can fail closed with a clear message.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import stat
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -59,9 +63,13 @@ class CachePinError(RuntimeError):
 def write_marker(install_path: Path, resolved_commit: str) -> None:
     """Write the cache-pin marker file to ``install_path``.
 
-    Idempotent: overwrites any prior marker (callers may invoke this
-    on every install, regardless of whether the lockfile YAML changed,
-    to self-heal caches that pre-date the marker contract).
+    Idempotent: callers may invoke this on every install, regardless of
+    whether the lockfile YAML changed, to self-heal caches that pre-date
+    the marker contract. An identical regular-file marker is left untouched,
+    so a converged install writes nothing (#4790). Otherwise the marker is
+    written atomically as a regular file (temp file in the same directory,
+    then ``os.replace``), replacing whatever entry was there without ever
+    following a link.
 
     Failures are silent at the filesystem layer because they are
     non-fatal for ``apm install`` itself -- a missing or unwritable
@@ -76,12 +84,47 @@ def write_marker(install_path: Path, resolved_commit: str) -> None:
         "resolved_commit": resolved_commit,
     }
     marker = install_path / MARKER_FILENAME
+    data = json.dumps(payload).encode("utf-8")
     try:
-        marker.write_text(json.dumps(payload), encoding="utf-8")
+        current = _regular_marker_bytes(marker)
     except OSError:
-        # Read-only mount, permission denied, etc. Drift will surface
-        # this on the next audit; install must not fail.
+        current = None  # unreadable: treat as a miss and still repair it
+    if current == data:
         return
+    try:
+        _replace_marker(install_path, marker, data)
+    except OSError:
+        # Read-only mount, permission denied, a directory in the way, etc.
+        # Drift will surface this on the next audit; install must not fail.
+        return
+
+
+def _regular_marker_bytes(marker: Path) -> bytes | None:
+    """The marker's bytes when it is a regular file, read without following links."""
+    try:
+        info = os.lstat(marker)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    fd = os.open(marker, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read()
+
+
+def _replace_marker(install_path: Path, marker: Path, data: bytes) -> None:
+    """Write *data* to a temp file beside *marker*, then rename it over the marker."""
+    fd, tmp = tempfile.mkstemp(dir=install_path, prefix=f"{MARKER_FILENAME}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, marker)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def verify_marker(install_path: Path, expected_commit: str) -> None:

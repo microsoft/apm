@@ -6,7 +6,9 @@ the base" in the header, and the run never modifies the project tree,
 ``apm.lock.yaml``, ``apm.yml``, or ``apm_modules/``.
 
 The shipped e2e test fabricates ``apm_modules`` by hand; these scenarios drive
-the real install so the package source tree is whatever APM really caches.
+the real install so the package source tree is whatever APM really caches. The Claude-format
+plugin scenarios target ``cursor``, which deploys a plugin split: Claude and
+Copilot load it intact from ``.agents/plugins`` at project scope (#3921).
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 
@@ -102,11 +105,11 @@ def test_export_patch_claude_plugin_package_exports_upstream_files(
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-plugin",
-        targets=("claude",),
+        targets=("cursor",),
         deps=({"git": remote_url("rawplug"), "ref": commits["rawplug"]},),
     )
     world.apm(project, "install", "--no-policy")
-    skill = project / ".claude" / "skills" / "rx" / "SKILL.md"
+    skill = project / ".agents" / "skills" / "rx" / "SKILL.md"
     assert skill.is_file()
     skill.write_text(skill.read_text() + "plugin edit\n")
 
@@ -143,7 +146,7 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     world, commits = _build_world(tmp_path, apm_binary_path)
     project = world.consumer(
         "consumer-two",
-        targets=("claude",),
+        targets=("cursor",),
         deps=(
             {"git": remote_url("mono"), "path": "packages/tool", "ref": "main"},
             {"git": remote_url("rawplug"), "ref": commits["rawplug"]},
@@ -151,8 +154,8 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     )
     world.apm(project, "install", "--no-policy")
     lock_before = (project / "apm.lock.yaml").read_bytes()
-    skills = (".claude/skills/tool-skill/SKILL.md", ".claude/skills/rx/SKILL.md")
-    agent = project / ".claude" / "agents" / "ra.md"
+    skills = (".agents/skills/tool-skill/SKILL.md", ".agents/skills/rx/SKILL.md")
+    agent = project / ".cursor" / "agents" / "ra.md"
     agent_before = agent.read_bytes()
     for rel in skills:
         target = project / rel
@@ -180,7 +183,7 @@ def test_export_patch_two_packages_and_install_hint_then_overwrite(
     install_text = " ".join(output(install).split())
     assert "overwrites" not in install_text
     assert (
-        kept_edit_message(".claude/agents/ra.md", user_scope=False, proven_edit=True)
+        kept_edit_message(".cursor/agents/ra.md", user_scope=False, proven_edit=True)
         in install_text
     ), install_text
     assert (project / "apm.lock.yaml").read_bytes() == lock_before
@@ -211,11 +214,11 @@ def test_export_patch_keeps_ambiguity_for_authored_apm_plugin_sources(
 
     project = world.consumer(
         "consumer-authored",
-        targets=("claude",),
+        targets=("cursor",),
         deps=({"git": remote_url("authoredplug"), "ref": commit.sha},),
     )
     world.apm(project, "install", "--no-policy")
-    deployed = project / ".claude" / "skills" / "own" / "SKILL.md"
+    deployed = project / ".agents" / "skills" / "own" / "SKILL.md"
     assert deployed.read_text() == body
     deployed.write_text(body + "consumer edit\n")
 

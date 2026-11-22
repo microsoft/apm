@@ -368,12 +368,10 @@ executable-trust configuration under either `executables` or the deprecated
 > `executables.deny` (bin type only) and honored as an alias for one minor
 > cycle. Prefer `executables.deny` for new policies.
 
-When a `marketplace_plugin` package ships a `bin/` directory, a global
-install (`apm install -g`) deploys those executables into
-`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
-commands (the skills-directory plugin contract). Deployment is
-Claude-only and user-scope only; project-scope installs never deploy
-executables.
+When a `marketplace_plugin` package ships a `bin/` directory, `apm install`
+with the `claude` target keeps it inside the plugin deployed whole to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`), so Claude Code
+invokes the scripts as bare commands. A denied `bin/` parks the whole plugin.
 
 ```yaml
 # .github/apm-policy.yml
@@ -511,6 +509,7 @@ These checks run without a policy file:
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
+- `kept-mcp-entries` -- reported only when an install without `apm.lock.yaml` kept an MCP entry it could not confirm it wrote for a server it no longer deploys; remove the entry or declare the server again, then run `apm install`
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 - `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path (`apm install` keeps it and warns; it never deletes it)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration

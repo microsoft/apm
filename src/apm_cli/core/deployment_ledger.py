@@ -24,6 +24,8 @@ from apm_cli.core.deployment_state import (
     LocatorKind,
 )
 from apm_cli.core.legacy_lock_evidence import RowProjection, legacy_bytes_owned, legacy_lock_hashes
+from apm_cli.core.receipt_history import ReceiptHistory
+from apm_cli.core.receipt_history import is_canonical_bundle_hash as _is_canonical_bundle_hash
 from apm_cli.core.remediation import DEPLOYMENT_OWNERS_INVALID
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -61,7 +63,6 @@ DEPLOYMENT_OWNER_REMEDIATION = DEPLOYMENT_OWNERS_INVALID.sentence()
 LOCAL_STATE_DIR = ".apm-local"
 """Per-deployment-root directory for local, never-shared APM state."""
 _SHA256_PREFIX = "sha256:"
-_LOWER_HEX = frozenset("0123456789abcdef")
 # Linux (btrfs subvolumes) and macOS can report a new st_dev for the same root
 # after a reboot or remount. Windows root identity is intentionally unchanged.
 _ROOT_DEVICE_REBIND_SUPPORTED = sys.platform != "win32"
@@ -127,8 +128,10 @@ def retire_receipts_of_missing_projects(limit: int = _RECEIPT_COLLECTION_LIMIT) 
                     and recorded.is_absolute()
                     and not os.path.lexists(recorded)
                     and recorded.parent.is_dir()
+                    and not has_symlink_component(directory, directory / "mcp" / path.name)
                 ):
                     path.unlink()
+                    (directory / "mcp" / path.name).unlink(missing_ok=True)
                     removed += 1
             except (OSError, ValueError, KeyError, TypeError):
                 continue
@@ -179,12 +182,13 @@ class DeploymentMaterializationSession:
         self.root = project_root.resolve()
         self.scope = scope
         self.state_path, self.identity_path = materialization_evidence_paths(self.root, scope)
-        # Containment is anchored one level above APM_HOME (``$HOME`` by
-        # default); for a shallow custom root the symlink check is the guard.
+        self.mcp_state_path = self.state_path.parent / "mcp" / self.state_path.name
+        # Containment anchors above APM_HOME ($HOME by default); else the symlink check guards.
         self._receipts_base = self.state_path.parent.parent.parent
         self._records: dict[str, DeploymentRecord] = {}
         self._destinations: dict[str, str] = {}
         self._bindings: dict[str, list[str]] = {}
+        self._history = ReceiptHistory()  # earlier writes per key (#4428)
         self._written: dict[str, str] = {}
         self._kept: set[str] = set()
         self._dirty = False
@@ -219,6 +223,7 @@ class DeploymentMaterializationSession:
     def _validate_paths(self) -> None:
         for base, path in (
             (self._receipts_base, self.state_path),
+            (self._receipts_base, self.mcp_state_path),
             (self.root, self.identity_path),
             (self.root, self.identity_path.parent / ".gitignore"),
         ):
@@ -284,16 +289,7 @@ class DeploymentMaterializationSession:
             if not self.state_path.exists():
                 return
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            if (
-                data["version"] != 1
-                or data["root"] != self.root.as_posix()
-                or data["scope"] != self.scope.value
-                or data["installation"] != installation
-                or (
-                    data["root_identity"] != self._root_identity()
-                    and not self._root_device_changed_only(data)
-                )
-            ):
+            if not self.binds(data):
                 raise ValueError("installation binding does not match")
             # A device-only change is rebound by the next writing session's flush.
             rebind = self._root_identity() != data["root_identity"]
@@ -320,6 +316,7 @@ class DeploymentMaterializationSession:
             self._records = dict(ledger.records)
             self._destinations = destinations
             self._bindings = bindings
+            self._history = ReceiptHistory.load(data.get("history", {}), ledger.records)
             self._physical_keys = {path: key for key, path in destinations.items()}
             if len(self._physical_keys) != len(destinations):
                 raise ValueError("ambiguous physical write receipts")
@@ -330,6 +327,17 @@ class DeploymentMaterializationSession:
                 "Preserve local skill edits, then remove the invalid receipt file and retry. "
                 "Existing files without trustworthy evidence will not be overwritten."
             ) from exc
+
+    def binds(self, data: Mapping[str, Any]) -> bool:
+        """Whether receipt *data* is bound to this root, scope and installation identity."""
+        installation, moved = self._installation, self._root_device_changed_only
+        recorded = [data["version"], data["root"], data["scope"]]
+        return not (
+            installation is None
+            or recorded != [1, self.root.as_posix(), self.scope.value]
+            or data["installation"] != installation
+            or (data["root_identity"] != self._root_identity() and not moved(data))
+        )
 
     def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
         return DeploymentLedgerCodec.locator_for_path(
@@ -491,7 +499,7 @@ class DeploymentMaterializationSession:
             return None
         claimed = {claim.content_hash for claim in self._claims[value]} - {None}
         if record.content_hash not in claimed and not self._holds(path, record):
-            return None
+            return self._history.earlier_write(key, path)  # a branch round trip (#4428)
         return record.content_hash
 
     @staticmethod
@@ -557,17 +565,18 @@ class DeploymentMaterializationSession:
         for record, physical, value in prepared:
             key = record.locator.key
             previous = self._physical_keys.get(physical)
-            if previous is not None:
-                self._records.pop(previous, None)
-                self._destinations.pop(previous, None)
-                self._bindings.pop(previous, None)
+            binding = [record.active_owner, self._claim_signature(value)]
+            replaced = self._records.pop(previous, None) if previous else None
+            same = previous is not None and self._bindings.pop(previous, None) == binding
+            self._destinations.pop(previous or "", None)
+            old_hash = replaced and replaced.content_hash
+            self._history.replace(
+                previous, old_hash, key, record.content_hash or "", same_binding=same
+            )
             self._records[key] = record
             self._destinations[key] = physical
             self._physical_keys[physical] = key
-            self._bindings[key] = [
-                record.active_owner,
-                self._claim_signature(value),
-            ]
+            self._bindings[key] = binding
             if not evidence_only:
                 self._written[key] = value
         self._dirty = True
@@ -596,11 +605,15 @@ class DeploymentMaterializationSession:
             record = committed._records.get(key)
             if record is None or record != self._records.get(key):
                 continue
-            committed._bindings[key] = [record.active_owner, committed._claim_signature(value)]
+            binding = [record.active_owner, committed._claim_signature(value)]
+            if committed._bindings.get(key) != binding:
+                committed._history.forget(key)  # never carry hashes to a new binding (#4428)
+            committed._bindings[key] = binding
             committed._dirty = True
         committed.flush()
 
-    def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
+    def binding(self) -> dict[str, Any]:
+        """The binding fields of a receipt for this installation, creating its identity once."""
         from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         self._validate_paths()
@@ -621,21 +634,22 @@ class DeploymentMaterializationSession:
                 self.identity_path, installation + "\n", new_file_mode=0o600, create_only=True
             )
             self._installation = installation
+        data: dict[str, Any] = dict(version=1, root=self.root.as_posix(), scope=self.scope.value)
+        data.update(root_identity=self._root_identity(), installation=self._installation)
+        if (birth_time := self._root_birth_time()) is not None:
+            data["root_birth_time"] = birth_time
+        return data
+
+    def _persist(self, records: dict[str, DeploymentRecord], destinations: dict[str, str]) -> None:
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+
+        data = {**self.binding(), "destinations": destinations}
         mkdir(self.state_path.parent, mode=0o700, parents=True, exist_ok=True)
         self._validate_paths()
-        data = {
-            "version": 1,
-            "root": self.root.as_posix(),
-            "root_identity": self._root_identity(),
-            "scope": self.scope.value,
-            "installation": self._installation,
-            "records": DeploymentLedgerCodec.rows(DeploymentLedger(records)),
-            "destinations": destinations,
-            "bindings": {key: self._bindings[key] for key in records},
-        }
-        birth_time = self._root_birth_time()
-        if birth_time is not None:
-            data["root_birth_time"] = birth_time
+        data["records"] = DeploymentLedgerCodec.rows(DeploymentLedger(records))
+        data["bindings"] = {key: self._bindings[key] for key in records}
+        if history := self._history.payload(records):
+            data["history"] = history
         atomic_write_text(
             self.state_path,
             json.dumps(data, sort_keys=True, indent=2) + "\n",
@@ -655,16 +669,12 @@ class DeploymentMaterializationSession:
         }
         if keys:
             records = {key: record for key, record in self._records.items() if key not in keys}
-            destinations = {
-                key: value for key, value in self._destinations.items() if key not in keys
-            }
+            destinations = {k: v for k, v in self._destinations.items() if k not in keys}
             self._persist(records, destinations)
-            self._records = records
-            self._destinations = destinations
-            self._bindings = {
-                key: value for key, value in self._bindings.items() if key not in keys
-            }
+            self._records, self._destinations = records, destinations
+            self._bindings = {k: v for k, v in self._bindings.items() if k not in keys}
             self._physical_keys = {path: key for key, path in destinations.items()}
+            self._history.retain(records)
 
     @classmethod
     def retire_removed(
@@ -833,16 +843,6 @@ def record_bundle_receipts(
         except ValueError:
             continue
     session.flush()
-
-
-def _is_canonical_bundle_hash(content_hash: str | None) -> bool:
-    """Return whether *content_hash* is one canonical ``sha256:<hex>`` digest."""
-    digest = (
-        content_hash.removeprefix(_SHA256_PREFIX)
-        if isinstance(content_hash, str) and content_hash.startswith(_SHA256_PREFIX)
-        else ""
-    )
-    return len(digest) == 64 and all(character in _LOWER_HEX for character in digest)
 
 
 def _require_local_bundle_hash(path: str, content_hash: str | None) -> None:

@@ -247,6 +247,13 @@ KINDS: Mapping[str, frozenset[str]] = {
         if c.form in ("local-path", "native", *LOCAL_CATALOGS)
     },
 }
+# At project scope a Claude plugin deploys whole to .agents/plugins for claude and copilot
+# (#3921): its carried skill and MCP server get no loose surface. The model expects only
+# the gated native unit; the oracle still observes the carried kinds, so a loose deploy fails.
+_EXPECTED_KINDS: Mapping[str, frozenset[str]] = {
+    **KINDS,
+    **{c.package: c.kinds for c in CHOICES if c.form == "native"},
+}
 _NAMES = sorted({*KINDS, "p-registry", INLINE_SERVER}, key=len, reverse=True)
 
 
@@ -941,7 +948,7 @@ class SourceMachine(MachineBase):
         """A resolving step deploys exactly the observable surfaces the model allows."""
         wanted = {
             "/".join(cell)
-            for cell in expected_deployed(self.declared_model(), self.kinds)
+            for cell in expected_deployed(self.declared_model(), _EXPECTED_KINDS)
             if (cell[1], cell[2]) in _SURFACE_GLOBS
         }
         deployed = set(step.after.deployed)
@@ -968,6 +975,22 @@ class SourceMachine(MachineBase):
     def gate_off_deploys_everything(self, step: Step) -> None:
         """No gate: every allowed surface is deployed and no MCP server is parked."""
         self.deploys_what_the_model_allows(step)
+        # A plugin that ships bin/ stays parked without --trust-bin, gate or not.
+        plugins = self.bench.deploy_root / ".agents" / "plugins"
+        missing = [
+            c.package
+            for c in self._choices()
+            if c.form == "native"
+            and "bin" not in c.prims
+            and not (plugins / c.package / ".claude-plugin").is_dir()
+        ]
+        assert not missing, f"native plugins not deployed whole: {missing}"
+        parked = [
+            c.package
+            for c in self._choices()
+            if c.form == "native" and "bin" in c.prims and (plugins / c.package).exists()
+        ]
+        assert not parked, f"bin/ plugins deployed without --trust-bin: {parked}"
         problems = self.root_mcp_problems(step)
         assert not problems, "; ".join(problems)
         output = f"{step.result.stdout}\n{step.result.stderr}"
