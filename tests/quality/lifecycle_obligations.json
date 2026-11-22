@@ -21888,9 +21888,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4634",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_local_bundle_never_replaces_the_users_hook[present-provenance-unknown]"
   },
   "pair|SRC=local-bundle|DEPLOYED=unowned": {
