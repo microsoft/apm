@@ -319,6 +319,42 @@ class TestCompileShims:
         root_agents = tmp_path / "AGENTS.md"
         assert not root_agents.exists() or "SRC_BODY" not in root_agents.read_text("utf-8")
 
+    @pytest.mark.parametrize(
+        ("rule", "carried"),
+        [
+            ('---\npaths:\n  - "**/*.py"\n---\nOTHER_BODY\n', True),
+            ('---\npaths:\n  - "**"\n---\nSTYLE_BODY edited\n', False),
+        ],
+        ids=["other-source-rule", "kept-legacy-rule"],
+    )
+    def test_same_named_rule_covers_an_instruction_only_with_its_scope(
+        self, tmp_path, rule, carried
+    ):
+        """Another source's ``style.md`` must not hide an always-on ``style`` (#4005 review)."""
+        (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / ".claude" / "rules").mkdir(parents=True)
+        (tmp_path / ".claude" / "rules" / "style.md").write_text(rule, encoding="utf-8")
+        primitives = PrimitiveCollection()
+        primitives.add_primitive(
+            Instruction(
+                name="style",
+                file_path=tmp_path / "apm_modules" / "o" / "a" / "style.instructions.md",
+                description="style",
+                apply_to="**",
+                content="STYLE_BODY",
+                author="test",
+            )
+        )
+
+        result = AgentsCompiler(str(tmp_path)).compile(
+            CompilationConfig(target="claude", resolve_links=False), primitives
+        )
+
+        assert result.success, result.errors
+        agents_md = tmp_path / "AGENTS.md"
+        text = agents_md.read_text(encoding="utf-8") if agents_md.exists() else ""
+        assert ("STYLE_BODY" in text) is carried
+
     def test_single_file_compile_keeps_directory_rules_out_of_root(self, tmp_path):
         (tmp_path / "src" / "test").mkdir(parents=True)
         result = AgentsCompiler(str(tmp_path)).compile(

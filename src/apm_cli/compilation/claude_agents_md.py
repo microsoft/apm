@@ -289,13 +289,39 @@ def is_claude_only_target(target: object) -> bool:
         return False
 
 
+def _rule_has_scope(rule: Path, base_dir: Path, apply_to: object) -> bool:
+    """Return True when the rule at *rule* was rendered with *apply_to*'s scope.
+
+    Install writes ``applyTo`` as the rule's ``paths:`` list, so a rule
+    another source deployed under the same filename (a different scope) does
+    not deliver this instruction; a kept legacy rule, edited or not, does.
+    """
+    from ..utils.yaml_io import loads_frontmatter
+
+    content = _read_text(rule, base_dir)
+    if content is None:
+        return False
+    try:
+        metadata = loads_frontmatter(content).metadata
+    except Exception:
+        return False
+    paths = metadata.get("paths") if isinstance(metadata, dict) else None
+    if isinstance(paths, str):
+        paths = [paths]
+    if paths is not None and not isinstance(paths, list):
+        return False
+    expected = parse_apply_to(normalize_apply_to(apply_to, default=""))
+    return [str(path).strip() for path in paths or ()] == [str(glob).strip() for glob in expected]
+
+
 def without_claude_rule_instructions(primitives, base_dir: Path, warn_fn):
     """Return *primitives* minus instructions ``.claude/rules/`` delivers.
 
     Used when Claude Code is the only AGENTS.md consumer: path-scoped
     instructions ``apm install`` deployed as rules must not load twice. Any
-    instruction without a deployed rule (always-on, directory-scoped, or a
-    compile-only project) stays, so nothing is dropped.
+    instruction without a deployed rule of its own scope (always-on,
+    directory-scoped, a compile-only project, or a same-named rule another
+    source deployed) stays, so nothing is dropped.
     """
     import copy
 
@@ -314,10 +340,12 @@ def without_claude_rule_instructions(primitives, base_dir: Path, warn_fn):
     if not deployed:
         return primitives
     filtered = copy.copy(primitives)
+    rules_dir = base_dir / ".claude" / "rules"
     filtered.instructions = [
         instruction
         for instruction in primitives.instructions
-        if _instruction_rule_filename("claude", instruction) not in deployed
+        if (name := _instruction_rule_filename("claude", instruction)) not in deployed
+        or not _rule_has_scope(rules_dir / name, base_dir, instruction.apply_to)
     ]
     return filtered
 

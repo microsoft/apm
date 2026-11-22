@@ -99,7 +99,10 @@ class TestNoDedupSkipsDeduplicationLogic:
 
     @staticmethod
     def _compile(tmp_path, primitives, *, no_dedup):
-        (tmp_path / ".claude" / "rules" / "python.md").write_text("# deployed\n", encoding="utf-8")
+        # The rule install deploys for this instruction carries its applyTo as paths:.
+        (tmp_path / ".claude" / "rules" / "python.md").write_text(
+            '---\npaths:\n  - "**/*.py"\n---\n# deployed\n', encoding="utf-8"
+        )
         compiler = AgentsCompiler(str(tmp_path))
         config = CompilationConfig(target="claude", no_dedup=no_dedup, resolve_links=False)
         result = compiler.compile(config, primitives)
