@@ -73,17 +73,17 @@ def _claude_world(root: Path) -> Path:
     return consumer.root
 
 
-def _gate_and_uninstall(tmp_path: Path, apm_binary_path: Path, world, scenario: str) -> str:
+def _gate_and_uninstall(tmp_path: Path, apm_binary_path: Path, world, scenario: str):
     """Install with canvas on, opt the gate in with no approvals, uninstall p-exec."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "w", base_env=dict(os.environ))
     project = world(isolated.work_root)
     runner = ApmLifecycleRunner((str(apm_binary_path),))
     env = isolated.subprocess_env()
 
-    def run(*args: str) -> str:
+    def run(*args: str):
         result = runner.run(args, scenario_id=scenario, cwd=project, env=env)
         assert result.returncode == 0, result.stdout + result.stderr
-        return result.stdout + result.stderr
+        return result
 
     run("experimental", "enable", "canvas")
     run("install", "--no-policy")
@@ -96,7 +96,9 @@ def _gate_and_uninstall(tmp_path: Path, apm_binary_path: Path, world, scenario: 
 def test_uninstall_names_each_retired_executable_kind_once(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    output = _gate_and_uninstall(tmp_path, apm_binary_path, _world, "4567")
+    result = _gate_and_uninstall(tmp_path, apm_binary_path, _world, "4567")
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
 
     lines = {
         match.group(1): match.group(0)
@@ -115,7 +117,9 @@ def test_uninstall_names_canvas_only_where_it_was_deployed(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """#4816: Claude has no canvas mapping, so only the deployed hooks are named."""
-    output = _gate_and_uninstall(tmp_path, apm_binary_path, _claude_world, "4816")
+    result = _gate_and_uninstall(tmp_path, apm_binary_path, _claude_world, "4816")
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
 
     retired = re.findall(r"p-mixed (.+) are no longer allowed \(not approved\)", output)
     assert retired == ["hooks"], output
