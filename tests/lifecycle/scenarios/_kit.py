@@ -69,6 +69,8 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
+    ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
+    ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
     # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
@@ -686,7 +688,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
+SCENARIO_LANES = frozenset({"T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -765,6 +767,7 @@ POLICY_BLOCK = ExpectedRefusal(
     "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
 )
 POLICY_REFUSALS = (
+    "pair|DEPLOYED=absent|GATE=denied-dependency",
     "pair|DEPLOYED=clean|GATE=denied-dependency",
     "pair|DEPLOYED=edited|GATE=denied-dependency",
     "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency",
@@ -790,8 +793,22 @@ POLICY_REFUSALS = (
     "pair|SRC=inline-mcp|GATE=denied-dependency",
 )
 
+# A lock written by a newer APM is refused before any write (deps/lockfile_generator.py).
+NEWER_LOCK = ExpectedRefusal(
+    1,
+    r"Refusing to run 'apm \S+' on apm\.lock\.yaml: it was written by APM .* newer than this APM",
+    "P-INV-I7",
+    "M-SCOPE-LOCK: a newer-generator lock refuses every command that reads it",
+)
+NEWER_LOCK_REFUSALS = (
+    "T4|OP=pack|SCOPE=project|LOCK=newer-generator",
+    "pair|OP=pack|LOCK=newer-generator",
+    "pair|SCOPE=project|LOCK=newer-generator",
+)
+
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
     **dict.fromkeys(POLICY_REFUSALS, POLICY_BLOCK),
+    **dict.fromkeys(NEWER_LOCK_REFUSALS, NEWER_LOCK),
     "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
         1,
         r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",

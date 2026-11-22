@@ -127,8 +127,7 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         (".claude/skills/p-native-claude-bin/SKILL.md", "p-native-claude-bin"),
     ),
     ("p-canvas", "project"): ((".github/extensions/p-canvas/extension.mjs", "p-canvas"),),
-    # Copilot has no user-scope canvas surface (integration/targets.py "copilot").
-    ("p-canvas", "user"): (),
+    ("p-canvas", "user"): ((".copilot/extensions/p-canvas/extension.mjs", "p-canvas"),),
 }
 _TARGETS = {
     "p-native-claude": "claude",
