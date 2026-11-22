@@ -226,6 +226,14 @@ Archive parsing and canonical dependency matching retain their existing costs.
 Deferring a direct import does not prove a cold-start speedup: other modules may
 still load the same dependency transitively.
 
+To measure end-to-end user journeys (install cold, warm and `--frozen`, update,
+compile, audit, pack) on realistic dependency trees and monorepos, use the
+seeded fixtures and the harness described in
+[`tests/fixtures/perf/README.md`](https://github.com/microsoft/apm/blob/main/tests/fixtures/perf/README.md).
+For example, `uv run python -m tests.benchmarks.journeys run --fixtures tree-10 --runs 1 --rtt 0`.
+The harness runs offline against a local mirror with an injectable round-trip
+time and counts requests per command.
+
 Without `uv`, use a standard Python venv and pip:
 
 ```bash

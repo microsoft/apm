@@ -237,12 +237,6 @@ class TestMCPCommandIntegration:
 class TestMCPInstallForwarding:
     """Tests for MCP install command forwarding."""
 
-    def test_mcp_install_exists(self):
-        """MCP install command is defined."""
-        from apm_cli.commands.mcp import mcp_install
-
-        assert mcp_install is not None
-
     def test_mcp_install_has_name_argument(self):
         """MCP install command accepts name argument."""
         from apm_cli.commands.mcp import mcp_install

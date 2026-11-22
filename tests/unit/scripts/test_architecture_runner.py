@@ -617,6 +617,7 @@ contracts-tooling-lifecycle-script-gate
 contracts-tooling-lifecycle-policy-errors
 contracts-tooling-linter-cache-content-key
 contracts-tooling-linter-cache-parse-once
+contracts-tooling-local-identity
 contracts-tooling-local-path-anchor
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp

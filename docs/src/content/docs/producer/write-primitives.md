@@ -202,6 +202,9 @@ harness folder, it rewrites the link so it still points at the file, now inside
 `apm_modules/`. Links inside one skill folder are not rewritten, because the
 folder is copied whole.
 
+`#fragment` and `?query` suffixes are kept. `apm compile` checks only the file
+path, so it does not verify that the heading or query exists in the target.
+
 **Gotcha:** APM rewrites a link when the target file exists and stays inside
 your package. A link to another package, an absolute path or a missing
 file is left as written, and breaks for consumers. Install your package into a

@@ -318,7 +318,7 @@ class TestGitHubDownloaderCloseRepo:
     def test_close_repo_with_none(self) -> None:
         from apm_cli.deps.github_downloader import _close_repo
 
-        _close_repo(None)  # must not raise
+        assert _close_repo(None) is None
 
     def test_close_repo_clears_cache(self) -> None:
         from apm_cli.deps.github_downloader import _close_repo
