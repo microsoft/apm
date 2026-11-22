@@ -230,6 +230,9 @@ def test_a_failed_last_plugin_removal_keeps_the_roots_byte_pinned(project, monke
         ("* -text\n*.sh text=auto\n", r"'\*\.sh text=auto' \(line 2\)"),
         ("* binary\n*.md !text\n", r"'\*\.md !text' \(line 2\)"),
         ("# kept by the team\n*.png -diff\n", r"no '\* -text' rule"),
+        # Git drops a whole rule with an invalid attribute name such as '#'.
+        ("* -text # pinned\n", r"no '\* -text' rule"),
+        ("* -text\n*.sh text\n*.md -text\n", r"'\*\.sh text' \(line 2\)"),
     ],
 )
 def test_a_user_gitattributes_that_converts_plugin_roots_is_refused(project, rules, named) -> None:
@@ -246,7 +249,15 @@ def test_a_user_gitattributes_that_converts_plugin_roots_is_refused(project, rul
     assert not (project.root / _CLAUDE).exists()
 
 
-@pytest.mark.parametrize("rules", ["* text\n*.png -diff\n* -text\n", "* text\n* binary\n"])
+@pytest.mark.parametrize(
+    "rules",
+    [
+        "* text\n*.png -diff\n* -text\n",
+        "* text\n* binary\n",
+        '"*" -text\n',
+        "* -text\n*.sh text=auto\n*.sh -text\n",
+    ],
+)
 def test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept(project, rules) -> None:
     project.source("acme/alpha", "alpha")
     attributes = project.plugins / ".gitattributes"
@@ -255,6 +266,19 @@ def test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept(project, ru
     project.reconcile(None)
     assert attributes.read_text() == rules
     assert (project.plugins / "alpha/hooks/run.sh").read_text() == "v1"
+
+
+def test_a_top_level_macro_that_sets_text_is_refused(project) -> None:
+    """Git expands a top-level [attr] macro in place, so it can re-enable text."""
+    project.source("acme/alpha", "alpha")
+    (project.root / ".git").mkdir(parents=True)
+    (project.root / ".gitattributes").write_text("[attr]normalize text eol=lf\n")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text("* -text\n* normalize\n")
+    with pytest.raises(ClaudeNativePluginError, match=r"'\* normalize' \(line 2\)"):
+        project.reconcile(None)
+    assert not (project.plugins / "alpha").exists()
 
 
 def test_an_unparseable_second_file_leaves_every_file_and_root_untouched(project) -> None:

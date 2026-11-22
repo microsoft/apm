@@ -13,6 +13,7 @@
   "regression_tests": [
     "tests/integration/test_native_project_plugin_lifecycle.py::test_a_user_gitattributes_that_converts_the_roots_refuses_the_deployment",
     "tests/integration/test_native_project_scope.py::test_a_user_gitattributes_that_converts_plugin_roots_is_refused",
-    "tests/integration/test_native_project_scope.py::test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept"
+    "tests/integration/test_native_project_scope.py::test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept",
+    "tests/integration/test_native_project_scope.py::test_a_top_level_macro_that_sets_text_is_refused"
   ]
 }

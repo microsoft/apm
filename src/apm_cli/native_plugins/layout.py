@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import uuid
@@ -89,37 +90,110 @@ def write_catalog(root: Path, marketplace: str, plugins: Iterable[str], *, owned
     atomic_write_text(catalog, json.dumps(document, indent=2) + "\n")
 
 
-def _conversion_reason(text: str) -> str | None:
+# Git's built-in macro; a repository's top-level file may define more.
+_BUILTIN_MACROS: dict[str, tuple[str, ...]] = {"binary": ("-diff", "-merge", "-text")}
+_ATTRIBUTE_NAME = re.compile(r"[A-Za-z0-9_.][-A-Za-z0-9_.]*\Z")
+_UNIVERSAL = ("*", "**")
+
+
+def _split_rule(line: str) -> tuple[str, list[str]] | None:
+    """Split one ``.gitattributes`` line as git does; ``None`` when git ignores it.
+
+    Git accepts a C-quoted pattern and drops a whole line whose pattern is
+    negated or whose attribute names are invalid.
+    """
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith('"'):
+        escaped = False
+        for end, char in enumerate(line[1:], start=1):
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                pattern, rest = re.sub(r"\\(.)", r"\1", line[1:end]), line[end + 1 :]
+                break
+        else:
+            return None
+    else:
+        pattern, *tail = line.split(None, 1)
+        rest = tail[0] if tail else ""
+    attributes = rest.split()
+    if pattern.startswith("!") or not all(
+        _ATTRIBUTE_NAME.match(_attribute_name(attribute)) for attribute in attributes
+    ):
+        return None
+    return pattern, attributes
+
+
+def _attribute_name(attribute: str) -> str:
+    """``-text``, ``!text`` and ``text=auto`` all name ``text``."""
+    return (attribute[1:] if attribute[0] in "-!" else attribute).split("=", 1)[0]
+
+
+def _macros(root: Path) -> dict[str, tuple[str, ...]]:
+    """Macros git applies under *root*: built-ins plus the work tree's top-level ones."""
+    macros = dict(_BUILTIN_MACROS)
+    top = next((path for path in (root, *root.parents) if (path / ".git").exists()), None)
+    top_level = None if top is None else top / ATTRIBUTES_RELATIVE
+    if top_level is None or not top_level.is_file():
+        return macros
+    for line in top_level.read_text(encoding="utf-8").splitlines():
+        rule = _split_rule(line)
+        if rule is not None and rule[0].startswith("[attr]"):
+            macros[rule[0][len("[attr]") :]] = tuple(rule[1])
+    return macros
+
+
+def _text_effects(
+    attributes: Iterable[str], macros: dict[str, tuple[str, ...]], depth: int = 0
+) -> Iterable[bool]:
+    """Yield, in the order git applies them, whether each ``text`` effect unsets it.
+
+    A macro expands in place, and only when set, as git expands it.
+    """
+    for attribute in attributes:
+        if _attribute_name(attribute) == "text":
+            yield attribute == "-text"
+        elif attribute in macros and depth < 8:
+            yield from _text_effects(macros[attribute], macros, depth + 1)
+
+
+def _conversion_reason(text: str, macros: dict[str, tuple[str, ...]]) -> str | None:
     """Say why a ``.gitattributes`` leaves plugin roots open to conversion.
 
-    Later lines win, and once ``text`` is unset neither ``eol`` nor ``crlf``
-    converts. So the roots are pinned only by a final ``* -text`` (or
-    ``* binary``) that no later rule setting ``text`` overrides.
+    Later rules win, and once ``text`` is unset neither ``eol`` nor ``crlf``
+    converts. So the roots are pinned by a ``* -text`` (or ``* binary``) that
+    no later rule re-enabling ``text`` overrides, unless a still later rule
+    for the same pattern unsets it again.
     """
     pinned = False
-    conflict: str | None = None
+    conflicts: dict[str, str] = {}
     for number, line in enumerate(text.splitlines(), start=1):
-        fields = line.split()
-        if not fields or fields[0].startswith(("#", "[attr]")):
+        rule = _split_rule(line)
+        if rule is None or rule[0].startswith("[attr]"):
             continue
-        universal = fields[0] in ("*", "**")
-        for attribute in fields[1:]:
-            if attribute in ("-text", "binary"):
-                if universal:
-                    pinned, conflict = True, None
-            elif attribute.lstrip("-!").split("=", 1)[0] == "text":
-                conflict = (
+        pattern, attributes = rule
+        for unsets in _text_effects(attributes, macros):
+            conflicts.pop(pattern, None)
+            if unsets and pattern in _UNIVERSAL:
+                pinned = True
+                conflicts.clear()
+            elif not unsets:
+                conflicts[pattern] = (
                     f"has rule '{line.strip()}' (line {number}), "
                     "which re-enables line-ending conversion"
                 )
-    if conflict is None and not pinned:
-        return "has no '* -text' rule"
-    return conflict
+    if conflicts:
+        return next(reversed(conflicts.values()))
+    return None if pinned else "has no '* -text' rule"
 
 
-def _require_pinning(attributes: Path) -> None:
+def _require_pinning(root: Path, attributes: Path) -> None:
     """Refuse a user's file that lets git convert the byte-pinned roots (#4809)."""
-    reason = _conversion_reason(attributes.read_text(encoding="utf-8"))
+    reason = _conversion_reason(attributes.read_text(encoding="utf-8"), _macros(root))
     if reason is not None:
         raise NativeLayoutError(
             f"{attributes} {reason}, so a checkout with core.autocrlf would change plugin "
@@ -140,7 +214,7 @@ def write_attributes(root: Path, *, enabled: bool) -> None:
     if enabled and not attributes.exists():
         atomic_write_text(attributes, ATTRIBUTES_TEXT)
     elif enabled and not ours:
-        _require_pinning(attributes)
+        _require_pinning(root, attributes)
     elif not enabled and ours:
         attributes.unlink()
 
