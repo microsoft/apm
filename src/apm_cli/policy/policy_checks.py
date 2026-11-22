@@ -176,12 +176,18 @@ def _with_allowlist_next_step(
 
 def _allowlist_project(
     project_root: Path,
-    modules_root: Path | None,
+    manifest: APMPackage,
+    effective: Sequence[DependencyReference],
     lock: LockFile | None,
     raw_yml: dict | None,
     policy: DependencyPolicy,
 ) -> AllowlistProject:
-    """Collect the project state the allow-list next step is proven against."""
+    """Collect the project state the allow-list next step is proven against.
+
+    The proof reads the live ``apm_modules/`` the suggested uninstall acts on,
+    never audit's scratch replay. *effective* is the ``replace:`` projection of
+    the production declarations, in declaration order.
+    """
     from .allowlist_remedy import AllowlistProject
 
     def _entries(section: str) -> tuple[object, ...]:
@@ -189,13 +195,19 @@ def _allowlist_project(
         entries = block.get("apm") if isinstance(block, dict) else None
         return tuple(entries) if isinstance(entries, list) else ()
 
+    declared = manifest.get_apm_dependencies()
     return AllowlistProject(
         project_root=project_root,
-        modules_dir=modules_root or project_root / "apm_modules",
+        modules_dir=project_root / "apm_modules",
         lock=lock,
         production=_entries("dependencies"),
         development=_entries("devDependencies"),
         policy=policy,
+        effective=(
+            {dep.get_unique_key(): ref for dep, ref in zip(declared, effective, strict=True)}
+            if len(declared) == len(effective)
+            else {}
+        ),
     )
 
 
@@ -1971,14 +1983,18 @@ def run_policy_checks(
             manifest.marketplaces, marketplace_resolution_origins(lock)
         ),
     )
-    result.checks.extend(
-        _with_allowlist_next_step(
-            dep_result.checks,
+    checks = dep_result.checks
+    if policy.enforcement == "block":
+        # Under warn the audit reports the violation without a next step.
+        checks = _with_allowlist_next_step(
+            checks,
             source_deps,
-            _allowlist_project(project_root, modules_root, lock, raw_yml, policy.dependencies),
+            _allowlist_project(
+                project_root, manifest, apm_deps, lock, raw_yml, policy.dependencies
+            ),
             policy_source,
         )
-    )
+    result.checks.extend(checks)
 
     # Early exit if dep checks already failed in fail-fast mode
     if fail_fast and not dep_result.passed:

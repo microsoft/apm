@@ -25,6 +25,9 @@ from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-remediation-advice")]
 
 _SOURCE = "org:contoso/.github"
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
 _ADMIN_ONLY = "    Ask your org admin to allow them (policy source: org:contoso/.github)."
 
 
@@ -39,11 +42,15 @@ def _locked(key: str, parent: str | None = None) -> LockedDependency:
     return LockedDependency(repo_url=key, depth=2 if parent else 1, resolved_by=parent)
 
 
-def _project(root: Path, deps: list[str], locked: list[LockedDependency], children=None) -> Path:
+def _project(
+    root: Path, deps: list[str], locked: list[LockedDependency], children=None, **manifest
+) -> Path:
     """Write apm.yml, the lock and each locked package's own manifest under apm_modules/."""
     children = children or {}
     (root / "apm.yml").write_text(
-        yaml.safe_dump({"name": "demo", "version": "1.0.0", "dependencies": {"apm": deps}}),
+        yaml.safe_dump(
+            {"name": "demo", "version": "1.0.0", "dependencies": {"apm": deps}, **manifest}
+        ),
         encoding="utf-8",
     )
     lock = LockFile()
@@ -59,11 +66,16 @@ def _project(root: Path, deps: list[str], locked: list[LockedDependency], childr
     return root
 
 
-def _allowlist(root: Path, *, require: tuple[str, ...] = ()) -> CheckResult:
+def _allowlist(
+    root: Path, *, require: tuple[str, ...] = (), modules_root: Path | None = None
+) -> CheckResult:
     policy = ApmPolicy(
-        dependencies=DependencyPolicy(allow=["github.com/contoso/**"], require=list(require))
+        enforcement="block",
+        dependencies=DependencyPolicy(allow=["github.com/contoso/**"], require=list(require)),
     )
-    result = run_policy_checks(root, policy, fail_fast=False, policy_source=_SOURCE)
+    result = run_policy_checks(
+        root, policy, fail_fast=False, modules_root=modules_root, policy_source=_SOURCE
+    )
     return next(c for c in result.checks if c.name == "dependency-allowlist")
 
 
@@ -189,4 +201,39 @@ def test_an_edited_deployed_file_uninstall_would_refuse_falls_back_to_the_admin(
     assert _stderr(capsys, check)[2] == (
         "    Ask your org admin to allow it (policy source: org:contoso/.github)."
     )
+    assert check.remediations == ()
+
+
+def test_removing_a_replaced_required_package_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    replace = [
+        {
+            "for": {"git": "https://github.com/contoso/original"},
+            "with": {"git": "https://github.com/contoso/fork", "ref": "v1.0.0"},
+        }
+    ]
+    root = _project(
+        tmp_path,
+        ["contoso/original"],
+        [_locked("contoso/original"), _locked("acme/hidden", parent="contoso/original")],
+        {"contoso/original": ["acme/hidden"]},
+        **{"$schema": _REPLACE_SCHEMA, "replace": replace},
+    )
+
+    check = _allowlist(root, require=("contoso/fork",))
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+
+
+def test_without_a_live_apm_modules_the_replay_tree_proves_nothing(tmp_path: Path, capsys) -> None:
+    root = _several(tmp_path, ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"])
+    replay = tmp_path.parent / f"{tmp_path.name}-replay"
+    (root / "apm_modules").rename(replay)
+
+    check = _allowlist(root, modules_root=replay)
+
+    assert _stderr(capsys, check)[4] == _ADMIN_ONLY
     assert check.remediations == ()

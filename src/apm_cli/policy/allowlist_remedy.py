@@ -11,17 +11,20 @@ another policy rule:
   dependencies the lock traces it to;
 * the uninstall orphan owner removes every denied transitive dependency and
   no surviving package still reaches a denied one (forward reachability);
-* no removed entry satisfies a package the policy requires;
+* no removed entry, through its ``replace:`` source, satisfies a package the
+  policy requires;
 * every deployed file the uninstall would delete has deployment evidence
   (a user-edited file makes uninstall refuse).
 
-Anything it cannot prove falls back to the admin-only advice.
+The proof reads the live ``apm_modules/`` the suggested uninstall acts on,
+never audit's scratch replay; without it the advice is admin-only, as is
+anything else it cannot prove.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
     from ..models.apm_package import DependencyReference
+    from ..models.dependency.selection import ManifestSelectionIndex
     from .schema import DependencyPolicy
 
 # One shell word every supported shell passes through unchanged.
@@ -45,15 +49,18 @@ class AllowlistProject:
     production: tuple[object, ...]  # raw apm.yml dependencies.apm entries
     development: tuple[object, ...]  # raw apm.yml devDependencies.apm entries
     policy: DependencyPolicy
+    # Unique key of each production declaration -> its replace:-effective ref,
+    # the reference the required-packages check judges.
+    effective: Mapping[str, DependencyReference]
 
 
 def uninstall_selectors(
     denied: Sequence[DependencyReference], project: AllowlistProject
 ) -> list[str]:
     """Return the ``apm uninstall`` arguments that clear *denied*, or ``[]`` if unproven."""
-    if project.lock is None or not denied:
+    if project.lock is None or not denied or not project.modules_dir.is_dir():
         return []
-    from ..models.dependency.selection import parse_dependency_entry
+    from ..models.dependency.selection import ManifestSelectionIndex, parse_dependency_entry
 
     declared: dict[str, object] = {}
     for entry in (*project.production, *project.development):
@@ -64,8 +71,9 @@ def uninstall_selectors(
     roots = _removal_roots(denied, declared, project.lock)
     if roots is None:
         return []
-    selectors = [_selector(key, declared[key], project) for key in roots]
-    if not all(selectors) or _removes_required(roots, declared, project.policy):
+    selection = ManifestSelectionIndex([*project.production, *project.development], project.lock)
+    selectors = [_selector(key, declared[key], selection) for key in roots]
+    if not all(selectors) or _removes_required(roots, declared, project):
         return []
     denied_keys = {dep.get_unique_key() for dep in denied}
     if not _uninstall_clears(denied_keys, [declared[key] for key in roots], project):
@@ -90,24 +98,19 @@ def _removal_roots(
     return roots
 
 
-def _selector(key: str, entry: object, project: AllowlistProject) -> str | None:
+def _selector(key: str, entry: object, selection: ManifestSelectionIndex) -> str | None:
     """Return a shell-safe identifier the uninstall selection maps to exactly *entry*."""
-    from ..models.dependency.selection import (
-        DependencySelectionStatus,
-        parse_dependency_entry,
-        select_manifest_dependency,
-    )
+    from ..models.dependency.selection import DependencySelectionStatus, parse_dependency_entry
 
-    manifest = [*project.production, *project.development]
     candidates = (key, entry) if isinstance(entry, str) else (key,)
     for candidate in dict.fromkeys(candidates):
         if not _SHELL_SAFE.fullmatch(candidate):
             continue
-        selection = select_manifest_dependency(candidate, manifest, project.lock)
-        if selection.status is not DependencySelectionStatus.MATCHED:
+        selected_entry = selection.select(candidate)
+        if selected_entry.status is not DependencySelectionStatus.MATCHED:
             continue
         try:
-            selected = parse_dependency_entry(selection.manifest_entry).get_unique_key()
+            selected = parse_dependency_entry(selected_entry.manifest_entry).get_unique_key()
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if selected == key:
@@ -116,17 +119,22 @@ def _selector(key: str, entry: object, project: AllowlistProject) -> str | None:
 
 
 def _removes_required(
-    roots: Sequence[str], declared: dict[str, object], policy: DependencyPolicy
+    roots: Sequence[str], declared: dict[str, object], project: AllowlistProject
 ) -> bool:
-    """Whether removing *roots* drops a package the policy requires."""
+    """Whether removing *roots* drops a package the policy requires.
+
+    Judged on each root's declared and ``replace:``-effective reference, as
+    the required-packages check sees it.
+    """
+    policy = project.policy
     if not policy.effective_require:
         return False
     from ..models.dependency.selection import parse_dependency_entry
     from .matcher import DependencyPolicyIndex
 
-    removed = DependencyPolicyIndex.from_dependencies(
-        parse_dependency_entry(declared[key]) for key in roots
-    )
+    refs = [parse_dependency_entry(declared[key]) for key in roots]
+    refs += [project.effective[key] for key in roots if key in project.effective]
+    removed = DependencyPolicyIndex.from_dependencies(refs)
     return any(
         removed.find_name(required.split("#", 1)[0]) is not None
         for required in policy.effective_require
