@@ -553,6 +553,34 @@ def _retire(
         return False
 
 
+def preview_project_retirement(
+    record: NativePluginRecord, deploy_root: Path
+) -> tuple[bool | None, tuple[str, ...]]:
+    """What retiring *record* at project scope would change; changes nothing.
+
+    Returns ``(root_removed, settings_files)``. *root_removed* is ``None`` when
+    the deployed root is absent, ``False`` when retirement would keep it (its
+    bytes changed since deploy, or it cannot be fingerprinted), as
+    :func:`retire_plugin` does. *settings_files* are the project settings
+    files holding an entry for the plugin under its marketplace, including
+    the Copilot suppression of a Claude-only plugin.
+    """
+    destination = plugins_root(deploy_root) / record.name
+    root_removed: bool | None = None
+    if destination.exists():
+        try:
+            root_removed = _fingerprinter(False)(destination) == record.fingerprint
+        except (OSError, ValueError, RuntimeError):
+            root_removed = False
+    files = []
+    for harness in HARNESSES:
+        target = settings_path(harness, user_scope=False, project_root=deploy_root)
+        with contextlib.suppress(NativeSettingsError, OSError):
+            if record.name in _observed(target, record.marketplace):
+                files.append(_display_path(target, Path(deploy_root), False))
+    return root_removed, tuple(files)
+
+
 def _observed(settings: Path, marketplace: str) -> dict[str, Any]:
     """``{plugin: enable value}`` the settings file already holds under *marketplace*."""
     enabled = read_settings(settings).get(ENABLED_KEY)

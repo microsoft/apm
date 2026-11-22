@@ -114,7 +114,12 @@ def retire_gated_native_plugins(
     try:
         apm_package = APMPackage.from_apm_yml(manifest_path)
         retirements = gate_retirements(
-            lockfile, modules_dir, apm_package, deploy_root, user_scope=False
+            lockfile,
+            modules_dir,
+            apm_package,
+            deploy_root,
+            user_scope=False,
+            migrate_user_legacy=not dry_run,
         )
     except Exception as exc:
         raise NativeGateCheckError(
@@ -124,7 +129,7 @@ def retire_gated_native_plugins(
     if retirements is None:
         return False
     if dry_run:
-        return _preview_gated_native_plugins(lockfile, retirements, logger)
+        return _preview_gated_native_plugins(lockfile, retirements, deploy_root, logger)
     before = {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
     hooks = dict(retirements.hook_packages)
     retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
@@ -134,11 +139,12 @@ def retire_gated_native_plugins(
     return bool(retired)
 
 
-def _preview_gated_native_plugins(lockfile: Any, retirements: Any, logger: Any) -> bool:
+def _preview_gated_native_plugins(
+    lockfile: Any, retirements: Any, deploy_root: Path, logger: Any
+) -> bool:
     """Report the native roots and declarations a real prune would retire."""
-    from apm_cli.claude_plugins.registrar import native_ownership
+    from apm_cli.claude_plugins.registrar import native_ownership, preview_project_retirement
     from apm_cli.native_plugins.record import PLUGINS_RELATIVE
-    from apm_cli.native_plugins.scopes import PROJECT_SETTINGS_RELATIVE
 
     owned = native_ownership(lockfile)
     reasons = {
@@ -148,14 +154,18 @@ def _preview_gated_native_plugins(lockfile: Any, retirements: Any, logger: Any) 
     }
     retiring = sorted(set(reasons) & set(owned))
     for key in retiring:
-        own = owned[key]
-        harnesses = own.harnesses if own.declared is None else own.declared
-        settings = sorted(
-            PROJECT_SETTINGS_RELATIVE[h] for h in harnesses if h in PROJECT_SETTINGS_RELATIVE
-        )
-        where = f" and its declarations in {', '.join(settings)}" if settings else ""
+        record = owned[key].record
+        root_removed, settings = preview_project_retirement(record, deploy_root)
+        root = f"{PLUGINS_RELATIVE}/{record.name}"
+        changes = []
+        if root_removed:
+            changes.append(f"remove {root}")
+        elif root_removed is False:
+            changes.append(f"keep {root} (changed since deploy; remove it manually)")
+        if settings:
+            changes.append(f"remove its declarations in {', '.join(settings)}")
         logger.dry_run_notice(
-            f"remove native plugin {own.record.name} ({reasons[key]}): "
-            f"{PLUGINS_RELATIVE}/{own.record.name}{where}"
+            f"retire native plugin {record.name} ({reasons[key]}): "
+            + ("; ".join(changes) or "nothing deployed")
         )
     return bool(retiring)

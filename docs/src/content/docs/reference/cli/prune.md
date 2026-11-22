@@ -159,8 +159,9 @@ reconciles hooks for packages and targets still declared.
 A native plugin under `.agents/plugins/` that the current approvals or policy
 no longer allow (for example, after its `executables.allow` entry is removed)
 is retired as one unit: prune removes its root and its declarations in the
-harness settings files. `--dry-run` lists each such plugin with its root and
-settings files. If prune cannot evaluate approvals and policy for locked native
+harness settings files; a root edited since deploy is kept for you to remove.
+`--dry-run` lists each such plugin with its root and settings files and
+changes nothing, including your personal approvals. If prune cannot evaluate approvals and policy for locked native
 plugins, it exits `1` with an error before removing packages or native plugins.
 
 Notes:
