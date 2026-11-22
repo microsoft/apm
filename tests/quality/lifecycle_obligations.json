@@ -24671,8 +24671,8 @@
   },
   "pair|TGT=multi-unchanged|NET=offline": {
    "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
+   "issue": "#4104",
+   "lane": "T-6e",
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
@@ -24893,8 +24893,8 @@
   },
   "pair|TGT=single-unchanged|NET=offline": {
    "family": "pair",
-   "issue": "#4100",
-   "lane": "T-6a",
+   "issue": "#4104",
+   "lane": "T-6e",
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[single-unchanged]"

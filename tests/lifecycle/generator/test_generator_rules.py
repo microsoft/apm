@@ -46,7 +46,7 @@ from tests.lifecycle.generator.rules import (
     classify,
     refusal_cell,
 )
-from tests.lifecycle.generator.space import build_space, raw_cells
+from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import credits, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -624,3 +624,24 @@ def test_a_changed_predicate_reinstates_the_u_bin_cells_as_must_cover(monkeypatc
     assert classify("pair", cell) == Verdict("removed", ("U-BIN",))
     monkeypatch.setattr(bin_pin, "predicate_digest", lambda *_: "0" * 64)
     assert classify("pair", cell) == Verdict("obligation", ("U-BIN",), must_cover=True)
+
+
+def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() -> None:
+    """An unchanged TGT is no target history: its offline pair belongs to T-6e."""
+    for tgt, lane in (
+        ("single-widened", "T-6a"),
+        ("multi-narrowed", "T-6a"),
+        ("changed", "T-6a"),
+        ("single-unchanged", "T-6e"),
+        ("multi-unchanged", "T-6e"),
+    ):
+        cell = {"TGT": tgt, "NET": "offline"}
+        entry = Entry(id=cell_id("pair", cell), family="pair", cell=cell, strength="e2e")
+        assert emit.lane_for(entry) == lane, (tgt, emit.lane_for(entry))
+    ledger = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
+    unchanged = {
+        key: entry["lane"]
+        for key, entry in ledger.items()
+        if entry["family"] == "pair" and "NET=offline" in key and "-unchanged" in key
+    }
+    assert len(unchanged) == 2 and set(unchanged.values()) == {"T-6e"}, unchanged

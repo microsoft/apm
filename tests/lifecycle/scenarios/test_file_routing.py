@@ -112,7 +112,21 @@ def _marked(root: Path) -> set[str]:
     return found
 
 
-def _assert_route(scenario: Scenario, route: str, *, compiled: bool = False) -> None:
+def _instruction_root(name: str) -> str:
+    target = KNOWN_TARGETS[name]
+    return f"{target.root_dir}/{target.primitives['instructions'].subdir}/"
+
+
+def _assert_route(
+    scenario: Scenario,
+    route: str,
+    *,
+    compiled: bool = False,
+    targets: tuple[str, ...] = (),
+    dropped: tuple[str, ...] = (),
+) -> None:
+    """The instruction follows its route; a deployed one sits under every current
+    target's instruction root and under no dropped target's."""
     marked = _marked(scenario.world.project)
     staged = [
         path.relative_to(scenario.world.project).as_posix()
@@ -121,6 +135,12 @@ def _assert_route(scenario: Scenario, route: str, *, compiled: bool = False) -> 
     if route == "deployed":
         assert marked, "a deployed instruction is a target file carrying the marker"
         assert not any(name.endswith(("AGENTS.md", "GEMINI.md")) for name in marked), marked
+        for name in targets:
+            root = _instruction_root(name)
+            assert any(path.startswith(root) for path in marked), (name, root, sorted(marked))
+        for name in dropped:
+            root = _instruction_root(name)
+            assert not any(path.startswith(root) for path in marked), (name, root, sorted(marked))
         return
     assert staged, "a compile-staged instruction stays under apm_modules"
     if compiled:
@@ -144,7 +164,8 @@ def test_install_routes_file_primitives(lifecycle_world, route, tgt) -> None:
         scenario.set_targets(*after)
     scenario.run("install", credit=_assignments("install", tgt, route))
     scenario.assert_deployed()
-    _assert_route(scenario, route)
+    dropped = tuple(name for name in before if name not in after)
+    _assert_route(scenario, route, targets=after, dropped=dropped)
     scenario.finish()
 
 
@@ -168,7 +189,7 @@ def test_operations_keep_the_file_route(lifecycle_world, route) -> None:
     kinds = {name: ["skill"] for name in specs}
     scenario = Scenario(lifecycle_world, specs, kinds=kinds, targets=targets, policy="allow")
     scenario.run("install f-doc f-two", credit=_assignments("install", _SINGLE, route))
-    _assert_route(scenario, route)
+    _assert_route(scenario, route, targets=targets)
     scenario.run("compile", credit=_assignments("compile", _SINGLE, route))
     _assert_route(scenario, route, compiled=True)
     scenario.run("update --yes", credit=_assignments("update", _SINGLE, route))
