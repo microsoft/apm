@@ -14,6 +14,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import frontmatter
 import pytest
 
 from apm_cli.deps.lockfile import LockFile
@@ -642,8 +643,11 @@ class TestPluginHeroScenarios:
 
         project = workspace / "project"
         project.mkdir()
+        # Codex keeps the loose, split route; a .claude-plugin plugin targeting
+        # claude or copilot installs whole at project scope (#3921).
         (project / "apm.yml").write_text(
-            "name: root-declared-skill-test\nversion: 1.0.0\ndependencies:\n  apm: []\n"
+            "name: root-declared-skill-test\nversion: 1.0.0\ntargets: [codex]\n"
+            "dependencies:\n  apm: []\n"
         )
         (project / ".github").mkdir()
         (project / ".github" / "copilot-instructions.md").write_text("# test\n")
@@ -722,8 +726,11 @@ class TestPluginHeroScenarios:
 
         project = workspace / "project"
         project.mkdir()
+        # Cursor keeps the loose, split route; a .claude-plugin plugin targeting
+        # claude or copilot installs whole at project scope (#3921).
         (project / "apm.yml").write_text(
-            "name: prepositioned-commands-test\nversion: 1.0.0\ndependencies:\n  apm: []\n",
+            "name: prepositioned-commands-test\nversion: 1.0.0\ntargets: [cursor]\n"
+            "dependencies:\n  apm: []\n",
             encoding="utf-8",
         )
         (project / ".github").mkdir()
@@ -732,9 +739,10 @@ class TestPluginHeroScenarios:
         install = _run_apm_command(apm_binary_path, ["install", str(plugin_dir)], project)
 
         assert install.returncode == 0, f"Command plugin install failed:\n{install.stderr}"
-        assert (project / ".github" / "prompts" / "run.prompt.md").read_text(
-            encoding="utf-8"
-        ) == "# Run\n"
+        deployed = frontmatter.loads(
+            (project / ".cursor" / "commands" / "run.md").read_text(encoding="utf-8")
+        )
+        assert deployed.content == "# Run"
 
 
 # ===========================================================================
@@ -915,10 +923,23 @@ class TestPluginNetworkE2E:
         combined = result.stdout + result.stderr
         assert "no native harness is binary-qualified" not in combined
         assert "does not include 'copilot'" not in combined
-        settings_path = temp_project / ".github" / "copilot" / "settings.local.json"
+        # At project scope the plugin deploys whole under .agents/plugins and is
+        # declared in the committed Copilot settings, not settings.local.json (#3921).
+        root = temp_project / ".agents" / "plugins"
+        assert (root / "context-engineering" / "plugin.json").read_bytes() == (
+            temp_project / "apm_modules" / self.NATIVE_PLUGIN_REF.split("#")[0] / "plugin.json"
+        ).read_bytes()
+        catalog = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
+        settings_path = temp_project / ".github" / "copilot" / "settings.json"
         assert settings_path.exists(), (
             f"Expected native Copilot marketplace registration at {settings_path}"
         )
+        declared = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert declared["extraKnownMarketplaces"] == {
+            catalog["name"]: {"source": {"source": "directory", "path": "./.agents/plugins"}}
+        }
+        assert declared["enabledPlugins"] == {f"context-engineering@{catalog['name']}": True}
+        assert not (temp_project / ".github" / "copilot" / "settings.local.json").exists()
 
     # ---- Test 2: deps list — no false orphans ---------------------------
 

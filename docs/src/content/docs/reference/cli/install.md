@@ -93,17 +93,16 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
-[Copilot Agent Plugin registration](../../../consumer/install-plugins/)
-does not discover or execute the Copilot CLI; APM owns materialization and
-target-file generation. Use a supported Copilot runtime for that registration.
-
-Plugins installed with `--global --target claude` are copied intact to
-`~/.agents/plugins/<plugin>/` and declared in Claude's `settings.json`
-(`extraKnownMarketplaces` and `enabledPlugins`); APM never runs the `claude`
-CLI. A plugin is enabled only when its executables are approved; otherwise it is
-not declared, with a warning. Rejected capabilities fail without loose-file
-fallback. See
-[Claude admission and qualification](../../../consumer/install-plugins/#claude-code-plugins-at-user-scope).
+Native plugins (Claude plugins targeting `claude`, or `copilot` at project
+scope, and Agent Plugins targeting `copilot`) are copied intact to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `--global`) and declared
+in `.claude/settings.json` and `.github/copilot/settings.json`
+(`~/.claude/settings.json` and `~/.copilot/settings.json` with `--global`).
+Commit `.agents/plugins/`, those settings files and `apm.lock.yaml` so a fresh
+clone loads the plugins without APM. APM never runs the `claude` or `copilot`
+CLI. A plugin is enabled only when its executables are approved; otherwise it
+is parked with a warning naming the next step, without loose-file fallback. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 ### Policy and trust
 
@@ -227,7 +226,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Required service writes fail loudly.** If MCP or LSP work is declared but no target can be resolved, install exits non-zero before changing the manifest, package deployment, or native service config. A native MCP/LSP config write failure also exits non-zero with the failed target and a permissions/path next step. A successful direct `--mcp` add never reports `Install interrupted`.
 - **Direct registry lookup fails closed.** Registry-form MCP entries (`apm install --mcp NAME` with no `--url` and no post-`--` command) resolve one unique registry identity before writing the manifest or user config. An unreachable registry, missing identity, or ambiguous bare server name exits non-zero without changing state. A no-match error names the searched registry and how to choose another; APM never switches registries on its own. See [Choosing an MCP registry](../../../consumer/install-mcp-servers/#choosing-an-mcp-registry).
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically, as are `apm_modules/` copies that no longer match the commit or content recorded in `apm.lock.yaml`. MCP servers with matching config are skipped; unchanged APM-managed connections can be updated when their declaration changes.
-- **MCP connection collisions.** On Claude, Codex and every JSON-config target (Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity), a differing connection with the same name is preserved unless its native configuration still matches the recorded APM baseline. Install identifies the conflicting target and exits nonzero. For a self-defined server the lockfile has not recorded, it does so before writing anything, so no file, MCP config or lockfile changes; a collision found at the MCP write keeps the successful writes to other targets recorded. An identical foreign entry is not adopted; it needs no write, so install and `--frozen` pass and leave it unowned (on Codex, the user's `enabled` switch is not part of the comparison). Neither `--force` nor `--frozen` takes over a user connection. Removal also preserves entries with a differing or unverifiable baseline. Windsurf has no workspace MCP config, so even a project install writes `~/.codeium/windsurf/mcp_config.json`; install output names that file on add and removal. See [MCP conflict recovery](../../../consumer/install-mcp-servers/#resolve-a-connection-name-conflict).
+- **MCP connection collisions.** On Claude, Codex and every JSON-config target (Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity), a differing connection with the same name is preserved unless its native configuration still matches the recorded APM baseline. Install identifies the conflicting target and exits nonzero before writing anything, so no file, MCP config or lockfile changes. Three cases are still found at the MCP write, which keeps the successful writes to other targets recorded: a registry server whose configuration needs environment or runtime values APM would prompt for, a `--frozen` install of a server the lockfile records, and a lockfile from APM 0.36 or earlier that records Copilot or VS Code servers. An identical foreign entry is not adopted; it needs no write, so install and `--frozen` pass and leave it unowned (on Codex, the user's `enabled` switch is not part of the comparison). Neither `--force` nor `--frozen` takes over a user connection. Removal also preserves entries with a differing or unverifiable baseline. Windsurf has no workspace MCP config, so even a project install writes `~/.codeium/windsurf/mcp_config.json`; install output names that file on add and removal. See [MCP conflict recovery](../../../consumer/install-mcp-servers/#resolve-a-connection-name-conflict).
 - **Claude Code profiles.** For user-scope MCP installs, an absolute `CLAUDE_CONFIG_DIR` selects that profile's `.claude.json` for both installation and stale-server cleanup. Removing an APM-managed server in the selected profile preserves other profiles and user-owned entries. Cleanup refuses symlinked config files or profile directories; replace the link with a regular file or directory before retrying. Skills, agents, and other deployed files follow the same rule: profiles share one user lockfile, and a global install removes stale files only under the selected `CLAUDE_CONFIG_DIR` (or `~/.claude`), leaving files deployed to other profiles in place. Files of a profile you no longer install into stay on disk and in the lockfile; remove them manually. `apm uninstall -g` follows the same rule; see [Harness profiles](../uninstall/#harness-profiles).
 - **Copilot CLI profiles.** For user-scope installs, an absolute `COPILOT_HOME` selects the Copilot CLI profile for instructions, agents, hooks, `mcp-config.json`, `lsp-config.json` and plugin settings. Skills stay in `~/.agents/skills/` unless you pass `--legacy-skill-paths`. Profiles share one user lockfile and stale cleanup stays inside the selected profile, as for Claude Code. `CODEX_HOME` and `HERMES_HOME` follow the same rule, and a relative value for any of them fails; see [harness home variables](../../environment-variables/#harness-home-variables).
 - **Failed or interrupted installs.** The first time an install is about to
@@ -251,10 +250,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   retains recovery data; the prior package may no longer be active.
   Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before retrying.
-  If updating Claude settings for native plugins fails, the settings file and
+  If updating harness settings for native plugins fails, the settings files and
   deployed plugin roots are left as they were and the previous lockfile is
   restored. Registration success is not runtime proof. See
-  [Claude user plugins](../../../consumer/install-plugins/#claude-code-plugins-at-user-scope).
+  [Native plugins](../../../consumer/install-plugins/#native-plugins).
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and
@@ -475,10 +474,10 @@ denied bundle is refused before any file is written. A bundle whose
 `apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
 remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
-declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
-whole and registers it without locating or executing Copilot. Stable Copilot
-CLI 1.0.81 or newer is required when loading the projection. See
-[Install Agent Plugins for Copilot](../../../consumer/install-plugins/).
+declare it in `apm.yml` and run `apm install --target copilot`, which deploys
+it whole to `.agents/plugins/` without locating or executing Copilot. Stable
+Copilot CLI 1.0.81 or newer is required to load it. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 :::
 
 ### Install only a subset of skills from a bundle

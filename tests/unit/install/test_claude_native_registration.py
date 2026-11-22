@@ -24,7 +24,7 @@ from apm_cli.claude_plugins.registrar import (
     marketplace_binding,
     marketplace_name,
     native_ownership,
-    reconcile_claude_plugins,
+    reconcile_native_plugins,
     verify_claude_native_cache,
 )
 from apm_cli.core.scope import InstallScope
@@ -43,7 +43,7 @@ _NAME = "apm-u-3f9c"
 def test_unparseable_settings_fail_closed_without_a_write(tmp_path: Path) -> None:
     settings = tmp_path / "settings.json"
     settings.write_text("{broken", encoding="utf-8")
-    declaration = SettingsDeclaration(_NAME, tmp_path, frozenset({"a"}), frozenset())
+    declaration = SettingsDeclaration(_NAME, str(tmp_path), frozenset({"a"}), frozenset())
     with pytest.raises(NativeSettingsError):
         write_declaration(settings, declaration)
     assert settings.read_text(encoding="utf-8") == "{broken"
@@ -55,7 +55,9 @@ def test_symlinked_settings_are_written_through_to_their_target(tmp_path: Path) 
     real.write_text('{"theme": "dark"}', encoding="utf-8")
     link = tmp_path / "settings.json"
     link.symlink_to(real)
-    write_declaration(link, SettingsDeclaration(_NAME, tmp_path, frozenset({"a"}), frozenset()))
+    write_declaration(
+        link, SettingsDeclaration(_NAME, str(tmp_path), frozenset({"a"}), frozenset())
+    )
     assert link.is_symlink()
     assert json.loads(real.read_text())["enabledPlugins"] == {f"a@{_NAME}": True}
 
@@ -109,7 +111,7 @@ class _Home:
         self.lock.dependencies[repo] = dependency
 
     def reconcile(self, previous, prepared=None) -> None:
-        reconcile_claude_plugins(
+        reconcile_native_plugins(
             modules_dir=self.modules,
             scope=InstallScope.USER,
             previous=previous,

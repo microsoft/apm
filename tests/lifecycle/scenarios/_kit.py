@@ -154,6 +154,26 @@ class Known:
         assert re.fullmatch(r"#\d+", self.tracking), self.tracking
 
 
+# A Claude-format plugin installs whole to .agents/plugins/<name>/ for claude and
+# copilot at project scope (#3921): its carried kinds have no loose surface there.
+# The observation still looks for them, so a loose deploy fails the model.
+_CLAUDE_NATIVE = frozenset({"p-native-claude", "p-native-claude-bin"})
+_WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
+
+
+def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
+    """``expected_deployed`` with the #3921 project-scope native projection applied."""
+    return frozenset(
+        cell
+        for cell in expected_deployed(model, kinds)
+        if not (
+            model.scope == "project"
+            and cell[0].split(":")[0] in _CLAUDE_NATIVE
+            and cell[2] in _WHOLE_PLUGIN_TARGETS
+        )
+    )
+
+
 @dataclass
 class StepModel:
     """The ``OracleModel`` view of one scenario step."""
@@ -165,7 +185,7 @@ class StepModel:
     seen: set[str]
 
     def allowed_surfaces(self) -> frozenset[str]:
-        return frozenset("/".join(cell) for cell in expected_deployed(self.model, self.kinds))
+        return frozenset("/".join(cell) for cell in projected_cells(self.model, self.kinds))
 
     def converged_before(self) -> bool:
         return self.converged
@@ -573,7 +593,7 @@ class Scenario:
         """``pkg/kind/target`` cells the model allows, limited to observable surfaces."""
         return frozenset(
             "/".join(cell)
-            for cell in expected_deployed(self.model, self.kinds)
+            for cell in projected_cells(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
             and self._observable(cell[0], cell[1], cell[2])
         )

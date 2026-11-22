@@ -1012,7 +1012,10 @@ def test_a_native_plugins_skill_in_the_users_hands_survives_install(
     lifecycle_world, deployed
 ) -> None:
     use_policy(lifecycle_world, "allow")
-    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow")
+    # cursor splits every plugin into loose skills; claude and copilot install a
+    # Claude plugin whole at project scope (#3921), where the skill is not a loose file.
+    targets = ("cursor",)
+    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
     if deployed == "unowned":
         scenario.user_write(_NATIVE_SKILL, _USER_NATIVE_SKILL)
         line = "install --dry-run p-native-claude"
