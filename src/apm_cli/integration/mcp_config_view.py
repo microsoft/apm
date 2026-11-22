@@ -37,6 +37,7 @@ from apm_cli.security.executables import _strip_version, locked_dependency_appro
 from apm_cli.security.trust import (
     REASON_DEFINITION_CHANGED,
     REASON_DENIED,
+    REASON_POLICY_TRANSITIVE,
     REASON_UNAPPROVED,
     REASON_UNTRUSTED_TRANSITIVE,
     McpAdmission,
@@ -269,6 +270,7 @@ class CurrentMcpConfigView:
         structural = {
             "only-apm": set(self.declaration_fingerprints),
             REASON_UNTRUSTED_TRANSITIVE: self.refusable_names,
+            REASON_POLICY_TRANSITIVE: set(self.declaration_fingerprints),
             REASON_UNAPPROVED: self.gated_names,
             REASON_DENIED: self.gated_names | self.refusable_names,
             REASON_DEFINITION_CHANGED: self.gated_names | self.refusable_names,
@@ -1210,6 +1212,12 @@ def parked_mcp_message(
     name = dependency.name
     approve = approve_command(package, user_scope=user_scope)
     explain = explain_command(package, user_scope=user_scope)
+    if reason == REASON_POLICY_TRANSITIVE:
+        return (
+            f"Refused MCP server '{name}' from transitive package {package}: org policy "
+            "sets mcp.trust_transitive to false and mcp.allow does not list it\n"
+            "    Ask the policy owner to add it to mcp.allow or set mcp.trust_transitive: true"
+        )
     if reason == REASON_UNTRUSTED_TRANSITIVE:
         detail = (
             "self-defined"

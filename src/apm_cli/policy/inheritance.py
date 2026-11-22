@@ -229,7 +229,11 @@ def _merge_mcp(parent: McpPolicy, child: McpPolicy) -> McpPolicy:
             allow=_intersect_allow(parent.transport.allow, child.transport.allow),
         ),
         self_defined=_escalate(_SELF_DEFINED_LEVELS, parent.self_defined, child.self_defined),
-        trust_transitive=parent.trust_transitive and child.trust_transitive,
+        trust_transitive=(
+            None
+            if parent.trust_transitive is None and child.trust_transitive is None
+            else bool(parent.trust_transitive) and bool(child.trust_transitive)
+        ),
     )
 
 

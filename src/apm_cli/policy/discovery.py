@@ -1807,7 +1807,7 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
             policy.mcp.allow is not None,
             policy.mcp.transport.allow is not None,
             policy.mcp.self_defined != "warn",
-            policy.mcp.trust_transitive,
+            policy.mcp.trust_transitive is not None,
             policy.compilation.target.allow is not None,
             policy.compilation.target.enforce is not None,
             policy.compilation.strategy.enforce is not None,
