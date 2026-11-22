@@ -37,7 +37,7 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
     user_scope: bool,
     foreign_target: str,
 ) -> None:
-    """Preserve foreign bytes while recording only the nonconflicting target write."""
+    """Preserve foreign bytes and refuse before writing any target (#4268)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
     project.mkdir()
@@ -102,17 +102,10 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
     )
     evidence = f"command={result.command!r}\n{result.stdout}\n{result.stderr}"
     assert foreign_path.read_bytes() == original, evidence
-    written_target = "codex" if foreign_target == "claude" else "claude"
-    written_path = paths[written_target]
-    assert written_path.is_file(), evidence
-    if written_target == "codex":
-        written = tomlkit.parse(written_path.read_text(encoding="utf-8"))["mcp_servers"]
-    else:
-        written = json.loads(written_path.read_text(encoding="utf-8"))["mcpServers"]
-    assert written["notes"]["url"] == requested_url, evidence
-    lock = LockFile.read(root / "apm.lock.yaml")
-    assert lock is not None, evidence
-    assert lock.mcp_target_servers == {written_target: ["notes"]}, evidence
+    other_path = paths["codex" if foreign_target == "claude" else "claude"]
+    assert not other_path.exists() or "notes" not in other_path.read_text("utf-8"), evidence
+    lock = LockFile.read(root / "apm.lock.yaml") if (root / "apm.lock.yaml").exists() else None
+    assert lock is None or not lock.mcp_target_servers, evidence
     assert result.returncode != 0, evidence
     assert foreign_target in (result.stdout + result.stderr).lower(), evidence
 
@@ -656,12 +649,12 @@ def test_metadata_only_replacement_write_retains_registry_receipt(
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_registry_write_before_all_self_defined_conflicts_is_persisted(
+def test_a_self_defined_conflict_is_refused_before_the_registry_write(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
     apm_binary_path: Path,
     target: str,
 ) -> None:
-    """A failed ordinary install still records the real registry-phase write."""
+    """An unrecorded self-defined collision refuses before any MCP write (#4268)."""
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.write(target, "http://127.0.0.1:9/personal")
     personal = scenario.servers(target)["notes"]
@@ -669,10 +662,9 @@ def test_registry_write_before_all_self_defined_conflicts_is_persisted(
         scenario.declare([{"name": "io.example/registered", "registry": registry.url}, _http()])
         result = scenario.install(targets=target)
         assert result.returncode == 1, result.stdout + result.stderr
-        assert registry.request_paths
-    assert scenario.servers(target)["notes"] == personal
-    assert "registered" in scenario.servers(target)
-    assert scenario.lock().mcp_target_servers == {target: ["io.example/registered"]}
+    assert scenario.servers(target) == {"notes": personal}
+    lock_path = scenario.root / "apm.lock.yaml"
+    assert not lock_path.exists() or not scenario.lock().mcp_target_servers
     scenario.declare([])
     _success(scenario.install(targets=target))
     assert scenario.servers(target) == {"notes": personal}

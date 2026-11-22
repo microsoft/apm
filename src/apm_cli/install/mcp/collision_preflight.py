@@ -86,3 +86,52 @@ def project_native_mcp_conflicts(
                     render=lambda client=client, info=info: client.render_server_config(info),
                 )
     return conflicts
+
+
+class _Silent:
+    """Discard target-resolution output; the MCP stage announces its own targets."""
+
+    verbose = False
+
+    def __getattr__(self, _name: str) -> Any:
+        return lambda *_args, **_kwargs: None
+
+
+def refuse_unrecorded_mcp_collisions(
+    dependencies: Iterable[Any],
+    *,
+    lockfile: Any,
+    project_root: Any,
+    user_scope: bool,
+    logger: Any,
+    **targets: Any,
+) -> None:
+    """Refuse before any write when a never-recorded self-defined server collides.
+
+    *targets* are the ``runtime``, ``exclude``, ``apm_config``,
+    ``explicit_target``, ``target_decision`` and ``scope`` the MCP stage
+    resolves its runtimes from.
+    """
+    from apm_cli.install.errors import MCPNativeConflictError
+    from apm_cli.integration.mcp_integrator_install import resolve_mcp_targets
+
+    runtimes = resolve_mcp_targets(
+        **targets,
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=_Silent(),
+        verbose=False,
+        console=None,
+    ).runtime_list()
+    conflicts = project_native_mcp_conflicts(
+        dependencies,
+        runtimes or [],
+        recorded=recorded_mcp_names(lockfile),
+        project_root=project_root,
+        user_scope=user_scope,
+        logger=logger,
+    )
+    if conflicts:
+        message = "MCP installation incomplete: " + ", ".join(conflicts)
+        logger.error(message)
+        raise MCPNativeConflictError(message, wrote_connections=False)
