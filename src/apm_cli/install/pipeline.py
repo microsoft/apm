@@ -913,16 +913,15 @@ def run_install_pipeline(  # noqa: C901, PLR0913, PLR0915, RUF100
         transaction.release_deploy_targets()
 
         # ------------------------------------------------------------------
-        # Phase: native plugin registration (#2703), LAST: after the lockfile
-        # is canonical and the integrity and content-audit gates allowed the
-        # install. MCP/LSP reconciliation runs before every native
-        # registration, which a rolled-back reconciliation skips (#4594);
-        # Claude's lockfile flush is then the install's single commit (#4329).
+        # Phase: native plugin registration (#2703, #3921), LAST: after the
+        # lockfile is canonical and the integrity and content-audit gates allowed
+        # the install. MCP/LSP reconciliation runs before every native
+        # registration, which a rolled-back reconciliation skips (#4594); native
+        # registration's lockfile flush is then the install's single commit (#4329).
         # ------------------------------------------------------------------
         if not lockfile_only:
             _run_phase("services", services, ctx)
             if services.native_registration_allowed(ctx):
-                _run_phase("copilot_plugins", copilot_plugins, ctx)
                 _run_phase("codex_plugins", codex_plugins, ctx)
                 _run_phase("claude_plugins", claude_plugins, ctx)
 

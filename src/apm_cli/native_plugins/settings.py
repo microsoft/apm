@@ -1,11 +1,11 @@
-"""Only writer for lock-owned native plugins; copilot_plugins/settings.py converges here in #3921.
+"""APM's only writer of documented native-plugin settings keys (Claude Code and Copilot).
 
-Harnesses that load a local directory marketplace in place (Claude Code today,
-GitHub Copilot after #3921) read two documented keys from a settings JSON
-document:
+Harnesses that load a local directory marketplace in place (Claude Code and
+GitHub Copilot) read two documented keys from a settings JSON document:
 
 * ``extraKnownMarketplaces.<name>`` -- ``{"source": {"source": "directory",
-  "path": <absolute directory>}}``;
+  "path": <directory>}}``, absolute at user scope and ``./.agents/plugins``
+  (relative to the project root) at project scope;
 * ``enabledPlugins["<plugin>@<name>"]`` -- ``true`` or ``false``.
 
 The caller supplies ownership: the plugin names the previous lockfile
@@ -41,16 +41,24 @@ class SettingsDeclaration:
     """What APM wants one settings document to declare (OpenAPM req-na-004)."""
 
     marketplace: str
-    directory: Path
+    path: str
+    """Directory source exactly as written: absolute, or relative at project scope."""
     plugins: frozenset[str]
     owned_plugins: frozenset[str] | None
     """Plugins the previous lockfile activated; ``None`` when there was no previous lock."""
     previous_binding: tuple[str, str] | None = None
     """``(name, path)`` the previous lock's entries were declared under, if any."""
+    suppressed: frozenset[str] = frozenset()
+    """Plugins to switch off here because another harness's file this one also
+    reads declares them (cross-target suppression, written as ``false``)."""
+    managed: frozenset[str] = frozenset()
+    """Plugins whose enable value here APM owns whatever it is: those it declares
+    to the harness whose file this one also reads. Their ``false`` is APM's
+    suppression, flipped or retired as their targets change."""
 
     @property
     def marketplace_value(self) -> dict[str, Any]:
-        return {"source": {"source": "directory", "path": str(self.directory)}}
+        return {"source": {"source": "directory", "path": self.path}}
 
     def plugin_key(self, plugin: str) -> str:
         return f"{plugin}@{self.marketplace}"
@@ -61,6 +69,8 @@ class SettingsChange:
     added: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
+    flipped: list[tuple[str, bool]] = field(default_factory=list)
+    """``(key, new value)`` for an existing enable value APM changed (a managed key)."""
 
     @property
     def changed(self) -> bool:
@@ -74,8 +84,11 @@ def read_settings(path: Path) -> dict[str, Any]:
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        from apm_cli.core.remediation import NATIVE_SETTINGS_INVALID
+
         raise NativeSettingsError(
-            f"Cannot read {path} as JSON; APM did not change it. Repair the file and retry."
+            f"Cannot read {path} as JSON; APM did not change it. "
+            + NATIVE_SETTINGS_INVALID.sentence()
         ) from exc
     if not isinstance(document, dict):
         raise NativeSettingsError(f"{path} must contain a JSON object; APM did not change it.")
@@ -106,7 +119,7 @@ def apply_declaration(
     change = SettingsChange()
     name = declaration.marketplace
     current = marketplaces.get(name)
-    binding = (name, str(declaration.directory))
+    binding = (name, declaration.path)
     moved = declaration.previous_binding is not None and declaration.previous_binding != binding
     # Another name already points at this profile root: a renamed binding.
     renamed = any(
@@ -128,15 +141,28 @@ def apply_declaration(
     elif not declaration.plugins and current is not None and owned:
         del marketplaces[name]
         change.removed.append(f"{MARKETPLACES_KEY}.{name}")
+    # Without a previous lock nothing existing is APM's to flip or retire.
+    managed = declaration.managed if owned is not None else frozenset()
     for plugin in sorted(declaration.plugins):
         key = declaration.plugin_key(plugin)
-        if key not in enabled:
+        if key not in enabled or (plugin in managed and enabled[key] is False):
+            if key in enabled:
+                change.flipped.append((key, True))
             enabled[key] = True
             change.added.append(f"{ENABLED_KEY}.{key}")
-    for plugin in sorted((owned or frozenset()) - declaration.plugins):
+    for plugin in sorted(declaration.suppressed - declaration.plugins):
         key = declaration.plugin_key(plugin)
-        # An explicit false is the user's decision; only APM's true is retired.
-        if enabled.get(key) is True:
+        if key not in enabled or (plugin in managed and enabled[key] is True):
+            if key in enabled:
+                change.flipped.append((key, False))
+            enabled[key] = False
+            change.added.append(f"{ENABLED_KEY}.{key}")
+    wanted = declaration.plugins | declaration.suppressed
+    for plugin in sorted((owned or frozenset()) - wanted):
+        key = declaration.plugin_key(plugin)
+        # An explicit false is the user's decision; only APM's true, or APM's
+        # own suppression, is retired.
+        if enabled.get(key) is True or (plugin in managed and enabled.get(key) is False):
             del enabled[key]
             change.removed.append(f"{ENABLED_KEY}.{key}")
     for key, section in ((MARKETPLACES_KEY, marketplaces), (ENABLED_KEY, enabled)):
@@ -173,6 +199,13 @@ def restore_settings(path: Path, snapshot: bytes | None) -> None:
         return
     # A snapshot APM may restore was readable as UTF-8 JSON before the write.
     atomic_write_text(target, snapshot.decode("utf-8"), normalize_line_endings=False)
+
+
+def write_settings_document(path: Path, document: dict[str, Any]) -> None:
+    """Write a whole settings document APM already changed in memory."""
+    target = settings_target(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(target, json.dumps(document, indent=2) + "\n")
 
 
 def write_declaration(path: Path, declaration: SettingsDeclaration) -> SettingsChange:

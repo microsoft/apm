@@ -44,7 +44,7 @@ SOURCES = (
     "native-plugin",
 )
 PLAIN_PRIMS = ("skill", "other-file")
-# The executable domain of the gate (commands/approve.py:255).
+# The executable domain of the gate (commands/approve.py::approve_cmd).
 EXECUTABLE_PRIMS = ("hook", "mcp", "lsp", "bin", "canvas")
 PRIMS = (*PLAIN_PRIMS, *EXECUTABLE_PRIMS)
 # TGT is <shape>-<change>. The shape is the declared target set BEFORE the step
@@ -130,7 +130,7 @@ def compile_staged_targets() -> tuple[str, ...]:
     """Targets whose profile has no native instructions primitive.
 
     A file primitive routed to one of these is staged for compile instead of
-    deployed (install/services.py:1025).
+    deployed (install/services.py::integrate_local_bundle, ``_staged``).
     """
     return tuple(
         sorted(

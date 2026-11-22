@@ -284,6 +284,7 @@ SCENARIO_MODULES = (
     "test_file_routing",
     "test_graph_version",
     "test_history_upgrade",
+    "test_mcp_write_receipts",
     "test_network_offline",
     "test_ownership_siblings",
     "test_platform",

@@ -532,11 +532,11 @@ new grant.
 
 
 
-This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
+A Claude marketplace or native plugin loads as one unit: APM deploys it whole, `bin/` included, and Claude Code adds the plugin's root `bin/` to the Bash tool's `PATH`. The contract is Claude-specific, so `bin/` deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
 
-**Security note:** deployed executables are tightened to `0o700` on POSIX systems and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments. Additionally, the `--trust-bin` / `--no-trust-bin` flags on `apm install` provide per-invocation consent: `--trust-bin` suppresses the trust-posture warning, `--no-trust-bin` skips bin/ deployment even if policy allows it, and the default (no flag) deploys with a warning.
+**Security note:** deployed executables are tightened to `0o700` on POSIX systems and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. Use this field to opt out globally or per-package in enterprise environments. The `--trust-bin` / `--no-trust-bin` flags on `apm install` give per-invocation consent: `--trust-bin` deploys `bin/` without the trust-posture warning. Because the plugin is one unit, `--no-trust-bin`, or a non-interactive install without `--trust-bin`, parks the whole plugin, not only `bin/`.
 
-**Scope:** bin/ deployment only activates for a marketplace plugin installed at user scope (`-g`) with the Claude target. Project-scope installs and other targets never deploy `bin/`.
+**Scope:** for the `claude` target, `bin/` stays inside the plugin APM deploys whole to `.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`); a denied `bin/` parks the whole plugin. See [Native plugins](../../consumer/install-plugins/#native-plugins).
 
 **Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../../producer/publish-to-a-marketplace/#choose-a-repository-shape) for the producer-side contract (directory layout, executable bit, scope and trust posture).
 

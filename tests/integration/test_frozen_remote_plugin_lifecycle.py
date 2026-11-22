@@ -81,16 +81,21 @@ def _scenario(
     transitive: bool = False,
     shape: str = "plugin",
     subdirectory: bool = False,
+    root_manifest: bool = False,
 ) -> _Scenario:
-    """Generate all baseline state through the CLI; author only package inputs."""
+    """Generate all baseline state through the CLI; author only package inputs.
+
+    A ``.claude-plugin`` plugin installs whole at project scope (#3921); a root
+    ``plugin.json`` (*root_manifest*) keeps the loose, split route.
+    """
     producer_env = IsolatedApmEnvironment.create(tmp_path / "producer", base_env=dict(os.environ))
     consumer_env = IsolatedApmEnvironment.create(tmp_path / "consumer", base_env=dict(os.environ))
     repository_source = producer_env.package_root / "plugin"
     source = repository_source / "plugins/nested" if subdirectory else repository_source
     source.mkdir(parents=True)
     if shape == "plugin":
-        metadata = source / ".claude-plugin"
-        metadata.mkdir()
+        metadata = source if root_manifest else source / ".claude-plugin"
+        metadata.mkdir(exist_ok=True)
         (metadata / "plugin.json").write_text(
             json.dumps({"name": "frozen-plugin", "version": "1.0.0"}),
             encoding="utf-8",
@@ -180,7 +185,7 @@ def _scenario(
     assert {entry["resolved_commit"] for entry in lock["dependencies"]} == pins
     assert {entry["resolved_ref"] for entry in lock["dependencies"]} == pins
     # reference/package-types.md (layout table; "Plugin collection"):
-    # `.claude-plugin/` is a Claude plugin collection.
+    # `.claude-plugin/` or a root `plugin.json` is a Claude plugin collection.
     expected_type = {"plugin": "marketplace_plugin"}.get(shape, shape)
     assert (
         next(entry for entry in lock["dependencies"] if entry["repo_url"] == "frozen/plugin")[
@@ -236,20 +241,21 @@ def test_frozen_whole_plugin_cold_consumer(
         plugin_mcp=plugin_mcp,
         root_mcp=root_mcp,
         transitive=transitive,
+        root_manifest=True,
     )
     for _ in range(2):
         scenario.freeze()
         assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
         restored = scenario.consumer / "apm_modules/frozen/plugin"
-        assert (restored / ".claude-plugin/plugin.json").read_bytes() == (
-            scenario.repository.worktree / ".claude-plugin/plugin.json"
+        assert (restored / "plugin.json").read_bytes() == (
+            scenario.repository.worktree / "plugin.json"
         ).read_bytes()
         _assert_mcp_matches_producer(scenario)
 
 
 def test_frozen_whole_plugin_subdirectory(tmp_path: Path, apm_binary_path: Path) -> None:
     """Replay a producer-selected whole plugin without losing its virtual source path."""
-    scenario = _scenario(tmp_path, apm_binary_path, subdirectory=True)
+    scenario = _scenario(tmp_path, apm_binary_path, subdirectory=True, root_manifest=True)
     lock = LockFile.read(scenario.consumer / "apm.lock.yaml")
     dependency = next(iter(lock.dependencies.values()))
     assert dependency.virtual_path == "plugins/nested"
@@ -258,8 +264,8 @@ def test_frozen_whole_plugin_subdirectory(tmp_path: Path, apm_binary_path: Path)
     for _ in range(2):
         scenario.freeze()
         assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
-        assert (restored / ".claude-plugin/plugin.json").read_bytes() == (
-            scenario.repository.worktree / "plugins/nested/.claude-plugin/plugin.json"
+        assert (restored / "plugin.json").read_bytes() == (
+            scenario.repository.worktree / "plugins/nested/plugin.json"
         ).read_bytes()
         _assert_mcp_matches_producer(scenario)
 
@@ -269,7 +275,9 @@ def test_frozen_cold_consumer_tolerates_absent_no_mcp_orphan(
     tmp_path: Path, apm_binary_path: Path, plugin_mcp: bool
 ) -> None:
     """An unused producer-locked package must not require hydration or MCP evidence."""
-    scenario = _scenario(tmp_path, apm_binary_path, plugin_mcp=plugin_mcp, root_mcp=plugin_mcp)
+    scenario = _scenario(
+        tmp_path, apm_binary_path, plugin_mcp=plugin_mcp, root_mcp=plugin_mcp, root_manifest=True
+    )
     packages = LocalPackageFactory(tmp_path / "orphan-source")
     orphan = packages.create("unused")
     packages.add_instruction(orphan, "unused", "---\napplyTo: '**'\n---\n# Unused instruction\n")
@@ -315,7 +323,7 @@ def test_frozen_replays_pin_after_remote_head_advances(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """Source bytes must come from the locked commit, not the repository's newer head."""
-    scenario = _scenario(tmp_path, apm_binary_path)
+    scenario = _scenario(tmp_path, apm_binary_path, root_manifest=True)
     source_skill = scenario.repository.worktree / "skills/frozen-skill/SKILL.md"
     source_skill.write_bytes(_SKILL + b"\nUnselected repository head.\n")
     newer = scenario.repositories.commit(scenario.repository, message="Unselected newer head")
@@ -334,7 +342,7 @@ def test_frozen_and_audit_accept_a_lock_with_the_previous_plugin_type(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     """A lock that recorded a whole plugin as skill_bundle still replays and audits (#4270)."""
-    scenario = _scenario(tmp_path, apm_binary_path)
+    scenario = _scenario(tmp_path, apm_binary_path, root_manifest=True)
     lock = load_yaml(scenario.consumer / "apm.lock.yaml")
     (entry,) = lock["dependencies"]
     assert entry["package_type"] == "marketplace_plugin"
@@ -593,7 +601,7 @@ def test_frozen_restores_and_verifies_a_drifted_present_source(
     the restored copy. An unreachable or unverifiable source still fails
     closed (test_frozen_refuses_unverifiable_source_evidence).
     """
-    scenario = _scenario(tmp_path, apm_binary_path)
+    scenario = _scenario(tmp_path, apm_binary_path, root_manifest=True)
     present = scenario.consumer / "apm_modules/frozen/plugin"
     native = scenario.consumer / ".mcp.json"
     native.write_text('{"mcpServers":{"user-owned":{"command":"keep"}}}\n', encoding="utf-8")
@@ -612,8 +620,8 @@ def test_frozen_restores_and_verifies_a_drifted_present_source(
     for _ in range(2):
         scenario.freeze()
         assert (scenario.consumer / ".agents/skills/frozen-skill/SKILL.md").read_bytes() == _SKILL
-        assert (present / ".claude-plugin/plugin.json").read_bytes() == (
-            scenario.repository.worktree / ".claude-plugin/plugin.json"
+        assert (present / "plugin.json").read_bytes() == (
+            scenario.repository.worktree / "plugin.json"
         ).read_bytes()
         # The drifted declaration is gone; APM may keep its normalized apm.yml.
         assert b"changed" not in (present / "apm.yml").read_bytes()
