@@ -795,6 +795,29 @@ def run(ctx: InstallContext) -> None:
         for _, _, source, materialization, _ in prepared_integrations
         if materialization is not None
     ]
+    from apm_cli.install.plan_replay import Recorder
+
+    recorder = Recorder(ctx)
+    if recorder.try_replay(ctx):
+        return
+    recorder.start()
+    _run_tail(ctx, prepared_integrations, materialized, direct_dep_keys, session)
+    if not (ctx.skill_baseline_refused or ctx.overwrite_preflight_refused):
+        recorder.finish(ctx)
+
+
+def _run_tail(ctx, prepared_integrations, materialized, direct_dep_keys, session) -> None:
+    """Original integrate body after acquire (PoC split)."""
+    installed_count = ctx.installed_count
+    unpinned_count = ctx.unpinned_count
+    total_prompts_integrated = ctx.total_prompts_integrated
+    total_agents_integrated = ctx.total_agents_integrated
+    total_skills_integrated = ctx.total_skills_integrated
+    total_sub_skills_promoted = ctx.total_sub_skills_promoted
+    total_instructions_integrated = ctx.total_instructions_integrated
+    total_commands_integrated = ctx.total_commands_integrated
+    total_hooks_integrated = ctx.total_hooks_integrated
+    total_links_resolved = ctx.total_links_resolved
     # A batch refusal must not swallow the acquired packages' held [+]
     # headers: print them before the refusal surfaces (#3994).
     try:
