@@ -409,9 +409,8 @@ def retire_bundle_hooks(
         return False
     # Hook configs register executables and always go; an edited script is kept.
     configs = tuple(sorted(state.hook_files)) if state else ()
-    kept = _retire_per_file(
-        project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs)
-    )
+    item = UnadmittedBundleHooks(slug, reason or "", configs)
+    kept = _retire_per_file(project_root, targets, item)
     recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
     _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
     # A hook file left on disk keeps its lock claim as well as its record.

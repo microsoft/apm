@@ -1206,8 +1206,8 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            '    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))\n',
-            "",
+            "    kept = _retire_per_file(project_root, targets, item)\n",
+            "    kept = set()\n",
         ),
         (
             "install-deployment-local-bundle-hook-trust",
