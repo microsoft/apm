@@ -26,19 +26,26 @@ print(json.dumps({
 """
 
 
-def _probe(flag: str | None) -> dict[str, bool]:
+def _probe(flag: str | None) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k != "APM_INSTALL_FAST_PATH"}
     if flag is not None:
         env["APM_INSTALL_FAST_PATH"] = flag
-    result = subprocess.run(
-        [sys.executable, "-c", _PROBE], env=env, capture_output=True, text=True, check=True
-    )
-    return json.loads(result.stdout.strip().splitlines()[-1])
+    return subprocess.run([sys.executable, "-c", _PROBE], env=env, capture_output=True, text=True)
 
 
 def test_unset_flag_never_imports_the_fast_path() -> None:
-    assert _probe(None) == {"fast_path": False, "recorder": False}
+    result = _probe(None)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "fast_path": False,
+        "recorder": False,
+    }
 
 
 def test_set_flag_engages_the_fast_path() -> None:
-    assert _probe("1") == {"fast_path": True, "recorder": True}
+    result = _probe("1")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == {
+        "fast_path": True,
+        "recorder": True,
+    }

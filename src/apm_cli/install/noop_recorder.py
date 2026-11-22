@@ -111,7 +111,15 @@ def _probe(path: str) -> list[Any] | None:
 
 
 def _identity(info: os.stat_result) -> tuple[int, ...]:
-    """Every stat field a trust or ownership check may read (not atime)."""
+    """Every stat field a trust or ownership check may read (not atime).
+
+    For a directory, size, mtime, ctime and link count only reflect its
+    entries, which change whenever anything is added beside them (a temp dir,
+    a parent of the project). They are not inputs of a run that did not list
+    the directory; a run that did list it records the entries themselves.
+    """
+    if stat.S_ISDIR(info.st_mode):
+        return (info.st_mode, info.st_ino, info.st_dev, info.st_uid, info.st_gid)
     return (
         info.st_mode,
         info.st_size,

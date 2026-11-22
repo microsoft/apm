@@ -214,7 +214,8 @@ def _arrange(world: World, change: str) -> None:
     if change == "revoked-user-approval":
         # The grant lives only in the user store, so revoking it leaves apm.yml
         # and the lockfile byte-identical.
-        approved = driver.run(world, ("approve", f"{ORG}/p-exec"), scope="user")
+        # A personal grant from the project: user store only, apm.yml untouched.
+        approved = driver.run(world, ("approve", "--user", "p-exec"))
         assert approved.returncode == 0, approved.stdout + approved.stderr
     else:
         _approve_exec(world)
