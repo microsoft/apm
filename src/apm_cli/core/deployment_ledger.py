@@ -326,12 +326,13 @@ class DeploymentMaterializationSession:
 
     def binds(self, data: Mapping[str, Any]) -> bool:
         """Whether receipt *data* is bound to this root, scope and installation identity."""
-        recorded = [data["version"], data["root"], data["scope"], data["installation"]]
-        same_root = data["root_identity"] == self._root_identity()
-        return (
-            self._installation is not None
-            and recorded == [1, self.root.as_posix(), self.scope.value, self._installation]
-            and (same_root or self._root_device_changed_only(data))
+        installation, moved = self._installation, self._root_device_changed_only
+        recorded = [data["version"], data["root"], data["scope"]]
+        return not (
+            installation is None
+            or recorded != [1, self.root.as_posix(), self.scope.value]
+            or data["installation"] != installation
+            or (data["root_identity"] != self._root_identity() and not moved(data))
         )
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
@@ -658,8 +659,7 @@ class DeploymentMaterializationSession:
             records = {key: record for key, record in self._records.items() if key not in keys}
             destinations = {k: v for k, v in self._destinations.items() if k not in keys}
             self._persist(records, destinations)
-            self._records = records
-            self._destinations = destinations
+            self._records, self._destinations = records, destinations
             self._bindings = {k: v for k, v in self._bindings.items() if k not in keys}
             self._physical_keys = {path: key for key, path in destinations.items()}
 

@@ -856,9 +856,10 @@ def _kept_mcp_entries(
         passed=False,
         message=(
             f"{len(kept)} MCP entr(ies) APM wrote for servers it no longer deploys were kept "
-            "because APM cannot confirm they are unchanged -- remove each entry you no longer "
-            "use, then run 'apm install'"
+            "because APM cannot confirm they are unchanged -- "
+            f"{remediation.KEPT_MCP_ENTRIES.clause()}"
         ),
+        remediations=(remediation.KEPT_MCP_ENTRIES,),
         details=[
             f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept
         ],

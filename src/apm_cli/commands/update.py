@@ -396,7 +396,7 @@ def _run_mcp_lsp_integration(
     from apm_cli.core.scope import InstallScope, get_modules_dir
     from apm_cli.install.lsp import run_lsp_integration
     from apm_cli.install.lsp.integration import lsp_target_config, prepare_lsp_integration
-    from apm_cli.install.mcp import run_mcp_integration
+    from apm_cli.install.mcp import journal_mcp_writes, run_mcp_integration
     from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
     from apm_cli.policy.install_preflight import PolicyBlockError
 
@@ -433,8 +433,6 @@ def _run_mcp_lsp_integration(
         executable_context=(effective_allow_executables, effective_allow_resolved),
     )
     prepared_lsp.require_capable_target()
-
-    from apm_cli.install.mcp.write_receipts import journal_mcp_writes
 
     try:
         with journal_mcp_writes(project_root, user_scope=user_scope, logger=logger):

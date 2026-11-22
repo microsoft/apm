@@ -44,6 +44,10 @@ _journal: ContextVar[list[tuple[str, str, str | None]] | None] = ContextVar(
 )
 
 
+class McpWriteEvidenceError(ValueError):
+    """The MCP write evidence file is unreadable or bound to another installation."""
+
+
 @dataclass(frozen=True)
 class McpWrite:
     """One MCP entry APM wrote: where, under which key, and its fingerprint."""
@@ -124,7 +128,10 @@ def journal_mcp_writes(project_root: Path, *, user_scope: bool, logger: Any) -> 
             store.forget_absent()
             store.save()
         except (OSError, ValueError) as exc:
-            logger.warning(f"Could not record the MCP entries this install wrote: {exc}")
+            if not writes:
+                _log.debug("MCP write evidence left unchanged", exc_info=True)
+            else:
+                logger.warning(f"Could not record the MCP entries this install wrote: {exc}")
 
 
 class McpWriteReceipts:
@@ -163,7 +170,7 @@ class McpWriteReceipts:
                     write = McpWrite.from_row(row)
                     store.writes[(write.runtime, write.name)] = write
             except (KeyError, TypeError, UnicodeError, ValueError) as exc:
-                raise ValueError(
+                raise McpWriteEvidenceError(
                     f"Invalid MCP write evidence at {store.path}: {exc}. The entries it lists "
                     "are kept; remove that file to start a new record."
                 ) from exc
@@ -185,9 +192,8 @@ class McpWriteReceipts:
 
     def _config(self, runtime: str) -> str | None:
         client = self._client(runtime)
-        if client is None:
-            return None
-        return Path(client.get_config_path()).absolute().as_posix()
+        path = client.get_config_path() if client is not None else None
+        return Path(path).absolute().as_posix() if path else None
 
     def _existing(self, runtime: str) -> dict[str, Any] | None:
         """The runtime's native MCP entries, or None when they cannot be read."""
@@ -228,11 +234,11 @@ class McpWriteReceipts:
 
     def record(self, writes: Iterable[tuple[str, str, str | None]]) -> None:
         """Record entries this install wrote, read back from their config."""
+        self._entries.clear()
         for runtime, name, content_hash in writes:
             client = self._client(runtime)
             if client is None:
                 continue
-            self._entries.pop(runtime, None)
             candidates = dict.fromkeys(
                 (
                     name,
@@ -300,7 +306,7 @@ class McpWriteReceipts:
                 self.forget(write)
             elif self.proven(write):
                 _remove_native_entry(self._client(write.runtime), write.key, logger)
-                self._entries.pop(write.runtime, None)
+                self._entries.clear()
                 self.forget(write)
                 removed.add(write.name)
             else:
@@ -339,11 +345,10 @@ class McpWriteReceipts:
         mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
         data = self._session.binding()
         data["writes"] = [self.writes[ident].row() for ident in sorted(self.writes)]
+        # Machine-local evidence, not a user-editable MCP config.
+        text = json.dumps(data, sort_keys=True, indent=2)  # architecture-authority-exempt: evidence
         atomic_write_text(
-            self.path,
-            json.dumps(data, sort_keys=True, indent=2) + "\n",
-            new_file_mode=0o600,
-            create_only=not self._existed,
+            self.path, text + "\n", new_file_mode=0o600, create_only=not self._existed
         )
         self._existed = True
 
@@ -365,8 +370,11 @@ def retire_undeclared_mcp_writes(
     """
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
-    except (OSError, ValueError) as exc:
+    except McpWriteEvidenceError as exc:
         logger.warning(f"Kept every MCP entry APM no longer deploys: {exc}")
+        return
+    except (OSError, ValueError):
+        _log.debug("No usable installation binding; every MCP entry is kept", exc_info=True)
         return
     removed = store.retire_undeclared(set(declared), exclude=exclude, logger=logger)
     if removed:

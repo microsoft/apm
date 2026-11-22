@@ -73,6 +73,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "managed-paths-unresolved": _FAULT,
     "native-mcp-ownership-unrecorded": "covered by the audit --ci native-mcp-ownership "
     "check tests in tests/unit/policy/test_ci_checks.py",
+    "kept-mcp-entries": "needs a deleted lockfile and an edited MCP entry; covered by "
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py and the audit --ci kept-mcp-entries "
+    "check test in tests/unit/install/test_mcp_write_receipts.py",
     "policy-fetch-failure-blocked": "executed by test_remediation_advice_lifecycle::"
     "test_policy_fetch_failure_remediation_clears_the_block",
     "rendering-changed": "needs a locked file rendered by an older APM version",

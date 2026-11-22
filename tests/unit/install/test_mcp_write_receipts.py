@@ -19,7 +19,10 @@ from apm_cli.install.mcp.write_receipts import (
 )
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.component
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-legacy-mcp-ownership-key-migration"),
+]
 
 SERVER = "demo-mcp"
 ENTRY = {"type": "stdio", "command": "demo", "args": ["--stdio"]}
@@ -110,12 +113,13 @@ def test_a_proven_entry_no_longer_declared_is_retired(project: Path) -> None:
 
 def test_a_declared_server_is_never_retired(project: Path) -> None:
     _install_write(project, _Logger())
+    before = _config(project).read_bytes()
 
     retire_undeclared_mcp_writes(
         {SERVER}, project_root=project, user_scope=False, exclude=None, logger=_Logger()
     )
 
-    assert SERVER in _servers(project)
+    assert _config(project).read_bytes() == before
 
 
 def test_an_unrecorded_identical_entry_is_never_retired(project: Path) -> None:
