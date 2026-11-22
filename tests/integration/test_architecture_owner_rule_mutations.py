@@ -4268,6 +4268,41 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="",
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="    for line in retired_kinds_warnings(hooks, skip=denied):\n        logger.warning(line)\n",
+        new="    for line in sorted(hooks):\n        logger.warning(line)\n",
+        intent="Uninstall bypasses the kinds owner when it warns about retired kinds (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning(f"{key} hooks are no longer allowed; removing them")\n'
+        ),
+        intent="Uninstall adds a hard-coded hooks label beside the owner's warning (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/security/exec_kinds.py",
+        old='f"{key} {exec_kinds_phrase(kinds)} are no longer allowed',
+        new='f"{key} hooks are no longer allowed',
+        intent="The retirement warning hard-codes 'hooks' instead of install's kind labels.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/install/plan_admission.py",
+        old="    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)\n",
+        new="    return tuple(sorted(retired))\n",
+        intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS
