@@ -1113,6 +1113,8 @@ def test_an_earlier_write_on_this_checkout_is_a_baseline_but_not_deletion_eviden
     _rewrite(session, path, "rendered on another branch\n")
     path.write_bytes(old_bytes)  # git checkout restores the earlier render
 
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert [old_hash in hashes for hashes in persisted["history"].values()] == [True]
     assert _session(root, lock).baseline(path, [TARGET]) == old_hash
     assert _receipt_evidence(root).receipt_hashes.get(path.resolve().as_posix()) != old_hash
     path.write_text("user edit\n", encoding="utf-8")
