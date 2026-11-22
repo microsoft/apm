@@ -288,6 +288,49 @@ class TestIsContentIdenticalToText:
         assert BaseIntegrator.is_content_identical_to_text(target, "x\n") is False
 
 
+class TestOverwritePlanSkipsReceiptOnIdentical:
+    """The #4381 write plan never keeps an identical file, so it skips the receipt lookup."""
+
+    def _decide(self, tmp_path: Path, on_disk: str, plan: list | None):
+        integrator = PromptIntegrator()
+        integrator._overwrite_plan = plan
+        lookups: list[Path] = []
+        integrator.receipted_unchanged = lambda path: lookups.append(path) or False
+        target = tmp_path / "review.prompt.md"
+        target.write_bytes(on_disk.encode("utf-8"))
+        target_paths: list[Path] = []
+        decision = integrator._check_adopt_or_skip(
+            target,
+            tmp_path / "src.prompt.md",
+            "review.prompt.md",
+            None,
+            False,
+            None,
+            target_paths,
+            expected_content="rendered\n",
+        )
+        return decision, lookups, target_paths, target
+
+    def test_planning_an_identical_file_skips_without_reading_its_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        plan: list = []
+        decision, lookups, target_paths, target = self._decide(tmp_path, "rendered\n", plan)
+        assert decision == (True, False)
+        assert lookups == []
+        assert plan == []
+        assert target_paths == [target]
+        assert target.read_bytes() == b"rendered\n"
+
+    def test_the_real_run_still_reads_the_receipt_of_an_identical_file(
+        self, tmp_path: Path
+    ) -> None:
+        decision, lookups, _, target = self._decide(tmp_path, "rendered\n", None)
+        assert decision == (True, True)
+        assert lookups == [target]
+        assert target.read_bytes() == b"rendered\n"
+
+
 # ---------------------------------------------------------------------------
 # Instruction integrator -- the user's reproducer (zava-storefront)
 # ---------------------------------------------------------------------------

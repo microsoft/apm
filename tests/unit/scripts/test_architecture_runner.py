@@ -653,6 +653,7 @@ install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
+install-deployment-claude-agents-md-routing
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
 install-deployment-overwrite-evidence

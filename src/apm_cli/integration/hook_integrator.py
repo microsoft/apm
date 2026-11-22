@@ -35,6 +35,7 @@ from apm_cli.hook_contract import HOOK_COMMAND_KEYS as _HOOK_COMMAND_KEYS
 from apm_cli.hook_contract import summarize_hook_command, walk_hook_commands
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.copilot_hook_paths import copilot_hook_target
 from apm_cli.integration.hook_bundle import (
     copy_deployed_hook_bundle,
     iter_deployable_hook_bundle_files,
@@ -1044,10 +1045,7 @@ class HookIntegrator(BaseIntegrator):
                 home_reference=home_reference,
             )
 
-            # Generate target filename (clean, no -apm suffix)
-            stem = hook_file.stem
-            target_filename = f"{package_name}-{stem}.json"
-            target_path = hooks_dir / target_filename
+            target_path = copilot_hook_target(hooks_dir, package_name, hook_file)
             rel_path = portable_relpath(target_path, project_root)
 
             if self.check_collision(
@@ -1130,7 +1128,7 @@ class HookIntegrator(BaseIntegrator):
             display_payloads.append(
                 self._build_display_payload(
                     f"{root_dir}/hooks/",
-                    target_filename,
+                    target_path.name,
                     hook_file,
                     rewritten,
                 )

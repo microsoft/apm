@@ -43,9 +43,13 @@ def _runner(apm_binary_path: Path) -> ApmLifecycleRunner:
     )
 
 
-def _instruction(name: str) -> str:
-    """Return a valid observable instruction source document."""
-    return f"---\napplyTo: '**'\ndescription: Lifecycle contract fixture {name}\n---\n# {name}\n"
+def _instruction(name: str, apply_to: str = "**") -> str:
+    """Return a valid observable instruction source document.
+
+    Claude loads ``**`` instructions from compiled AGENTS.md (#3939); a
+    path-scoped ``apply_to`` keeps the ``.claude/rules/`` file observable.
+    """
+    return f"---\napplyTo: '{apply_to}'\ndescription: Lifecycle contract fixture {name}\n---\n# {name}\n"
 
 
 def _dependency_rows(project_root: Path) -> dict[str, dict[str, object]]:
@@ -103,6 +107,7 @@ def _create_git_lifecycle_project(
     mcp_dependencies: tuple[dict[str, object], ...] = (),
     lsp_dependencies: tuple[dict[str, object], ...] = (),
     targets: tuple[str, ...] = ("copilot",),
+    instruction_apply_to: str = "**",
 ) -> _GitLifecycleProject:
     """Create an isolated consumer and real local-Git configuration package."""
     isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
@@ -116,7 +121,7 @@ def _create_git_lifecycle_project(
     package_factory.add_instruction(
         source_package,
         f"{source_name}-instruction",
-        _instruction(f"{source_name}-instruction"),
+        _instruction(f"{source_name}-instruction", instruction_apply_to),
     )
     repositories = LocalGitRepositoryFactory(
         isolated.repository_root,
@@ -1307,6 +1312,7 @@ def test_saved_target_drives_package_mcp_lsp_update_audit_and_uninstall(
     fixture = _create_git_lifecycle_project(
         tmp_path / "saved-target-project",
         source_name="saved-target-source",
+        instruction_apply_to="**/*.saved",
         mcp_dependencies=(
             {
                 "name": server_name,
@@ -2406,7 +2412,7 @@ def test_unset_target_keeps_normal_detection_for_package_without_services(
     package_factory.add_instruction(
         package,
         "service-free",
-        _instruction("service-free"),
+        _instruction("service-free", "**/*.md"),
     )
     project_factory = LocalPackageFactory(isolated.work_root)
     project = project_factory.create(

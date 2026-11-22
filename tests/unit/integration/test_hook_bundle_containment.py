@@ -56,8 +56,10 @@ def _files(root: Path) -> set[str]:
 def test_a_script_deploys_under_an_external_claude_root(world: SimpleNamespace) -> None:
     written = _copy(world, f"{world.root.as_posix()}/hooks/local/scripts/g.sh")
 
+    deployed = world.root / "hooks" / "local" / "scripts" / "g.sh"
     assert _files(world.root) == {"hooks/local/scripts/g.sh"}
-    assert written == [world.root / "hooks" / "local" / "scripts" / "g.sh"]
+    assert deployed.read_text(encoding="utf-8") == world.script.read_text(encoding="utf-8")
+    assert written == [deployed]
 
 
 def test_a_dotdot_destination_escaping_the_claude_root_is_refused(
