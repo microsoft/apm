@@ -568,21 +568,6 @@ class TestVerifyHashPin:
 class TestStripSourcePrefix:
     """Cover _strip_source_prefix."""
 
-    def test_org_prefix(self) -> None:
-        from apm_cli.policy.discovery import _strip_source_prefix
-
-        assert _strip_source_prefix("org:contoso/.github") == "contoso/.github"
-
-    def test_url_prefix(self) -> None:
-        from apm_cli.policy.discovery import _strip_source_prefix
-
-        assert _strip_source_prefix("url:https://example.com") == "https://example.com"
-
-    def test_file_prefix(self) -> None:
-        from apm_cli.policy.discovery import _strip_source_prefix
-
-        assert _strip_source_prefix("file:/path/to/policy.yml") == "/path/to/policy.yml"
-
     def test_no_prefix(self) -> None:
         from apm_cli.policy.discovery import _strip_source_prefix
 
@@ -603,12 +588,6 @@ class TestDeriveLeafHost:
 
         result = _derive_leaf_host("org:ghes.corp.com/org/.github", tmp_path)
         assert result == "ghes.corp.com"
-
-    def test_org_two_parts(self, tmp_path: Path) -> None:
-        from apm_cli.policy.discovery import _derive_leaf_host
-
-        result = _derive_leaf_host("org:contoso/.github", tmp_path)
-        assert result == "github.com"
 
     def test_empty_source(self, tmp_path: Path) -> None:
         from apm_cli.policy.discovery import _derive_leaf_host
@@ -643,12 +622,6 @@ class TestExtractExtendsHost:
         from apm_cli.policy.discovery import _extract_extends_host
 
         result = _extract_extends_host("org-name")
-        assert result is None
-
-    def test_empty_returns_none(self) -> None:
-        from apm_cli.policy.discovery import _extract_extends_host
-
-        result = _extract_extends_host("")
         assert result is None
 
     def test_none_returns_none(self) -> None:

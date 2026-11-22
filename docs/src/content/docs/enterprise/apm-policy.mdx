@@ -195,6 +195,9 @@ bypass is not set. See [Gate pull requests](../enforce-in-ci/).
 
 ## Debug a policy failure
 
+`apm compile` applies the same dependency rules to installed packages before it writes
+agent context, so a package the policy no longer allows is never compiled in.
+
 A blocked `apm install` prints one `[x] Policy violation: <dependency> -- <reason>`
 line per finding, then `Blocked by org policy at <source> (<check>)`. `apm audit --ci`
 shows the same check as an `[x]` row followed by its details. Then:

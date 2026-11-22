@@ -232,7 +232,7 @@ def test_gate_pack_spine_credits_pack_cells(lifecycle_template, tmp_path: Path) 
         seen |= machine.expected_seen
     missing = pack_cells() - earned_cells(current_node(), "G1|pack|") - set(KNOWN_PACK)
     assert not missing, f"pack ids without an oracle receipt: {sorted(missing)}"
-    # Every strict known cell failed on its step (#4714).
+    # Every strict known cell failed on its step.
     assert seen == set(KNOWN_PACK)
     # The gate is off at the end: the canvas stays deployed in the project.
     assert (machine.bench.deploy_root / ".github/extensions/p-canvas/extension.mjs").exists()

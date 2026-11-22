@@ -329,6 +329,7 @@ marketplace:
         assert result.exit_code != 0
         assert "no such option" in result.output.lower()
         assert "--marketplace-path" in result.output
+        assert "--marketplace-output" in result.output
 
     def test_pack_marketplace_path_invalid_format(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

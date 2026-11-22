@@ -340,19 +340,17 @@ EXEC_PACK = PackSet(
     executables={"hook": ("hooks/p-exec-session.json",), "lsp": (".lsp.json",)},
     plain=("skills/p-skill/SKILL.md",),
 )
-# A canvas packs in a project of its own: while #4714 is open, a canvas the gate
-# parks makes the whole pack fail, which would hide the other kinds' cells.
+# A canvas packs in a project of its own, so a canvas failure never hides the other
+# kinds' cells (a parked canvas failed the whole pack until #4714 was fixed).
 CANVAS_PACK = PackSet(
     kinds={"p-canvas": frozenset({"canvas"})},
     decided=("p-canvas",),
     executables={"canvas": ("extensions/p-canvas/extension.mjs", "extensions/p-canvas/icon.txt")},
 )
 PACK_SETS = (EXEC_PACK, CANVAS_PACK)
-# Strict known cells (R: pack must exit 0 and ship what the gate deploys).
-KNOWN_PACK: dict[str, str] = {
-    f"G1|pack|canvas|{level}|project": "#4714"
-    for level in ("unapproved-exec", "denied-executable", "revoked-after-deploy")
-}
+# Strict known cells (R: pack must exit 0 and ship what the gate deploys); none
+# since #4714 closed.
+KNOWN_PACK: dict[str, str] = {}
 _KNOWN_PACK_MATCH = r"pack exited 1: .*Cannot pack dependency lifecycle/p-canvas"
 
 

@@ -572,6 +572,7 @@ def replay_project_matrix(machine: GateMatrix) -> None:
         "update": 1,
         "lock": 1,
         "audit-ci": 1,
+        "compile": 1,
         "mcp-install": 1,
     }
     probes = ("install", "install-frozen", "update", "lock", "audit-ci", "compile", "prune")

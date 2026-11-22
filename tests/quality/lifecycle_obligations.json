@@ -5339,9 +5339,8 @@
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4714",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=none": {
@@ -5362,9 +5361,8 @@
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4714",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=canvas|GATE=unapproved-exec": {
@@ -5374,9 +5372,8 @@
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4714",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
   "T1|OP=pack|PRIM=hook|GATE=allowed": {
@@ -18375,7 +18372,10 @@
   "pair|OP=pack|PRIM=canvas": {
    "credited_by": [
     "G1|pack|canvas|allowed|project",
-    "G1|pack|canvas|none|project"
+    "G1|pack|canvas|denied-executable|project",
+    "G1|pack|canvas|none|project",
+    "G1|pack|canvas|revoked-after-deploy|project",
+    "G1|pack|canvas|unapproved-exec|project"
    ],
    "family": "pair",
    "issue": "#4095",
@@ -28249,9 +28249,9 @@
   },
   "U-BIN": {
    "evidence": [
-    "src/apm_cli/install/exec_gate.py:713",
-    "src/apm_cli/install/exec_gate.py:714",
-    "src/apm_cli/install/exec_gate.py:717"
+    "src/apm_cli/install/exec_gate.py:725",
+    "src/apm_cli/install/exec_gate.py:726",
+    "src/apm_cli/install/exec_gate.py:729"
    ],
    "text": "bin/ deploys only for a marketplace plugin installed at user scope with a Claude target that supports skills (plugin_bin_deployable), so bin/ at project scope is unreachable and removed. The package type, not SRC, makes a marketplace plugin, so SRC cells stay. Self-reinstating: the generator hashes the predicate (generator/bin_pin.py); when the hash differs from U_BIN_PIN the cells return as must-cover and --check fails until a reviewed change updates the pin. The closed-world pins of the bin/ writer and unpack live with the gate tables (T3)"
   },
@@ -28294,8 +28294,8 @@
   },
   "U10": {
    "evidence": [
-    "src/apm_cli/commands/compile/cli.py:695",
-    "src/apm_cli/commands/compile/cli.py:729"
+    "src/apm_cli/commands/compile/cli.py:824",
+    "src/apm_cli/commands/compile/cli.py:858"
    ],
    "text": "compile renders hook/mcp/lsp only; --validate reads MCP declarations"
   },
