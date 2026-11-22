@@ -253,11 +253,16 @@ def _directory_destination_open(project_root: Path, prefix: str) -> bool:
 
     The same files that block the root route keep a directory instruction in
     ``.claude/rules/``: a nested ``AGENTS.md`` compile may not write, a nested
-    ``CLAUDE.md`` without the import, or a destination in a nested Git
-    repository that compile skips.
+    ``CLAUDE.md`` without the import, a destination in a nested Git
+    repository that compile skips, or one a symlink resolves outside the
+    project (compile refuses to write there).
     """
     directory = project_root / prefix
     if not directory.is_dir() or _in_nested_repository(directory, project_root):
+        return False
+    try:
+        ensure_path_within(directory, project_root)
+    except PathTraversalError:
         return False
     return (
         _agents_md_blocker(directory, project_root) is None

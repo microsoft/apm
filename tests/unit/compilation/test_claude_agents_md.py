@@ -127,6 +127,16 @@ class TestDirectoryDestination:
         (tmp_path / "docs" / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
         assert routes_to_agents_md("docs/**", tmp_path) is True
 
+    def test_directory_symlinked_outside_the_project_keeps_the_rule(self, tmp_path):
+        """Compile refuses ``src/AGENTS.md`` outside the project, so install keeps the rule."""
+        project, outside = tmp_path / "project", tmp_path / "outside"
+        (project / ".claude").mkdir(parents=True)
+        outside.mkdir()
+        (project / "src").symlink_to(outside, target_is_directory=True)
+
+        assert routes_to_agents_md("src/**", project) is False
+        assert _deploy(project, _package(tmp_path, {"src": "src/**"})) == ["src.md"]
+
     def test_nested_git_repository_keeps_the_rule(self, tmp_path):
         (tmp_path / "vendor" / "lib" / "src").mkdir(parents=True)
         (tmp_path / "vendor" / "lib" / ".git").mkdir()
