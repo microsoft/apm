@@ -8,7 +8,7 @@ the npm v12-style ``allowExecutables`` default-deny policy.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -385,16 +385,28 @@ def policy_denied_locked_packages(lockfile: Any, policy: Any) -> dict[str, str]:
     The same dependency check the install policy gate applies
     (:func:`~apm_cli.policy.matcher.check_dependency_allowed`).
     """
+    return policy_denied_dependencies(
+        (
+            (key, dep.to_dependency_ref())
+            for key, dep in (getattr(lockfile, "dependencies", None) or {}).items()
+            if key != "."
+        ),
+        policy,
+    )
+
+
+def policy_denied_dependencies(
+    dependencies: Iterable[tuple[str, Any]], policy: Any
+) -> dict[str, str]:
+    """Return key -> reason for each ``(key, DependencyReference)`` the org policy denies."""
     from apm_cli.policy.matcher import check_dependency_allowed
 
     dependency_policy = getattr(policy, "dependencies", None)
     if dependency_policy is None:
         return {}
     denied: dict[str, str] = {}
-    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
-        if key == ".":
-            continue
-        allowed, reason = check_dependency_allowed(dep.to_dependency_ref(), dependency_policy)
+    for key, ref in dependencies:
+        allowed, reason = check_dependency_allowed(ref, dependency_policy)
         if not allowed:
             denied[key] = f"org policy: {reason}"
     return denied

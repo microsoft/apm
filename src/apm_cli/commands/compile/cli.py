@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -434,6 +434,8 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             symbol="error",
         )
         return 1
+    if not _dependency_policy_allows(logger, [source_root], user_scope=True):
+        return 1
 
     # A malformed user manifest is authoritative-but-broken, so it fails closed
     # with the same framing 'apm install -g' uses rather than degrading to
@@ -693,42 +695,96 @@ def _validate_project(
             sys.exit(1)
 
 
-def _enforce_dependency_policy(logger: CommandLogger, source_root: Path) -> None:
-    """Refuse to compile while org policy denies an installed dependency.
+def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, Any]]:
+    """``(key, DependencyReference)`` for every installed package compile renders from *root*.
+
+    Mirrors :func:`get_dependency_declaration_order`: locked packages, the
+    scope manifest's installed direct dependencies (a lost or partial lock
+    still renders them) and lockfile-proven local bundle staging.
+    """
+    from ...core.scope import scope_manifest_path
+    from ...deps.lockfile import LockFile, resolve_lockfile_path_for_read
+    from ...models.apm_package import APMPackage
+    from ...models.dependency.reference import DependencyReference
+
+    subjects: dict[str, Any] = {}
+    modules_root = root / "apm_modules"
+    lockfile = LockFile.read(resolve_lockfile_path_for_read(root, read_only=True))
+    if lockfile is not None:
+        for key, dep in lockfile.dependencies.items():
+            if key != ".":
+                subjects.setdefault(key, dep.to_dependency_ref())
+        for slug in lockfile.local_staging_slugs():
+            ref = DependencyReference(repo_url=f"_local/{slug}", is_local=True, source="local")
+            subjects.setdefault(ref.get_unique_key(), ref)
+    manifest = scope_manifest_path(root, user_scope=user_scope)
+    declared: list[Any] = []
+    if manifest.is_file() and modules_root.is_dir():
+        try:
+            declared = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except ValueError:
+            # Compile reports an invalid manifest itself, before it renders anything.
+            declared = []
+        for dep in declared:
+            # Marketplace identities resolve at install; the lock names them.
+            if not dep.is_marketplace and dep.get_install_path(modules_root).is_dir():
+                subjects.setdefault(dep.get_unique_key(), dep)
+    return sorted(subjects.items())
+
+
+def _dependency_policy_allows(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> bool:
+    """Whether org policy lets compile render what is installed under *roots*.
 
     Compile renders installed dependency content (and the files it deployed)
     into agent context, so it applies the dependency check install, update
-    and uninstall apply (:func:`policy_denied_locked_packages`), routed
-    through the trust policy owner so an unusable policy fails closed as
-    install does. ``enforcement: warn`` reports and continues.
+    and uninstall apply, routed through the trust policy owner so an unusable
+    policy fails closed as install does. ``enforcement: warn`` reports and
+    allows. Reports each denied package and the remediation when it refuses.
     """
-    from ...deps.lockfile import LockFile, resolve_lockfile_path_for_read
+    from ...core.remediation import COMPILE_DEPENDENCY_DENIED
+    from ...core.scope import manifest_root
     from ...install.errors import PolicyViolationError
-    from ...install.exec_gate import policy_denied_locked_packages
+    from ...install.exec_gate import policy_denied_dependencies
     from ...policy.outcome_routing import resolve_trust_policy
 
-    lockfile = LockFile.read(resolve_lockfile_path_for_read(source_root, read_only=True))
-    if lockfile is None or not any(key != "." for key in lockfile.dependencies):
-        return
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = {
+        key: ref
+        for root in unique_roots
+        for key, ref in _rendered_dependencies(root, user_scope=user_scope)
+    }
+    if not subjects:
+        return True
     try:
-        policy = resolve_trust_policy(source_root, logger=logger)
+        policy = resolve_trust_policy(
+            manifest_root(unique_roots[0], user_scope=user_scope), logger=logger
+        )
     except PolicyViolationError as exc:
         logger.error(str(exc))
-        sys.exit(1)
-    denied = policy_denied_locked_packages(lockfile, policy) if policy is not None else {}
-    if not denied or getattr(policy, "enforcement", "block") == "off":
-        return
-    blocking = getattr(policy, "enforcement", "block") != "warn"
+        return False
+    denied = policy_denied_dependencies(subjects.items(), policy) if policy is not None else {}
+    enforcement = getattr(policy, "enforcement", "block")
+    if not denied or enforcement == "off":
+        return True
+    blocking = enforcement != "warn"
     for key, reason in sorted(denied.items()):
         message = f"{key}: {reason}"
         logger.error(message) if blocking else logger.warning(message)
     if blocking:
-        from ...core.remediation import COMPILE_DEPENDENCY_DENIED
-
         logger.refusal(
             "Compile blocked by org policy -- nothing was written. "
             f"{COMPILE_DEPENDENCY_DENIED.sentence()}"
         )
+    return not blocking
+
+
+def _enforce_dependency_policy(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> None:
+    """Exit 1 before anything is written when org policy refuses the compile."""
+    if not _dependency_policy_allows(logger, roots, user_scope=user_scope):
         sys.exit(1)
 
 
@@ -1595,7 +1651,8 @@ def compile(  # noqa: PLR0913 -- Click handler
             _run_validation_mode(logger, verbose, source_root)
             return
 
-        _enforce_dependency_policy(logger, source_root)
+        # --root installs under the redirected cwd; judge both roots.
+        _enforce_dependency_policy(logger, [source_root, Path.cwd()])
 
         if watch:
             _run_watch_mode(

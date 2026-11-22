@@ -399,7 +399,14 @@ def replay_matrix(machine: GateMatrix) -> None:
     # denied-dependency: the org policy denies every package of the project.
     machine.run("install", "install", packages=exec_and_mixed)
     machine.deny_by_policy()
-    refused = {"install": 1, "install-frozen": 1, "update": 1, "lock": 1, "audit-ci": 1}
+    refused = {
+        "install": 1,
+        "install-frozen": 1,
+        "update": 1,
+        "lock": 1,
+        "audit-ci": 1,
+        "compile": 1,
+    }
     probes = ("install", "install-frozen", "update", "lock", "audit-ci", "compile", "prune")
     machine.probes(*probes, "mcp-install", exits=refused)
     machine.run("approve", "approve", packages=exec_and_mixed)
