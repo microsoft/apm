@@ -97,3 +97,17 @@ def exec_kinds_phrase(kinds) -> str:
     if len(labels) < 2:
         return "".join(labels)
     return f"{', '.join(labels[:-1])} and {labels[-1]}"
+
+
+def retired_kinds_warnings(hooks, *, skip) -> list[str]:
+    """One warning per retired package naming the kinds its rebuild removes.
+
+    *hooks* maps a lock key to ``(why, kinds)``. A package in *skip* (already
+    reported) or with no kind the rebuild removes (MCP only: MCP admission
+    reports it) gets none.
+    """
+    return [
+        f"{key} {exec_kinds_phrase(kinds)} are no longer allowed ({why}); removing them"
+        for key, (why, kinds) in sorted(hooks.items())
+        if key not in skip and kinds
+    ]

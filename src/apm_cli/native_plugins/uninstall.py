@@ -58,7 +58,7 @@ def retire_disallowed_native_survivors(
     lockfile: Any,
     retirements: Any,
     removed_keys: set[str],
-    hooks: Mapping[str, str],
+    hooks: Mapping[str, object],
     logger: Any,
 ) -> set[str]:
     """Drop the lock record of each surviving native plugin a gate no longer admits.

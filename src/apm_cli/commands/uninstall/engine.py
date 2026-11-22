@@ -1849,7 +1849,7 @@ def gate_retired_hook_survivors(
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
     from ...native_plugins.uninstall import retire_disallowed_native_survivors
-    from ...security.exec_kinds import exec_kinds_phrase
+    from ...security.exec_kinds import retired_kinds_warnings
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1879,16 +1879,9 @@ def gate_retired_hook_survivors(
     hooks = {k: v for k, v in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
-    for key, (why, kinds) in sorted(hooks.items()):
-        # No kind the rebuild removes (e.g. MCP only): MCP admission reports it.
-        if key not in denied and kinds:
-            logger.warning(
-                f"{key} {exec_kinds_phrase(kinds)} are no longer allowed ({why}); removing them"
-            )
-    reasons = {key: why for key, (why, _kinds) in hooks.items()}
-    native = retire_disallowed_native_survivors(
-        lockfile, retirements, removed_keys, reasons, logger
-    )
+    for line in retired_kinds_warnings(hooks, skip=denied):
+        logger.warning(line)
+    native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
     return refreshed | set(denied) | set(hooks) | native, set(denied)
 
 
