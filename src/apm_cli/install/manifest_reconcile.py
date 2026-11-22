@@ -655,7 +655,6 @@ def reconcile_deployed_block(  # noqa: PLR0913 -- deployed-state chokepoint wrap
         evidence=evidence,
         recorded_hashes=prior_hashes,
         user_scope=user_scope,
-        # Survivors' paths are live too: never this removal's to delete (#4750).
         live_paths=[*files, *protected_values],
         # A departing owner (selected removal) releases a skill directory left
         # holding only user content, as prune and install cleanup do (#4162).
@@ -864,7 +863,6 @@ def reconcile_target_deployed_files(
             generic_governed_values=(
                 frozenset(prior_files) if selected_owner_removal else frozenset()
             ),
-            # Survivors' files are never this removal's to delete (#4750).
             protected_values=frozenset(survivor_files) if selected_owner_removal else frozenset(),
             user_scope=user_scope,
         )
