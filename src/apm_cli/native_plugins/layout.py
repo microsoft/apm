@@ -103,6 +103,12 @@ def write_attributes(root: Path, *, enabled: bool) -> None:
         attributes.unlink()
 
 
+def attributes_enabled(root: Path) -> bool:
+    """Whether APM's own ``.gitattributes`` is in place, for a rollback to restore."""
+    attributes = _checked(root, root / ATTRIBUTES_RELATIVE)
+    return attributes.is_file() and attributes.read_text(encoding="utf-8") == ATTRIBUTES_TEXT
+
+
 def prune_empty(root: Path) -> None:
     """Remove the catalog directory and plugins root once nothing is left in them."""
     for empty in (root / ".claude-plugin", root):

@@ -199,6 +199,30 @@ def test_removal_keeps_user_entries_and_explicit_false(project) -> None:
     assert not project.plugins.exists()
 
 
+def test_a_failed_last_plugin_removal_keeps_the_roots_byte_pinned(project, monkeypatch) -> None:
+    """Rollback restores APM's .gitattributes with the catalog, so no checkout
+    converts the line endings of a root the lock still pins."""
+    from apm_cli.claude_plugins import registrar
+    from apm_cli.native_plugins.settings import NativeSettingsError
+
+    project.source("acme/alpha", "alpha")
+    project.reconcile(None)
+    attributes = project.plugins / ".gitattributes"
+    before = attributes.read_bytes()
+    previous = native_ownership(project.lock)
+    project.lock.dependencies.clear()
+
+    def failing_write(path, declaration):
+        raise NativeSettingsError(f"{path}: disk full")
+
+    monkeypatch.setattr(registrar, "write_declaration", failing_write)
+    with pytest.raises(ClaudeNativePluginError, match="disk full"):
+        project.reconcile(previous, prepared=False)
+    assert (project.plugins / "alpha/hooks/run.sh").read_text() == "v1"
+    assert (project.plugins / ".claude-plugin/marketplace.json").is_file()
+    assert attributes.read_bytes() == before
+
+
 def test_an_unparseable_second_file_leaves_every_file_and_root_untouched(project) -> None:
     project.source("acme/alpha", "alpha")
     broken = project.root / _COPILOT
