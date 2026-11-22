@@ -1,0 +1,14 @@
+{
+  "issue": 4594,
+  "fixed_in": "Unreleased",
+  "summary": "A failed MCP configuration write after deploy left the failed attempt's hooks and apm.lock.yaml on disk; the install now rolls back through its deploy journal before the lockfile writer scope commits.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_failure_phase.py::test_failed_install_preserves_state_and_recovers"
+  ]
+}

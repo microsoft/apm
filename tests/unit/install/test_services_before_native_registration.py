@@ -16,9 +16,17 @@ import pytest
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
 from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
-from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
+from apm_cli.deps.lockfile_write_authority import (
+    LockfileWriter,
+    discard_staged_lockfile_writes,
+    lockfile_write_scope,
+)
 from apm_cli.install.context import InstallContext
-from apm_cli.install.errors import InstallFailureAlreadyRendered, PolicyViolationError
+from apm_cli.install.errors import (
+    InstallFailureAlreadyRendered,
+    MCPNativeConflictError,
+    PolicyViolationError,
+)
 from apm_cli.install.phases import claude_plugins, services
 from apm_cli.models.results import InstallDisposition
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -95,7 +103,9 @@ def test_a_committing_reconcile_failure_still_registers_and_commits_once(
 ) -> None:
     ctx = _ctx(tmp_path, None)
     stage = _stage_mcp(ctx)
-    failure = InstallFailureAlreadyRendered("MCP installation incomplete: native-srv (claude)")
+    failure = MCPNativeConflictError(
+        "MCP installation incomplete: native-srv (claude)", wrote_connections=True
+    )
 
     def reconcile(result) -> None:
         stage(result)
@@ -109,6 +119,30 @@ def test_a_committing_reconcile_failure_still_registers_and_commits_once(
     on_disk = get_lockfile_path(tmp_path).read_text(encoding="utf-8")
     assert declared_against == [on_disk]
     assert _SERVER in on_disk
+
+
+def test_a_failed_mcp_write_rolls_the_install_back_and_registers_nothing(
+    tmp_path: Path,
+) -> None:
+    """#4594: a failed MCP config write restores the deploys; nothing commits."""
+    ctx = _ctx(tmp_path, None)
+    stage = _stage_mcp(ctx)
+    failure = InstallFailureAlreadyRendered("MCP configuration failed for selected runtime(s)")
+    ctx.transaction = MagicMock()
+    ctx.transaction.rollback.side_effect = discard_staged_lockfile_writes
+
+    def reconcile(result) -> None:
+        stage(result)
+        raise failure
+
+    ctx.reconcile_services = reconcile
+
+    declared_against = _install_tail(ctx)
+
+    assert ctx.service_failure is failure
+    ctx.transaction.rollback.assert_called_once_with()
+    assert declared_against == []
+    assert not get_lockfile_path(tmp_path).exists()
 
 
 def test_a_refused_reconcile_registers_and_commits_nothing(tmp_path: Path) -> None:

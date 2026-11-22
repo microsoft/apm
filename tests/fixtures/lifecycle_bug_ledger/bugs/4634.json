@@ -1,0 +1,17 @@
+{
+  "issue": 4634,
+  "fixed_in": "Unreleased",
+  "summary": "Reinstalling a local bundle after apm.lock.yaml was lost recorded the bundle's MCP server with bundle provenance although APM did not own the identical .mcp.json entry, so audit --ci and install --frozen rejected the lock; the bundle install now records only the servers it claims and names the unmanaged entry to remove.",
+  "failure_modes": [
+    "outcome",
+    "ownership"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/test_local_bundle_lost_lock_mcp.py::test_bundle_reinstall_after_lost_lock_leaves_a_state_the_gates_accept",
+    "tests/unit/install/test_owned_mcp_integration.py::test_owned_mcp_records_only_servers_this_install_claims"
+  ]
+}
