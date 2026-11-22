@@ -107,6 +107,9 @@ NATIVE_DECLARATIONS: Mapping[str, str] = {
     "claude": ".claude/settings.json",
     "copilot": ".github/copilot/settings.json",
 }
+# The enable key is ``<plugin>@<marketplace>``; APM's project-scope marketplace
+# name carries this prefix (native_plugins/scopes.py), a user's own does not.
+_APM_PROJECT_MARKETPLACE = "apm-p-"
 
 
 def whole_plugin(scope: str, package: str, target: str) -> bool:
@@ -135,7 +138,8 @@ def native_declaration(root: Path, target: str, plugin: str) -> str | None:
     if not path.is_file():
         return None
     enabled = json.loads(path.read_text(encoding="utf-8")).get("enabledPlugins") or {}
-    if any(key.split("@", 1)[0] == plugin and value for key, value in enabled.items()):
+    owned = f"{plugin}@{_APM_PROJECT_MARKETPLACE}"
+    if any(key.startswith(owned) and value for key, value in enabled.items()):
         return relative
     return None
 
@@ -418,12 +422,23 @@ class Scenario:
 
     def native_gaps(self, observation: Observation) -> list[str]:
         """Allowed native cells not deployed whole: a root without its declaration,
-        or neither (#4808)."""
-        return sorted(
-            f"{cell}: found {sorted(observation.cell_paths.get(cell, ()))}"
-            for cell in self.expected_cells()
-            if cell.split("/")[1] == "native" and len(observation.cell_paths.get(cell, ())) != 2
-        )
+        or neither (#4808).
+
+        A declaration file that holds declared user bytes is the user's (I1-X2
+        forbids APM to change it), so its cell needs only the root.
+        """
+        gaps = []
+        for cell in sorted(self.expected_cells()):
+            package, kind, target = cell.split("/")
+            if kind != "native":
+                continue
+            found = observation.cell_paths.get(cell, frozenset())
+            wanted = {SURFACE_GLOBS[(self.scope, kind, target)].format(pkg=package.split(":")[0])}
+            if NATIVE_DECLARATIONS[target] not in self.user_bytes:
+                wanted.add(NATIVE_DECLARATIONS[target])
+            if not wanted <= found:
+                gaps.append(f"{cell}: found {sorted(found)}, wanted {sorted(wanted)}")
+        return gaps
 
     def _user_files(self) -> frozenset[str]:
         """I1-X2: declared user writes the lock does not record: the user's files.

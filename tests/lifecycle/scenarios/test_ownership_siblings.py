@@ -1020,7 +1020,11 @@ def test_a_native_plugin_is_one_gated_cell_at_project_scope(lifecycle_world) -> 
     """
     use_policy(lifecycle_world, "allow")
     targets = ("claude", "copilot")
-    scenario = Scenario(lifecycle_world, ("p-native-claude",), policy="allow", targets=targets)
+    # The carried skill and MCP kinds are observed too, so a loose copy fails the model.
+    kinds = {"p-native-claude": ("native", "skill", "mcp")}
+    scenario = Scenario(
+        lifecycle_world, ("p-native-claude",), kinds=kinds, policy="allow", targets=targets
+    )
     scenario.run("install p-native-claude")
     scenario.run("approve p-native-claude")
     scenario.run("install")
