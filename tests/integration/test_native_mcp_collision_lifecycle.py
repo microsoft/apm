@@ -464,7 +464,7 @@ def test_partial_install_retains_deferred_names_in_active_target(
     assert kept.returncode == 1, kept.stdout + kept.stderr
     kept_output = " ".join((kept.stdout + kept.stderr).split())
     assert "Preserved MCP connection(s) notes" in kept_output, kept_output
-    assert set(scenario.servers(target)) == {"new", "notes"}
+    assert set(scenario.servers(target)) == {"new", "notes", "old"}
     assert scenario.servers(target)["notes"] == personal
     path = scenario.path(target)
     if target == "claude":
