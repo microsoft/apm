@@ -148,7 +148,9 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
                 continue
             data = (project_root / rel).read_bytes()
             extras.append([rel, before.get(rel), _store_put(store, data)])
-        key = _extras_key(lock_path.read_text(encoding="utf-8"), (project_root / "apm.yml").read_bytes())
+        key = _extras_key(
+            lock_path.read_text(encoding="utf-8"), (project_root / "apm.yml").read_bytes()
+        )
         index = store / _EXTRAS_DIR / f"{key}.json"
         index.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=index.parent, prefix=".idx.")
@@ -160,7 +162,12 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
 
 
 def _within(root: Path, rel: str) -> Path:
-    if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in rel.split("/")):
+    if (
+        not rel
+        or rel.startswith("/")
+        or "\\" in rel
+        or any(p in ("", ".", "..") for p in rel.split("/"))
+    ):
         raise Decline(f"unsafe path {rel!r}")
     path = root / rel
     current = root
@@ -254,7 +261,9 @@ def _copy_package(checkout: Path, install_path: Path, sha: str) -> None:
     install_path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(dir=install_path.parent, prefix=f".{install_path.name}."))
     try:
-        shutil.copytree(checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(
+            checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git")
+        )
         os.replace(staging, install_path)
     except BaseException:
         _discard_staging(staging)
@@ -374,11 +383,16 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         return False
     count = len(files) + len(extras)
     _trace(f"applied a verified diff ({count} files)")
-    from apm_cli.utils.console import _rich_info, _rich_success
+    from apm_cli.utils.console import _rich_success
 
     if not (count or packages):
-        elapsed = time.perf_counter() - started
-        _rich_info(f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info")
+        # The empty diff prints the full no-op's lines through the same owners.
+        from apm_cli.core.scope import manifest_file
+        from apm_cli.install import fast_output
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(manifest_file(project_root))
+        fast_output.render(project_root, lock, manifest, started=started)
         return True
 
     _rich_success(
