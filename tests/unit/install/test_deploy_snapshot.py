@@ -272,3 +272,28 @@ def test_the_journal_settles_before_a_failing_post_commit_action(
     # The lockfile reached disk and records the deploy, so rollback keeps it.
     assert lock.exists()
     assert deployed.read_bytes() == b"a\n"
+
+
+def test_a_rolled_back_install_restores_an_mcp_config_it_wrote(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """#4594: an MCP config written before a later service failure is restored."""
+    from apm_cli.adapters.client.base import journal_config_write
+
+    project = tmp_path / "project"
+    config = project / ".cursor" / "mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(b'{"mcpServers": {"mine": {"command": "x"}}}\n')
+    created = project / ".gemini" / "settings.json"
+    transaction = _transaction(project)
+    transaction.journal_deploy_writes()
+
+    journal_config_write(config)
+    config.write_bytes(b'{"mcpServers": {"mine": {}, "apm-srv": {}}}\n')
+    journal_config_write(created)
+    created.parent.mkdir(parents=True)
+    created.write_bytes(b"{}\n")
+    transaction.rollback()
+
+    assert config.read_bytes() == b'{"mcpServers": {"mine": {"command": "x"}}}\n'
+    assert not (project / ".gemini").exists()

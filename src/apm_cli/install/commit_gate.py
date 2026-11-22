@@ -279,8 +279,39 @@ def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage
         enforce_installed_hash_policy(ctx, ctx.existing_lockfile if frozen else prospective)
     if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
         _check_merged_mcp_policy(ctx, prospective)
+        if not ctx.dry_run:
+            _refuse_native_mcp_collisions(ctx)
     if write_plan and not ctx.dry_run and not ctx.force:
         _refuse_unproven_overwrites(ctx, write_plan)
+
+
+def _refuse_native_mcp_collisions(ctx: InstallContext) -> None:
+    """Refuse an MCP server that collides with a native connection, before any write (#4268).
+
+    The targets resolve as the later MCP stage resolves them, from the
+    command's ``--runtime`` and ``--exclude`` (carried by ``lsp_preflight``);
+    without them the MCP stage runs the same projection before its first write.
+    """
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.install.lsp.integration import lsp_target_config
+    from apm_cli.install.mcp.collision_preflight import refuse_unrecorded_mcp_collisions
+
+    filters = ctx.lsp_preflight
+    if filters is None or ctx.target_decision is None or not ctx.preview_mcp_dependencies:
+        return
+    refuse_unrecorded_mcp_collisions(
+        ctx.preview_mcp_dependencies,
+        lockfile=ctx.existing_lockfile,
+        project_root=ctx.project_root,
+        user_scope=is_user_scope(ctx.scope),
+        logger=ctx.logger,
+        runtime=filters.runtime,
+        exclude=filters.exclude,
+        apm_config=lsp_target_config(ctx.apm_package),
+        explicit_target=ctx.target_decision.value,
+        target_decision=ctx.target_decision,
+        scope=ctx.scope,
+    )
 
 
 # (package_info, its PackageDeploymentPlan, the managed files it integrates with)

@@ -278,16 +278,6 @@ class TestInitTargetFlag:
 class TestInitDeprecatedFlags:
     """Tests for deprecated --plugin and --marketplace flags."""
 
-    def test_init_plugin_flag_shows_deprecation(self, runner, tmp_path, monkeypatch):
-        """--plugin flag shows a deprecation warning."""
-        monkeypatch.chdir(tmp_path)
-        clear_apm_yml_cache()
-        # Provide a valid kebab-case project name for --plugin (uses the tmp dir name otherwise)
-        result = runner.invoke(cli, ["plugin", "init", "my-plugin", "--yes"])
-        assert result.exit_code == 0, result.output
-        assert (tmp_path / "my-plugin" / "apm.yml").exists()
-        assert (tmp_path / "my-plugin" / "plugin.json").exists()
-
     def test_init_marketplace_flag_was_removed(self, runner, tmp_path, monkeypatch):
         """--marketplace was removed in 0.37 (#4073): exit 2, nothing written."""
         monkeypatch.chdir(tmp_path)

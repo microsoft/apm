@@ -17,9 +17,13 @@ from scripts.merge_queue.api import REPO, Api, get_all
 CLOSING_QUERY = (
     "query($owner: String!, $name: String!, $pr: Int!) {"
     " repository(owner: $owner, name: $name) { pullRequest(number: $pr) {"
-    " closingIssuesReferences(first: 50) { nodes { number } } } } }"
+    " closingIssuesReferences(first: 50) { nodes { number repository { nameWithOwner } } } } } }"
 )
-_KEYWORD = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.IGNORECASE)
+# GitHub's closing keywords, with a bare "#n" or a qualified "owner/repo#n".
+_KEYWORD = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+([\w.-]+/[\w.-]+)?#(\d+)\b",
+    re.IGNORECASE,
+)
 _OK = (200, 201, 204)
 
 
@@ -28,6 +32,8 @@ class Audit:
     pr: int
     fixes: tuple[int, ...]
     closing: tuple[int, ...]
+    # Closures in other repositories ("owner/repo#n"): a ticket never declares them.
+    foreign: tuple[str, ...] = ()
 
     @property
     def missing(self) -> list[int]:
@@ -41,11 +47,12 @@ class Audit:
 
     @property
     def clean(self) -> bool:
-        return not self.missing and not self.extra
+        return not self.missing and not self.extra and not self.foreign
 
 
-def closing_references(api: Api, pr: int) -> tuple[int, ...]:
-    """Issues the merge will close: linked or body references, plus commit keywords."""
+def closing_references(api: Api, pr: int) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """Issues the merge will close, from linked or body references and commit keywords:
+    this repository's numbers, and any other repository's issues fully qualified."""
     owner, name = REPO.split("/")
     response = api.post(
         "graphql",
@@ -55,14 +62,18 @@ def closing_references(api: Api, pr: int) -> tuple[int, ...]:
     if response.status != 200 or body.get("errors") or not body.get("data"):
         raise RuntimeError(f"closingIssuesReferences for #{pr} failed: {response.body}")
     nodes = body["data"]["repository"]["pullRequest"]["closingIssuesReferences"]["nodes"]
-    numbers = {int(node["number"]) for node in nodes}
+    refs = {(node["repository"]["nameWithOwner"], int(node["number"])) for node in nodes}
     for commit in get_all(api, f"repos/{REPO}/pulls/{pr}/commits"):
-        numbers.update(int(n) for n in _KEYWORD.findall(commit["commit"]["message"]))
-    return tuple(sorted(numbers))
+        for repo, number in _KEYWORD.findall(commit["commit"]["message"]):
+            refs.add((repo or REPO, int(number)))
+    local = tuple(sorted(n for repo, n in refs if repo.lower() == REPO.lower()))
+    foreign = tuple(sorted(f"{repo}#{n}" for repo, n in refs if repo.lower() != REPO.lower()))
+    return local, foreign
 
 
 def audit(api: Api, pr: int, fixes: tuple[int, ...]) -> Audit:
-    return Audit(pr, tuple(sorted(fixes)), closing_references(api, pr))
+    closing, foreign = closing_references(api, pr)
+    return Audit(pr, tuple(sorted(fixes)), closing, foreign)
 
 
 def settle(api: Api, fixes: tuple[int, ...], head_branch: str) -> tuple[list[str], bool]:

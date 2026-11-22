@@ -13,8 +13,11 @@
 #     tests/integration/test_install_*.py file for install-path changes.
 # The full integration suite still runs once per train head (merge_group,
 # merge-train refs), never per pull request. scripts/owner_surface.py splits
-# the slice into the 3 shards itself: scripts.ci_sharding refuses empty
-# shards, so a slice too small to split runs whole on shard 1.
+# the slice into the matrix's shards itself (the count is strategy.job-total):
+# scripts.ci_sharding refuses empty shards, so a slice too small to split runs
+# whole on shard 1. Four shards, because the durations file is measured on the
+# whole suite, while each slice shard pays the 40-80s module baselines of the
+# mutation tests per worker: an install-path slice took 14m on 3 shards (#4746).
 #
 # `Owner Surface Check` always reports and is REQUIRED: merge-gate.yml lists it
 # in every EXPECTED_CHECKS context, and merge-train.yml calls this workflow
@@ -78,14 +81,15 @@ jobs:
         python3 -m scripts.owner_surface plan --base "$BASE_SHA" --out owner-surface-changed.txt
 
   slice:
-    name: Owner Surface Slice (${{ matrix.shard }}/3)
+    name: Owner Surface Slice (${{ matrix.shard }}/${{ strategy.job-total }})
     needs: [select]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # About 1.5x the expected p95 (13 minutes) of an install-path slice on 4 shards.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       if: needs.select.outputs.run == 'true'
@@ -116,11 +120,12 @@ jobs:
         APM_E2E_TESTS: "1"
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         SHARD: ${{ matrix.shard }}
+        SHARD_COUNT: ${{ strategy.job-total }}
       run: |
         python3 -m scripts.owner_surface plan --base "$BASE_SHA" --out owner-surface-changed.txt
         uv run --frozen --extra dev python -m scripts.owner_surface run \
           --base "$BASE_SHA" --changed owner-surface-changed.txt \
-          --shard "$SHARD/3" --durations .github/ci-durations/linux-x86_64.json -- \
+          --shard "$SHARD/$SHARD_COUNT" --durations .github/ci-durations/linux-x86_64.json -- \
           -p no:cacheprovider -m "$HERMETIC_MARK_EXPR" -n 4 --dist loadgroup --durations=15
 
   owner-surface:
