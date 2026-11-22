@@ -230,7 +230,7 @@ def test_uninstall_keeps_a_bundle_owned_instruction(lifecycle_world) -> None:
 
 
 def test_bundle_ships_root_skills_with_apm_dir(lifecycle_world) -> None:
-    """Strict known cell bundle-ships-root-skills-with-apm-dir (#4709)."""
+    """A bundle of a package with .apm/ still ships its root skills (#4709)."""
     root = _author(lifecycle_world, "f-bun")
     manifest = root / "apm.yml"
     data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
@@ -240,8 +240,7 @@ def test_bundle_ships_root_skills_with_apm_dir(lifecycle_world) -> None:
     assert bundle.is_file(), bundle
     names = {name.split("/", 1)[1] for name in zipfile.ZipFile(bundle).namelist()}
     assert "instructions/f-bun.instructions.md" in names, sorted(names)
-    with known_defect("#4709", r"^the bundle drops the root skill"):
-        assert "skills/f-bun/SKILL.md" in names, f"the bundle drops the root skill: {sorted(names)}"
+    assert "skills/f-bun/SKILL.md" in names, f"the bundle drops the root skill: {sorted(names)}"
 
 
 CREDITS = credits(
