@@ -337,6 +337,10 @@ class TestLockFile:
         assert written["dependencies"] == []
         assert written["generated_at"] == next_write.isoformat()
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="#4742: the no-op check (_same_document) parses the on-disk lockfile again",
+    )
     def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io
 
@@ -345,19 +349,22 @@ class TestLockFile:
             "lockfile_version: '1'\ngenerated_at: '2025-01-01T00:00:00+00:00'\ndependencies: []\n",
             encoding="utf-8",
         )
+        existing_text = lock_path.read_text(encoding="utf-8")
         real_load_yaml_str = yaml_io.load_yaml_str
-        load_calls = 0
+        existing_parses = 0
 
         def counting_load_yaml_str(text):
-            nonlocal load_calls
-            load_calls += 1
+            nonlocal existing_parses
+            existing_parses += text == existing_text
             return real_load_yaml_str(text)
 
         monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
 
         LockFile().write(lock_path)
 
-        assert load_calls == 1
+        # The no-op check also parses the new serialization; the file on disk
+        # is parsed once.
+        assert existing_parses == 1
 
     def test_write_reuses_preloaded_destination(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io

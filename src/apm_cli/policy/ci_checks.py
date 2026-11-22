@@ -839,6 +839,38 @@ def _check_native_mcp_ownership(
     )
 
 
+def _kept_mcp_entries(
+    project_root: Path, lock: LockFile, *, user_scope: bool, lockless: bool = False
+) -> tuple[CheckResult, ...]:
+    """Report MCP entries install kept without a lockfile because it could not prove them (#4737).
+
+    Empty when nothing was kept, so audit output is unchanged for every other project.
+    """
+    from ..install.mcp.write_receipts import kept_mcp_writes, unusable_mcp_evidence
+
+    kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
+    details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
+    # Without a lockfile, unusable evidence keeps every entry it lists, so it is
+    # reported; with one, the lockfile governs cleanup and the record is unused.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope) if lockless else None
+    if unusable is not None:
+        details.append(unusable)
+    if not details:
+        return ()
+    check = CheckResult(
+        name="kept-mcp-entries",
+        passed=False,
+        message=(
+            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
+            "longer deploys because it cannot confirm them -- "
+            f"{remediation.KEPT_MCP_ENTRIES.clause()}"
+        ),
+        remediations=(remediation.KEPT_MCP_ENTRIES,),
+        details=details,
+    )
+    return (check,)
+
+
 @dataclass(frozen=True)
 class DeployedHashDrift:
     """One deployed file whose on-disk bytes differ from its locked hash envelope."""
@@ -1646,6 +1678,9 @@ def run_baseline_checks(
                 deployment_root, LockFile(), resolved_targets, user_scope=user_scope
             )
         )
+        result.checks.extend(
+            _kept_mcp_entries(deployment_root, LockFile(), user_scope=user_scope, lockless=True)
+        )
         return result
 
     if lock is None or manifest is None:
@@ -1702,17 +1737,24 @@ def run_baseline_checks(
 
     # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
     # entry --frozen refuses (#4477)
-    if _run(
-        _check_config_consistency(
-            manifest,
-            lock,
-            prepared_replay=prepared_replay,
-            prepared_replay_error=prepared_replay_error,
-            replay_error_owner=replay_error_owner,
-            no_policy=no_policy,
+    if (
+        _run(
+            _check_config_consistency(
+                manifest,
+                lock,
+                prepared_replay=prepared_replay,
+                prepared_replay_error=prepared_replay_error,
+                replay_error_owner=replay_error_owner,
+                no_policy=no_policy,
+            )
         )
-    ) or _run(
-        _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
+        or _run(
+            _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
+        )
+        # 7c: MCP entries kept without a lockfile because they could not be proven (#4737)
+        or any(
+            _run(check) for check in _kept_mcp_entries(deployment_root, lock, user_scope=user_scope)
+        )
     ):
         return result
 

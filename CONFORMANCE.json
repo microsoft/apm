@@ -109,7 +109,7 @@
     },
     {
       "behavioral_tests": [
-        "tests/test_lockfile.py::TestLockFile::test_to_yaml"
+        "tests/unit/deps/test_lockfile.py::TestLockFile::test_to_yaml"
       ],
       "conformance_class": "consumer",
       "id": "req-lk-001",
@@ -119,7 +119,7 @@
       "test_count": 2,
       "tests": [
         "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_valid_v2_passes_schema",
-        "tests/test_lockfile.py::TestLockFile::test_to_yaml"
+        "tests/unit/deps/test_lockfile.py::TestLockFile::test_to_yaml"
       ]
     },
     {
