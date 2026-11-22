@@ -458,10 +458,25 @@ def test_partial_install_retains_deferred_names_in_active_target(
     assert result.returncode == 1, result.stdout + result.stderr
     assert scenario.path(target).read_bytes() == config_before
     assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
+    # The refusal kept the edited claim, so retiring it preserves the entry.
     scenario.declare([{**_http(), "name": "new"}])
-    _success(scenario.install(targets=target))
+    kept = scenario.install(targets=target)
+    assert kept.returncode == 1, kept.stdout + kept.stderr
+    kept_output = " ".join((kept.stdout + kept.stderr).split())
+    assert "Preserved MCP connection(s) notes" in kept_output, kept_output
     assert set(scenario.servers(target)) == {"new", "notes"}
     assert scenario.servers(target)["notes"] == personal
+    path = scenario.path(target)
+    if target == "claude":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["mcpServers"].pop("notes")
+        path.write_text(json.dumps(document), encoding="utf-8")
+    else:
+        document = tomlkit.parse(path.read_text(encoding="utf-8"))
+        document["mcp_servers"].pop("notes")
+        path.write_text(tomlkit.dumps(document), encoding="utf-8")
+    _success(scenario.install(targets=target))
+    assert set(scenario.servers(target)) == {"new"}
     assert scenario.lock().mcp_target_servers == {target: ["new"]}
 
 
