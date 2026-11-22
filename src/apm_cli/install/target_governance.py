@@ -120,5 +120,8 @@ def retired_native_plugins(
             target_retired(name, active_targets=active_targets, declared_targets=declared_targets)
             for name in harnesses
         ):
-            retired[key] = (record.root, min(harnesses))
+            # Name a harness the lock's declaration recorded, so the #4517 precedence filter
+            # in dropped_target_files keeps it; the retirement decision above is unchanged.
+            recorded = harnesses & frozenset(getattr(lockfile, "manifest_targets", None) or ())
+            retired[key] = (record.root, min(recorded or harnesses))
     return retired
