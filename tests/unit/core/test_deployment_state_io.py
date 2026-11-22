@@ -205,6 +205,7 @@ def test_departing_proof_superseding_a_generic_row_is_consumed_once(tmp_path: Pa
         kind=LocatorKind.PROJECT_RELATIVE,
         target="legacy-generic",
         value=concrete.value,
+        runtime=None,
         scope="project",
     )
     prior = DeploymentLedger(

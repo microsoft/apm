@@ -93,7 +93,6 @@ def test_reported_package_failure_makes_uninstall_incomplete(
 
 def test_critical_security_block_counts_as_survivor_failure() -> None:
     """A survivor blocked for critical hidden characters makes uninstall incomplete (#4703)."""
-    from apm_cli.commands.uninstall.engine import _reintegration_failure_count
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
     diagnostics = DiagnosticCollector()
@@ -102,4 +101,4 @@ def test_critical_security_block_counts_as_survivor_failure() -> None:
     diagnostics.security("Suspicious text", package="other", severity="warning")
 
     assert diagnostics.error_count == 0
-    assert _reintegration_failure_count(diagnostics) == 1
+    assert diagnostics.failed_package_count == 1

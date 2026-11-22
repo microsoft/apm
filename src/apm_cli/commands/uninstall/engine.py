@@ -1764,25 +1764,8 @@ def _sync_integrations_after_uninstall(
         failed_paths=failed_hook_paths,
         error_count=result.get("errors", 0),
         materialization_session=materialization_session,
-        package_failures=_reintegration_failure_count(reintegration_diagnostics),
+        package_failures=reintegration_diagnostics.failed_package_count,
     )
-
-
-def _reintegration_failure_count(diagnostics) -> int:
-    """Survivor failures: recorded errors plus packages a critical security finding blocked.
-
-    A survivor blocked for critical hidden characters is reported as a security
-    finding, not an error, but it was not rebuilt, so uninstall is incomplete.
-    """
-    from ...utils.diagnostics import CATEGORY_SECURITY
-
-    blocked = {
-        d.package
-        for items in diagnostics.by_category().values()
-        for d in items
-        if d.category == CATEGORY_SECURITY and d.severity == "critical"
-    }
-    return diagnostics.error_count + len(blocked)
 
 
 def _restage_changed_local_survivors(

@@ -310,6 +310,20 @@ class DiagnosticCollector:
         return sum(1 for d in self._diagnostics if d.category == CATEGORY_DRIFT)
 
     @property
+    def failed_package_count(self) -> int:
+        """Errors plus each package a critical security finding blocked (#4703).
+
+        A package blocked for critical hidden characters is recorded as a
+        security finding, not an error, but it was not deployed.
+        """
+        blocked = {
+            d.package
+            for d in self._diagnostics
+            if d.category == CATEGORY_SECURITY and d.severity == "critical"
+        }
+        return self.error_count + len(blocked)
+
+    @property
     def has_critical_security(self) -> bool:
         """Return True if any critical-severity security finding exists."""
         return any(
