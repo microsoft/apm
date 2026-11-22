@@ -253,10 +253,10 @@ def test_frozen_install_never_flushes_the_lockfile(tmp_path: Path, apm_binary_pa
 
 
 @_needs_inotify
-def test_failed_install_records_what_it_deployed_in_one_write(
+def test_a_failed_mcp_write_restores_the_deploys_and_writes_no_lockfile(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A failure after deployment commits the lockfile once, recording what reached disk."""
+    """A failed MCP write after deployment restores the deploys; the lockfile is never written (#4594)."""
     scenario = _new_scenario(tmp_path / "failed", apm_binary_path, ("copilot",))
     installed = _run(scenario, _INSTALL, "failed-baseline")
     assert installed.returncode == 0, _evidence(installed)
@@ -275,14 +275,18 @@ def test_failed_install_records_what_it_deployed_in_one_write(
     (root / ".mcp.json").unlink()
     (root / ".mcp.json").mkdir()
 
+    lock_before = (root / _LOCKFILE).read_bytes()
+
     with count_lockfile_writes(root) as counter:
         failed = _run(scenario, _INSTALL, "failed-install")
 
     assert failed.returncode != 0, _evidence(failed)
     assert "late-server" in failed.stdout + failed.stderr, _evidence(failed)
-    assert counter.writes == 1, counter.events
+    assert "Deployed files restored to their previous state." in failed.stdout + failed.stderr
+    assert counter.writes == 0, counter.events
+    assert (root / _LOCKFILE).read_bytes() == lock_before
     lock = load_yaml(root / _LOCKFILE)
-    assert any("late-mcp" in key for key in _dependency_keys(lock)), lock
+    assert not any("late-mcp" in key for key in _dependency_keys(lock)), lock
 
 
 _HTTP_MCP = ("--transport", "http", "--url", "https://mcp.example.invalid/mcp")
