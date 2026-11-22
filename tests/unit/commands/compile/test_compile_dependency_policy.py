@@ -246,3 +246,139 @@ def test_a_package_a_pre_compile_script_installs_is_judged_before_rendering(
     assert exit_info.value.code == 1
     assert ("error", "acme/denied: org policy: denied by pattern") in logger.lines
     assert not (tmp_path / "AGENTS.md").exists()
+
+
+def _deny_refs_named_denied(subjects, _policy):
+    return {
+        key: "org policy: denied by pattern"
+        for key, ref in subjects
+        if "denied" in str(getattr(ref, "repo_url", ""))
+    }
+
+
+def _replaced_lock(root: Path) -> None:
+    """A lock whose owner/upstream row resolves, by a replace: rule, to a denied fork."""
+    from apm_cli.models.dependency.reference import DependencyReference
+    from apm_cli.models.dependency.replacement import (
+        ReplacementBinding,
+        parse_replace_block,
+        project_effective_reference,
+    )
+
+    block = [
+        {
+            "for": {"git": "https://github.com/owner/upstream"},
+            "with": {"git": "https://github.com/denied-fork/upstream", "ref": "fixed"},
+        }
+    ]
+    original = DependencyReference(repo_url="owner/upstream", host="github.com", reference="v1")
+    rule = parse_replace_block(block)[0]
+    binding = ReplacementBinding(original, rule)
+    binding.record(original, None, False)
+    effective = project_effective_reference(original, rule)
+    effective.replacement = binding
+    lock = LockFile()
+    lock.replacements = block
+    lock.add_dependency(
+        LockedDependency.from_dependency_ref(
+            dep_ref=effective, resolved_commit="a" * 40, depth=1, resolved_by=None
+        )
+    )
+    lock.write(root / "apm.lock.yaml")
+
+
+def test_the_lock_derived_source_is_judged_not_the_declared_one(tmp_path: Path) -> None:
+    """--root with a replace: rule: the lock's effective source wins over the manifest entry."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "apm.yml").write_text(
+        yaml.safe_dump(
+            {"name": "p", "version": "1.0.0", "dependencies": {"apm": ["owner/upstream"]}}
+        ),
+        encoding="utf-8",
+    )
+    redirected = tmp_path / "redirected"
+    (redirected / "apm_modules" / "owner" / "upstream").mkdir(parents=True)
+    _replaced_lock(redirected)
+    logger = _Logger()
+    with (
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="block")),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            side_effect=_deny_refs_named_denied,
+        ),
+    ):
+        allowed = _dependency_policy_allows(logger, [source, redirected])
+
+    assert allowed is False
+    assert ("error", "owner/upstream: org policy: denied by pattern") in logger.lines
+    assert (redirected / "apm.lock.yaml").is_file()
+
+
+def test_a_script_that_swaps_a_locked_source_is_judged_before_rendering(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Same key, new source: the recheck judges the current inventory, not the keys seen."""
+    from apm_cli.commands.compile import cli as compile_cli
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\n", encoding="utf-8")
+    lock = LockFile()
+    lock.dependencies["owner/upstream"] = LockedDependency(repo_url="owner/upstream")
+    lock.write(tmp_path / "apm.lock.yaml")
+
+    class _Runner:
+        def scripts_for_event(self, _event):
+            return []
+
+        def fire(self, _event, _payload):
+            _replaced_lock(tmp_path)  # same key, now resolving to a denied fork
+
+    logger = _Logger()
+    with (
+        patch("apm_cli.core.lifecycle_scripts.build_runner_from_context", return_value=_Runner()),
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="block")),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            side_effect=_deny_refs_named_denied,
+        ),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        compile_cli._run_compilation(
+            logger,
+            None,
+            "AGENTS.md",
+            False,
+            False,
+            None,
+            True,
+            False,
+            False,
+            False,
+            True,
+            False,
+            source_root=tmp_path,
+            run_scripts=True,
+        )
+
+    assert exit_info.value.code == 1
+    assert ("error", "owner/upstream: org policy: denied by pattern") in logger.lines
+    assert not (tmp_path / "AGENTS.md").exists()
+
+
+def test_warn_enforcement_reports_each_package_once_per_command(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    logger = _Logger()
+    with (
+        patch(_RESOLVE, return_value=SimpleNamespace(enforcement="warn")),
+        patch(
+            "apm_cli.install.exec_gate.policy_denied_dependencies",
+            return_value={"acme/denied": "org policy: denied by pattern"},
+        ),
+    ):
+        assert _dependency_policy_allows(logger, [project]) is True
+        assert _dependency_policy_allows(logger, [project]) is True
+
+    warned = [line for line in logger.lines if line[0] == "warning"]
+    assert warned == [("warning", "acme/denied: org policy: denied by pattern")]
+    assert (project / "apm.lock.yaml").is_file()

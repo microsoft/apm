@@ -626,15 +626,16 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
 def _pre_compile_then_validate(
     logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
 ) -> None:
-    """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
-    if not run or source_root is None:
-        return
-    roots = [source_root, Path.cwd()]
-    judged = frozenset(_policy_subjects(roots, user_scope=False))
-    _fire_pre_compile(logger, verbose, source_root)
-    _validate_project(logger, False, source_root, allow_empty=clean)
-    # A script may have installed packages after the early check: judge those.
-    _enforce_dependency_policy(logger, roots, skip=judged)
+    """When ``run``, fire pre-compile scripts, then check the project they may have populated.
+
+    Under the lifecycle lock, right before rendering, the org dependency policy
+    judges the current installed inventory again: a script or an install that
+    finished while compile waited for the lock may have changed it.
+    """
+    if run and source_root is not None:
+        _fire_pre_compile(logger, verbose, source_root)
+        _validate_project(logger, False, source_root, allow_empty=clean)
+    _enforce_dependency_policy(logger, [source_root or Path.cwd(), Path.cwd()])
 
 
 def _validate_project(
@@ -775,16 +776,13 @@ def _policy_subjects(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
         for root in unique_roots
         for key, ref in _rendered_dependencies(root, user_scope=user_scope)
     }
-    subjects.update(_declared_across_roots(unique_roots, user_scope=user_scope))
+    for key, ref in _declared_across_roots(unique_roots, user_scope=user_scope).items():
+        subjects.setdefault(key, ref)  # the lock's effective source (replace:) wins
     return subjects
 
 
 def _dependency_policy_allows(
-    logger: CommandLogger,
-    roots: list[Path],
-    *,
-    user_scope: bool = False,
-    skip: frozenset[str] = frozenset(),
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
 ) -> bool:
     """Whether org policy lets compile render what is installed under *roots*.
 
@@ -793,7 +791,7 @@ def _dependency_policy_allows(
     and uninstall apply, routed through the trust policy owner so an unusable
     policy fails closed as install does. ``enforcement: warn`` reports and
     allows. Reports each denied package and the remediation when it refuses.
-    Packages in *skip* were already judged by this command.
+    A warning already reported to *logger* (this command) is not repeated.
     """
     from ...core.remediation import COMPILE_DEPENDENCY_DENIED
     from ...core.scope import manifest_root
@@ -803,7 +801,6 @@ def _dependency_policy_allows(
 
     unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
     subjects = _policy_subjects(unique_roots, user_scope=user_scope)
-    subjects = {key: ref for key, ref in subjects.items() if key not in skip}
     if not subjects:
         return True
     try:
@@ -818,9 +815,17 @@ def _dependency_policy_allows(
     if not denied or enforcement == "off":
         return True
     blocking = enforcement != "warn"
+    # The command judges twice (before and under its lock); warn once per package.
+    warned: set[str] = getattr(logger, "_apm_policy_warned", set())
     for key, reason in sorted(denied.items()):
         message = f"{key}: {reason}"
-        logger.error(message) if blocking else logger.warning(message)
+        if blocking:
+            logger.error(message)
+        elif message not in warned:
+            logger.warning(message)
+            warned.add(message)
+    if not blocking:
+        logger._apm_policy_warned = warned
     if blocking:
         logger.refusal(
             "Compile blocked by org policy -- nothing was written. "
@@ -830,14 +835,10 @@ def _dependency_policy_allows(
 
 
 def _enforce_dependency_policy(
-    logger: CommandLogger,
-    roots: list[Path],
-    *,
-    user_scope: bool = False,
-    skip: frozenset[str] = frozenset(),
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
 ) -> None:
     """Exit 1 before anything is written when org policy refuses the compile."""
-    if not _dependency_policy_allows(logger, roots, user_scope=user_scope, skip=skip):
+    if not _dependency_policy_allows(logger, roots, user_scope=user_scope):
         sys.exit(1)
 
 
