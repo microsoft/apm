@@ -240,3 +240,29 @@ def compute_policy_hash(content: str | bytes, algorithm: str = _DEFAULT_HASH_ALG
     raise ProjectPolicyConfigError(
         f"Refusing to compute policy hash with unsupported algorithm '{algorithm}'"
     )
+
+
+def _split_hash_pin(expected_hash: str) -> tuple[str, str]:
+    """Split an ``"<algo>:<hex>"`` pin into (algorithm, lowercase_hex).
+
+    Bare hex (no prefix) is interpreted as sha256 for backwards
+    compatibility -- callers that care about the algorithm should pass a
+    fully-qualified pin. Raises :class:`ProjectPolicyConfigError` on a
+    structurally invalid pin (unsupported algorithm, wrong length, non
+    hex). The discovery helpers translate that into a fail-closed
+    ``hash_mismatch`` outcome rather than crashing.
+    """
+    raw = expected_hash.strip()
+    if ":" in raw:
+        algo, _, hex_part = raw.partition(":")
+        algo = algo.strip().lower()
+    else:
+        algo = _DEFAULT_HASH_ALGORITHM
+        hex_part = raw
+    hex_part = hex_part.strip().lower()
+    if algo not in ALLOWED_HASH_ALGORITHMS:
+        raise ProjectPolicyConfigError(f"Unsupported policy.hash algorithm '{algo}'")
+    expected_len = _HASH_HEX_LEN[algo]
+    if len(hex_part) != expected_len or not _HEX_RE.match(hex_part):
+        raise ProjectPolicyConfigError(f"policy.hash is not a valid {algo} digest")
+    return algo, hex_part

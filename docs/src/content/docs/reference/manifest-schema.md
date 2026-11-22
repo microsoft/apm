@@ -530,6 +530,12 @@ shorthand_form  = [host [":" port] "/"] owner "/" repo ["/" virtual_path] ["#" r
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
+A `local_path_form` that begins with `.\`, `..\` or `~\` is normalised to POSIX
+form on read: `.\pkg`, `..\pkg` and `~\pkg` resolve, lock and deploy exactly
+like `./pkg`, `../pkg` and `~/pkg` on every platform, and pass the same checks.
+Windows drive-letter (`C:\pkg`) and UNC (`\\server\share`) paths are not
+normalised.
+
 The `host:port` shorthand resolves as HTTPS. SSH custom ports require the
 `ssh://` URL form.
 
@@ -688,7 +694,7 @@ Marketplace dependency (resolved at install time):
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
 | `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity; `apm install plugin@catalog` writes it to `apm.yml` in registry form (`id`, `registry`, `version`), and its lock row replays from the exact `version`, `resolved_url` and `resolved_hash`, with no commit. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
 When `version` is a semver range or bare version number (for example
 `~2.1.0`, `^2.0`, or `2.1.0`), the resolver uses the plugin source's
