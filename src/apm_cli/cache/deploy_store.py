@@ -23,6 +23,7 @@ digest is line-ending-normalized, apm#1952); either may be the one kept.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
 import stat
@@ -37,6 +38,12 @@ DEPLOY_BUCKET = "deploy_v1"
 _KEY_RE = re.compile(r"[0-9a-f]{64}")
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
+# Windows junctions and other reparse points pass lstat as directories.
+_REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _is_reparse(info: os.stat_result) -> bool:
+    return bool(getattr(info, "st_file_attributes", 0) & _REPARSE)
 
 
 class DeployStore:
@@ -48,7 +55,7 @@ class DeployStore:
     @classmethod
     def open_default(cls) -> DeployStore | None:
         """Return the store in the machine cache, or ``None`` when caching is off."""
-        if os.environ.get("APM_NO_CACHE"):
+        if os.environ.get("APM_NO_CACHE", "").strip() in ("1", "true", "yes"):
             return None
         try:
             return cls(get_cache_root() / DEPLOY_BUCKET)
@@ -63,16 +70,20 @@ class DeployStore:
     @staticmethod
     def _real_dir(path: Path) -> bool:
         try:
-            return stat.S_ISDIR(os.lstat(path).st_mode)
+            info = os.lstat(path)
         except OSError:
             return False
+        return stat.S_ISDIR(info.st_mode) and not _is_reparse(info)
 
-    def get(self, key: str) -> bytes | None:
+    def get(self, key: str, *, raw_sha256: str | None = None) -> bytes | None:
         """Return the verified bytes stored under *key*, or ``None``.
 
-        ``None`` covers a malformed key, a missing entry, a symbolic link
-        anywhere in the store path, a non-regular file and an entry whose
-        bytes do not hash to *key* (which is also evicted).
+        ``None`` covers a malformed key, a missing entry, a symbolic link or
+        reparse point anywhere in the store path, a non-regular file and an
+        entry whose bytes do not hash to *key* (which is also evicted). With
+        *raw_sha256*, the exact bytes must also match it, so a caller that
+        must restore a byte-identical file never gets the other line-ending
+        image that shares the line-ending-normalized key.
         """
         entry = self._entry(key)
         if entry is None or not (self._real_dir(self._root) and self._real_dir(entry.parent)):
@@ -85,6 +96,8 @@ class DeployStore:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or os.path.islink(entry):
                 return None
+            if _is_reparse(os.lstat(entry)):
+                return None
             with os.fdopen(fd, "rb", closefd=False) as handle:
                 data = handle.read()
         except OSError:
@@ -94,6 +107,8 @@ class DeployStore:
         if canonical_digest(data) != key:
             with contextlib.suppress(OSError):
                 entry.unlink()
+            return None
+        if raw_sha256 is not None and hashlib.sha256(data).hexdigest() != raw_sha256:
             return None
         return data
 

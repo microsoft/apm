@@ -114,3 +114,29 @@ def test_no_store_without_a_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert store is not None and store.put(key, _TEXT)
     assert (tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key).read_bytes() == _TEXT
     assert os.path.isdir(tmp_path / "c")
+
+
+def test_an_exact_byte_reader_never_gets_the_other_line_ending_image(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    crlf = _TEXT.replace(b"\n", b"\r\n")
+    key = canonical_digest(_TEXT)
+    assert canonical_digest(crlf) == key
+    store.put(key, crlf)
+
+    assert store.get(key) == crlf
+    assert store.get(key, raw_sha256=hashlib.sha256(_TEXT).hexdigest()) is None
+    assert store.get(key, raw_sha256=hashlib.sha256(crlf).hexdigest()) == crlf
+    assert (root / key[:2] / key).read_bytes() == crlf, "a raw mismatch is a miss, not an eviction"
+
+
+@pytest.mark.parametrize("value", ["0", "false", ""])
+def test_the_store_follows_the_cache_root_no_cache_parsing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
+) -> None:
+    monkeypatch.setenv("APM_NO_CACHE", value)
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "c"))
+    store = DeployStore.open_default()
+    key = canonical_digest(_TEXT)
+
+    assert store is not None and store.put(key, _TEXT)
+    assert (tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key).read_bytes() == _TEXT
