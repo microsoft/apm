@@ -1,0 +1,17 @@
+{
+  "issue": 4832,
+  "fixed_in": "Unreleased",
+  "summary": "After a clean apm install -g, apm audit --ci reported drift for a user-root agent linking to a context file, because replay rendered context and memory links from its scratch directory instead of the live deployment directory; replay now renders them in the live deployment frame, as it already did for asset links.",
+  "failure_modes": [
+    "observation",
+    "portability"
+  ],
+  "properties": [
+    "outcome.status_matches_state",
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_install_g_then_audit_accepts_a_user_root_context_link",
+    "tests/unit/compilation/test_link_resolver.py::TestReplayFrameTranslation::test_replay_renders_context_links_in_live_deployment_frame"
+  ]
+}

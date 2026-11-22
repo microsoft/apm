@@ -318,8 +318,24 @@ class UnifiedLinkResolver:
             return None
 
         # Calculate relative path from target location to actual source file
-        # The shared helper owns ../ handling and cross-drive refusal.
-        return portable_link_relpath(actual_file, ctx.target_location)
+        # The shared helper owns ../ handling and cross-drive refusal. Audit
+        # replay renders in the live deployment coordinates install used (#4832).
+        return portable_link_relpath(actual_file, self._live_target_location(ctx))
+
+    @staticmethod
+    def _live_target_location(ctx: LinkResolutionContext) -> Path:
+        """Map a replay target directory to where install deployed it.
+
+        Audit replay writes under ``deployment_frame[0]`` (scratch) but must
+        emit the link text install wrote under ``deployment_frame[1]``; the
+        frame only shapes link text, nothing is read or written through it.
+        """
+        target_location = ctx.target_location
+        if ctx.deployment_frame is not None:
+            replay_root, live_root = ctx.deployment_frame
+            if target_location.is_relative_to(replay_root):
+                target_location = live_root / target_location.relative_to(replay_root)
+        return target_location
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -540,15 +556,10 @@ class UnifiedLinkResolver:
             except (OSError, ValueError):
                 return None
 
-        target_location = ctx.target_location
-        if ctx.deployment_frame is not None:
-            replay_root, live_root = ctx.deployment_frame
-            if target_location.is_relative_to(replay_root):
-                target_location = live_root / target_location.relative_to(replay_root)
         try:
             relative_path = portable_link_relpath(
                 candidate_in_deployment,
-                target_location,
+                self._live_target_location(ctx),
             )
         except (OSError, ValueError):
             return None

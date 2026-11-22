@@ -851,6 +851,31 @@ class TestReplayFrameTranslation:
         assert "(../../../../y/apm/apm_modules/_local/package/MANIFESTO.md)" in installed
         assert render(scratch_root, (scratch_root, live_home)) == installed
 
+    def test_replay_renders_context_links_in_live_deployment_frame(self, tmp_path):
+        """A user-root context link replays as install -g wrote it (#4832)."""
+        home = tmp_path / "home"
+        context = home / ".apm" / "context" / "notes.context.md"
+        context.parent.mkdir(parents=True)
+        context.write_text("Notes.\n", encoding="utf-8")
+        source_file = home / ".apm" / "agents" / "research.agent.md"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("placeholder", encoding="utf-8")
+        scratch_root = tmp_path / "scratch"
+        content = "Read [the notes](../context/notes.context.md) first."
+
+        def render(deploy_root: Path, frame: tuple[Path, Path] | None) -> str:
+            resolver = UnifiedLinkResolver(deploy_root)
+            resolver.deployment_frame = frame
+            target_file = deploy_root / ".copilot" / "agents" / "research.agent.md"
+            return resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        installed = render(home, None)
+        assert "[the notes](../../.apm/context/notes.context.md)" in installed
+        assert render(scratch_root, (scratch_root, home)) == installed
+        # The frame only shapes link text: nothing is written in either root.
+        assert not scratch_root.exists()
+        assert context.read_text(encoding="utf-8") == "Notes.\n"
+
     def test_dependency_replay_keeps_link_when_live_frame_has_no_relpath(
         self, tmp_path, monkeypatch
     ):

@@ -317,3 +317,30 @@ def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessSc
     audit = _install_claude_hook_then_audit(scene, "./scripts/g.sh")
 
     assert audit.returncode == 0, describe(audit)
+
+
+def test_install_g_then_audit_accepts_a_user_root_context_link(scene: HarnessScene) -> None:
+    """I3: audit --ci replays a user-root agent's context link as install -g wrote it (#4832).
+
+    Install renders ``../context/notes.context.md`` relative to the live
+    ``~/.copilot/agents``; replay must emit the same text, not a path from its
+    scratch directory, or a clean install reports drift.
+    """
+    context = scene.isolated.config_root / "context"
+    context.mkdir()
+    (context / "notes.context.md").write_text(
+        "---\ndescription: Notes\n---\n\nShared notes.\n", encoding="utf-8"
+    )
+    _source(scene).write_text(
+        _agent("Read [the notes](../context/notes.context.md) first."), encoding="utf-8"
+    )
+    _install(scene)
+    deployed = (scene.home / _DEPLOYED).read_text(encoding="utf-8")
+    assert "[the notes](" in deployed, deployed
+
+    audit = scene.runner.run(
+        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+    )
+
+    assert audit.returncode == 0, describe(audit)
+    assert (scene.home / _DEPLOYED).read_text(encoding="utf-8") == deployed
