@@ -8,13 +8,20 @@ fetched exactly as before, and nothing outlives the scope.
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 import requests
 
-from apm_cli.core.invocation_memo import invocation_memo, invocation_scope
+from apm_cli.core.invocation_memo import (
+    invocation_memo,
+    invocation_scope,
+    memoized_per_invocation,
+)
 from apm_cli.policy.discovery import discover_policy
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-outcome-routing")]
@@ -173,3 +180,40 @@ def test_each_cli_invocation_gets_a_fresh_scope_closed_at_exit(monkeypatch):
     assert [result.exit_code for result in results] == [0, 0]
     assert [result.output for result in results] == ["seen=[]\n", "seen=[]\n"]
     assert invocation_memo("probe") is None
+
+
+def test_overlapping_scopes_share_nothing_and_leave_nothing_behind():
+    first, second = invocation_scope(), invocation_scope()
+    first.__enter__()
+    invocation_memo("probe")["key"] = "from-first"
+    second.__enter__()
+    assert invocation_memo("probe") is None
+    first.__exit__(None, None, None)  # exits out of order, before the scope it overlaps
+    assert invocation_memo("probe") is None
+    second.__exit__(None, None, None)
+
+    assert invocation_memo("probe") is None
+    with invocation_scope():
+        assert invocation_memo("probe") == {}
+
+
+@pytest.mark.parametrize(("kept", "expected_calls"), [(True, 1), (False, 8)])
+def test_concurrent_misses_fetch_once_and_rejected_results_retry(kept, expected_calls):
+    calls: list[str] = []
+    started = threading.Barrier(8)
+
+    @memoized_per_invocation(f"concurrency-{kept}", keep=lambda _result: kept)
+    def fetch(key: str) -> str:
+        calls.append(key)
+        time.sleep(0.05)
+        return f"result-{key}"
+
+    def worker(_index: int) -> str:
+        started.wait()
+        return fetch("same")
+
+    with invocation_scope(), ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(worker, range(8)))
+
+    assert results == ["result-same"] * 8
+    assert len(calls) == expected_calls

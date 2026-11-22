@@ -19,25 +19,40 @@ _T = TypeVar("_T")
 
 _lock = threading.Lock()
 _memos: dict[str, dict[Any, Any]] | None = None
+_depth = 0
+_overlapped = False
+_KEY_LOCK = object()  # memo key prefix for the per-key lock of a memoized call
 
 
 @contextmanager
 def invocation_scope() -> Iterator[None]:
-    """Give the enclosed command a fresh set of memos and drop them on exit."""
-    global _memos
+    """Give the enclosed command a fresh set of memos and drop them on exit.
+
+    One CLI process runs one command, so scopes never overlap in practice. If
+    they do (threads or nested runners), memoization is off for everyone until
+    the last scope exits, so no invocation reads another's memo and no state
+    survives the scopes.
+    """
+    global _memos, _depth, _overlapped
     with _lock:
-        previous, _memos = _memos, {}
+        _depth += 1
+        if _depth == 1:
+            _memos, _overlapped = {}, False
+        else:
+            _memos, _overlapped = None, True
     try:
         yield
     finally:
         with _lock:
-            _memos = previous
+            _depth -= 1
+            if _depth == 0:
+                _memos, _overlapped = None, False
 
 
 def invocation_memo(name: str) -> dict[Any, Any] | None:
     """Return the named memo of the current invocation, or ``None`` outside one."""
     with _lock:
-        if _memos is None:
+        if _memos is None or _overlapped:
             return None
         return _memos.setdefault(name, {})
 
@@ -47,21 +62,30 @@ def memoized_per_invocation(
 ) -> Callable[[Callable[..., _T]], Callable[..., _T]]:
     """Reuse a result of *fn* within one invocation when ``keep(result)`` is true.
 
-    Results ``keep`` rejects (for example errors that a retry may clear) are
-    recomputed on every call, exactly as without the memo.
+    Calls with the same key run one at a time, so concurrent workers that miss
+    together fetch once; other keys proceed in parallel. Results ``keep``
+    rejects (for example errors that a retry may clear) are recomputed on every
+    call, exactly as without the memo.
     """
 
     def decorate(fn: Callable[..., _T]) -> Callable[..., _T]:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> _T:
-            memo = invocation_memo(name)
             key = (args, tuple(sorted(kwargs.items())))
-            if memo is not None and key in memo:
-                return memo[key]
-            result = fn(*args, **kwargs)
-            if memo is not None and keep(result):
-                memo[key] = result
-            return result
+            with _lock:
+                memo = None if _memos is None or _overlapped else _memos.setdefault(name, {})
+                key_lock = (
+                    None if memo is None else memo.setdefault((_KEY_LOCK, key), threading.Lock())
+                )
+            if memo is None or key_lock is None:
+                return fn(*args, **kwargs)
+            with key_lock:
+                if key in memo:
+                    return memo[key]
+                result = fn(*args, **kwargs)
+                if keep(result):
+                    memo[key] = result
+                return result
 
         return wrapper
 
