@@ -550,14 +550,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         raise CacheMissError(f"lockfile at {config.lockfile_path} is empty or unreadable")
 
     project_root = config.project_root.resolve()
-    if (
-        not config.user_scope
-        and _SELF_KEY not in lock.dependencies
-        and _project_has_root_primitives(project_root)
-    ):
+    self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
+    if _SELF_KEY not in lock.dependencies and _project_has_root_primitives(self_source_root):
         # Install integrates root .apm/ content whenever the directory exists,
         # even when it only merges hooks into shared configs and so records no
-        # local_deployed_files (#3369). Replay the same root package in memory.
+        # local_deployed_files (#3369); at user scope that root is ~/.apm (#3772).
+        # Replay the same root package in memory.
         lock.dependencies[_SELF_KEY] = lock.project_self_entry()
     scratch_root = (
         config.scratch_root.resolve()
@@ -572,7 +570,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         else project_root / "apm_modules"
     )
     live_modules_dir = project_root / "apm_modules"
-    self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
     deployment_modules_dir, deployment_frame = replay_deployment_frame(
         scratch_root, project_root, user_scope=config.user_scope
     )

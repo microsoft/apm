@@ -11,9 +11,11 @@
     "idempotency.byte_stable"
   ],
   "regression_tests": [
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_adding_a_dependency_that_deploys_a_root_claimed_agent_keeps_its_file",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_first_upgraded_install_migrates_a_receipt_without_a_lock",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_first_upgraded_install_updates_a_migrated_user_root_skill",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_hand_edited_deployed_agent_is_kept_and_named",
+    "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_install_g_then_audit_accepts_a_user_root_inline_hook",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_install_g_then_audit_accepts_a_user_root_scripted_hook",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_install_g_with_only_user_root_agents_writes_the_user_lockfile",
     "tests/integration/test_user_root_primitives_lockfile_lifecycle.py::test_unreceipted_pre_existing_file_is_still_skipped"

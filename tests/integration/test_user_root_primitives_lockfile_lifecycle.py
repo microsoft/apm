@@ -22,6 +22,7 @@ from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import load_yaml
 from tests.integration._harness_output_kit import HarnessScene, describe, flat
 from tests.utils.apm_lifecycle_runner import CommandResult
+from tests.utils.local_package import LocalPackageFactory
 
 pytestmark = [
     pytest.mark.integration,
@@ -57,10 +58,14 @@ def _source(scene: HarnessScene) -> Path:
     return scene.isolated.config_root / "agents" / "research.agent.md"
 
 
-def _install(scene: HarnessScene, *, expect: int = 0, target: str = "copilot") -> CommandResult:
+def _install(
+    scene: HarnessScene, *packages: str, expect: int = 0, target: str = "copilot"
+) -> CommandResult:
     cwd = scene.isolated.work_root / "cwd"
     cwd.mkdir(exist_ok=True)
-    result = scene.runner.run(("install", "-g", "--target", target), cwd=cwd, env=scene.env)
+    result = scene.runner.run(
+        ("install", "-g", *packages, "--target", target), cwd=cwd, env=scene.env
+    )
     assert result.returncode == expect, describe(result)
     for stream in (result.stdout, result.stderr):
         assert stream.isascii(), describe(result)
@@ -258,28 +263,64 @@ def test_first_upgraded_install_updates_a_migrated_user_root_skill(
     assert deployed[0].read_text(encoding="utf-8").rstrip().endswith("Version two.")
 
 
-def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessScene) -> None:
-    """I3: audit --ci replays a user-root scripted hook with the commands install -g wrote."""
+def test_adding_a_dependency_that_deploys_a_root_claimed_agent_keeps_its_file(
+    scene: HarnessScene,
+) -> None:
+    """I7: a dependency taking over a root-claimed path retires the self claim, not the file."""
+    _source(scene).write_text(_agent("Shared."), encoding="utf-8")
+    _install(scene)
+    _assert_claimed(scene)
+    factory = LocalPackageFactory(scene.isolated.package_root)
+    package = factory.create("research-pack")
+    factory.add_agent(package, "research", _agent("Shared."))
+
+    _install(scene, str(package.root), "--no-policy", "--parallel-downloads", "0")
+
+    deployed = scene.home / _DEPLOYED
+    assert deployed.is_file(), sorted(p.name for p in deployed.parent.iterdir())
+    assert deployed.read_text(encoding="utf-8").endswith("Shared.\n")
+    lock = _lock(scene)
+    assert _DEPLOYED not in (lock.get("local_deployed_files") or []), lock
+    owners = [
+        dep
+        for dep in lock.get("dependencies") or ()
+        if _DEPLOYED in (dep.get("deployed_files") or [])
+    ]
+    assert len(owners) == 1, lock
+
+
+def _install_claude_hook_then_audit(scene: HarnessScene, command: str) -> CommandResult:
     hooks = scene.isolated.config_root / "hooks"
-    (hooks / "scripts").mkdir(parents=True)
+    hooks.mkdir()
     hook = {
         "hooks": {
-            "PreToolUse": [
-                {"matcher": "Bash", "hooks": [{"type": "command", "command": "./scripts/g.sh"}]}
-            ]
+            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": command}]}]
         }
     }
     (hooks / "guard.json").write_text(json.dumps(hook, indent=2) + "\n", encoding="utf-8")
-    (hooks / "scripts" / "g.sh").write_text("#!/bin/sh\necho guard\n", encoding="utf-8")
+    if command.startswith("./scripts/"):
+        (hooks / "scripts").mkdir()
+        (hooks / "scripts" / "g.sh").write_text("#!/bin/sh\necho guard\n", encoding="utf-8")
     (scene.home / ".copilot").rmdir()
     claude_root = scene.home / ".claude"
     claude_root.mkdir()
     _install(scene, target="claude")
     settings = (claude_root / "settings.json").read_text(encoding="utf-8")
-    assert "g.sh" in settings, settings
-
-    audit = scene.runner.run(
+    assert command.removeprefix("./scripts/") in settings, settings
+    return scene.runner.run(
         ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
     )
+
+
+def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessScene) -> None:
+    """I3: audit --ci replays a user-root scripted hook with the commands install -g wrote."""
+    audit = _install_claude_hook_then_audit(scene, "./scripts/g.sh")
+
+    assert audit.returncode == 0, describe(audit)
+
+
+def test_install_g_then_audit_accepts_a_user_root_inline_hook(scene: HarnessScene) -> None:
+    """I3: a user-root hook naming no script has no file claim, yet audit --ci replays it."""
+    audit = _install_claude_hook_then_audit(scene, "echo guard")
 
     assert audit.returncode == 0, describe(audit)

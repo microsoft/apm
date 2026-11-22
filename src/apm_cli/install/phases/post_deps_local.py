@@ -82,9 +82,22 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.phases.cleanup import kept_prior_values
     from apm_cli.install.phases.targets import declared_target_profiles
 
+    # A path a dependency of this install now claims leaves the self entry
+    # without being treated as stale, so its surviving file is not deleted.
+    _dependency_claimed = _dependency_claimed_paths(ctx)
+    _prior_files = [
+        path for path in _persist_lock.local_deployed_files if path not in _dependency_claimed
+    ]
+    _prior_hashes = {
+        path: content_hash
+        for path, content_hash in _persist_lock.local_deployed_file_hashes.items()
+        if path not in _dependency_claimed
+    }
     # Members this run skipped keep their prior rows and hashes (#4230).
-    _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
-    _current_files = sorted(_root_claimed(ctx))
+    _kept = kept_prior_values(ctx, _prior_files)
+    _current_files = sorted(
+        path for path in ctx.local_deployed_files if path not in _dependency_claimed
+    )
     _current_hashes = _hash_deployed(_current_files, ctx.project_root)
     _ghost_count = 0
 
@@ -111,8 +124,8 @@ def run(ctx: InstallContext) -> None:
         dep_key="<local .apm/>",
         current_files=_current_files,
         current_hashes=_current_hashes,
-        prior_files=list(_persist_lock.local_deployed_files),
-        prior_hashes=dict(_persist_lock.local_deployed_file_hashes),
+        prior_files=_prior_files,
+        prior_hashes=_prior_hashes,
         active_targets=ctx.targets,
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
@@ -144,14 +157,15 @@ def run(ctx: InstallContext) -> None:
         _persist_lock.save(_lock_path)
 
 
-def _root_claimed(ctx: InstallContext) -> list[str]:
-    """Return the root-local deployments the root package claims.
+def _dependency_claimed_paths(ctx: InstallContext) -> frozenset[str]:
+    """Return the paths a dependency of this user-scope install claims (#3772).
 
     At user scope the root package is ``$HOME``, which also holds dependency
-    sources; a file a dependency of this install already claims stays that
-    dependency's, so uninstalling it removes the file (#3772).
+    sources; a file a dependency claims stays that dependency's, so
+    uninstalling it removes the file. Project scope keeps its root claims.
     """
     if not is_user_scope(getattr(ctx, "scope", None)):
-        return list(ctx.local_deployed_files)
-    dependency_claims = {path for paths in ctx.package_deployed_files.values() for path in paths}
-    return [path for path in ctx.local_deployed_files if path not in dependency_claims]
+        return frozenset()
+    from apm_cli.core.deployment_state import DeploymentReconciler
+
+    return DeploymentReconciler.current_claimed_paths(ctx.package_deployed_files)
