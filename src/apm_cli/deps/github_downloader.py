@@ -12,12 +12,9 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
-import git  # noqa: F401  -- re-exported; tests patch apm_cli.deps.github_downloader.git
 import requests
-from git import RemoteProgress, Repo
-from git.exc import GitCommandError
 
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
@@ -59,6 +56,7 @@ from .bare_cache import (
 )
 from .carried_license import carry_licenses, read_repository_license
 from .download_strategies import DownloadDelegate
+from .git_lazy import bind_git_name, git_command_error
 from .git_remote_ops import (
     parse_ls_remote_output,
     semver_sort_key,
@@ -71,6 +69,9 @@ from .transport_selection import (
     initial_transport_scheme,
 )
 from .virtual_file import materialize_virtual_file_package
+
+if TYPE_CHECKING:
+    from git import Repo
 
 _log = logging.getLogger(__name__)
 
@@ -135,66 +136,88 @@ def _dir_size_bytes(path: Path) -> int:
     return total
 
 
-class GitProgressReporter(RemoteProgress):
-    """Report git clone progress to Rich Progress."""
+def _git_progress_reporter_class() -> type:
+    """Return ``GitProgressReporter``, defining it (and importing GitPython) on first use."""
+    cls = globals().get("GitProgressReporter")
+    if cls is not None:
+        return cls
+    RemoteProgress = bind_git_name(globals(), "RemoteProgress")
 
-    def __init__(self, progress_task_id=None, progress_obj=None, package_name=None):
-        super().__init__()
-        self.task_id = progress_task_id
-        self.progress = progress_obj
-        self.package_name = package_name  # Keep consistent name throughout download
-        self.last_op = None
-        self.disabled = False  # Flag to stop updates after download completes
+    class GitProgressReporter(RemoteProgress):
+        """Report git clone progress to Rich Progress."""
 
-    def update(self, op_code, cur_count, max_count=None, message=""):
-        """Called by GitPython during clone operations."""
-        if not self.progress or self.task_id is None or self.disabled:
-            return
+        def __init__(self, progress_task_id=None, progress_obj=None, package_name=None):
+            super().__init__()
+            self.task_id = progress_task_id
+            self.progress = progress_obj
+            self.package_name = package_name  # Keep consistent name throughout download
+            self.last_op = None
+            self.disabled = False  # Flag to stop updates after download completes
 
-        # Keep the package name consistent - don't change description to git operations
-        # This keeps the UI clean and scannable
+        def update(self, op_code, cur_count, max_count=None, message=""):
+            """Called by GitPython during clone operations."""
+            if not self.progress or self.task_id is None or self.disabled:
+                return
 
-        # Update progress bar naturally - let it reach 100%
-        if max_count and max_count > 0:
-            # Determinate progress (we have total count)
-            self.progress.update(
-                self.task_id,
-                completed=cur_count,
-                total=max_count,
-                # Note: We don't update description - keep the original package name
-            )
-        else:
-            # Indeterminate progress (just show activity)
-            self.progress.update(
-                self.task_id,
-                total=100,  # Set fake total for indeterminate tasks
-                completed=min(cur_count, 100) if cur_count else 0,
-                # Note: We don't update description - keep the original package name
-            )
+            # Keep the package name consistent - don't change description to git operations
+            # This keeps the UI clean and scannable
 
-        self.last_op = cur_count
+            # Update progress bar naturally - let it reach 100%
+            if max_count and max_count > 0:
+                # Determinate progress (we have total count)
+                self.progress.update(
+                    self.task_id,
+                    completed=cur_count,
+                    total=max_count,
+                    # Note: We don't update description - keep the original package name
+                )
+            else:
+                # Indeterminate progress (just show activity)
+                self.progress.update(
+                    self.task_id,
+                    total=100,  # Set fake total for indeterminate tasks
+                    completed=min(cur_count, 100) if cur_count else 0,
+                    # Note: We don't update description - keep the original package name
+                )
 
-    def _get_op_name(self, op_code):
-        """Convert git operation code to human-readable name."""
-        from git import RemoteProgress
+            self.last_op = cur_count
 
-        # Extract operation type from op_code
-        if op_code & RemoteProgress.COUNTING:
-            return "Counting objects"
-        elif op_code & RemoteProgress.COMPRESSING:
-            return "Compressing objects"
-        elif op_code & RemoteProgress.WRITING:
-            return "Writing objects"
-        elif op_code & RemoteProgress.RECEIVING:
-            return "Receiving objects"
-        elif op_code & RemoteProgress.RESOLVING:
-            return "Resolving deltas"
-        elif op_code & RemoteProgress.FINDING_SOURCES:
-            return "Finding sources"
-        elif op_code & RemoteProgress.CHECKING_OUT:
-            return "Checking out files"
-        else:
-            return "Cloning"
+        def _get_op_name(self, op_code):
+            """Convert git operation code to human-readable name."""
+            from git import RemoteProgress
+
+            # Extract operation type from op_code
+            if op_code & RemoteProgress.COUNTING:
+                return "Counting objects"
+            elif op_code & RemoteProgress.COMPRESSING:
+                return "Compressing objects"
+            elif op_code & RemoteProgress.WRITING:
+                return "Writing objects"
+            elif op_code & RemoteProgress.RECEIVING:
+                return "Receiving objects"
+            elif op_code & RemoteProgress.RESOLVING:
+                return "Resolving deltas"
+            elif op_code & RemoteProgress.FINDING_SOURCES:
+                return "Finding sources"
+            elif op_code & RemoteProgress.CHECKING_OUT:
+                return "Checking out files"
+            else:
+                return "Cloning"
+
+    GitProgressReporter.__qualname__ = "GitProgressReporter"
+    globals()["GitProgressReporter"] = GitProgressReporter
+    return GitProgressReporter
+
+
+def __getattr__(name: str) -> Any:
+    # GitPython names stay module attributes (stable patch targets such as
+    # ``apm_cli.deps.github_downloader.Repo``) but import only on first use, so
+    # building a downloader on a no-op install never loads GitPython.
+    if name in ("git", "Repo", "RemoteProgress", "GitCommandError"):
+        return bind_git_name(globals(), name)
+    if name == "GitProgressReporter":
+        return _git_progress_reporter_class()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class GitHubPackageDownloader:
@@ -684,7 +707,7 @@ class GitHubPackageDownloader:
         dep_ref: DependencyReference = None,
         verbose_callback=None,
         **clone_kwargs,
-    ) -> Repo:
+    ) -> "Repo":
         """Thin delegate to :func:`bare_cache.clone_with_fallback` (kept on the class so test patches still work)."""
         return clone_with_fallback(
             self._execute_transport_plan,
@@ -693,7 +716,7 @@ class GitHubPackageDownloader:
             progress_reporter=progress_reporter,
             dep_ref=dep_ref,
             verbose_callback=verbose_callback,
-            repo_cls=Repo,
+            repo_cls=bind_git_name(globals(), "Repo"),
             **clone_kwargs,
         )
 
@@ -1562,7 +1585,9 @@ class GitHubPackageDownloader:
 
                     package_display_name = subdir_path.split("/")[-1]
                     progress_reporter = (
-                        GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                        _git_progress_reporter_class()(
+                            progress_task_id, progress_obj, package_display_name
+                        )
                         if progress_task_id and progress_obj
                         else None
                     )
@@ -1954,7 +1979,9 @@ class GitHubPackageDownloader:
             if resolved_ref.ref_type == GitReferenceType.COMMIT:
                 # For commits, we need to clone and checkout the specific commit
                 progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                    _git_progress_reporter_class()(
+                        progress_task_id, progress_obj, package_display_name
+                    )
                     if progress_task_id and progress_obj
                     else None
                 )
@@ -1969,7 +1996,9 @@ class GitHubPackageDownloader:
             else:
                 # For branches and tags, we can use shallow clone
                 progress_reporter = (
-                    GitProgressReporter(progress_task_id, progress_obj, package_display_name)
+                    _git_progress_reporter_class()(
+                        progress_task_id, progress_obj, package_display_name
+                    )
                     if progress_task_id and progress_obj
                     else None
                 )
@@ -1995,7 +2024,7 @@ class GitHubPackageDownloader:
             if git_dir.exists():
                 _rmtree(git_dir)
 
-        except (GitCommandError, subprocess.CalledProcessError) as e:
+        except (git_command_error(), subprocess.CalledProcessError) as e:
             # Check if this might be a private repository access issue
             if "Authentication failed" in str(e) or "remote: Repository not found" in str(e):
                 error_msg = f"Failed to clone repository {dep_ref.repo_url}. "

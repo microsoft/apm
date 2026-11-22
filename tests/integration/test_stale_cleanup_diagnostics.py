@@ -147,7 +147,8 @@ def test_removal_commands_name_each_deleted_path(
     factory = LocalPackageFactory(isolated.package_root)
     kit = factory.create("named-kit")
     factory.add_skill(kit, "named", "---\nname: named\ndescription: Named\n---\n# Named\n")
-    factory.add_instruction(kit, "named", "---\napplyTo: '**'\n---\n# Named rule\n")
+    # A file-type glob keeps a per-file Claude rule; '**' now goes to AGENTS.md (#3939).
+    factory.add_instruction(kit, "named", "---\napplyTo: '**/*.py'\n---\n# Named rule\n")
     consumer = factory.create("consumer", targets=("claude", "copilot"))
     factory.add_relative_dependency(consumer, kit)
     runner = ApmLifecycleRunner((str(apm_binary_path),))

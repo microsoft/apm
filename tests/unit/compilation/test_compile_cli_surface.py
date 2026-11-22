@@ -759,7 +759,7 @@ class TestMultiTargetDoesNotGenerateUnrequestedFiles:
         assert should_compile_claude_md("vscode") is False
         assert should_compile_gemini_md("vscode") is False
 
-        assert should_compile_agents_md("claude") is False
+        assert should_compile_agents_md("claude") is True
         assert should_compile_claude_md("claude") is True
         assert should_compile_gemini_md("claude") is False
 

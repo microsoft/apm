@@ -490,15 +490,17 @@ class TestNoDedupPreventsRemoval:
             dry_run=False,
         )
         primitives = _make_primitives(tmp_path)
-        compiler._compile_claude_md(config, primitives)
+        compiler.compile(config, primitives)
 
-        # File must still exist (now regenerated with full instructions)
+        # File must still exist (now regenerated as the AGENTS.md import)
         assert (tmp_path / "CLAUDE.md").exists(), (
             "--no-dedup must produce a CLAUDE.md; stale-removal must not fire"
         )
         body = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
-        assert "## Project Standards" in body or "global guidance" in body.lower(), (
-            "--no-dedup CLAUDE.md must contain instruction content"
+        assert "@AGENTS.md" in body.splitlines()
+        agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+        assert "global guidance" in agents.lower(), (
+            "--no-dedup AGENTS.md must contain instruction content"
         )
 
     def test_no_dedup_does_not_remove_without_rules(self, tmp_path):
@@ -512,7 +514,7 @@ class TestNoDedupPreventsRemoval:
             dry_run=False,
         )
         primitives = _make_primitives(tmp_path)
-        result = compiler._compile_claude_md(config, primitives)
+        result = compiler.compile(config, primitives)
 
         assert result.success
         assert (tmp_path / "CLAUDE.md").exists()
