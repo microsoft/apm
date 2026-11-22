@@ -418,7 +418,7 @@ def _activate_staged_local_refresh(
         safe_rmtree(backup_path, apm_modules_dir)
 
 
-def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
+def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     """Parse apm.yml's direct APM dependencies, excluding *packages_to_remove*.
 
     Seeds the forward reachability walk (see
@@ -434,6 +434,8 @@ def _read_survivor_direct_refs(apm_yml_path, packages_to_remove):
     missing, or malformed; the project's own manifest is a Step-1/3
     concern here, not part of this walk's fail-closed contract, which
     covers the manifests visited DURING the walk, not this seed step.
+    The single survivor projection: ``apm audit --ci``'s allow-list advice
+    (#4570) proves its uninstall against the same survivors.
     """
     if apm_yml_path is None:
         return [], []
@@ -507,7 +509,7 @@ def _uninstall_orphan_decision(
     candidate when that walk is incomplete. Only the real removal path may
     persist ``decision.repairs``; ``--dry-run`` stays read-only.
     """
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = read_survivor_direct_refs(apm_yml_path, packages_to_remove)
     decision = decide_orphan_removal(
         operation=OrphanOperation.UNINSTALL,
         roots=_removal_targets(packages_to_remove, lockfile) if lockfile else (),
@@ -1223,7 +1225,7 @@ def project_shrunk_selections(
         return {}
     from ...deps.reachability import declared_node_selections
 
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages_to_remove)
+    direct_refs, dev_refs = read_survivor_direct_refs(apm_yml_path, packages_to_remove)
     declared = declared_node_selections(
         lockfile, apm_yml_path.parent, apm_modules_dir, direct_refs, dev_refs=dev_refs
     )

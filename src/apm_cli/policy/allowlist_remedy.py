@@ -13,6 +13,8 @@ another policy rule:
   no surviving package still reaches a denied one (forward reachability);
 * no removed entry, through its ``replace:`` source, satisfies a package the
   policy requires;
+* uninstall's pre-mutation lockfile guard accepts ``apm.lock.yaml`` (not a
+  symlink, not written by a newer APM);
 * uninstall's path preflight accepts every recorded path it would remove;
 * every deployed file the uninstall would delete has deployment evidence
   (a user-edited file makes uninstall refuse), judged by uninstall's own
@@ -219,7 +221,8 @@ def _uninstall_clears(
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
     return (
-        _deployment_paths_validate(cleanup_keys, project)
+        _lockfile_writable(project)
+        and _deployment_paths_validate(cleanup_keys, project)
         and _deletions_have_evidence(cleanup_keys, removed, project)
     ) and (_uninstall_policy_resolves(removed, project))
 
@@ -302,20 +305,30 @@ def _uninstall_policy_resolves(removed: list[object], project: AllowlistProject)
 def _survivors(
     removed: list[object], project: AllowlistProject
 ) -> tuple[list[DependencyReference], list[DependencyReference]]:
-    """Parse the direct dependencies that survive removing *removed*, per section."""
-    from ..models.dependency.selection import parse_dependency_entry
+    """The direct dependencies that survive removing *removed*, per section.
 
-    gone = {ref.get_identity() for ref in map(parse_dependency_entry, removed)}
-    sections: list[list[DependencyReference]] = [[], []]
-    for section, entries in zip(sections, (project.production, project.development), strict=True):
-        for entry in entries:
-            try:
-                ref = parse_dependency_entry(entry)
-            except (ValueError, TypeError, AttributeError, KeyError):
-                continue
-            if ref.get_identity() not in gone:
-                section.append(ref)
-    return sections[0], sections[1]
+    Uninstall's own survivor projection, so the proof and the command agree.
+    """
+    from ..commands.uninstall.engine import read_survivor_direct_refs
+
+    return read_survivor_direct_refs(manifest_file(project.project_root), removed)
+
+
+def _lockfile_writable(project: AllowlistProject) -> bool:
+    """Whether uninstall's pre-mutation lockfile guard lets it rewrite the lock.
+
+    ``apm uninstall`` refuses before any change when ``apm.lock.yaml`` is a
+    symlink or was written by a newer APM.
+    """
+    from ..deps.lockfile import LockfileRefusal, get_lockfile_path, refuse_lockfile_before_mutation
+
+    try:
+        refuse_lockfile_before_mutation(
+            project.lock, get_lockfile_path(project.project_root), would_mutate=True
+        )
+    except LockfileRefusal:
+        return False
+    return True
 
 
 def _refs_by_key(entries: list[object]) -> dict[str, DependencyReference]:

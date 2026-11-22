@@ -42,6 +42,10 @@ _ROUTES = (
     (_CLI, "_refuse_unvalidated_paths", "uninstall_unvalidated_paths"),
     (_SHRINK, "uninstall_unvalidated_paths", "validate_deploy_path"),
     (_REMEDY, "_deployment_paths_validate", "uninstall_unvalidated_paths"),
+    (_REMEDY, "_lockfile_writable", "refuse_lockfile_before_mutation"),
+    (_REMEDY, "_survivors", "read_survivor_direct_refs"),
+    (_ENGINE, "_uninstall_orphan_decision", "read_survivor_direct_refs"),
+    (_ENGINE, "project_shrunk_selections", "read_survivor_direct_refs"),
     (_ENGINE, "_sync_integrations_after_uninstall", "resolve_project_exec_allow_map"),
 )
 # The first writes uninstall performs; the preflight must precede them all.

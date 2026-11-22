@@ -541,6 +541,11 @@ BUNDLE_INTEGRITY_FAILED = _entry(
     before="discard this copy",
     then="install the rebuilt bundle",
 )
+BUNDLE_PACKAGES_UNRECORDED = _entry(
+    "bundle-packages-unrecorded",
+    "apm install <package>",
+    "install the content from a package the allow list names",
+)
 UNPACK_CRITICAL_FINDINGS = _entry(
     "unpack-critical-findings",
     "apm audit --file <path>",

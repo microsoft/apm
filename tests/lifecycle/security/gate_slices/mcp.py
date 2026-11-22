@@ -8,6 +8,7 @@ obligation's snapshot fact is that the other scope keeps its bytes.
 
 from __future__ import annotations
 
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice
 
 _PROJECT = ({"project": (".mcp.json",)}, {"home": (".copilot", ".claude")})
@@ -22,7 +23,7 @@ _ALL = (
 )
 _LOCAL = ("definition-changed", "local-deny", "revoke-approval")
 _BUNDLE = tuple(change for change in _ALL if change != "policy-dep-deny")
-_XFAIL: dict[str, str] = {}
+_XFAIL: dict[str, KnownFailure] = {}
 # A bundle approval pins the whole bundle digest: a changed definition reads as
 # a bundle that is not approved yet.
 _ANNOUNCE = {"G|bundle-install|definition-changed|mcp": r"not approved for this exact bundle"}
@@ -66,7 +67,7 @@ SLICE = GateSlice(
             announce=_ANNOUNCE.get(f"G|{path}|{change}|mcp"),
             unchanged=unchanged,
             smoke=f"G|{path}|{change}|mcp" in _SMOKE,
-            xfail=_XFAIL.get(f"G|{path}|{change}|mcp", ""),
+            xfail=_XFAIL.get(f"G|{path}|{change}|mcp"),
             ungoverned=_UNGOVERNED.get(f"G|{path}|{change}|mcp", ""),
         )
         for path, (changes, (surface, unchanged)) in _PATHS.items()

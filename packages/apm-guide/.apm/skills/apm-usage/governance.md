@@ -123,6 +123,11 @@ dependencies:
   `apm pack`, which refuses to ship a denied declared or locked package
   (`Pack blocked by org policy: <pkg>`, exit 1). Pack applies deny only:
   allow, require and pin rules do not apply to it.
+- `allow` judges `apm install <bundle>` by the packages its embedded
+  lockfile records only, never by the author-chosen `_local/<name>`. Under
+  an allow list, a bundle that records no packages is a violation (`the
+  bundle records no packages for dependencies.allow to match`):
+  `enforcement: block` refuses it before any write, `warn` only reports it.
 
 `dependencies.require` entries are exact and name ONE host: a hostless
 entry (`contoso/baseline`) names the default host only; write other hosts

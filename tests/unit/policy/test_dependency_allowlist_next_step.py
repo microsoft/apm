@@ -349,3 +349,39 @@ def test_an_unmanaged_recorded_path_uninstall_would_refuse_falls_back_to_the_adm
         "    Ask your org admin to allow it (policy source: org:contoso/.github)."
     )
     assert check.remediations == ()
+
+
+def test_a_symlinked_lockfile_uninstall_would_refuse_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _project(tmp_path, ["acme/evil-pkg"], [_locked("acme/evil-pkg")])
+    real = tmp_path / "locks" / "apm.lock.yaml"
+    real.parent.mkdir()
+    (root / "apm.lock.yaml").rename(real)
+    (root / "apm.lock.yaml").symlink_to(real)
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[2] == (
+        "    Ask your org admin to allow it (policy source: org:contoso/.github)."
+    )
+    assert check.remediations == ()
+
+
+def test_a_surviving_dev_dependency_that_reaches_the_denied_one_falls_back_to_the_admin(
+    tmp_path: Path, capsys
+) -> None:
+    root = _several(
+        tmp_path,
+        ["acme/evil-pkg", "acme/other-pkg", "contoso/parent"],
+        _locked("contoso/dev-tool"),
+        children={"contoso/dev-tool": ["acme/hidden"]},
+    )
+    manifest = yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))
+    manifest["devDependencies"] = {"apm": ["contoso/dev-tool"]}
+    (root / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert _stderr(capsys, check)[4] == _ADMIN_ONLY
+    assert check.remediations == ()
