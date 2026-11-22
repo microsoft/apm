@@ -112,10 +112,12 @@ class DeploymentEvidence:
         self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
-        # One spelling per path, as claims are looked up (#4295).
-        self._owners = {
-            path.replace("\\", "/").rstrip("/"): keys for path, keys in (owners or {}).items()
-        }
+        # One spelling per path, as claims are looked up; spellings of one
+        # path pool their owners so none is dropped (#4295).
+        self._owners: dict[str, tuple[str, ...]] = {}
+        for path, keys in (owners or {}).items():
+            key = path.replace("\\", "/").rstrip("/")
+            self._owners[key] = tuple(dict.fromkeys((*self._owners.get(key, ()), *keys)))
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
         self._recorded_hashes = dict(recorded_hashes or {})

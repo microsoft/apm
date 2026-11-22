@@ -562,6 +562,28 @@ def test_consent_finds_an_owner_recorded_under_a_backslash_spelling(tmp_path: Pa
     assert path.exists() and result.deleted == []
 
 
+@pytest.mark.req("req-lk-024")
+def test_consent_pools_owners_across_path_spellings(tmp_path: Path) -> None:
+    """Two spellings of one path keep every owner: an offline one never hides a render."""
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: render if owner == "owner/pkg" else None,
+        owners={_PATH.replace("/", "\\"): ("owner/pkg",), _PATH: ("offline/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+
+
 _HOOK = ".github/hooks/pkg-apm.json"
 
 
