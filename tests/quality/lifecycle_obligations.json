@@ -7733,8 +7733,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[git]"
   },
   "T3|OP=compile|SRC=git|PRIM=skill": {
    "family": "T3",
@@ -7882,8 +7883,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[marketplace-git]"
   },
   "T3|OP=compile|SRC=marketplace-git|PRIM=skill": {
    "credited_by": [
@@ -7955,8 +7957,9 @@
    "family": "T3",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_compile_source_files.py::test_compile_keeps_a_remote_package_file_primitive[native-plugin]"
   },
   "T3|OP=compile|SRC=native-plugin|PRIM=skill": {
    "credited_by": [
@@ -13647,15 +13650,17 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[proxy-logical]"
   },
   "pair|LOCK=absent|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[qualified-host-port]"
   },
   "pair|LOCK=absent|MCPOWN=copilot": {
    "family": "pair",
@@ -14157,22 +14162,25 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[bare-default]"
   },
   "pair|LOCK=newer-generator|HOSTID=proxy-logical": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[proxy-logical]"
   },
   "pair|LOCK=newer-generator|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_newer_lock_is_refused_for_each_host_identity[qualified-host-port]"
   },
   "pair|LOCK=newer-generator|MCPOWN=copilot": {
    "family": "pair",
@@ -15207,22 +15215,25 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[bare-default]"
   },
   "pair|OP=audit|HOSTID=proxy-logical": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[proxy-logical]"
   },
   "pair|OP=audit|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_audit_replays_each_host_identity[qualified-host-port]"
   },
   "pair|OP=audit|LOCK=absent": {
    "family": "pair",
@@ -15566,8 +15577,9 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|OP=bundle-install|DEPLOYED=edited": {
    "family": "pair",
@@ -22549,8 +22561,9 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=inline-mcp|DEPLOYED=edited": {
    "family": "pair",
@@ -22807,8 +22820,9 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_registry_mcp_and_bundle_sources_work_offline"
   },
   "pair|SRC=local-bundle|DEPLOYED=edited": {
    "family": "pair",
@@ -24071,15 +24085,17 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_git_marketplace_plugin_records_its_host_identity[proxy-logical]"
   },
   "pair|SRC=marketplace-git|HOSTID=qualified-host-port": {
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_host_identity_pairs.py::test_a_git_marketplace_plugin_records_its_host_identity[qualified-host-port]"
   },
   "pair|SRC=marketplace-git|LOCK=absent": {
    "credited_by": [
@@ -25029,8 +25045,9 @@
    "family": "pair",
    "issue": "#4096",
    "lane": "T-2",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_network_offline.py::test_converged_project_works_offline[multi-unchanged]"
   },
   "pair|SRC=native-plugin|DEPLOYED=edited": {
    "family": "pair",
