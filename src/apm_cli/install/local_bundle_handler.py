@@ -151,7 +151,7 @@ def install_local_bundle(
 
             targets = resolve_skill_layout(targets, legacy_skill_paths=True)
 
-        from .bundle_admission import admit_bundle, plugin_bundle_integrity
+        from .bundle_admission import admit_bundle, bundle_policy_subjects, plugin_bundle_integrity
 
         verify_integrity = plugin_bundle_integrity(bundle_info, logger)
         integrity_verified = False
@@ -202,6 +202,7 @@ def install_local_bundle(
             bundle_approval_key,
             (bundle_mcp_deps, bundle_lsp_deps),
             scope_dir=None if dry_run else _bundle_lock_root(global_),
+            create_config=create_config,
         )
         bundle_mcp_deps = _filter_bundle_executables(
             bundle_mcp_deps,
@@ -234,6 +235,7 @@ def install_local_bundle(
             logger=logger,
             dry_run=dry_run,
             fetch_result=policy_fetch_result,
+            bundled_deps=bundle_policy_subjects(bundle_info),
         )
 
         # Warn on bundle/install target mismatch.
@@ -705,24 +707,6 @@ def _bundle_approval_key(bundle_info, allow_executables) -> str | None:
     )
 
 
-def _declared_bundle_exec_types(bundle_info, mcp_deps: list, lsp_deps: list) -> tuple[str, ...]:
-    """Executable types the bundle ships, before trust filters them."""
-    from .local_bundle_paths import bundle_pack_files, is_plugin_hook_path
-
-    files = list(bundle_pack_files(bundle_info))
-    if not files and bundle_info.source_dir is not None:
-        root = Path(bundle_info.source_dir)
-        files = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
-    declared = []
-    if any(is_plugin_hook_path(path) for path in files):
-        declared.append("hooks")
-    if mcp_deps:
-        declared.append("mcp")
-    if lsp_deps:
-        declared.append("lsp")
-    return tuple(declared)
-
-
 def _stage_bundle_executables(
     bundle_info,
     slug: str,
@@ -730,6 +714,7 @@ def _stage_bundle_executables(
     service_deps: tuple[list, list],
     *,
     scope_dir: Path | None,
+    create_config: bool,
 ) -> BundleRecordStage | None:
     """Stage this install's exact-content key and executable types; not on dry runs.
 
@@ -741,7 +726,9 @@ def _stage_bundle_executables(
 
     if scope_dir is None:
         return None
-    declared = _declared_bundle_exec_types(bundle_info, *service_deps)
+    from .local_bundle_paths import declared_bundle_exec_types
+
+    declared = declared_bundle_exec_types(bundle_info, *service_deps, create_config=create_config)
     return BundleRecordStage(scope_dir, slug, approval_key, tuple(declared) if approval_key else ())
 
 

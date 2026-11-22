@@ -1,7 +1,11 @@
-"""The shadow runner: ``tick`` once, or ``run --interval 60``. Never writes to main.
+"""The queue runner: ``tick`` once, or ``run --interval 60``.
 
-python -m scripts.merge_queue.runner tick  [--state-dir DIR] [--depth N]
-python -m scripts.merge_queue.runner run   [--state-dir DIR] [--interval 60]
+Shadow by default: trains are built and proven on queue refs, and nothing is written
+to main. With ``--land`` the runner also admin-merges proven trains (landing.py);
+every train-building write still goes through ShadowApi.
+
+python -m scripts.merge_queue.runner tick  [--state-dir DIR] [--depth N] [--land]
+python -m scripts.merge_queue.runner run   [--state-dir DIR] [--interval 60] [--land]
 python -m scripts.merge_queue.runner metrics [--state-dir DIR]
 """
 
@@ -9,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -17,12 +22,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.merge_queue import metrics, proof, refs, state, tickets, train
+from scripts.merge_queue import classify, landing, metrics, proof, red, refs, state, tickets, train
 from scripts.merge_queue.api import REPO, Api, GhApi, Response, get_all
 
 DEFAULT_STATE_DIR = Path.home() / ".apm-queue"
 CODEQL_PREFIX = "Analyze ("
 EXIT_LOCKED = 3
+
+
+_RERUN = re.compile(rf"repos/{re.escape(REPO)}/actions/runs/\d+/rerun-failed-jobs")
 
 
 class ShadowViolation(RuntimeError):
@@ -32,7 +40,8 @@ class ShadowViolation(RuntimeError):
 class ShadowApi:
     """Wraps an Api and refuses every write except creating, merging into and deleting
     queue refs: ``git/refs`` may only create ``queue/*`` or ``queue-build/*``, ``merges``
-    may only target ``queue-build/*``, and deletes only remove those branches."""
+    may only target ``queue-build/*``, and deletes only remove those branches. It also
+    allows rerunning a train run's failed jobs (red handling)."""
 
     _REFS = f"repos/{REPO}/git/refs"
     _MERGES = f"repos/{REPO}/merges"
@@ -48,6 +57,8 @@ class ShadowApi:
             target = str(body.get("ref", ""))
             if not target.startswith(("refs/heads/queue/", "refs/heads/queue-build/")):
                 raise ShadowViolation(f"shadow runner refused to create {target!r}")
+        elif _RERUN.fullmatch(path):
+            pass
         elif path == self._MERGES:
             target = str(body.get("base", ""))
             if not target.startswith("queue-build/"):
@@ -55,6 +66,9 @@ class ShadowApi:
         else:
             raise ShadowViolation(f"shadow runner refused POST {path}")
         return self.inner.post(path, body)
+
+    def patch(self, path: str, body: Mapping[str, Any]) -> Response:
+        raise ShadowViolation(f"shadow runner refused PATCH {path}")
 
     def delete(self, path: str) -> Response:
         prefix = f"{self._REFS}/heads/"
@@ -129,19 +143,42 @@ def ready_tickets(api: Api, log: Log, skip: set[int]) -> list[tickets.Ticket]:
     return ready
 
 
-def poll(api: Api, current: state.State, log: Log) -> None:
-    """Record verdicts for in-flight trains; log the landings a real runner would make."""
+def _stale(api: Api, item: state.Train, run_id: int | None) -> bool:
+    """After a rerun request, the completed verdict may still be the old attempt."""
+    if not item.awaiting_attempt or run_id is None:
+        return False
+    attempt = int(api.get(f"repos/{REPO}/actions/runs/{run_id}").get("run_attempt", 1))
+    return attempt < item.awaiting_attempt
+
+
+def poll(
+    api: Api,
+    current: state.State,
+    log: Log,
+    writer: Api | None = None,
+    read_report: red.ReportReader = classify.read_report,
+) -> None:
+    """Record verdicts for in-flight trains; a red one is classified and handled
+    (red.py). Log the landings a real runner would make."""
+    if writer is not None:
+        for pr in list(current.unlabel):
+            red.unlabel(writer, current, pr)
     for item in current.in_flight():
         result, run_id = proof.verdict(api, item.head_ref, item.head_sha)
-        if result not in (proof.GREEN, proof.RED):
+        if result not in (proof.GREEN, proof.RED) or _stale(api, item, run_id):
             continue
-        item.move(state.GREEN if result == proof.GREEN else state.RED)
-        item.run_id, item.verdict_at = run_id, log.clock()
+        item.run_id = run_id
         log.emit("verdict", train=item.train_id, verdict=result, run=run_id)
-        current.window = train.next_window(
-            current.window, "green" if result == proof.GREEN else "red-unattributed"
-        )
-        if result == proof.GREEN:
+        if result == proof.RED:
+            action = red.handle(api, writer, current, item, log, read_report)
+            if action in (classify.RERUN, red.WAIT):
+                continue
+            outcome = "red-unattributed" if action == classify.BISECT else "red-attributed"
+        else:
+            item.move(state.GREEN)
+            item.verdict_at, outcome = log.clock(), "green"
+            if item.reruns:
+                log.emit("flake", train=item.train_id, run=run_id, nodes=item.residual)
             for member in item.members:
                 log.emit(
                     "would-land",
@@ -151,6 +188,7 @@ def poll(api: Api, current: state.State, log: Log) -> None:
                     commit=member.sha,
                     tree=member.tree,
                 )
+        current.window = train.next_window(current.window, outcome)
         api.delete(f"repos/{REPO}/git/refs/heads/{refs.build_ref(item.train_id)}")
 
 
@@ -181,12 +219,25 @@ def _publish(api: Api, names: list[str], shas: list[str]) -> list[str] | None:
     return created
 
 
-def launch(api: Api, current: state.State, log: Log, main_sha: str, depth: int) -> None:
-    """Build and publish one more train while fewer than ``depth`` are in flight."""
-    flying = current.in_flight()
-    if len(flying) >= depth:
+def launch(
+    api: Api, current: state.State, log: Log, main_sha: str, depth: int, landing_on: bool = False
+) -> None:
+    """Build and publish one more train while fewer than ``depth`` are in flight.
+
+    When landing is on, a proven train that has not landed yet is still ahead of main,
+    so new trains stack on it too (``State.chain``)."""
+    if current.halted or len(current.in_flight()) >= depth:
         return
-    ready = ready_tickets(api, log, current.queued_prs())
+    flying = current.chain() if landing_on else current.in_flight()
+    ready = [
+        t
+        for t in ready_tickets(api, log, current.queued_prs())
+        if current.ejected.get(t.pr) != t.head
+    ]
+    if current.split:
+        # Bisect: the next train is the first half only; the rest wait a cycle.
+        ready = [t for t in ready if t.pr in current.split]
+        current.split = []
     landed = satisfied_dependencies(api, ready, flying)
     members = train.compose(ready, current.window, landed=landed)
     if not members:
@@ -251,14 +302,20 @@ def sweep(api: Api, current: state.State, now: datetime) -> list[str]:
 
 
 def tick(
-    api: Api, current: state.State, log: Log, depth: int = 2, now: datetime | None = None
+    api: Api,
+    current: state.State,
+    log: Log,
+    depth: int = 2,
+    now: datetime | None = None,
+    landing_on: bool = False,
+    read_report: red.ReportReader = classify.read_report,
 ) -> state.State:
     shadow = ShadowApi(api)
-    poll(shadow, current, log)
+    poll(shadow, current, log, writer=api if landing_on else None, read_report=read_report)
     for name in sweep(shadow, current, now or datetime.now(UTC)):
         log.emit("janitor", ref=name)
     main_sha = shadow.get(f"repos/{REPO}/commits/main")["sha"]
-    launch(shadow, current, log, main_sha, depth)
+    launch(shadow, current, log, main_sha, depth, landing_on)
     return current
 
 
@@ -289,21 +346,36 @@ def single_instance(lock_path: Path) -> Iterator[bool]:
         yield _try_lock(handle)
 
 
-def _one_tick(api: Api, state_dir: Path, depth: int) -> None:
+def _one_tick(api: Api, state_dir: Path, depth: int, merge: landing.Merger | None = None) -> None:
+    """One pass. ``merge`` set means --land: proven trains are landed after the shadow pass."""
     state_path = state_dir / "state.json"
     live = state.rebuild(api)
     current = state.reconcile(state.load(state_path), live) if state_path.is_file() else live
-    tick(api, current, Log(state_dir / "events.jsonl"), depth)
+    log = Log(state_dir / "events.jsonl")
+    tick(api, current, log, depth, landing_on=merge is not None)
+    if merge is not None:
+        landing_path = state_dir / "landing.json"
+        lander = landing.load(landing_path)
+
+        def checkpoint() -> None:
+            state.save(current, state_path)
+            landing.save(lander, landing_path)
+
+        landing.tick(api, current, lander, log, merge, save=checkpoint)
+        landing.save(lander, landing_path)
     state.save(current, state_path)
     (state_dir / "heartbeat").write_text(_now() + "\n", encoding="utf-8")
 
 
-def main(argv: Sequence[str], api: Api | None = None) -> int:
+def main(argv: Sequence[str], api: Api | None = None, merge: landing.Merger | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.merge_queue.runner")
     parser.add_argument("command", choices=("tick", "run", "metrics"))
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--interval", type=int, default=60)
+    parser.add_argument(
+        "--land", action="store_true", help="admin-merge proven trains (default: shadow only)"
+    )
     args = parser.parse_args(argv)
     if args.command == "metrics":
         print(json.dumps(metrics.summarize(metrics.read_events(args.state_dir / "events.jsonl"))))
@@ -314,7 +386,12 @@ def main(argv: Sequence[str], api: Api | None = None) -> int:
             return EXIT_LOCKED
         client = api or GhApi()
         while True:
-            _one_tick(client, args.state_dir, args.depth)
+            _one_tick(
+                client,
+                args.state_dir,
+                args.depth,
+                (merge or landing.gh_merge) if args.land else None,
+            )
             if args.command == "tick":
                 return 0
             time.sleep(args.interval)

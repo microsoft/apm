@@ -148,6 +148,16 @@ def _runs(*runs: dict) -> dict:
     return {"workflow_runs": list(runs)}
 
 
+def _gate_jobs(api: FakeApi, runs: dict) -> None:
+    """Each run's train-gate job concludes like the run (the common case)."""
+    for run in runs["workflow_runs"]:
+        api.routes[f"repos/{REPO}/actions/runs/{run['id']}/jobs"] = {
+            "jobs": [
+                {"name": "train-gate", "status": "completed", "conclusion": run.get("conclusion")}
+            ]
+        }
+
+
 @pytest.mark.parametrize(
     ("runs", "expected"),
     [
@@ -208,6 +218,7 @@ def test_verdict_reads_the_newest_run_on_the_exact_branch_and_sha(
     api = FakeApi()
     path = f"repos/{REPO}/actions/workflows/merge-train.yml/runs"
     api.routes[path] = runs
+    _gate_jobs(api, runs)
     assert proof.verdict(api, "queue/t0001/p1-full", HEAD)[0] == expected
     assert api.queries(path) == [
         {"branch": ["queue/t0001/p1-full"], "head_sha": [HEAD], "per_page": ["5"]}
@@ -229,6 +240,67 @@ def _merge_handler(conflicts=(), in_base=()):
         return Response(201, {"sha": sha, "commit": {"tree": {"sha": "e" + sha[1:]}}})
 
     return handler
+
+
+def test_an_inherited_only_train_is_green_by_its_gate_job_not_the_run() -> None:
+    api = FakeApi()
+    branch = "queue/t0001/p1-full"
+    run = {
+        "id": 5,
+        "head_sha": HEAD,
+        "head_branch": branch,
+        "status": "completed",
+        "conclusion": "failure",
+        "created_at": "2026-11-21T10:00:00Z",
+    }
+    api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = _runs(run)
+    jobs = f"repos/{REPO}/actions/runs/5/jobs"
+    api.routes[jobs] = {
+        "jobs": [{"name": "train-gate", "status": "completed", "conclusion": "success"}]
+    }
+    assert proof.verdict(api, branch, HEAD) == (proof.GREEN, 5)
+    assert api.queries(jobs) == [{"filter": ["latest"], "per_page": ["100"]}]
+    api.routes[jobs] = {
+        "jobs": [{"name": "train-gate", "status": "completed", "conclusion": "cancelled"}]
+    }
+    assert proof.verdict(api, branch, HEAD) == (proof.RED, 5)
+    api.routes[jobs] = {"jobs": []}
+    assert proof.verdict(api, branch, HEAD) == (proof.RED, 5)
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        ({"status": "completed", "conclusion": "success"}, "green"),
+        (
+            {
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [{"name": "Lint chain", "conclusion": "failure"}],
+            },
+            "violation",
+        ),
+        (
+            {
+                "status": "completed",
+                "conclusion": "failure",
+                "steps": [{"name": "Install dependencies", "conclusion": "failure"}],
+            },
+            "infra",
+        ),
+        ({"status": "completed", "conclusion": "cancelled"}, "infra"),
+        ({"status": "in_progress", "conclusion": None}, "pending"),
+    ],
+)
+def test_a_guard_result_separates_violations_from_infrastructure(job, expected) -> None:
+    api = FakeApi()
+    branch = "queue/t0001/p1-guard"
+    status = "completed" if job["status"] == "completed" else "in_progress"
+    api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"] = _runs(
+        {"id": 6, "head_sha": HEAD, "head_branch": branch, "status": status, "created_at": "x"}
+    )
+    api.routes[f"repos/{REPO}/actions/runs/6/jobs"] = {"jobs": [{"name": "guard", **job}]}
+    assert proof.guard_result(api, branch, HEAD) == expected
 
 
 def test_only_a_full_branch_can_prove_a_train() -> None:
@@ -259,6 +331,7 @@ def test_a_newer_run_beats_a_retried_older_run() -> None:
             "run_attempt": 1,
         },
     )
+    _gate_jobs(api, api.routes[f"repos/{REPO}/actions/workflows/merge-train.yml/runs"])
     assert proof.verdict(api, branch, HEAD) == (proof.RED, 2)
 
 
