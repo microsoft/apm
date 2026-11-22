@@ -548,6 +548,36 @@ def test_a_refused_retirement_records_the_entry_it_wrote(
     assert scenario.lock().mcp_target_servers == {}
 
 
+def test_a_refused_deselection_keeps_the_claim_it_did_not_remove(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """``targets:`` drops claude, but its entry was edited: the claude claim stays (#4792).
+
+    Once the user restores APM's entry, the next install retires it.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    scenario.declare([_http()])
+    _success(scenario.install())
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+    written = scenario.servers("claude")["notes"]
+    scenario.edit("claude", "notes", {**written, "url": "http://127.0.0.1:9/personal"})
+    scenario.declare([{**_http(), "targets": ["codex"]}])
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s) notes" in output, output
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
+
+    scenario.edit("claude", "notes", written)
+    _success(scenario.install())
+    assert "notes" not in scenario.servers("claude")
+    assert "notes" in scenario.servers("codex")
+    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+
+
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])
 def test_claude_managed_env_removal_repeats_and_retires(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
