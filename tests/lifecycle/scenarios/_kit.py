@@ -162,14 +162,26 @@ _WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
 
 
 def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
-    """``expected_deployed`` with the #3921 project-scope native projection applied."""
+    """``expected_deployed`` with the #3921 project-scope native projection applied.
+
+    Other targets still get APM's loose copy (#4559). Gemini deploys skills to the
+    cross-tool .agents/skills root copilot also reads, so with such a target current
+    the native package's loose skill is expected there too.
+    """
+    cells = expected_deployed(model, kinds)
+    loose_roots = {
+        (cell[0], _skill_root(cell[2]))
+        for cell in cells
+        if cell[1] == "skill" and cell[2] not in _WHOLE_PLUGIN_TARGETS
+    }
     return frozenset(
         cell
-        for cell in expected_deployed(model, kinds)
+        for cell in cells
         if not (
             model.scope == "project"
             and cell[0].split(":")[0] in _CLAUDE_NATIVE
             and cell[2] in _WHOLE_PLUGIN_TARGETS
+            and not (cell[1] == "skill" and (cell[0], _skill_root(cell[2])) in loose_roots)
         )
     )
 
