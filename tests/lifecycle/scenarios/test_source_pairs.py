@@ -110,7 +110,8 @@ def test_a_registry_package_deploys_its_executable_once_approved(lifecycle_world
     )
     use_registry(lifecycle_world)
     scenario = Scenario(lifecycle_world, {name: f"lifecycle/{name}#1.0.0"}, policy="allow")
-    _approved_install(scenario, name, {"SRC": "pkg-registry", "PRIM": _REGISTRY_PRIMS[name]})
+    step = _approved_install(scenario, name, {"SRC": "pkg-registry", "PRIM": _REGISTRY_PRIMS[name]})
+    assert step.result.returncode == 0, step.output
     fetched = [
         entry["path"]
         for entry in lifecycle_world.services.egress_log()
