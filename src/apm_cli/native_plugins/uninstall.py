@@ -117,6 +117,11 @@ def retire_gated_native_plugins(
     hooks = dict(retirements.hook_packages)
     retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
     retired = before - {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
-    for key in sorted(retired & (set(hooks) | set(retirements.denied_packages))):
+    denied = set(retirements.denied_packages)
+    for key in sorted(retired & (set(hooks) | denied)):
+        # The survivor helper already named this one with its reason.
+        if key in retirements.native_packages and not _named_kinds(hooks.get(key)):
+            if key not in denied:
+                continue
         logger.warning(f"{key} native plugin is no longer allowed; removing it")
     return bool(retired)

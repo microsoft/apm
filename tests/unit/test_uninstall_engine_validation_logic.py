@@ -419,3 +419,26 @@ def test_native_survivor_notice_follows_named_kinds(hook_entry, noticed):
     notice = f"{key} native plugin is no longer allowed (not approved); removing it"
     warnings = [call.args[0] for call in logger.warning.call_args_list]
     assert (notice in warnings) is noticed
+
+
+def test_prune_names_an_empty_kind_native_survivor_once(monkeypatch, tmp_path):
+    """Prune's fallback notice skips a native survivor the helper already named (#4567)."""
+    from apm_cli.native_plugins.uninstall import retire_gated_native_plugins
+
+    key = "acme/plugin"
+    lockfile = SimpleNamespace(dependencies={key: SimpleNamespace(native_plugin=object())})
+    retirements = SimpleNamespace(
+        denied_packages={},
+        native_packages={key: "not approved"},
+        hook_packages={key: ("not approved", ())},
+    )
+    monkeypatch.setattr("apm_cli.install.exec_gate.gate_retirements", lambda *a, **k: retirements)
+    monkeypatch.setattr(
+        "apm_cli.models.apm_package.APMPackage.from_apm_yml", lambda *_a, **_k: object()
+    )
+    logger = MagicMock()
+
+    assert retire_gated_native_plugins(lockfile, tmp_path, tmp_path / "apm.yml", tmp_path, logger)
+
+    warnings = [call.args[0] for call in logger.warning.call_args_list]
+    assert warnings == [f"{key} native plugin is no longer allowed (not approved); removing it"]
