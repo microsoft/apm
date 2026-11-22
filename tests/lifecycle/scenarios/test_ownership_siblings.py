@@ -1187,6 +1187,25 @@ def test_an_edited_mcp_entry_from_each_source_is_refused(lifecycle_world, src) -
     scenario.finish()
 
 
+_INLINE_DRY_RUN = ("install", "--mcp", "p-inline", "--dry-run", "--", INERT_COMMAND, "--stdio")
+
+
+def test_a_dry_run_inline_mcp_install_writes_nothing(lifecycle_world) -> None:
+    """``install --mcp NAME --dry-run -- CMD`` previews the server and changes nothing."""
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(lifecycle_world, (), policy="allow")
+    manifest = (lifecycle_world.project / "apm.yml").read_bytes()
+    step = scenario.run(
+        _INLINE_DRY_RUN,
+        credit=[{"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}],
+        says=[r"would add MCP server 'p-inline'"],
+    )
+    assert not step.changed, step.changed
+    assert not (lifecycle_world.project / ".mcp.json").exists()
+    assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+    scenario.finish()
+
+
 @pytest.mark.parametrize("src", sorted(_MCP_SOURCES))
 def test_an_mcp_entry_without_a_lock_is_kept(lifecycle_world, src) -> None:
     use_policy(lifecycle_world, "allow")
@@ -1263,6 +1282,9 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
+        "test_a_dry_run_inline_mcp_install_writes_nothing": [
+            {"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}
+        ],
         **{
             f"test_a_users_mcp_entry_blocks_a_server_of_the_same_name[{src}]": [
                 _pair("unowned", PRIM="mcp", SRC=src)
