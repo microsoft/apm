@@ -434,8 +434,6 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             symbol="error",
         )
         return 1
-    if not _dependency_policy_allows(logger, [source_root], user_scope=True):
-        return 1
 
     # A malformed user manifest is authoritative-but-broken, so it fails closed
     # with the same framing 'apm install -g' uses rather than degrading to
@@ -483,6 +481,10 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
         )
         selection_source = _display_user_path(manifest_file(source_root))
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
+
+    # After the manifest is validated: its own errors keep their framing.
+    if not _dependency_policy_allows(logger, [source_root], user_scope=True):
+        return 1
 
     results = compile_user_root_contexts(
         compile_targets,
