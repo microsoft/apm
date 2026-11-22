@@ -234,6 +234,10 @@ class Context:
         return [self.project / root for root in self.fixture.roots]
 
     spawn_log: Path | None = None
+    # Setup reuse: the installed state survives a no-op sample, and the
+    # committed lockfiles are captured once per fixture (generation is seeded).
+    is_installed: bool = False
+    locks: dict[str, bytes] | None = None
 
     def run(self, argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -283,12 +287,16 @@ class Context:
         shutil.rmtree(self.project, ignore_errors=True)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
+        self.is_installed = False
 
     def installed(self) -> None:
         """Every root installed from the current manifests (warm cache as a side effect)."""
+        if self.is_installed:
+            return
         self.fresh_project()
         for root in self.roots():
             self.checked(["install"], root)
+        self.is_installed = True
 
     def warm_cache(self) -> None:
         if not any(self.world.cache_dir.iterdir()):
@@ -323,18 +331,23 @@ def _setup_warm(ctx: Context) -> None:
     ctx.fresh_project()
 
 
-def _locked_project(ctx: Context) -> None:
+def _locked_project(ctx: Context, warm: bool = True) -> None:
     """A fresh checkout of an installed project: manifests plus committed lockfiles."""
-    ctx.installed()
-    locks = {root: (root / "apm.lock.yaml").read_bytes() for root in ctx.roots()}
+    if ctx.locks is None:
+        ctx.installed()
+        ctx.locks = {
+            root: (ctx.project / root / "apm.lock.yaml").read_bytes() for root in ctx.fixture.roots
+        }
+    if warm:
+        ctx.warm_cache()
     ctx.fresh_project()
-    for root, data in locks.items():
-        (root / "apm.lock.yaml").write_bytes(data)
+    for root, data in ctx.locks.items():
+        (ctx.project / root / "apm.lock.yaml").write_bytes(data)
 
 
 def _setup_frozen(ctx: Context) -> None:
     """CI replay: committed lockfiles, nothing else, cold cache."""
-    _locked_project(ctx)
+    _locked_project(ctx, warm=False)
     ctx.world.clear_cache()
 
 
@@ -538,6 +551,8 @@ def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
             break
         load = wait_for_load(args.max_load, args.load_wait_min * 60)
         sample, output = _timed(ctx, journey)
+        if journey.name != "install-noop":
+            ctx.is_installed = False
         sample.load1 = load
         sample.load_ok = load < args.max_load
         samples.append(sample)
@@ -935,11 +950,16 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--work", default=str(REPO_ROOT / "build" / "perf-work"))
     run_parser.add_argument("--out", default=str(REPO_ROOT / "build" / "perf"))
     board = sub.add_parser("scoreboard", help="append a North Star row from a journeys JSON")
-    board.add_argument("json", help="journeys-<sha>.json from a --preset scoreboard run")
     board.add_argument("file", help="scoreboard markdown file to append to")
+    board.add_argument(
+        "json", nargs="+", help="journeys-<sha>.json files of one CLI SHA (chunks are merged)"
+    )
     args = parser.parse_args(argv)
     if args.command == "scoreboard":
-        report = json.loads(Path(args.json).read_text(encoding="utf-8"))
+        reports = [json.loads(Path(j).read_text(encoding="utf-8")) for j in args.json]
+        report = reports[0]
+        for extra in reports[1:]:
+            report["results"] += extra["results"]
         append_scoreboard(report, Path(args.file))
         return 0
     if args.command == "verify-real":
