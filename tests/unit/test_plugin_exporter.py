@@ -1153,6 +1153,7 @@ class TestExportPluginBundle:
         pack = yaml.safe_load((result.bundle_path / "apm.lock.yaml").read_text())["pack"]
         assert pack["renderings"] == expected
 
+    @pytest.mark.parametrize("copilot_first", [False, True])
     @pytest.mark.parametrize(
         ("claude", "copilot", "packed"),
         [
@@ -1161,14 +1162,19 @@ class TestExportPluginBundle:
             ("review.prompt.md", "review.prompt.prompt.md", "review.prompt.md"),
         ],
     )
-    def test_claude_and_copilot_commands_pack_once(self, tmp_path, claude, copilot, packed):
-        """#3686: one command rendering per primitive, the Claude one, without a collision."""
+    def test_claude_and_copilot_commands_pack_once(
+        self, tmp_path, claude, copilot, packed, copilot_first
+    ):
+        """#3686: one command rendering per primitive, the Claude one, in either lock order."""
         project = _setup_plugin_project(tmp_path)
-        deployed = []
-        for root, name, body in (
+        renderings = [
             (".claude/commands", claude, "claude"),
             (".github/prompts", copilot, "copilot"),
-        ):
+        ]
+        if copilot_first:
+            renderings.reverse()
+        deployed = []
+        for root, name, body in renderings:
             path = project / root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
@@ -1177,12 +1183,17 @@ class TestExportPluginBundle:
             project, [LockedDependency(repo_url="acme/cmd", depth=1, deployed_files=deployed)]
         )
 
-        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning:
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
             result = export_plugin_bundle(project, tmp_path / "build")
 
         assert sorted(p.name for p in (result.bundle_path / "commands").iterdir()) == [packed]
         assert (result.bundle_path / "commands" / packed).read_text() == "claude"
         assert not any("collision" in str(call) for call in warning.call_args_list)
+        lines = [str(call) for call in info.call_args_list if "rendering" in str(call)]
+        assert len(lines) == 1 and f".github/prompts/{copilot}" in lines[0], lines
 
     def test_hooks_merged(self, tmp_path):
         """Root (first-party) hooks are packed; dependency cache hooks are not.

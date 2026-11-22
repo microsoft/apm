@@ -820,17 +820,30 @@ def _append_deployed_component(
     components: list[tuple[Path, str]],
     source: Path,
     output_rel: str,
-    seen_outputs: set[str],
+    seen_outputs: dict[str, set[Path]],
     project_root: Path,
     dep: LockedDependency,
 ) -> None:
-    """Append one deployed component unless it is unsafe or already mapped."""
-    if output_rel in seen_outputs or not _validate_output_rel(output_rel):
+    """Append one deployed component unless it is unsafe or already mapped.
+
+    A repeated output path is dropped, except a further target rendering of a
+    primitive (``.claude/commands/x.md`` and ``.github/prompts/x.prompt.md``):
+    every rendering stays a candidate for ``_drop_same_path_renderings``
+    (#3686).
+    """
+    if not _validate_output_rel(output_rel):
+        return
+    seen = seen_outputs.get(output_rel)
+    if seen is not None and (
+        source in seen
+        or deployed_rendering_rank(portable_relpath(source, project_root)) is None
+        or any(deployed_rendering_rank(portable_relpath(p, project_root)) is None for p in seen)
+    ):
         return
     if source.is_file() and not source.is_symlink():
         _verify_attested_hash(source, project_root, dep)
         components.append((source, output_rel))
-        seen_outputs.add(output_rel)
+        seen_outputs.setdefault(output_rel, set()).add(source)
 
 
 def _collect_deployed_components(
@@ -840,7 +853,7 @@ def _collect_deployed_components(
     """Collect dependency components from lockfile deployed_files entries."""
     components: list[tuple[Path, str]] = []
     missing: list[str] = []
-    seen_outputs: set[str] = set()
+    seen_outputs: dict[str, set[Path]] = {}
     skill_subset = skill_subset_filter_tokens(dep.skill_subset)
 
     for rel_path in dep.deployed_files:
