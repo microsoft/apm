@@ -530,6 +530,12 @@ shorthand_form  = [host [":" port] "/"] owner "/" repo ["/" virtual_path] ["#" r
 local_path_form = ("./" / "../" / "/" / "~/" / ".\\" / "..\\" / "~\\") path
 ```
 
+A `local_path_form` that begins with `.\`, `..\` or `~\` is normalised to POSIX
+form on read: `.\pkg`, `..\pkg` and `~\pkg` resolve, lock and deploy exactly
+like `./pkg`, `../pkg` and `~/pkg` on every platform, and pass the same checks.
+Windows drive-letter (`C:\pkg`) and UNC (`\\server\share`) paths are not
+normalised.
+
 The `host:port` shorthand resolves as HTTPS. SSH custom ports require the
 `ssh://` URL form.
 

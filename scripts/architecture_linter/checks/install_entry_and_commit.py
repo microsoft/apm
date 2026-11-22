@@ -208,7 +208,7 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
     if not (
         _ordered(
             pipeline,
-            "transaction.journal_deploy_writes()",
+            "transaction.journal_deploy_writes(ctx)",
             "materialization_session = _run_integration_phase(ctx)",
         )
         and _ordered(pipeline, '_run_phase("audit"', "transaction.release_deploy_targets()")
@@ -237,6 +237,8 @@ def _deploy_snapshot_violations(provider: FactsProvider, loaded: dict) -> list[V
             "self._deploy_journal = DeployJournal(store_parent)",
             "self._restore_deploy_targets()",
             "self._remove_created_target_roots()",
+            "self._undo_deploys()\n                finally:",
+            "return unless_lockfile_commits(self._undo_deploys)",
         )
     ):
         found.append(
