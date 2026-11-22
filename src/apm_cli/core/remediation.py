@@ -942,6 +942,19 @@ PROTOCOL_FALLBACK_DISALLOWED = _entry(
     "apm config set allow-protocol-fallback true",
     "allow cross-protocol fallback (not recommended)",
 )
+CLAUDE_AGENTS_MD_BLOCKED = _entry(
+    "claude-agents-md-blocked",
+    "apm install",
+    "move always-on and directory instructions from .claude/rules/ into AGENTS.md",
+    before="{fix}",
+    then="run 'apm compile'",
+)
+CLAUDE_DIRECTORY_INSTRUCTION_SINGLE_FILE = _entry(
+    "claude-directory-instruction-single-file",
+    "apm install",
+    "keep it in .claude/rules/",
+    before="set 'compilation.strategy: single-file' in apm.yml",
+)
 
 # -- end W3 deps-compilation --
 # -- W3 plugins-runtime --
@@ -1256,6 +1269,23 @@ POLICY_FETCH_FAILURE_BLOCKED = _entry(
     "check that the org policy source{source} is reachable",
     then="retry, or ask your org admin",
 )
+# apm compile while org policy denies an installed dependency (its content
+# would be rendered into agent context).
+COMPILE_DEPENDENCY_DENIED = _entry(
+    "compile-dependency-denied",
+    "apm install",
+    "drop the denied package's installed content",
+    before="remove or replace the blocked dependencies in apm.yml",
+    then="re-run apm compile ('apm policy status' shows the active policy)",
+)
+# apm run / apm preview reading a prompt from a package the org policy denies.
+RUN_DEPENDENCY_DENIED = _entry(
+    "run-dependency-denied",
+    "apm install",
+    "drop the denied package's installed content",
+    before="remove or replace the blocked dependency in apm.yml",
+    then="run another prompt ('apm policy status' shows the active policy)",
+)
 FROZEN_KEPT_ADOPTED = _entry(
     "frozen-kept-adopted",
     "apm install --frozen",
@@ -1279,6 +1309,24 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "apm install",
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
+)
+KEPT_MCP_ENTRIES = _entry(
+    "kept-mcp-entries",
+    "apm install",
+    "forget the record of each kept MCP entry",
+    before="remove each kept entry you no longer use, or declare its server again",
+)
+WITHHELD_HOOK_FILE_UNRECORDED = _entry(
+    "withheld-hook-file-unrecorded",
+    "apm audit --ci",
+    "confirm no unrecorded file remains at a withheld package's hook path",
+    before="delete each named file you did not write yourself",
+)
+WITHHELD_HOOK_PATHS_UNCHECKED = _entry(
+    "withheld-hook-paths-unchecked",
+    "apm audit --ci",
+    "check the withheld package's hook paths again",
+    before="fix the reported read error or directory location",
 )
 FROZEN_EXEC_DECISIONS_STALE = _entry(
     "frozen-exec-decisions-stale",

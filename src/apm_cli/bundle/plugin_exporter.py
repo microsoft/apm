@@ -902,7 +902,78 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     probe = _collect_apm_components(install_path / ".apm")
     probe.extend(_collect_root_plugin_components(install_path))
     _collect_bare_skill(install_path, dep, probe)
+    # A canvas the executable gate kept from deploying is not a provenance
+    # gap: install recorded it as withheld, and pack omits it (#4714).
+    if _gate_parked_types(install_path, dep):
+        probe = [item for item in probe if not item[1].startswith("extensions/")]
     return bool(probe)
+
+
+def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, ...]:
+    """Executable types the cache ships that the lock records the gate withheld (#4714).
+
+    Of the executable kinds only canvas extensions pack from ``.apm/``; the
+    lock row's ``exec_status`` and ``exec_allowed_types`` say whether install
+    deployed them.
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, TRUST_GATED
+
+    if dep.exec_status not in (TRUST_GATED, TRUST_DENIED):
+        return ()
+    if EXEC_TYPE_CANVAS in (dep.exec_allowed_types or ()):
+        return ()
+    canvas: list[tuple[Path, str]] = []
+    _collect_recursive(install_path / ".apm" / "extensions", "extensions", canvas)
+    return (EXEC_TYPE_CANVAS,) if canvas else ()
+
+
+def _warn_parked_executables(
+    dep: LockedDependency, install_path: Path, logger=None, *, format_carries: bool = True
+) -> None:
+    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714).
+
+    *format_carries* is False for a bundle format that cannot carry canvas
+    extensions at all, so approving alone would not ship them.
+    """
+    from ..install.exec_skip_reasons import withheld_executable_reason
+
+    for exec_type in _gate_parked_types(install_path, dep):
+        label = dep.get_unique_key()
+        reason = withheld_executable_reason(
+            label,
+            exec_type,
+            "canvas extension(s)",
+            denied=_canvas_denied(dep, install_path),
+            outcome="not packed",
+        )
+        message = f"dependency {label}: {reason}"
+        if not format_carries:
+            message += (
+                " The agent-plugin format does not carry canvas extensions;"
+                " pack with '--format claude-plugin' to ship them."
+            )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
+
+
+def _canvas_denied(dep: LockedDependency, install_path: Path) -> bool | None:
+    """Whether the lock row's worst-case status is the canvas's own verdict.
+
+    ``exec_status`` is the worst case across executable types: a denied row
+    proves the canvas denied only when canvas is the package's one executable
+    type; otherwise it is unknown (``None``).
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, scan_package_executables
+
+    if dep.exec_status != TRUST_DENIED:
+        return False
+    try:
+        declared = set(scan_package_executables(install_path, dep.repo_url, "").exec_types)
+    except Exception:
+        return None
+    return True if declared <= {EXEC_TYPE_CANVAS} else None
 
 
 def _cache_config_kinds(install_path: Path) -> tuple[str, ...]:
@@ -1017,6 +1088,38 @@ def _collect_lsp_servers(
     return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
+def _routed_rule_components(
+    lockfile, project_root: Path, dependency_keys: set[str]
+) -> dict[str, list[tuple[Path, str]]]:
+    """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
+
+    A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
+    plugin pack mapped to ``instructions/``; render them through the same
+    projection so the bundle keeps those bytes. Only *dependency_keys* (the
+    dependencies the bundle ships) render. Keyed by dependency key.
+    """
+    import atexit
+    import tempfile
+
+    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+
+    components: dict[str, list[tuple[Path, str]]] = {}
+    routed = routed_claude_rules(lockfile, project_root, dependency_keys=dependency_keys)
+    if not routed:
+        return components
+    rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
+    atexit.register(shutil.rmtree, rendered_root, ignore_errors=True)
+    for dep_key, rules in routed.items():
+        dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
+        write_routed_claude_rules(dep_root, rules)
+        components[dep_key] = [
+            (dep_root / rel, plugin_rel)
+            for rel in sorted(rules)
+            if (plugin_rel := _plugin_rel_for_deployed_path(rel, None)) is not None
+        ]
+    return components
+
+
 def export_plugin_bundle(
     project_root: Path,
     output_dir: Path,
@@ -1098,16 +1201,21 @@ def export_plugin_bundle(
 
     apm_modules_dir = project_root / "apm_modules"
 
+    # Prefer lockfile is_dev flag (covers transitive deps);
+    # fall back to apm.yml URL matching for older lockfiles
+    packed_deps = [
+        dep
+        for dep in (lockfile.get_all_dependencies() if lockfile else [])
+        if not (
+            getattr(dep, "is_dev", False)
+            or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+        )
+    ]
+    routed_rules = _routed_rule_components(
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}
+    )
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
-            # Prefer lockfile is_dev flag (covers transitive deps);
-            # fall back to apm.yml URL matching for older lockfiles
-            if (
-                getattr(dep, "is_dev", False)
-                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
-            ):
-                continue
-
+        for dep in packed_deps:
             dep_name = dep.repo_url
 
             # Provenance rule (issue #1999 follow-up): a dependency's content
@@ -1116,6 +1224,8 @@ def export_plugin_bundle(
             # ``apm_modules`` is an unattested cache -- it carries no integrity
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger)
+            dep_routed = routed_rules.get(dep.get_unique_key(), [])
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
@@ -1126,7 +1236,7 @@ def export_plugin_bundle(
                         "were not found among its installed files. "
                         f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
-            elif _cache_would_contribute_primitives(install_path, dep):
+            elif not dep_routed and _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
                 # recorded none of them: a stale or partial install. Refuse
                 # to pack the cache -- fail loudly with a fix.
@@ -1147,7 +1257,7 @@ def export_plugin_bundle(
             # shared settings is not surprised by the exclusion.
             _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
-            _merge_file_map(file_map, dep_components, dep_name, force, collisions)
+            _merge_file_map(file_map, dep_components + dep_routed, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
     from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
