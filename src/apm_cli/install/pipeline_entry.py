@@ -10,6 +10,7 @@ resolution, policy gate and commit gate, then stops before the first write;
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import tempfile
 from collections.abc import Iterator
@@ -184,3 +185,23 @@ def install_pipeline_options(
         transaction=ctx.transaction,
         lsp_preflight=lsp_preflight,
     )
+
+
+def stateless_noop(command: Any) -> Any:
+    """Exit ``apm install`` early when nothing would change (install/noop_diff.py).
+
+    The decision module loads only when the command runs; any doubt runs
+    *command*, the full pipeline.
+    """
+
+    @functools.wraps(command)
+    def install(*args: Any, **kwargs: Any) -> Any:
+        from pathlib import Path
+
+        from apm_cli.install.noop_diff import invocation_argv, try_noop
+
+        if try_noop(kwargs, invocation_argv(), Path.cwd()):
+            return None
+        return command(*args, **kwargs)
+
+    return install

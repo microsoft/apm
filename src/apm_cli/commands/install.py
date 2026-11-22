@@ -121,7 +121,11 @@ from apm_cli.install.phases.local_content import (
 # test pinned in #762 (test_hash_deployed_is_module_level_and_works) keep
 # working via "apm_cli.commands.install._hash_deployed".
 from apm_cli.install.phases.lockfile import compute_deployed_hashes as _hash_deployed  # noqa: F401
-from apm_cli.install.pipeline_entry import install_pipeline_options, pipeline_preview
+from apm_cli.install.pipeline_entry import (
+    install_pipeline_options,
+    pipeline_preview,
+    stateless_noop,
+)
 from apm_cli.install.repository_access import probe_failure_reason
 
 # Re-export DI-seam helpers from the install services module so that test
@@ -1115,6 +1119,7 @@ def _handle_mcp_install(  # noqa: PLR0913
 )
 @click.pass_context
 @serialized_lifecycle_unless_fresh_preview("dry_run")
+@stateless_noop
 def install(  # noqa: PLR0913
     ctx,
     packages,
