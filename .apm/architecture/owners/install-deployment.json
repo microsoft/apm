@@ -357,8 +357,11 @@
     {
       "id": "noop-install-replay",
       "decision": "Whether a plain apm install / --frozen may replay a recorded no-op instead of running the pipeline: recorded inputs byte-identical, live org policy re-discovered, deployed files verified by lockfile content hash",
-      "owner": "install/noop_fast_path.py (run_with_fast_path, engaged only by commands/install.py install)",
-      "selectors": ["src/apm_cli/install/noop_fast_path.py"],
+      "owner": "install/noop_fast_path.py (run_with_fast_path, engaged only by commands/install.py install); install/noop_recorder.py observes the recorded run",
+      "selectors": [
+        "src/apm_cli/install/noop_fast_path.py",
+        "src/apm_cli/install/noop_recorder.py"
+      ],
       "guards": ["install-deployment-noop-replay-owner"]
     },
     {

@@ -6,7 +6,8 @@ recorded inputs: org policy re-discovery routed by the outcome owner
 (``discover_trust_policy`` + ``classify_project_policy``) and
 the lockfile content-hash verifier (``verify_deployed_file_hashes``). Only the
 ``apm install`` command (commands/install.py) may engage it, and no other
-module installs process-wide audit hooks.
+module than its recorder (``install/noop_recorder.py``) installs process-wide
+audit hooks.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from scripts.architecture_linter.models import Violation
 RULE_NOOP_REPLAY = "install-deployment-noop-replay-owner"
 
 _OWNER = "src/apm_cli/install/noop_fast_path.py"
+_RECORDER = "src/apm_cli/install/noop_recorder.py"
 _ENGAGER = "src/apm_cli/commands/install.py"
 _SOURCE_TREE = "src/apm_cli/"
 _LIVE_CHECKS = (
@@ -80,7 +82,7 @@ def check_noop_replay_owner(provider: FactsProvider) -> tuple[Violation, ...]:
                 "apm install's callback must be decorated with @noop_fast_path directly",
             )
         )
-    others = _tree_python_paths(provider, _SOURCE_TREE, excluded=(_OWNER, _ENGAGER))
+    others = _tree_python_paths(provider, _SOURCE_TREE, excluded=(_OWNER, _ENGAGER, _RECORDER))
     findings.extend(
         _banned(
             provider,
@@ -98,7 +100,7 @@ def check_noop_replay_owner(provider: FactsProvider) -> tuple[Violation, ...]:
             rule_id=rule_id,
             paths=others,
             pattern=_AUDIT_HOOK,
-            message="Only install/noop_fast_path.py installs a process-wide audit hook",
+            message="Only install/noop_recorder.py installs a process-wide audit hook",
             configured=False,
             respect_exempt=False,
         )
