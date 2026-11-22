@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.security.gate import is_generated_python_artifact
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    resolve_for_containment,
+)
 from apm_cli.utils.paths import portable_relpath
 
 
@@ -64,6 +68,14 @@ def deployed_path_entry(
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
+    resolved: list[Path] = []
+
+    def _resolved_candidate() -> Path:
+        # Resolved lazily, once per call (external-root targets never need it).
+        if not resolved:
+            resolved.append(resolve_for_containment(target_path))
+        return resolved[0]
+
     def _try_target(tgts) -> str | None:
         for _t in tgts:
             deploy_root = _t.managed_deploy_root
@@ -87,10 +99,11 @@ def deployed_path_entry(
                     return portable_relpath(resolved_target, project_root)
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
-                    target_path,
+                    _resolved_candidate(),
                     project_root=project_root,
                     target=_t,
                     scope=InstallScope.PROJECT,
+                    candidate_resolved=True,
                 )
             except RuntimeError:
                 continue
