@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OpenAPM native plugin activation profile Part C now records a cited verdict for every catalog target; none of the 15 newly surveyed targets qualifies yet. (closes #3922, #3999)
 - An `http://` registry URL whose host is an integer, hex or leading-zero IPv4 spelling (`http://167772161/apm`) no longer counts as a private network host; write the dotted address (`http://10.0.0.1/apm`) or set `insecure: true`. (#4521)
+- Nightly mutation testing covers 13 owner modules, one shard each, and fails when an owner's kill rate drops below its recorded floor. (#4121, #4585)
+- A failed or interrupted (Ctrl-C, SIGTERM) `apm install` restores every file it wrote and keeps `apm.lock.yaml` unchanged, with or without the install-time audit. (#4612)
 
 ### Fixed
 
@@ -34,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` and `apm install` find the lockfile entry of a required package declared as an explicit registry-proxy URL (`host/artifactory/...`), so a `<proxy-host>/owner/repo` entry in `dependencies.require` passes `required-packages-deployed`. (#4067)
 - `apm unpack` into a project leaves `apm.lock.yaml` unchanged when it already records the unpacked files with the same content, so restores keep tracked files clean. (closes #4556, #4580)
 - The first `apm install` after a dependency moves from git to a registry removes its stale `.apm-pin`; repeat installs and `install --update` change no bytes. (closes #4572, #4597)
+- Catalog entries routed to a package registry install by name in registry form and replay with `--frozen` from the lockfile, without a commit or the catalog. (closes #4009, #4017)
 - `apm uninstall` refuses before any change when a shared bundle's shrinking skill selection would delete an edited or unproven file. (closes #4313, #4588)
 - `apm install -g` records files deployed from user-root primitives (`~/.apm/agents`) in the user lockfile, so a later install deploys source edits instead of skipping them. (closes #3772, #4684)
 

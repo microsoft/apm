@@ -745,26 +745,26 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
     [
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.snapshot_deploy_targets(ctx)\n",
+            "        transaction.journal_deploy_writes(ctx)\n",
             "",
-            id="commit-order-snapshot-removed",
+            id="commit-order-journal-never-opened",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
-            "        transaction.snapshot_deploy_targets(ctx)\n",
-            "        capture_audit_gated_snapshot(ctx)\n",
-            id="commit-order-snapshot-outside-transaction",
+            "        transaction.journal_deploy_writes(ctx)\n",
+            "        DeployJournal(ctx.apm_modules_dir)\n",
+            id="commit-order-journal-outside-transaction",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
             "        transaction.release_deploy_targets()\n",
             "",
-            id="commit-order-snapshot-never-released",
+            id="commit-order-journal-never-released",
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._restore_deploy_targets()\n",
-            "                    pass\n",
+            "        self._restore_deploy_targets()\n",
+            "        pass\n",
             id="commit-order-rollback-skips-restore",
         ),
         pytest.param(
@@ -775,9 +775,21 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
         pytest.param(
             "src/apm_cli/install/transaction.py",
-            "                    self._remove_created_target_roots()\n",
-            "                    pass\n",
+            "        self._remove_created_target_roots()\n",
+            "        pass\n",
             id="commit-order-rollback-keeps-created-roots",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "                    self._undo_deploys()\n",
+            "                    pass\n",
+            id="commit-order-rollback-skips-undo",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "        return unless_lockfile_commits(self._undo_deploys)\n",
+            "        return unless_lockfile_commits(lambda: None)\n",
+            id="commit-order-uncommitted-update-skips-undo",
         ),
         pytest.param(
             "src/apm_cli/install/pipeline.py",
@@ -787,16 +799,120 @@ def test_package_selector_identity_cannot_bypass_interpreted_references(
         ),
     ],
 )
-def test_audit_gated_deploy_snapshot_is_owned_by_the_transaction(
-    path: str, old: str, new: str
-) -> None:
-    """Dropping or bypassing the transaction's deploy snapshot fails the guard."""
+def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: str) -> None:
+    """Dropping or bypassing the transaction's deploy journal fails the guard."""
     rule_id = "install-deployment-install-commit-order"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
     assert report.failures == ()
     assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            "            stale_target.unlink()\n",
+            id="raw-path-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    shutil.copy2(source_file, target_file)\n",
+            id="raw-shutil-copy",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            '                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:\n',
+            '                with open(json_path, "w", encoding="utf-8") as f:\n',
+            id="raw-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            '            stale_target.open("w").close()\n',
+            id="raw-path-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    source_file.replace(target_file)\n",
+            id="raw-path-replace",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    atomic_io.atomic_copy(source_file, target_file)\n",
+            id="raw-atomic-copy-call",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            from apm_cli.utils.atomic_io import atomic_copy\n\n"
+            "            atomic_copy(src, dest, metadata=False)\n",
+            id="raw-atomic-copy-import",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/write_seam.py",
+            "    record_before_write(destination, follow=True)\n"
+            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
+            id="seam-writer-skips-record",
+        ),
+        pytest.param(
+            "src/apm_cli/install/transaction.py",
+            "            write_seam.listen(self._record_deploy_write)\n",
+            "            pass\n",
+            id="transaction-not-listening",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "            write_seam.unlink(stale_target)\n",
+            "            with write_seam.private_scratch():\n                write_seam.unlink(stale_target)\n",
+            id="scratch-outside-the-locked-render",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    with write_seam.planning():\n                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-outside-the-commit-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "                    write_seam.copy2(source_file, target_file)\n",
+            "                    seam = write_seam\n"
+            "                    with seam.planning():\n"
+            "                        write_seam.copy2(source_file, target_file)\n",
+            id="planning-through-a-module-alias",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/cleanup.py",
+            "from apm_cli.integration import write_seam\n",
+            "from apm_cli.integration import write_seam\n"
+            "from apm_cli.integration.write_seam import private_scratch\n",
+            id="scratch-imported-directly",
+        ),
+    ],
+)
+def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
+    path: str, old: str, new: str
+) -> None:
+    """A raw write in an integrator is never journaled, so rollback could not restore it."""
+    rule_id = "install-deployment-deploy-write-seam"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new)
+    ast.parse(mutated, filename=path)
+
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+
+    assert report.failures == ()
+    assert {(violation.rule_id, violation.path) for violation in report.violations} == {
+        (rule_id, path)
+    }
 
 
 def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
@@ -1254,10 +1370,10 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
         pytest.param(
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
-            "                canvas_approved=_canvas_enabled and _canvas_approved_bundle,\n"
+            "                canvas_approved=_canvas_ok,\n"
             "            )\n"
             "            if _deploy_rel is None:",
             id="omitted-hooks-approved",
@@ -2239,6 +2355,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm install --mcp strips user comments from apm.yml again.",
     ),
     MutationCase(
+        guard_id="install-deployment-deploy-write-seam",
+        rule_id="install-deployment-deploy-write-seam",
+        path="src/apm_cli/integration/agent_integrator.py",
+        old="from apm_cli.integration.write_seam import write_text_lf",
+        new="from apm_cli.utils.atomic_io import write_text_lf",
+        intent="An integrator writes deploy files without the seam the transaction journals.",
+    ),
+    MutationCase(
         guard_id="install-deployment-drift-claim-classification",
         rule_id="install-deployment-drift-claim-classification",
         path="src/apm_cli/install/drift.py",
@@ -2269,6 +2393,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def exec_trust_context_for_project(",
         new="def exec_trust_context_for_project_disabled(",
         intent="Executable trust loses its canonical project-context resolver.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-explicit-policy-source-owner",
+        rule_id="install-deployment-explicit-policy-source-owner",
+        path="src/apm_cli/policy/explicit_source.py",
+        old="inheritance.merge_policies(discovered.policy, explicit.policy)",
+        new="inheritance.merge_policies(explicit.policy, discovered.policy)",
+        intent="The explicit --policy source becomes the parent and can loosen org policy.",
     ),
     MutationCase(
         guard_id="install-deployment-frozen-flag-reader",
@@ -2314,7 +2446,7 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-install-commit-order",
         rule_id="install-deployment-install-commit-order",
         path="src/apm_cli/install/phases/integrate.py",
-        old="        check_before_deploy(ctx)\n",
+        old="        check_before_deploy(ctx, _write_plan(ctx, materialized, deployment_plans, local_plan))\n",
         new="        pass\n",
         intent="Integration deploys before the commit gate checks the install.",
     ),
@@ -6131,9 +6263,15 @@ def test_lock_target_canonicalisation_guard_rejects_mutations(
         ),
         pytest.param(
             "src/apm_cli/install/mcp/integration.py",
-            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=True) | bundle_owned",
-            "mcp_servers_for_runtime([], owned_target, named_only=True) | bundle_owned",
+            "mcp_servers_for_runtime(mcp_deps, owned_target, named_only=not flag_narrowed)",
+            "mcp_servers_for_runtime([], owned_target, named_only=not flag_narrowed)",
             id="target-scoped-install-retires-other-targets",
+        ),
+        pytest.param(
+            "src/apm_cli/install/mcp/integration.py",
+            "target_decision is not None and target_decision.from_flag",
+            'target_decision is not None and target_decision.source == "--target flag"',
+            id="narrowed-cleanup-keyed-on-display-label",
         ),
         pytest.param(
             "src/apm_cli/install/service_integration.py",
@@ -6759,3 +6897,86 @@ def test_every_stale_deleter_consumes_the_skip_set(
     )
     assert report.failures == ()
     assert any(item.rule_id == rule for item in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("rule_id", "path", "old", "new"),
+    [
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/install/local_bundle_handler.py",
+            "            bundled_deps=bundle_policy_subjects(bundle_info),\n",
+            "",
+            id="bundle-identity-skips-dependency-deny",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/packer.py",
+            "    policy_warnings = pack_policy_preflight(Path(project_root), logger)\n",
+            "    policy_warnings = []\n",
+            id="pack-skips-dependency-policy",
+        ),
+        pytest.param(
+            "install-deployment-bundle-admission-owner",
+            "src/apm_cli/bundle/pack_policy.py",
+            "    bundled = locked_package_refs(",
+            "    bundled = list(",
+            id="pack-policy-ignores-locked-packages",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "    retire_unadmitted_bundle_canvas(\n",
+            "    dict(\n",
+            id="scope-recheck-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/policy/ci_checks.py",
+            "unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)",
+            "[]",
+            id="audit-skips-bundle-canvas",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "holding = found.setdefault((slug, True), BundleCanvas(slug, True))",
+            "holding = found.setdefault((slug, False), BundleCanvas(slug, False))",
+            id="bundle-canvas-ownership-unrecorded",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "        path = contained_bundle_path(root, value, prefixes)\n",
+            "        path = root / rel\n",
+            id="bundle-canvas-retire-uncontained",
+        ),
+        pytest.param(
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        hook_file = contained_bundle_path(project_root, value, prefixes)\n",
+            "        hook_file = Path(project_root) / value\n",
+            id="bundle-hook-retire-uncontained",
+        ),
+        pytest.param(
+            "install-deployment-executable-trust-context",
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
+            "package_type_approved(allow_executables, keys, EXEC_TYPE_HOOKS)",
+            id="bundle-canvas-approved-as-hooks",
+        ),
+    ],
+)
+def test_bundle_policy_and_canvas_gate_routes_are_guarded(
+    rule_id: str, path: str, old: str, new: str
+) -> None:
+    """Local bundle identity, pack and bundle canvas gate, record and re-check route through owners."""
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    mutated = source.replace(old, new, 1)
+    ast.parse(mutated, filename=path)
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
+    assert report.failures == ()
+    assert any(
+        violation.rule_id == rule_id and violation.path == path for violation in report.violations
+    )

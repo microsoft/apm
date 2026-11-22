@@ -3,7 +3,6 @@
 import errno
 import os
 import re
-import shutil
 import stat
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
@@ -13,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.core.remediation import LOCAL_FILE_UNMANAGED
-from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
+from apm_cli.integration import write_seam
+from apm_cli.integration.write_seam import write_text_lf
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -244,6 +245,9 @@ class BaseIntegrator:
 
     # Overwrite evidence for one install call, bound by ``recorded_writes`` (#4360).
     _overwrite_gate: "OverwriteGate | None" = None
+    # While install plans its writes (#4381), every file the gate would keep
+    # without evidence, with its edit kind, instead of any write or keep.
+    _overwrite_plan: list[tuple[Path, str | None]] | None = None
 
     # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
     # ``False`` = byte-preserving identity (the safe default any future
@@ -571,9 +575,9 @@ class BaseIntegrator:
                     if on_member_skipped is not None:
                         on_member_skipped(target_file)
                     continue
-                target_file.parent.mkdir(parents=True, exist_ok=True)
+                write_seam.mkdir(target_file.parent, parents=True, exist_ok=True)
                 try:
-                    shutil.copy2(source_file, target_file)
+                    write_seam.copy2(source_file, target_file)
                 except OSError:
                     if not destination_existed:
                         self.cleanup_empty_parents([target_file], destination.parent)
@@ -777,7 +781,8 @@ class BaseIntegrator:
         """
         if cls.is_content_identical_to_text(path, text, lf_normalized_deploy=True):
             return False
-        path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(path.parent, parents=True, exist_ok=True)
+        write_seam.record_before_write(path)
         writer(path, text)
         return True
 
@@ -840,6 +845,7 @@ class BaseIntegrator:
                 lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY,
             )
         )
+        plan = self._overwrite_plan
         if identical:
             target_paths.append(target_path)
             # Already receipted with these bytes: unchanged, not an adoption (RA-007).
@@ -847,7 +853,7 @@ class BaseIntegrator:
                 return True, False
             # A managed file already holding the final render is APM's bytes:
             # record the receipt the skipped rewrite would have (#4184, #3701).
-            if managed_files and rel_path.replace("\\", "/") in managed_files:
+            if plan is None and managed_files and rel_path.replace("\\", "/") in managed_files:
                 self.note_rendered_write(target_path)
             return True, True
         if self.check_collision(
@@ -858,8 +864,14 @@ class BaseIntegrator:
         # deployment evidence; the lockfile hash alone never authorizes it (#4360).
         gate = self._overwrite_gate
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
+            if plan is not None:
+                return True, False
             return False, False
-        if gate is not None and gate.adopt_legacy(target_path, rel_path):
+        if gate is not None and (
+            gate.legacy_adoptable(target_path, rel_path)
+            if plan is not None
+            else gate.adopt_legacy(target_path, rel_path)
+        ):
             target_paths.append(target_path)
             return True, False
         rendered = self._rendered_hash(source_file, expected_content)
@@ -869,19 +881,23 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
-        if gate is not None and gate.keep(target_path, rel_path, edit=edit):
+        if plan is not None:
+            # Planning writes nothing; a blocking keep refuses the whole plan (#4381).
+            if edit != "drift":
+                plan.append((target_path, edit))
+        elif gate is not None and gate.keep(target_path, rel_path, edit=edit):
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
-            return True, False
-        # A proven edit the gate cannot keep (the project's own local content)
-        # still names the true reason (RA-012).
-        message = kept_edit_message(
-            rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
-        )
-        if diagnostics is not None:
-            diagnostics.error(message, package=gate.owner if gate else "")
         else:
-            _rich_warning(message)
+            # A proven edit the gate cannot keep (the project's own local content)
+            # still names the true reason (RA-012).
+            message = kept_edit_message(
+                rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
+            )
+            if diagnostics is not None:
+                diagnostics.error(message, package=gate.owner if gate else "")
+            else:
+                _rich_warning(message)
         return True, False
 
     # Known integration prefixes that APM is allowed to deploy/remove under.
@@ -1206,7 +1222,7 @@ class BaseIntegrator:
         for d in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
             try:
                 if d.exists() and not any(d.iterdir()):
-                    d.rmdir()
+                    write_seam.rmdir(d)
             except OSError:
                 pass
 
@@ -1402,7 +1418,7 @@ class BaseIntegrator:
         elif legacy_glob_dir and legacy_glob_pattern and legacy_glob_dir.exists():
             for f in legacy_glob_dir.glob(legacy_glob_pattern):
                 try:
-                    f.unlink()
+                    write_seam.unlink(f)
                     stats["files_removed"] += 1
                 except Exception:
                     stats["errors"] += 1

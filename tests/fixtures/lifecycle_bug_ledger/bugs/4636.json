@@ -1,0 +1,17 @@
+{
+  "issue": 4636,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall after a target change re-integrates the remaining packages only into the targets apm.lock.yaml records, so it no longer writes unrecorded files to a newly declared target (I1) or prints a skip hint for a target root it just created; it names apm install as the step that deploys and records the new target.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/test_uninstall_engine_validation_logic.py::test_uninstall_reconciles_only_targets_the_lock_declares",
+    "tests/unit/test_uninstall_engine_validation_logic.py::test_without_recorded_declarations_a_target_needs_a_recorded_file"
+  ]
+}

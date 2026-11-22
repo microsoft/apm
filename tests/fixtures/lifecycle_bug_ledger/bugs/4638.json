@@ -1,0 +1,14 @@
+{
+  "issue": 4638,
+  "fixed_in": "Unreleased",
+  "summary": "A --frozen install refused on a widened target set left merged hook configuration (.claude/settings.json, apm-hooks.json, the .gemini pair) on disk; the deploy journal now stays until the install commits, so the refusal restores it.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_frozen_target_widening.py::test_a_refused_frozen_widening_leaves_no_hook_config"
+  ]
+}

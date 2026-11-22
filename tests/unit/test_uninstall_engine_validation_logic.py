@@ -272,3 +272,123 @@ def _make_mock_locked_dep(key, repo_url=None, resolved_by=None):
     dep.resolved_by = resolved_by
     dep.parent_keys = (resolved_by,)
     return dep
+
+
+# ---------------------------------------------------------------------------
+# Targets uninstall reconciles after a target change (#4636)
+# ---------------------------------------------------------------------------
+
+
+def _profiles(*names):
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return [KNOWN_TARGETS[name] for name in names]
+
+
+def _locked_with(files=(), manifest_targets=None):
+    lockfile = LockFile(dependencies={"acme/a": LockedDependency(repo_url="acme/a")})
+    lockfile.dependencies["acme/a"].deployed_files = list(files)
+    lockfile.manifest_targets = manifest_targets
+    return lockfile
+
+
+_DEPLOYMENT_ROW = """lockfile_version: '1'
+dependencies:
+- repo_url: acme/a
+  deployed_files:
+  - {value}
+deployments:
+- kind: project-relative
+  target: {target}
+  value: {value}
+  runtime: null
+  scope: project
+  owners:
+  - acme/a
+  active_owner: acme/a
+  content_hash: null
+"""
+
+
+def _recorded(target, value):
+    return LockFile.from_yaml(_DEPLOYMENT_ROW.format(target=target, value=value))
+
+
+@pytest.mark.parametrize(
+    ("declared", "files", "kept", "new"),
+    [
+        (("claude",), [".github/prompts/a.prompt.md"], [], ["claude"]),
+        (("copilot", "claude"), [".github/prompts/a.prompt.md"], ["copilot"], ["claude"]),
+        (
+            ("copilot", "claude", "gemini"),
+            [".github/prompts/a.prompt.md", ".claude/commands/a.md"],
+            ["copilot", "claude"],
+            ["gemini"],
+        ),
+        (("copilot",), [".github/prompts/a.prompt.md", ".claude/commands/a.md"], ["copilot"], []),
+        (("copilot",), [".github/prompts/a.prompt.md"], ["copilot"], []),
+    ],
+)
+def test_uninstall_reconciles_only_targets_the_lock_declares(declared, files, kept, new):
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    targets, added = lock_recorded_targets(_profiles(*declared), _locked_with(files=files))
+    assert [target.name for target in targets] == kept
+    assert added == new
+
+
+def test_a_refreshed_declaration_is_not_deployment_evidence():
+    """A changed uninstall write records apm.yml's new targets in manifest_targets."""
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _locked_with(files=[".github/prompts/a.prompt.md"], manifest_targets=["claude"])
+    targets, added = lock_recorded_targets(_profiles("claude"), lockfile)
+    assert (targets, added) == ([], ["claude"])
+
+
+def test_without_recorded_declarations_a_target_needs_a_recorded_file():
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _locked_with(files=[".claude/skills/a/SKILL.md"])
+    targets, added = lock_recorded_targets(_profiles("copilot", "claude"), lockfile)
+    assert [target.name for target in targets] == ["claude"]
+    assert added == ["copilot"]
+
+
+@pytest.mark.parametrize(
+    ("declared", "kept"),
+    [(("copilot",), ["copilot"]), (("copilot", "gemini"), [])],
+)
+def test_a_legacy_shared_root_row_counts_only_for_its_one_governing_target(declared, kept):
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _locked_with(files=[".agents/skills/a/SKILL.md"])
+    targets, _added = lock_recorded_targets(_profiles(*declared), lockfile)
+    assert [target.name for target in targets] == kept
+
+
+def test_a_deployment_row_names_its_target_on_a_shared_root():
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    lockfile = _recorded("copilot", ".agents/skills/a/SKILL.md")
+    targets, added = lock_recorded_targets(_profiles("copilot", "gemini"), lockfile)
+    assert [target.name for target in targets] == ["copilot"]
+    assert added == ["gemini"]
+
+
+@pytest.mark.parametrize("lockfile", [None, LockFile()])
+def test_without_any_lock_record_every_target_is_reconciled(lockfile):
+    from apm_cli.commands.uninstall.recorded_targets import lock_recorded_targets
+
+    targets, added = lock_recorded_targets(_profiles("copilot", "claude"), lockfile)
+    assert [target.name for target in targets] == ["copilot", "claude"]
+    assert added == []
+
+
+def test_the_new_target_advice_names_apm_install():
+    from apm_cli.core.remediation import UNINSTALL_NEW_TARGET_UNDEPLOYED
+
+    assert UNINSTALL_NEW_TARGET_UNDEPLOYED.bind(targets="claude").sentence() == (
+        "Run 'apm install' to deploy the remaining packages to claude and record them "
+        "in apm.lock.yaml."
+    )
