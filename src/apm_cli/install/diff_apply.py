@@ -29,6 +29,7 @@ import os
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,42 @@ _EXTRAS_DIR = "extras"
 # Project files APM writes beside the deployed primitives; the lock does not hash them.
 _SKIP_HARVEST = {"apm.yml", "apm.lock.yaml"}
 _SKIP_DIRS = {"apm_modules", ".git", ".apm-local"}
+
+
+# Per-package integration body lines this process emitted (full run), by dependency key.
+_BODIES: dict[str, list[str]] = {}
+_BODY_DIR = "bodies"
+
+
+def package_body(package_name: str) -> list[str]:
+    """The list one full-run package integration appends its tree lines to."""
+    body: list[str] = []
+    _BODIES[str(package_name)] = body
+    return body
+
+
+def _body_key(dep: Any, targets: list[str]) -> str:
+    from apm_cli.version import get_version
+
+    parts = [
+        get_version(),
+        str(getattr(dep, "repo_url", "")),
+        str(getattr(dep, "host", "")),
+        str(getattr(dep, "resolved_commit", "")),
+        str(getattr(dep, "content_hash", "")),
+        ",".join(sorted(targets)),
+    ]
+    return hashlib.sha256("\0".join(parts).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class PackageOutcome:
+    """One dependency of an applied diff, for the output renderer (install/fast_output.py)."""
+
+    key: str
+    dep: Any
+    files_written: bool
+    body: tuple[str, ...]
 
 
 class Decline(Exception):
@@ -141,6 +178,19 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
                         _store_put(store, data)
         if before is None:
             return
+        targets = list(getattr(lock, "manifest_targets", None) or [])
+        for key, dep in lock.dependencies.items():
+            body = _BODIES.get(key)
+            files = getattr(dep, "deployed_file_hashes", None) or {}
+            # Only a package deployed fresh this run (none of its files existed) records its body.
+            if body is None or not files or any(rel in before for rel in files):
+                continue
+            path = store / _BODY_DIR / f"{_body_key(dep, targets)}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".body.")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(body, handle)
+            os.replace(tmp, path)
         after = _snapshot(project_root)
         extras = []
         for rel, digest in sorted(after.items()):
@@ -157,6 +207,31 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
         os.replace(tmp, index)
     except Exception as exc:  # the store is an accelerator; never fail an install
         _trace(f"harvest skipped ({type(exc).__name__})")
+
+
+def _outcomes(lock: Any, files: list, store: Path) -> list[PackageOutcome]:
+    """Per dependency: all of its files written (replay its recorded body), none, or decline."""
+    written: dict[str, int] = {}
+    for _path, _data, _digest, owner in files:
+        written[owner] = written.get(owner, 0) + 1
+    targets = list(getattr(lock, "manifest_targets", None) or [])
+    out: list[PackageOutcome] = []
+    for key, dep in lock.dependencies.items():
+        total = len(getattr(dep, "deployed_file_hashes", None) or {})
+        count = written.get(key, 0)
+        if count == 0:
+            out.append(PackageOutcome(key, dep, False, ("  |-- (files unchanged)",)))
+            continue
+        if count != total:
+            raise Decline("partial package diff")
+        try:
+            body = json.loads((store / _BODY_DIR / f"{_body_key(dep, targets)}.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            raise Decline("no recorded output") from None
+        if not isinstance(body, list) or not all(isinstance(line, str) for line in body):
+            raise Decline("no recorded output")
+        out.append(PackageOutcome(key, dep, True, tuple(body)))
+    return out
 
 
 def _within(root: Path, rel: str) -> Path:
@@ -346,6 +421,7 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
         files = _plan_files(project_root, lock, store, ascii_ok, receipts)
+        outcomes = _outcomes(lock, files, store)
         extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
         ascii_ok[0] = ascii_ok[0] and all(data.isascii() for _p, data in extras)
         if not ascii_ok[0]:
@@ -377,6 +453,13 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         return False
     count = len(files) + len(extras)
     _trace(f"applied a verified diff ({count} files)")
+    try:
+        from apm_cli.install.fast_output import render
+    except ImportError:
+        render = None
+    if render is not None:
+        render(project_root, lock, outcomes, frozen=bool(options.get("frozen")), started=started)
+        return True
     from apm_cli.utils.console import _rich_info, _rich_success
 
     if not (count or packages):
