@@ -69,6 +69,8 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
+    ("user", "lsp", "copilot"): (".copilot/lsp-config.json", '"{pkg}-server"'),
+    ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
     # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
@@ -765,6 +767,7 @@ POLICY_BLOCK = ExpectedRefusal(
     "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
 )
 POLICY_REFUSALS = (
+    "pair|DEPLOYED=absent|GATE=denied-dependency",
     "pair|DEPLOYED=clean|GATE=denied-dependency",
     "pair|DEPLOYED=edited|GATE=denied-dependency",
     "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency",

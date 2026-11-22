@@ -280,6 +280,7 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
 SCENARIO_MODULES = (
     "test_cache_presence",
     "test_concurrency",
+    "test_deployed_absent",
     "test_failure_phase",
     "test_file_routing",
     "test_graph_version",
@@ -288,9 +289,11 @@ SCENARIO_MODULES = (
     "test_mcp_ownership_history",
     "test_network_offline",
     "test_ownership_siblings",
+    "test_pack_lock_states",
     "test_platform",
     "test_policy_pairs",
     "test_target_history_sources",
+    "test_user_scope",
 )
 
 

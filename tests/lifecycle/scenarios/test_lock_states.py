@@ -428,27 +428,9 @@ def test_sources_under_a_drifted_lock(lifecycle_world, world, lock) -> None:
     scenario.finish()
 
 
-# -- pack, and a plugin's bin/ at user scope --------------------------------------------
+# -- a plugin's bin/ at user scope (pack: test_pack_lock_states) ---------------------
 
-_PACK_LOCKS = ("stale", NEWER)
-
-
-def _pack_credit(lock: str) -> list[dict[str, str]]:
-    return [_pair(lock, OP="pack", SCOPE="project")]
-
-
-@pytest.mark.parametrize("lock", _PACK_LOCKS)
-def test_pack_under_a_drifted_lock(lifecycle_world, lock) -> None:
-    use_policy(lifecycle_world, "allow")
-    specs = {name: lifecycle_world.packages[f"{name}:git"].spec for name in ("p-skill", "p-lsp")}
-    scenario = Scenario(lifecycle_world, specs, policy="allow")
-    scenario.run("install p-skill")
-    if lock == NEWER:
-        stamp_newer(scenario)
-    else:
-        toggle(scenario, "p-lsp")
-    play(scenario, (Row((), "pack", tuple(_pack_credit(lock)), lock == NEWER),))
-    scenario.finish()
+_BIN_LOCKS = ("stale", NEWER)
 
 
 _BIN = "p-native-claude-bin"
@@ -459,7 +441,7 @@ def _bin_credit(lock: str) -> list[dict[str, str]]:
     return found if lock == NEWER else [*found, {"PRIM": "bin", "SCOPE": "user"}]
 
 
-@pytest.mark.parametrize("lock", _PACK_LOCKS)
+@pytest.mark.parametrize("lock", _BIN_LOCKS)
 def test_user_bin_plugin_under_a_drifted_lock(lifecycle_world, lock) -> None:
     """bin/ deploys only from a marketplace plugin at user scope (U-BIN)."""
     world = lifecycle_world
@@ -503,10 +485,9 @@ CREDITS = credits(
             f"test_sources_under_a_drifted_lock[{world}-{lock}]": _source_credit(world, lock)
             for world, lock in _SOURCE_CASES
         },
-        **{f"test_pack_under_a_drifted_lock[{lock}]": _pack_credit(lock) for lock in _PACK_LOCKS},
         **{
             f"test_user_bin_plugin_under_a_drifted_lock[{lock}]": _bin_credit(lock)
-            for lock in _PACK_LOCKS
+            for lock in _BIN_LOCKS
         },
     },
 )

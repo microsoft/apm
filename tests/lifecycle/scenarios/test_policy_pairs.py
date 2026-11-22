@@ -16,20 +16,24 @@ keep its bytes (I1-X2).
 
 from __future__ import annotations
 
-import json
 import re
 
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
-    PROJECT_HOME_ALLOWED,
     Known,
     Scenario,
     assert_changes,
     credits,
     known_defect,
 )
-from tests.lifecycle.world import use_policy, use_registry
+from tests.lifecycle.scenarios._sources import (
+    MARKETPLACES,
+    SOURCES,
+    from_source,
+    source_fields,
+)
+from tests.lifecycle.world import use_policy
 from tests.lifecycle.world.packages import INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
@@ -214,76 +218,28 @@ def test_a_target_change_with_no_policy_installs_and_says_so(lifecycle_world, ch
 
 # -- each package source ---------------------------------------------------------
 
-_SOURCES = {
-    "git": ("p-skill", "p-skill:git"),
-    "marketplace-git": ("p-skill", "p-skill:marketplace"),
-    "marketplace-local": ("p-skill", "p-skill@lifecycle-local"),
-    "marketplace-file": ("p-skill", "p-skill@lifecycle-file"),
-    "pkg-registry": ("p-skill", "p-skill:registry"),
-    "native-plugin": ("p-native-claude", "p-native-claude"),
-}
-_MARKETPLACES = ("marketplace-git", "marketplace-local", "marketplace-file")
-# A marketplace install may refresh the catalog cache under HOME.
-_MARKET_HOME = {"home": (*PROJECT_HOME_ALLOWED, ".apm/cache/marketplace")}
 
-
-def _local_catalog(world, src: str) -> str:
-    """A marketplace on disk: a catalog directory, or one ``marketplace.json`` file."""
-    name = "lifecycle-local" if src == "marketplace-local" else "lifecycle-file"
-    plugin = {
-        "name": "p-skill",
-        "description": "Lifecycle world package p-skill",
-        "source": {"source": "github", "repo": "lifecycle/p-skill", "ref": "v1.0.0"},
-    }
-    document = {"name": name, "owner": {"name": "APM Lifecycle"}, "plugins": [plugin]}
-    root = world.root / name
-    catalog = root / ".claude-plugin" / "marketplace.json"
-    catalog.parent.mkdir(parents=True)
-    catalog.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
-    return str(root if src == "marketplace-local" else catalog)
-
-
-def _from_source(world, src: str) -> tuple[Scenario, str]:
-    """(scenario, package name) with *src* reachable and nothing installed yet."""
-    use_policy(world, "allow")
-    if src == "pkg-registry":
-        use_registry(world)
-    name, spec = _SOURCES[src]
-    spec = world.packages[spec].spec if spec in world.packages else spec
-    targets = ("claude",) if src == "native-plugin" else ("copilot",)
-    scenario = Scenario(world, {name: spec}, policy="allow", targets=targets)
-    if src in _MARKETPLACES:
-        catalog = world.services.marketplace_url if src == "marketplace-git" else None
-        catalog = catalog or _local_catalog(world, src)
-        scenario.run(f"marketplace add {catalog}", forbidden={"project": ("*",)}, allowed={})
-    return scenario, name
-
-
-def _fields(src: str) -> dict[str, object]:
-    return {"allowed": _MARKET_HOME} if src in _MARKETPLACES else {}
-
-
-@pytest.mark.parametrize("src", sorted(_SOURCES))
+@pytest.mark.parametrize("src", sorted(SOURCES))
 def test_a_denied_package_from_each_source_is_refused(lifecycle_world, src) -> None:
-    scenario, name = _from_source(lifecycle_world, src)
+    scenario, name = from_source(lifecycle_world, src)
     variant = "deny-native" if src == "native-plugin" else _DENY
-    if src in _MARKETPLACES:
+    if src in MARKETPLACES:
         # Resolve once while allowed, so the refused install finds the catalog current.
-        scenario.run(f"install --dry-run {name}", **_fields(src))
+        scenario.run(f"install --dry-run {name}", **source_fields(src))
     _deny(scenario, name, variant=variant)
     step = scenario.run(
         f"install {name}",
         credit=[_pair(SRC=src, GATE=_DD)],
         refusal=True,
-        **_fields(src),
+        **source_fields(src),
     )
     assert "Blocked by org policy" in " ".join(step.output.split()), step.output
     scenario.finish()
 
 
-@pytest.mark.parametrize("src", sorted(_SOURCES))
+@pytest.mark.parametrize("src", sorted(SOURCES))
 def test_no_policy_installs_from_each_source_and_says_so(lifecycle_world, src) -> None:
-    scenario, name = _from_source(lifecycle_world, src)
+    scenario, name = from_source(lifecycle_world, src)
     variant = "deny-native" if src == "native-plugin" else _DENY
     use_policy(lifecycle_world, variant)
     scenario.source_moved()
@@ -291,7 +247,7 @@ def test_no_policy_installs_from_each_source_and_says_so(lifecycle_world, src) -
         f"install --no-policy {name}",
         credit=[_pair(SRC=src, NOPOLICY="on")],
         says=[_NO_POLICY_SAYS],
-        **_fields(src),
+        **source_fields(src),
     )
     assert step.result.returncode == 0, step.output
     scenario.finish()
@@ -308,7 +264,7 @@ def _offline(world) -> None:
 
 
 def test_a_denied_git_package_is_refused_online(lifecycle_world) -> None:
-    scenario, name = _from_source(lifecycle_world, "git")
+    scenario, name = from_source(lifecycle_world, "git")
     _deny(scenario, name)
     lifecycle_world.services.reset()
     step = scenario.run(
@@ -462,13 +418,13 @@ CREDITS = credits(
         },
         **{
             f"test_a_denied_package_from_each_source_is_refused[{src}]": [_pair(SRC=src, GATE=_DD)]
-            for src in _SOURCES
+            for src in SOURCES
         },
         **{
             f"test_no_policy_installs_from_each_source_and_says_so[{src}]": [
                 _pair(SRC=src, NOPOLICY="on")
             ]
-            for src in _SOURCES
+            for src in SOURCES
         },
         "test_a_denied_git_package_is_refused_online": [_pair(GATE=_DD, NET="online", SRC="git")],
         "test_a_denied_package_is_refused_offline": [_pair(GATE=_DD, NET="offline")],
