@@ -845,7 +845,7 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
         print(f"[PATHATTR] {journey.name} step {index} rc={result.returncode}")
         if target.is_file():
             report = json.loads(target.read_text(encoding="utf-8"))
-            print("[PATHATTR] " + json.dumps({k: report[k] for k in ("per_op", "inner", "mutations")}))
+            print("[PATHATTR] " + json.dumps({k: report[k] for k in ("per_op", "inner", "mutations", "repeat_histogram")}))
             for row in report["callers"]:
                 print("[PATHATTR-C] " + json.dumps(row))
             for row in report["top_paths"][:15]:

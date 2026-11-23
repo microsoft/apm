@@ -171,6 +171,10 @@ def _dump() -> None:
              "secs": round(_secs[(op, c)], 4), "dup_secs": round(_dup_secs[(op, c)], 4)}
             for op, c in callers
         ],
+        "repeat_histogram": {
+            op: dict(sorted(Counter(n for (o, _), n in _paths.items() if o == op).items()))
+            for op in ops
+        },
         "top_paths": [
             {"op": op, "path": p[-160:], "calls": n} for (op, p), n in _paths.most_common(30)
         ],
