@@ -18,8 +18,10 @@ import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
 
-from tests.lifecycle.machines._gate_bin import BIN_PATH, GateBin, bin_cells, replay_bin
+from tests.lifecycle.machines._gate_bin import BIN_PATH, KNOWN_DD, GateBin, bin_cells, replay_bin
 from tests.lifecycle.machines._gate_bundle import (
+    KNOWN_PACK,
+    PACK_SETS,
     GateBundles,
     GatePack,
     bundle_cells,
@@ -227,20 +229,27 @@ def test_gate_bundle_spine_credits_bundle_install_cells(lifecycle_template, tmp_
 
 def test_gate_pack_spine_credits_pack_cells(lifecycle_template, tmp_path: Path) -> None:
     """``apm pack`` ships exactly the dependency executables each gate level deploys."""
-    machine = GatePack(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project"))
-    replay_pack(machine)
-    missing = pack_cells() - earned_cells(current_node(), "G1|pack|")
+    pool, seen = WorldPool(lifecycle_template, tmp_path), set()
+    for packs in PACK_SETS:
+        machine = GatePack(Bench(pool.fresh(), "project"), packs)
+        replay_pack(machine)
+        seen |= machine.expected_seen
+    missing = pack_cells() - earned_cells(current_node(), "G1|pack|") - set(KNOWN_PACK)
     assert not missing, f"pack ids without an oracle receipt: {sorted(missing)}"
-    # The gate is off at the end: the hook stays deployed in the project.
-    assert (machine.bench.deploy_root / ".github/hooks/p-exec-session.json").exists()
+    # Every strict known cell failed on its step.
+    assert seen == set(KNOWN_PACK)
+    # The gate is off at the end: the canvas stays deployed in the project.
+    assert (machine.bench.deploy_root / ".github/extensions/p-canvas/extension.mjs").exists()
 
 
 def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_path: Path) -> None:
     """bin/ of a Claude marketplace plugin at every user-scope gate level keeps I1-I9."""
     machine = GateBin(Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "user"))
     replay_bin(machine)
-    missing = bin_cells() - earned_cells(current_node(), "G1|")
+    missing = bin_cells() - set(KNOWN_DD) - earned_cells(current_node(), "G1|")
     assert not missing, f"bin ids without an oracle receipt: {sorted(missing)}"
+    strict = {cell.label for cell in machine.known}
+    assert machine.expected_seen == strict, sorted(strict - machine.expected_seen)
     # The spine ends with the plugin uninstalled: no bin/ is left in HOME.
     assert not (machine.bench.deploy_root / BIN_PATH).exists()
 
@@ -473,3 +482,69 @@ def test_i1_fails_a_verified_tree_the_lock_has_no_native_plugin_record_for(tmp_p
     # Same bytes and fingerprint, but the lock's only record names another root.
     after = _native_after(tmp_path, {".agents/plugins/tool/bin/tool"}, recorded_name="other")
     _expect_i1(after, ["deployed file is not in the lock: .agents/plugins/tool/bin/tool"])
+
+
+# P-OWN-executable-item-admission: an approval pins the definition of what it
+# admits. A hook's definition is every file deployed with it (its script, the
+# modules the script imports, the package.json files that set their module
+# type), so a change to any of them parks the hook until it is approved again.
+_BUNDLE_HOOK = {
+    "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "node ./run.mjs"}]}]}
+}
+
+
+def _bundled_hook(root: Path) -> Path:
+    """h-bundle: a hook whose script imports a helper under a package module type."""
+    from tests.utils.local_package import LocalPackageFactory
+
+    package = LocalPackageFactory(root).create("h-bundle", version="1.0.0")
+    hooks = package.root / ".apm" / "hooks"
+    (hooks / "lib").mkdir(parents=True)
+    (hooks / "run.mjs").write_text("import './lib/helper.mjs';\n", encoding="ascii")
+    (hooks / "lib" / "helper.mjs").write_text("export const ok = 1;\n", encoding="ascii")
+    (hooks / "lib" / "package.json").write_text('{"type": "module"}\n', encoding="ascii")
+    (package.root / "package.json").write_text('{"type": "module"}\n', encoding="ascii")
+    (hooks / "run.json").write_text(json.dumps(_BUNDLE_HOOK), encoding="ascii")
+    return package.root
+
+
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        (".apm/hooks/lib/helper.mjs", "export const ok = 2;\n"),
+        (".apm/hooks/lib/package.json", '{"type": "commonjs"}\n'),
+        ("package.json", '{"type": "commonjs"}\n'),
+    ],
+    ids=["imported-module", "nested-package-json", "package-json"],
+)
+def test_an_approved_hook_reparks_when_any_file_of_its_bundle_changes(
+    lifecycle_template, tmp_path: Path, relative: str, content: str
+) -> None:
+    """Install parks the changed hook and retires it (I4); approving it again re-pins it."""
+    from tests.lifecycle.machines._kit import StepRunner
+    from tests.lifecycle.model.state import ModelState
+
+    bench = Bench(WorldPool(lifecycle_template, tmp_path).fresh(), "project")
+    source = _bundled_hook(bench.world.root / "hook-bundle")
+    kinds = {"h-bundle": frozenset({"hook"})}
+    unapproved = ModelState(declared=frozenset({"h-bundle"}))
+    approved = ModelState(
+        declared=frozenset({"h-bundle"}), decisions={("h-bundle", "hook"): "allowed"}
+    )
+    runner = StepRunner(bench, unapproved, kinds)
+    hook = bench.deploy_root / ".github" / "hooks" / "h-bundle-run.json"
+
+    runner.step(("install", str(source)), exits={0}, mutating=True)
+    runner.step(("approve", str(source)), exits={0})
+    runner.step(("install",), exits={0}, model=approved, mutating=True)
+    assert hook.is_file(), "the approved hook did not deploy"
+
+    runner.edit("change-" + relative, lambda: (source / relative).write_text(content, "ascii"))
+    step = runner.step(("install",), exits={0}, model=unapproved, mutating=True)
+    assert not hook.exists(), "a hook whose bundle changed stayed deployed"
+    output = " ".join((step.result.stdout + step.result.stderr).split())
+    assert "definition changed" in output, output
+
+    runner.step(("approve", str(source)), exits={0})
+    runner.step(("install",), exits={0}, model=approved, mutating=True)
+    assert hook.is_file(), "re-approving the changed hook did not deploy it"
