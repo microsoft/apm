@@ -240,9 +240,11 @@ Work down this list:
    are reported not to load in git worktrees, in non-interactive `claude -p`
    runs (including claude-code-action) and in Copilot CLI 1.0.106. `apm install`
    prints `[!] <package> installed as a native plugin ...` for each dependency
-   it installs this way. To deploy its skills loose instead, set
-   `skills: ["*"]` on that dependency in `apm.yml` (project scope only: with
-   `-g`, a `skills:` selection parks the plugin instead).
+   it installs this way. For a Claude-format plugin with skills at project
+   scope, the notice also says how to deploy its skills loose instead: set
+   `skills: ["*"]` on that dependency in `apm.yml`. That does not apply with
+   `-g` (a `skills:` selection parks the plugin), to Agent Plugins (they stay
+   native) or to a plugin without skills, so their notice omits it.
 
 :::tip[Other options]
 Packaging your own plugin: [Build a plugin](../../producer/build-a-plugin/).
