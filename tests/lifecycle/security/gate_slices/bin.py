@@ -15,6 +15,7 @@ bin/ deploys only for a marketplace Claude plugin at user scope
 
 from __future__ import annotations
 
+from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.security.gate_slices import GateRow, GateSlice
 
 _PLUGIN = "p-native-claude-bin"
@@ -30,7 +31,15 @@ _ALL = (
     "policy-dep-deny",
     "revoke-approval",
 )
-_USER_ORG = "#3703 user-scope installs discover no org policy, so an org policy change leaves user-scope deployments in place"
+_USER_ORG = KnownFailure(
+    "#3703",
+    "user-scope installs discover no org policy, so an org policy change leaves"
+    " user-scope deployments in place",
+    # I4 keeps the surface (org-deny, org-enables-gate); the dep deny row keeps
+    # the plugin file and prints no deny (policy-dep-deny).
+    r"still deployed but not allowed|plugins/p-native-claude-bin/\S+ must be absent"
+    r"|output lacks /denied by pattern/",
+)
 _XFAIL = {
     **{
         f"G|marketplace-install|{change}|bin": _USER_ORG
@@ -60,13 +69,13 @@ def _absent_row(path: str, change: str) -> GateRow:
         unchanged=_NEVER,
         package="p-exec",
         target="copilot",
-        xfail=_XFAIL.get(row_id, ""),
+        xfail=_XFAIL.get(row_id),
     )
 
 
 def _real_row(path: str, change: str) -> GateRow:
     row_id = f"G|{path}|{change}|bin"
-    return GateRow(row_id, surface=_DEPLOYED, xfail=_XFAIL.get(row_id, ""))
+    return GateRow(row_id, surface=_DEPLOYED, xfail=_XFAIL.get(row_id))
 
 
 SLICE = GateSlice(

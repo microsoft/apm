@@ -692,7 +692,11 @@ single `train-gate` check at that SHA:
 module and the NOTICE check. The ratchets compare against the merge base with
 `main`; a `Queue-Base: <sha>` trailer must name exactly that commit. A full
 train runs every check the `merge_group` gate requires. `train-gate` passes only
-when every job is green.
+when every job is green, or when every failure is inherited: `gate.py` collects the
+failing pytest node ids from the failed jobs' logs and subtracts the
+`train-failures.json` of the newest base probe (`queue/b<sha12>/p0-full`). It then
+publishes the run's own `train-failures.json`. A cancelled job, or a failure
+without node ids, is never excused.
 
 Queue refs are real branches: only write-access users can push them, and every
 job tests the triggering commit. Train jobs restore caches (including `main`'s)
@@ -722,6 +726,14 @@ the merges API, publishes the prefix refs, and logs `would-land` events:
 python -m scripts.merge_queue.runner tick      # one pass; state in ~/.apm-queue
 python -m scripts.merge_queue.runner metrics   # shadow summary from events.jsonl
 ```
+
+A red train is classified by `scripts/merge_queue/classify.py`:
+- the earliest red guard prefix ejects its PR;
+- an infra failure is rerun once, and a second infra failure halts launches;
+- a failure attributable to one member's files ejects that member;
+- any other failure is rerun once (a flake lands), then bisected by halves.
+
+An ejected PR re-enters only with a new head.
 
 Landing is off by default. `--land` (`scripts/merge_queue/landing.py`) also
 admin-merges proven trains in launch order with

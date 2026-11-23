@@ -27,7 +27,7 @@ from tests.integration._lockfile_chain_kit import (
     tree,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _SKILL_ROOTS = (".agents/skills", ".claude/skills")
 _INSTRUCTION = ".github/instructions/style.instructions.md"

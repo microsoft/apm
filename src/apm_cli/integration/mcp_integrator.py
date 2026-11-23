@@ -1191,6 +1191,10 @@ class MCPIntegrator:
                 label=claude_label,
             )
 
+        from apm_cli.install.mcp.write_receipts import forget_removed_mcp_writes
+
+        forget_removed_mcp_writes(project_root_path, user_scope=clean_user_scope)
+
     # ------------------------------------------------------------------
     # Lockfile persistence
     # ------------------------------------------------------------------

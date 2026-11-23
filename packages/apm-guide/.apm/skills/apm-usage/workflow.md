@@ -100,7 +100,7 @@ aliases; experimental targets such as `grok-cloud` cannot be stored in
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits for reproducibility |
 | `.gitignore` | Yes | `apm install` adds `apm_modules/` to it |
 | `.apm/` | Yes, if present | Local primitives you author (instructions, agents, etc.) |
-| Deployed files: `.github/`, `.claude/`, `.agents/`, `.grok/`, root `.mcp.json`, `AGENTS.md` | Optional | Any clone rebuilds them from the lockfile (`apm install --frozen`). Commit them when something reads the repo without running APM, such as a cloud coding agent |
+| Deployed files: `.github/`, `.claude/`, `.agents/`, `.grok/`, root `.mcp.json`, `AGENTS.md`, `CLAUDE.md` (imports `AGENTS.md`) | Optional | Any clone rebuilds them from the lockfile (`apm install --frozen`). Commit them when something reads the repo without running APM, such as a cloud coding agent |
 | `apm_modules/` | **No** | Installed dependencies -- gitignored automatically; restored by `apm install` |
 
 ## Team member setup
@@ -112,9 +112,9 @@ apm install            # restores all deps from lockfile
 ```
 
 Committed agent files can be reviewed and discovered after clone, but linked
-package context requires `apm install`. Keep `apm_modules/` resources and
-native Copilot Agent Plugin sources available while agents or tools use them,
-even after APM exits.
+package context requires `apm install`. Keep `apm_modules/` resources
+available while agents or tools use them, even after APM exits. Native plugins
+load from the committed `.agents/plugins/` and need no install.
 
 `apm install` also deploys local `.apm/` content, which wins collisions,
 even with no dependencies. For version replay and updates, see

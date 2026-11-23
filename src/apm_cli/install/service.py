@@ -72,6 +72,11 @@ class FrozenDisposition:
         return self.replay
 
     @property
+    def retain_stale_files(self) -> bool:
+        """A locked file this version no longer renders stays on disk and in the lock."""
+        return self.replay
+
+    @property
     def withhold_lockfile_writes(self) -> bool:
         """apm.lock.yaml is never rewritten, so nothing new may be recorded."""
         return self.replay

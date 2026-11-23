@@ -22,7 +22,7 @@ from tests.integration._install_audit_replay_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _DECLARED = (".claude/rules/glob.md", ".cursor/rules/glob.mdc", ".claude/skills/helper/SKILL.md")
 _UNDECLARED_ROOTS = (".github", ".codex", ".opencode", ".gemini")

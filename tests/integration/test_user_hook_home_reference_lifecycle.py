@@ -13,6 +13,7 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.legacy_lock import record_as_pre_037_lock
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackageFactory
 
@@ -200,11 +201,14 @@ def test_user_scope_hook_home_reference_lifecycle(
     assert hook.returncode == 0, hook.stderr
     assert (scenario.cwd / _OUTPUT).read_text(encoding="utf-8") == "portable-hook\n"
 
-    # A pre-#2821 install wrote absolute paths; reinstall must replace them in place.
+    # A pre-#2821 install (APM 0.35) wrote absolute paths and recorded their
+    # hashes in its lock; reinstall must replace them in place (#4626: that
+    # pre-0.37 lock is the evidence APM wrote them).
     portable_files = _config_files(home, harness)
     for name, content in portable_files.items():
         legacy = content.decode("utf-8").replace("$HOME", str(home.resolve()))
         (home / harness.config_root / name).write_text(legacy, encoding="utf-8")
+    record_as_pre_037_lock(scenario.isolated.config_root / "apm.lock.yaml", home)
     assert _commands(home, harness) == [absolute]
     _install(scenario, harness, scenario.environment, "migrate")
     assert _commands(home, harness) == [portable]

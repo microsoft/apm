@@ -22,7 +22,7 @@ import itertools
 import json
 import re
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -80,7 +80,9 @@ ORACLE_LAWS: Mapping[str, OracleLaw] = {
     "I6": OracleLaw("output is ASCII; JSON mode prints valid JSON", ()),
     "I7": OracleLaw(
         "no silent success; a failed command preserves durable state "
-        "(I7-X1: except retiring an executable it denies or revoked)",
+        "(I7-X1: except retiring an executable it denies or revoked; "
+        "I7-X2: an install that keeps a user edit may write the lockfile and the "
+        "files it names as written)",
         ("transaction.failed_command_preserves_state",),
     ),
     "I8": OracleLaw(
@@ -458,11 +460,16 @@ def _user_write_violations(after: Observation) -> tuple[list[Violation], set[str
 def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violation]]:
     """Managed paths a native_plugin record of the same lock owns, plus root mismatches.
 
-    A record owns the paths under its root only at user scope (where the root
-    lives) and only while the root's tree carries the record's fingerprint.
+    A record owns the paths under its root only while the root's tree carries
+    the record's fingerprint: the per-machine digest at user scope, the
+    portable path-and-bytes digest at project scope (#3921).
     """
-    if after.lock is None or not after.user_scope:
+    if after.lock is None:
         return set(), []
+    from apm_cli.claude_plugins.admission import (
+        ClaudeNativePluginError,
+        fingerprint_native_claude_source,
+    )
     from apm_cli.utils.content_hash import compute_native_plugin_hash
 
     owned: set[str] = set()
@@ -478,9 +485,14 @@ def _native_plugin_recorded(after: Observation) -> tuple[set[str], list[Violatio
         under = {path for path in after.managed_paths if path.startswith(prefix)}
         if not under:
             continue
+        root = after.deploy_root / record.root
         try:
-            observed = compute_native_plugin_hash(after.deploy_root / record.root)
-        except (OSError, ValueError):
+            observed = (
+                compute_native_plugin_hash(root)
+                if after.user_scope
+                else fingerprint_native_claude_source(root, portable=True)
+            )
+        except (OSError, ValueError, ClaudeNativePluginError):
             observed = "unreadable"
         if observed == record.fingerprint:
             owned |= under
@@ -668,11 +680,17 @@ def _i7_failure_preserves_state(
     if result is None or result.returncode == 0 or op.edit_only:
         return None
     found = []
+    kept_writes = _i7_x2_kept_writes(op, result)
     if after.state.manifest_bytes != before.state.manifest_bytes:
         found.append(Violation("I7", f"failed {op.name} changed the manifest"))
     if after.state.lockfile_bytes != before.state.lockfile_bytes:
-        found.append(Violation("I7", f"failed {op.name} changed the lockfile"))
+        message = f"failed {op.name} changed the lockfile"
+        # I7-X2: an install that kept a user edit records what it wrote.
+        if kept_writes is None:
+            found.append(Violation("I7", message))
     retirement = _i7_x1_retirement(before, after, model)
+    if retirement is None and kept_writes:
+        retirement = _i7_x2_retirement(before, after, model, kept_writes)
     if retirement is None:
         found.append(Violation("I7", f"failed {op.name} changed deployed surfaces"))
         retirement = frozenset()
@@ -685,6 +703,7 @@ def _i7_failure_preserves_state(
         and path.split(":", 1)[1] != report
         and not _within_retirement(path, retirement)
         and not (retirement and _RETIREMENT_BOOKKEEPING in path)
+        and not _i7_x2_written(path, before, after, kept_writes)
     ]
     if changed:
         found.append(Violation("I7", f"failed {op.name} changed durable files: {changed}"))
@@ -693,6 +712,81 @@ def _i7_failure_preserves_state(
             Violation("I7", f"failed {op.name} exited {result.returncode} without announcing why")
         )
     return found
+
+
+_KEPT_LINE = re.compile(r"\bKept \S.*?: ")
+_KEPT_WRITTEN = re.compile(
+    r"This install wrote (\d+) file\(s\), recorded in apm\.lock\.yaml:\n((?:[ \t]+\S[^\n]*\n?)*)"
+)
+
+
+def _i7_x2_kept_writes(op: Operation, result: CommandResult) -> frozenset[str] | None:
+    """I7-X2: the files a failed install that kept a user edit wrote, or None.
+
+    An install that keeps a proven edit blocking an update, or an unproven
+    mismatch (#4360, #4626), exits 1 yet writes the outputs it proved APM
+    wrote and the lockfile recording them. The exception is closed: a Kept
+    line names the edit and every written file is listed under "This install
+    wrote N file(s)"; nothing else may change (the exit code is exactly 1).
+    """
+    if result.returncode != 1 or (op.command or op.name.split("-", 1)[0]) not in {
+        "install",
+        "update",
+    }:
+        return None
+    text = f"{result.stdout}\n{result.stderr}"
+    if not _KEPT_LINE.search(text):
+        return None
+    written: set[str] = set()
+    # File-level keeps (finalize) and LSP entry keeps each list what they wrote.
+    for match in _KEPT_WRITTEN.finditer(text):
+        listed = {line.strip() for line in match.group(2).splitlines() if line.strip()}
+        if len(listed) != int(match.group(1)):
+            return None
+        written |= listed
+    return frozenset(written)
+
+
+def _i7_x2_retirement(
+    before: Observation, after: Observation, model, kept_writes: frozenset[str]
+) -> frozenset[str] | None:
+    """I7-X2: a kept-edit install may deploy a new surface whose every file it lists.
+
+    The rest of the surface change still meets I7-X1.
+    """
+    appeared = after.deployed - before.deployed
+    if any(not after.cell_paths.get(cell, frozenset()) <= kept_writes for cell in appeared):
+        return None
+    return _i7_x1_retirement(before, replace(after, deployed=after.deployed - appeared), model)
+
+
+def _i7_x2_written(
+    path: str, before: Observation, after: Observation, kept_writes: frozenset[str] | None
+) -> bool:
+    """I7-X2: *path* is a listed write, or a directory created only to hold one.
+
+    Listed writes are relative to the deploy root; the same relative path
+    under another snapshot root is never covered. A created ancestor must be a
+    real directory: a new symlink or file at that path is an unlisted change.
+    """
+    if not kept_writes:
+        return False
+    root, relative = path.split(":", 1)
+    snapshot = before.artifacts.snapshot(root)
+    if snapshot.root.resolve() != before.deploy_root.resolve():
+        return False
+    if relative in kept_writes:
+        return True
+    if relative in snapshot.paths:
+        return False
+    created = next(
+        (e for e in after.artifacts.snapshot(root).entries if e.relative_path == relative), None
+    )
+    return (
+        created is not None
+        and created.kind == "directory"
+        and any(write.startswith(relative + "/") for write in kept_writes)
+    )
 
 
 def _requested_report(command) -> str | None:

@@ -23,6 +23,7 @@ from apm_cli.install.lsp.integration import (
     run_owned_lsp_integration,
 )
 from apm_cli.install.service import FrozenDisposition
+from apm_cli.integration.lsp_integrator import LspInstallRecord
 from apm_cli.models.dependency.lsp import LSPDependency
 from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
@@ -421,7 +422,7 @@ class TestRunLspIntegration:
             fail_on_write_error=False,
             managed_target_servers={},
             force=False,
-            kept_unowned={},
+            record=LspInstallRecord(locked_configs={}),
         )
 
     @patch(_PATCH_TARGET)

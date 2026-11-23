@@ -99,41 +99,14 @@
     "tests/integration/test_command_integrator_hermetic.py": [
       "TestExtractInputNames::test_none_returns_empty_lists"
     ],
-    "tests/integration/test_commands_auth_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
-      "TestCheckPackageConflicts::test_string_dep_is_parsed",
-      "TestDetectTokenType::test_token_type_detection"
-    ],
-    "tests/integration/test_commands_config_coverage.py": [
-      "TestConfigCommandFinalPaths::test_config_get_audit_on_install_when_set",
-      "TestConfigCommandFlagPaths::test_config_get_no_key_shows_audit_on_install_when_flag_on"
-    ],
-    "tests/integration/test_commands_mcp_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
-      "TestLocalPathNoMarkersHint::test_no_sub_packages_no_output"
-    ],
     "tests/integration/test_copilot_app_targets_coverage.py": [
       "TestExperimentalFlags::test_flags_contains_copilot_cowork",
       "TestNormaliseFlagName::test_already_snake_case_unchanged",
       "TestNormaliseFlagName::test_hyphen_converted_to_underscore"
     ],
-    "tests/integration/test_deep_coverage_adapters.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key",
-      "TestCopilotEnvPlaceholderTranslation::test_translate_env_placeholder_legacy_angle_syntax"
-    ],
     "tests/integration/test_deep_coverage_deps_policy.py": [
       "TestHashVerification::test_verify_hash_pin_with_string",
-      "TestPolicyChecks::test_load_raw_apm_yml_missing_file",
       "TestPolicyDiscovery::test_verify_hash_pin_match"
-    ],
-    "tests/integration/test_deps_models_validation.py": [
-      "TestCloseRepoAndDebug::test_close_repo_calls_clear_cache_and_close",
-      "TestCloseRepoAndDebug::test_close_repo_none_is_noop"
-    ],
-    "tests/integration/test_deps_resolver_resolution.py": [
-      "TestGitHubDownloaderCloseRepo::test_close_repo_clears_cache",
-      "TestGitHubDownloaderCloseRepo::test_close_repo_with_none"
     ],
     "tests/integration/test_download_copilot_end_to_end.py": [
       "TestBuildUnsupportedOrMissingError::test_fallback_ref_included_in_message",
@@ -149,359 +122,16 @@
       "TestCopilotPureHelpers::test_translate_posix_dollar_brace",
       "TestCopilotPureHelpers::test_translate_vscode_env_prefix"
     ],
-    "tests/integration/test_github_downloader_phase3w4.py": [
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_miss_falls_through"
-    ],
-    "tests/integration/test_github_downloader_validation_flow.py": [
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_miss_falls_through"
-    ],
     "tests/integration/test_integrators_end_to_end.py": [
-      "TestBuildSelfDefinedInfo::test_tools_override_embedded",
-      "TestIsVscodeAvailable::test_vscode_dir_makes_available",
-      "TestMCPConfigDrift::test_new_dep_not_in_stored_ignored",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules",
-      "TestMCPIntegratorRemoveStale::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStale::test_exclude_prevents_cleanup",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
-      "TestMCPIntegratorRemoveStale::test_vscode_file_absent_is_noop",
-      "TestMCPIntegratorServerHelpers::test_get_server_names_empty",
-      "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
-      "TestRunMcpInstall::test_empty_deps_returns_zero",
       "TestRunMcpInstall::test_project_scope_sets_user_scope_false",
       "TestRunMcpInstall::test_run_mcp_install_verbose_no_crash",
-      "TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict",
-      "TestValidateSkillName::test_empty_name_invalid",
-      "TestValidateSkillName::test_single_char_valid",
-      "TestValidateSkillName::test_uppercase_invalid"
-    ],
-    "tests/integration/test_integrators_hooks_execution.py": [
-      "TestAttemptSpec::test_creation_and_fields",
-      "TestAttemptSpec::test_unpacking",
-      "TestCopilotKeysToGemini::test_bash_renamed_to_command",
-      "TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten",
-      "TestCopilotKeysToGemini::test_powershell_renamed_to_command",
-      "TestCopilotKeysToGemini::test_timeout_sec_to_ms",
-      "TestCopilotKeysToGemini::test_windows_key_renamed_to_command",
-      "TestDirectoryExistsAtRef::test_ado_host_skips_probe",
-      "TestDirectoryExistsAtRef::test_github_200_returns_true",
-      "TestDirectoryExistsAtRef::test_github_404_returns_false",
-      "TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false",
-      "TestDirectoryExistsAtRef::test_no_token_still_makes_request",
-      "TestDirectoryExistsAtRef::test_request_exception_returns_false",
-      "TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude",
-      "TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor",
-      "TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty",
-      "TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini",
-      "TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere",
-      "TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf",
-      "TestHookIntegrationResultCompat::test_full_constructor_via_super",
-      "TestHookIntegrationResultCompat::test_hooks_integrated_alias",
-      "TestHookIntegrationResultCompat::test_target_paths_preserved",
-      "TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs",
-      "TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir",
-      "TestHookIntegratorFindHookFiles::test_skips_symlinks",
-      "TestHookIntegratorParseHookJson::test_invalid_json_returns_none",
-      "TestHookIntegratorParseHookJson::test_missing_file_returns_none",
-      "TestHookIntegratorParseHookJson::test_non_dict_returns_none",
-      "TestHookIntegratorParseHookJson::test_valid_json_returned",
-      "TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks",
-      "TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result",
-      "TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal",
-      "TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json",
-      "TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate",
-      "TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty",
-      "TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk",
-      "TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists",
-      "TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent",
-      "TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated",
-      "TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script",
-      "TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped",
-      "TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero",
-      "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
-      "TestIsShaPin::test_41_chars_too_long",
-      "TestIsShaPin::test_abbreviated_7_char_sha",
-      "TestIsShaPin::test_branch_name_not_sha",
-      "TestIsShaPin::test_full_40_char_sha",
-      "TestIsShaPin::test_mixed_case_sha",
-      "TestIsShaPin::test_non_hex_returns_false",
-      "TestIsShaPin::test_tag_name_not_sha",
-      "TestIsShaPin::test_too_short_not_sha",
-      "TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted",
-      "TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing",
-      "TestMCPIntegratorAppendDrifted::test_empty_drifted_noop",
-      "TestMCPIntegratorAppendDrifted::test_sorted_order",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes",
-      "TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent",
-      "TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten",
-      "TestReinjectApmSourceFromSidecar::test_basic_reinject",
-      "TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once",
-      "TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored",
-      "TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored",
-      "TestRewriteCommandForTarget::test_cursor_plugin_root_variable",
-      "TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list",
-      "TestRewriteCommandForTarget::test_plugin_root_variable_replaced",
-      "TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy",
-      "TestRewriteCommandForTarget::test_system_command_unchanged",
-      "TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base",
-      "TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime",
-      "TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted",
-      "TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime",
-      "TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through",
-      "TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime",
-      "TestRunMcpInstallDirectoryGating::test_project_scope_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime",
-      "TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs",
-      "TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved",
-      "TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile",
-      "TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset",
-      "TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content",
-      "TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill",
-      "TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped",
-      "TestSplitOwnerRepo::test_empty_owner_returns_none",
-      "TestSplitOwnerRepo::test_empty_repo_returns_none",
-      "TestSplitOwnerRepo::test_no_slash_returns_none",
-      "TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo",
-      "TestSplitOwnerRepo::test_valid_owner_repo",
-      "TestSshAttemptAllowed::test_allow_fallback_permits_ssh",
-      "TestSshAttemptAllowed::test_import_error_returns_false",
-      "TestSshAttemptAllowed::test_ssh_protocol_preference_allows",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent",
-      "TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json",
-      "TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files",
-      "TestSyncIntegrationHooks::test_removes_managed_hook_json",
-      "TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths",
-      "TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json",
-      "TestToGeminiHookEntries::test_already_nested_entry_left_alone",
-      "TestToGeminiHookEntries::test_apm_source_promoted_to_outer",
-      "TestToGeminiHookEntries::test_flat_copilot_entry_wrapped",
-      "TestToGeminiHookEntries::test_non_dict_entry_passed_through",
-      "TestToGeminiHookEntries::test_timeoutsec_converted_in_flat",
-      "TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected",
-      "TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error",
-      "TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker",
-      "TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
-    ],
-    "tests/integration/test_integrators_hooks_phase3c.py": [
-      "TestAttemptSpec::test_creation_and_fields",
-      "TestAttemptSpec::test_unpacking",
-      "TestCopilotKeysToGemini::test_bash_renamed_to_command",
-      "TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten",
-      "TestCopilotKeysToGemini::test_powershell_renamed_to_command",
-      "TestCopilotKeysToGemini::test_timeout_sec_to_ms",
-      "TestCopilotKeysToGemini::test_windows_key_renamed_to_command",
-      "TestDirectoryExistsAtRef::test_ado_host_skips_probe",
-      "TestDirectoryExistsAtRef::test_github_200_returns_true",
-      "TestDirectoryExistsAtRef::test_github_404_returns_false",
-      "TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false",
-      "TestDirectoryExistsAtRef::test_no_token_still_makes_request",
-      "TestDirectoryExistsAtRef::test_request_exception_returns_false",
-      "TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude",
-      "TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor",
-      "TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty",
-      "TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini",
-      "TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere",
-      "TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf",
-      "TestHookIntegrationResultCompat::test_full_constructor_via_super",
-      "TestHookIntegrationResultCompat::test_hooks_integrated_alias",
-      "TestHookIntegrationResultCompat::test_target_paths_preserved",
-      "TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs",
-      "TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir",
-      "TestHookIntegratorFindHookFiles::test_skips_symlinks",
-      "TestHookIntegratorParseHookJson::test_invalid_json_returns_none",
-      "TestHookIntegratorParseHookJson::test_missing_file_returns_none",
-      "TestHookIntegratorParseHookJson::test_non_dict_returns_none",
-      "TestHookIntegratorParseHookJson::test_valid_json_returned",
-      "TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks",
-      "TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result",
-      "TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal",
-      "TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json",
-      "TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate",
-      "TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty",
-      "TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk",
-      "TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists",
-      "TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent",
-      "TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated",
-      "TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script",
-      "TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped",
-      "TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero",
-      "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
-      "TestIsShaPin::test_41_chars_too_long",
-      "TestIsShaPin::test_abbreviated_7_char_sha",
-      "TestIsShaPin::test_branch_name_not_sha",
-      "TestIsShaPin::test_full_40_char_sha",
-      "TestIsShaPin::test_mixed_case_sha",
-      "TestIsShaPin::test_non_hex_returns_false",
-      "TestIsShaPin::test_tag_name_not_sha",
-      "TestIsShaPin::test_too_short_not_sha",
-      "TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted",
-      "TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing",
-      "TestMCPIntegratorAppendDrifted::test_empty_drifted_noop",
-      "TestMCPIntegratorAppendDrifted::test_sorted_order",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes",
-      "TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent",
-      "TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten",
-      "TestReinjectApmSourceFromSidecar::test_basic_reinject",
-      "TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once",
-      "TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored",
-      "TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored",
-      "TestRewriteCommandForTarget::test_cursor_plugin_root_variable",
-      "TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list",
-      "TestRewriteCommandForTarget::test_plugin_root_variable_replaced",
-      "TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy",
-      "TestRewriteCommandForTarget::test_system_command_unchanged",
-      "TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base",
-      "TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime",
-      "TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted",
-      "TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime",
-      "TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through",
-      "TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime",
-      "TestRunMcpInstallDirectoryGating::test_project_scope_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime",
-      "TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs",
-      "TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved",
-      "TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile",
-      "TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset",
-      "TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content",
-      "TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill",
-      "TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped",
-      "TestSplitOwnerRepo::test_empty_owner_returns_none",
-      "TestSplitOwnerRepo::test_empty_repo_returns_none",
-      "TestSplitOwnerRepo::test_no_slash_returns_none",
-      "TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo",
-      "TestSplitOwnerRepo::test_valid_owner_repo",
-      "TestSshAttemptAllowed::test_allow_fallback_permits_ssh",
-      "TestSshAttemptAllowed::test_import_error_returns_false",
-      "TestSshAttemptAllowed::test_ssh_protocol_preference_allows",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent",
-      "TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json",
-      "TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files",
-      "TestSyncIntegrationHooks::test_removes_managed_hook_json",
-      "TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths",
-      "TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json",
-      "TestToGeminiHookEntries::test_already_nested_entry_left_alone",
-      "TestToGeminiHookEntries::test_apm_source_promoted_to_outer",
-      "TestToGeminiHookEntries::test_flat_copilot_entry_wrapped",
-      "TestToGeminiHookEntries::test_non_dict_entry_passed_through",
-      "TestToGeminiHookEntries::test_timeoutsec_converted_in_flat",
-      "TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected",
-      "TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error",
-      "TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker",
-      "TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
+      "TestRunMcpInstall::test_stored_mcp_configs_none_defaults_to_empty_dict"
     ],
     "tests/integration/test_integrators_validation_rules.py": [
-      "TestIsTlsFailure::test_runtime_error_with_tls_prefix",
       "TestIsTlsFailure::test_ssl_error_detected",
       "TestRunMcpInstallRuntimeDetection::test_stored_mcp_configs_none_defaults_empty",
       "TestRunMcpInstallRuntimeDetection::test_verbose_true_no_crash_on_empty_deps",
       "TestRunMcpInstallScopeHandling::test_project_scope_enum_propagates_no_exception"
-    ],
-    "tests/integration/test_marketplace_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_registry_field_required_default",
-      "TestBaseAdapterHelpers::test_registry_field_required_explicit_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_dollar_brace",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix"
-    ],
-    "tests/integration/test_marketplace_e2e.py": [
-      "test_marketplace_install_resolves_and_deploys"
-    ],
-    "tests/integration/test_mcp_coverage.py": [
-      "TestMCPCommandIntegration::test_mcp_install_subcommand_exists",
-      "TestMCPInstallForwarding::test_mcp_install_exists"
-    ],
-    "tests/integration/test_mcp_install_flow.py": [
-      "TestRunMcpInstallEarlyReturns::test_empty_deps_returns_zero",
-      "TestScopeHandling::test_project_scope_sets_user_scope_false",
-      "TestScopeHandling::test_user_scope_sets_user_scope_true",
-      "TestUserScopeFiltering::test_user_scope_filters_workspace_only_runtimes",
-      "TestUserScopeFiltering::test_user_scope_no_supported_runtimes_warns_and_returns_zero"
-    ],
-    "tests/integration/test_mcp_install_phase3w4.py": [
-      "TestScopeHandling::test_project_scope_sets_user_scope_false",
-      "TestScopeHandling::test_user_scope_sets_user_scope_true",
-      "TestUserScopeFiltering::test_user_scope_filters_workspace_only_runtimes",
-      "TestUserScopeFiltering::test_user_scope_no_supported_runtimes_warns_and_returns_zero"
-    ],
-    "tests/integration/test_mcp_integrator_install_flow.py": [
-      "TestGetServerNames::test_empty_list"
-    ],
-    "tests/integration/test_pack_install_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps",
-      "TestCheckPackageConflicts::test_string_dep_parsed"
-    ],
-    "tests/integration/test_uninstall_policy_pack_flow.py": [
-      "TestDeriveLeafHost::test_org_source_two_parts_returns_github_com",
-      "TestExtractExtendsHost::test_empty_returns_none",
-      "TestStripSourcePrefix::test_file_prefix_stripped",
-      "TestStripSourcePrefix::test_org_prefix_stripped",
-      "TestStripSourcePrefix::test_url_prefix_stripped"
-    ],
-    "tests/integration/test_utils_coverage.py": [
-      "TestInstallTui::test_should_animate_always_mode",
-      "TestInstallTui::test_should_animate_never_mode",
-      "TestReflink::test_reflink_supported_respects_env_var"
     ],
     "tests/integration/test_wave2_adapters_coverage.py": [
       "TestBaseAdapterHelpers::test_extract_legacy_angle_vars_non_string",
@@ -509,91 +139,17 @@
       "TestBaseAdapterHelpers::test_has_env_placeholder_env_prefix",
       "TestBaseAdapterHelpers::test_has_env_placeholder_legacy",
       "TestBaseAdapterHelpers::test_has_env_placeholder_non_string",
-      "TestBaseAdapterHelpers::test_registry_field_is_required_default",
-      "TestBaseAdapterHelpers::test_registry_field_is_required_explicit_false",
       "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
       "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
       "TestBaseAdapterHelpers::test_stringify_env_literal_string_passthrough",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_brace_var",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
       "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestInstallTui::test_should_animate_always_env",
-      "TestInstallTui::test_should_animate_never_env",
       "TestMacOSReflink::test_reflink_supported_no_reflink_env",
       "TestReflink::test_reflink_supported_apm_no_reflink_env"
     ],
     "tests/integration/test_wave3_deps_models_coverage.py": [
       "TestGitHubDownloaderLogic::test_close_repo_with_none"
-    ],
-    "tests/integration/test_wave4_adapters_registry_coverage.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key",
-      "TestCopilotClientAdapter::test_copilot_adapter_target_name",
-      "TestCopilotEnvPlaceholders::test_translate_legacy_angle_vars",
-      "TestCopilotEnvPlaceholders::test_translate_posix_vars_passthrough",
-      "TestCopilotEnvPlaceholders::test_translate_vscode_env_syntax",
-      "TestDriftCheck::test_json_key_diff_empty_objects",
-      "TestEdgeCases::test_json_key_diff_empty_objects",
-      "TestErrorHandling::test_mcp_operations_initialization_no_errors",
-      "TestErrorHandling::test_runtime_manager_initialization_no_errors",
-      "TestIntegrationScenarios::test_copilot_config_with_env_placeholders",
-      "TestMCPServerOperations::test_mcp_operations_initialization",
-      "TestRuntimeManager::test_runtime_manager_initialization"
-    ],
-    "tests/integration/test_wave6_audit_discovery_coverage.py": [
-      "TestDeriveLeafHost::test_org_two_parts",
-      "TestExtractExtendsHost::test_empty_returns_none",
-      "TestStripSourcePrefix::test_file_prefix",
-      "TestStripSourcePrefix::test_org_prefix",
-      "TestStripSourcePrefix::test_url_prefix"
-    ],
-    "tests/integration/test_wave6_deps_cli_coverage.py": [
-      "TestDepsTree::test_tree_with_lockfile_one_dep",
-      "TestDepsTree::test_tree_with_lockfile_transitive",
-      "TestDepsTreeTextFallback::test_tree_text_output_with_lockfile",
-      "TestDepsTreeTextFallback::test_tree_text_output_with_transitive"
-    ],
-    "tests/integration/test_wave6_formatters_lockfile_coverage.py": [
-      "TestDependencyReferenceParsing::test_parse_ado_format",
-      "TestDependencyReferenceParsing::test_parse_github_url",
-      "TestDependencyReferenceParsing::test_parse_local_path"
-    ],
-    "tests/integration/test_wave6_init_pack_coverage.py": [
-      "TestInitDeprecatedFlags::test_init_plugin_flag_shows_deprecation",
-      "TestPluginInit::test_plugin_init_yes"
-    ],
-    "tests/integration/test_wave6_integrators_coverage.py": [
-      "TestHookIntegratorFindHookFiles::test_returns_empty_when_no_hooks",
-      "TestIsVscodeAvailable::test_vscode_dir_makes_it_available",
-      "TestMCPIntegratorBuildSelfDefinedInfo::test_with_tools_override",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_no_apm_modules_dir",
-      "TestMCPIntegratorDriftDetection::test_ignores_new_deps_not_in_stored",
-      "TestMCPIntegratorGetServerNames::test_empty_list",
-      "TestMCPIntegratorRemoveStale::test_empty_stale_names_is_noop",
-      "TestMCPIntegratorRemoveStale::test_exclude_removes_runtime_from_set",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
-      "TestMCPIntegratorRemoveStale::test_skips_vscode_when_file_absent",
-      "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
-      "TestValidateSkillName::test_empty_name",
-      "TestValidateSkillName::test_single_char",
-      "TestValidateSkillName::test_uppercase"
-    ],
-    "tests/integration/test_wave6_validation_uninstall_coverage.py": [
-      "TestTLSHelpers::test_is_tls_failure_with_tls_prefix"
-    ],
-    "tests/integration/test_wave7_depref_sources_coverage.py": [
-      "TestDependencyReferenceProperties::test_is_azure_devops_true",
-      "TestDependencyReferenceProperties::test_is_local_true",
-      "TestDependencyReferenceSshUrls::test_https_url"
-    ],
-    "tests/integration/test_wave7_marketplace_install_coverage.py": [
-      "TestInstallInternalHelpers::test_check_package_conflicts_empty"
-    ],
-    "tests/integration/test_wave7_policy_registry_coverage.py": [
-      "TestLoadRawApmYml::test_file_absent_returns_none"
     ],
     "tests/red_team/env/test_denylist_suffix_gaps.py": [
       "TestSuffixGapHeaderExpansion::test_blocked_name_blocked_in_header",
@@ -604,38 +160,25 @@
       "test_registry_picker_range_grammar_gaps",
       "test_revision_pin_update_rejects_malformed_tag_records"
     ],
-    "tests/test_codex_empty_string_and_defaults.py": [
+    "tests/unit/adapters/test_codex_empty_string_and_defaults.py": [
       "TestCodexEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults",
       "TestCodexEmptyStringAndDefaults::test_codex_no_overrides_gets_defaults",
       "TestCodexEmptyStringAndDefaults::test_whitespace_only_treated_as_empty"
     ],
-    "tests/test_empty_string_and_defaults.py": [
+    "tests/unit/adapters/test_empty_string_and_defaults.py": [
       "TestEmptyStringAndDefaults::test_codex_empty_strings_trigger_defaults",
       "TestEmptyStringAndDefaults::test_codex_no_overrides_gets_defaults",
       "TestEmptyStringAndDefaults::test_whitespace_only_treated_as_empty"
-    ],
-    "tests/test_github_downloader.py": [
-      "TestErrorHandling::test_network_timeout_handling",
-      "TestWindowsCleanupHelpers::test_close_repo_none_is_safe"
-    ],
-    "tests/test_token_manager.py": [
-      "TestIsValidCredentialToken::test_empty_string_invalid",
-      "TestIsValidCredentialToken::test_exactly_1024_chars_valid",
-      "TestIsValidCredentialToken::test_over_1024_chars_invalid",
-      "TestResolveCredentialFromGit::test_file_not_found_returns_none"
-    ],
-    "tests/unit/core/test_auth_validation.py": [
-      "TestDetectTokenType::test_token_prefixes"
     ],
     "tests/unit/core/test_experimental.py": [
       "TestCoworkFlagRegistration::test_cowork_flag_is_registered",
       "TestNormaliseFlagName::test_hyphens_converted_to_underscores",
       "TestNormaliseFlagName::test_underscores_are_idempotent"
     ],
+    "tests/unit/core/test_token_manager.py": [
+      "TestResolveCredentialFromGit::test_file_not_found_returns_none"
+    ],
     "tests/unit/core/test_token_manager_lifecycle.py": [
-      "TestIsValidCredentialToken::test_empty_string_is_invalid",
-      "TestIsValidCredentialToken::test_token_exactly_1024_bytes_is_valid",
-      "TestIsValidCredentialToken::test_token_over_1024_bytes_is_invalid",
       "TestResolveCredentialFromGit::test_returns_none_on_file_not_found"
     ],
     "tests/unit/deps/test_download_strategies_selection.py": [
@@ -644,35 +187,18 @@
     "tests/unit/deps/test_git_remote_ops.py": [
       "TestValidateLsRemoteTagOutput::test_invalid_or_ambiguous_records_are_rejected"
     ],
-    "tests/unit/install/test_skill_path_migration.py": [
-      "TestLegacySkillPattern::test_rejects_non_legacy",
-      "TestPathTraversalRejection::test_regex_near_miss_rejects"
+    "tests/unit/deps/test_github_downloader.py": [
+      "TestErrorHandling::test_network_timeout_handling",
+      "TestWindowsCleanupHelpers::test_close_repo_none_is_safe"
     ],
     "tests/unit/install/test_validation_error_handling.py": [
       "TestIsTlsFailure::test_ssl_error_returns_true"
     ],
-    "tests/unit/install/test_validation_local_path.py": [
-      "TestLocalPathNoMarkersHint::test_no_sub_packages_produces_no_output"
-    ],
     "tests/unit/integration/test_agent_integrator.py": [
       "TestAgentIntegrator::test_should_integrate_always_returns_true"
     ],
-    "tests/unit/integration/test_base_integrator.py": [
-      "TestPartitionBucketKey::test_agents_copilot_aliased",
-      "TestPartitionBucketKey::test_commands_claude_aliased",
-      "TestPartitionBucketKey::test_instructions_claude_aliased",
-      "TestPartitionBucketKey::test_instructions_cursor_aliased",
-      "TestPartitionBucketKey::test_prompts_copilot_aliased"
-    ],
     "tests/unit/integration/test_command_integrator.py": [
       "TestExtractInputNames::test_none"
-    ],
-    "tests/unit/integration/test_data_driven_dispatch.py": [
-      "TestPartitionBucketKey::test_claude_commands_alias",
-      "TestPartitionBucketKey::test_claude_instructions_alias",
-      "TestPartitionBucketKey::test_copilot_agents_alias",
-      "TestPartitionBucketKey::test_copilot_prompts_alias",
-      "TestPartitionBucketKey::test_cursor_instructions_alias"
     ],
     "tests/unit/integration/test_instruction_integrator.py": [
       "TestInstructionSyncIntegration::test_sync_handles_missing_instructions_dir"
@@ -776,14 +302,9 @@
       "TestAuditOutcomeCause::test_no_git_remote"
     ],
     "tests/integration/test_commands_auth_flow.py": [
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
       "TestGenerateApmYml::test_author_dict_uses_name_field",
       "TestGenerateApmYml::test_mcp_deps_injected",
       "TestTryWithFallback::test_auth_first_succeeds"
-    ],
-    "tests/integration/test_commands_config_coverage.py": [
-      "TestConfigSet::test_set_auto_integrate_false",
-      "TestConfigSet::test_set_auto_integrate_true"
     ],
     "tests/integration/test_commands_deep_coverage.py": [
       "TestViewCommand::test_view_invalid_field",
@@ -792,7 +313,6 @@
     ],
     "tests/integration/test_commands_mcp_flow.py": [
       "TestCheckPackageConflicts::test_dict_dep_parsed",
-      "TestCheckPackageConflicts::test_empty_deps_returns_empty_set",
       "TestEmitJsonErrorOrRaise::test_non_json_mode_raises_click_exception",
       "TestFindDuplicateNames::test_no_duplicates_returns_empty_string",
       "TestIsTlsFailure::test_chained_ssl_error_returns_true",
@@ -829,10 +349,6 @@
       "TestParseLsRemoteOutput::test_simple_tag",
       "TestSortRemoteRefs::test_branches_sorted_alphabetically",
       "TestSortRemoteRefs::test_tags_before_branches"
-    ],
-    "tests/integration/test_deep_coverage_adapters.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key"
     ],
     "tests/integration/test_deps_models_validation.py": [
       "TestCheckLogger::test_scratch_root_emits_when_verbose",
@@ -876,12 +392,6 @@
     "tests/integration/test_gemini_integration.py": [
       "TestGeminiCommandIntegration::test_no_description_omits_key"
     ],
-    "tests/integration/test_git_cache_hermetic.py": [
-      "TestBareHasSha::test_returns_false_on_oserror",
-      "TestBareHasSha::test_returns_false_on_timeout",
-      "TestLsRemoteResolve::test_oserror_raises_runtime_error",
-      "TestLsRemoteResolve::test_timeout_raises_runtime_error"
-    ],
     "tests/integration/test_git_reference_resolver.py": [
       "TestListRemoteRefs::test_artifactory_returns_empty_list",
       "TestListRemoteRefs::test_unauthenticated_uses_noninteractive_env",
@@ -895,9 +405,7 @@
       "TestResolveCommitShaForRef::test_artifactory_short_circuits_to_none",
       "TestResolveCommitShaForRef::test_non_200_response_returns_none"
     ],
-    "tests/integration/test_github_downloader_phase3w4.py": [
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used",
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_miss_falls_through",
+    "tests/integration/test_github_downloader_validation_flow.py": [
       "TestDownloadVirtualFilePackage::test_frontmatter_description_extracted",
       "TestGetCloneEngine::test_returns_existing_engine",
       "TestIsGenericDependencyHost::test_azure_devops_returns_false",
@@ -907,11 +415,6 @@
       "TestIsGenericDependencyHost::test_none_dep_ref_returns_false",
       "TestResolveDepAuthCtx::test_generic_host_returns_none",
       "TestResolveDepToken::test_generic_host_returns_none"
-    ],
-    "tests/integration/test_github_downloader_validation_flow.py": [
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_hit_used",
-      "TestDownloadSubdirectoryPersistentCache::test_persistent_cache_miss_falls_through",
-      "TestDownloadVirtualFilePackage::test_frontmatter_description_extracted"
     ],
     "tests/integration/test_install_marketplace_phase4w3.py": [
       "TestRenderPostInstallSummary::test_invalid_error_count_defaults_to_zero"
@@ -949,15 +452,12 @@
       "TestCopySkillToTarget::test_skips_when_no_skill_md",
       "TestIsVscodeAvailable::test_no_vscode_dir_and_no_binary",
       "TestMCPIntegratorCollectTransitive::test_collects_mcp_from_valid_package",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
       "TestMCPIntegratorCollectTransitive::test_skips_invalid_apm_yml",
       "TestMCPIntegratorDeduplicate::test_deduplicates_by_name",
       "TestMCPIntegratorDeduplicate::test_handles_dict_deps",
       "TestMCPIntegratorDetectRuntimes::test_empty_scripts_returns_empty",
       "TestMCPIntegratorRemoveStale::test_removes_from_claude_project_mcp_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_vscode_mcp_json",
       "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
       "TestPromoteSubSkills::test_skips_dir_without_skill_md",
@@ -966,302 +466,24 @@
       "TestToHyphenCase::test_truncates_to_64_chars"
     ],
     "tests/integration/test_integrators_hooks_execution.py": [
-      "TestAttemptSpec::test_creation_and_fields",
-      "TestAttemptSpec::test_unpacking",
-      "TestCopilotKeysToGemini::test_bash_renamed_to_command",
-      "TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten",
-      "TestCopilotKeysToGemini::test_powershell_renamed_to_command",
-      "TestCopilotKeysToGemini::test_timeout_sec_to_ms",
-      "TestCopilotKeysToGemini::test_windows_key_renamed_to_command",
-      "TestDirectoryExistsAtRef::test_ado_host_skips_probe",
-      "TestDirectoryExistsAtRef::test_github_200_returns_true",
-      "TestDirectoryExistsAtRef::test_github_404_returns_false",
-      "TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false",
-      "TestDirectoryExistsAtRef::test_no_token_still_makes_request",
       "TestDirectoryExistsAtRef::test_request_exception_returns_false",
-      "TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude",
-      "TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor",
-      "TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty",
-      "TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini",
-      "TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere",
-      "TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf",
-      "TestHookIntegrationResultCompat::test_full_constructor_via_super",
       "TestHookIntegrationResultCompat::test_hooks_integrated_alias",
-      "TestHookIntegrationResultCompat::test_target_paths_preserved",
-      "TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs",
-      "TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks",
       "TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir",
       "TestHookIntegratorFindHookFiles::test_skips_symlinks",
-      "TestHookIntegratorParseHookJson::test_invalid_json_returns_none",
-      "TestHookIntegratorParseHookJson::test_missing_file_returns_none",
-      "TestHookIntegratorParseHookJson::test_non_dict_returns_none",
-      "TestHookIntegratorParseHookJson::test_valid_json_returned",
-      "TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks",
-      "TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result",
-      "TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal",
-      "TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json",
-      "TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate",
-      "TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty",
-      "TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk",
-      "TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists",
-      "TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent",
-      "TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated",
-      "TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script",
-      "TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped",
-      "TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero",
-      "TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists",
       "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
-      "TestIsShaPin::test_41_chars_too_long",
-      "TestIsShaPin::test_abbreviated_7_char_sha",
-      "TestIsShaPin::test_branch_name_not_sha",
-      "TestIsShaPin::test_full_40_char_sha",
-      "TestIsShaPin::test_mixed_case_sha",
-      "TestIsShaPin::test_non_hex_returns_false",
-      "TestIsShaPin::test_tag_name_not_sha",
-      "TestIsShaPin::test_too_short_not_sha",
-      "TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted",
-      "TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing",
-      "TestMCPIntegratorAppendDrifted::test_empty_drifted_noop",
-      "TestMCPIntegratorAppendDrifted::test_sorted_order",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes",
-      "TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent",
-      "TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten",
-      "TestReinjectApmSourceFromSidecar::test_basic_reinject",
-      "TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once",
-      "TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored",
-      "TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored",
-      "TestRewriteCommandForTarget::test_cursor_plugin_root_variable",
-      "TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list",
-      "TestRewriteCommandForTarget::test_plugin_root_variable_replaced",
-      "TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy",
-      "TestRewriteCommandForTarget::test_system_command_unchanged",
-      "TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base",
-      "TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime",
-      "TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted",
-      "TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime",
-      "TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through",
-      "TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime",
-      "TestRunMcpInstallDirectoryGating::test_project_scope_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime",
-      "TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs",
-      "TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved",
-      "TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile",
-      "TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset",
-      "TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only",
-      "TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content",
-      "TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill",
-      "TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped",
       "TestSplitOwnerRepo::test_empty_owner_returns_none",
       "TestSplitOwnerRepo::test_empty_repo_returns_none",
       "TestSplitOwnerRepo::test_no_slash_returns_none",
-      "TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo",
-      "TestSplitOwnerRepo::test_valid_owner_repo",
-      "TestSshAttemptAllowed::test_allow_fallback_permits_ssh",
-      "TestSshAttemptAllowed::test_import_error_returns_false",
-      "TestSshAttemptAllowed::test_ssh_protocol_preference_allows",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent",
       "TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json",
-      "TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files",
-      "TestSyncIntegrationHooks::test_removes_managed_hook_json",
-      "TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths",
-      "TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json",
-      "TestToGeminiHookEntries::test_already_nested_entry_left_alone",
-      "TestToGeminiHookEntries::test_apm_source_promoted_to_outer",
-      "TestToGeminiHookEntries::test_flat_copilot_entry_wrapped",
-      "TestToGeminiHookEntries::test_non_dict_entry_passed_through",
-      "TestToGeminiHookEntries::test_timeoutsec_converted_in_flat",
-      "TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected",
-      "TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error",
-      "TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker",
-      "TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
-    ],
-    "tests/integration/test_integrators_hooks_phase3c.py": [
-      "TestAttemptSpec::test_creation_and_fields",
-      "TestAttemptSpec::test_unpacking",
-      "TestCopilotKeysToGemini::test_bash_renamed_to_command",
-      "TestCopilotKeysToGemini::test_command_key_already_present_not_overwritten",
-      "TestCopilotKeysToGemini::test_powershell_renamed_to_command",
-      "TestCopilotKeysToGemini::test_timeout_sec_to_ms",
-      "TestCopilotKeysToGemini::test_windows_key_renamed_to_command",
-      "TestDirectoryExistsAtRef::test_ado_host_skips_probe",
-      "TestDirectoryExistsAtRef::test_github_200_returns_true",
-      "TestDirectoryExistsAtRef::test_github_404_returns_false",
-      "TestDirectoryExistsAtRef::test_invalid_repo_url_returns_false",
-      "TestDirectoryExistsAtRef::test_no_token_still_makes_request",
-      "TestDirectoryExistsAtRef::test_request_exception_returns_false",
-      "TestFilterHookFilesForTargetExtended::test_claude_suffix_included_for_claude",
-      "TestFilterHookFilesForTargetExtended::test_codex_suffix_excluded_from_vscode",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_excluded_from_cursor",
-      "TestFilterHookFilesForTargetExtended::test_copilot_suffix_targets_copilot",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_excluded_from_claude",
-      "TestFilterHookFilesForTargetExtended::test_cursor_suffix_included_for_cursor",
-      "TestFilterHookFilesForTargetExtended::test_empty_list_returns_empty",
-      "TestFilterHookFilesForTargetExtended::test_gemini_suffix_included_for_gemini",
-      "TestFilterHookFilesForTargetExtended::test_universal_hooks_file_included_everywhere",
-      "TestFilterHookFilesForTargetExtended::test_windsurf_suffix_included_for_windsurf",
-      "TestHookIntegrationResultCompat::test_full_constructor_via_super",
-      "TestHookIntegrationResultCompat::test_hooks_integrated_alias",
-      "TestHookIntegrationResultCompat::test_target_paths_preserved",
-      "TestHookIntegratorFindHookFiles::test_deduplicates_across_both_dirs",
-      "TestHookIntegratorFindHookFiles::test_empty_package_returns_empty",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_apm_hooks",
-      "TestHookIntegratorFindHookFiles::test_finds_files_in_hooks_dir",
-      "TestHookIntegratorFindHookFiles::test_skips_symlinks",
-      "TestHookIntegratorParseHookJson::test_invalid_json_returns_none",
-      "TestHookIntegratorParseHookJson::test_missing_file_returns_none",
-      "TestHookIntegratorParseHookJson::test_non_dict_returns_none",
-      "TestHookIntegratorParseHookJson::test_valid_json_returned",
-      "TestIntegrateHooksForTarget::test_copilot_target_dispatches_to_integrate_package_hooks",
-      "TestIntegrateHooksForTarget::test_unknown_target_returns_empty_result",
-      "TestIntegratePackageHooksClaude::test_copilot_event_name_normalized_to_pascal",
-      "TestIntegratePackageHooksClaude::test_hook_merged_into_settings_json",
-      "TestIntegratePackageHooksClaude::test_idempotent_reinvoke_doesnt_duplicate",
-      "TestIntegratePackageHooksClaude::test_no_hook_files_returns_empty",
-      "TestIntegratePackageHooksClaude::test_schema_strict_strips_apm_source_from_disk",
-      "TestIntegratePackageHooksCodex::test_integrates_when_codex_dir_exists",
-      "TestIntegratePackageHooksCodex::test_skips_when_codex_dir_absent",
-      "TestIntegratePackageHooksCopilot::test_basic_hook_file_integrated",
-      "TestIntegratePackageHooksCopilot::test_hook_with_script_copies_script",
-      "TestIntegratePackageHooksCopilot::test_invalid_hook_json_skipped",
-      "TestIntegratePackageHooksCopilot::test_no_hook_files_returns_zero",
-      "TestIntegratePackageHooksCursor::test_integrates_when_cursor_dir_exists",
-      "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
-      "TestIsShaPin::test_41_chars_too_long",
-      "TestIsShaPin::test_abbreviated_7_char_sha",
-      "TestIsShaPin::test_branch_name_not_sha",
-      "TestIsShaPin::test_full_40_char_sha",
-      "TestIsShaPin::test_mixed_case_sha",
-      "TestIsShaPin::test_non_hex_returns_false",
-      "TestIsShaPin::test_tag_name_not_sha",
-      "TestIsShaPin::test_too_short_not_sha",
-      "TestMCPIntegratorAppendDrifted::test_appends_new_names_sorted",
-      "TestMCPIntegratorAppendDrifted::test_does_not_duplicate_existing",
-      "TestMCPIntegratorAppendDrifted::test_empty_drifted_noop",
-      "TestMCPIntegratorAppendDrifted::test_sorted_order",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_parses_valid_mcp_package",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_modules_dir_absent",
-      "TestMCPIntegratorCollectTransitiveWithLock::test_returns_empty_when_no_apm_yml_in_modules",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_detects_changed_dep",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_new_dep_not_in_stored_is_not_drifted",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_no_drift_when_identical",
-      "TestMCPIntegratorDetectMcpConfigDrift::test_non_dep_object_skipped",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_empty_runtimes_returns_empty",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_explicit_target_allows_through",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_returns_list",
-      "TestMCPIntegratorGateProjectScopedRuntimes::test_user_scope_filters_project_only_runtimes",
-      "TestMCPIntegratorRemoveStaleCursor::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_empty_stale_set_is_noop",
-      "TestMCPIntegratorRemoveStaleVscode::test_removes_from_vscode_mcp_json",
-      "TestMCPIntegratorRemoveStaleVscode::test_skips_when_mcp_json_absent",
-      "TestReinjectApmSourceFromSidecar::test_already_tagged_entry_not_overwritten",
-      "TestReinjectApmSourceFromSidecar::test_basic_reinject",
-      "TestReinjectApmSourceFromSidecar::test_each_sidecar_entry_consumed_at_most_once",
-      "TestReinjectApmSourceFromSidecar::test_event_not_in_hooks_is_ignored",
-      "TestReinjectApmSourceFromSidecar::test_sidecar_entry_without_source_ignored",
-      "TestRewriteCommandForTarget::test_cursor_plugin_root_variable",
-      "TestRewriteCommandForTarget::test_missing_script_does_not_add_to_copy_list",
-      "TestRewriteCommandForTarget::test_plugin_root_variable_replaced",
-      "TestRewriteCommandForTarget::test_relative_path_replaced_with_script_copy",
-      "TestRewriteCommandForTarget::test_system_command_unchanged",
-      "TestRewriteCommandForTarget::test_vscode_target_uses_github_scripts_base",
-      "TestRunMcpInstallDirectoryGating::test_cursor_dir_enables_cursor_runtime",
-      "TestRunMcpInstallDirectoryGating::test_exclude_parameter_accepted",
-      "TestRunMcpInstallDirectoryGating::test_explicit_runtime_targets_single_runtime",
-      "TestRunMcpInstallDirectoryGating::test_explicit_target_passed_through",
-      "TestRunMcpInstallDirectoryGating::test_gemini_dir_enables_gemini_runtime",
-      "TestRunMcpInstallDirectoryGating::test_project_scope_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_verbose_mode_no_crash",
-      "TestRunMcpInstallDirectoryGating::test_windsurf_dir_enables_windsurf_runtime",
-      "TestRunMcpInstallDirectoryGating::test_with_stored_mcp_configs",
-      "TestSkillIntegrationResultPostInit::test_explicit_target_paths_preserved",
-      "TestSkillIntegrationResultPostInit::test_target_paths_defaults_to_empty_list",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_native_skill_owner_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_build_skill_ownership_map_returns_dict",
-      "TestSkillIntegratorBuildOwnershipMaps::test_returns_empty_maps_when_no_lockfile",
-      "TestSkillIntegratorIntegrateSkillBundle::test_all_skills_promoted_without_subset",
-      "TestSkillIntegratorIntegrateSkillBundle::test_skill_subset_filters_to_named_skills_only",
-      "TestSkillIntegratorPromoteSubSkillsForce::test_force_true_overwrites_existing_different_content",
-      "TestSkillIntegratorSkillSubsetOnNonBundle::test_skill_subset_warning_for_single_skill",
-      "TestSkillIntegratorSyncIntegrationNoLockfile::test_no_lockfile_no_crash",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_file_dep_is_skipped",
-      "TestSkillIntegratorVirtualFileDep::test_virtual_subdirectory_dep_is_not_skipped",
-      "TestSplitOwnerRepo::test_empty_owner_returns_none",
-      "TestSplitOwnerRepo::test_empty_repo_returns_none",
-      "TestSplitOwnerRepo::test_no_slash_returns_none",
-      "TestSplitOwnerRepo::test_owner_repo_with_extra_slash_keeps_repo",
-      "TestSplitOwnerRepo::test_valid_owner_repo",
-      "TestSshAttemptAllowed::test_allow_fallback_permits_ssh",
-      "TestSshAttemptAllowed::test_import_error_returns_false",
-      "TestSshAttemptAllowed::test_ssh_protocol_preference_allows",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_deletes_empty_event_key",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_from_json_static",
-      "TestSyncIntegrationHooks::test_clean_apm_entries_noop_when_file_absent",
-      "TestSyncIntegrationHooks::test_cleans_apm_entries_from_cursor_hooks_json",
-      "TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files",
-      "TestSyncIntegrationHooks::test_removes_managed_hook_json",
-      "TestSyncIntegrationHooks::test_skips_traversal_in_managed_paths",
-      "TestSyncIntegrationHooks::test_sync_cleans_claude_settings_json",
-      "TestToGeminiHookEntries::test_already_nested_entry_left_alone",
-      "TestToGeminiHookEntries::test_apm_source_promoted_to_outer",
-      "TestToGeminiHookEntries::test_flat_copilot_entry_wrapped",
-      "TestToGeminiHookEntries::test_non_dict_entry_passed_through",
-      "TestToGeminiHookEntries::test_timeoutsec_converted_in_flat",
-      "TestValidateVirtualPackageExistsEdgeCases::test_empty_vpath_rejected",
-      "TestValidateVirtualPackageExistsEdgeCases::test_non_virtual_raises_value_error",
-      "TestValidateVirtualPackageExistsEdgeCases::test_subdir_no_ref_fallback_returns_false_when_no_marker",
-      "TestValidateVirtualPackageExistsEdgeCases::test_verbose_callback_called_on_traversal",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_probes_directly",
-      "TestValidateVirtualPackageExistsEdgeCases::test_virtual_file_returns_false_on_runtime_error"
+      "TestSyncIntegrationHooks::test_legacy_fallback_removes_apm_suffix_files"
     ],
     "tests/integration/test_integrators_validation_rules.py": [
       "TestLocalPathFailureReason::test_path_does_not_exist"
     ],
     "tests/integration/test_marketplace_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_non_string_passthrough",
       "TestCodexClientAdapter::test_get_current_config_missing_file",
       "TestKiroClientAdapter::test_get_current_config_missing_file",
       "TestNormalizeDepEntry::test_string_passthrough"
-    ],
-    "tests/integration/test_marketplace_builder_hermetic.py": [
-      "TestResolveExplicitRef::test_tag_found_in_refs",
-      "TestResolveVersionRange::test_best_candidate_chosen"
-    ],
-    "tests/integration/test_marketplace_builder_phase3w4.py": [
-      "TestResolveExplicitRef::test_tag_found_in_refs",
-      "TestResolveVersionRange::test_best_candidate_chosen"
     ],
     "tests/integration/test_marketplace_e2e_surface.py": [
       "TestCheckGitignoreForMarketplaceJson::test_no_gitignore_returns_silently",
@@ -1280,20 +502,6 @@
       "TestRenderBuildError::test_no_matching_version_error",
       "TestRenderBuildError::test_offline_miss_error",
       "TestRenderBuildError::test_ref_not_found_error"
-    ],
-    "tests/integration/test_mcp_install_flow.py": [
-      "TestExcludeRuntime::test_exclude_all_runtimes_returns_zero",
-      "TestScopeHandling::test_project_scope_sets_user_scope_false",
-      "TestScopeHandling::test_user_scope_sets_user_scope_true",
-      "TestUserScopeFiltering::test_user_scope_filters_workspace_only_runtimes",
-      "TestUserScopeFiltering::test_user_scope_no_supported_runtimes_warns_and_returns_zero"
-    ],
-    "tests/integration/test_mcp_install_phase3w4.py": [
-      "TestExcludeRuntime::test_exclude_all_runtimes_returns_zero",
-      "TestScopeHandling::test_project_scope_sets_user_scope_false",
-      "TestScopeHandling::test_user_scope_sets_user_scope_true",
-      "TestUserScopeFiltering::test_user_scope_filters_workspace_only_runtimes",
-      "TestUserScopeFiltering::test_user_scope_no_supported_runtimes_warns_and_returns_zero"
     ],
     "tests/integration/test_mcp_integrator_characterisation.py": [
       "TestDeduplicate::test_preserves_order"
@@ -1317,14 +525,10 @@
     "tests/integration/test_pack_install_flow.py": [
       "TestCheckPackageConflicts::test_dict_dep_parsed",
       "TestEmitJsonErrorOrRaise::test_non_json_mode_raises_click_exception",
-      "TestPackCmd::test_pack_deprecated_target_flag_warns",
       "TestRenderBundleResult::test_dry_run_no_files_warns_empty",
       "TestRenderBundleResult::test_dry_run_with_files",
       "TestSplitArgvAtDoubleDash::test_double_dash_splits_correctly",
       "TestValidateAndAddPackagesToApmYml::test_missing_apm_yml_exits"
-    ],
-    "tests/integration/test_pack_install_phase3w4.py": [
-      "TestPackCmd::test_pack_deprecated_target_flag_warns"
     ],
     "tests/integration/test_remaining_modules_coverage.py": [
       "TestCollectMcp::test_no_mcp_file_returns_empty",
@@ -1358,7 +562,6 @@
     "tests/integration/test_uninstall_policy_pack_flow.py": [
       "TestDeriveLeafHost::test_file_source_falls_back_to_git_remote",
       "TestDetectGarbage::test_none_content_returns_none",
-      "TestExtractExtendsHost::test_empty_returns_none",
       "TestExtractExtendsHost::test_no_slash_returns_none",
       "TestExtractExtendsHost::test_three_part_ref_returns_host",
       "TestExtractExtendsHost::test_two_part_ref_returns_none",
@@ -1384,12 +587,6 @@
       "TestSelectRemoteWithUrl::test_returns_none_when_all_empty"
     ],
     "tests/integration/test_wave2_adapters_coverage.py": [
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_false",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_bool_true",
-      "TestBaseAdapterHelpers::test_stringify_env_literal_int",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_env_prefix",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_legacy_angle",
-      "TestBaseAdapterHelpers::test_translate_env_placeholder_non_string_passthrough",
       "TestCodexClientAdapter::test_get_config_path_user_scope",
       "TestCodexClientAdapter::test_get_current_config_missing_file",
       "TestDependencyTypes::test_parse_git_reference_semver_tag",
@@ -1403,10 +600,6 @@
       "TestSkillIntegratorFindMethods::test_find_context_files",
       "TestSkillIntegratorFindMethods::test_find_instruction_files"
     ],
-    "tests/integration/test_wave4_adapters_registry_coverage.py": [
-      "TestCopilotClientAdapter::test_copilot_adapter_env_substitution_enabled",
-      "TestCopilotClientAdapter::test_copilot_adapter_mcp_servers_key"
-    ],
     "tests/integration/test_wave4_cli_commands_coverage.py": [
       "TestRunCommand::test_run_verbose_flag"
     ],
@@ -1418,7 +611,6 @@
       "TestAuditOutcomeCause::test_absent",
       "TestAuditOutcomeCause::test_empty",
       "TestAuditOutcomeCause::test_no_git_remote",
-      "TestExtractExtendsHost::test_empty_returns_none",
       "TestExtractExtendsHost::test_two_part_ref_returns_none",
       "TestHasActionableFindings::test_no_findings",
       "TestRenderSummary::test_critical_findings",
@@ -1440,15 +632,12 @@
       "TestIntegratePackageHooksCursor::test_skips_when_cursor_dir_absent",
       "TestIsVscodeAvailable::test_no_vscode_dir_and_no_binary",
       "TestMCPIntegratorCollectTransitive::test_collects_mcp_from_valid_package",
-      "TestMCPIntegratorCollectTransitive::test_returns_empty_when_apm_modules_empty",
       "TestMCPIntegratorCollectTransitive::test_skips_invalid_apm_yml",
       "TestMCPIntegratorDeduplicate::test_deduplicates_by_name",
       "TestMCPIntegratorDeduplicate::test_handles_dict_deps",
       "TestMCPIntegratorDetectRuntimes::test_empty_scripts_returns_empty",
       "TestMCPIntegratorRemoveStale::test_removes_from_claude_project_mcp_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_cursor_mcp_json",
-      "TestMCPIntegratorRemoveStale::test_removes_from_gemini_settings",
-      "TestMCPIntegratorRemoveStale::test_removes_from_opencode_json",
       "TestMCPIntegratorRemoveStale::test_removes_from_vscode_mcp_json",
       "TestMCPIntegratorUpdateLockfile::test_noop_when_lockfile_absent",
       "TestPromoteSubSkills::test_skips_dir_without_skill_md",
@@ -1491,15 +680,6 @@
       "TestValidationResult::test_add_warning",
       "TestValidationResult::test_initial_state",
       "TestValidationResult::test_summary_valid_with_warnings"
-    ],
-    "tests/test_apm_package_models.py": [
-      "TestPackageContentType::test_from_string_case_insensitive",
-      "TestValidationResult::test_add_error",
-      "TestValidationResult::test_add_warning",
-      "TestValidationResult::test_initial_state"
-    ],
-    "tests/test_lockfile.py": [
-      "TestLockFile::test_read_nonexistent"
     ],
     "tests/unit/commands/test_audit_error_handling.py": [
       "TestApplyStrip::test_skips_nonexistent_files",
@@ -1586,6 +766,9 @@
       "TestSplitOwnerRepo::test_empty_owner_returns_none",
       "TestSplitOwnerRepo::test_empty_repo_returns_none",
       "TestSplitOwnerRepo::test_no_slash_returns_none"
+    ],
+    "tests/unit/deps/test_lockfile.py": [
+      "TestLockFile::test_read_nonexistent"
     ],
     "tests/unit/install/test_drift_detection.py": [
       "TestCheckLogger::test_scratch_root_emits_when_verbose",
@@ -1760,6 +943,12 @@
     "tests/unit/marketplace/test_versioned_resolver.py": [
       "TestResolveMarketplacePlugin::test_plugin_not_found_raises"
     ],
+    "tests/unit/models/test_apm_package_models.py": [
+      "TestPackageContentType::test_from_string_case_insensitive",
+      "TestValidationResult::test_add_error",
+      "TestValidationResult::test_add_warning",
+      "TestValidationResult::test_initial_state"
+    ],
     "tests/unit/policy/test_discovery_logic.py": [
       "TestParseRemoteUrl::test_https_ghe"
     ],
@@ -1829,10 +1018,6 @@
     "tests/unit/test_command_helpers.py": [
       "TestAtomicWrite::test_overwrites_existing_file"
     ],
-    "tests/unit/test_config_command.py": [
-      "TestConfigSet::test_set_auto_integrate_false",
-      "TestConfigSet::test_set_auto_integrate_true"
-    ],
     "tests/unit/test_copilot_adapter_compatibility.py": [
       "TestGetCurrentConfig::test_returns_empty_dict_when_file_missing",
       "TestResolveEnvPlaceholders::test_delegates_to_resolve_variable_placeholders"
@@ -1852,12 +1037,6 @@
     ],
     "tests/unit/test_exclude.py": [
       "TestMatchesPattern::test_exact_match"
-    ],
-    "tests/unit/test_git_cache_branch_coverage.py": [
-      "TestBareHasSha::test_returns_false_on_oserror",
-      "TestBareHasSha::test_returns_false_on_timeout",
-      "TestLsRemoteResolve::test_oserror_raises_runtime_error",
-      "TestLsRemoteResolve::test_timeout_raises_runtime_error"
     ],
     "tests/unit/test_git_reference_resolver_resolution.py": [
       "TestResolveCommitShaForRef::test_non_200_response_returns_none"

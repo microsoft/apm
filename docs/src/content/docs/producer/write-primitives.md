@@ -58,6 +58,12 @@ Copilot gets `.github/instructions/python.instructions.md`; Claude Code gets
 and OpenCode read one combined file instead: `apm compile` builds `AGENTS.md` or
 `GEMINI.md`, and consumers see a reminder after install.
 
+Claude Code gets always-on rules (`applyTo: "**"` or no `applyTo`) and
+single-directory rules (for example `src/test/**`) through `AGENTS.md`
+instead: `apm compile` writes them there, plus a `CLAUDE.md` that imports
+`@AGENTS.md`. Only path-scoped rules, like the one above, become
+`.claude/rules/` files.
+
 **Gotcha:** without `applyTo`, some harnesses do not know when to load the rule;
 Cursor may skip it. Use `applyTo: "**"` for a rule that always applies.
 
@@ -139,7 +145,10 @@ prompts, as described above.
 project or organization turns on the executables gate, your hooks wait until
 they [approve your package](../../consumer/approve-executables/). Every
 hook file reaches every harness the consumer targets; to limit a hook to Claude
-Code, publish it in a package whose `apm.yml` sets `targets: [claude]`.
+Code, publish it in a package whose `apm.yml` sets `targets: [claude]`. A Claude
+Code plugin (`.claude-plugin/plugin.json`) is not split this way for Claude Code or
+Copilot: its hooks stay in the plugin folder, with `${CLAUDE_PLUGIN_ROOT}` intact
+([Native plugins](../../consumer/install-plugins/#native-plugins)).
 
 
 ### Migrating from filename routing
@@ -198,6 +207,9 @@ When APM copies an agent, instruction, prompt or command into a consumer's
 harness folder, it rewrites the link so it still points at the file, now inside
 `apm_modules/`. Links inside one skill folder are not rewritten, because the
 folder is copied whole.
+
+`#fragment` and `?query` suffixes are kept. `apm compile` checks only the file
+path, so it does not verify that the heading or query exists in the target.
 
 **Gotcha:** APM rewrites a link when the target file exists and stays inside
 your package. A link to another package, an absolute path or a missing

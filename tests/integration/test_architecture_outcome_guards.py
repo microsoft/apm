@@ -8,12 +8,18 @@ from unittest.mock import MagicMock
 import pytest
 
 
-def _write_plugin_consumer(tmp_path: Path, plugin_manifest: dict) -> tuple[Path, Path]:
-    """Create a local plugin and a consumer that installs it."""
+def _write_plugin_consumer(
+    tmp_path: Path, plugin_manifest: dict, *, root_manifest: bool = False
+) -> tuple[Path, Path]:
+    """Create a local plugin and a consumer that installs it.
+
+    A ``.claude-plugin`` plugin installs whole at project scope (#3921); a root
+    ``plugin.json`` (*root_manifest*) keeps the loose, split route.
+    """
     import json
 
     plugin = tmp_path / "plugin"
-    manifest_dir = plugin / ".claude-plugin"
+    manifest_dir = plugin if root_manifest else plugin / ".claude-plugin"
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "plugin.json").write_text(
         json.dumps(plugin_manifest),
@@ -253,6 +259,7 @@ def test_plugin_skill_links_leaving_the_bundle_survive_declaration_filtering(
     plugin, consumer = _write_plugin_consumer(
         tmp_path,
         {"name": "linked-skills", "version": "1.0.0", "skills": ["./skills/"]},
+        root_manifest=True,
     )
     (plugin / "docs").mkdir()
     (plugin / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
@@ -352,6 +359,7 @@ def test_plugin_declaring_no_skills_says_which_ones_it_shadowed(
     plugin, consumer = _write_plugin_consumer(
         tmp_path,
         {"name": "quiet-skills", "version": "1.0.0", "skills": []},
+        root_manifest=True,
     )
     for name in ("alpha", "beta"):
         skill = plugin / "skills" / name

@@ -305,16 +305,20 @@ def install_local_bundle(
             return
 
         if bundle_mcp_present and bundle_info.source_dir is not None:
-            _wire_legacy_bundle_mcp_servers(
-                bundle_format=bundle_info.format,
-                targets=targets,
-                project_root=project_root,
-                user_scope=global_,
-                verbose=getattr(logger, "verbose", False),
-                logger=logger,
-                deps=bundle_mcp_deps,
-                owner=_bundle_owner_key(bundle_info),
-            )
+            from apm_cli.install.mcp.write_receipts import journal_mcp_writes
+
+            # The bundle's MCP writes are recorded like any install's (#4801).
+            with journal_mcp_writes(project_root, user_scope=global_, logger=logger):
+                _wire_legacy_bundle_mcp_servers(
+                    bundle_format=bundle_info.format,
+                    targets=targets,
+                    project_root=project_root,
+                    user_scope=global_,
+                    verbose=getattr(logger, "verbose", False),
+                    logger=logger,
+                    deps=bundle_mcp_deps,
+                    owner=_bundle_owner_key(bundle_info),
+                )
         # A kept user LSP entry fails the install only after the bundle's
         # deployed files and receipts are recorded (#4628).
         lsp_conflict = (
@@ -406,6 +410,12 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         log_bundle_deployed(logger, msg, deployed, targets)
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        lock_path = get_lockfile_path(_bundle_lock_root(global_))
+        announce_kept_mcp_writes(
+            lock_path, project_root=project_root, user_scope=global_, exclude=None, logger=logger
+        )
         if lsp_conflict is not None:
             raise lsp_conflict
 

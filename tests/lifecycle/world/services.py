@@ -104,8 +104,12 @@ POLICY_VARIANTS = (
     "garbage_response",
     "cached_stale",
     "deny-all-deps",
+    "mcp-deny-all",
+    "allow-list",
 )
 DENIED_PACKAGE = "p-exec"
+# allow-list: only this package is allowed; ``**/`` also matches a bundle named after it.
+ALLOWED_PACKAGE = "p-skill"
 # exec-gate-on: any org executables signal turns the gate on
 # (security/executables.py org_signal); recommending a package the world never
 # serves denies nothing.
@@ -145,6 +149,9 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
         },
         "exec-deny-all": {"name": "exec-deny-all", **base, "executables": {"deny_all": True}},
         "mcp-deny": {"name": "mcp-deny", **base, "mcp": {"deny": ["*"]}},
+        # ``*`` stays within one segment (policy/matcher.py); ``**`` also denies
+        # namespaced registry servers such as io.github.lifecycle/p-registry.
+        "mcp-deny-all": {"name": "mcp-deny-all", **base, "mcp": {"deny": ["**"]}},
         # The project pins a different hash (``use_policy``); the served bytes are benign.
         "hash-mismatch": {"name": "hash-mismatch", **base},
         "deny-lsp": {
@@ -168,6 +175,11 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
                     f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
                 ]
             },
+        },
+        "allow-list": {
+            "name": "allow-list",
+            **base,
+            "dependencies": {"allow": [f"**/{ALLOWED_PACKAGE}", f"{ORG}/{ALLOWED_PACKAGE}"]},
         },
         "malformed": MALFORMED_POLICY,
         "garbage_response": GARBAGE_POLICY,

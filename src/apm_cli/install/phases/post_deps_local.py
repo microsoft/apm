@@ -20,9 +20,9 @@ Two responsibilities:
    dep lockfile phase has already written dependency data; this phase
    simply augments the on-disk lockfile with the local fields.
 
-Scope guard: this phase only runs for ``InstallScope.PROJECT``.  User-
-scope installs do not track local deployed files (matching pre-refactor
-behavior).
+Both scopes persist: at user scope the root is ``~/.apm`` and the claims go
+to the user lockfile, so a later ``install -g`` can update APM's own files
+when a user-root primitive changes (#3772).
 """
 
 from __future__ import annotations
@@ -44,12 +44,6 @@ def run(ctx: InstallContext) -> None:
 
     Mutates ``ctx.local_deployed_files`` (appends failed cleanup paths).
     """
-    from apm_cli.core.scope import InstallScope
-
-    # Scope guard: only PROJECT scope tracks local deployed files.
-    if ctx.scope is not InstallScope.PROJECT:
-        return
-
     # Skip if there is no local content (current or previous). Root hooks that
     # only merge into shared configs still need a lockfile so that
     # `apm audit --ci` replays them (#4033).
@@ -88,12 +82,30 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.install.phases.cleanup import kept_prior_values
     from apm_cli.install.phases.targets import declared_target_profiles
 
+    # A path a dependency of this install now claims leaves the self entry
+    # without being treated as stale, so its surviving file is not deleted.
+    _dependency_claimed = _dependency_claimed_paths(ctx)
+    _prior_files = [
+        path for path in _persist_lock.local_deployed_files if path not in _dependency_claimed
+    ]
+    _prior_hashes = {
+        path: content_hash
+        for path, content_hash in _persist_lock.local_deployed_file_hashes.items()
+        if path not in _dependency_claimed
+    }
     # Members this run skipped keep their prior rows and hashes (#4230).
-    _kept = kept_prior_values(ctx, list(_persist_lock.local_deployed_files))
-    _current_files = sorted(ctx.local_deployed_files)
+    _kept = kept_prior_values(ctx, _prior_files)
+    # A kept edited local output never hashes the edit (#4873), as for dependencies,
+    # and a kept path the project did not already claim gains no local claim.
+    _retained = getattr(ctx, "package_cleanup_retained", {}).get(".", {})
+    _claimed = set(_prior_files)
+    _current_files = sorted(
+        path
+        for path in ctx.local_deployed_files
+        if path not in _dependency_claimed and (path not in _retained or path in _claimed)
+    )
     _current_hashes = _hash_deployed(
-        ctx.local_deployed_files,
-        ctx.project_root,
+        (path for path in _current_files if path not in _retained), ctx.project_root
     )
     _ghost_count = 0
 
@@ -120,8 +132,8 @@ def run(ctx: InstallContext) -> None:
         dep_key="<local .apm/>",
         current_files=_current_files,
         current_hashes=_current_hashes,
-        prior_files=list(_persist_lock.local_deployed_files),
-        prior_hashes=dict(_persist_lock.local_deployed_file_hashes),
+        prior_files=_prior_files,
+        prior_hashes=_prior_hashes,
         active_targets=ctx.targets,
         declared_targets=declared_target_profiles(ctx),
         diagnostics=ctx.diagnostics,
@@ -129,6 +141,7 @@ def run(ctx: InstallContext) -> None:
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
+        cleanup_retained_hashes=_retained,
         current_run_trusted=not _local_had_errors,
         retained_values=frozenset(_kept),
         include_ledger=True,
@@ -151,3 +164,17 @@ def run(ctx: InstallContext) -> None:
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):
         _persist_lock.save(_lock_path)
+
+
+def _dependency_claimed_paths(ctx: InstallContext) -> frozenset[str]:
+    """Return the paths a dependency of this user-scope install claims (#3772).
+
+    At user scope the root package is ``$HOME``, which also holds dependency
+    sources; a file a dependency claims stays that dependency's, so
+    uninstalling it removes the file. Project scope keeps its root claims.
+    """
+    if not is_user_scope(getattr(ctx, "scope", None)):
+        return frozenset()
+    from apm_cli.core.deployment_state import DeploymentReconciler
+
+    return DeploymentReconciler.current_claimed_paths(ctx.package_deployed_files)

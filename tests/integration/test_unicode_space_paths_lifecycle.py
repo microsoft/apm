@@ -23,7 +23,7 @@ from tests.integration._path_corner_world_kit import (
     write,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 TARGETS = ("claude", "copilot", "cursor", "codex", "opencode")
 EDITED = (
@@ -39,7 +39,9 @@ def test_spaced_unicode_paths_install_audit_export_chain(
     commits = publish_corner_packages(world)
     local = world.isolated.work_root / "local pkg \u00fc"
     write(local / "apm.yml", "name: local-pkg\nversion: 1.0.0\ndescription: l\n")
-    write(local / ".apm/instructions/l\u00f6 cal.instructions.md", "---\napplyTo: '**'\n---\nl\n")
+    write(
+        local / ".apm/instructions/l\u00f6 cal.instructions.md", "---\napplyTo: '**/*.md'\n---\nl\n"
+    )
     project = world.project(
         "my pr\u00f8ject \u00e9",
         targets=TARGETS,

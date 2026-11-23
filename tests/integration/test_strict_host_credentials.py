@@ -91,9 +91,14 @@ _RESOLVE = (
 
 
 def _resolve(host: str, org: str = "") -> subprocess.CompletedProcess[str]:
-    """Resolve *host* in a fresh process; the last stdout line is the context."""
+    """Resolve *host* in a fresh process; the last stdout line is the context.
+
+    The child runs in the fixture's HOME: a cwd inherited from an earlier
+    in-process test may no longer exist, and gh lookup resolves the cwd.
+    """
     return subprocess.run(
         [sys.executable, "-c", _RESOLVE, host, org],
+        cwd=os.environ["HOME"],
         capture_output=True,
         text=True,
         encoding="utf-8",

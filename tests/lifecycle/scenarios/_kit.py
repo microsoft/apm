@@ -39,6 +39,7 @@ import yaml
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
 from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.model.expected import expected_deployed, expected_exit, expected_lock_rows
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import (
@@ -66,9 +67,14 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | tuple[str, str]] = {
     ("project", "lsp", "copilot"): (".github/lsp.json", '"{pkg}-server"'),
     ("project", "canvas", "copilot"): ".github/extensions/{pkg}/extension.mjs",
     ("project", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
+    # The root half of a whole Claude plugin (#3921); NATIVE_DECLARATIONS is the other.
+    ("project", "native", "copilot"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
+    ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
     ("user", "mcp", "copilot"): (".copilot/mcp-config.json", '"{pkg}-mcp"'),
+    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # HOME paths a project command may write: receipts and bookkeeping only.
 PROJECT_HOME_ALLOWED = (".apm/deployment-receipts", ".apm-local", ".local/state/gh", ".cache/apm")
@@ -85,7 +91,57 @@ class Known:
     match: str
 
     def __post_init__(self) -> None:
-        assert re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
+
+
+# A Claude-format plugin installs whole to .agents/plugins/<name>/ for claude and
+# copilot at project scope (#3921): its carried kinds have no loose surface there.
+# The observation still looks for them, so a loose deploy fails the model.
+_CLAUDE_NATIVE = frozenset({"p-native-claude", "p-native-claude-bin"})
+_WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
+# There each such plugin is one gated native cell (#4808) of two halves: its root
+# (the SURFACE_GLOBS entry) and the target's enabledPlugins declaration of it.
+# Either half observes the cell, so a denied plugin left active fails I4; an
+# install that succeeds must leave every allowed native cell whole.
+NATIVE_DECLARATIONS: Mapping[str, str] = {
+    "claude": ".claude/settings.json",
+    "copilot": ".github/copilot/settings.json",
+}
+# The enable key is ``<plugin>@<marketplace>``; APM's project-scope marketplace
+# name carries this prefix (native_plugins/scopes.py), a user's own does not.
+_APM_PROJECT_MARKETPLACE = "apm-p-"
+
+
+def whole_plugin(scope: str, package: str, target: str) -> bool:
+    """True when *package* installs whole for *target* at *scope* (#3921)."""
+    return (
+        scope == "project"
+        and package.split(":")[0] in _CLAUDE_NATIVE
+        and target in _WHOLE_PLUGIN_TARGETS
+    )
+
+
+def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
+    """``expected_deployed`` with the #3921 project-scope native projection applied:
+    a plugin installed whole keeps only its native cell."""
+    return frozenset(
+        cell
+        for cell in expected_deployed(model, kinds)
+        if cell[1] == "native" or not whole_plugin(model.scope, cell[0], cell[2])
+    )
+
+
+def native_declaration(root: Path, target: str, plugin: str) -> str | None:
+    """The settings file under *root* in which *target* enables *plugin*, or None."""
+    relative = NATIVE_DECLARATIONS[target]
+    path = root / relative
+    if not path.is_file():
+        return None
+    enabled = json.loads(path.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+    owned = f"{plugin}@{_APM_PROJECT_MARKETPLACE}"
+    if any(key.startswith(owned) and value for key, value in enabled.items()):
+        return relative
+    return None
 
 
 @dataclass
@@ -99,7 +155,7 @@ class StepModel:
     seen: set[str]
 
     def allowed_surfaces(self) -> frozenset[str]:
-        return frozenset("/".join(cell) for cell in expected_deployed(self.model, self.kinds))
+        return frozenset("/".join(cell) for cell in projected_cells(self.model, self.kinds))
 
     def converged_before(self) -> bool:
         return self.converged
@@ -189,7 +245,7 @@ def assert_changes(changed: Iterable[str], patterns: Iterable[str], *, label: st
 @contextmanager
 def known_defect(tracking: str, match: str) -> Iterator[None]:
     """A block that must keep failing with *match* until *tracking* is fixed (strict)."""
-    assert re.fullmatch(r"#\d+", tracking), tracking
+    assert TRACKING.fullmatch(tracking) and match, (tracking, match)
     try:
         yield
     except AssertionError as exc:
@@ -326,7 +382,6 @@ class Scenario:
 
     def deployed(self) -> tuple[frozenset[str], frozenset[str], dict[str, frozenset[str]]]:
         """(``pkg/kind/target`` cells found, package-owned paths, each cell's paths)."""
-        root = self.deploy_root
         deployed: set[str] = set()
         managed: set[str] = set()
         cell_paths: dict[str, frozenset[str]] = {}
@@ -334,27 +389,58 @@ class Scenario:
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
-                    surface = SURFACE_GLOBS.get((self.scope, kind, target))
-                    if surface is None:
-                        continue
-                    pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
-                    name = package.split(":")[0]
-                    marker = marker.format(pkg=name)
-                    hits = [
-                        path
-                        for path in root.glob(pattern.format(pkg=name))
-                        if path.is_file()
-                        and marker in path.read_text(encoding="utf-8")
-                        and path.relative_to(root).as_posix() not in users
-                    ]
-                    if hits:
+                    found, owned = self._surface_hits(package, kind, target, users)
+                    if found:
                         cell = f"{package}/{kind}/{target}"
                         deployed.add(cell)
-                        found = frozenset(path.relative_to(root).as_posix() for path in hits)
                         cell_paths[cell] = found
-                        if not marker:
-                            managed.update(found)
+                        managed.update(owned)
         return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _surface_hits(
+        self, package: str, kind: str, target: str, users: frozenset[str]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """(paths found for one cell, those the package owns whole)."""
+        surface = SURFACE_GLOBS.get((self.scope, kind, target))
+        native = kind == "native"
+        if surface is None or (native and not whole_plugin(self.scope, package, target)):
+            return frozenset(), frozenset()
+        root = self.deploy_root
+        pattern, marker = surface if isinstance(surface, tuple) else (surface, "")
+        name = package.split(":")[0]
+        marker = marker.format(pkg=name)
+        found = frozenset(
+            path.relative_to(root).as_posix()
+            for path in root.glob(pattern.format(pkg=name))
+            if path.is_file()
+            and marker in path.read_text(encoding="utf-8")
+            and path.relative_to(root).as_posix() not in users
+        )
+        owned = found if not marker else frozenset()
+        declaration = native_declaration(root, target, name) if native else None
+        return (found | {declaration} if declaration else found), owned
+
+    def native_gaps(self, observation: Observation, *, trust_bin: bool = True) -> list[str]:
+        """Allowed native cells not deployed whole: a root without its declaration,
+        or neither (#4808).
+
+        A declaration file that holds declared user bytes is the user's (I1-X2
+        forbids APM to change it), so its cell needs only the root. Without
+        *trust_bin* a plugin that ships bin/ is parked whole (claude_plugins/
+        admission.py), so its cell is not required.
+        """
+        gaps = []
+        for cell in sorted(self.expected_cells()):
+            package, kind, target = cell.split("/")
+            if kind != "native" or not (trust_bin or "bin" not in self.kinds[package]):
+                continue
+            found = observation.cell_paths.get(cell, frozenset())
+            wanted = {SURFACE_GLOBS[(self.scope, kind, target)].format(pkg=package.split(":")[0])}
+            if NATIVE_DECLARATIONS[target] not in self.user_bytes:
+                wanted.add(NATIVE_DECLARATIONS[target])
+            if not wanted <= found:
+                gaps.append(f"{cell}: found {sorted(found)}, wanted {sorted(wanted)}")
+        return gaps
 
     def _user_files(self) -> frozenset[str]:
         """I1-X2: declared user writes the lock does not record: the user's files.
@@ -394,6 +480,7 @@ class Scenario:
             managed_paths=managed,
             user_bytes=dict(self.user_bytes),
             cell_paths=cell_paths,
+            user_scope=self.scope == "user",
         )
 
     def snapshot(self) -> ArtifactSnapshotSet:
@@ -403,8 +490,9 @@ class Scenario:
         """``pkg/kind/target`` cells the model allows, limited to observable surfaces."""
         return frozenset(
             "/".join(cell)
-            for cell in expected_deployed(self.model, self.kinds)
+            for cell in projected_cells(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
+            and (cell[1] != "native" or whole_plugin(self.scope, cell[0], cell[2]))
         )
 
     def assert_deployed(self) -> None:
@@ -425,6 +513,8 @@ class Scenario:
         requested: ModelState | None = None,
         credit: Iterable[Mapping[str, str]] = (),
         keep: Mapping[str, Iterable[str]] | None = None,
+        refusal: bool = False,
+        says: Iterable[str] = (),
         **fields: object,
     ) -> Step:
         """Run one command line through the driver and apply I1-I9.
@@ -435,6 +525,8 @@ class Scenario:
         step with no strict known cell credits the generated scenario-lane
         obligations they imply (``credit_step``). *keep* names paths per
         root that must be present and byte-unchanged across the step.
+        *refusal* credits a declared refusal (``EXPECTED_REFUSALS``) instead.
+        *says* lists patterns the output must match; they join the evidence.
         Extra *fields* go to ``operation_for`` (``forbidden``, ``cells``, ...).
         """
         args = self._args(line)
@@ -462,10 +554,13 @@ class Scenario:
         self._check_exit(args, result, allowed_exit, exit_cell)
         check_cross_cutting(before, after, result, model, op)
         self._advance(op, args, requested, result)
+        if self._reconciled(op, result) and not (known or exit_cell):
+            gaps = self.native_gaps(after, trust_bin="--trust-bin" in args)
+            assert not gaps, f"{' '.join(args)}: allowed native plugins not whole: {gaps}"
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
         if not (known or exit_cell):
-            credit_step(step, credit, keep=keep, scope=self.scope)
+            credit_step(step, credit, keep=keep, scope=self.scope, refusal=refusal, says=says)
         return step
 
     def pair(
@@ -492,6 +587,13 @@ class Scenario:
         assert not missing, f"strict expected failures that no longer fail: {missing}"
 
     # -- internals ---------------------------------------------------------------
+
+    @staticmethod
+    def _reconciled(op: Operation, result: CommandResult) -> bool:
+        """A successful install or update that wrote what the model allows."""
+        return (
+            result.returncode == 0 and op.command in _RECONCILING and "DRYRUN" not in op.modifiers
+        )
 
     def _check_exit(
         self,
@@ -679,7 +781,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g"})
+SCENARIO_LANES = frozenset({"T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -699,22 +801,24 @@ class Credit:
 
     def __post_init__(self) -> None:
         assert self.node.startswith(f"{NODE_ROOT}/test_"), self.node
-        assert self.tracking is None or re.fullmatch(r"#\d+", self.tracking), self.tracking
+        assert self.tracking is None or TRACKING.fullmatch(self.tracking), self.tracking
 
 
 def credits(
     module_file: str,
     rows: Mapping[str, Iterable[Mapping[str, str]]],
-    known: Mapping[str, str] | None = None,
+    known: Mapping[str, Known] | None = None,
 ) -> tuple[Credit, ...]:
     """``CREDITS`` of one module: test id (``name[param]``) -> the assignments it proves.
 
-    *known* maps a test id to the issue of the strict known cell it carries.
+    *known* maps a test id to the strict known cell it carries (issue and signature).
     """
     module = f"{NODE_ROOT}/{Path(module_file).name}"
     known = known or {}
     return tuple(
-        Credit(f"{module}::{test}", dict(assignment), known.get(test))
+        Credit(
+            f"{module}::{test}", dict(assignment), known[test].tracking if test in known else None
+        )
         for test, assignments in rows.items()
         for assignment in assignments
     )
@@ -732,21 +836,211 @@ def credited_ids(assignments: Iterable[Mapping[str, str]]) -> tuple[str, ...]:
     return tuple(sorted({key for item in assignments for key in implied(item) if key in lane}))
 
 
+@dataclass(frozen=True)
+class ExpectedRefusal:
+    """A pair whose designed outcome is a refusal that changes nothing.
+
+    *cause* is a regex the command's output must match; *upholds* names the
+    promise or law the refusal keeps and *source* cites where it is decided.
+    """
+
+    exit: int
+    cause: str
+    upholds: str
+    source: str
+
+
+# T-6b (#4101): ownership pairs whose designed outcome is a refusal. Declared,
+# never inferred from what the CLI did: a refusal of any other pair fails the
+# step, and so does a declared pair whose command succeeds.
+# An org policy that denies a declared dependency refuses every resolving
+# install and writes nothing (policy/install_preflight.py, dependency-denylist).
+# Each alternative names its policy cause: a package denial
+# (command_logger._policy_reason_blocked) or an MCP server denial
+# (commit_gate.refuse_blocked_mcp). Any other refusal earns no credit.
+POLICY_BLOCK_CAUSE = (
+    r"Blocked by org policy at \S.*?Nothing was changed\."
+    r"|MCP server\(s\) blocked by org policy\. MCP configs were NOT written\."
+)
+POLICY_BLOCK = ExpectedRefusal(
+    1,
+    POLICY_BLOCK_CAUSE,
+    "P-INV-I4",
+    "docs reference/cli/install.md: a blocked install exits 1 and changes nothing",
+)
+POLICY_REFUSALS = (
+    "pair|DEPLOYED=clean|GATE=denied-dependency",
+    "pair|DEPLOYED=edited|GATE=denied-dependency",
+    "pair|DEPLOYED=present-provenance-unknown|GATE=denied-dependency",
+    "pair|DEPLOYED=unowned|GATE=denied-dependency",
+    "pair|GATE=denied-dependency|FORCE=on",
+    "pair|GATE=denied-dependency|NET=offline",
+    "pair|GATE=denied-dependency|NET=online",
+    "pair|GATE=denied-dependency|SELECT=on",
+    "pair|GATE=denied-dependency|UPDATE=on",
+    *(
+        f"pair|GATE=denied-dependency|TGT={shape}-{change}"
+        for shape in ("single", "multi")
+        for change in ("unchanged", "narrowed", "widened")
+    ),
+    "pair|SRC=git|GATE=denied-dependency",
+    "pair|SRC=local-path|GATE=denied-dependency",
+    "pair|SRC=marketplace-file|GATE=denied-dependency",
+    "pair|SRC=marketplace-git|GATE=denied-dependency",
+    "pair|SRC=marketplace-local|GATE=denied-dependency",
+    "pair|SRC=native-plugin|GATE=denied-dependency",
+    "pair|SRC=pkg-registry|GATE=denied-dependency",
+    "pair|SRC=mcp-registry|GATE=denied-dependency",
+    "pair|SRC=inline-mcp|GATE=denied-dependency",
+)
+
+EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {
+    **dict.fromkeys(POLICY_REFUSALS, POLICY_BLOCK),
+    "pair|DEPLOYED=edited|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen: deployed files do not match the hashes recorded in apm\.lock\.yaml",
+        "P-INV-I3",
+        "req-lk-017 (install/service.py _enforce_frozen_deployed_hashes)",
+    ),
+    "pair|DEPLOYED=present-provenance-unknown|FROZEN=on": ExpectedRefusal(
+        1,
+        r"--frozen requires apm\.lock\.yaml to exist",
+        "P-LAW-lockfile.frozen_preserves_bytes",
+        "req-lk-006: --frozen refuses a project with no lockfile (install/service.py enforce_frozen)",
+    ),
+    "pair|PRIM=mcp|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|SRC=inline-mcp|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|SRC=inline-mcp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-INV-I7",
+        "install/mcp/collision_preflight.py: install --mcp refuses before any write (#4759)",
+    ),
+    "pair|SRC=mcp-registry|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"conflicts with the existing copilot connection .* Preserved that connection",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/mcp_integrator_install.py: a native MCP conflict is never overwritten",
+    ),
+    "pair|OP=approve-deny|DEPLOYED=present-provenance-unknown": ExpectedRefusal(
+        1,
+        r"not found in installed packages",
+        "P-LAW-ownership.preserve_unowned",
+        "commands/approve.py: approve acts only on packages the lockfile records",
+    ),
+    "pair|PRIM=lsp|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"LSP server '\S+' conflicts with the existing",
+        "P-LAW-ownership.preserve_unowned",
+        "integration/lsp_integrator.py: a user's LSP entry of the same name is preserved (#4628)",
+    ),
+    "pair|PRIM=bin|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"already exists and the previous apm\.lock\.yaml does not record it",
+        "P-LAW-ownership.preserve_unowned",
+        "claude_plugins/registrar.py: a plugin root APM did not deploy is never replaced",
+    ),
+    "pair|OP=install|DEPLOYED=unowned": ExpectedRefusal(
+        1,
+        r"Installation refused: skill 'p-skill'",
+        "P-LAW-ownership.preserve_unowned",
+        "install/phases/integrate.py skill collision refusal (#4101)",
+    ),
+    "pair|OP=pack|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"does not match the hash recorded in apm\.lock\.yaml",
+        "P-LAW-ownership.preserve_unowned",
+        "commands/pack.py: pack refuses a dependency whose installed files drifted",
+    ),
+    "pair|OP=uninstall|DEPLOYED=edited": ExpectedRefusal(
+        1,
+        r"Uninstall refused: deleting these tracked files needs deployment evidence",
+        "P-LAW-ownership.preserve_unowned",
+        "docs/src/content/docs/reference/cli/uninstall.md (edited files are kept)",
+    ),
+}
+
+
+def _durable(changed: Iterable[str]) -> list[str]:
+    return sorted(
+        path
+        for path in changed
+        if not any(path == tree or path.startswith(tree + "/") for tree in _BOOKKEEPING_TREES)
+    )
+
+
+def credit_problems(
+    ids: Iterable[str], *, exit: int, output: str, changed: Iterable[str], refusal: bool
+) -> list[str]:
+    """Why a step may not credit *ids*: a declared refusal must refuse, nothing else may."""
+    ids = sorted(ids)
+    if not refusal:
+        return [
+            f"{key}: declared refusal ({EXPECTED_REFUSALS[key].upholds}), but the step exited 0"
+            for key in ids
+            if key in EXPECTED_REFUSALS and exit == 0
+        ]
+    problems = [] if exit != 0 else ["a refusal credit needs a non-zero exit"]
+    for key in ids:
+        expected = EXPECTED_REFUSALS.get(key)
+        if expected is None:
+            problems.append(f"{key}: refusal is not a declared outcome (EXPECTED_REFUSALS)")
+        elif exit != expected.exit:
+            problems.append(f"{key}: exited {exit}, declared {expected.exit}")
+        elif not re.search(expected.cause, output):
+            problems.append(f"{key}: output does not name the cause {expected.cause!r}")
+    durable = _durable(changed)
+    if durable:
+        problems.append(f"a refusal must change nothing, changed: {durable}")
+    return problems
+
+
 def credit_step(
     step: Step,
     assignments: Iterable[Mapping[str, str]],
     *,
     keep: Mapping[str, Iterable[str]] | None = None,
     scope: str = "project",
+    refusal: bool = False,
+    says: Iterable[str] = (),
 ) -> None:
     """Credit the obligations *assignments* imply through ``check_obligation``.
 
-    Only a successful step credits (every scenario-lane obligation is a
-    success pair). The evidence is the step's exact changed set (present or
-    absent after it) plus the *keep* paths (present and byte-unchanged).
+    A successful step credits success pairs; with *refusal*, a step credits
+    only pairs declared in ``EXPECTED_REFUSALS``, and only when it exits with
+    the declared code, names the cause and changes nothing durable. The
+    evidence is the step's exact changed set (present or absent after it)
+    plus the *keep* paths (present and byte-unchanged) and the *says*
+    output patterns (an announced outcome).
     """
     ids = credited_ids(assignments)
-    if not ids or step.result.returncode != 0:
+    if not ids:
+        return
+    problems = credit_problems(
+        ids,
+        exit=step.result.returncode,
+        output=step.output,
+        changed=step.changed,
+        refusal=refusal,
+    )
+    says = tuple(says)
+    problems += [
+        f"output does not say {pattern!r}"
+        for pattern in says
+        if not re.search(pattern, step.output)
+    ]
+    assert not problems, f"{step.line}:\n" + "\n".join(problems)
+    if step.result.returncode != 0 and not refusal:
         return
     present: dict[str, set[str]] = {}
     absent: dict[str, set[str]] = {}
@@ -758,7 +1052,17 @@ def credit_step(
     kept = {root: tuple(paths) for root, paths in (keep or {}).items()}
     for root, paths in kept.items():
         present.setdefault(root, set()).update(paths)
-    evidence = Evidence(present=present, absent=absent, unchanged=kept, exit=0, ascii_output=True)
+    exit_code = step.result.returncode
+    causes = tuple(EXPECTED_REFUSALS[key].cause for key in ids) if refusal else ()
+    causes += says
+    evidence = Evidence(
+        present=present,
+        absent=absent,
+        unchanged=kept,
+        exit=exit_code,
+        output_matches=causes,
+        ascii_output=True,
+    )
     strength = "e2e-evidence" if evidence.state_facts() else "e2e"
     for key in ids:
         check_obligation(

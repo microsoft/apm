@@ -30,6 +30,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 SECRET = "mcp-credential-scope-sentinel-0003"

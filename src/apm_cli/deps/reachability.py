@@ -101,6 +101,13 @@ class ReachabilityResult:
             before the visited dedup (as the install resolver records them),
             keyed by lockfile key when one matches. Feed it to
             :func:`apm_cli.models.dependency.subsets.merge_edge_selections`.
+        parent_keys: For each key in ``reachable_via``, the exact lock key of
+            that parent. Sibling virtual packages share one ``repo_url``,
+            so only this key tells them apart (#4823).
+        depths: Shortest depth of every walked node over the whole edge
+            graph, direct declarations at 1, as install records it (#4833).
+        graph_children: Every declaring edge the walk saw, parent key to
+            child keys, for repairs that follow the graph, not the lock.
     """
 
     reachable: frozenset[str]
@@ -109,6 +116,9 @@ class ReachabilityResult:
     reachable_via: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     dev_only: frozenset[str] = frozenset()
     edge_selections: dict[str, tuple[EdgeSelection, ...]] = field(default_factory=dict)
+    parent_keys: dict[str, str] = field(default_factory=dict)
+    depths: dict[str, int] = field(default_factory=dict)
+    graph_children: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -124,7 +134,56 @@ class DeclaredSelections:
     unverifiable: tuple[tuple[str, str], ...]
 
 
-_WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
+class _ParentGraph:
+    """Every declaring edge the walk sees, solved like the install resolver.
+
+    Shortest depth comes from a breadth-first pass over the whole edge graph
+    from the surviving direct declarations (production and dev alike), so a
+    shorter path through a node the walk already expanded still counts. Each
+    node's parent is its nearest declaring parent, ties to the lowest parent
+    key, as ``APMDependencyResolver._select_nearest_parent`` records it
+    (#4804, #4823, #4833). Dev status stays with the walk's own propagation.
+    """
+
+    def __init__(self) -> None:
+        self._roots: set[str] = set()
+        self._parents: dict[str, dict[str, tuple[str, str | None]]] = {}
+        self._children: dict[str, set[str]] = {}
+
+    def edge(self, key: str, parent_key: str | None, via: tuple[str | None, str | None]) -> None:
+        if parent_key is None:
+            self._roots.add(key)
+            return
+        self._parents.setdefault(key, {}).setdefault(parent_key, via)
+        self._children.setdefault(parent_key, set()).add(key)
+
+    def solve(self, lock_keys, reachable_via: dict) -> tuple[dict, dict, dict]:
+        """Return ``(depths, parent_keys, children)`` and fill *reachable_via*."""
+        depths = dict.fromkeys(self._roots, 1)
+        queue = deque(sorted(self._roots))
+        while queue:
+            node = queue.popleft()
+            for child in sorted(self._children.get(node, ())):
+                if child not in depths:
+                    depths[child] = depths[node] + 1
+                    queue.append(child)
+        parent_keys: dict[str, str] = {}
+        for key, parents in self._parents.items():
+            if key in self._roots or key not in depths:
+                continue
+            nearest = [p for p in parents if depths.get(p) == depths[key] - 1]
+            if not nearest:
+                continue
+            parent = min(nearest)
+            parent_keys[key] = parent
+            if key in lock_keys:
+                reachable_via[key] = parents[parent]
+        children = {node: frozenset(kids) for node, kids in self._children.items()}
+        return depths, parent_keys, children
+
+
+# (ref, anchor, parent repo identity, is_dev, chain, parent's exact lock key)
+_WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...], str | None]
 
 
 def locked_marketplace_form(
@@ -286,6 +345,8 @@ def compute_forward_reachable_keys(
     """
     unverifiable: list[tuple[str, str]] = []
     from apm_cli.deps.apm_resolver import APMDependencyResolver
+    from apm_cli.deps.local_identity import root_local_dirs as collect_root_local_dirs
+    from apm_cli.deps.local_identity import transitive_local_identity
     from apm_cli.deps.lockfile import lockfile_parent_identity
 
     replacement_index = build_replacement_index(parse_replace_block(lockfile.replacements))
@@ -296,6 +357,7 @@ def compute_forward_reachable_keys(
     reachable: set[str] = set()
     dev_only: set[str] = set()
     reachable_via: dict[str, tuple[str, str | None]] = {}
+    parent_graph = _ParentGraph()
     visited: set[str] = set()  # resolved local dirs (as str) or remote unique keys
     # Each queue entry also carries the repo_url of the node whose manifest
     # edge introduced it (None for the seed direct_refs, which have no
@@ -304,15 +366,20 @@ def compute_forward_reachable_keys(
     # repair (see ReachabilityResult.reachable_via).
     # Production paths drain before any dev path starts, so ``visited``
     # gives a key the production flag whenever any production path exists.
-    queue: deque[_WalkItem] = deque((ref, project_root, None, False, ()) for ref in direct_refs)
-    dev_queue: deque[_WalkItem] = deque((ref, project_root, None, True, ()) for ref in dev_refs)
+    queue: deque[_WalkItem] = deque(
+        (ref, project_root, None, False, (), None) for ref in direct_refs
+    )
+    dev_queue: deque[_WalkItem] = deque(
+        (ref, project_root, None, True, (), None) for ref in dev_refs
+    )
     edge_selections: dict[str, list[EdgeSelection]] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
+    root_local_dirs = collect_root_local_dirs((*direct_refs, *dev_refs), project_root)
 
     while queue or dev_queue:
-        ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
+        ref, anchor, parent_repo_url, is_dev, chain, parent_key = (queue or dev_queue).popleft()
         if ref.is_marketplace:
             ref = locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
@@ -334,12 +401,12 @@ def compute_forward_reachable_keys(
             if real_dir is None:
                 continue
             if ref.replacement is None and parent_repo_url is not None:
-                ref = replace(
+                ref = transitive_local_identity(
                     ref,
                     declaring_parent=parent_repo_url,
-                    anchored_local_path=APMDependencyResolver._portable_anchor_identity(
-                        real_dir, project_root
-                    ),
+                    anchored=real_dir,
+                    root=project_root,
+                    root_local_dirs=root_local_dirs,
                 )
             visit_key = ref.get_unique_key() if ref.replacement is not None else str(real_dir)
             matched_key = (
@@ -350,6 +417,11 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            parent_graph.edge(
+                matched_key or ref.get_unique_key(),
+                parent_key,
+                (parent_repo_url, None if ref.replacement is not None else ref.local_path),
+            )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -357,12 +429,10 @@ def compute_forward_reachable_keys(
                 reachable.add(matched_key)
                 if is_dev:
                     dev_only.add(matched_key)
-                if parent_repo_url is not None:
-                    reachable_via.setdefault(
-                        matched_key,
-                        (parent_repo_url, None if ref.replacement is not None else ref.local_path),
-                    )
             manifest_dir = real_dir
+            # A surviving local parent is not in the candidate directory
+            # index; its own identity is still its lock key (#4823).
+            node_key = matched_key or ref.get_unique_key()
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
@@ -384,6 +454,9 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(visit_key, []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            # Remote deps don't use anchored local_path -- only
+            # resolved_by needs repairing for these.
+            parent_graph.edge(visit_key, parent_key, (parent_repo_url, None))
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -391,11 +464,8 @@ def compute_forward_reachable_keys(
                 reachable.add(visit_key)
                 if is_dev:
                     dev_only.add(visit_key)
-                if parent_repo_url is not None:
-                    # Remote deps don't use anchored local_path -- only
-                    # resolved_by needs repairing for these.
-                    reachable_via.setdefault(visit_key, (parent_repo_url, None))
             manifest_dir = install_path
+            node_key = visit_key
 
         try:
             package = _normalized_local_plugin(manifest_dir) if ref.is_local else None
@@ -439,9 +509,11 @@ def compute_forward_reachable_keys(
                     lockfile_parent_identity(ref, lockfile.replacements),
                     is_dev,
                     child_chain,
+                    node_key,
                 )
             )
 
+    depths, parent_keys, graph_children = parent_graph.solve(lockfile.dependencies, reachable_via)
     return ReachabilityResult(
         reachable=frozenset(reachable),
         complete=not unverifiable,
@@ -449,6 +521,9 @@ def compute_forward_reachable_keys(
         reachable_via=reachable_via,
         dev_only=frozenset(dev_only),
         edge_selections={key: tuple(edges) for key, edges in edge_selections.items()},
+        parent_keys=parent_keys,
+        depths=depths,
+        graph_children=graph_children,
     )
 
 

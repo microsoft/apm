@@ -1,4 +1,8 @@
-"""Declare admitted native Claude plugins only after lock and security gates."""
+"""Declare admitted native plugins only after lock and security gates.
+
+One phase converges Claude Code and GitHub Copilot onto the saved lock at
+either scope (#3290, #3921).
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,11 @@ import copy
 from typing import TYPE_CHECKING
 
 from apm_cli.claude_plugins.admission import ClaudeNativePluginError
-from apm_cli.claude_plugins.registrar import native_ownership, reconcile_claude_plugins
+from apm_cli.claude_plugins.registrar import (
+    native_ownership,
+    plan_native_declarations,
+    reconcile_native_plugins,
+)
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.deps.lockfile_write_authority import (
     flush_lockfile_writes,
@@ -19,22 +27,24 @@ if TYPE_CHECKING:
 
 
 def _refuse_retained_loose_claude_files(ctx: InstallContext) -> None:
-    """Refuse native activation beside package-owned loose Claude files.
+    """Refuse native activation beside package-owned loose files of its harnesses.
 
     Stale cleanup keeps edited or undeletable package-owned files. Registering
     the intact plugin next to them would load the same content twice. Only
-    paths attributed to the Claude target block; other targets' projections
-    and unmanaged user files are not package-owned Claude state.
+    paths attributed to a harness that loads the plugin block; other targets'
+    projections and unmanaged user files are not that harness's state.
     """
     from apm_cli.install.target_governance import install_governance, is_governed_by_install
 
     plugins = getattr(ctx, "claude_native_plugins", None) or {}
     retained = getattr(ctx, "package_cleanup_retained", None) or {}
-    claude = [target for target in ctx.targets or () if target.name == "claude"]
-    if not plugins or not retained or not claude:
+    if not plugins or not retained:
         return
-    prefixes, schemes = install_governance(claude)
     for key in sorted(plugins):
+        native = [t for t in ctx.targets or () if t.name in plugins[key].harnesses]
+        if not native:
+            continue
+        prefixes, schemes = install_governance(native)
         paths = sorted(
             path
             for path in retained.get(key, {})
@@ -42,19 +52,19 @@ def _refuse_retained_loose_claude_files(ctx: InstallContext) -> None:
         )
         if paths:
             raise ClaudeNativePluginError(
-                f"Cannot switch {key} to native Claude: package-owned loose Claude files "
+                f"Cannot switch {key} to a native plugin: package-owned loose files "
                 f"were kept because they changed or could not be removed: {', '.join(paths)}. "
                 "Move or delete them, then run the install again."
             )
 
 
 def run(ctx: InstallContext) -> None:
-    """Converge Claude onto the saved lock, using the same owner as removal.
+    """Converge native plugins onto the saved lock, using the same owner as removal.
 
-    The lock and Claude's declarations are one rollback unit (req-na-004): when
-    declaration fails, the previous lock is restored so a retry still owns
-    everything it must retire. MCP/LSP reconciliation already ran (#4329), so
-    the restored lock keeps the service records that reached disk.
+    The lock and the harness declarations are one rollback unit (req-na-004):
+    when declaration fails, the previous lock is restored so a retry still
+    owns everything it must retire. MCP/LSP reconciliation already ran (#4329),
+    so the restored lock keeps the service records that reached disk.
     """
     if ctx.apm_modules_dir is None:
         return
@@ -71,19 +81,24 @@ def run(ctx: InstallContext) -> None:
         else None
     )
     if ctx.claude_native_plugins or previous_owned:
+        planned = _planned_declarations(ctx, lock_path, previous_owned)
+        if planned is not None:
+            planned.write(lock_path)
         # Claude's declarations never run ahead of the lock they follow.
         flush_lockfile_writes()
     committed = LockFile.read(lock_path)
     try:
-        reconcile_claude_plugins(
+        declared = reconcile_native_plugins(
             modules_dir=ctx.apm_modules_dir,
             scope=ctx.scope,
             previous=previous_owned,
             lockfile=committed,
             prepared=ctx.claude_native_plugins,
             deploy_root=ctx.project_root,
+            run_targets=frozenset(target.name for target in ctx.targets or ()),
             logger=ctx.logger,
             dry_run=ctx.dry_run,
+            rejected=frozenset(ctx.native_rejected_names),
         )
     except ClaudeNativePluginError:
         previous = _with_reconciled_services(ctx.existing_lockfile, committed)
@@ -96,6 +111,57 @@ def run(ctx: InstallContext) -> None:
         else:
             remove_lockfile(lock_path)
         raise
+    from apm_cli.install.service import InstallService
+
+    if ctx.dry_run or InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+        return
+    stamped = _record_declared(LockFile.read(lock_path), declared)
+    if stamped is not None:
+        stamped.write(lock_path)
+
+
+def _planned_declarations(ctx: InstallContext, lock_path, previous_owned) -> LockFile | None:
+    """The lock with the planned ``native_declared``, so the flush commits once (#4329).
+
+    A failed declaration restores the previous lock, so a stamp ahead of the
+    settings never survives; a plan that differs from the result is rewritten.
+    """
+    from apm_cli.install.service import InstallService
+
+    if ctx.dry_run or InstallService.frozen_disposition(ctx).withhold_lockfile_writes:
+        return None
+    staged = LockFile.read(lock_path)
+    planned = plan_native_declarations(
+        modules_dir=ctx.apm_modules_dir,
+        scope=ctx.scope,
+        previous=previous_owned,
+        lockfile=staged,
+        prepared=ctx.claude_native_plugins,
+        deploy_root=ctx.project_root,
+        run_targets=frozenset(target.name for target in ctx.targets or ()),
+    )
+    return _record_declared(staged, planned)
+
+
+def _record_declared(lockfile: LockFile | None, declared) -> LockFile | None:
+    """Record beside each native row which harnesses now hold APM's ``true``.
+
+    It is what APM last wrote, so a later run can tell its own values from a
+    hand edit (#3921). Returns the lock to write, or ``None`` when nothing
+    changed; a frozen install never writes the lock.
+    """
+    if lockfile is None or not declared:
+        return None
+    changed = False
+    for locked in lockfile.dependencies.values():
+        record = locked.native_plugin
+        if record is None or record.name not in declared:
+            continue
+        harnesses = sorted(declared[record.name])
+        if locked.native_declared != harnesses:
+            locked.native_declared = harnesses
+            changed = True
+    return lockfile if changed else None
 
 
 def _with_reconciled_services(previous: LockFile | None, committed: LockFile | None):

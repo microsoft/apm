@@ -73,12 +73,46 @@ def _registry_range_covers_locked_version(
     manifest_range: str | None,
     locked_version: str | None,
 ) -> bool:
-    """True when the lockfile's exact registry version still satisfies the manifest range."""
+    """True when the manifest range would still select the lockfile's exact registry version.
+
+    Uses the resolver's own ``pick_best`` so replay applies the same
+    pre-release eligibility rule: a stable range never selects a pre-release.
+    """
     if not manifest_range or not locked_version:
         return False
-    from apm_cli.deps.registry.semver import is_semver_range, match_version
+    from apm_cli.deps.registry.semver import pick_best
 
-    return bool(is_semver_range(manifest_range) and match_version(manifest_range, locked_version))
+    return pick_best(manifest_range, [locked_version]) == locked_version
+
+
+def registry_selector_mismatch(selector: str | None, locked_version: str | None) -> bool:
+    """True when a registry version selector no longer selects the locked version.
+
+    The manifest carries a selector (for example ``^1.2.0``) while the lock
+    records the exact version it resolved to (for example ``1.5.3``). A semver
+    range drifts only when it stops covering the locked version; any other
+    selector (exact tag or label) is exact-matched by the resolver, so it
+    drifts on a literal mismatch.
+    """
+    from apm_cli.deps.registry.semver import is_semver_range
+
+    if not is_semver_range(selector or ""):
+        return selector != locked_version
+    return not _registry_range_covers_locked_version(selector, locked_version)
+
+
+def has_complete_registry_pin(locked_dep: Any) -> bool:
+    """True when a registry lock row records its exact version, URL and hash.
+
+    These are the registry pin a replay needs (req-lk-003, req-lk-019):
+    the exact version selects the package, ``resolved_hash`` is the trust
+    anchor, and ``resolved_url`` is advisory. No commit is involved.
+    """
+    return bool(
+        getattr(locked_dep, "version", None)
+        and getattr(locked_dep, "resolved_url", None)
+        and getattr(locked_dep, "resolved_hash", None)
+    )
 
 
 def _normalize_dep_source(dep: Any) -> str:
@@ -119,6 +153,33 @@ def revision_pin_mismatch(reference: str | None, locked_dep: LockedDependency) -
     )
 
 
+def _registry_marketplace_mismatch(spec: str | None, locked_dep: Any) -> str | None:
+    """Compare a registry-routed catalog selection to its locked registry evidence.
+
+    A catalog entry routed to a registry locks registry evidence, not a commit
+    (#4009): the exact version, resolved URL and resolved hash.
+    """
+    if not has_complete_registry_pin(locked_dep):
+        return "missing locked registry version, URL or hash evidence"
+    if spec and registry_selector_mismatch(spec, locked_dep.version):
+        return f"manifest version '{spec}' != lockfile registry version '{locked_dep.version}'"
+    return None
+
+
+def _non_git_marketplace_mismatch(
+    spec: str | None, locked_dep: LockedDependency
+) -> tuple[bool, str | None]:
+    """Route registry-locked (#4009) and local-catalog (#4639) entries to their evidence checks.
+
+    Returns ``(True, mismatch)`` when the entry is not Git-locked, else ``(False, None)``.
+    """
+    if getattr(locked_dep, "source", None) == "registry":
+        return True, _registry_marketplace_mismatch(spec, locked_dep)
+    if locked_dep.is_local_source:
+        return True, _local_catalog_mismatch(spec, locked_dep)
+    return False, None
+
+
 def marketplace_ref_mismatch(
     dep_ref: DependencyReference,
     locked_dep: LockedDependency,
@@ -134,8 +195,9 @@ def marketplace_ref_mismatch(
     from apm_cli.marketplace.version_resolver import is_version_constraint
 
     spec = dep_ref.marketplace_version_spec
-    if locked_dep.is_local_source:
-        return _local_catalog_mismatch(spec, locked_dep)
+    handled, mismatch = _non_git_marketplace_mismatch(spec, locked_dep)
+    if handled:
+        return mismatch
     if not is_full_revision_pin(locked_dep.resolved_commit):
         return "missing locked commit evidence"
     if not spec:
@@ -485,15 +547,7 @@ def detect_ref_change(
     # (the user expanded/contracted the range away from the locked
     # version and we need to re-resolve).
     if manifest_source == "registry":
-        from apm_cli.deps.registry.semver import is_semver_range
-
-        ref = dep_ref.reference
-        if not is_semver_range(ref or ""):
-            # Non-semver selector (branch/label/exact tag): the resolver
-            # exact-matches it, so drift is a literal mismatch -- not the
-            # range-coverage test, which only applies to semver ranges.
-            return ref != locked_dep.version
-        return not _registry_range_covers_locked_version(ref, locked_dep.version)
+        return registry_selector_mismatch(dep_ref.reference, locked_dep.version)
 
     if (getattr(dep_ref, "is_insecure", False) is True) != (
         getattr(selected_locked, "is_insecure", False) is True
@@ -808,7 +862,7 @@ def build_download_ref(
         if locked is None or update_refs or ref_changed or locked.source == "local":
             raise ValueError("source has no unchanged remote lock pin")
         if locked.source == "registry":
-            if not (locked.version and locked.resolved_url and locked.resolved_hash):
+            if not has_complete_registry_pin(locked):
                 raise ValueError("registry source has no complete locked version, URL and hash")
         elif not is_full_revision_pin(locked.resolved_commit):
             raise ValueError("remote source has no immutable locked commit")

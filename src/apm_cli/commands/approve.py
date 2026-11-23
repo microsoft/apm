@@ -129,12 +129,14 @@ def _installed_identities(manifest: Path) -> frozenset[str]:
 
 
 def _load_store(
-    manifest: Path, user_scope: bool
+    manifest: Path, user_scope: bool, *, migrate_legacy: bool = True
 ) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
     """Load the (allow, deny) grant maps from the selected store.
 
     A key written as an install spec is stored under the package identity
-    when this store is saved (#4189).
+    when this store is saved (#4189). With *migrate_legacy* False a legacy
+    ``approvals.yml`` is folded in memory only; :func:`_save_store` retires
+    it, so a refused command writes nothing (#4923).
     """
     from ..security.executables import (
         _readable_lockfile,
@@ -144,7 +146,7 @@ def _load_store(
     )
 
     if user_scope:
-        allow, deny = load_user_executables()
+        allow, deny = load_user_executables(migrate_legacy=migrate_legacy)
     else:
         allow, deny, used_alias = load_project_executables(manifest)
         if used_alias:
@@ -165,10 +167,16 @@ def _save_store(
     deny: dict[str, dict[str, bool]],
 ) -> None:
     """Persist the (allow, deny) grant maps to the selected store."""
-    from ..security.executables import save_user_executables, write_project_executables
+    from ..security.executables import (
+        _migrate_legacy_approvals,
+        save_user_executables,
+        write_project_executables,
+    )
 
     if user_scope:
         save_user_executables(allow, deny)
+        # *allow* already holds any legacy grants; retire approvals.yml now.
+        _migrate_legacy_approvals(allow)
     else:
         write_project_executables(manifest, allow, deny)
 
@@ -296,7 +304,7 @@ def approve_cmd(
             _show_pending(manifest, logger=logger)
             return
 
-        allow, deny = _load_store(manifest, user_scope)
+        allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
 
         if recommended:
             _approve_recommended(manifest, user_scope, allow, deny, logger=logger)
@@ -316,7 +324,7 @@ def approve_cmd(
             _approve_bundles(manifest, user_scope, allow, deny, bundles, logger=logger)
             if not packages:
                 return
-            allow, deny = _load_store(manifest, user_scope)
+            allow, deny = _load_store(manifest, user_scope, migrate_legacy=False)
         _approve_packages(manifest, user_scope, allow, deny, packages, logger=logger)
     except PolicyViolationError as exc:
         _report_policy_block(exc)
@@ -855,44 +863,79 @@ def _approve_bundles(
     logger: CommandLogger,
 ) -> None:
     """Grant parked bundle executables under their exact key: the executables.allow entry."""
-    from dataclasses import replace
-
     if not bundles:
         return
-    cleared = []
+    keys = [bundle.approval_key for bundle in bundles]
+    cleared = [key for key in dict.fromkeys(keys) if key in deny]
+    remaining = {key: value for key, value in deny.items() if key not in cleared}
+    # Decide another layer's deny against the store as it would be saved, and
+    # refuse before any write: a failed approve changes nothing (#4933).
+    blocked = _bundles_still_denied(manifest, user_scope, remaining, bundles, logger=logger)
+    if blocked:
+        global_install = _install_command(manifest).endswith("-g")
+        for key in dict.fromkeys(keys):
+            if key in blocked:
+                hint = _lift_deny_hint(blocked[key], key, user_scope=global_install)
+                _rich_error(
+                    f"{key} is still denied by another trust layer ({blocked[key]}); the "
+                    f"approval has no effect until that deny is lifted: {hint}",
+                    symbol="error",
+                )
+        _rich_info("Nothing written.", symbol="info")
+        sys.exit(1)
     for bundle in bundles:
         entry = allow.get(bundle.approval_key)
         grant = dict(entry) if isinstance(entry, dict) else {}
         grant.update(dict.fromkeys(bundle.exec_types, True))
         allow[bundle.approval_key] = grant
-        if deny.pop(bundle.approval_key, None) is not None:
-            cleared.append(bundle.approval_key)
+    for key in cleared:
+        deny.pop(key)
     _save_store(manifest, user_scope, allow, deny)
     for key in cleared:
         _rich_info(f"Cleared deny for {key} in {_store_label(user_scope)}.", symbol="info")
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    blocked = {bundle.approval_key for bundle in _pending_bundles(manifest, ctx)}
     for bundle in bundles:
-        if bundle.approval_key in blocked:
-            _rich_error(
-                f"{bundle.approval_key} is still denied by another trust layer; the approval "
-                "has no effect until that deny is lifted.",
-                symbol="error",
-            )
-        else:
-            _rich_success(
-                f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
-                symbol="check",
-            )
-    approved = len([b for b in bundles if b.approval_key not in blocked])
-    if approved:
-        _rich_info(
-            f"Updated {_store_label(user_scope)} ({approved} approved). "
-            f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
-            symbol="info",
+        _rich_success(
+            f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
+            symbol="check",
         )
-    if blocked & {bundle.approval_key for bundle in bundles}:
-        sys.exit(1)
+    _rich_info(
+        f"Updated {_store_label(user_scope)} ({len(bundles)} approved). "
+        f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
+        symbol="info",
+    )
+
+
+def _bundles_still_denied(
+    manifest: Path, user_scope: bool, deny: dict, bundles: list, *, logger: CommandLogger
+) -> dict[str, str]:
+    """Keys of *bundles* a deny blocks once the written store holds *deny*, with its layer.
+
+    The first denying layer is reported, as for a named package (#4933).
+
+    Reads never persist a legacy ``approvals.yml`` migration, so a refused
+    approve leaves the personal store as it found it.
+    """
+    from dataclasses import replace
+
+    from ..models.manifest_io import load_manifest
+    from ..security.executables import TRUST_DENIED, _deny_types, build_exec_trust_context
+    from ..security.trust import package_type_verdicts
+
+    data = load_manifest(manifest) if manifest.is_file() else None
+    ctx = build_exec_trust_context(
+        policy=_load_org_policy(manifest.parent, logger=logger),
+        project_data=data if isinstance(data, dict) else {},
+        migrate_user_legacy=False,
+    )
+    store = "user_deny" if user_scope else "project_deny"
+    ctx = replace(ctx, gate_enabled=True, **{store: _deny_types(deny)})
+    blocked: dict[str, str] = {}
+    for bundle in bundles:
+        verdicts = package_type_verdicts(ctx, (bundle.approval_key,), None, bundle.exec_types)
+        layers = [v.layer for v in verdicts.values() if v.state == TRUST_DENIED]
+        if layers:
+            blocked.setdefault(bundle.approval_key, layers[0])
+    return blocked
 
 
 def _trust_command(
@@ -1347,11 +1390,9 @@ def _pending_declarations(manifest: Path, *, logger: CommandLogger) -> list:
     ]
 
 
-def _is_native_plugin(
-    package_type: str | None, package_dir: Path, *, user_scope: bool = False
-) -> bool:
+def _is_native_plugin(package_type: str | None, package_dir: Path) -> bool:
     """A plugin a harness loads intact: an Agent Plugin, a Codex bundle, or a
-    Claude plugin under the user-scope native route (#3290)."""
+    Claude plugin, native at both scopes (#3290, #3921)."""
     if package_type == "agent_plugin":
         return True
     if package_type is None and _is_agent_plugin(package_dir):
@@ -1359,8 +1400,7 @@ def _is_native_plugin(
     if (package_dir / ".codex-plugin" / "plugin.json").is_file():
         return True
     return (
-        user_scope
-        and package_type in (None, "marketplace_plugin")
+        package_type in (None, "marketplace_plugin")
         and (package_dir / ".claude-plugin" / "plugin.json").is_file()
     )
 
@@ -1396,9 +1436,6 @@ def scan_installed_executable_packages(manifest: Path) -> list:
 
     apm_modules = manifest.parent / "apm_modules"
     results: list[ExecutableDeclaration] = []
-    from ..core.scope import InstallScope, get_apm_dir
-
-    user_scope = manifest.parent.resolve() == get_apm_dir(InstallScope.USER).resolve()
 
     if not apm_modules.is_dir():
         return results
@@ -1455,7 +1492,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 parent_name=locked.resolved_by if locked.depth > 1 else None,
                 original_identity=approval.original_identity,
             )
-            native = _is_native_plugin(locked.package_type, package_dir, user_scope=user_scope)
+            native = _is_native_plugin(locked.package_type, package_dir)
             if native:
                 declaration = native_declaration(declaration, package_dir)
             if declaration.has_executables:
@@ -1501,7 +1538,7 @@ def scan_installed_executable_packages(manifest: Path) -> list:
                 version,
                 manifest_data=manifest_data,
             )
-            native = _is_native_plugin(None, pkg_dir, user_scope=user_scope)
+            native = _is_native_plugin(None, pkg_dir)
             if native:
                 decl = native_declaration(decl, pkg_dir)
             if decl.has_executables:
