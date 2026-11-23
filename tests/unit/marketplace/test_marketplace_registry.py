@@ -346,6 +346,20 @@ class TestCatalogScopedRefPins:
             self._key(shadow): "v1",
         }
 
+    def test_a_failed_pin_write_leaves_the_registration_unchanged(self):
+        from apm_cli.marketplace.version_pins import RefPinStoreError
+
+        self._write({"team/tool/1.0.0": "v1"})
+        registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        Path(str(self.pins) + ".tmp").mkdir()
+
+        with pytest.raises(RefPinStoreError):
+            registry_mod.remove_marketplace("team")
+
+        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
+        registry = json.loads(Path(registry_mod._marketplaces_path()).read_text())
+        assert [entry["name"] for entry in registry["marketplaces"]] == ["team"]
+
 
 class TestCatalogPinIdentity:
     """#4966: the pin scope names exactly one catalog."""

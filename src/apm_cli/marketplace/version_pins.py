@@ -159,12 +159,13 @@ def load_ref_pins(
     return data
 
 
-def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
+def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = False) -> None:
     """Persist *pins* to disk atomically.
 
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
-    logged and swallowed (advisory system). A preview writes nothing.
+    logged and swallowed (advisory system), unless *strict*, which raises
+    :class:`RefPinStoreError`. A preview writes nothing.
     """
     from apm_cli.config import user_state_writes_suppressed
 
@@ -178,6 +179,8 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None) -> None:
             json.dump(pins, fh, indent=2)
         os.replace(tmp_path, path)
     except OSError as exc:
+        if strict:
+            raise RefPinStoreError(path, f"cannot be written ({type(exc).__name__})") from exc
         logger.debug("Failed to save version-pins: %s", exc)
 
 
@@ -269,7 +272,8 @@ def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) 
 
     Called before an alias is re-registered or removed, so its pins stay with
     that catalog and are never read for another one (#4966). A pin already
-    recorded for the catalog wins over a legacy one.
+    recorded for the catalog wins over a legacy one. A failed write raises
+    :class:`RefPinStoreError`, so the registry change does not happen.
     """
     prefix = f"{alias.lower()}/"
     pins = load_ref_pins(pins_dir)
@@ -281,7 +285,7 @@ def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) 
     for key in legacy:
         ref = pins.pop(key)
         pins.setdefault(f"{catalog}#{key[len(prefix) :].lower()}", ref)
-    save_ref_pins(pins, pins_dir)
+    save_ref_pins(pins, pins_dir, strict=True)
 
 
 # ------------------------------------------------------------------
