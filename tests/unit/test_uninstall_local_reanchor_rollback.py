@@ -57,8 +57,8 @@ def test_an_unsaved_reanchor_lock_restores_the_manifest_and_exits_nonzero(tmp_pa
 def _planned(tmp_path: Path):
     manifest = tmp_path / "apm.yml"
     lock = tmp_path / "apm.lock.yaml"
-    manifest.write_text("name: proj\ndependencies:\n  apm:\n    - ./vendor/e\n", encoding="utf-8")
-    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    manifest.write_bytes(b"name: proj\ndependencies:\n  apm:\n    - ./vendor/e\n")
+    lock.write_bytes(b"lockfile_version: '4'\n")
     plan = snapshot_for_rollback(
         LocalReanchorPlan(renames={"./vendor/e": "local:vendor/e"}), (manifest, lock)
     )

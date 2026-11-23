@@ -362,7 +362,7 @@ def _refuse_unverifiable_local_survivors(
             except (OSError, RuntimeError):
                 unresolved.append(package)  # unverifiable: never dropped from the check
                 continue
-            local[directory] = package
+            local.setdefault(directory, []).append(package)
     if not local and not unresolved:
         return []
     direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
@@ -376,18 +376,18 @@ def _refuse_unverifiable_local_survivors(
         and not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local))
     ):
         return []
-    local = {**local, **{index: package for index, package in enumerate(unresolved)}}
+    kept = [package for packages in local.values() for package in packages] + unresolved
     if dry_run:
         # A preview writes nothing: it shows the package kept, as the real run would.
-        for package in () if quiet else local.values():
+        for package in () if quiet else kept:
             logger.warning(
                 f"Dry run: Would keep {_dependency_public_label(package)}: apm_modules/ is "
                 "missing, so APM cannot confirm that no other local package still needs it; "
                 "the uninstall itself refuses."
             )
-        return list(local.values())
+        return kept
     logger.error(
-        f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
+        f"{_dependency_public_label(kept[0])} was not removed: apm_modules/ "
         "is missing, so APM cannot confirm whether another local package still needs it; "
         f"apm.yml and apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
     )
@@ -439,6 +439,11 @@ def _plan_reanchor_or_exit(
                 "changed since it was installed, and refreshing its copy cannot be undone; "
                 "reinstall first"
             )
+        if plan.renames and (blocked := _unrelocatable(lockfile, plan, project_root)):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but {blocked}, which cannot be "
+                "carried to its new identity in one transaction yet"
+            )
         if plan.renames and _native_owned(lockfile):
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but native plugin registrations are "
@@ -467,6 +472,26 @@ def _plan_reanchor_or_exit(
         )
         sys.exit(1)
     return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+
+
+def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
+    """Why a re-anchor cannot keep its deployments intact, or ``None`` (#4889).
+
+    Merged hooks are rebuilt from the materialization the re-key moves, and a
+    file another package also claims may change writer; both would lose or
+    change deployed state that a rollback cannot restore.
+    """
+    from ...core.deployment_ledger import DeploymentLedgerCodec
+    from .local_survivors import survivor_ships_hooks
+
+    modules_dir = Path(project_root) / "apm_modules"
+    for key in plan.renames:
+        if survivor_ships_hooks(lockfile, key, modules_dir):
+            return f"{key} ships hooks"
+    for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
+        if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
+            return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
+    return None
 
 
 def _native_owned(lockfile) -> bool:
