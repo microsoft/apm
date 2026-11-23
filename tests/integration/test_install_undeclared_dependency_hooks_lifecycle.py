@@ -104,3 +104,4 @@ def test_install_keeps_an_edited_entry_of_an_undeclared_dependency(
     world.apm("install")
 
     assert _entries(world) == {"PreToolUse": ["Edit"]}
+    assert '"echo h"' in settings.read_text(encoding="utf-8")
