@@ -913,6 +913,9 @@ class TestReplayFrameTranslation:
         frame = (scratch_root, live_root)
         assert render(scratch_root, scratch_root, frame) == installed
         assert render(live_root, scratch_root, frame) == installed
+        # The frame only shapes link text: nothing is deployed in either root.
+        assert not (live_root / ".github").exists()
+        assert not (scratch_root / ".github").exists()
 
     def test_dependency_replay_keeps_link_when_live_frame_has_no_relpath(
         self, tmp_path, monkeypatch
