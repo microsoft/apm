@@ -111,7 +111,6 @@ jobs:
           *) echo "::error::OS must be linux, macos or windows"; exit 1 ;;
         esac
         # cProfile needs the Python console script; the Windows venv has a PE launcher.
-        if [ "$OS" = windows ] && [ "$PROFILE" = 1 ]; then echo "::error::PROFILE=1 is not supported on windows"; exit 1; fi
         # The venv console script, relative to a side's worktree.
         if [ "$OS" = windows ]; then VENV_APM=.venv/Scripts/apm.exe; else VENV_APM=.venv/bin/apm; fi
         {
@@ -163,7 +162,8 @@ jobs:
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
     - name: Install py-spy (research)
-      run: uv tool install py-spy==0.4.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      shell: bash
+      run: uv tool install py-spy==0.4.0 && uv tool dir --bin >> "$GITHUB_PATH"
     - name: Interleaved runs
       working-directory: harness
       env:

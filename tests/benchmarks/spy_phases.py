@@ -138,3 +138,73 @@ def summarize(text: str, rate: int) -> list[str]:
             top = ", ".join(f"{c} {sec(k)}" for c, k in children[phase].most_common(8))
             out.append(f"CHILD {phase}: {top}")
     return out
+
+
+# Invariant buckets, first match wins (functions anywhere in the stack, then modules).
+_INVARIANTS = (
+    ("imports", {"_find_and_load"}, ()),
+    ("policy", set(), ("policy/",)),
+    (
+        "checkout-verify",
+        {"verify_checkout", "require_verified_copy", "require_verified_checkout",
+         "read_verified_file", "verify_checkout_sha"},
+        ("cache/checkout_verify",),
+    ),  # fmt: skip
+    (
+        "content-hash",
+        {"compute_package_hash", "compute_package_digests", "verify_package_hash",
+         "compute_native_bundle_hash", "locked_content_mismatch"},
+        ("install/phases/content_hash_stream",),
+    ),  # fmt: skip
+    (
+        "fetch-clone",
+        {"_ensure_bare_repo", "_create_checkout", "_clone_with_fallback", "clone_from",
+         "_fetch_into_bare", "_materialize_checkout"},
+        (),
+    ),  # fmt: skip
+    (
+        "ref-resolve",
+        {"resolve_git_reference", "_resilient_get", "ls_remote", "_ls_remote"},
+        ("deps/tiered_ref_resolver", "deps/git_reference_resolver"),
+    ),
+    ("copy-to-modules", {"robust_copytree", "robust_copy_entry"}, ()),
+    ("cache-lookup", set(), ("cache/",)),
+    ("manifest-validate", {"validate_apm_package", "from_apm_yml", "load_manifest"}, ()),
+    ("receipts-ledger", set(), ("core/deployment_ledger", "cache/deploy_store",
+                                "install/deploy_snapshot", "install/receipts")),  # fmt: skip
+    ("lockfile", set(), ("deps/lockfile", "install/phases/lockfile",
+                         "deps/lockfile_generator", "install/cache_pin")),  # fmt: skip
+    (
+        "discovery",
+        {"find_files_by_glob", "find_primitive_files", "discover_primitives"},
+        ("primitives/", "compilation/inventory"),
+    ),
+    ("deploy-writes", set(), ("integration/", "install/template", "install/services",
+                              "install/deployment_plan", "install/commit_gate")),  # fmt: skip
+    ("resolver-graph", set(), ("deps/",)),
+)
+
+
+def invariants(text: str, rate: int) -> list[str]:
+    """Samples per invariant; one stack counts once, in the first bucket it matches."""
+    buckets: Counter = Counter()
+    total = 0
+    for line in text.splitlines():
+        stack, _, count = line.rpartition(" ")
+        if not stack or not count.isdigit():
+            continue
+        n = int(count)
+        total += n
+        frames = _frames(stack)
+        funcs = {func for func, _path in frames}
+        mods = [_apm(path) or "" for _func, path in frames]
+        name = "other-apm" if any(mods) else "interpreter"
+        for bucket, wanted_funcs, wanted_mods in _INVARIANTS:
+            if funcs & wanted_funcs or any(m.startswith(wanted_mods) for m in mods if m):
+                name = bucket
+                break
+        buckets[name] += n
+    out = [f"INV TOTAL samples={total} ~{total / rate:.2f}s"]
+    for name, n in buckets.most_common():
+        out.append(f"INV {name} {n / rate:.2f}s {100 * n / max(total, 1):.1f}%")
+    return out

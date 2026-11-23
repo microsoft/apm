@@ -794,9 +794,9 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     return sample, output
 
 
-def _spy(ctx: Context, journey: Journey, python: str, apm: Path, prof: Path) -> None:
-    """RESEARCH: py-spy (idle off, nonblocking) phase attribution, printed to the log."""
-    from tests.benchmarks.spy_phases import summarize
+def _spy(ctx: Context, journey: Journey, launch: list[str], prof: Path) -> None:
+    """RESEARCH: py-spy (idle off, nonblocking) attribution per phase and invariant."""
+    from tests.benchmarks.spy_phases import invariants, summarize
 
     rate = 250
     for attempt in range(3):
@@ -806,49 +806,38 @@ def _spy(ctx: Context, journey: Journey, python: str, apm: Path, prof: Path) -> 
             started = time.perf_counter()
             result = subprocess.run(
                 ["py-spy", "record", "--nonblocking", "--rate", str(rate), "--format", "raw",
-                 "--output", str(raw), "--", python, str(apm), *argv],
+                 "--output", str(raw), "--", *launch, *argv],
                 cwd=cwd, env=ctx.world.env, capture_output=True, text=True,
                 timeout=_COMMAND_TIMEOUT_S, check=False,
             )  # fmt: skip
-            print(f"[SPY] {journey.name} attempt {attempt} step {index} rc={result.returncode} "
-                  f"wall={time.perf_counter() - started:.2f}")  # fmt: skip
-            if raw.is_file():
-                for line in summarize(raw.read_text(encoding="utf-8"), rate):
-                    print(f"[SPY] {line}")
-            else:
+            print(f"[SPY] {ctx.fixture.name} {journey.name} attempt {attempt} step {index} "
+                  f"rc={result.returncode} wall={time.perf_counter() - started:.2f}")  # fmt: skip
+            if not raw.is_file():
                 print(f"[SPY] no output: {result.stderr[-600:]}")
+                continue
+            text = raw.read_text(encoding="utf-8")
+            try:
+                for line in (*summarize(text, rate), *invariants(text, rate)):
+                    print(f"[SPY] {ctx.fixture.name} {journey.name} {line}")
+            except Exception as exc:  # research: never lose the run
+                print(f"[SPY] summarizer failed: {exc!r}")
 
 
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
-    """One extra run under cProfile; only for a Python console-script ``apm``."""
+    """RESEARCH: py-spy sampling only (cProfile inflates per-call costs)."""
     apm = Path(ctx.apm[-1])
-    first = apm.read_bytes()[:200].split(b"\n", 1)[0]
-    if not first.startswith(b"#!") or b"python" not in first:
-        return None
-    python = first[2:].decode().strip()
-    journey.setup(ctx)
+    if apm.suffix.lower() == ".exe":
+        entry = "import sys; from apm_cli.entrypoint import main; sys.argv[0] = 'apm'; main()"
+        launch = [str(apm.parent / "python.exe"), "-c", entry]
+    else:
+        first = apm.read_bytes()[:200].split(b"\n", 1)[0]
+        if not first.startswith(b"#!") or b"python" not in first:
+            return None
+        launch = [first[2:].decode().strip(), str(apm)]
     prof = out / "profiles" / f"{ctx.fixture.name}-{journey.name}-rtt{int(ctx.world.rtt_ms)}.prof"
     prof.parent.mkdir(parents=True, exist_ok=True)
-    for index, (argv, cwd) in enumerate(journey.steps(ctx)):
-        target = prof if index == 0 else prof.with_suffix(f".{index}.prof")
-        result = subprocess.run(
-            [python, "-m", "cProfile", "-o", str(target), str(apm), *argv],
-            cwd=cwd,
-            env=ctx.world.env,
-            capture_output=True,
-            timeout=_COMMAND_TIMEOUT_S,
-            check=False,
-        )
-        if result.returncode != 0 or not target.is_file():
-            print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
-            return None
-    _spy(ctx, journey, python, apm, prof)
-    if prof.exists():
-        with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
-            stats = pstats.Stats(str(prof), stream=handle)
-            stats.sort_stats("cumulative").print_stats(60)
-            stats.sort_stats("tottime").print_stats(40)
-    return str(prof)
+    _spy(ctx, journey, launch, prof)
+    return None
 
 
 def measure(ctx: Context, journey: Journey, args: argparse.Namespace) -> dict:
