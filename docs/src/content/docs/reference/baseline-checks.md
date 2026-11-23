@@ -199,9 +199,10 @@ the [policy schema](../policy-schema/).
 
 Fails when a local bundle's deployed hooks (or canvas extensions) are no longer
 admitted by the current executables trust, and when a bundle hook entry in a
-merged hook config was changed outside APM (for example a new `matcher`): APM
-can no longer match it to its recorded content, so the check names the bundle
-instead of losing track of the entry. Restore the recorded entry first: `apm
+merged hook config was changed outside APM (for example a new `matcher`), or
+its ownership record (`apm-hooks.json` beside the config) is unreadable or
+missing: APM can no longer match the entry to its recorded content, so the check
+names it instead of losing track of the bundle's hooks. Restore the recorded entry first: `apm
 uninstall` refuses while an edited entry still runs the bundle's script. Keep
 your own changes in a separate hook entry.
 

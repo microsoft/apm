@@ -1525,17 +1525,17 @@ def _check_drift(
 # -- Aggregate runner ----------------------------------------------
 
 
-def _modified_bundle_hooks_result(slugs: Sequence[str]) -> CheckResult:
-    """A bundle hook entry edited outside APM is named, never dropped silently (#5078)."""
+def _bundle_hook_ownership_result(problems: Sequence[str]) -> CheckResult:
+    """Bundle hook entries APM can no longer attribute are named, never dropped (#5078)."""
     return CheckResult(
         name="local-bundle-hooks",
         passed=False,
         message=(
-            f"{len(slugs)} local bundle(s) have hook entries changed outside APM; restore each "
-            "recorded entry first (uninstall refuses while an edited entry still runs the "
-            "bundle's script), and keep your own changes in a separate hook entry"
+            f"{len(problems)} local bundle hook ownership problem(s); restore each recorded "
+            "entry and ownership record first (uninstall refuses while an edited entry still "
+            "runs the bundle's script), and keep your own changes in a separate hook entry"
         ),
-        details=[f"{slug}: a deployed hook entry was changed outside APM" for slug in slugs],
+        details=list(problems),
     )
 
 
@@ -1552,7 +1552,7 @@ def _check_local_bundle_hooks(
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
     from ..install.local_bundle_canvas import unadmitted_bundle_canvas
-    from ..install.local_bundle_hook_trust import modified_bundle_hooks, unadmitted_bundle_hooks
+    from ..install.local_bundle_hook_trust import bundle_hook_ownership, unadmitted_bundle_hooks
     from ..security.executables import resolve_project_exec_allow_map
 
     def allow_provider():
@@ -1564,12 +1564,13 @@ def _check_local_bundle_hooks(
         DeploymentLedgerCodec.from_lockfile(lock)
     )
     try:
+        problems = bundle_hook_ownership(deployment_root, targets, bundle_paths)
         unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
         canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
-    if modified := modified_bundle_hooks(deployment_root, targets):
-        return _modified_bundle_hooks_result(modified)
+    if problems:
+        return _bundle_hook_ownership_result(problems)
     if not unadmitted and not canvas:
         return CheckResult(
             name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"

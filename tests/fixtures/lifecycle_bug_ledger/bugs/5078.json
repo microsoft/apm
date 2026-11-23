@@ -1,7 +1,7 @@
 {
   "issue": 5078,
   "fixed_in": "Unreleased",
-  "summary": "A local bundle's merged hook entry the user edited no longer matched its sidecar record, so trust discovery and audit lost track of it; audit now names the bundle as changed outside APM.",
+  "summary": "A local bundle's merged hook entry the user edited, or one hidden by an unreadable or missing ownership record, was no longer attributed, so trust discovery and audit lost track of it; audit now names each case.",
   "failure_modes": [
     "ownership"
   ],
@@ -9,6 +9,6 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/integration/test_local_bundle_hook_edit_lifecycle.py::test_audit_names_a_bundle_hook_entry_edited_outside_apm"
+    "tests/integration/test_local_bundle_hook_edit_lifecycle.py::test_audit_names_bundle_hooks_apm_can_no_longer_attribute"
   ]
 }

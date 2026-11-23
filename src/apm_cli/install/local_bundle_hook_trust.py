@@ -43,8 +43,21 @@ class _BundleHookState:
     hook_files: set[str] = field(default_factory=set)
 
 
-def _merged_hook_documents(project_root: Path, targets: Any):
-    """Yield ``(config, sidecar, container)`` for every merged hook target."""
+@dataclass
+class _MergedHookState:
+    """One merged hook target's config and ownership sidecar, read once."""
+
+    target: Any
+    label: str
+    config: dict[str, Any] | None
+    sidecar: dict[str, Any] | None
+    container: str
+    config_unreadable: bool = False
+    sidecar_unreadable: bool = False
+
+
+def _merged_hook_states(project_root: Path, targets: Any) -> Iterator[_MergedHookState]:
+    """Read every merged hook target's config and sidecar, each once (#5078)."""
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
     from apm_cli.integration.hook_ownership import read_hook_object
 
@@ -53,16 +66,31 @@ def _merged_hook_documents(project_root: Path, targets: Any):
         if config is None:
             continue
         json_path = Path(project_root) / target.root_dir / config.config_filename
-        sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
-        try:
-            yield (
-                read_hook_object(json_path),
-                read_hook_object(sidecar_path),
-                config.event_container_key,
-            )
-        except (OSError, ValueError, TypeError):
+        documents: list[dict[str, Any] | None] = []
+        for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):
+            try:
+                documents.append(read_hook_object(path))
+            except (OSError, ValueError, TypeError):
+                documents.append(None)
+        yield _MergedHookState(
+            target,
+            Path(target.root_dir, config.config_filename).as_posix(),
+            documents[0],
+            documents[1],
+            config.event_container_key,
+            config_unreadable=documents[0] is None,
+            sidecar_unreadable=documents[1] is None,
+        )
+
+
+def _merged_hook_documents(project_root: Path, targets: Any):
+    """Yield ``(config, sidecar, container)`` for every merged hook target."""
+    for state in _merged_hook_states(project_root, targets):
+        if state.config_unreadable or state.sidecar_unreadable:
             # Unreadable ownership state cannot prove an approval.
-            yield None, None, config.event_container_key
+            yield None, None, state.container
+        else:
+            yield state.config, state.sidecar, state.container
 
 
 def _per_file_targets(targets: Any) -> list[Any]:
@@ -206,14 +234,8 @@ def _markers(entries_by_event: Any) -> list[str]:
     ]
 
 
-def modified_bundle_hooks(project_root: Path, targets: Any) -> list[str]:
-    """Slugs of local bundles whose merged hook entries no longer match APM's record (#5078).
-
-    A merged config holds no ownership marker; the sidecar restores it onto
-    each entry whose content still matches. An entry the user edited (or
-    removed) matches nothing, so its bundle would otherwise drop out of trust
-    discovery and audit silently; it is reported here instead.
-    """
+def _modified_slugs(state: _MergedHookState) -> set[str]:
+    """Bundles whose recorded entries no disk entry matches any more (edited or removed)."""
     import copy
     from collections import Counter
 
@@ -222,17 +244,76 @@ def modified_bundle_hooks(project_root: Path, targets: Any) -> list[str]:
         reinject_apm_source_from_sidecar,
     )
 
+    hooks = copy.deepcopy((state.config or {}).get(state.container))
+    hooks = hooks if isinstance(hooks, dict) else {}
+    # Only a content match proves ownership: an inline marker copied into an
+    # edited entry must not pass for the bundle's recorded entry.
+    for entries in hooks.values():
+        for entry in entries if isinstance(entries, list) else ():
+            if isinstance(entry, dict):
+                entry.pop("_apm_source", None)
+    reinject_apm_source_from_sidecar(hooks, state.sidecar or {})
+    unmatched = Counter(_markers(state.sidecar)) - Counter(_markers(hooks))
+    return {
+        parsed[0]
+        for marker in unmatched
+        if (parsed := parse_local_bundle_hook_source(marker)) is not None
+    }
+
+
+def _recorded_slugs(state: _MergedHookState) -> set[str]:
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    return {
+        parsed[0]
+        for marker in _markers(state.sidecar)
+        if (parsed := parse_local_bundle_hook_source(marker)) is not None
+    }
+
+
+def _scripted_slugs(state: _MergedHookState, lock_paths: Collection[str], project_root: Path):
+    """Bundles the lock records hook scripts for under *state*'s target."""
+    from apm_cli.integration.hook_command_paths import hook_scripts_parent
+
+    base = Path(hook_scripts_parent(state.target.name, state.target.root_dir)).as_posix() + "/"
     slugs: set[str] = set()
-    for data, sidecar, container in _merged_hook_documents(project_root, targets):
-        if not isinstance(sidecar, dict):
+    for value in lock_paths:
+        rest = _relative_value(value, project_root)
+        if rest.startswith(base) and "/" in rest[len(base) :]:
+            slugs.add(rest[len(base) :].split("/", 1)[0])
+    return slugs
+
+
+def bundle_hook_ownership(
+    project_root: Path, targets: Any, bundle_paths: Collection[str] = ()
+) -> list[str]:
+    """Every bundle hook ownership problem, reading each config and sidecar once (#5078).
+
+    A problem is a bundle entry edited or removed outside APM, an unreadable
+    ownership record (or config, while the lock records bundle hooks there),
+    or bundle hook scripts the lock records for a target whose ownership
+    record names no entry for that bundle (a missing or stripped sidecar).
+    Each would otherwise leave the bundle's entries silently unattributed.
+    """
+    states = list(_merged_hook_states(project_root, targets))
+    problems: list[str] = []
+    for state in states:
+        scripted = _scripted_slugs(state, bundle_paths, project_root)
+        if state.sidecar_unreadable or (state.config_unreadable and scripted):
+            problems.append(
+                f"{state.label}: the hook config or its ownership record cannot be read, "
+                "so bundle hooks there cannot be attributed"
+            )
             continue
-        hooks = copy.deepcopy(data.get(container)) if isinstance(data, dict) else None
-        hooks = hooks if isinstance(hooks, dict) else {}
-        reinject_apm_source_from_sidecar(hooks, sidecar)
-        for marker in Counter(_markers(sidecar)) - Counter(_markers(hooks)):
-            if (parsed := parse_local_bundle_hook_source(marker)) is not None:
-                slugs.add(parsed[0])
-    return sorted(slugs)
+        problems += [
+            f"{slug}: a deployed hook entry was changed outside APM"
+            for slug in sorted(_modified_slugs(state))
+        ]
+        problems += [
+            f"{slug}: {state.label} has no ownership record for the bundle's deployed hooks"
+            for slug in sorted(scripted - _recorded_slugs(state))
+        ]
+    return problems
 
 
 def contained_bundle_path(project_root: Path, value: str, prefixes: Collection[str]) -> Path | None:

@@ -1,11 +1,12 @@
 """APMLifecycle: an edited bundle hook entry never goes silently invisible (#5078).
 
-PROMISE: P-OWN-local-bundle-hook-trust, P-INV-I7 -- nothing is skipped silently: a local bundle's merged hook
-entry the user edited (for example its matcher) no longer matches APM's
-recorded content, so ``apm audit --ci`` names the bundle as changed outside
-APM instead of losing track of the entry (source: issue #5078 accepted scope).
+PROMISE: P-OWN-local-bundle-hook-trust, P-INV-I7 -- nothing is skipped silently: a local
+bundle's merged hook entry the user edited (for example its matcher) no longer
+matches APM's recorded content, and an unreadable or missing ownership record
+hides every entry; ``apm audit --ci`` names each case instead of losing track
+of the bundle's hooks (source: issue #5078 accepted scope and review).
 CELL: OP=install,audit SRC=local-bundle PRIM=hooks SCOPE=project TGT=claude
-EDIT=none|matcher
+CHANGE=none|matcher|sidecar-corrupt|sidecar-missing
 """
 
 from __future__ import annotations
@@ -62,11 +63,21 @@ def _hooked_bundle(world: MarketplacePackWorld, tmp_path: Path) -> tuple[Path, s
     return bundle, key
 
 
-@pytest.mark.parametrize("edited", [False, True], ids=["unchanged", "matcher-edited"])
-def test_audit_names_a_bundle_hook_entry_edited_outside_apm(
-    tmp_path: Path, apm_binary_path: Path, edited: bool
+_EXPECTED = {
+    "unchanged": None,
+    "matcher-edited": "hookpkg: a deployed hook entry was changed outside APM",
+    "marker-copied": "hookpkg: a deployed hook entry was changed outside APM",
+    "sidecar-corrupt": ".claude/settings.json: the hook config or its ownership record cannot be read",
+    "sidecar-missing": "hookpkg: .claude/settings.json has no ownership record",
+}
+
+
+@pytest.mark.parametrize("change", list(_EXPECTED))
+def test_audit_names_bundle_hooks_apm_can_no_longer_attribute(
+    tmp_path: Path, apm_binary_path: Path, change: str
 ) -> None:
-    """An approved bundle hook passes audit; after a matcher edit audit names the bundle."""
+    """An approved bundle hook passes audit; an edited entry, or an unreadable or missing
+    ownership record, fails it naming what APM can no longer attribute (#5078)."""
     world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
     bundle, key = _hooked_bundle(world, tmp_path)
     consumer = world.consumer("consumer", targets=("claude",))
@@ -75,19 +86,28 @@ def test_audit_names_a_bundle_hook_entry_edited_outside_apm(
     dump_yaml(manifest, consumer / "apm.yml")
     world.apm(consumer, "install", str(bundle))
     settings_path = consumer / ".claude" / "settings.json"
+    sidecar = consumer / ".claude" / "apm-hooks.json"
     settings = json.loads(settings_path.read_text("utf-8"))
     assert [e["matcher"] for e in settings["hooks"]["PreToolUse"]] == ["Bash"]
-    if edited:
+    assert sidecar.is_file()
+    if change in ("matcher-edited", "marker-copied"):
         settings["hooks"]["PreToolUse"][0]["matcher"] = "Bash|Write"
+        if change == "marker-copied":
+            recorded = json.loads(sidecar.read_text("utf-8"))["PreToolUse"][0]
+            settings["hooks"]["PreToolUse"][0]["_apm_source"] = recorded["_apm_source"]
         settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    elif change == "sidecar-corrupt":
+        sidecar.write_text("{not json", encoding="utf-8")
+    elif change == "sidecar-missing":
+        sidecar.unlink()
     before = settings_path.read_bytes()
 
     audit = world.apm(consumer, "audit", "--ci", "--no-policy", expect=None)
 
     text = output(audit)
-    if edited:
-        assert audit.returncode == 1, text
-        assert "hookpkg" in text and "changed outside APM" in text, text
-    else:
+    if _EXPECTED[change] is None:
         assert audit.returncode == 0, text
+    else:
+        assert audit.returncode == 1, text
+        assert _EXPECTED[change] in text, text
     assert settings_path.read_bytes() == before
