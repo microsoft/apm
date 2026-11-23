@@ -227,15 +227,21 @@ def _is_link(path: str) -> bool:
 
 
 def _without_trailing_separators(path: str) -> str:
-    """*path* without trailing separators, so ``"link/"`` names the link itself.
+    """*path* without trailing separators or ``.`` parts, so ``"link/./"`` names the link.
 
-    A filesystem root (``/``, ``C:\\``) is kept as given.
+    Links are not resolved and ``..`` is kept; a filesystem root (``/``,
+    ``C:\\``) is kept as given.
     """
     separators = os.sep + (os.altsep or "")
-    stripped = path.rstrip(separators)
-    if not stripped or not os.path.splitdrive(stripped)[1]:
-        return path
-    return stripped
+    current = path
+    while True:
+        stripped = current.rstrip(separators)
+        if not stripped or not os.path.splitdrive(stripped)[1]:
+            return current
+        head, tail = os.path.split(stripped)
+        if tail != "." or not head:
+            return stripped
+        current = head
 
 
 def _remove_link(path: str) -> None:

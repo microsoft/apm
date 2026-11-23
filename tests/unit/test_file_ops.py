@@ -589,13 +589,14 @@ class TestRmtreeNeverFollowsALink:
             target.chmod(stat.S_IRWXU)
 
     @_SYMLINKS
-    def test_a_link_root_named_with_a_trailing_separator_is_removed_itself(self, tmp_path):
+    @pytest.mark.parametrize("suffix", [os.sep, f"{os.sep}.{os.sep}", f"{os.sep}.{os.sep}."])
+    def test_a_link_root_named_with_a_trailing_separator_is_removed_itself(self, tmp_path, suffix):
         target = tmp_path / "target"
         mode = _read_only_dir(target)
         link = tmp_path / "link"
         link.symlink_to(target, target_is_directory=True)
         try:
-            robust_rmtree(str(link) + os.sep)
+            robust_rmtree(str(link) + suffix)
 
             assert not link.is_symlink() and not link.exists()
             assert stat.S_IMODE(target.stat().st_mode) == mode
@@ -608,13 +609,14 @@ class TestRmtreeNeverFollowsALink:
         target = tmp_path / "target.txt"
         target.write_text("kept", encoding="utf-8")
         target.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(target.stat().st_mode)
         link = tmp_path / "link.txt"
         link.symlink_to(target)
         try:
             _on_readonly_retry(os.unlink, str(link), None)
 
             assert not link.is_symlink()
-            assert stat.S_IMODE(target.stat().st_mode) == stat.S_IREAD
+            assert stat.S_IMODE(target.stat().st_mode) == read_only
             assert target.read_text(encoding="utf-8") == "kept"
         finally:
             target.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -654,6 +656,7 @@ class TestRmtreeNeverFollowsALink:
         pack = tmp_path / "pack-1.pack"
         pack.write_bytes(b"pack")
         pack.chmod(stat.S_IREAD)
+        read_only = stat.S_IMODE(pack.stat().st_mode)
 
         def no_follow_unavailable(path, mode, *, follow_symlinks=True):
             raise NotImplementedError("chmod: follow_symlinks unavailable on this platform")
@@ -665,7 +668,7 @@ class TestRmtreeNeverFollowsALink:
         monkeypatch.undo()
 
         assert pack.exists()
-        assert stat.S_IMODE(pack.stat().st_mode) == stat.S_IREAD
+        assert stat.S_IMODE(pack.stat().st_mode) == read_only
         pack.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
