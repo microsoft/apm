@@ -1207,6 +1207,13 @@ def _remove_proven_members(
     complete = True
     for member_rel, member in proven:
         if not _member_still_safe(skill_dir, member):
+            if _member_parents_safe(skill_dir, member) and evidence.consent_kept_link(
+                member_rel, member
+            ):
+                # A final link whose ancestors are safe is consent retention (#4815).
+                _keep_consent_link(result, diagnostics, member_rel, dep_key)
+                complete = False
+                continue
             result.reject(member_rel, REJECTED_REPLACED)
             diagnostics.warn(
                 f"Skipped removing {member_rel}: it was replaced or moved since APM "
@@ -1239,15 +1246,27 @@ def _member_still_safe(skill_dir: Path, member: Path) -> bool:
     from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
     try:
-        if skill_dir.is_symlink() or member.is_symlink() or not member.is_file():
+        if member.is_symlink() or not member.is_file():
+            return False
+        if not _member_parents_safe(skill_dir, member):
+            return False
+        ensure_path_within(member, skill_dir)
+    except (OSError, PathTraversalError):
+        return False
+    return True
+
+
+def _member_parents_safe(skill_dir: Path, member: Path) -> bool:
+    """Return whether *member* is reached from *skill_dir* through no symlinked directory."""
+    try:
+        if skill_dir.is_symlink():
             return False
         parent = member.parent
         while parent != skill_dir:
             if parent.is_symlink() or parent == parent.parent:
                 return False
             parent = parent.parent
-        ensure_path_within(member, skill_dir)
-    except (OSError, PathTraversalError):
+    except OSError:
         return False
     return True
 
