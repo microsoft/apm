@@ -597,3 +597,64 @@ def test_a_local_bundle_install_killed_mid_deploy_is_replayed(
     assert _tree_state(chain.project) == before, _evidence(result)
     assert _stores(chain) == [], _evidence(result)
     _assert_lock_matches_disk(chain.project)
+
+
+_CANVAS = ".github/extensions/board/extension.mjs"
+
+
+def _canvas_bundle(chain: Chain, version: str, *, canvas: bool) -> Path:
+    """Pack a local bundle whose version 1 ships a canvas extension and later ones do not."""
+    producer = chain.isolated.work_root / "canvas-producer"
+    skill = producer / ".apm" / "skills" / "canvasbundle-s"
+    skill.mkdir(parents=True, exist_ok=True)
+    (producer / ".github").mkdir(exist_ok=True)
+    manifest = {
+        "name": "canvasbundle",
+        "version": version,
+        "description": "journal replay canvas fixture",
+        "targets": ["copilot"],
+        "dependencies": {"apm": []},
+    }
+    (producer / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        "---\nname: canvasbundle-s\ndescription: fixture skill\n---\n# skill\n", encoding="utf-8"
+    )
+    extensions = producer / ".apm" / "extensions"
+    shutil.rmtree(extensions, ignore_errors=True)
+    if canvas:
+        (extensions / "board").mkdir(parents=True)
+        (extensions / "board" / "extension.mjs").write_text(
+            "export default { name: 'board' };\n", encoding="utf-8"
+        )
+    out = chain.isolated.work_root / f"canvas-out-{version}"
+    for args in (("install", "--no-policy"), ("pack", "-o", str(out))):
+        result = chain.runner.run(args, cwd=producer, env=chain.env, scenario_id=" ".join(args))
+        assert result.returncode == 0, _evidence(result)
+    return out / f"canvasbundle-{version}"
+
+
+def test_a_local_bundle_retire_killed_mid_delete_is_replayed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A bundle reinstall's retire deletes are journaled like its deploys (#5130)."""
+    chain = Chain(tmp_path / "retire", apm_binary_path, dirs=(".github",))
+    chain.ok("experimental", "enable", "canvas")
+    v1 = _canvas_bundle(chain, "1.0.0", canvas=True)
+    v2 = _canvas_bundle(chain, "2.0.0", canvas=False)
+    chain.ok("install", str(v1))
+    before = _tree_state(chain.project)
+    assert _CANVAS in before, before
+
+    # Version 2 ships no canvas: its install retires the extension, killed mid-retire.
+    _kill_mid_refusal(chain, "retire+kill", str(v2))
+    journal = _journal(_abandoned(chain))
+    assert any(line.get("path") == _CANVAS for line in journal[1:]), journal
+    assert not (chain.project / _CANVAS).exists()
+
+    result = chain.run("install", str(v1))
+
+    assert result.returncode == 0, _evidence(result)
+    assert "left by an interrupted install" in _text(result), _evidence(result)
+    assert _tree_state(chain.project) == before, _evidence(result)
+    assert _stores(chain) == [], _evidence(result)
+    _assert_lock_matches_disk(chain.project)
