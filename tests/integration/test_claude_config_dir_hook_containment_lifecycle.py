@@ -161,3 +161,22 @@ def test_retiring_the_last_hook_deletes_only_the_settings_file_apm_created(
         assert json.loads(settings.read_text(encoding="utf-8")) == {"theme": "dark"}
     else:
         assert not settings.exists(), settings.read_text(encoding="utf-8")
+
+
+def test_uninstall_never_deletes_through_a_profile_swapped_for_a_symlink(
+    scene: HarnessScene,
+) -> None:
+    """A CLAUDE_CONFIG_DIR replaced by a symlink after install is rewritten, not deleted from."""
+    root = _claude_root(scene, external=True)
+    package = _hook_package(scene)
+    installed = _install(scene)
+    assert installed.returncode == 0, describe(installed)
+    elsewhere = scene.isolated.root / "elsewhere"
+    root.rename(elsewhere)
+    root.symlink_to(elsewhere, target_is_directory=True)
+
+    cwd = scene.isolated.work_root / "cwd"
+    retired = scene.runner.run(("uninstall", "-g", package), cwd=cwd, env=scene.env)
+
+    assert retired.returncode == 0, describe(retired)
+    assert json.loads((elsewhere / "settings.json").read_text(encoding="utf-8")) == {}
