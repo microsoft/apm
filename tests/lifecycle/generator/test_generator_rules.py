@@ -767,11 +767,15 @@ def test_u_user_scope_org_policy_lapses_when_3703_lands(tmp_path) -> None:
     assert removed == {"T2|SCOPE=user|GATE=denied-dependency|FROZEN=on"}
     kept = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))["obligations"]
     assert kept["pair|OP=install|GATE=denied-dependency"]["status"] == "required"
-    # A scope-free bin cell is reachable at project scope: the matrix refusal witnesses it.
+    # A scope-free bin cell rests only on a witness that deploys bin/ (#4981): the project
+    # matrix's p-exec bin/ never deploys, so each cell names a bin witness or is baseline.
     for op in sorted(ORG_DENY_OPS):
-        entry = kept[f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"]
-        assert entry["status"] == "required", (op, entry)
-        assert entry["witness"].endswith("test_gate_matrix_credits_op_prim_gate_cells[project]")
+        key = f"T1|OP={op}|PRIM=bin|GATE=denied-dependency"
+        entry = kept[key]
+        if "witness" in entry:
+            assert credits_bin(entry["witness"], parse_cell(key)[1]), (op, entry)
+        else:
+            assert entry["status"] == "baseline", (op, entry)
 
 
 def test_a_changed_user_scope_policy_decision_reinstates_the_cells(monkeypatch) -> None:
