@@ -10,6 +10,7 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_a_hand_removed_package_keeps_no_shared_server_alive"
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_a_hand_removed_package_keeps_no_shared_server_alive",
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_a_user_added_server_survives_the_stale_row_cleanup"
   ]
 }
