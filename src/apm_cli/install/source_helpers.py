@@ -291,6 +291,33 @@ def record_declared_license(ctx: Any, dep_key: str, install_path: Path) -> None:
         ctx.package_declared_licenses[dep_key] = declared
 
 
+def record_package_targets(ctx: Any, dep_key: str, install_path: Path) -> None:
+    """Record the package's own ``targets:`` restriction for the lockfile (#4850).
+
+    An unreadable manifest records nothing, so pack keeps failing closed.
+    """
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.install.target_filter import recorded_package_targets
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.manifest_io import load_manifest
+
+    manifest = manifest_file(install_path)
+    try:
+        # Parse uncached: this run may have rematerialized the manifest after it was cached.
+        package = APMPackage.from_mapping(
+            load_manifest(manifest),
+            package_path=install_path,
+            manifest_path=manifest,
+            warning_handler=None,
+            warn_deprecated=False,
+        )
+        recorded = recorded_package_targets(package)
+    except Exception:
+        return
+    if recorded:
+        ctx.package_targets[dep_key] = recorded
+
+
 def carried_licenses_for(ctx: Any, dep_key: str, locked_dep: Any) -> tuple:
     """Return this run's carried licence records for *dep_key*, else the lock's (#3556)."""
     if dep_key in ctx.package_carried_licenses:
