@@ -1089,7 +1089,50 @@ def test_a_reanchor_refuses_a_directory_only_shared_skill_claim(
             (row.get("deployed_file_hashes") or {}).pop(_SHARED_SKILL, None)
     dump_yaml(lock, world.project / "apm.lock.yaml")
 
-    _assert_refused_before_any_write(world, ".claude/skills/shared", "would change its writer")
+    _assert_refused_before_any_write(world, ".claude/skills/shared")
+
+
+def test_a_reanchor_refuses_an_unclaimed_shared_member_whose_bytes_would_change(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: under a directory-only claim, a member e' would rewrite refuses.
+
+    y still writes ``shared`` last, but skill members merge: z's ``asset.txt``
+    stays, and after the re-anchor e' writes its own over it.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "y", "y")
+    _skill_package(vendor / "z", "z", ("../e", "../y"))
+    for name in ("e", "y", "z"):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# S\n",
+        )
+    write(vendor / "e" / ".apm/skills/shared/asset.txt", "E\n")
+    write(vendor / "z" / ".apm/skills/shared/asset.txt", "Z\n")
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    members = ".claude/skills/shared/"
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    lock["deployments"] = [
+        row for row in lock["deployments"] if not row["value"].startswith(members)
+    ]
+    for row in lock["dependencies"]:
+        row["deployed_files"] = [
+            path for path in row.get("deployed_files") or [] if not path.startswith(members)
+        ]
+        hashes = row.get("deployed_file_hashes") or {}
+        for path in [path for path in hashes if path.startswith(members)]:
+            del hashes[path]
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+    assert (world.project / members / "asset.txt").read_text(encoding="utf-8") == "Z\n"
+
+    _assert_refused_before_any_write(
+        world, ".claude/skills/shared/asset.txt", "has no claim that proves its writer"
+    )
 
 
 def test_a_reanchor_refuses_a_shared_skill_on_a_root_several_targets_deploy(
