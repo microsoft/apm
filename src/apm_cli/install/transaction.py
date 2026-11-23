@@ -311,6 +311,7 @@ class InstallTransaction:
         the pipeline: the journal is then kept until this install commits and
         a refusal there rolls back every journaled path (#4638).
         """
+        from apm_cli.cache.deploy_store import discard_staged
         from apm_cli.core.scope import get_apm_home
         from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
         from apm_cli.integration import write_seam
@@ -318,6 +319,8 @@ class InstallTransaction:
         with self._lock:
             if self._deploy_journal is not None or self.committed or self._rolled_back:
                 return
+            # Deploy-store evidence counts only from this attempt's integrate phase on.
+            discard_staged()
             if ctx is not None:
                 from apm_cli.install.service import InstallService
 
