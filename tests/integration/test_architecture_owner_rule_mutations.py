@@ -186,6 +186,18 @@ def test_archive_member_reads_cannot_bypass_the_limits_owner(
             'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
             id="load-inline-self-entry",
         ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        served = served_outputs(\n",
+            "        served = _served_without_owner(\n",
+            id="records-serve-without-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        not is_external_url(match.group(2))\n",
+            '        not match.group(2).startswith("http")\n',
+            id="records-link-rule-without-owner",
+        ),
     ],
 )
 def test_audit_replay_scope_projection_cannot_bypass_owner(

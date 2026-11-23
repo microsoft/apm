@@ -24,14 +24,16 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
 from apm_cli.utils.content_hash import compute_file_hash
-from tests.integration._mcp_chain_kit import Chain
+from tests.integration._mcp_chain_kit import Chain, stdio_server
 from tests.lifecycle import driver
 from tests.utils.apm_lifecycle_runner import CommandResult
 
@@ -602,6 +604,38 @@ def test_a_shared_config_a_user_edits_after_the_kill_is_kept(
     after = json.loads(settings.read_text(encoding="utf-8"))
     assert after["permissions"] == {"allow": ["Bash(ls)"]}, after
     assert _tree_state(chain.project)[_SIDECAR] == before[_SIDECAR], _evidence(result)
+    assert _text(result).isascii(), _evidence(result)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX directory modes")
+def test_a_mode_change_on_an_mcp_config_directory_apm_created_is_kept(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5086: the native MCP config directory is journaled with its mode, so replay keeps it."""
+    chain = Chain(tmp_path / "mcp-dir", apm_binary_path)
+    chain.write_manifest([stdio_server("replay-srv", "hi")], apm=["./pkg"])
+    _write_package(chain, revision="v1", description="agent helper", extra=False)
+    settings = ".kiro/settings"
+    config = f"{settings}/mcp.json"
+    _kill_mid_refusal(chain, "path+kill", *_SCAN.args, APM_TEST_DEPLOY_KILL_PATH=config)
+    config_dir = chain.project / settings
+    assert (chain.project / config).is_file(), _tree_state(chain.project)
+    _abandoned(chain)
+    os.chmod(config_dir, 0o700)
+
+    result = chain.run("install", *_SCAN.args)
+
+    assert result.returncode == 0, _evidence(result)
+    assert f"Kept {settings}: it changed after the interrupted install" in _text(result), _evidence(
+        result
+    )
+    assert config_dir.is_dir(), _evidence(result)
+    assert _mode(config_dir) == 0o700, _evidence(result)
+    assert (config_dir / "mcp.json").is_file(), _evidence(result)
     assert _text(result).isascii(), _evidence(result)
 
 

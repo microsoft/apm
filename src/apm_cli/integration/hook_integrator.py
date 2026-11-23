@@ -1877,20 +1877,18 @@ class HookIntegrator(BaseIntegrator):
         guard_targets = list(KNOWN_TARGETS.values())
         if targets is not None:
             guard_targets = guard_targets + list(targets)
-        hook_prefixes = [
-            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
-            for t in guard_targets
-            if t.supports("hooks")
-        ]
-        hook_prefix_tuple = tuple(dict.fromkeys(hook_prefixes))
         if managed_files is not None:
-            from apm_cli.integration.cleanup import consent_outcome, remove_synced_files
+            from apm_cli.integration.cleanup import (
+                consent_outcome,
+                managed_hook_prefixes,
+                remove_synced_files,
+            )
 
             # Deletion needs deployment evidence; None keeps every file (#3701).
             cleanup = remove_synced_files(
                 managed_files,
                 project_root,
-                prefixes=hook_prefix_tuple,
+                prefixes=managed_hook_prefixes(targets),
                 dep_key="<uninstall hooks>",
                 targets=guard_targets,
                 evidence=evidence,

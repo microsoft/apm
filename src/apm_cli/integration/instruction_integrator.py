@@ -346,6 +346,31 @@ class InstructionIntegrator(BaseIntegrator):
             plan[source_file] = (target_path, content, links_resolved)
         return plan
 
+    @staticmethod
+    def _deploy_dir(target: TargetProfile, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    @staticmethod
+    def _verbatim_target(deploy_dir: Path, source_file: Path) -> Path:
+        return deploy_dir / source_file.name
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target: TargetProfile, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator copies for *target*, or ``None`` if it renders.
+
+        The same directory and file name ``integrate_instructions_for_target``
+        uses; rule-dir formats transform their sources, so they are ``None``.
+        """
+        mapping = target.primitives.get("instructions")
+        if not mapping:
+            return {}
+        if mapping.output_compare:
+            return None
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
+        files = self.find_instruction_files(Path(package_info.install_path), source_plan)
+        return self.unique_destinations((self._verbatim_target(deploy_dir, f), f) for f in files)
+
     def deployed_rule_matches(self, source: Path, target: TargetProfile, deploy_root: Path) -> bool:
         """Prove native delivery using the same filename and renderer as install.
 
@@ -465,8 +490,6 @@ class InstructionIntegrator(BaseIntegrator):
         if not mapping:
             return IntegrationResult(0, 0, 0, [])
 
-        effective_root = mapping.deploy_root or target.root_dir
-        target_root = project_root / effective_root
         if not target.auto_create and not (project_root / target.root_dir).is_dir():
             return IntegrationResult(0, 0, 0, [])
 
@@ -503,7 +526,7 @@ class InstructionIntegrator(BaseIntegrator):
         if not instruction_files:
             return IntegrationResult(0, 0, 0, [])
 
-        deploy_dir = target_root / mapping.subdir
+        deploy_dir = self._deploy_dir(target, mapping, project_root)
         write_seam.mkdir(deploy_dir, parents=True, exist_ok=True)
 
         fmt = mapping.format_id
@@ -545,7 +568,7 @@ class InstructionIntegrator(BaseIntegrator):
             if rule_dir_format:
                 target_path, new_content, links_resolved = rendered_rules[source_file]
             else:
-                target_path = deploy_dir / source_file.name
+                target_path = self._verbatim_target(deploy_dir, source_file)
                 # source_file.name has no separators, so traversal via
                 # deploy_dir is impossible. Validate against deploy_dir (not
                 # project_root) so user-scope targets outside the workspace work.
