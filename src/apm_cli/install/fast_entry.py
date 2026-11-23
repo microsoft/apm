@@ -61,7 +61,16 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
             return _decided()
         return None
 
-    def run(frozen: bool) -> Any:
+    def run(frozen: bool | None) -> Any:
+        from apm_cli.install.service import InstallService, resolve_frozen
+
+        # The command's own frozen decision (CI with a lockfile selects --frozen and
+        # says so), and its lockfile-write chokepoint for the whole callback.
+        frozen = resolve_frozen(frozen, False, False, None)
+        with InstallService.frozen_writes(frozen):
+            return _run(frozen)
+
+    def _run(frozen: bool) -> Any:
         from contextlib import nullcontext
         from pathlib import Path
         from types import SimpleNamespace
@@ -95,6 +104,6 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
     return click.Command(
         "install",
         callback=run,
-        params=[click.Option(["--frozen"], is_flag=True)],
+        params=[click.Option(["--frozen"], is_flag=True, default=None)],
         add_help_option=False,
     )
