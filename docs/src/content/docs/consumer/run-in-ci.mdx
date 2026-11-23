@@ -47,7 +47,7 @@ content is harmless; see [The agent supply chain](../../concepts/agent-supply-ch
           - uses: microsoft/apm-action@v1
             with:
               setup-only: 'true'
-              apm-version: '0.38.2'
+              apm-version: '0.39.0'
           - run: |
               apm install --frozen
               apm audit --ci
@@ -84,7 +84,7 @@ content is harmless; see [The agent supply chain](../../concepts/agent-supply-ch
     apm:
       image: python:3.12
       script:
-        - pip install apm-cli==0.38.2
+        - pip install apm-cli==0.39.0
         - apm install --frozen
         - apm audit --ci
     ```
