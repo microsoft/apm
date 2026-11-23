@@ -641,6 +641,8 @@ def test_require_resolution_decides_a_pinned_required_package_mismatch(
         assert audit.returncode == 1, _text(audit)
         assert "version mismatch" in _text(audit), _text(audit)
     else:
+        # The audit ran require_resolution and accepted the project's ref.
+        assert audit.returncode == 0, _text(audit)
         assert "version mismatch" not in _text(audit), _text(audit)
 
 
