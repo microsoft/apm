@@ -3626,8 +3626,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="transport-platform-deploy-store-verified-reads",
         rule_id="transport-platform-deploy-store-verified-reads",
         path="src/apm_cli/cache/deploy_store.py",
-        old="if canonical_digest(data) != key:",
-        new="if not data:",
+        old="if data is None or canonical_digest(data) != key:",
+        new="if data is None:",
         intent="A deploy store read returns bytes without re-hashing them against the key.",
     ),
     MutationCase(
