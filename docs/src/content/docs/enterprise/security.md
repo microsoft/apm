@@ -99,30 +99,6 @@ risk that remains.
   user-scope installs (`apm install -g`) are not governed by it.
 :::
 
-## Git and GitHub CLI discovery
-
-For `git` and `gh` discovery, APM selects an exclusion root from the
-resolved current working directory and its parents, in this order:
-
-1. The nearest directory containing `.git`.
-2. If no `.git` is found, the nearest directory containing an `apm.yml` file.
-3. If neither is found, the current working directory itself.
-
-APM searches explicit `PATH` directories, rejecting any directory or
-resolved executable located at this root or in any of its subdirectories.
-This also excludes symlinks resolving back into it. On Windows, discovery
-checks `PATHEXT` extensions such as `.EXE`, including on Python 3.11,
-without adding the current directory to the search.
-
-`--global` does not change these rules. For a home-directory example and
-recovery steps, see
-[Git works in the terminal, but APM cannot find it](../../troubleshooting/install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it)
-in the install troubleshooting guide.
-
-This check applies to APM's executable selection, not to searches performed
-internally by external tools. Keep project-controlled directories off your
-inherited `PATH`.
-
 ## HTTPS transport trust
 
 APM keeps certificate verification on for every HTTPS request. Python-based paths verify

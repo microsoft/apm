@@ -13,11 +13,15 @@ and exits non-zero when a critical check fails.
 ## Git works in the terminal, but APM cannot find it
 
 **What you see:** `apm doctor` reports `git not found on PATH` even though
-`git --version` works in your terminal. An install may instead report
-`not accessible or doesn't exist`, including with `--global`.
+Git works in your terminal. Compare the two checks:
+
+```bash frame="terminal"
+git --version
+apm doctor
+```
 
 See [Git discovery troubleshooting](./install-failures/#git-works-in-the-terminal-but-apm-cannot-find-it)
-for the directory-exclusion rules, a cross-platform example, and recovery steps.
+for recovery steps and a cross-platform example.
 
 ## Nothing was installed (no harness detected)
 

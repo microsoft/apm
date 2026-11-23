@@ -12,19 +12,42 @@ For TLS-specific failures see [SSL / TLS issues](../ssl-issues/). For the full f
 ## Git works in the terminal, but APM cannot find it
 
 Symptom: `git --version` works in your terminal, but `apm doctor` reports
-`git not found on PATH`. Its network check may also report
-`git not found; cannot test network`: the check could not run, not that
-a network connection failed.
+`git not found on PATH`. An install may instead report
+`not accessible or doesn't exist`; check the `git` row in `apm doctor`
+before treating that message as an authentication problem.
 
-Git may be installed inside APM's
-[exclusion root](../../enterprise/security/#git-and-github-cli-discovery).
-During `apm install`, this discovery failure can be hidden behind the
-generic package-validation message `not accessible or doesn't exist`;
-that message alone does not establish an authentication problem.
+If the network row says `git not found; cannot test network`, the check
+could not run: it does not establish a network failure.
+
+To recover, choose another working directory using the rules below and
+rerun `apm doctor`. Once its `git` row passes, retry your original install
+command. Network access, authentication, or later installation steps may
+still need attention.
+
+### How APM chooses Git
+
+Before searching `PATH`, APM chooses a directory to exclude, called the
+**exclusion root**. It searches the resolved current working directory and
+its parents in this order:
+
+1. The nearest directory containing `.git`.
+2. If no `.git` is found anywhere in that search, the nearest directory
+   containing an `apm.yml` file.
+3. If neither is found, the current working directory itself.
+
+APM skips `PATH` directories and resolved executables located at this root
+or in any of its subdirectories, including symlinks resolving back into it.
+The same selection rules apply to `gh`.
+
+`--global` changes the installation scope, not these rules; keep it when
+retrying a global install. Moving to a subdirectory will not help if an
+ancestor `.git` or `apm.yml` keeps Git inside the excluded directory.
 
 ### Example: Git installed under your home directory
 
-The same layout illustrates this on Windows, Linux, and macOS:
+Suppose Git is installed in `tools/bin` inside your home directory, and
+`work` is a sibling of `tools`. These paths are illustrative, not
+recommended installation locations:
 
 | OS | Home directory | Git executable |
 |---|---|---|
@@ -32,11 +55,9 @@ The same layout illustrates this on Windows, Linux, and macOS:
 | Linux | `/home/example` | `/home/example/tools/bin/git` |
 | macOS | `/Users/example` | `/Users/example/tools/bin/git` |
 
-These paths are illustrative, not recommended installation locations.
-Git's `bin` directory is on `PATH`, and `work` is a sibling of `tools` under
-the home directory. Assume neither working directory nor any parent
-contains `.git` or `apm.yml`, no other Git installation is on `PATH`, and
-there is no symlink redirection.
+Git's `bin` directory is on `PATH`, with no other Git installation or
+symlink redirection. Neither working directory nor any parent contains
+`.git` or `apm.yml`.
 
 Run `apm doctor` from each directory without changing Git or `PATH`:
 
@@ -44,14 +65,6 @@ Run `apm doctor` from each directory without changing Git or `PATH`:
 |---|---|---|
 | Home directory | Home directory | Fails: `tools/bin` is a subdirectory of the home directory, so APM skips it. |
 | `work` | `work` | Succeeds: both `tools/bin` and Git's resolved executable are outside the root. |
-
-To recover, change to a directory whose computed exclusion root contains
-neither the `PATH` directory providing Git nor its resolved executable,
-then check the `git` row in `apm doctor` before retrying your original install
-command, retaining `--global` if used. Detecting Git does not guarantee
-that network, authentication, or later installation steps will succeed.
-An arbitrary subdirectory is not enough if an ancestor `.git` or `apm.yml`
-causes APM to exclude a directory that still contains Git.
 
 ## 1. Authentication failures
 
