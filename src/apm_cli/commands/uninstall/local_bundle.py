@@ -101,9 +101,16 @@ def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: 
     if identity is None:
         logger.error(f"'{Path(package).name}' could not be read as a local bundle.")
         sys.exit(1)
+    from ...install.local_bundle_pending import retiring_bundle_keys
+
     package_id, key = identity
     deployed = _deployed(bundle_scope)
-    matches = sorted(slug for slug, state in deployed.items() if key in state.keys)
+    # A retry after a failed record update: the hooks are gone, the note keeps the key (#5003).
+    retiring = retiring_bundle_keys(bundle_scope.lock_dir, "hooks")
+    matches = sorted(
+        {slug for slug, state in deployed.items() if key in state.keys}
+        | {slug for slug, recorded in retiring.items() if recorded == key}
+    )
     if not matches:
         # Installed while the executables gate admitted everything: no content
         # identity was recorded, so an alias cannot be told apart by path.
