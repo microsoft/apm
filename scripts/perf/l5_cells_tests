@@ -1,0 +1,1 @@
+tests/unit/install/test_verdict_record.py tests/unit/install/test_diff_apply.py tests/unit/install/test_fast_entry.py tests/unit/test_update_notice.py tests/quality/test_quality_baselines.py
