@@ -641,6 +641,19 @@ def compile_home_record(deploy_root: Path) -> str:
     return f".apm/compiled-agents-md/{key}.json"
 
 
+def _exact_write(
+    path: str, exact: Collection[str], existed: Collection[str], kinds: Mapping[str, str]
+) -> bool:
+    """*path* is an exact allowed file written as a regular file, or a directory newly
+    created to hold one; never a path below it, a symlink or a replaced ancestor."""
+    for allowed in exact:
+        if path == allowed:
+            return kinds.get(path) == "file"
+        if allowed.startswith(path + "/"):
+            return kinds.get(path) == "directory" and path not in existed
+    return False
+
+
 def _i5_write_set(
     before: Observation, after: Observation, result, model, op: Operation
 ) -> list[Violation] | None:
@@ -649,19 +662,21 @@ def _i5_write_set(
         return None
     found = []
     for root_id, snapshot in before.artifacts.snapshots:
-        observed = _durable_changes(snapshot, after.artifacts.snapshot(root_id))
+        later = after.artifacts.snapshot(root_id)
+        observed = _durable_changes(snapshot, later)
         allowed = op.allowed.get(root_id, ())
         dry_run = op.read_only or "DRYRUN" in op.modifiers
-        # Exact files: each admits itself and its ancestor directories, never a descendant.
         exact: tuple[str, ...] = ()
         if root_id == "home" and op.name == "compile" and not dry_run:
             exact = (compile_home_record(after.deploy_root),)
+        existed = {entry.relative_path for entry in snapshot.entries}
+        kinds = {entry.relative_path: entry.kind for entry in later.entries}
         # An allowed prefix admits its subtree and its exact ancestor directories.
         observed -= {
             path
             for path in observed
             if any(_within(path, a) or a.startswith(path + "/") for a in allowed)
-            or any(path == e or e.startswith(path + "/") for e in exact)
+            or _exact_write(path, exact, existed, kinds)
         }
         for prefix in op.forbidden.get(root_id, ()):
             hit = sorted(path for path in observed if _within(path, prefix))
