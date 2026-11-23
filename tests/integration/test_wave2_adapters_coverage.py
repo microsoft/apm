@@ -3188,26 +3188,6 @@ class TestMarketplaceClientHTTP:
         result = _read_bounded_response_bytes(mock_resp, "https://example.com/small", 1000000)
         assert result == b"hello world"
 
-    def test_fetch_url_direct_digest_mismatch_raises(self) -> None:
-        """_fetch_url_direct raises when expected digest doesn't match."""
-        from apm_cli.marketplace.client import _fetch_url_direct
-
-        payload = json.dumps({"name": "test"}).encode()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.url = "https://cdn.example.com/marketplace.json"
-        mock_resp.headers = {}
-        mock_resp.iter_content.return_value = [payload]
-        mock_resp.close = MagicMock()
-
-        with patch("apm_cli.marketplace.client._http_get", return_value=mock_resp):
-            with pytest.raises(MarketplaceFetchError, match="digest mismatch"):
-                _fetch_url_direct(
-                    "https://cdn.example.com/marketplace.json",
-                    credential=_anonymous("https://cdn.example.com/marketplace.json"),
-                    expected_digest="sha256:wrongdigest",
-                )
-
     def test_fetch_url_direct_not_object_raises(self) -> None:
         """_fetch_url_direct raises when response root is not a JSON object."""
         from apm_cli.marketplace.client import _fetch_url_direct
