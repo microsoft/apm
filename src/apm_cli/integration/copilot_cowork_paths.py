@@ -236,24 +236,40 @@ def from_lockfile_path(lockfile_path: str, cowork_root: Path) -> Path:
     return ensure_path_within(candidate, cowork_root)
 
 
-def cowork_locator(lockfile_path: str, cowork_root: Path) -> Path:
+def cowork_locator(
+    lockfile_path: str, cowork_root: Path, *, reject_linked_ancestors: bool = False
+) -> Path:
     """Decode a ``cowork://`` entry without following its final component.
 
-    Like :func:`from_lockfile_path`, but only the parent directory is resolved
-    and contained, so a final symlink stays the link itself.  Deletion
-    decisions must judge, and unlink, the locator the lockfile names, never
-    the file a link points at (#4295).
+    Like :func:`from_lockfile_path`, but a final symlink stays the link itself:
+    only the parent directory is resolved and contained, and a regular final
+    component is still contained in full. Deletion decisions must judge, and
+    unlink, the locator the lockfile names, never the file a link points at
+    (#4295, #5022). With *reject_linked_ancestors*, a symlinked directory
+    between *cowork_root* and the entry is refused, as the project-scope path
+    gate refuses one under the deploy root.
     """
-    from apm_cli.utils.path_security import ensure_path_within
+    from apm_cli.utils.path_security import (
+        PathTraversalError,
+        ensure_path_within,
+        has_symlink_component,
+        validate_path_segments,
+    )
 
-    # Validates scheme, segments and containment of the full path first.
-    resolved = from_lockfile_path(lockfile_path, cowork_root)
+    if not lockfile_path.startswith(COWORK_URI_SCHEME):
+        raise ValueError(f"Not a cowork lockfile path: {lockfile_path!r}")
     rel_posix = lockfile_path[len(COWORK_URI_SCHEME) :]
-    rel_posix = rel_posix.removeprefix("skills/")
-    candidate = cowork_root / rel_posix
+    validate_path_segments(rel_posix, context="cowork lockfile path")
+    candidate = cowork_root / rel_posix.removeprefix("skills/")
     if candidate == cowork_root or not candidate.name:
-        return resolved
-    return ensure_path_within(candidate.parent, cowork_root) / candidate.name
+        return from_lockfile_path(lockfile_path, cowork_root)
+    if reject_linked_ancestors and has_symlink_component(cowork_root, candidate.parent):
+        raise PathTraversalError(f"Refusing a symlinked ancestor of {lockfile_path}")
+    locator = ensure_path_within(candidate.parent, cowork_root) / candidate.name
+    if locator.is_symlink():
+        return locator
+    # A regular entry is contained in full, exactly as from_lockfile_path decodes it.
+    return from_lockfile_path(lockfile_path, cowork_root)
 
 
 def is_cowork_path(lockfile_path: str) -> bool:
