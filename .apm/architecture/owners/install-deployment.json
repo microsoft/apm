@@ -259,6 +259,7 @@
         "src/apm_cli/commands/uninstall/hook_absence.py"
       ],
       "guards": [
+        "install-deployment-uninstall-absence-proof",
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
         "install-deployment-cleanup-spelling-aliases",

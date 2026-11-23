@@ -252,6 +252,10 @@ from scripts.architecture_linter.checks.install_trust_integrity import (
     check_update_marketplace_provenance,
     check_update_registry_integrity,
 )
+from scripts.architecture_linter.checks.install_uninstall_absence_proof import (
+    GUARD_UNINSTALL_ABSENCE_PROOF,
+    check_uninstall_absence_proof,
+)
 from scripts.architecture_linter.checks.install_uninstall_and_resolution import (
     _GUARD_IMMUTABLE_REQUIREMENTS,
     _GUARD_RESOLUTION_REPLACEMENT,
@@ -291,6 +295,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_CLEANUP_TARGET_ROOTS,
         "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
         check_cleanup_target_roots,
+    ),
+    _rule(
+        GUARD_UNINSTALL_ABSENCE_PROOF,
+        "An aborted uninstall sync proves a removed file absent only through its owner.",
+        check_uninstall_absence_proof,
     ),
     _rule(
         GUARD_RECEIPT_COLLECTION,

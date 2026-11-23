@@ -3189,6 +3189,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A trust reader drops the policy discovery outcome and keeps only .policy.",
     ),
     MutationCase(
+        guard_id="install-deployment-uninstall-absence-proof",
+        rule_id="install-deployment-uninstall-absence-proof",
+        path="src/apm_cli/commands/uninstall/cli.py",
+        old="if not absence_proven(Path(deploy_root), path, pinned=root_pin)",
+        new="if Path(deploy_root, path).exists()",
+        intent="An aborted uninstall sync probes the file itself, following a swapped link.",
+    ),
+    MutationCase(
         guard_id="install-deployment-uninstall-preflight",
         rule_id="install-deployment-uninstall-preflight",
         path="src/apm_cli/commands/uninstall/cli.py",
