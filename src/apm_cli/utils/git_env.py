@@ -1830,6 +1830,34 @@ def git_resolve_commit(
     return result.stdout.strip()
 
 
+def git_exact_ref_commit(
+    worktree: Path,
+    refname: str,
+    *,
+    env: dict[str, object] | None = None,
+) -> str | None:
+    """The commit the full *refname* names, or ``None``; never a rev-parse name expansion."""
+    result = run_git_text(
+        [
+            get_git_executable(),
+            "-C",
+            str(worktree),
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            refname,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+        env=git_subprocess_env(env),
+    )
+    for line in result.stdout.splitlines():
+        name, _, objectname = line.rpartition(" ")
+        if name == refname:
+            return git_resolve_commit(worktree, objectname, env=env)
+    return None
+
+
 def git_current_branch(
     worktree: Path,
     *,

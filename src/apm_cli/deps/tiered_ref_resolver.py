@@ -240,6 +240,31 @@ def _exact_ref_queries(ref: str) -> tuple[str, ...]:
     return (f"heads/{ref}", f"tags/{ref}")
 
 
+def _listed_exactly(resolver: object, dep_ref: DependencyReference, ref: str) -> str | None:
+    """The commit of the origin branch or tag named *ref*, from the origin's ref listing.
+
+    The commits API resolves a name like ``git rev-parse``, so ``heads/<x>``
+    could answer with a tag named ``heads/<x>``; the listing matches the
+    namespace exactly, with no fallback to another ref.
+    """
+    if not _exact_ref_queries(ref):
+        return None
+    from .git_remote_ops import exact_branch_or_tag_sha
+
+    records = [
+        (
+            remote.commit_sha,
+            f"refs/{'heads' if remote.ref_type == GitReferenceType.BRANCH else 'tags'}/{remote.name}",
+        )
+        for remote in resolver.list_remote_refs(dep_ref)
+    ]
+    try:
+        sha = exact_branch_or_tag_sha(records, ref, str(dep_ref.repo_url))
+    except RuntimeError:
+        return None
+    return sha.lower() if _SHA_RE.match(sha or "") else None
+
+
 class L1CommitsAPI:
     """Resolve via the GitHub-family commits API.
 
@@ -280,9 +305,11 @@ class L1CommitsAPI:
             resolver = getattr(self._host, "_refs", None)
             if resolver is None:
                 return None
-            # The commits API resolves a name like rev-parse, so ``pull/1/head``
-            # would reach a pull request's commit. Ask for the origin's own
-            # branch, then tag, by namespace; any other ``refs/`` name gets no answer.
+            # The commits API resolves a name like rev-parse, so a branch or tag
+            # name resolves from the exact ref listing; the API only expands an
+            # abbreviated commit, which admission then checks like any pin.
+            if not _ABBREVIATED_COMMIT_RE.match(ref):
+                return _listed_exactly(resolver, dep_ref, ref)
             for query in _exact_ref_queries(ref):
                 sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
                 if sha and _SHA_RE.match(sha):

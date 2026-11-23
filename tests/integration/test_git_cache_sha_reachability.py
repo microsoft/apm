@@ -493,7 +493,6 @@ class _RevParseRefDownloader(_RefDownloader):
         return None
 
 
-@pytest.mark.xfail(strict=True, reason="exact branch and tag lookup lands in the next step")
 @pytest.mark.parametrize("ref", ["release", "refs/heads/release"])
 def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(
     tmp_path: Path, origin: _Origin, ref: str

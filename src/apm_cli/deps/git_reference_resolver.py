@@ -25,7 +25,6 @@ pattern.
 from __future__ import annotations
 
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -679,7 +678,7 @@ class GitReferenceResolver:
 
     def _resolve_in_clone(self, temp_dir, ref, dep_ref):
         """Resolve *ref* in a full clone; a fully qualified name only in its own namespace."""
-        from ..utils.git_env import git_resolve_commit
+        from ..utils.git_env import git_exact_ref_commit
 
         if ref.startswith("refs/heads/"):
             candidates = ((GitReferenceType.BRANCH, f"refs/remotes/origin/{ref[11:]}"),)
@@ -691,8 +690,7 @@ class GitReferenceResolver:
                 (GitReferenceType.TAG, f"refs/tags/{ref}"),
             )
         for ref_type, name in candidates:
-            try:
-                return ref_type, git_resolve_commit(temp_dir, name, env=self._host.git_env)
-            except subprocess.CalledProcessError:
-                continue
+            commit = git_exact_ref_commit(temp_dir, name, env=self._host.git_env)
+            if commit:
+                return ref_type, commit
         raise ValueError(f"Reference '{ref}' not found in repository {dep_ref.repo_url}")

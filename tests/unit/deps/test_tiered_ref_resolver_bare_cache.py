@@ -124,7 +124,7 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
     )
     downloader = MagicMock()
     fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    fake_refs.list_remote_refs.return_value = []
     fake_refs.resolve.return_value = ResolvedReference(
         original_ref="owner/repo#main",
         ref_type=GitReferenceType.BRANCH,
@@ -144,10 +144,8 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
 
     assert result.resolved_commit == SHA_B
     stale_l2.assert_not_called()
-    assert [c.args[1] for c in fake_refs.resolve_commit_sha_for_ref.call_args_list] == [
-        "heads/main",
-        "tags/main",
-    ]
+    fake_refs.list_remote_refs.assert_called_once()
+    fake_refs.resolve_commit_sha_for_ref.assert_not_called()
     fake_refs.resolve.assert_called_once()
     assert resolver.stats["legacy_clone"] == 1
     assert "bare_rev_parse" not in resolver.stats
@@ -162,7 +160,7 @@ def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeyp
     )
     downloader = MagicMock()
     fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    fake_refs.list_remote_refs.return_value = []
     downloader._refs = fake_refs
     resolver = build_tiered_ref_resolver(
         downloader=downloader,
@@ -175,10 +173,8 @@ def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeyp
 
     assert result.resolved_commit == SHA_A
     cached_l2.assert_called_once_with(_dep().to_github_url(), "main")
-    assert [c.args[1] for c in fake_refs.resolve_commit_sha_for_ref.call_args_list] == [
-        "heads/main",
-        "tags/main",
-    ]
+    fake_refs.list_remote_refs.assert_called_once()
+    fake_refs.resolve_commit_sha_for_ref.assert_not_called()
     fake_refs.resolve.assert_not_called()
     assert resolver.stats["bare_rev_parse"] == 1
     assert resolver.stats["legacy_clone"] == 0
@@ -258,7 +254,7 @@ def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_pat
     stale_l2 = MagicMock(return_value=SHA_A)
     downloader = MagicMock()
     fake_refs = MagicMock()
-    fake_refs.resolve_commit_sha_for_ref.return_value = None
+    fake_refs.list_remote_refs.return_value = []
     fake_refs.resolve.side_effect = RuntimeError("remote unavailable")
     downloader._refs = fake_refs
     resolver = build_tiered_ref_resolver(

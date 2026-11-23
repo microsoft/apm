@@ -32,7 +32,7 @@ from apm_cli.deps.tiered_ref_resolver import (
     ref_freshness_policy_for_install,
 )
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef, ResolvedReference
 
 pytestmark = pytest.mark.unit
 
@@ -169,13 +169,23 @@ def test_l1_returns_sha_directly_when_ref_is_already_a_sha():
     assert tier.try_resolve(_dep(ref=SHA_A), SHA_A) == SHA_A
 
 
-def test_l1_delegates_to_legacy_resolve_commit_sha_for_ref():
+def test_l1_resolves_a_branch_from_the_exact_ref_listing():
+    legacy = MagicMock()
+    legacy.list_remote_refs.return_value = [RemoteRef("main", GitReferenceType.BRANCH, SHA_B)]
+    host = MagicMock()
+    host._refs = legacy
+    tier = L1CommitsAPI(host=host)
+    assert tier.try_resolve(_dep(), "main") == SHA_B
+    legacy.resolve_commit_sha_for_ref.assert_not_called()
+
+
+def test_l1_expands_an_abbreviated_commit_through_the_commits_api():
     legacy = MagicMock()
     legacy.resolve_commit_sha_for_ref.return_value = SHA_B
     host = MagicMock()
     host._refs = legacy
     tier = L1CommitsAPI(host=host)
-    assert tier.try_resolve(_dep(), "main") == SHA_B
+    assert tier.try_resolve(_dep(), SHA_B[:12]) == SHA_B
     legacy.resolve_commit_sha_for_ref.assert_called_once()
 
 
@@ -652,11 +662,22 @@ class _RevParseCommitsApi:
 
     def __init__(self) -> None:
         self.queries: list[str] = []
+        self.listings = 0
         self._REFS = {
             "refs/heads/main": "a" * 40,
             "refs/tags/v1": "b" * 40,
             "refs/pull/1/head": "f" * 40,
         }
+
+    def list_remote_refs(self, _dep_ref) -> list[RemoteRef]:
+        self.listings += 1
+        kinds = (("refs/heads/", GitReferenceType.BRANCH), ("refs/tags/", GitReferenceType.TAG))
+        return [
+            RemoteRef(name.removeprefix(prefix), kind, sha)
+            for name, sha in self._REFS.items()
+            for prefix, kind in kinds
+            if name.startswith(prefix)
+        ]
 
     def resolve_commit_sha_for_ref(self, _dep_ref, ref: str) -> str | None:
         self.queries.append(ref)
@@ -666,7 +687,6 @@ class _RevParseCommitsApi:
         return None
 
 
-@pytest.mark.xfail(strict=True, reason="exact branch and tag lookup lands in the next step")
 @pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
 def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(ref: str) -> None:
     api = _RevParseCommitsApi()
@@ -737,7 +757,7 @@ def test_a_branch_literally_named_like_a_pull_ref_resolves_to_its_own_commit() -
     tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "pull/1/head") == "c" * 40
-    assert api.queries == ["heads/pull/1/head"]
+    assert (api.queries, api.listings) == ([], 1)
 
 
 def test_a_ref_with_a_space_gets_no_commits_api_query() -> None:
@@ -748,22 +768,22 @@ def test_a_ref_with_a_space_gets_no_commits_api_query() -> None:
     assert api.queries == []
 
 
-def test_a_non_ascii_name_is_queried_only_as_a_branch_or_tag() -> None:
+def test_a_non_ascii_name_resolves_only_as_a_branch_or_tag() -> None:
     api = _RevParseCommitsApi()
     api._REFS["refs/tags/v\u00e9"] = "d" * 40
     tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v\u00e9") == "d" * 40
-    assert api.queries == ["heads/v\u00e9", "tags/v\u00e9"]
+    assert (api.queries, api.listings) == ([], 1)
 
 
-def test_a_version_like_tag_is_found_without_a_failing_branch_query() -> None:
+def test_a_version_like_tag_is_found_in_one_listing() -> None:
     api = _RevParseCommitsApi()
     api._REFS["refs/tags/v1.2.0"] = "e" * 40
     tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v1.2.0") == "e" * 40
-    assert api.queries == ["tags/v1.2.0"]
+    assert (api.queries, api.listings) == ([], 1)
 
 
 def test_a_branch_named_like_a_version_still_resolves() -> None:
@@ -772,4 +792,4 @@ def test_a_branch_named_like_a_version_still_resolves() -> None:
     tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "2.x") == "9" * 40
-    assert api.queries == ["tags/2.x", "heads/2.x"]
+    assert (api.queries, api.listings) == ([], 1)

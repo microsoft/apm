@@ -444,10 +444,9 @@ def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
     """Return ``(fetch_ref, resolved_commit)`` for a single-file dependency.
 
     A declared ref is fetched by its admitted commit, never by name. A full
-    commit is admitted as a pin. A branch or tag name resolves only exactly:
-    through the commits API by ``heads/`` or ``tags/`` namespace, else by
-    ``git ls-remote`` over the dependency's own transport. An abbreviated
-    commit resolves through the API and is then admitted as a pin.
+    commit is admitted as a pin. A branch or tag name resolves only exactly,
+    by ``git ls-remote`` over the dependency's own transport. An abbreviated
+    commit resolves through the commits API and is then admitted as a pin.
 
     An undeclared ref (the default branch), an Azure DevOps branch name
     (resolved exactly by the items API) and an Artifactory route (no Git
@@ -473,16 +472,15 @@ def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
     if full:
         _require_at_origin(downloader, dep_ref, ref.lower())
         return ref.lower(), ref.lower()
-    for query in _exact_ref_queries(ref):
+    # The commits API resolves names like ``git rev-parse``: it only expands an
+    # abbreviated commit, admitted as a pin. A branch or tag name is listed exactly.
+    for query in _exact_ref_queries(ref) if _ABBREVIATED_COMMIT_RE.match(ref) else ():
         try:
             sha = downloader._resolve_commit_sha_for_ref(dep_ref, query)
         except Exception:
             sha = None
         if sha and len(sha) == 40 and _COMMIT_RE.match(sha):
-            if _ABBREVIATED_COMMIT_RE.match(ref):
-                _require_at_origin(downloader, dep_ref, sha.lower())
-            else:
-                _record_tip(downloader, dep_ref, sha)
+            _require_at_origin(downloader, dep_ref, sha.lower())
             return sha.lower(), sha.lower()
     found: list[tuple[str, str, dict]] = []
     _at_origin(

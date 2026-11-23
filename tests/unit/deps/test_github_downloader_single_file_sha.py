@@ -81,28 +81,17 @@ class TestSingleFileShaResolution:
     ) -> None:
         dep = _make_virtual_file_dep()
 
+        listing = _ls_remote(f"{self.SHA}\trefs/heads/main\n{'f' * 40}\trefs/tags/heads/main\n")
         with (
             patch.object(downloader._strategies, "resilient_get") as mock_get,
             patch.object(downloader._strategies, "download_github_file") as mock_dl,
+            patch("apm_cli.utils.git_env.git_remote_refs", return_value=listing),
         ):
-            mock_get.return_value = _fake_response(200, self.SHA)
             mock_dl.return_value = _file_content()
             pkg_info = downloader.download_virtual_file_package(dep, tmp_path / "vpkg")
 
-        # Cheap commits API was called exactly once.
-        assert mock_get.call_count == 1
-        call = mock_get.call_args
-        url = call.args[0]
-        headers = call.args[1] if len(call.args) > 1 else call.kwargs.get("headers", {})
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        assert parsed.scheme == "https"
-        assert parsed.hostname == "api.github.com"
-        # Only the branch namespace is queried, never the bare name.
-        assert parsed.path == "/repos/owner/repo/commits/heads/main"
-        # Accept header asks for the SHA-only response shape.
-        assert headers.get("Accept") == "application/vnd.github.sha"
+        # A branch name resolves from the exact ref listing, not the commits API.
+        assert mock_get.call_count == 0
 
         rr = pkg_info.resolved_reference
         assert rr is not None
@@ -162,7 +151,10 @@ class TestSingleFileShaResolution:
         throttle = GitHubThrottleError(GitHubThrottle(429, "http-429"), "github.com")
 
         with (
-            patch.object(downloader._refs, "resolve_commit_sha_for_ref", return_value=self.SHA),
+            patch(
+                "apm_cli.utils.git_env.git_remote_refs",
+                return_value=_ls_remote(f"{self.SHA}\trefs/tags/v1\n"),
+            ),
             patch.object(downloader._strategies, "download_github_file", side_effect=throttle),
             patch.object(
                 downloader._strategies,
