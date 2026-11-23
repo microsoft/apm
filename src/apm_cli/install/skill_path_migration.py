@@ -324,7 +324,13 @@ def run_skill_path_migration(ctx: Any) -> None:
 
     if ctx.dry_run:
         return
-    plans = detect_legacy_skill_deployments(ctx.existing_lockfile, ctx.project_root)
+    # A loose file a parked native replacement keeps stays where it was (#5092).
+    kept = getattr(ctx, "parked_native_kept_values", frozenset())
+    plans = [
+        plan
+        for plan in detect_legacy_skill_deployments(ctx.existing_lockfile, ctx.project_root)
+        if plan.src_path not in kept
+    ]
     if not plans:
         return
     collisions = check_collisions(plans, ctx.project_root)
