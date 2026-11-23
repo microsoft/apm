@@ -152,7 +152,7 @@ _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | getattr(os, "
 def install() -> None:
     pathlib.PurePath.relative_to = relative_to
     pathlib.PurePath.is_relative_to = is_relative_to
-    pathlib.Path.resolve = resolve
+    # DIAGNOSTIC: string relative_to only, no resolve memo
     for name in (
         "rename", "replace", "unlink", "remove", "rmdir", "mkdir", "makedirs", "chmod",
         "symlink", "link", "utime", "chdir", "truncate", "removedirs", "renames",
