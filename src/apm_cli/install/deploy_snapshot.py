@@ -44,10 +44,10 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 from apm_cli.install.deploy_state import ABSENT as _ABSENT
-from apm_cli.install.deploy_state import OTHER as _OTHER
 from apm_cli.install.deploy_state import entry_state as _entry
 from apm_cli.install.deploy_state import path_state as _state
 from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.install.deploy_state import valid_state as _valid_state
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
@@ -455,28 +455,6 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
             raise ValueError("journal manifest holds a malformed write event")
         events.setdefault(index, {})[sub] = state
     return units, events, commit
-
-
-def _valid_state(state: Any, *, entry: bool) -> bool:
-    """Whether *state* has the shape :func:`_state` (or :func:`_entry`) records."""
-    if entry:
-        return isinstance(state, str)
-    if not isinstance(state, dict):
-        return False
-    if state in (_ABSENT, _OTHER):
-        return True
-    if set(state) == {"link"}:
-        return isinstance(state["link"], str)
-    if set(state) == {"file", "mode"}:
-        return isinstance(state["file"], str) and type(state["mode"]) is int
-    if set(state) == {"dir", "mode"}:
-        entries = state["dir"]
-        return (
-            isinstance(entries, dict)
-            and all(isinstance(k, str) and isinstance(v, str) for k, v in entries.items())
-            and type(state["mode"]) is int
-        )
-    return False
 
 
 def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any]:
