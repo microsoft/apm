@@ -288,6 +288,25 @@ def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
+def test_approving_a_denied_hook_under_an_org_deny_drops_only_its_own_deny(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Review replay (#4923): approve removes the package's own deny before it saves
+    the grant; the known cell excuses exactly that change, nothing else."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.declare("hook")
+    machine.install("plain")
+    machine.decide("hook", "deny")
+    machine.set_policy("org-deny")
+    world = machine.world
+    machine.decide("hook", "approve")
+    store = world.store()
+    path = str(world.packages["hook"])
+    assert any(k == path or k.startswith(path + "#") for k in store.get("allow") or {}), store
+    assert not any(k == path or k.startswith(path + "#") for k in store.get("deny") or {}), store
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
+
+
 @pytest.mark.parametrize("scope", SCOPES)
 def test_verdict_on_an_uninstalled_package_ignores_the_operation_lock(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...], scope: str

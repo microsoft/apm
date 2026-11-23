@@ -215,23 +215,37 @@ def _approve_under_org_deny(machine, op, before, after, result) -> bool:
 
 
 def _only_grants_added(before, after, paths: list[str]) -> bool:
-    """True when the manifest gained a grant for every path and changed nothing else."""
+    """True when the manifest gained a grant for every path and changed nothing else.
+
+    Approve also drops the package's own deny from the same store
+    (commands/approve.py), so removing exactly those entries is allowed too.
+    """
 
     def manifest(observation) -> dict:
         raw = observation.state.manifest_bytes
         return (yaml.safe_load(raw) if raw else None) or {}
+
+    def ours(key: str) -> bool:
+        return any(key == p or key.startswith(p + "#") for p in paths)
 
     old, new = manifest(before), manifest(after)
     allow = dict((new.get("executables") or {}).get("allow") or {})
     if not all(any(k == p or k.startswith(p + "#") for k in allow) for p in paths):
         return False
     old_allow = (old.get("executables") or {}).get("allow") or {}
-    for key in [k for k in allow if k not in old_allow]:
-        if any(key == p or key.startswith(p + "#") for p in paths):
-            del allow[key]
+    for key in [k for k in allow if k not in old_allow and ours(k)]:
+        del allow[key]
+    new_deny = (new.get("executables") or {}).get("deny") or {}
+    old_deny = {
+        k: v
+        for k, v in ((old.get("executables") or {}).get("deny") or {}).items()
+        if k in new_deny or not ours(k)
+    }
     return _without_empty_store(
         {**new, "executables": {**(new.get("executables") or {}), "allow": allow}}
-    ) == _without_empty_store(old)
+    ) == _without_empty_store(
+        {**old, "executables": {**(old.get("executables") or {}), "deny": old_deny}}
+    )
 
 
 def _without_empty_store(data: dict) -> dict:
