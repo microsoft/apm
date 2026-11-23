@@ -907,7 +907,7 @@ def _native_mcp_transport(spec: dict[str, Any]) -> str | None:
 
 
 def claude_native_mcp_servers(
-    plugin_path: Path, manifest: dict[str, Any]
+    plugin_path: Path, manifest: dict[str, Any], *, keys: list[str] | None = None
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Every MCP server Claude's plugin loader would start, and what APM cannot model.
 
@@ -920,6 +920,7 @@ def claude_native_mcp_servers(
     *unmodeled* names each entry APM cannot read (unparseable or missing file,
     path outside the plugin, ``.mcpb``/``.dxt`` bundle, URL, non-object entry,
     unknown transport). Callers must not assume an unmodeled entry complies.
+    *keys*, when given, collects every raw server key, modeled or not.
     The loose (normalized) route keeps :func:`_extract_mcp_servers`.
     """
     servers: list[dict[str, Any]] = []
@@ -929,6 +930,9 @@ def claude_native_mcp_servers(
         if not isinstance(mapping, dict):
             unmodeled.append(f"{source} (not a server mapping)")
             return
+        if keys is not None:
+            # Every raw server key Claude would see, whatever its transport.
+            keys.extend(str(name) for name in mapping)
         for name, spec in mapping.items():
             transport = _native_mcp_transport(spec) if isinstance(spec, dict) else None
             if transport is None:

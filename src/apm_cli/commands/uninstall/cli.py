@@ -64,8 +64,9 @@ from .engine import (
 )
 from .selection_shrink import (
     _shrink_surviving_selections,
-    shrink_path_split,
     shrink_retired_paths,
+    uninstall_evidence_refusals,
+    uninstall_unvalidated_paths,
 )
 
 
@@ -287,12 +288,23 @@ def _report_uninstall_outcome(
     mcp_cleanup_fatal: bool,
     consented_deletions: Iterable[str] = (),
 ) -> bool:
-    """Render the final summary and return whether cleanup was incomplete."""
+    """Render the final summary and return whether cleanup was incomplete.
+
+    A reported package failure leaves the uninstall incomplete, so the command
+    exits non-zero instead of claiming success (#4703).
+    """
     _report_consented_deletions(logger, consented_deletions)
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
-    if not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
+    diagnostics = getattr(logger, "diagnostics", None)
+    package_failures = (
+        diagnostics.failed_package_count if diagnostics is not None else 0
+    ) + integration_cleanup.package_failures
+    if package_failures:
+        noun = "package" if package_failures == 1 else "packages"
+        logger.error(f"Uninstall incomplete: {package_failures} {noun} failed (see above).")
+    elif not mcp_cleanup_fatal and lsp_cleanup_error is None and not integration_incomplete:
         if integration_cleanup_error is None:
             logger.success(f"Uninstall complete: {summary}")
         else:
@@ -300,7 +312,8 @@ def _report_uninstall_outcome(
     elif integration_incomplete:
         logger.warning("Package removal finished, but managed hook cleanup is incomplete.")
     return (
-        mcp_cleanup_fatal
+        package_failures > 0
+        or mcp_cleanup_fatal
         or lsp_cleanup_error is not None
         or integration_incomplete
         or integration_cleanup_error is not None
@@ -324,12 +337,26 @@ def _collect_deployed_cleanup_state(
     lockfile,
     dependency_keys: set[str],
 ) -> tuple[set[str], dict[str, str]]:
-    """Snapshot selected deployment paths and hashes before lockfile mutation."""
+    """Snapshot selected deployment paths and hashes before lockfile mutation.
+
+    Unless the project-local owner (``.``) is selected, paths it still holds
+    (local content and local bundles) are not cleanup claims: uninstall keeps
+    them on disk, as the lockfile keeps recording them (#4703).
+    """
     from ...core.deployment_ledger import DeploymentLedgerCodec
+    from ...deps.lockfile import _SELF_KEY
     from ...integration.base_integrator import BaseIntegrator
 
     snapshot = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys)
-    return BaseIntegrator.normalize_managed_files(snapshot.paths) or set(), snapshot.hashes
+    paths = BaseIntegrator.normalize_managed_files(snapshot.paths) or set()
+    hashes = snapshot.hashes
+    if _SELF_KEY not in dependency_keys:
+        held = BaseIntegrator.normalize_managed_files(set(lockfile.local_deployed_files)) or set()
+        paths -= held
+        hashes = {
+            path: value for path, value in hashes.items() if path.replace("\\", "/") not in held
+        }
+    return paths, hashes
 
 
 @dataclass(frozen=True)
@@ -480,25 +507,14 @@ def _refuse_unvalidated_paths(
     Each path this uninstall removes goes through the deploy-path gate the
     cleanup uses; rows another profile keeps on disk are not removed.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope
-    from ...integration.base_integrator import BaseIntegrator
 
-    if lockfile is None or not dependency_keys:
-        return
-    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
-    rejected = sorted(
-        path
-        for path in paths
-        # URI rows (cowork://, copilot-app-db://) have their own owners.
-        if "://" not in path
-        and path not in kept_paths
-        and not BaseIntegrator.validate_deploy_path(
-            path,
-            deploy_root,
-            user_scope=scope is InstallScope.USER,
-            allow_final_symlink=True,
-        )
+    rejected = uninstall_unvalidated_paths(
+        lockfile,
+        dependency_keys,
+        deploy_root,
+        user_scope=scope is InstallScope.USER,
+        kept_paths=kept_paths,
     )
     if not rejected:
         return
@@ -601,15 +617,19 @@ def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) 
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
-    """Ensure dependency sections exist and return their mutable list views."""
-    if "dependencies" not in data:
+    """Ensure dependency sections exist and return their mutable list views.
+
+    A null section (``devDependencies:`` with no value) counts as absent,
+    as the audit's manifest projection reads it (#4570).
+    """
+    if data.get("dependencies") is None:
         data["dependencies"] = {}
-    if "apm" not in data["dependencies"]:
+    if data["dependencies"].get("apm") is None:
         data["dependencies"]["apm"] = []
-    had_dev_section = "devDependencies" in data
+    had_dev_section = data.get("devDependencies") is not None
     if not had_dev_section:
         data["devDependencies"] = {}
-    if "apm" not in data["devDependencies"]:
+    if data["devDependencies"].get("apm") is None:
         data["devDependencies"]["apm"] = []
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
@@ -715,27 +735,29 @@ def _abort_if_retained_target_cleanup_paths(
     what is still on disk; apm.yml keeps the package for the retry (#3656).
     Files ``--trust-lockfile`` kept for lack of evidence (at preflight or at
     the deletion recheck), and the skill directories holding them, do not stop
-    the uninstall (#4295); its deletions are named first, before any exit.
+    the uninstall (#4295); its deletions are named first, before any exit. A
+    path cleanup failed on or its safety gates rejected always stops it (#4815).
     """
     from ...integration.cleanup import _claim_key
 
     if evidence is not None:
         _report_consented_deletions(logger, evidence.take_consented_deletions())
         consent_kept = consent_kept | evidence.kept_under_consent()
+    rejected = getattr(outcome, "rejected_paths", {})
+    # Only evidence-based retention is waived; a failed or rejected path stays.
+    blocking = {_claim_key(path) for path in (*getattr(outcome, "failed_paths", ()), *rejected)}
     # One spelling per file, as consent records it (#4295).
-    consent_kept = {_claim_key(kept) for kept in consent_kept}
+    consent_kept = {_claim_key(kept) for kept in consent_kept} - blocking
     # Every ancestor directory of a kept file, built once: lookups stay O(1).
     kept_dirs = {
         "/".join(parts[:index])
         for parts in (kept.split("/") for kept in consent_kept)
         for index in range(1, len(parts))
     }
-    # Only evidence-based retention is waived; a path cleanup failed on stays.
-    failed = {_claim_key(path) for path in getattr(outcome, "failed_paths", set())}
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
-        if (key := _claim_key(path)) not in failed and (key in consent_kept or key in kept_dirs)
+        if (key := _claim_key(path)) not in blocking and (key in consent_kept or key in kept_dirs)
     }
     if not outcome.retained_paths:
         return
@@ -753,7 +775,8 @@ def _abort_if_retained_target_cleanup_paths(
         f"package and {lock_state}. Package directories may already have been removed."
     )
     for path in sorted(outcome.retained_paths):
-        logger.error(f"  - {path}")
+        reason = rejected.get(path)
+        logger.error(f"  - {path}: refused, {reason}" if reason else f"  - {path}")
     logger.error("Resolve or remove the listed files, then retry uninstall.")
     sys.exit(1)
 
@@ -814,35 +837,13 @@ def _refuse_uninstall_without_evidence(
     With *trust_lockfile* (consent already given to *evidence*) nothing is
     refused: the files still lacking evidence are returned and kept (#4295).
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
-    from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
     if not lockfile or (not cleanup_keys and not shrunk):
         return frozenset()
-    # Hash-tracked skill members count too: directory cleanup deletes them.
-    selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
-    survivors, survivor_hashes = _collect_deployed_cleanup_state(
-        lockfile,
-        DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
+    refused = uninstall_evidence_refusals(
+        evidence, lockfile, cleanup_keys, shrunk=shrunk, preserved=preserved_values
     )
-    candidates = (selected | builtins.set(selected_hashes)) - survivors
-    candidates -= builtins.set(survivor_hashes)
-    if shrunk:
-        others, other_hashes = _collect_deployed_cleanup_state(
-            lockfile,
-            DeploymentLedgerCodec.valid_owner_keys(
-                lockfile, excluded_dependency_keys=cleanup_keys | builtins.set(shrunk)
-            ),
-        )
-        retired, retained = shrink_path_split(lockfile, shrunk)
-        retired = BaseIntegrator.normalize_managed_files(retired) or builtins.set()
-        # A path another shrinking survivor keeps deploying is not deleted.
-        retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
-        candidates |= retired - others - builtins.set(other_hashes) - retained
-    candidates -= builtins.set(lockfile.local_deployed_files)
-    candidates -= builtins.set(preserved_values or ())
-    refused = evidence.refusals(sorted(candidates))
     if not refused or trust_lockfile:
         return frozenset(claim for claim, _ in refused)
     _cleanup_staged_local_refreshes(staged_refreshes, modules_dir)
