@@ -481,6 +481,7 @@ def try_apply(
     project_root: Path,
     *,
     frozen_disposition: Any,
+    decide_only: bool = False,
 ) -> bool:
     """Apply the verified diff and return True; False (with a trace reason) runs the full pipeline."""
     from apm_cli.install import noop_diff
@@ -544,6 +545,15 @@ def try_apply(
             recheck = _audit_gate(project_root, fetch, writes=bool(files or extras))
             if not noop_diff._policy_checks_pass(project_root, fetch):
                 raise Decline("policy checks")
+        if decide_only:
+            # Test seam (APM_INSTALL_FAST_PATH=decide): report the decision, write nothing.
+            count = len(files) + len(extras)
+            _trace(
+                f"applied a verified diff ({count} files)"
+                if count or packages
+                else "no-op (desired state already deployed)"
+            )
+            return True
         staged: list[tuple[Path, Path]] = []
         try:
             for checkout, install_path, sha in packages:

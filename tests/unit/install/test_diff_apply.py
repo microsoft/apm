@@ -135,3 +135,25 @@ def test_non_ascii_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
     with pytest.raises(Decline, match="non-ASCII"):
         diff_apply._plan_files(tmp_path, lock, records, deploy, {})
+
+
+@pytest.mark.parametrize("argv", [["install"], ["install", "--only", "apm"]])
+def test_decide_seam_exits_nonzero_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+) -> None:
+    """APM_INSTALL_FAST_PATH=decide is a test seam: never a green install, never a write."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.install.fast_entry import DECIDE_EXIT
+
+    (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "decide")
+    result = CliRunner().invoke(cli, argv, obj={})
+    assert result.exit_code == DECIDE_EXIT
+    assert "install fast path: full run" in result.output
+    after = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+    assert after == before
+    assert (tmp_path / "apm.yml").read_text(encoding="utf-8") == "name: demo\nversion: 1.0.0\n"

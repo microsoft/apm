@@ -1,1 +1,0 @@
-- `apm install` and `apm install --frozen` on a locked project now restore the deployed state from the verified machine caches instead of re-running the install pipeline, about 2.3-2.6x less CPU on a 10-package tree; set `APM_INSTALL_FAST_PATH=0` to always run the full pipeline (#TBD)
