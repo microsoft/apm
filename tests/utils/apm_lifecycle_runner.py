@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import time
@@ -84,6 +85,16 @@ class ApmLifecycleRunner:
             budget_seconds=self._timeout_seconds,
         )
         _check_output(args, result, scenario_id=scenario_id, env=env)
+        if _audit_parity_applies(args, env):
+            live = self._run_with_timeout(
+                args,
+                cwd=cwd,
+                env={**env, _RECORDS_SWITCH: "0"},
+                timeout_seconds=self._timeout_seconds,
+                scenario_id=scenario_id,
+                budget_seconds=self._timeout_seconds,
+            )
+            _assert_audit_parity(result, live)
         return result
 
     def _run_with_timeout(
@@ -178,6 +189,50 @@ class ApmLifecycleRunner:
                     )
                 )
         return tuple(results)
+
+
+# Drift replay served from render records must never change an audit (#4940):
+# every read-only ``apm audit`` a lifecycle test runs is replayed fully live too.
+_RECORDS_SWITCH = "APM_AUDIT_RECORDS"
+_RECORDS_SUMMARY = re.compile(
+    r"^\[i\] drift replay: \d+ package\(s\) from records, \d+ live\n?", re.M
+)
+_MUTATING_AUDIT_FLAGS = frozenset({"--strip"})
+
+
+def _audit_parity_applies(args: Sequence[str], env: Mapping[str, str]) -> bool:
+    return (
+        bool(args)
+        and args[0] == "audit"
+        and _RECORDS_SWITCH not in env
+        and not _MUTATING_AUDIT_FLAGS.intersection(args)
+    )
+
+
+# Per-run noise inside diagnostic lines: fresh temp directory names.
+_TEMP_NAME = re.compile(r"\btmp[A-Za-z0-9_]{8}\b")
+
+
+def _diagnostics(stderr: str) -> list[str]:
+    """The status-symbol lines of *stderr*, without the served/live summary."""
+    return [
+        _TEMP_NAME.sub("tmpXXXXXXXX", line)
+        for line in _RECORDS_SUMMARY.sub("", stderr).splitlines()
+        if line.startswith("[")
+    ]
+
+
+def _assert_audit_parity(served: CommandResult, live: CommandResult) -> None:
+    pairs = (
+        ("exit", served.returncode, live.returncode),
+        ("stdout", served.stdout, live.stdout),
+        ("diagnostics", _diagnostics(served.stderr), _diagnostics(live.stderr)),
+    )
+    for name, with_records, without in pairs:
+        assert with_records == without, (
+            f"audit {name} differs with render records on vs off (#4940)\n"
+            f"command={served.command!r}\nrecords={with_records!r}\nlive={without!r}"
+        )
 
 
 def _check_output(
