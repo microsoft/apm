@@ -7,7 +7,8 @@
 #       -> waits for that branch's Perf bench run and prints its summary table.
 #
 # Defaults: the 4 North Star journeys on tree-10, 3 pairs per runner, RTT 30 ms,
-# 3 runners (9 interleaved pairs per side), OS linux (or macos). Wall time is never reported.
+# 3 runners (9 interleaved pairs per side), OS linux (or macos, windows).
+# Wall time is never reported.
 # The harness (workflow + tests/benchmarks) comes from HARNESS_REF.
 set -euo pipefail
 
@@ -64,5 +65,5 @@ fetch() {
 case "${1:-}" in
   request) shift; request "$@" ;;
   fetch) shift; fetch "$@" ;;
-  *) sed -n '2,12p' "$0"; exit 2 ;;
+  *) sed -n '2,13p' "$0"; exit 2 ;;
 esac

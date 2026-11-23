@@ -261,6 +261,113 @@ def _wait4_with_deadline(proc: subprocess.Popen, timeout_s: float) -> tuple[int,
         delay = min(delay * 2, 0.1)
 
 
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+
+
+def _job_popen(argv: list[str], **kwargs) -> tuple[subprocess.Popen, int]:
+    """Windows: start *argv* inside a fresh Job Object; return the process and the job.
+
+    The process starts suspended and resumes only once it is in the job, so
+    every descendant (the venv launcher's python.exe, git and its helpers)
+    lands in the job too. Were it started running, children spawned before
+    ``AssignProcessToJobObject`` would be missed.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    ntdll = ctypes.WinDLL("ntdll")
+    ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    proc = subprocess.Popen(argv, creationflags=_CREATE_SUSPENDED, **kwargs)
+    # Popen keeps the process handle in the private ``_handle``.
+    handle = int(proc._handle)
+    if not kernel32.AssignProcessToJobObject(job, handle):
+        error = ctypes.WinError(ctypes.get_last_error())
+        kernel32.TerminateJobObject(job, 1)
+        proc.kill()
+        proc.wait()
+        _close_job(job)
+        raise error
+    status = ntdll.NtResumeProcess(handle)
+    if status:
+        kernel32.TerminateJobObject(job, 1)
+        proc.wait()
+        _close_job(job)
+        raise OSError(f"NtResumeProcess failed: NTSTATUS {status & 0xFFFFFFFF:#010x}")
+    return proc, job
+
+
+def _close_job(job: int) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle(job)
+
+
+def _job_wait_with_deadline(proc: subprocess.Popen, job: int, timeout_s: float) -> float:
+    """Windows: wait for *proc*, bounded; return the job's user + kernel CPU seconds.
+
+    ``JobObjectBasicAccountingInformation`` totals the CPU of every process
+    ever in the job (the child and all its descendants), in 100 ns units. A
+    child still running at the deadline has its whole job terminated, and the
+    command fails like ``subprocess.run(timeout=...)`` would.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _Accounting(ctypes.Structure):
+        _fields_ = (
+            ("TotalUserTime", ctypes.c_int64),
+            ("TotalKernelTime", ctypes.c_int64),
+            ("ThisPeriodTotalUserTime", ctypes.c_int64),
+            ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+            ("TotalPageFaultCount", wintypes.DWORD),
+            ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("TotalTerminatedProcesses", wintypes.DWORD),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.QueryInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.LPDWORD,
+    )
+    try:
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            kernel32.TerminateJobObject(job, 1)
+            proc.wait()
+            raise
+        info = _Accounting()
+        if not kernel32.QueryInformationJobObject(
+            job,
+            _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+            None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        print(f"[i] DEBUG job processes={info.TotalProcesses} active={info.ActiveProcesses} cpu={(info.TotalUserTime + info.TotalKernelTime) / 1e7}", flush=True)  # TEMP
+        return (info.TotalUserTime + info.TotalKernelTime) / 1e7
+    finally:
+        _close_job(job)
+
+
 @dataclass
 class Context:
     fixture: Fixture
@@ -300,7 +407,8 @@ class Context:
         """Run one command; return its exit code, output tail and CPU seconds.
 
         CPU is user + sys of the child and every descendant it waited for
-        (``wait4``), so server-side ``git http-backend`` work is excluded.
+        (``wait4``; on Windows, every process of its Job Object), so
+        server-side ``git http-backend`` work is excluded.
         """
         env = dict(self.world.env)
         if self.spawn_log is not None:
@@ -310,14 +418,21 @@ class Context:
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
-            proc = subprocess.Popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
-            status, usage = _wait4_with_deadline(proc, _COMMAND_TIMEOUT_S)
-            proc.returncode = os.waitstatus_to_exitcode(status)
+            if sys.platform == "win32":
+                proc, job = _job_popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
+                cpu = _job_wait_with_deadline(proc, job, _COMMAND_TIMEOUT_S)
+            else:
+                proc = subprocess.Popen(
+                    [*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err
+                )
+                status, usage = _wait4_with_deadline(proc, _COMMAND_TIMEOUT_S)
+                proc.returncode = os.waitstatus_to_exitcode(status)
+                cpu = usage.ru_utime + usage.ru_stime
             out.seek(0)
             err.seek(0)
             tail = out.read()[-3000:].decode(errors="replace") + "\n"
             tail += err.read()[-3000:].decode(errors="replace")
-        return proc.returncode, tail, usage.ru_utime + usage.ru_stime
+        return proc.returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
         result = self.run(argv, cwd)
@@ -489,6 +604,9 @@ JOURNEYS: dict[str, Journey] = {
 
 
 def load1() -> float:
+    """The 1-min load average; 0.0 on Windows, which has none."""
+    if not hasattr(os, "getloadavg"):
+        return 0.0
     return round(os.getloadavg()[0], 2)
 
 
@@ -650,7 +768,8 @@ def _git_sha() -> str:
 
 
 def resolve_apm(explicit: str | None) -> list[str]:
-    candidates = [explicit, os.environ.get("APM_BINARY_PATH"), str(REPO_ROOT / ".venv/bin/apm")]
+    venv_apm = ".venv/Scripts/apm.exe" if sys.platform == "win32" else ".venv/bin/apm"
+    candidates = [explicit, os.environ.get("APM_BINARY_PATH"), str(REPO_ROOT / venv_apm)]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return [str(Path(candidate).resolve())]
@@ -732,7 +851,11 @@ def run(args: argparse.Namespace) -> dict:
 
 
 def _uptime() -> str:
-    return subprocess.run(["uptime"], capture_output=True, text=True, check=False).stdout.strip()
+    try:
+        result = subprocess.run(["uptime"], capture_output=True, text=True, check=False)
+    except OSError:  # no ``uptime`` (Windows)
+        return "-"
+    return result.stdout.strip()
 
 
 def _progress(record: dict) -> None:

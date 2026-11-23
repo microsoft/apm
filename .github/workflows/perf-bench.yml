@@ -5,8 +5,8 @@ name: Perf bench
 # (scripts/perf/bench_ci.sh); the runners do all the work.
 # Trigger: a push to perf-bench/** carrying bench-request.env (no main change
 # needed), or a manual dispatch once this file is on main.
-# Reported: CPU (user+sys of apm and its children, wait4) and deterministic
-# counts. Wall time is never reported: hosted runners are shared VMs.
+# Reported: CPU (user+sys of apm and its children: wait4 on POSIX, a Job
+# Object on Windows) and deterministic counts. Wall time is never reported: hosted runners are shared VMs.
 
 on:
   push:
@@ -32,7 +32,7 @@ on:
         description: Interleaved base/new pairs per runner.
         default: '3'
       os:
-        description: Runner OS (linux or macos).
+        description: Runner OS (linux, macos or windows).
         default: linux
 
 permissions:
@@ -57,6 +57,7 @@ jobs:
       rtt: ${{ steps.req.outputs.rtt }}
       pairs: ${{ steps.req.outputs.pairs }}
       runner: ${{ steps.req.outputs.runner }}
+      venv_apm: ${{ steps.req.outputs.venv_apm }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -94,11 +95,15 @@ jobs:
         case "$OS" in
           linux) RUNNER=ubuntu-24.04 ;;
           macos) RUNNER=macos-15 ;;
-          *) echo "::error::OS must be linux or macos"; exit 1 ;;
+          windows) RUNNER=windows-2025 ;;
+          *) echo "::error::OS must be linux, macos or windows"; exit 1 ;;
         esac
+        # The venv console script, relative to a side's worktree.
+        if [ "$OS" = windows ]; then VENV_APM=.venv/Scripts/apm.exe; else VENV_APM=.venv/bin/apm; fi
         {
           echo "base=$BASE"; echo "new=$NEW"; echo "fixtures=$FIXTURES"
           echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"; echo "runner=$RUNNER"
+          echo "venv_apm=$VENV_APM"
         } >> "$GITHUB_OUTPUT"
 
   bench:
@@ -110,9 +115,14 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
+    defaults:
+      run:
+        # Git Bash on Windows; the same scripts run on every OS.
+        shell: bash
     env:
       BASE: ${{ needs.request.outputs.base }}
       NEW: ${{ needs.request.outputs.new }}
+      VENV_APM: ${{ needs.request.outputs.venv_apm }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -132,7 +142,7 @@ jobs:
           git -C harness fetch --quiet --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" "$sha"
           git -C harness worktree add --quiet --detach "../$side" FETCH_HEAD
           (cd "$side" && uv sync --frozen --no-editable --quiet)
-          echo "$side: $(git -C "$side" rev-parse HEAD) $("$side/.venv/bin/apm" --version)"
+          echo "$side: $(git -C "$side" rev-parse HEAD) $("$side/$VENV_APM" --version)"
         done
     - name: Install harness
       working-directory: harness
@@ -147,8 +157,8 @@ jobs:
         SHARD: ${{ matrix.shard }}
       run: |
         uv run --frozen python -m tests.benchmarks.ci_bench abab \
-          --base-apm "$GITHUB_WORKSPACE/base/.venv/bin/apm" \
-          --new-apm "$GITHUB_WORKSPACE/new/.venv/bin/apm" \
+          --base-apm "$GITHUB_WORKSPACE/base/$VENV_APM" \
+          --new-apm "$GITHUB_WORKSPACE/new/$VENV_APM" \
           --pairs "$PAIRS" --fixtures "$FIXTURES" --journeys "$JOURNEYS" --rtt "$RTT" \
           --out "$GITHUB_WORKSPACE/out/shard-$SHARD"
     - if: always()

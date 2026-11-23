@@ -17,24 +17,35 @@ if _LOG:
     _counts = {}
 
     def _target(event, args):
+        """``(target, is_command_line)``: a shell-style string is split, a path is not."""
         if event == "subprocess.Popen":
             executable, argv = args[0], args[1]
             if executable is None:
-                executable = argv if isinstance(argv, (str, bytes)) else (list(argv) or ["?"])[0]
-            return executable
-        if event in ("os.system", "os.exec"):
-            return args[0]
+                if isinstance(argv, (str, bytes)):
+                    return argv, True
+                return (list(argv) or ["?"])[0], False
+            return executable, False
+        if event == "os.system":
+            return args[0], True
+        if event == "os.exec":
+            return args[0], False
         if event == "os.spawn":
-            return args[1]
-        return None
+            return args[1], False
+        return None, False
 
     def _hook(event, args):
         if event not in ("subprocess.Popen", "os.system", "os.exec", "os.spawn"):
             return
-        target = _target(event, args)
+        target, command_line = _target(event, args)
         if isinstance(target, bytes):
             target = target.decode(errors="replace")
-        name = os.path.basename(str(target).split()[0]) if target else "?"
+        target = str(target) if target else ""
+        if command_line:
+            target = (target.split() or [""])[0]
+        name = os.path.basename(target) or "?"
+        # ``git.exe`` on Windows counts as ``git``, so counts compare across OSes.
+        if os.name == "nt" and name.lower().endswith(".exe"):
+            name = name[:-4]
         _counts[name] = _counts.get(name, 0) + 1
 
     def _flush():
