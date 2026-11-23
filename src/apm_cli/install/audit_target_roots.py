@@ -145,6 +145,16 @@ def claims_for_root(
     return rebased
 
 
+def frame_root_package(package_info: Any, root: Path) -> None:
+    """Point the replayed root package at *root*, where install read it.
+
+    The root package deploys from there; its links render in the live frame
+    like any dependency (#4832: a user-root context link from ~/.apm).
+    """
+    package_info.root_local_project_root = root
+    package_info.deployment_package_root = root
+
+
 def replay_route_manifest(
     manifest_path: Path, lock: Any, targets: list[TargetProfile], *, from_lock: bool
 ) -> Any:
