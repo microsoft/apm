@@ -1,7 +1,9 @@
 """Tests for the apm init command."""
 
+import contextlib
 import json  # noqa: F401
 import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -935,20 +937,28 @@ class TestToggleInputParser:
         assert err is not None
 
 
+@contextlib.contextmanager
 def _agentrc_on_path(path):
-    """Answer the helper owner for ``agentrc`` only, delegating every other tool.
+    """Put an ``agentrc`` stub on PATH outside the project, or hide any installed one.
 
-    A blanket patch would also feed git resolution, whose process-wide cache
-    would then poison every later test on the worker.
+    A real PATH change exercises the helper owner itself, so git resolution
+    keeps finding the real git and its process-wide cache stays clean.
     """
-    from apm_cli.utils import git_env
-
-    real_lookup = git_env.trusted_executable
-
-    def _lookup(name):
-        return path if name == "agentrc" else real_lookup(name)
-
-    return patch("apm_cli.utils.git_env.trusted_executable", side_effect=_lookup)
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    with tempfile.TemporaryDirectory() as bin_dir:
+        if path is None:
+            entries = [
+                entry
+                for entry in entries
+                if not any((Path(entry) / f"agentrc{ext}").exists() for ext in ("", ".exe", ".cmd"))
+            ]
+        else:
+            stub = Path(bin_dir) / ("agentrc.exe" if sys.platform == "win32" else "agentrc")
+            stub.write_bytes(b"stub\n")
+            stub.chmod(0o755)
+            entries = [bin_dir, *entries]
+        with patch.dict(os.environ, {"PATH": os.pathsep.join(entries)}):
+            yield
 
 
 def test_agentrc_probe_never_poisons_the_git_executable_cache(tmp_path, monkeypatch):

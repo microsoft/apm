@@ -436,25 +436,39 @@ def test_cli_start_disables_the_implicit_working_directory_search(tmp_path: Path
 
 @pytest.mark.parametrize("user_value", [None, "0"], ids=["unset", "user-set"])
 def test_user_scripts_keep_the_users_working_directory_search(
-    monkeypatch: pytest.MonkeyPatch, user_value: str | None
+    tmp_path: Path, user_value: str | None
 ) -> None:
     """APM's helpers skip the working directory; scripts the user wrote get their own setting."""
-    from apm_cli.core.lifecycle_scripts import ScriptEntry
-    from apm_cli.core.script_executors import _build_script_env
-    from apm_cli.utils import git_env
-
-    name = "NoDefaultCurrentDirectoryInExePath"
-    monkeypatch.setattr(git_env, "_user_no_cwd_search", git_env._UNSET)
-    monkeypatch.setenv(name, "placeholder")
-    if user_value is None:
-        monkeypatch.delenv(name)
-    else:
-        monkeypatch.setenv(name, user_value)
-    with monkeypatch.context() as windows:
-        windows.setattr(git_env.sys, "platform", "win32")
-        git_env.disable_implicit_cwd_search()
-
-    assert os.environ[name] == "1"
-    env = _build_script_env(ScriptEntry(script_type="command", event="post-install", command="x"))
-    script_values = [value for key, value in env.items() if key.upper() == name.upper()]
-    assert script_values == ([] if user_value is None else [user_value])
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    environment = _source_environment(isolated.subprocess_env())
+    for key in [key for key in environment if key.upper() == "NODEFAULTCURRENTDIRECTORYINEXEPATH"]:
+        del environment[key]
+    if user_value is not None:
+        environment["NoDefaultCurrentDirectoryInExePath"] = user_value
+    probe = (
+        "import json, os, sys\n"
+        "from apm_cli.utils.git_env import disable_implicit_cwd_search\n"
+        "from apm_cli.core.lifecycle_scripts import ScriptEntry\n"
+        "from apm_cli.core.script_executors import _build_script_env\n"
+        "platform, sys.platform = sys.platform, 'win32'\n"
+        "disable_implicit_cwd_search()\n"
+        "sys.platform = platform\n"
+        "name = 'NoDefaultCurrentDirectoryInExePath'\n"
+        "script = _build_script_env(ScriptEntry(script_type='command', event='post-install',"
+        " command='x'))\n"
+        "print(json.dumps({'apm': os.environ.get(name), 'script': [v for k, v in script.items()"
+        " if k.upper() == name.upper()]}))\n"
+    )
+    result = subprocess.run(
+        (sys.executable, "-c", probe),
+        cwd=isolated.work_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = json.loads(result.stdout)
+    assert evidence["apm"] == "1"
+    assert evidence["script"] == ([] if user_value is None else [user_value])
