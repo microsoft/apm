@@ -505,7 +505,7 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
 
 
 def roll_back(plan: LocalReanchorPlan) -> list[str]:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+    """Restore apm.yml, apm.lock.yaml and the receipts to the snapshot; return what was not.
 
     Every path is attempted. One that cannot be restored keeps its snapshot
     beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
@@ -702,7 +702,14 @@ def _plan_reanchor_or_exit(
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+    if not plan.renames:
+        return plan
+    from ...core.deployment_ledger import materialization_evidence_paths
+
+    # The receipts go back with the lock: an interrupt after their rename never
+    # leaves lock and receipts naming different owners (#5077).
+    receipts, _identity = materialization_evidence_paths(project_root, InstallScope.PROJECT)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root), receipts))
 
 
 def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
