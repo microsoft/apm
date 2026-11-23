@@ -9,8 +9,9 @@ with ``--trust-bin`` (source: src/apm_cli/install/exec_gate.py
 plugin_bin_deployable, src/apm_cli/security/executables.py compose_trust_bin).
 CELL: OP x PRIM=bin x GATE (T1).
 
-bin/ deploys nowhere else (U-BIN), so this spine is the only place the GATE
-matrix can observe it. It drives ``p-native-claude-bin@lifecycle-market`` on
+Loose bin/ deploys nowhere else; at project scope bin/ ships only inside a
+whole plugin root, which the plugin bin spine (``_gate_plugin_bin.py``,
+U-BIN) observes. It drives ``p-native-claude-bin@lifecycle-market`` on
 the claude target of the user scope through five gate levels: gate off
 (``none``), ``allowed`` (the user manifest opts into the gate), ``revoked-after-deploy`` (deny after a deploy),
 ``denied-executable`` and ``unapproved-exec`` (decisions dropped from
@@ -19,8 +20,10 @@ the gate decision alone decides bin/. Every step runs I1-I9; installs and
 updates must leave exactly the model's deployed set, and ``install --mcp``
 leaves bin/ byte-identical (U7). A last segment runs under an org policy that
 denies the plugin: a user-scope command discovers no org policy (#3703), so the
-steps that should retire or refuse bin/ are strict known cells (``KNOWN_DD``).
-``bin_cells`` labels the same script statically.
+steps that should retire or refuse bin/ are strict known cells (``KNOWN_DD``),
+and the other steps there are checked but credit no denied-dependency cell (the
+project matrix's refusals witness those). ``bin_cells`` labels the same script
+statically.
 """
 
 from __future__ import annotations
@@ -113,9 +116,16 @@ class GateBin(StepRunner):
         return lambda *_args: self._cell == cell
 
     def run(self, op: str, *words: str, exits=(0,)) -> None:
-        """Run one command, check I1-I9 and its outcome, credit its id, then advance."""
+        """Run one command, check I1-I9 and its outcome, credit its id, then advance.
+
+        User scope discovers no org policy (#3703), so a step under the org deny
+        never evaluates it: unless a strict known cell tracks it, the step is still
+        checked but earns no denied-dependency credit.
+        """
         cell = f"G1|{op}|bin|{self.state.gate()}|user"
-        self.credited.add(cell)
+        ungoverned = self.state.denied_by_policy and cell not in KNOWN_DD
+        if not ungoverned:
+            self.credited.add(cell)
         requested = self._requested(op)
         if not self.dry:
             self._cell = cell
@@ -130,6 +140,7 @@ class GateBin(StepRunner):
             self._cell = ""
             if cell not in KNOWN_DD:
                 self._check_outcome(op, requested, step)
+            if cell in self.credited and cell not in KNOWN_DD:
                 self._credit(op, cell, step)
         self.state = requested
 

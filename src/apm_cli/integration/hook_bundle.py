@@ -248,6 +248,29 @@ def hook_containment_root(target, project_root: Path) -> Path:
     return root
 
 
+def hook_cleanup_root(target, project_root: Path) -> Path | None:
+    """Return the root an emptied hook file may be deleted under (#4945).
+
+    The :func:`hook_containment_root` of *target*. An outside-HOME Claude root
+    that is itself a symlink, as configured or as stored, may have been
+    redirected since install, so it yields ``None``: the cleanup rewrites the
+    file in place, never deletes it.
+    """
+    from apm_cli.integration.targets import configured_user_root
+
+    root = hook_containment_root(target, project_root)
+    if root == project_root:
+        return root
+    try:
+        # The scope resolver stores the resolved path; the configured one keeps the link.
+        configured = configured_user_root(target.name)
+    except PathTraversalError:
+        return None
+    if root.is_symlink() or (configured and Path(os.path.normpath(configured)).is_symlink()):
+        return None
+    return root
+
+
 def copy_deployed_hook_bundle(
     integrator: BaseIntegrator,
     *,

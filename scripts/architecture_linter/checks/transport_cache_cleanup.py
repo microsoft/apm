@@ -17,7 +17,11 @@ from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-cache-cleanup-outcome"
 _OWNER = "src/apm_cli/cache/cleanup.py"
-_CONSUMERS = ("src/apm_cli/cache/git_cache.py", "src/apm_cli/cache/http_cache.py")
+_CONSUMERS = (
+    "src/apm_cli/cache/git_cache.py",
+    "src/apm_cli/cache/http_cache.py",
+    "src/apm_cli/cache/deploy_store.py",
+)
 
 
 def _check_cache_cleanup(provider: FactsProvider) -> tuple[Violation, ...]:

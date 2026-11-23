@@ -241,3 +241,98 @@ class TestUpdatePluginJsonPaths:
 # ---------------------------------------------------------------------------
 # Integration tests: export_plugin_bundle
 # ---------------------------------------------------------------------------
+
+
+class TestDuplicatePluginRenderings:
+    """#3686: one rendering per primitive, identified by the deploying target."""
+
+    @pytest.mark.parametrize(
+        ("deployed", "dropped"),
+        [
+            # claude + copilot agents and instructions: one rendering each.
+            (
+                {
+                    ".claude/agents/rv.md": "agents/rv.md",
+                    ".github/agents/rv.agent.md": "agents/rv.agent.md",
+                    ".claude/rules/py.md": "instructions/py.md",
+                    ".github/instructions/py.instructions.md": "instructions/py.instructions.md",
+                    ".cursor/rules/py.mdc": "instructions/py.mdc",
+                },
+                {"agents/rv.agent.md", "instructions/py.md", "instructions/py.mdc"},
+            ),
+            # Two distinct Claude agents with dotted stems are not renderings.
+            (
+                {
+                    ".claude/agents/rv.md": "agents/rv.md",
+                    ".claude/agents/rv.agent.md": "agents/rv.agent.md",
+                },
+                set(),
+            ),
+            # A dotted stem still pairs its Copilot and Claude instruction renderings.
+            (
+                {
+                    ".github/instructions/review.agent.instructions.md": (
+                        "instructions/review.agent.instructions.md"
+                    ),
+                    ".claude/rules/review.agent.md": "instructions/review.agent.md",
+                },
+                {"instructions/review.agent.md"},
+            ),
+            # Without the APM rendering each native rule rendering is kept.
+            (
+                {
+                    ".claude/rules/py.md": "instructions/py.md",
+                    ".cursor/rules/py.mdc": "instructions/py.mdc",
+                },
+                set(),
+            ),
+            # A Copilot prompt exports as commands/x.md and pairs with Gemini's TOML.
+            (
+                {
+                    ".github/prompts/review.prompt.md": "commands/review.md",
+                    ".gemini/commands/review.toml": "commands/review.toml",
+                },
+                {"commands/review.toml"},
+            ),
+            # Own source primitives carry no target provenance.
+            (
+                {".apm/agents/rv.agent.md": "agents/rv.agent.md", "agents/rv.md": "agents/rv.md"},
+                set(),
+            ),
+        ],
+    )
+    def test_drops_only_other_target_renderings(self, deployed, dropped):
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
+
+        sources = list(deployed)
+        superseded = superseded_plugin_renderings(sources)
+        assert {deployed[sources[index]] for index in superseded} == dropped
+
+    @pytest.mark.parametrize("claude_first", [True, False])
+    @pytest.mark.parametrize(
+        ("claude", "other", "superseded"),
+        [
+            # Same extension: the Claude plugin format beats Kiro's lossy prompt.
+            (".claude/commands/review.md", ".kiro/prompts/review.md", True),
+            (".claude/agents/rv.md", ".kiro/agents/rv.md", True),
+            # Stems rv.agent and rv: two primitives, left to collide.
+            (".claude/agents/rv.agent.md", ".github/agents/rv.agent.md", False),
+        ],
+    )
+    def test_rendering_identity_and_format_decide_the_kept_one(
+        self, claude, other, superseded, claude_first
+    ):
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
+
+        sources = [claude, other] if claude_first else [other, claude]
+        expected = {sources.index(other): sources.index(claude)} if superseded else {}
+        assert superseded_plugin_renderings(sources) == expected
+
+    def test_prompt_rename_keeps_distinct_commands_apart(self):
+        """A Claude command and a renamed Copilot prompt with a dotted stem stay distinct."""
+        from apm_cli.bundle.plugin_layout import superseded_plugin_renderings
+
+        deployed = [".claude/commands/review.md", ".github/prompts/review.prompt.prompt.md"]
+        plugin_rels = {_plugin_rel_for_deployed_path(src, None) for src in deployed}
+        assert plugin_rels == {"commands/review.md", "commands/review.prompt.md"}
+        assert superseded_plugin_renderings(deployed) == {}

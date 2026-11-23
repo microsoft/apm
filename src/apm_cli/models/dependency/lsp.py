@@ -1,12 +1,10 @@
 """LSP dependency model."""
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from apm_cli.models.dependency.server_names import validate_server_name
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
-
-_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 
 
 def _first_defined(data: dict, primary: str, fallback: str):
@@ -163,12 +161,7 @@ class LSPDependency:
         """
         if not self.name:
             raise ValueError("LSP dependency 'name' must not be empty")
-        if not _NAME_REGEX.match(self.name):
-            raise ValueError(
-                f"Invalid LSP dependency name '{self.name}': "
-                f"must start with a letter, digit, '@', or '_' and contain "
-                f"only [a-zA-Z0-9._@/:=-] (max 128 chars)."
-            )
+        validate_server_name(self.name, "LSP")
         if ".." in self.name.split("/"):
             raise ValueError(
                 f"Invalid LSP dependency name '{self.name}': must not contain '..' path segments."
