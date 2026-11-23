@@ -131,3 +131,67 @@ def test_removing_a_server_through_a_linked_codex_dir_reports_it_and_deletes_not
     assert snapshot(kit.outside) == before, output(result)
     assert (kit.project / ".codex").is_symlink()
     assert _ROOT_LINK in output(result)
+
+
+_CODEX_SEED = 'model = "x"\n'
+
+
+def _link_codex(kit, link: str) -> Path:
+    """Link the project's ``.codex`` dir or its ``config.toml`` outside; return the target."""
+    if link == "dir":
+        target = kit.outside / "codex"
+        target.mkdir()
+        (target / "config.toml").write_text(_CODEX_SEED, encoding="utf-8")
+        os.symlink(target, kit.project / ".codex", target_is_directory=True)
+        return target / "config.toml"
+    (kit.project / ".codex").mkdir()
+    target = kit.outside / "config.toml"
+    target.write_text(_CODEX_SEED, encoding="utf-8")
+    os.symlink(target, kit.project / ".codex" / "config.toml")
+    return target
+
+
+@pytest.mark.parametrize("link", ["dir", "file"])
+def test_install_mcp_flag_refuses_a_linked_codex_config(
+    tmp_path: Path, apm_binary_path: Path, link: str
+) -> None:
+    """``apm install --mcp`` writes through the same link policy as the install pipeline."""
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    kit.write_manifest(("codex",))
+    target = _link_codex(kit, link)
+
+    result = kit.run("install", "--no-policy", "--verbose", "--mcp", "localsrv", "--", "echo", "ok")
+
+    assert target.read_text(encoding="utf-8") == _CODEX_SEED, output(result)
+    assert "symlink" in output(result), output(result)
+    linked = kit.project / ".codex" if link == "dir" else kit.project / ".codex/config.toml"
+    assert linked.is_symlink()
+
+
+def test_uninstall_reports_a_server_behind_a_linked_codex_config_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A server whose config.toml became a link outside is reported; nothing outside changes."""
+    kit = build_containment_kit(tmp_path, apm_binary_path)
+    (kit.package / "apm.yml").write_text(
+        "name: pkg\nversion: 1.0.0\ndependencies:\n  mcp:\n    - name: pkgsrv\n"
+        "      registry: false\n      transport: stdio\n      command: echo\n"
+        "      args: [ok]\n",
+        encoding="utf-8",
+    )
+    kit.write_manifest(("codex",))
+    (kit.project / ".codex").mkdir()
+    installed = kit.run("install", "--no-policy", "--trust-transitive-mcp")
+    config = kit.project / ".codex" / "config.toml"
+    assert "pkgsrv" in config.read_text(encoding="utf-8"), output(installed)
+    copy = kit.outside / "config.toml"
+    shutil.copyfile(config, copy)
+    config.unlink()
+    os.symlink(copy, config)
+    before = snapshot(kit.outside)
+
+    result = kit.run("uninstall", kit.package.as_posix())
+
+    assert snapshot(kit.outside) == before, output(result)
+    assert config.is_symlink()
+    assert "symlink" in output(result), output(result)

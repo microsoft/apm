@@ -617,7 +617,7 @@ class MCPClientAdapter(ABC):
         JSONC comments), or the path runs through a symlink (under ``$HOME``
         at user scope), which stale cleanup refuses to rewrite later.
         """
-        if self.user_scope and has_symlink_component(Path.home(), config_path):
+        if self.user_scope and self._is_linked_config(config_path):
             _warn_symlinked_mcp_config(config_path)
             return None
         return self._parse_json_config_for_update(config_path)
@@ -672,6 +672,14 @@ class MCPClientAdapter(ABC):
             )
             return None
         return config
+
+    def _is_linked_config(self, config_path: Path, *, user_root: Path | None = None) -> bool:
+        """The one MCP config link policy (project, user under $HOME, relocated user root)."""
+        if user_root is None and not self.user_scope:
+            return self._is_linked_project_config(config_path)
+        if Path(os.path.abspath(config_path)).is_relative_to(os.path.abspath(Path.home())):
+            return has_symlink_component(Path.home(), config_path)
+        return has_symlink_component((user_root or config_path.parent).parent, config_path)
 
     def _is_linked_project_config(self, config_path: Path) -> bool:
         """Return whether a project-scope config path is or crosses a symlink.
