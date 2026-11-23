@@ -22,7 +22,7 @@ if _LOG:
         items = iter(argv[1:])
         for item in items:
             item = item.decode(errors="replace") if isinstance(item, bytes) else str(item)
-            if item in ("-c", "-C"):
+            if item in ("-c", "-C", "--git-dir", "--work-tree", "--namespace"):
                 next(items, None)
             elif not item.startswith("-"):
                 return item
