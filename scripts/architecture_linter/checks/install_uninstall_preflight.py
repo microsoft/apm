@@ -48,6 +48,9 @@ _ROUTES = (
     (_CLEANUP, "hook_sync_unlinks", "managed_hook_prefixes"),
     (_CLEANUP, "hook_sync_unlinks", "_stale_gate_passes"),
     (_CLEANUP, "hook_sync_unlinks", "_managed_link_unlinkable"),
+    # The read-only hook decision and the sync share one consent link rule (#5139).
+    (_CLEANUP, "hook_sync_unlinks", "_consent_keeps_link"),
+    (_CLEANUP, "consent_kept_link", "_consent_keeps_link"),
     (_CLEANUP, "remove_stale_deployed_files", "_managed_link_unlinkable"),
     (_HOOKS, "sync_integration", "managed_hook_prefixes"),
     (_CLEANUP, "final_link_handled", "_stale_gate_passes"),
