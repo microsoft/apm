@@ -2186,3 +2186,56 @@ def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Pa
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_private_apm_home_is_still_replayed(tmp_path: Path, apm_home: Path) -> None:
+    """A dotfiles APM_HOME is a link to a private directory: its target is checked."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    target = tmp_path / "dotfiles" / "apm"
+    target.mkdir(parents=True, mode=0o700)
+    apm_home.symlink_to(target, target_is_directory=True)
+    _killed_journal(apm_home, project, config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_symlinked_apm_home_others_can_write_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    target = tmp_path / "shared" / "apm"
+    target.mkdir(parents=True, mode=0o700)
+    apm_home.symlink_to(target, target_is_directory=True)
+    _killed_journal(apm_home, project, config)
+    target.chmod(0o777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+def test_a_journal_that_is_a_directory_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "journal.jsonl").unlink()
+    (store / "journal.jsonl").mkdir(mode=0o700)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
