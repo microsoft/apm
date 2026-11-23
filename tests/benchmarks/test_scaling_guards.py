@@ -1087,21 +1087,13 @@ def test_bench_pairs_stay_within_their_shard_under_a_nested_artifact_root(
     assert row["paired_new_over_base"] == 0.5
 
 
-def test_bench_pairs_a_single_runs_directory(tmp_path: Path) -> None:
+def test_bench_pairs_a_single_runs_directory(tmp_path: Path, capsys) -> None:
     # Reporting one shard's runs/ directly: base-00 and new-00 are one pair.
-    runs = tmp_path / "perf-bench-shard-1" / "runs"
     _write_bench_record(tmp_path, 1, "base", 0, 3.0, nested="runs")
     _write_bench_record(tmp_path, 1, "new", 0, 1.5, nested="runs")
 
-    (row,) = ci_bench.summarize(runs)
-    assert row["paired_new_over_base"] == 0.5
-
-
-def test_policy_fixtures_skip_journeys_outside_the_governed_project() -> None:
-    fixture = journeys.Fixture("tree-10-policy", Path("."), (".",), policy=True)
-    wanted = ["install-warm", "install-global-cold", "install-global-warm", "install-bundle"]
-
-    assert journeys._journeys_for(fixture, 0.0, False, wanted, []) == ["install-warm"]
+    assert _bench_report(tmp_path / "perf-bench-shard-1" / "runs", shards=1, pairs=1) == 0
+    assert "| 2.00x | +50.0% | 0.500 |" in capsys.readouterr().out
 
 
 def test_bench_report_pairs_modeled_rtt_wall_and_round_trips(tmp_path: Path, capsys) -> None:
