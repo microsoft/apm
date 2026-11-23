@@ -144,3 +144,23 @@ def test_refuses_whole_batch_when_one_output_crosses_a_linked_directory(tmp_path
 
     assert not regular.exists()
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+@pytest.mark.parametrize("linked_spelling", ["base_dir", "output"])
+def test_refuses_linked_directory_when_root_spellings_differ(tmp_path: Path, linked_spelling: str):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".github").symlink_to(outside, target_is_directory=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(project, target_is_directory=True)
+    base_dir, output_root = (alias, project) if linked_spelling == "base_dir" else (project, alias)
+
+    with pytest.raises(OSError, match="Refusing deployment through a symlinked path component"):
+        CompiledOutputWriter(base_dir=base_dir).write(
+            output_root / ".github" / "copilot-instructions.md", "# B\n"
+        )
+
+    assert list(outside.iterdir()) == []
