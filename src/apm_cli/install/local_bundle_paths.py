@@ -22,6 +22,46 @@ _UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})
 _RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})
 
 
+# Bundle metadata never deploys to consumer projects (#1207 D2.a).
+_BUNDLE_METADATA_FILES = frozenset(
+    {
+        "plugin.json",
+        ".mcp.json",
+        "mcp.json",
+        ".lsp.json",
+        "lsp.json",
+        "com.microsoft.apm/mcp.json",
+        "com.microsoft.apm/lsp.json",
+    }
+)
+
+
+def deployable_bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:
+    """Return packed file digests a bundle may deploy, minus bundle metadata.
+
+    An older bundle without ``pack.bundle_files`` falls back to hashing every
+    regular file except ``apm.lock.yaml`` so it never deploys zero files.
+    Metadata matches case-insensitively (case-folding filesystems) and is
+    dropped before any per-target loop so it never inflates skip counts.
+    """
+    pack_files = bundle_pack_files(bundle_info)
+    if not pack_files:
+        import hashlib
+
+        bundle_dir: Path = bundle_info.source_dir
+        for fp in bundle_dir.rglob("*"):
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            rel = fp.relative_to(bundle_dir).as_posix()
+            if rel.lower() != "apm.lock.yaml":
+                pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+    return {
+        rel: digest
+        for rel, digest in pack_files.items()
+        if rel.lower() not in _BUNDLE_METADATA_FILES
+    }
+
+
 def bundle_pack_files(bundle_info: LocalBundleInfo) -> dict[str, str]:
     """Read the packed file manifest from bundle lockfile metadata."""
     if not bundle_info.lockfile:

@@ -112,6 +112,23 @@ def deployed_rendering_rank(deployed_rel: str) -> int | None:
     return preference.index(found[1]) if found[1] in preference else len(preference)
 
 
+def kept_shared_path_rendering(deployed_rels: list[str]) -> int | None:
+    """Return the index of the rendering kept among deployed files sharing one plugin path.
+
+    ``None`` keeps them all as a collision: when one is no target rendering, or
+    when the preferred one is not a rendering the others may be dropped beside
+    (Claude ``.claude/rules/py.md`` and Kiro ``.kiro/steering/py.md`` are two
+    native rule formats and neither converts to the other, #3686).
+    """
+    found = [_deployed_rendering(rel) for rel in deployed_rels]
+    if any(rendering is None for rendering in found):
+        return None
+    ranks = [deployed_rendering_rank(rel) for rel in deployed_rels]
+    kept = min(range(len(found)), key=lambda index: (ranks[index], index))
+    head, extension = found[kept]
+    return kept if _DROP_ONLY_BESIDE.get(head, extension) == extension else None
+
+
 def deployed_rendering_suffix(deployed_rel: str) -> str | None:
     """Return the deploying target's own extension for *deployed_rel*, if any."""
     found = _deployed_rendering(deployed_rel)

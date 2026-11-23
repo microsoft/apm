@@ -51,6 +51,7 @@ from .plugin_layout import (
     deployed_rendering_suffix,
     duplicate_plugin_renderings,
     find_plugin_root_sources,
+    kept_shared_path_rendering,
 )
 
 # ---------------------------------------------------------------------------
@@ -1548,20 +1549,24 @@ def _drop_same_path_renderings(
 ) -> list[tuple[Path, str]]:
     """Keep the preferred of several deployed renderings that share one plugin path.
 
-    Only files every target rendered are ranked; any other shared path stays a
-    collision for :func:`_merge_file_map` to report.
+    :func:`.plugin_layout.kept_shared_path_rendering` picks the kept one; any
+    other shared path stays a collision for :func:`_merge_file_map` to report.
     """
-    by_rel: dict[str, list[tuple[int | None, int, str]]] = {}
+    by_rel: dict[str, list[tuple[int, str]]] = {}
     for index, (source, rel) in enumerate(components):
         deployed = _deployed_path(source, project_root, rendered) or ""
-        by_rel.setdefault(rel, []).append((deployed_rendering_rank(deployed), index, deployed))
+        by_rel.setdefault(rel, []).append((index, deployed))
     skip: set[int] = set()
     for members in by_rel.values():
-        if len(members) < 2 or any(rank is None for rank, _index, _path in members):
+        if len(members) < 2:
             continue
-        for _rank, index, deployed in sorted(members)[1:]:
-            skip.add(index)
-            dropped.append(deployed)
+        kept = kept_shared_path_rendering([deployed for _index, deployed in members])
+        if kept is None:
+            continue
+        for position, (index, deployed) in enumerate(members):
+            if position != kept:
+                skip.add(index)
+                dropped.append(deployed)
     return [component for index, component in enumerate(components) if index not in skip]
 
 

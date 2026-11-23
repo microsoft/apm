@@ -1234,6 +1234,29 @@ class TestExportPluginBundle:
         ]
         assert (instructions / "py.instructions.md").read_text() == "copilot py"
 
+    def test_two_native_rule_renderings_report_a_collision(self, tmp_path):
+        """#3686: Claude and Kiro rules never convert, so neither is dropped as a duplicate."""
+        rules = [(".claude/rules/py.md", "claude"), (".kiro/steering/py.md", "kiro")]
+        project = _setup_plugin_project(tmp_path)
+        for rel, body in rules:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text(body, encoding="utf-8")
+        _write_lockfile(
+            project,
+            [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=[r for r, _ in rules])],
+        )
+        with (
+            patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning,
+            patch("apm_cli.bundle.plugin_exporter._rich_info") as info,
+        ):
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        # First writer wins; the collision names the shared path.
+        assert (bundle / "instructions" / "py.md").read_text() == "claude"
+        warnings = [str(call) for call in warning.call_args_list]
+        assert any("instructions/py.md -- collision" in w for w in warnings), warnings
+        assert not any("rendering" in str(call) for call in info.call_args_list)
+
     def test_native_markdown_prompts_keep_their_stem(self, tmp_path):
         """#3686: a Kiro prompt review.prompt.md pairs with its Claude command, not review.md."""
         bundle = self._pack_deployed(

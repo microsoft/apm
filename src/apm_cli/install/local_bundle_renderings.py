@@ -5,8 +5,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..core.command_logger import InstallLogger
     from ..utils.diagnostics import DiagnosticCollector
+
+
+_TEXT_BUNDLE_SUFFIXES = frozenset({".json", ".md", ".toml", ".txt", ".yaml", ".yml"})
+
+
+def normalized_bundle_text(path: Path) -> str | None:
+    """Return a packed text file with LF line endings, or None for binary files."""
+    if path.suffix.lower() not in _TEXT_BUNDLE_SUFFIXES:
+        return None
+    from ..utils.atomic_io import normalize_crlf_to_lf
+
+    try:
+        return normalize_crlf_to_lf(path.read_bytes().decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
 
 
 def render_bundle_rule(
