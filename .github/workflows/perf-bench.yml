@@ -99,6 +99,9 @@ jobs:
         [[ "$FIXTURES" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad FIXTURES"; exit 1; }
         [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
         [[ "$RTT" =~ ^[0-9]{1,4}(,[0-9]{1,4}){0,3}$ ]] || { echo "::error::bad RTT (comma list of up to 4)"; exit 1; }
+        # Each RTT is one cell key; a repeated value (30,030) would overwrite pairs.
+        DISTINCT=$(tr ',' '\n' <<< "$RTT" | sed 's/^0*\([0-9]\)/\1/' | sort -u | wc -l)
+        [ "$DISTINCT" -eq "$(tr ',' '\n' <<< "$RTT" | wc -l)" ] || { echo "::error::RTT values must be distinct"; exit 1; }
         [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
         [[ "$PROFILE" =~ ^[01]$ ]] || { echo "::error::PROFILE must be 0 or 1"; exit 1; }
         case "$OS" in
@@ -107,6 +110,8 @@ jobs:
           windows) RUNNER=windows-2025 ;;
           *) echo "::error::OS must be linux, macos or windows"; exit 1 ;;
         esac
+        # cProfile needs the Python console script; the Windows venv has a PE launcher.
+        if [ "$OS" = windows ] && [ "$PROFILE" = 1 ]; then echo "::error::PROFILE=1 is not supported on windows"; exit 1; fi
         # The venv console script, relative to a side's worktree.
         if [ "$OS" = windows ]; then VENV_APM=.venv/Scripts/apm.exe; else VENV_APM=.venv/bin/apm; fi
         {
