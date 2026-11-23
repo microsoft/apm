@@ -603,7 +603,7 @@ def unconsented(retained: Iterable[str], evidence: DeploymentEvidence | None) ->
     A file consent keeps is not a cleanup failure; every other retained path is.
     """
     kept = evidence.kept_under_consent() if evidence is not None else frozenset()
-    return [path for path in retained if path.replace("\\", "/") not in kept]
+    return [path for path in retained if _claim_key(path) not in kept]
 
 
 def consent_outcome(

@@ -698,6 +698,43 @@ def _sync_hooks(root: Path, evidence: DeploymentEvidence) -> dict:
 
 
 @pytest.mark.req("req-lk-024")
+def test_consent_kept_dot_segment_hook_is_not_a_sync_error(tmp_path: Path) -> None:
+    """A hook claim spelled with ``./`` that consent keeps is no failure (#4295)."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+
+    path = _hook(tmp_path)
+    dotted = _HOOK.replace("hooks/", "hooks/./")
+    evidence = DeploymentEvidence(deploy_root=tmp_path, receipts={}, render=_no_render, kept=())
+    evidence.consent_to_lockfile_hashes()
+
+    stats = HookIntegrator().sync_integration(
+        None, tmp_path, managed_files={dotted}, managed_file_hashes={}, evidence=evidence
+    )
+
+    assert path.exists()
+    assert stats["errors"] == 0
+
+
+@pytest.mark.req("req-lk-024")
+def test_uninstall_waives_a_consent_kept_dot_segment_claim(tmp_path: Path) -> None:
+    """Retained ``./`` spellings match consent's canonical keys, so uninstall completes."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.cli import _abort_if_retained_target_cleanup_paths
+
+    lock_path = tmp_path / "apm.lock.yaml"
+    outcome = SimpleNamespace(retained_paths={_PATH.replace("/notes", "/./notes")})
+    logger = SimpleNamespace(render_summary=lambda: None, error=lambda *_a, **_k: None)
+
+    _abort_if_retained_target_cleanup_paths(
+        outcome, None, lock_path, logger, consent_kept=frozenset({_PATH})
+    )
+
+    assert outcome.retained_paths == set()
+    assert not lock_path.exists()
+
+
+@pytest.mark.req("req-lk-024")
 def test_consent_kept_hook_is_not_reported_as_a_path_safety_failure(tmp_path: Path) -> None:
     path = _hook(tmp_path)
     evidence = DeploymentEvidence(deploy_root=tmp_path, receipts={}, render=_no_render, kept=())
