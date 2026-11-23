@@ -1199,8 +1199,9 @@ def test_uninstall_bundle_finishes_a_pending_record_update_that_failed(
     world.apm(consumer, "audit", "--ci")
     pending = output(world.apm(consumer, "approve", "--pending"))
     assert "All packages with executables are approved." in pending, pending
+    # Converged: nothing is left to finish, and a repeat changes no bytes.
     again = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
-    assert "Local bundle 'hookpkg' has no hooks deployed" in again, again
+    assert "no changes were made" in again, again
     assert tree_bytes(consumer) == after
 
 

@@ -64,6 +64,10 @@ def record_bundle_executables(
         del bundles[slug]
     else:
         return
+    _write(scope_dir, bundles)
+
+
+def _write(scope_dir: Path, bundles: dict[str, dict]) -> None:
     path = _record_path(scope_dir)
     if blocker := pending_record_blocker(scope_dir):
         from ..utils.path_security import PathTraversalError
@@ -115,12 +119,50 @@ def recorded_bundle_slugs(scope_dir: Path) -> list[str]:
     return [bundle.slug for bundle in _recorded(scope_dir)]
 
 
+def _retiring(entry: Any) -> list[str]:
+    types = entry.get("retiring") if isinstance(entry, dict) else None
+    return [str(t) for t in types] if isinstance(types, list) else []
+
+
+def mark_bundle_retiring(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Note, before uninstall removes anything, that it is retiring *exec_type* (#4987).
+
+    A retry after a failed :func:`drop_bundle_exec_type` finds the note and
+    finishes; a bundle whose *exec_type* is only parked carries none.
+    """
+    bundles = _read(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    if exec_type in _retiring(entry):
+        return
+    bundles[slug] = {**entry, "retiring": sorted({*_retiring(entry), exec_type})}
+    _write(scope_dir, bundles)
+
+
+def retiring_bundle_slugs(scope_dir: Path, exec_type: str) -> set[str]:
+    """Slugs whose uninstall began retiring *exec_type* and did not finish its record update."""
+    return {slug for slug, entry in _read(scope_dir).items() if exec_type in _retiring(entry)}
+
+
 def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
     """Forget *exec_type* for one installed bundle once its uninstall removed it (#3700)."""
-    for bundle in _recorded(scope_dir):
-        if bundle.slug == slug and exec_type in bundle.exec_types:
-            remaining = [t for t in bundle.exec_types if t != exec_type]
-            record_bundle_executables(scope_dir, slug, bundle.approval_key, remaining)
+    bundles = _read(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    remaining = [t for t in types if t != exec_type]
+    retiring = [t for t in _retiring(entry) if t != exec_type]
+    if not remaining:
+        del bundles[slug]
+    else:
+        bundles[slug] = {k: v for k, v in entry.items() if k != "retiring"}
+        bundles[slug]["exec_types"] = remaining
+        if retiring:
+            bundles[slug]["retiring"] = retiring
+    _write(scope_dir, bundles)
 
 
 def pending_bundles(
