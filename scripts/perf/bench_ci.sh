@@ -2,7 +2,7 @@
 # Perf bench on CI runners: agents only do I/O (seconds), runners do the work.
 #
 #   scripts/perf/bench_ci.sh request BASE_SHA NEW_SHA [JOURNEYS] [FIXTURES] [PAIRS] [RTT] [OS]
-#       -> pushes perf-bench/<new8>-<epoch> with bench-request.env; prints the branch.
+#       -> pushes perf-bench/<new8>-<epoch>-<rand6> with bench-request.env; prints the branch.
 #   scripts/perf/bench_ci.sh fetch BRANCH
 #       -> waits for that branch's Perf bench run and prints its summary table.
 #
@@ -10,6 +10,8 @@
 # 3 runners (9 interleaved pairs per side), OS linux (or macos, windows).
 # Wall time is never reported.
 # The harness (workflow + tests/benchmarks) comes from HARNESS_REF.
+# Cloud agents: use `gh workflow run perf-bench.yml --ref <harness branch> -f ...`;
+# a push request from a trailer-signed commit stops at action_required.
 set -euo pipefail
 
 REPO="${PERF_BENCH_REPO:-microsoft/apm}"
@@ -23,7 +25,9 @@ request() {
   local journeys="${3:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
   local fixtures="${4:-tree-10}" pairs="${5:-3}" rtt="${6:-30}" os="${7:-linux}"
   [[ "$base" =~ ^[0-9a-f]{7,40}$ && "$new" =~ ^[0-9a-f]{7,40}$ ]] || die "SHAs must be hex"
-  local branch="perf-bench/${new:0:8}-$(date +%s)"
+  # A random suffix: two sessions benching one SHA in the same second must not collide.
+  local rand; rand="$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
+  local branch="perf-bench/${new:0:8}-$(date +%s)-${rand}"
   local tmp; tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
   git -C "$tmp" init --quiet
@@ -65,5 +69,5 @@ fetch() {
 case "${1:-}" in
   request) shift; request "$@" ;;
   fetch) shift; fetch "$@" ;;
-  *) sed -n '2,13p' "$0"; exit 2 ;;
+  *) sed -n '2,14p' "$0"; exit 2 ;;
 esac
