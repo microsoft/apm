@@ -380,7 +380,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             package_info,
             project_root,
             source_plan,
-            user_scope=scope is InstallScope.USER,
+            user_scope=scope is InstallScope.USER or native_claude_user_scope,
             retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
         )
 
@@ -511,7 +511,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Sibling integrators don't accept this kwarg, so include it only
             # for hooks.
             if _prim_name == "hooks":
-                _call_kwargs["user_scope"] = scope is InstallScope.USER
+                _call_kwargs["user_scope"] = scope is InstallScope.USER or native_claude_user_scope
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
                 # Mirror retiring_targets (#3129) so a fallback preflight isn't

@@ -2,8 +2,9 @@
 """End-to-end journey benchmarks of the real ``apm`` CLI on the perf fixtures.
 
 Runs the installed CLI as a subprocess (``--apm``, else ``APM_BINARY_PATH``,
-else ``.venv/bin/apm``, else ``apm`` on PATH) through critical user journeys
-on the seeded fixtures of ``tests/fixtures/perf`` and writes JSON plus
+else ``.venv/bin/apm`` or ``.venv/Scripts/apm.exe``, else ``apm`` on PATH)
+through critical user journeys on the seeded fixtures of ``tests/fixtures/perf``
+and writes JSON plus
 markdown: wall p50/p90, requests, round trips and connects per command, the
 1-min load of every sample, the git SHA and the CLI version.
 
@@ -58,7 +59,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
-from tests.fixtures.perf.generator import consumer_manifest, write_lf  # noqa: E402
+from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
 
 LOCAL_JOURNEYS = ("compile", "audit", "pack", "install-bundle")
 NETWORK_JOURNEYS = (
@@ -121,7 +122,7 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
     directory = work / "fixtures" / name
     if name == "real":
         template = directory / "project"
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
         template.mkdir(parents=True)
         text = consumer_manifest("real-consumer", list(REAL_PACKAGES), ("copilot",))
         write_lf(template / "apm.yml", text)
@@ -156,7 +157,7 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
 
 def _rebuild(directory: Path, recipe: object, build: Callable[[Path], object]):
     """Regenerate the fixture; generation is seeded, so this is cheap to trust."""
-    shutil.rmtree(directory, ignore_errors=True)
+    remove_tree(directory)
     directory.mkdir(parents=True)
     return build(directory / "src")
 
@@ -191,13 +192,13 @@ class _RealWorld:
         self.tunnel.reset_traffic()
 
     def clear_cache(self) -> None:
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
+        remove_tree(self.cache_dir)
         self.cache_dir.mkdir(parents=True)
 
 
 @contextlib.contextmanager
 def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
-    shutil.rmtree(directory / "env", ignore_errors=True)
+    remove_tree(directory / "env")
     if fixture.real:
         isolated, env = isolated_environment(directory / "env")
         with counting_tunnel() as tunnel:
@@ -261,6 +262,175 @@ def _wait4_with_deadline(proc: subprocess.Popen, timeout_s: float) -> tuple[int,
         delay = min(delay * 2, 0.1)
 
 
+_CREATE_SUSPENDED = 0x00000004
+_JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+
+def _job_popen(argv: list[str], **kwargs) -> tuple[subprocess.Popen, int]:
+    """Windows: start *argv* inside a fresh Job Object; return the process and the job.
+
+    The process starts suspended and resumes only once it is in the job, so
+    every descendant (the venv launcher's python.exe, git and its helpers)
+    lands in the job too. Were it started running, children spawned before
+    ``AssignProcessToJobObject`` would be missed. The job kills its processes
+    when its last handle closes, so a crashed harness orphans nothing.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = (
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        )
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = (
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", ctypes.c_uint64 * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    kernel32.SetInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    )
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    ntdll = ctypes.WinDLL("ntdll")
+    ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    proc = None
+    try:
+        limits = _ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            job, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        proc = subprocess.Popen(argv, creationflags=_CREATE_SUSPENDED, **kwargs)
+        # Popen keeps the process handle in the private ``_handle``.
+        handle = int(proc._handle)
+        if not kernel32.AssignProcessToJobObject(job, handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        status = ntdll.NtResumeProcess(handle)
+        if status:
+            raise OSError(f"NtResumeProcess failed: NTSTATUS {status & 0xFFFFFFFF:#010x}")
+    except BaseException:
+        if proc is not None:
+            kernel32.TerminateJobObject(job, 1)
+            proc.kill()
+            proc.wait()
+        _close_job(job)
+        raise
+    return proc, job
+
+
+def _close_job(job: int) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle(job)
+
+
+def _job_wait_with_deadline(proc: subprocess.Popen, job: int, timeout_s: float) -> float:
+    """Windows: wait for *proc*, bounded; return the job's user + kernel CPU seconds.
+
+    ``JobObjectBasicAccountingInformation`` totals the CPU of every process
+    ever in the job (the child and all its descendants), in 100 ns units. A
+    child still running at the deadline has its whole job terminated, and the
+    command fails like ``subprocess.run(timeout=...)`` would.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _Accounting(ctypes.Structure):
+        _fields_ = (
+            ("TotalUserTime", ctypes.c_int64),
+            ("TotalKernelTime", ctypes.c_int64),
+            ("ThisPeriodTotalUserTime", ctypes.c_int64),
+            ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+            ("TotalPageFaultCount", wintypes.DWORD),
+            ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("TotalTerminatedProcesses", wintypes.DWORD),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.QueryInformationJobObject.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.LPDWORD,
+    )
+    try:
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            kernel32.TerminateJobObject(job, 1)
+            proc.wait()
+            raise
+        info = _Accounting()
+        if not kernel32.QueryInformationJobObject(
+            job,
+            _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+            None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return _job_cpu_seconds(info.TotalUserTime, info.TotalKernelTime)
+    finally:
+        _close_job(job)
+
+
+def _job_cpu_seconds(user_100ns: int, kernel_100ns: int) -> float:
+    """Job Object user + kernel times (100 ns units) as CPU seconds."""
+    return (user_100ns + kernel_100ns) / 10_000_000
+
+
+def _run_measured(
+    argv: list[str], timeout_s: float, *, platform: str = sys.platform, **popen_kwargs
+) -> tuple[int, float]:
+    """Run *argv* to completion, bounded; return its exit code and CPU seconds.
+
+    CPU is user + sys of the child and its descendants: ``wait4`` on POSIX
+    (descendants it waited for), a Job Object on Windows (every process ever
+    in the job).
+    """
+    if platform == "win32":
+        proc, job = _job_popen(argv, **popen_kwargs)
+        cpu = _job_wait_with_deadline(proc, job, timeout_s)
+        return proc.returncode, cpu
+    proc = subprocess.Popen(argv, **popen_kwargs)
+    status, usage = _wait4_with_deadline(proc, timeout_s)
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    return proc.returncode, usage.ru_utime + usage.ru_stime
+
+
 @dataclass
 class Context:
     fixture: Fixture
@@ -300,7 +470,8 @@ class Context:
         """Run one command; return its exit code, output tail and CPU seconds.
 
         CPU is user + sys of the child and every descendant it waited for
-        (``wait4``), so server-side ``git http-backend`` work is excluded.
+        (``wait4``; on Windows, every process of its Job Object), so
+        server-side ``git http-backend`` work is excluded.
         """
         env = dict(self.world.env)
         if self.spawn_log is not None:
@@ -310,14 +481,14 @@ class Context:
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
-            proc = subprocess.Popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
-            status, usage = _wait4_with_deadline(proc, _COMMAND_TIMEOUT_S)
-            proc.returncode = os.waitstatus_to_exitcode(status)
+            returncode, cpu = _run_measured(
+                [*self.apm, *argv], _COMMAND_TIMEOUT_S, cwd=cwd, env=env, stdout=out, stderr=err
+            )
             out.seek(0)
             err.seek(0)
             tail = out.read()[-3000:].decode(errors="replace") + "\n"
             tail += err.read()[-3000:].decode(errors="replace")
-        return proc.returncode, tail, usage.ru_utime + usage.ru_stime
+        return returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
         result = self.run(argv, cwd)
@@ -330,7 +501,7 @@ class Context:
     # state helpers (untimed)
 
     def fresh_project(self) -> None:
-        shutil.rmtree(self.project, ignore_errors=True)
+        remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
         self.is_installed = False
@@ -356,7 +527,7 @@ class Context:
                 shutil.rmtree(path)
             elif path.exists():
                 path.unlink()
-        shutil.rmtree(Path(self.world.env["HOME"]) / ".copilot", ignore_errors=True)
+        remove_tree(Path(self.world.env["HOME"]) / ".copilot")
         shutil.copyfile(self.fixture.template / "apm.yml", home / "apm.yml")
 
 
@@ -412,10 +583,10 @@ def _setup_install_bundle(ctx: Context) -> None:
     """A plugin bundle packed from the installed project; a fresh consumer installs it."""
     ctx.installed()
     dist = ctx.work / "dist-bundle"
-    shutil.rmtree(dist, ignore_errors=True)
+    remove_tree(dist)
     ctx.checked(["pack", "--archive", "-o", str(dist)], ctx.roots()[0])
     consumer = ctx.work / "bundle-consumer"
-    shutil.rmtree(consumer, ignore_errors=True)
+    remove_tree(consumer)
     consumer.mkdir()
     text = consumer_manifest("bundle-consumer", [], ("copilot",))
     write_lf(consumer / "apm.yml", text)
@@ -436,7 +607,7 @@ def _uninstall_steps(ctx: Context) -> list[Step]:
 
 def _setup_pack(ctx: Context) -> None:
     ctx.installed()
-    shutil.rmtree(ctx.work / "dist", ignore_errors=True)
+    remove_tree(ctx.work / "dist")
 
 
 @dataclass(frozen=True)
@@ -489,6 +660,9 @@ JOURNEYS: dict[str, Journey] = {
 
 
 def load1() -> float:
+    """The 1-min load average; 0.0 on Windows, which has none."""
+    if not hasattr(os, "getloadavg"):
+        return 0.0
     return round(os.getloadavg()[0], 2)
 
 
@@ -650,7 +824,8 @@ def _git_sha() -> str:
 
 
 def resolve_apm(explicit: str | None) -> list[str]:
-    candidates = [explicit, os.environ.get("APM_BINARY_PATH"), str(REPO_ROOT / ".venv/bin/apm")]
+    venv_apm = ".venv/Scripts/apm.exe" if sys.platform == "win32" else ".venv/bin/apm"
+    candidates = [explicit, os.environ.get("APM_BINARY_PATH"), str(REPO_ROOT / venv_apm)]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return [str(Path(candidate).resolve())]
@@ -732,7 +907,11 @@ def run(args: argparse.Namespace) -> dict:
 
 
 def _uptime() -> str:
-    return subprocess.run(["uptime"], capture_output=True, text=True, check=False).stdout.strip()
+    try:
+        result = subprocess.run(["uptime"], capture_output=True, text=True, check=False)
+    except OSError:  # no ``uptime`` (Windows)
+        return "-"
+    return result.stdout.strip()
 
 
 def _progress(record: dict) -> None:
@@ -940,7 +1119,7 @@ def verify_real(args: argparse.Namespace) -> int:
     """Install each REAL_PACKAGES entry alone; exit 1 when any fails to resolve."""
     apm = resolve_apm(args.apm)
     work = Path(args.work).resolve() / "verify-real"
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     failures = 0
     isolated, env = isolated_environment(work / "env")
     with counting_tunnel() as tunnel:

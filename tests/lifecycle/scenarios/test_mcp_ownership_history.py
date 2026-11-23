@@ -144,7 +144,7 @@ def test_one_command_on_an_mcp_owner(lifecycle_world, row, owner) -> None:
         lock = scenario.lock()
         rows = {dep.repo_url for dep in lock.get_package_dependencies()} if lock else set()
         assert any(url.rstrip("/").endswith("pkg") for url in rows), f"{rows}\n{step.output}"
-        if row == "lock-stale" and owner == "copilot":
+        if row == "lock-stale":
             problems = mcp_server_problems(scenario, {"srv2"})
             assert not problems, f"{problems}\n{step.output}"
     scenario.finish()

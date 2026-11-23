@@ -615,7 +615,9 @@ def _decide_uninstall(
             retained_keys=candidate_orphans,
             rescued_roots=rescued_roots,
             repairs=MappingProxyType(repairs),
-            rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+            rescued_depths=MappingProxyType(
+                _rescued_root_depths(lockfile, rescued_roots, repairs, walk, probe.apm_modules_dir)
+            ),
             rescued_dev=MappingProxyType(
                 _rescued_dev_status(lockfile, rescued_roots, walk, complete=False)
             ),
@@ -631,7 +633,9 @@ def _decide_uninstall(
         rescued_keys=rescued,
         rescued_roots=rescued_roots,
         repairs=MappingProxyType(repairs),
-        rescued_depths=MappingProxyType(_rescued_root_depths(lockfile, rescued_roots, repairs)),
+        rescued_depths=MappingProxyType(
+            _rescued_root_depths(lockfile, rescued_roots, repairs, walk, probe.apm_modules_dir)
+        ),
         rescued_dev=MappingProxyType(
             _rescued_dev_status(lockfile, rescued_roots, walk, complete=True)
         ),
@@ -664,8 +668,62 @@ def _rescued_subtree(lockfile: LockFile, rescued_roots: frozenset[str]) -> list[
     return order
 
 
+_UNKNOWN_PARENT = object()
+
+
+def _rescued_parent_resolver(lockfile: LockFile, repairs: Mapping, walk, modules_dir: Path):
+    """Resolve each affected entry's parent row by exact key (#4823).
+
+    A rescued root takes the exact parent key the walk recorded. A recorded
+    legacy edge (``resolved_by`` is a ``repo_url`` that sibling virtual
+    packages share) goes through the lock parent placement owner. ``None``
+    means a direct entry; ``_UNKNOWN_PARENT`` means no unambiguous parent,
+    and an entry is never its own parent.
+    """
+    replacements = lockfile.replacements
+    dependencies = lockfile.get_package_dependencies()
+    by_identity = {lockfile_parent_identity(dep, replacements): dep for dep in dependencies}
+    placement: list[Mapping] = []
+
+    def placed() -> Mapping:
+        # Reads installed manifests, so only when a descendant needs it.
+        if not placement:
+            from ..deps.lock_parent_placement import (
+                installed_manifest_children,
+                place_legacy_lock_parents,
+            )
+
+            placement.append(
+                place_legacy_lock_parents(
+                    dependencies, installed_manifest_children(modules_dir)
+                ).parents
+            )
+        return placement[0]
+
+    def parent_of(key: str, dep):
+        exact = walk.parent_keys.get(key) if key in repairs else None
+        if exact is not None and lockfile.get_dependency(exact) is not None:
+            parent = lockfile.get_dependency(exact)
+        elif key not in repairs and replacements is None and key in placed():
+            parent = placed()[key]
+        else:
+            parent_id = repairs[key][0] if key in repairs else dep.resolved_by
+            if parent_id is None:
+                return None
+            parent = by_identity.get(parent_id)
+        if parent is None or parent.get_unique_key() == key:
+            return _UNKNOWN_PARENT
+        return parent
+
+    return parent_of
+
+
 def _rescued_root_depths(
-    lockfile: LockFile, rescued_roots: frozenset[str], repairs: Mapping
+    lockfile: LockFile,
+    rescued_roots: frozenset[str],
+    repairs: Mapping,
+    walk,
+    modules_dir: Path,
 ) -> dict[str, int]:
     """Depth each re-parented root and its locked subtree take (#4749, #4804).
 
@@ -673,11 +731,9 @@ def _rescued_root_depths(
     rescued root under another rescued root lands below it. As install
     records it, an entry sits one level below its recorded parent.
     """
-    replacements = lockfile.replacements
-    by_identity = {
-        lockfile_parent_identity(dep, replacements): dep
-        for dep in lockfile.get_package_dependencies()
-    }
+    if not rescued_roots:
+        return {}
+    parent_of = _rescued_parent_resolver(lockfile, repairs, walk, modules_dir)
     affected = _rescued_subtree(lockfile, rescued_roots)
     affected_set = set(affected)
     depths: dict[str, int] = {}
@@ -686,10 +742,11 @@ def _rescued_root_depths(
         if key in depths:
             return depths[key]
         dep = lockfile.get_dependency(key)
-        parent_id = repairs[key][0] if key in repairs else dep.resolved_by
-        parent = by_identity.get(parent_id) if parent_id is not None else None
+        parent = parent_of(key, dep)
         if parent is None:
-            return 1 if parent_id is None else max(dep.depth, 1)
+            return 1
+        if parent is _UNKNOWN_PARENT:
+            return max(dep.depth, 1)
         parent_key = parent.get_unique_key()
         if parent_key in affected_set and parent_key not in trail:
             parent_depth = depth_of(parent_key, trail | {key})

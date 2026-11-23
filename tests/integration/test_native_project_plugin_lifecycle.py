@@ -378,3 +378,81 @@ def test_prune_retires_a_native_plugin_whose_approval_was_revoked(
     # The next install parks it again, as for any unapproved plugin.
     apm("install")
     assert not root.exists()
+
+
+def test_a_user_gitattributes_that_converts_the_roots_refuses_the_deployment(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """I7: a user rule that re-enables line-ending conversion blocks the deploy (#4809).
+
+    CELL: OP=install SRC=git PRIM=plugin(hooks) SCOPE=project TGT=claude,copilot
+    GATE=approved DEPLOYED=user-owned .agents/plugins/.gitattributes. APM keeps
+    the user's file and never rewrites it; it deploys only once the file leaves
+    the byte-pinned roots unconverted, so a core.autocrlf clone still verifies.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("sp-like")
+    for relative, text in _FILES.items():
+        path = repository.worktree / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="ascii")
+    (repository.worktree / "hooks/session-start").chmod(0o755)
+    revision = factory.commit(repository, message="superpowers-shaped plugin").sha
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{_DEPENDENCY}.git")
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        json.dumps(
+            {
+                "name": "consumer",
+                "version": "1.0.0",
+                "targets": ["claude", "copilot"],
+                "dependencies": {"apm": [{"git": _DEPENDENCY, "ref": revision}]},
+                "executables": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str, expect: int = 0, cwd: Path = project) -> CommandResult:
+        result = runner.run(args, cwd=cwd, env=env)
+        _assert_output_oracles(result)
+        assert result.returncode == expect, _evidence(result)
+        return result
+
+    def snap() -> LifecycleStateSnapshot:
+        return LifecycleStateSnapshot.capture(project, targets=("claude", "copilot"))
+
+    root = project / ".agents/plugins" / _PLUGIN
+    apm("install")
+    apm("approve", _DEPENDENCY)
+    attributes = project / ".agents/plugins/.gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text("* text\n", encoding="ascii")
+    before = snap()
+
+    refused = apm("install", expect=1)
+    flat = " ".join((refused.stdout + refused.stderr).split())
+    assert "has rule '* text' (line 1)" in flat, _evidence(refused)
+    assert "Add '* -text' as its last rule" in flat, _evidence(refused)
+    assert not root.exists()
+    assert not any((project / settings).exists() for settings in _SETTINGS)
+    assert attributes.read_bytes() == b"* text\n"
+    assert snap() == before
+
+    # The printed hint: a final '* -text' wins, and the user's file is kept as is.
+    attributes.write_text("* text\n* -text\n", encoding="ascii")
+    apm("install")
+    assert attributes.read_bytes() == b"* text\n* -text\n"
+    assert (root / "hooks/hooks.json").read_text(encoding="ascii") == _FILES["hooks/hooks.json"]
+    apm("audit", "--ci")
+    clone = _commit_and_clone_with_crlf(project, env)
+    clone_root = clone / ".agents/plugins" / _PLUGIN
+    assert (clone_root / "hooks/hooks.json").read_bytes() == (
+        root / "hooks/hooks.json"
+    ).read_bytes()
+    apm("install", "--frozen", cwd=clone)
+    apm("audit", "--ci", cwd=clone)

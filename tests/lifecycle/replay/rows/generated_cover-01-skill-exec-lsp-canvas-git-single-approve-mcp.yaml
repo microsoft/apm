@@ -716,6 +716,7 @@ when:
   - '*'
 - run: apm prune --dry-run
   cells:
+  - T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=canvas|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=hook|GATE=revoked-after-deploy
   - T1|OP=prune|PRIM=lsp|GATE=revoked-after-deploy

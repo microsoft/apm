@@ -134,6 +134,9 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
     # each entry with its dependency or local bundle (hook_ownership.py).
     ("project", "hook", "claude"): MergedHooks(".claude/settings.json"),
+    # A declared Gemini target merges hooks into .gemini/settings.json the same way,
+    # with its own apm-hooks.json sidecar (hook_integrator.py, "gemini").
+    ("project", "hook", "gemini"): MergedHooks(".gemini/settings.json"),
     # The root half of a whole Claude plugin (#3921); NATIVE_DECLARATIONS is the other.
     ("project", "native", "copilot"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
@@ -615,7 +618,18 @@ class Scenario:
                 for (scope, surface_kind, target), surface in SURFACE_GLOBS.items():
                     if scope != self.scope or surface_kind != kind:
                         continue
-                    if target in self.model.targets or surface in live:
+                    if target in self.model.targets:
+                        continue
+                    # A whole plugin's root is shared, but each harness's enable entry is
+                    # its own: a dropped target that still enables the plugin keeps it.
+                    if (
+                        kind == "native"
+                        and whole_plugin(self.scope, package, target)
+                        and native_declaration(self.deploy_root, target, package.split(":")[0])
+                    ):
+                        found.add(f"{package}/{kind}/{target}")
+                        continue
+                    if surface in live:
                         continue
                     if kind == "skill" and _skill_root(target) in skill_roots:
                         continue

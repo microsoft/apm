@@ -297,16 +297,18 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         ),
     ),
     "U-BIN-OPS": (
-        "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle "
-        "install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace "
-        "plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no "
-        "user-scope form, and a local bundle is never a marketplace plugin, so no gate "
-        "level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees "
-        "proves nothing about the gate). An org-policy level stays its own cell (U2 "
+        "a gate level of PRIM=bin under audit, pack, marketplace or a local bundle "
+        "install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a "
+        "marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these "
+        "commands have no user-scope form and write no plugin root, and a local bundle "
+        "is never a marketplace plugin, so no gate level ever reaches a bin/ there (the "
+        "#4575 review: an absence U-BIN guarantees proves nothing about the gate). prune "
+        "is not listed: it retires a trusted project-scope whole plugin's root, bin/ "
+        "included (#4559, #4808). An org-policy level stays its own cell (U2 "
         "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. "
-        "Under prune and marketplace that org-policy level stays baseline (Q&L ruling "
-        "2026-11-22): both exit 0 under the deny and bin/ never deploys at project scope "
-        "(U_BIN_PIN), so any absence witness there is vacuous",
+        "Under marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): "
+        "it exits 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), "
+        "so any absence witness there is vacuous",
         (
             Ev(
                 "src/apm_cli/install/exec_gate.py",
@@ -799,8 +801,10 @@ def u_bin_applies(cell: Mapping[str, str]) -> bool:
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
 
 
-# Commands with no user-scope form, and the local bundle install: bin/ never deploys there.
-BIN_LESS_OPS = frozenset({"audit", "prune", "pack", "marketplace", "bundle-install"})
+# Commands with no user-scope form that write no plugin root, and the local bundle
+# install: bin/ never deploys there. prune retires a whole plugin's root, bin/ included
+# (#4559, #4808), so its bin gate levels are reachable cells.
+BIN_LESS_OPS = frozenset({"audit", "pack", "marketplace", "bundle-install"})
 
 
 def u_bin_ops_applies(cell: Mapping[str, str]) -> bool:

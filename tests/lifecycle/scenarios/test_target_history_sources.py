@@ -22,8 +22,10 @@ import pytest
 from tests.lifecycle import driver
 from tests.lifecycle.scenarios._kit import (
     PROJECT_HOME_ALLOWED,
+    Known,
     Scenario,
     credits,
+    known_defect,
     mcp_server_problems,
 )
 from tests.lifecycle.world import use_policy, use_registry
@@ -102,10 +104,28 @@ def _assert_whole_plugin(scenario: Scenario, targets: tuple[str, ...], output: s
 _REGISTRY = "p-skill:registry"
 
 
+# Narrowing leaves the dropped harness enabling the whole plugin (#4874): those
+# native-plugin units have their own strict Known row (test_a_narrowed_target_...).
+_NARROWED = ("single-narrowed", "multi-narrowed")
+_STALE_ISSUE = "#4874"
+_STALE_MATCH = r"^an undeclared target keeps \['p-native-claude/native/"
+_STALE_ENABLE = Known(_STALE_ISSUE, _STALE_MATCH)
+
+
+def _kinds_for(tgt: str) -> dict[str, tuple[tuple[str, str], ...]]:
+    return {
+        name: units for name, units in _KINDS.items() if name != _NATIVE or tgt not in _NARROWED
+    }
+
+
+def _native_unit(tgt: str) -> dict[str, str]:
+    return _unit("install", tgt, "native-plugin", "skill", "allowed", NET="offline")
+
+
 def _kinds_credit(tgt: str) -> list[dict[str, str]]:
     found = [
         _unit("install", tgt, src, prim, "allowed", NET="offline")
-        for units in _KINDS.values()
+        for units in _kinds_for(tgt).values()
         for src, prim in units
     ]
     found.append(_unit("install", tgt, "pkg-registry", "skill", "none", NET="offline"))
@@ -219,17 +239,19 @@ def _credit(row: str, tgt: str) -> list[dict[str, str]]:
     return _market_credit("install" if row == "marketplace-install" else "marketplace", tgt)
 
 
-def _deploy(world, row: str, before) -> tuple[Scenario, object, dict]:
+def _deploy(world, row: str, before, tgt: str) -> tuple[Scenario, object, dict]:
     """Deploy the row's project at the old targets; return (scenario, command, run fields)."""
     use_policy(world, "allow")
     if row == "kinds-offline":
         use_registry(world)
-        names = (*_KINDS, _REGISTRY)
+        kinds = _kinds_for(tgt)
+        names = (*kinds, _REGISTRY)
         scenario = Scenario(world, names, targets=before, policy="allow")
         scenario.run(f"install {' '.join(names)}")
-        scenario.run(f"approve {' '.join(_KINDS)}")
+        scenario.run(f"approve {' '.join(kinds)}")
         installed = scenario.run("install")
-        _assert_whole_plugin(scenario, before, installed.output)
+        if _NATIVE in kinds:
+            _assert_whole_plugin(scenario, before, installed.output)
         return scenario, "install", {}
     if row == "gates":
         names = ("p-exec", "p-canvas")
@@ -278,7 +300,7 @@ CASES = (
 @pytest.mark.parametrize(("row", "tgt"), CASES, ids=[f"{row}-{tgt}" for row, tgt in CASES])
 def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     before, after = TARGET_HISTORIES[tgt]
-    scenario, command, fields = _deploy(lifecycle_world, row, before)
+    scenario, command, fields = _deploy(lifecycle_world, row, before, tgt)
     scenario.set_targets(*after)
     if row == "kinds-offline":
         _go_offline(lifecycle_world)
@@ -286,7 +308,7 @@ def test_first_command_after_a_target_change(lifecycle_world, row, tgt) -> None:
     assert step.result.returncode == 0, step.output
     if row in _RECONCILING_ROWS:
         scenario.assert_deployed()
-    if row == "kinds-offline":
+    if row == "kinds-offline" and _NATIVE in _kinds_for(tgt):
         _assert_whole_plugin(scenario, after, step.output)
     if row in _MCP_NAMES:
         problems = mcp_server_problems(scenario, _MCP_NAMES[row])
@@ -361,10 +383,85 @@ def test_claude_surfaces_count_only_their_own_entries(lifecycle_world) -> None:
         assert written and (cell in observed) == counted, (cell, written, sorted(observed))
 
 
+def test_gemini_hooks_count_only_when_registered_and_owned(lifecycle_world) -> None:
+    """Negative control: Gemini's merged hooks count for a package only when
+    .gemini/settings.json registers an entry its sidecar marks as the package's."""
+    scenario = Scenario(lifecycle_world, ("p-exec",), targets=("gemini",))
+    settings = lifecycle_world.project / ".gemini/settings.json"
+    sidecar = settings.with_name("apm-hooks.json")
+    settings.parent.mkdir(parents=True)
+    cell = "p-exec/hook/gemini"
+    cases = (
+        ({}, _owned("_local/p-exec"), False),
+        ({"hooks": {"SessionStart": [_HOOK]}}, {}, False),
+        ({"hooks": {"SessionStart": [_HOOK]}}, _owned("_local/p-exec"), True),
+    )
+    for registered, owned, counted in cases:
+        settings.write_text(json.dumps(registered), encoding="ascii")
+        sidecar.write_text(json.dumps(owned), encoding="ascii")
+        written = settings.read_text(encoding="ascii")
+        observed, _, _ = scenario.deployed()
+        assert written and (cell in observed) == counted, (written, owned, sorted(observed))
+
+
+def test_a_dropped_target_that_still_enables_a_whole_plugin_keeps_it(lifecycle_world) -> None:
+    """Negative control: the plugin root is shared by claude and copilot, but each
+    harness's enable entry is its own, so a dropped claude still enabling it counts."""
+    scenario = Scenario(lifecycle_world, (_NATIVE,), targets=("copilot",))
+    root = lifecycle_world.project / f".agents/plugins/{_NATIVE}/.claude-plugin/plugin.json"
+    root.parent.mkdir(parents=True)
+    root.write_text(json.dumps({"name": _NATIVE}), encoding="ascii")
+    settings = lifecycle_world.project / _PLUGIN_SETTINGS["claude"]
+    settings.parent.mkdir(parents=True)
+    cell = f"{_NATIVE}/native/claude"
+    for enabled in (True, False):
+        document = {"enabledPlugins": {f"{_NATIVE}@apm-p-0123abcd": enabled}}
+        settings.write_text(json.dumps(document), encoding="ascii")
+        written = settings.read_text(encoding="ascii")
+        kept = scenario.undeclared_target_cells()
+        assert written and (cell in kept) == enabled, (written, sorted(kept))
+
+
+@pytest.mark.parametrize("tgt", _NARROWED)
+def test_a_narrowed_target_retires_a_whole_plugins_enable_entry(lifecycle_world, tgt) -> None:
+    """The first offline install after a narrowing keeps the whole plugin for the
+    remaining harness and drops the dropped harness's enable entry (strict #4874)."""
+    before, after = TARGET_HISTORIES[tgt]
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(lifecycle_world, (_NATIVE,), targets=before, policy="allow")
+    scenario.run(f"install {_NATIVE}")
+    scenario.run(f"approve {_NATIVE}")
+    installed = scenario.run("install")
+    _assert_whole_plugin(scenario, before, installed.output)
+    scenario.set_targets(*after)
+    _go_offline(lifecycle_world)
+    step = scenario.run("install", credit=[_native_unit(tgt)])
+    assert step.result.returncode == 0, step.output
+    observed, _, _ = scenario.deployed()
+    assert observed == scenario.expected_cells(), sorted(observed)
+    _assert_whole_plugin(scenario, after, step.output)
+    with known_defect(_STALE_ISSUE, _STALE_MATCH):
+        left = scenario.undeclared_target_cells()
+        assert not left, f"an undeclared target keeps {sorted(left)}"
+    scenario.finish()
+
+
 CREDITS = credits(
     __file__,
     {
-        f"test_first_command_after_a_target_change[{row}-{tgt}]": _credit(row, tgt)
-        for row, tgt in CASES
+        **{
+            f"test_first_command_after_a_target_change[{row}-{tgt}]": _credit(row, tgt)
+            for row, tgt in CASES
+        },
+        **{
+            f"test_a_narrowed_target_retires_a_whole_plugins_enable_entry[{tgt}]": [
+                _native_unit(tgt)
+            ]
+            for tgt in _NARROWED
+        },
+    },
+    known={
+        f"test_a_narrowed_target_retires_a_whole_plugins_enable_entry[{tgt}]": _STALE_ENABLE
+        for tgt in _NARROWED
     },
 )

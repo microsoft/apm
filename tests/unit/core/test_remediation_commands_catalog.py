@@ -100,6 +100,9 @@ COMPONENT_ONLY: dict[str, str] = {
     "project-owned-file": "editing the project source is the manual step; covered by the "
     "view --file provenance tests",
     "prune-incomplete": _FAULT,
+    "prune-native-gate-unchecked": (
+        "needs the native gate check to raise; tests/unit/test_prune_command.py drives that branch"
+    ),
     "prune-partial": _FAULT,
     "registry-canonical-unrecorded": _NETWORK,
     "runtime-missing": _NETWORK,
