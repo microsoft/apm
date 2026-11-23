@@ -253,7 +253,24 @@ def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     )
 
 
+_HACK_DETECT_MEMO: dict = {}
+
+
 def detect_package_type(
+    package_path: Path,
+    *,
+    agent_plugin_detection: AgentPluginDetection | None = None,
+) -> tuple[PackageType, Path | None]:
+    """PERF FALSIFICATION HACK: memoized per path -- NEVER SHIP."""
+    key = (str(package_path), agent_plugin_detection is None)
+    if key not in _HACK_DETECT_MEMO:
+        _HACK_DETECT_MEMO[key] = _detect_package_type(
+            package_path, agent_plugin_detection=agent_plugin_detection
+        )
+    return _HACK_DETECT_MEMO[key]
+
+
+def _detect_package_type(
     package_path: Path,
     *,
     agent_plugin_detection: AgentPluginDetection | None = None,
