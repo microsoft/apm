@@ -2856,8 +2856,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Prune stops reconciling deployment provenance through the state owner.",
     ),
     MutationCase(
-        guard_id="install-deployment-provenance-state",
-        rule_id="install-deployment-provenance-state",
+        guard_id="install-deployment-reanchor-receipt-history",
+        rule_id="install-deployment-reanchor-receipt-history",
         path="src/apm_cli/core/deployment_reanchor.py",
         old="            self._dirty = True\n        self.flush()\n",
         new="            self._history.forget(key)\n            self._dirty = True\n        self.flush()\n",

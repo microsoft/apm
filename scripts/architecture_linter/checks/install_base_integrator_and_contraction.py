@@ -1493,12 +1493,6 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             findings.append(
                 _summary(rule_id, path, "Local materialization evidence must use the guarded owner")
             )
-        if not failures and path == _DEPLOYMENT_REANCHOR and "_history.forget" in text:
-            findings.append(
-                _summary(
-                    rule_id, path, "A re-anchor must carry receipt hash history, never forget it"
-                )
-            )
     # Every file-primitive writer reports its final-rendered writes, and the
     # install service records them for each integrator call (#3701).
     write_reports = {
