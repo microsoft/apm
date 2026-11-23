@@ -1416,9 +1416,6 @@
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_audit_fails_closed_on_a_misspelled_opt_out",
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_flipping_the_route_moves_the_plugin_and_keeps_user_entries",
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_frozen_refuses_a_route_change_until_a_normal_install",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[dependency-merge]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[sequence-merge]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[top-level-merge]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
         "tests/spec_conformance/test_native_route_reqs.py::test_an_explicit_bool_tag_is_accepted_on_load",
@@ -1433,9 +1430,12 @@
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dependency-merge]",
         "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dev-native-True]",
         "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native-Off]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]"
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[sequence-merge]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[top-level-merge]"
       ],
       "conformance_class": "consumer",
       "id": "req-mf-030",
@@ -1449,9 +1449,6 @@
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_audit_fails_closed_on_a_misspelled_opt_out",
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_flipping_the_route_moves_the_plugin_and_keeps_user_entries",
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_frozen_refuses_a_route_change_until_a_normal_install",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[dependency-merge]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[sequence-merge]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_a_misspelled_boolean_behind_a_merge_key_is_rejected[top-level-merge]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
         "tests/spec_conformance/test_native_route_reqs.py::test_an_explicit_bool_tag_is_accepted_on_load",
@@ -1468,9 +1465,12 @@
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dependency-merge]",
         "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dev-native-True]",
         "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native-Off]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]"
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[sequence-merge]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[top-level-merge]"
       ]
     },
     {
