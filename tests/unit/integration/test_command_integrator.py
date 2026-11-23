@@ -1731,3 +1731,34 @@ class TestCursorCommandPanelFindings:
         assert any(i.severity == "critical" for i in sec_items), (
             f"expected critical security diagnostic, got: {[(i.severity, i.message) for i in sec_items]}"
         )
+
+
+class TestNonStringFrontmatterKeys:
+    """A non-string frontmatter key skips that command only (#4922)."""
+
+    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        (tmp_path / ".claude").mkdir()
+        pkg_info = _make_package(
+            tmp_path,
+            {
+                "bad.prompt.md": "---\n1: x\ndescription: Bad\n---\nBad body\n",
+                "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
+            },
+        )
+        diag = DiagnosticCollector()
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, tmp_path, diagnostics=diag
+        )
+
+        commands = tmp_path / ".claude" / "commands"
+        assert not (commands / "bad.md").exists()
+        assert frontmatter.load(commands / "good.md").metadata["description"] == "Good"
+        assert result.files_skipped == 1
+        warnings = [d.message for d in diag.by_category().get("warning", [])]
+        assert any(
+            "bad.prompt.md" in m and "non-string frontmatter key(s): 1" in m for m in warnings
+        ), warnings
