@@ -181,6 +181,9 @@ class Operation:
     scope: str = "project"
     # Modifier factors of the obligation vocabulary (FROZEN, DRYRUN, FORCE, ...).
     modifiers: tuple[str, ...] = ()
+    # compile only: ``--validate`` (renders nothing) and the ``--root DIR`` output root.
+    validate_only: bool = False
+    output_root: str = ""
 
     @property
     def family(self) -> str:
@@ -220,6 +223,10 @@ def operation_for(args: tuple[str, ...], *, scope: str = "project", **fields: ob
         "mutating": command in MUTATING_COMMANDS and "DRYRUN" not in modifiers,
         "json_output": json_output,
     }
+    if command == "compile":
+        defaults["validate_only"] = "--validate" in args
+        roots = [second for first, second in itertools.pairwise(args) if first == "--root"]
+        defaults["output_root"] = roots[-1] if roots else ""
     return Operation(
         name, command=command, scope=scope, modifiers=modifiers, **{**defaults, **fields}
     )
@@ -665,10 +672,12 @@ def _i5_write_set(
         later = after.artifacts.snapshot(root_id)
         observed = _durable_changes(snapshot, later)
         allowed = op.allowed.get(root_id, ())
-        dry_run = op.read_only or "DRYRUN" in op.modifiers
+        renders = not (op.read_only or op.validate_only or "DRYRUN" in op.modifiers)
         exact: tuple[str, ...] = ()
-        if root_id == "home" and op.name == "compile" and not dry_run:
-            exact = (compile_home_record(after.deploy_root),)
+        if root_id == "home" and op.name == "compile" and renders:
+            # --root DIR writes (and keys its record by) DIR, resolved from the project.
+            output = after.deploy_root / op.output_root if op.output_root else after.deploy_root
+            exact = (compile_home_record(output),)
         existed = {entry.relative_path for entry in snapshot.entries}
         kinds = {entry.relative_path: entry.kind for entry in later.entries}
         # An allowed prefix admits its subtree and its exact ancestor directories.

@@ -236,6 +236,15 @@ Work down this list:
    accept the folder-trust prompt and start a new session (or run
    `/reload-plugins`). Copilot CLI 1.0.81 or later loads the same plugins.
 5. **Does a hook fail at runtime?** Check [Known gaps](#known-gaps).
+6. **Is this an environment that does not load native plugins?** Native plugins
+   are reported not to load in git worktrees, in non-interactive `claude -p`
+   runs (including claude-code-action) and in Copilot CLI 1.0.106. `apm install`
+   prints `[!] <package> installed as a native plugin ...` for each dependency
+   it installs this way. For a Claude-format plugin with skills at project
+   scope, the notice also says how to deploy its skills loose instead: set
+   `skills: ["*"]` on that dependency in `apm.yml`. That does not apply with
+   `-g` (a `skills:` selection parks the plugin), to Agent Plugins (they stay
+   native) or to a plugin without skills, so their notice omits it.
 
 :::tip[Other options]
 Packaging your own plugin: [Build a plugin](../../producer/build-a-plugin/).

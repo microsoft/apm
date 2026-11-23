@@ -109,9 +109,16 @@ def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: 
     if identity is None:
         logger.error(f"'{Path(package).name}' could not be read as a local bundle.")
         sys.exit(1)
+    from ...install.local_bundle_pending import retiring_bundle_keys
+
     package_id, key = identity
     identities = _identities(bundle_scope)
-    matches = sorted(slug for slug, keys in identities.items() if key in keys)
+    # A retry after a failed record update: the hooks are gone, the note keeps the key (#5003).
+    retiring = retiring_bundle_keys(bundle_scope.lock_dir, "hooks")
+    matches = sorted(
+        {slug for slug, keys in identities.items() if key in keys}
+        | {slug for slug, recorded in retiring.items() if recorded == key}
+    )
     # Any hooks installed while the executables gate admitted everything recorded
     # no content identity, so such a copy could be this bundle under an alias.
     keyless = sorted(
@@ -243,16 +250,44 @@ def _refuse_unsafe_cleanup(bundle_scope: _BundleScope, *, logger: Any, dry_run: 
     )
 
 
+_PENDING_RECORD = "apm_modules/.local-bundle-pending.json"
+
+
+def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any) -> bool:
+    """Drop the hooks entry of each bundle whose hooks are gone; ``True`` when one failed.
+
+    A failed update keeps the retiring note, so the same uninstall finishes it (#4987).
+    """
+    from ...core.scope import is_user_scope
+    from ...install.local_bundle_pending import drop_bundle_exec_type
+
+    command = "apm uninstall -g" if is_user_scope(scope) else "apm uninstall"
+    failed = False
+    for slug in slugs:
+        try:
+            drop_bundle_exec_type(lock_dir, slug, "hooks")
+        except (OSError, ValueError) as exc:
+            failed = True
+            logger.error(
+                f"Removed hooks from local bundle '{slug}', but {_PENDING_RECORD} could not "
+                f"be updated ({exc}). Fix access to that file, then run '{command} {slug}' "
+                "again to finish."
+            )
+    return failed
+
+
 def uninstall_local_bundles(
     slugs: list[str], bundle_scope: _BundleScope, *, scope: Any, logger: Any, dry_run: bool
 ) -> None:
     """Retire each selected bundle's hooks through the hook trust owner; exit 1 on failure."""
     from ...install.local_bundle_hook_trust import installed_local_bundles, retire_bundle_hooks
-    from ...install.local_bundle_pending import drop_bundle_exec_type
+    from ...install.local_bundle_pending import mark_bundle_retiring, retiring_bundle_slugs
 
     root, targets, lock_dir = bundle_scope.root, bundle_scope.targets, bundle_scope.lock_dir
     deployed = _owned(bundle_scope)
-    missing = [slug for slug in slugs if slug not in deployed]
+    # An earlier uninstall removed these hooks but could not update the record (#4987).
+    resuming = retiring_bundle_slugs(lock_dir, "hooks")
+    missing = [slug for slug in slugs if slug not in deployed and slug not in resuming]
     for slug in missing:
         logger.error(
             f"Local bundle '{slug}' has no hooks deployed. 'apm uninstall' removes a "
@@ -271,8 +306,19 @@ def uninstall_local_bundles(
             logger.dry_run_notice(f"Would remove hooks from local bundle '{slug}'")
         return
 
+    try:
+        for slug in slugs:
+            mark_bundle_retiring(lock_dir, slug, "hooks")
+    except (OSError, ValueError) as exc:
+        logger.error(
+            f"Local bundle hooks were not removed: {_PENDING_RECORD} could not be updated "
+            f"({exc}); no hooks were removed. Fix access to that file, then retry."
+        )
+        sys.exit(1)
     unconfirmed: dict[str, tuple[str, ...]] = {}
     for slug in slugs:
+        if slug not in deployed:
+            continue
         retired = retire_bundle_hooks(root, targets, slug, lock_dir=lock_dir, reason=None)
         if retired.failed_paths:
             unconfirmed[slug] = retired.failed_paths
@@ -280,16 +326,18 @@ def uninstall_local_bundles(
     for slug, paths in unconfirmed.items():
         left[slug] = tuple(sorted({*left.get(slug, ()), *paths}))
     # Pending state goes only for a bundle whose hooks are confirmed gone.
-    for slug in slugs:
-        if slug not in left:
-            drop_bundle_exec_type(lock_dir, slug, "hooks")
-    if failed := [slug for slug in slugs if slug in left]:
-        for slug in failed:
-            files = ", ".join(left[slug]) or "merged hook configuration"
-            logger.error(
-                f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
-                "they stay recorded. Remove or repair those files, then retry."
-            )
+    record_failed = _finish_records(
+        [slug for slug in slugs if slug not in left], lock_dir, scope=scope, logger=logger
+    )
+    # Every failure is reported, each with its own recovery step, before exiting.
+    failed = [slug for slug in slugs if slug in left]
+    for slug in failed:
+        files = ", ".join(left[slug]) or "merged hook configuration"
+        logger.error(
+            f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
+            "they stay recorded. Remove or repair those files, then retry."
+        )
+    if failed or record_failed:
         sys.exit(1)
     for slug in slugs:
         logger.success(f"Removed hooks from local bundle '{slug}'", symbol="check")
