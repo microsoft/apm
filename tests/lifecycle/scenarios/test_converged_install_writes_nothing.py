@@ -8,7 +8,7 @@ durable bytes unchanged; P-INV-I2 -- idempotence (source: CHANGELOG 0.38.0
 Every digest-based no-write oracle is blind to a rewrite of identical bytes, so
 this cell compares identity stamps (inode, mtime_ns, ctime_ns; ``snapshot.capture_stamps``)
 of the cache markers, the lock and every deployed file across a repeated install;
-tests/quality/test_snapshot_stamps.py holds the stamp oracle's own controls.
+tests/quality/test_oracle_compile_record.py holds the stamp oracle's own controls.
 """
 
 from __future__ import annotations
