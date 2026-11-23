@@ -143,14 +143,10 @@ def _write_cleaned_json_config(
     """Write a cleaned MCP JSON config, or delete it once APM's last entry left.
 
     With *delete_emptied*, a file whose servers were all removed by this
-    cleanup and that holds nothing else but empty scaffolding goes, as a fresh
-    deploy never writes it (#4852). A file with any other key stays.
+    cleanup and that holds no other key goes, as a fresh deploy never writes
+    it (#4852). A file with any other key, even an empty one, stays.
     """
-    if (
-        delete_emptied
-        and not config.get(servers_key)
-        and all(value in ([], {}) for key, value in config.items() if key != servers_key)
-    ):
+    if delete_emptied and not config.get(servers_key) and set(config) <= {servers_key}:
         write_seam.unlink(config_path)
         return
     write_json_config(
@@ -193,8 +189,7 @@ def _clean_json_mcp_config(
         nested_settings: Top-level keys that hold settings rather than
             servers whenever ``nested_servers`` returns a map.
         delete_emptied: Delete the file once this cleanup removed every server
-            it held and nothing but empty scaffolding remains (project
-            ``.mcp.json``, #4852).
+            it held and no other key remains (project ``.mcp.json``, #4852).
 
     Returns:
         Number of entries removed.

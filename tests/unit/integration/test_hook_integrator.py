@@ -1701,20 +1701,25 @@ class TestSyncIntegration:
 
         assert not settings_path.exists()
 
-    def test_sync_keeps_settings_with_user_keys(self, temp_project):
-        """A settings.json that also holds the user's keys stays, without APM's hooks."""
+    @pytest.mark.parametrize(
+        "user_keys",
+        [{"permissions": {"allow": ["Bash(ls)"]}}, {"version": 1}],
+        ids=["permissions", "cursor-default-is-claude-user-key"],
+    )
+    def test_sync_keeps_settings_with_user_keys(self, temp_project, user_keys):
+        """A settings.json that also holds the user's keys stays, without APM's hooks.
+
+        Cursor's injected ``version: 1`` is a user key in Claude's settings.
+        """
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
-        settings = {
-            "permissions": {"allow": ["Bash(ls)"]},
-            "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]},
-        }
+        settings = {**user_keys, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
         settings_path.write_text(json.dumps(settings))
 
         HookIntegrator().sync_integration(None, temp_project)
 
-        assert json.loads(settings_path.read_text()) == {"permissions": {"allow": ["Bash(ls)"]}}
+        assert json.loads(settings_path.read_text()) == user_keys
 
 
 # ─── Script path rewriting tests ─────────────────────────────────────────────

@@ -370,10 +370,9 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
 }
 
 
-def _write_or_drop_hook_json(json_path: Path, data: dict) -> None:
-    """Write cleaned hook JSON, or delete it when only injected defaults remain (#4852)."""
-    defaults = [config.top_level_defaults for config in _MERGE_HOOK_TARGETS.values()]
-    if all(any(d.get(key, ...) == value for d in defaults) for key, value in data.items()):
+def _write_or_drop_hook_json(json_path: Path, data: dict, defaults: dict[str, Any]) -> None:
+    """Write cleaned hook JSON, or delete it when only the target's defaults remain (#4852)."""
+    if all(defaults.get(key, ...) == value for key, value in data.items()):
         write_seam.unlink(json_path)  # a fresh deploy with no hooks writes no file
     else:
         write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
@@ -1759,6 +1758,7 @@ class HookIntegrator(BaseIntegrator):
                 container=config.event_container_key,
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
+                defaults=config.top_level_defaults,
             )
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
@@ -1775,6 +1775,7 @@ class HookIntegrator(BaseIntegrator):
         container: str,
         sidecar_path: Path,
         dry_run: bool = False,
+        defaults: dict[str, Any] | None = None,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
@@ -1840,7 +1841,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                _write_or_drop_hook_json(json_path, data)
+                _write_or_drop_hook_json(json_path, data, defaults or {})
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
@@ -1927,6 +1928,7 @@ class HookIntegrator(BaseIntegrator):
                     stats,
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                    defaults=config.top_level_defaults,
                 )
 
         return stats
@@ -2043,6 +2045,7 @@ class HookIntegrator(BaseIntegrator):
         stats: dict[str, Any],
         container: str = "hooks",
         sidecar_path: Path | None = None,
+        defaults: dict[str, Any] | None = None,
     ) -> None:
         """Remove externally-owned entries from a native hooks JSON file.
 
@@ -2076,7 +2079,7 @@ class HookIntegrator(BaseIntegrator):
                 del data[container]
 
             if modified:
-                _write_or_drop_hook_json(json_path, data)
+                _write_or_drop_hook_json(json_path, data, defaults or {})
                 stats["files_removed"] += 1
             if kept:
                 write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")

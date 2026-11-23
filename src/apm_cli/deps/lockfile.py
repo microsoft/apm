@@ -43,7 +43,7 @@ from ..models.dependency.replacement import (
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
 from ..native_plugins import record as native_rec
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
-from .lockfile_container import parse_lockfile_text
+from .lockfile_container import parse_lockfile_text, records_mcp_target_servers
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
 from .lockfile_extensions import carry_vendor_extensions, vendor_extensions
 from .lockfile_version_remedy import with_version_remedy
@@ -1560,7 +1560,7 @@ class LockFile:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
             if self.mcp_omissions:
                 data["mcp_omissions"] = dict(sorted(self.mcp_omissions.items()))
-            if self.mcp_target_servers or (self._mcp_target_servers_present and self.mcp_servers):
+            if records_mcp_target_servers(self):
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
                     for target, servers in sorted(self.mcp_target_servers.items())
@@ -1990,8 +1990,7 @@ class LockFile:
             return False
         if (
             self.mcp_target_servers != other.mcp_target_servers
-            or (self._mcp_target_servers_present and bool(self.mcp_servers))
-            != (other._mcp_target_servers_present and bool(other.mcp_servers))
+            or records_mcp_target_servers(self) != records_mcp_target_servers(other)
             or dict(self.deployment_ledger.records) != dict(other.deployment_ledger.records)
         ):
             return False

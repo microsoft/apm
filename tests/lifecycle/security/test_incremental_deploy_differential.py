@@ -187,7 +187,7 @@ _USER_CONFIGS = {
     "mcp-user-key": (
         "policy-denies-executables",
         ".mcp.json",
-        {"mcpServers": {}, "x-user-note": "mine"},
+        {"mcpServers": {}, "x-user-note": {}},
         ("mcpServers", "p-exec-mcp"),
     ),
     "claude-settings-user-key": (

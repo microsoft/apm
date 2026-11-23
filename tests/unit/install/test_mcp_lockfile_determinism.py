@@ -770,6 +770,20 @@ def test_empty_mcp_target_servers_is_omitted_without_mcp_servers(tmp_path: Path)
     assert restored.is_semantically_equivalent(lockfile)
 
 
+def test_constructed_target_servers_equal_their_read_back(tmp_path: Path) -> None:
+    """A non-empty map compares equal whether or not its presence flag was set."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile(mcp_servers=["managed"], mcp_target_servers={"copilot": ["managed"]})
+
+    lockfile.write(lock_path)
+
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored._mcp_target_servers_present is True
+    assert lockfile.is_semantically_equivalent(restored)
+    assert restored.is_semantically_equivalent(lockfile)
+
+
 def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> None:
     """The no-write optimization must distinguish empty from legacy-absent."""
     lock_path = tmp_path / "apm.lock.yaml"
