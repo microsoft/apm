@@ -4732,6 +4732,32 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The cache path helper execs a bare git name through an os.execv alias in an os-only file.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        def _forward(argv, executable=None):\n"
+            "            return subprocess.run(argv, executable=executable)\n\n"
+            '        _forward([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable through a same-module wrapper.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        def _forward(argv, **options):\n"
+            "            return subprocess.run(argv, **options)\n\n"
+            '        _forward([get_git_executable()], executable="git")\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe passes a literal executable through a wrapper's keyword arguments.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
