@@ -21,7 +21,9 @@ files (through ``keeps_edited_output``). The guard is closed-world:
   gate's result: it sits in the body of ``if not <gate>(...)``, or follows a
   sibling ``if <gate>(...):`` whose body leaves (``continue``/``return``).
   A short-circuited test, an ignored result or a new unguarded writer fails;
-  only the listed non-executable writers (merged settings, cleanup) are exempt.
+  only the listed non-executable writes (merged settings and sidecar, cleanup),
+  each by operation and destination, are exempt; a gate must ask about the
+  path the write replaces (itself, its resolved form or a member it iterates).
 """
 
 from __future__ import annotations
@@ -52,14 +54,21 @@ _EXECUTABLE_MODULES = (
 )
 # Gate asks whose result a write must depend on.
 _EXECUTABLE_GATES = frozenset({"keeps_edited_output", "_keeps_edited_bundle"})
-# Writers in those modules that never replace an executable output.
-_UNGATED_EXECUTABLE_WRITERS = {
+# The exact (operation, destination) writes in those modules that never
+# replace an executable output; any other write in the same function is gated.
+_UNGATED_EXECUTABLE_WRITES = {
     "src/apm_cli/integration/hook_integrator.py": {
-        # Merged hook entries in shared settings files are not file outputs.
-        "HookIntegrator._integrate_merged_hooks",
-        # Removing APM entries from shared settings on cleanup.
-        "HookIntegrator._clean_apm_source_from_json",
-        "HookIntegrator._clean_apm_entries_from_json",
+        # Merged hook entries in a shared settings file and its sidecar.
+        "HookIntegrator._integrate_merged_hooks": frozenset(
+            {("atomic_write_text", "sidecar_path"), ("write_text_if_changed", "json_path")}
+        ),
+        # Removing APM entries from a shared settings file and its sidecar.
+        "HookIntegrator._clean_apm_source_from_json": frozenset(
+            {("atomic_write_text", "json_path"), ("atomic_write_text", "sidecar_path")}
+        ),
+        "HookIntegrator._clean_apm_entries_from_json": frozenset(
+            {("open_for_write", "json_path"), ("atomic_write_text", "sidecar_path")}
+        ),
     },
 }
 _CANVAS_GATE = (
@@ -86,7 +95,20 @@ _RAW_WRITES = frozenset(
     }
 )
 # Content writes in an executable writer module (``open`` only in a write mode).
-_EXECUTABLE_WRITES = (_RAW_WRITES - {"open"}) | {"atomic_write_text", "copytree", "copyfile"}
+_EXECUTABLE_WRITES = (_RAW_WRITES - {"open"}) | {
+    "atomic_write_text",
+    "copytree",
+    "move",
+    "open_for_write",
+    "rename",
+    "write_json_config",
+}
+# Writes whose destination is the second argument (source first).
+_SOURCE_FIRST = frozenset({"copy2", "copyfile", "copytree", "move", "rename"})
+# Module-level or integrator receivers: the destination is an argument.
+_ARG_RECEIVERS = frozenset({"write_seam", "shutil", "os", "self", "integrator"})
+# A resolved destination derived from the gated path stays the gated path.
+_PATH_RESOLVERS = frozenset({"ensure_path_within"})
 # The only writers that may skip the owner: leaves for direct callers or for
 # an in-module caller that asked the owner first. Every other writer asks.
 _LEAF_WRITERS = frozenset(
@@ -210,25 +232,73 @@ def _leaves(body: list[ast.stmt]) -> bool:
     return bool(body) and isinstance(body[-1], (ast.Continue, ast.Return, ast.Raise))
 
 
-def _gated(index, write: ast.AST) -> bool:
-    """*write* runs only when the executable overwrite gate let it through."""
+def _destination(call: ast.Call) -> str | None:
+    """The path expression a write call replaces."""
+    name = _call_name(call)
+    func = call.func
+    on_path = isinstance(func, ast.Attribute) and not (
+        isinstance(func.value, ast.Name) and func.value.id in _ARG_RECEIVERS
+    )
+    if on_path and name not in _SOURCE_FIRST:
+        return ast.unparse(func.value)
+    position = 0 if on_path or name not in _SOURCE_FIRST else 1
+    if len(call.args) > position:
+        return ast.unparse(call.args[position])
+    return None
+
+
+def _gate_destination(test: ast.AST) -> str | None:
+    call = test.operand if isinstance(test, ast.UnaryOp) else test
+    return ast.unparse(call.args[0]) if isinstance(call, ast.Call) and call.args else None
+
+
+def _same_target(index, function: ast.AST, gated: str, destination: str | None) -> bool:
+    """*destination* is the gated path, its resolved form, or a member it iterates."""
+    if destination is None:
+        return False
+    if destination == gated:
+        return True
+    for node in index.walk(function):
+        if (
+            isinstance(node, ast.Assign)
+            and any(ast.unparse(target) == destination for target in node.targets)
+            and isinstance(node.value, ast.Call)
+            and _call_name(node.value) in _PATH_RESOLVERS
+            and node.value.args
+            and ast.unparse(node.value.args[0]) == gated
+        ):
+            return True
+        if isinstance(node, ast.For) and ast.unparse(node.iter) == gated:
+            names = [elt for elt in ast.walk(node.target) if isinstance(elt, ast.Name)]
+            if any(name.id == destination for name in names):
+                return True
+    return False
+
+
+def _gated(index, write: ast.Call) -> bool:
+    """*write* runs only when the gate for its own destination let it through."""
+    destination = _destination(write)
     child, parent = write, index.parent(write)
+    gates: list[ast.AST] = []
     while parent is not None:
         if isinstance(parent, ast.If) and child in parent.body and _gate_test(parent.test) is False:
-            return True
+            gates.append(parent.test)
         for field in ("body", "orelse", "finalbody"):
             block = getattr(parent, field, None)
             if isinstance(block, list) and child in block:
-                earlier = block[: block.index(child)]
-                if any(
-                    isinstance(stmt, ast.If)
+                gates.extend(
+                    stmt.test
+                    for stmt in block[: block.index(child)]
+                    if isinstance(stmt, ast.If)
                     and _gate_test(stmt.test) is True
                     and _leaves(stmt.body)
-                    for stmt in earlier
-                ):
-                    return True
+                )
         if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return False
+            return any(
+                _same_target(index, parent, gated, destination)
+                for gate in gates
+                if (gated := _gate_destination(gate)) is not None
+            )
         child, parent = parent, index.parent(parent)
     return False
 
@@ -251,15 +321,16 @@ def _executable_findings(provider: FactsProvider, rule: str) -> list[Violation]:
         if index is None:
             findings.append(_summary(rule, path, "executable writer module must be parseable"))
             continue
-        exempt = _UNGATED_EXECUTABLE_WRITERS.get(path, set())
-        exempt_used: set[str] = set()
+        exempt = _UNGATED_EXECUTABLE_WRITES.get(path, {})
+        exempt_used: set[tuple[str, str, str | None]] = set()
         for node in index.nodes:
             if not _is_write(node):
                 continue
             function = _enclosing_function(index, node)
             qualname = index.function_qualname(function) if function is not None else "<module>"
-            if qualname in exempt:
-                exempt_used.add(qualname)
+            write = (_call_name(node), _destination(node))
+            if write in exempt.get(qualname, ()):
+                exempt_used.add((qualname, *write))
                 continue
             if not _gated(index, node):
                 findings.append(
@@ -271,9 +342,10 @@ def _executable_findings(provider: FactsProvider, rule: str) -> list[Violation]:
                         line=node.lineno,
                     )
                 )
+        listed = {(name, *write) for name, writes in exempt.items() for write in writes}
         findings.extend(
-            _summary(rule, path, f"stale ungated-writer exemption {name}: it no longer writes")
-            for name in sorted(exempt - exempt_used)
+            _summary(rule, path, f"stale ungated-write exemption {entry}: no such write")
+            for entry in sorted(listed - exempt_used, key=str)
         )
     path, name = _CANVAS_GATE
     index = provider.tree_index(path)

@@ -1802,6 +1802,43 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "def hook_containment_root(",
             id="new-unguarded-executable-writer",
         ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.rename(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-rename",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path, data: dict) -> None:\n"
+            "    write_seam.write_json_config(target_file, data)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-json-config",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path) -> None:\n"
+            "    write_seam.open_for_write(target_file).close()\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                    target_path,\n                    hook_file,\n                    rel_path,",
+            "                    hook_file,\n                    hook_file,\n                    rel_path,",
+            id="gate-asks-about-another-path",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n"
+            "        write_seam.copy2(json_path, target_dir / 'run.sh')\n",
+            id="executable-copy-in-exempt-function",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
