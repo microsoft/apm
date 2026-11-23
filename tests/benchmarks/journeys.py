@@ -830,6 +830,28 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
         if result.returncode != 0 or not target.is_file():
             print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
             return None
+    journey.setup(ctx)
+    hook = Path(__file__).with_name("path_attr.py")
+    for index, (argv, cwd) in enumerate(journey.steps(ctx)):
+        target = prof.with_suffix(f".paths{index}.json")
+        result = subprocess.run(
+            [python, str(hook), str(target), str(apm), *argv],
+            cwd=cwd,
+            env=ctx.world.env,
+            capture_output=True,
+            timeout=_COMMAND_TIMEOUT_S,
+            check=False,
+        )
+        print(f"[PATHATTR] {journey.name} step {index} rc={result.returncode}")
+        if target.is_file():
+            report = json.loads(target.read_text(encoding="utf-8"))
+            print("[PATHATTR] " + json.dumps({k: report[k] for k in ("per_op", "inner", "mutations")}))
+            for row in report["callers"]:
+                print("[PATHATTR-C] " + json.dumps(row))
+            for row in report["top_paths"][:15]:
+                print("[PATHATTR-P] " + json.dumps(row))
+        else:
+            print(f"[PATHATTR] no report: {result.stderr[-800:]}")
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
             stats = pstats.Stats(str(prof), stream=handle)
