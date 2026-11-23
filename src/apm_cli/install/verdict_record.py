@@ -95,7 +95,6 @@ ENV_ALLOWLIST = (
     "PATH",
     "PATHEXT",
     "PROGRAMDATA",
-    "PROXY_REGISTRY_ALLOW_HTTP",
     "PROXY_REGISTRY_ONLY",
     "PROXY_REGISTRY_TOKEN",
     "PROXY_REGISTRY_URL",
@@ -191,7 +190,6 @@ _USER_SURFACES = (
     ".claude.json",
     ".codex/config.toml",
     ".codeium/windsurf/mcp_config.json",
-    ".config/github-copilot/intellij/mcp.json",
     ".hermes/config.yaml",
 )
 
