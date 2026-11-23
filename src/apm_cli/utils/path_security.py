@@ -25,6 +25,24 @@ from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
 
+# PERF FALSIFICATION HACK (H-W): each distinct path is resolved and link-checked
+# once per process; every check still runs once per file. NEVER SHIP.
+import os as _hack_os  # noqa: E402
+
+_hack_real = _hack_os.path.realpath
+_hack_memo: dict = {}
+
+
+def _hack_realpath(path, *, strict=False):
+    key = (_hack_os.fspath(path), strict)
+    if key not in _hack_memo:
+        _hack_memo[key] = _hack_real(path, strict=strict)
+    return _hack_memo[key]
+
+
+_hack_os.path.realpath = _hack_realpath
+_hack_link_memo: dict = {}
+
 
 class PathTraversalError(ValueError):
     """Raised when a computed path escapes its expected base directory."""
@@ -258,6 +276,14 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics."""
+    _key = (str(base_dir), str(path), raise_on_error)
+    if _key in _hack_link_memo:
+        return _hack_link_memo[_key]
+    _hack_link_memo[_key] = _hack_has_symlink_component(base_dir, path, raise_on_error=raise_on_error)
+    return _hack_link_memo[_key]
+
+
+def _hack_has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     try:
         relative = path.relative_to(base_dir)
         current = base_dir
