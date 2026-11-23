@@ -270,26 +270,13 @@ class TestDiscoveryScaling:
 # ---------------------------------------------------------------------------
 
 
-class _CountingLock:
-    """Stand-in for the console lock that counts every acquisition."""
-
-    def __init__(self, ops: list[int]):
-        self._ops = ops
-
-    def __enter__(self):
-        self._ops[0] += 1
-        return self
-
-    def __exit__(self, *exc_info) -> bool:
-        return False
-
-
 def _console_operation_counts(get_console) -> tuple[dict[int, int], dict[int, int]]:
-    """Count console builds and lock acquisitions for 50 and 500 calls (#4857).
+    """Count Rich console constructions for 50 and 500 calls (#4857).
 
-    Returns the operation count and the number of distinct consoles handed
-    out per call count. Builds return a cheap sentinel, so only the work the
-    singleton does is measured, never Rich construction time.
+    Returns the construction count and the number of distinct consoles
+    handed out per call count. Only the Rich ``Console`` collaborator is
+    replaced, by a counting factory returning a cheap sentinel, so the real
+    singleton and ``_ascii_console`` run but Rich construction time does not.
     """
     from apm_cli.utils import console
 
@@ -303,11 +290,7 @@ def _console_operation_counts(get_console) -> tuple[dict[int, int], dict[int, in
             _ops[0] += 1
             return object()
 
-        with (
-            patch.object(console, "RICH_AVAILABLE", True),
-            patch.object(console, "_ascii_console", build),
-            patch.object(console, "_console_lock", _CountingLock(ops)),
-        ):
+        with patch.object(console, "Console", build):
             consoles = [get_console() for _ in range(n)]
         instances[n] = len({id(c) for c in consoles})
         console._reset_console()
@@ -317,14 +300,13 @@ def _console_operation_counts(get_console) -> tuple[dict[int, int], dict[int, in
 
 
 def _seeded_quadratic_get_console():
-    """Same singleton, rebuilt once per prior call under the lock."""
+    """Same singleton, rebuilt once per prior call."""
     from apm_cli.utils import console
 
-    with console._console_lock:
-        _seeded_quadratic_get_console.calls += 1
-        for _ in range(_seeded_quadratic_get_console.calls):
-            console._console_instance = console._ascii_console(None)
-    return console._console_instance
+    _seeded_quadratic_get_console.calls += 1
+    for _ in range(_seeded_quadratic_get_console.calls):
+        built = console._ascii_console(console.Console)
+    return built
 
 
 class TestConsoleSingletonScaling:
@@ -338,7 +320,7 @@ class TestConsoleSingletonScaling:
             f"_get_console handed out {instances} distinct consoles, a caching regression"
         )
         assert _grows_linearly(counts), (
-            f"_get_console did {counts[500]} operations for 500 calls and "
+            f"_get_console built {counts[500]} consoles for 500 calls and "
             f"{counts[50]} for 50, a super-linear regression"
         )
         # Negative control: the same singleton rebuilt quadratically fails the guard.
