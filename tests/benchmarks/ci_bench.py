@@ -110,7 +110,8 @@ def abab(args: argparse.Namespace) -> int:
 def _shard_of(path: Path, root: Path) -> str:
     """The shard directory a run JSON sits under (artifact layouts nest ``runs/``)."""
     parts = path.relative_to(root).parts
-    return next((p for p in parts if p.startswith(("perf-bench-shard-", "shard-"))), parts[0])
+    shard = next((p for p in parts if p.startswith(("perf-bench-shard-", "shard-"))), None)
+    return shard if shard is not None else path.parent.parent.name
 
 
 def _load(root: Path) -> dict:

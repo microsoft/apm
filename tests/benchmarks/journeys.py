@@ -912,6 +912,11 @@ def _journeys_for(
         # A monorepo has several roots and local-path deps, which pack refuses by design.
         if name in (*_GLOBAL, *_PACKS) and len(fixture.roots) > 1:
             continue
+        # The served policy governs the project checkout only: global installs
+        # and the bundle consumer have no governed remote, so they would not
+        # exercise it.
+        if name in (*_GLOBAL, "install-bundle") and fixture.policy:
+            continue
         names.append(name)
     return names
 
