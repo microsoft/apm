@@ -552,3 +552,20 @@ def test_prune_treats_a_surviving_single_file_dependency_as_a_leaf(
 
     assert "could not be read" not in pruned, pruned
     _assert_orphan_pruned(world)
+
+
+def test_prune_keeps_everything_when_a_survivor_dir_became_a_plain_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """vendor/a replaced by an unsupported file is unreadable, not a leaf: f stays."""
+    world = _world(tmp_path, apm_binary_path)
+    survivor = world.project / "vendor" / "a"
+    shutil.rmtree(survivor)
+    survivor.write_text("not a package\n", encoding="utf-8")
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "_local/f" in rows, sorted(rows)
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    assert "could not be read" in pruned, pruned
