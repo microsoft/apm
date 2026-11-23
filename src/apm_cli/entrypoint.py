@@ -216,6 +216,19 @@ def _vh_mac(root: str, key: bytes, lock_text: bytes):
     put("build", str(getattr(sys.modules.get("apm_cli"), "__version__", "")).encode())
     put("root", os.path.realpath(root).encode())
     put("ctx", f"{sys.platform}|{os.sep}|{sys.version_info[:2]}|install".encode())
+    import locale
+
+    put(  # O3: presentation inputs
+        "presentation",
+        "|".join(
+            [
+                str(sys.stdout.isatty()),
+                str(sys.stderr.isatty()),
+                locale.getpreferredencoding(False),
+                *(os.environ.get(k, "") for k in ("NO_COLOR", "FORCE_COLOR", "TERM", "COLUMNS")),
+            ]
+        ).encode(),
+    )
     take(os.path.join(root, "apm.yml"))
     take(os.path.join(root, ".git", "config"))
     take(os.path.join(root, ".apm-local", "installation"))
