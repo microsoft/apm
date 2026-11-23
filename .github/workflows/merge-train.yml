@@ -158,6 +158,8 @@ jobs:
           tests/quality/test_cli_docs_surface.py \
           tests/quality/test_journey_index.py \
           tests/quality/test_generated_obligations.py \
+          tests/quality/test_known_cells_cite_open_issues.py \
+          tests/quality/test_known_cell_closing.py \
           tests/quality/test_oracle_user_writes.py \
           tests/quality/test_scenario_refusal_credit.py \
           tests/quality/test_cli_command_literals.py
@@ -175,6 +177,7 @@ jobs:
     if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
+      pull-requests: read
     uses: ./.github/workflows/ci.yml
     with:
       base_sha: ${{ needs.scope.outputs.base_sha }}

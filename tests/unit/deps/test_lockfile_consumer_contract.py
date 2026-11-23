@@ -53,6 +53,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "skill_subset": ["alpha", "beta"],
     "target_subset": ["copilot"],
     "subset_pairings": None,
+    "package_targets": ["copilot"],
     "resolved_url": "https://registry.example.invalid/consume-contract.tgz",
     "resolved_hash": f"sha256:{'e' * 64}",
     "constraint": "^1.0.0",

@@ -223,6 +223,79 @@ def test_a_failed_last_plugin_removal_keeps_the_roots_byte_pinned(project, monke
     assert attributes.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("rules", "named"),
+    [
+        ("* text\n", r"'\* text' \(line 1\)"),
+        ("* -text\n*.sh text=auto\n", r"'\*\.sh text=auto' \(line 2\)"),
+        ("* binary\n*.md !text\n", r"'\*\.md !text' \(line 2\)"),
+        ("# kept by the team\n*.png -diff\n", r"no '\* -text' rule"),
+        # Git drops a whole rule with an invalid attribute name such as '#'.
+        ("* -text # pinned\n", r"no '\* -text' rule"),
+        ("* -text\n*.sh text\n*.md -text\n", r"'\*\.sh text' \(line 2\)"),
+        # Git keeps a pattern with an unknown escape verbatim, quotes included.
+        ('"\\*" -text\n', r"no '\* -text' rule"),
+        # An unset macro does not expand, so -binary leaves text unspecified.
+        ("* binary\n* -binary\n", r"'\* -binary' \(line 2\)"),
+        ("* binary -binary\n", r"'\* binary -binary' \(line 1\)"),
+        ("\ufeff* text\n\xff\n", r"'\* text' \(line 1\)"),
+    ],
+)
+def test_a_user_gitattributes_that_converts_plugin_roots_is_refused(project, rules, named) -> None:
+    """A user's .agents/plugins/.gitattributes is kept, but it must leave the
+    byte-pinned roots unconverted under core.autocrlf (#4809)."""
+    project.source("acme/alpha", "alpha")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text(rules, encoding="utf-8", errors="surrogateescape")
+    before = attributes.read_bytes()
+    with pytest.raises(ClaudeNativePluginError, match=named):
+        project.reconcile(None)
+    assert attributes.read_bytes() == before
+    assert not (project.plugins / "alpha").exists()
+    assert not (project.root / _CLAUDE).exists()
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        "* text\n*.png -diff\n* -text\n",
+        "* text\n* binary\n",
+        '"*" -text\n',
+        '"\\052" -text\n',
+        "* -text\n*.sh text=auto\n*.sh -text\n",
+    ],
+)
+def test_a_user_gitattributes_whose_last_word_pins_the_roots_is_kept(project, rules) -> None:
+    project.source("acme/alpha", "alpha")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text(rules)
+    project.reconcile(None)
+    assert attributes.read_text() == rules
+    assert (project.plugins / "alpha/hooks/run.sh").read_text() == "v1"
+
+
+@pytest.mark.parametrize(
+    "macros",
+    [
+        "\ufeff[attr]normalize text eol=lf\n# \xff\n",
+        "".join(f"[attr]m{n} m{n + 1}\n" for n in range(9)) + "[attr]m9 text\n[attr]normalize m0\n",
+    ],
+)
+def test_a_top_level_macro_that_reaches_text_is_refused(project, macros) -> None:
+    """A top-level [attr] macro, however deeply chained, can re-enable text."""
+    project.source("acme/alpha", "alpha")
+    (project.root / ".git").mkdir(parents=True)
+    (project.root / ".gitattributes").write_text(macros, encoding="utf-8", errors="surrogateescape")
+    attributes = project.plugins / ".gitattributes"
+    attributes.parent.mkdir(parents=True)
+    attributes.write_text("* -text\n* normalize\n")
+    with pytest.raises(ClaudeNativePluginError, match=r"'\* normalize' \(line 2\)"):
+        project.reconcile(None)
+    assert not (project.plugins / "alpha").exists()
+
+
 def test_an_unparseable_second_file_leaves_every_file_and_root_untouched(project) -> None:
     project.source("acme/alpha", "alpha")
     broken = project.root / _COPILOT

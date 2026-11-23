@@ -997,7 +997,9 @@ def routed_claude_rule_renders(
     records a ``content_hash`` must match it before its manifest or its
     instructions (or their absence) decide routing, so a deleted routed
     instruction fails too. An older row without one renders nothing it
-    does not already record as deployed.
+    does not already record as deployed. A missing cached copy of an
+    attested dependency fails too unless the lock proves it gives Claude
+    nothing (:func:`_lock_proves_claude_excluded`).
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.deployable_source_plan import DeployableSourcePlan
@@ -1014,9 +1016,11 @@ def routed_claude_rule_renders(
             continue
         dep_ref = dep.to_dependency_ref()
         install_path = dep_ref.get_install_path(modules_root)
-        if not install_path.is_dir():
-            continue
         attested = bool(getattr(dep, "content_hash", None))
+        if not install_path.is_dir():
+            if verified and attested and not _lock_proves_claude_excluded(dep, dep_ref):
+                _refuse_missing_source(dep, install_path, project_root)
+            continue
         if verified and attested:
             _require_locked_source(lockfile, dep, install_path, project_root)
         manifest = manifest_file(install_path)
@@ -1057,6 +1061,39 @@ def routed_claude_rule_renders(
         if rendered:
             rules[dep.get_unique_key()] = rendered
     return rules
+
+
+def _lock_proves_claude_excluded(dep, dep_ref) -> bool:
+    """Return True when the lock records that *dep* excludes Claude.
+
+    Without its cached copy, pack cannot read the dependency's ``targets:``
+    or instructions, so only a recorded exclusion is authoritative: the
+    edge's target subset, or the package's own ``targets:`` install recorded
+    (#4850), judged by the same rule install applies. A missing Claude
+    deployment proves nothing: a collision can block one target while another
+    deploys, and Claude lacks some primitives.
+    """
+    from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import recorded_targets_exclude
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    subset = effective_dependency_selection(dep_ref).target_subset
+    if subset and "claude" not in subset:
+        return True
+    recorded = getattr(dep, "package_targets", None) or ()
+    return recorded_targets_exclude(KNOWN_TARGETS["claude"], recorded)
+
+
+def _refuse_missing_source(dep, install_path: Path, project_root: Path) -> None:
+    """Refuse to pack a Claude dependency whose cached copy is gone (#4755)."""
+    from apm_cli.core.remediation import PACK_INSTALLED_FILES_MISSING
+
+    cached = portable_relpath(install_path, project_root)
+    raise ValueError(
+        f"Cannot pack dependency {dep.repo_url}: its installed copy {cached} is missing, so "
+        "its Claude instructions routed to AGENTS.md cannot be rendered into the bundle. "
+        f"{PACK_INSTALLED_FILES_MISSING.sentence()}"
+    )
 
 
 def _require_locked_source(lockfile, dep, install_path: Path, project_root: Path) -> None:

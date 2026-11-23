@@ -82,8 +82,16 @@ function Restore-DeveloperMode($State) {
 
 function Remove-OwnedProfile($State) {
     if (-not $State.UserSid) { return }
-    $profiles = @(Get-CimInstance -ClassName Win32_UserProfile -Filter "SID='$($State.UserSid)'")
+    $filter = "SID='$($State.UserSid)'"
+    $profiles = @(Get-CimInstance -ClassName Win32_UserProfile -Filter $filter)
     if ($profiles.Count -gt 1) { throw 'More than one profile matches the newly created SID.' }
+    # The User Profile Service unloads a -Credential child's profile asynchronously after
+    # the child exits (#4904): wait a bounded time for it, then fail closed.
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    while (@($profiles | Where-Object { $_.Loaded }).Count -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $profiles = @(Get-CimInstance -ClassName Win32_UserProfile -Filter $filter)
+    }
     foreach ($profile in $profiles) {
         if ($profile.Loaded) { throw 'The owned user profile is still loaded.' }
         $profile | Remove-CimInstance
