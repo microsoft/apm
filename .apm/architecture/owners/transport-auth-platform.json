@@ -15,6 +15,7 @@
       "selectors": [
         "src/apm_cli/deps/transport_selection.py",
         "src/apm_cli/deps/git_reference_resolver.py",
+        "src/apm_cli/deps/anonymous_ref_listing.py",
         "src/apm_cli/deps/download_strategies.py",
         "src/apm_cli/install/validation.py",
         "src/apm_cli/marketplace/resolver.py",
@@ -84,6 +85,13 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "deploy-store",
+      "decision": "Content-addressed store of deployed file bytes: hex-digest keys, verify on every read, no symlink following, atomic owner-only writes",
+      "owner": "cache/deploy_store.py (DeployStore); install/phases/lockfile_deploy_records.py stages the lockfile phase's deployed bytes and package records through it",
+      "selectors": ["src/apm_cli/cache/deploy_store.py", "src/apm_cli/install/phases/lockfile_deploy_records.py"],
+      "guards": ["transport-platform-deploy-store-verified-reads"]
+    },
+    {
       "id": "cached-repository-git",
       "decision": "Git runs in persisted repositories: their config is allow-listed before any run, and every run is inert",
       "owner": "cache/cached_repo.py (require_trusted_cached_repo / inert_git_args / cached_repo_env)",
@@ -107,9 +115,10 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
       "selectors": ["src/apm_cli/utils/git_env.py"],
       "guards": [
+        "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",
         "transport-platform-git-clone-hooks-disabled",
         "transport-platform-git-clone-templates-disabled",
@@ -257,8 +266,8 @@
     },
     {
       "id": "archive-extraction-limits",
-      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths and duplicate entries (#4235)",
-      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member and _stream_member); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
+      "decision": "Which limits every archive extraction applies, for every accepted format (tar.gz and zip): entry-count cap, streamed uncompressed-size cap, and refusal of links, special files, absolute or traversing paths, duplicate entries and names a filesystem would rewrite (#4235)",
+      "owner": "utils/archive.py (safe_extract_tar, safe_extract_zip, read_zip_member; shared _archive_member_target, _claim_member, _stream_member and portable_name_problem, which bundle/unpacker.py also applies to lockfile paths); consumers: deps/registry/extractor.py, bundle/unpacker.py, bundle/local_bundle.py, deps/download_strategies.py",
       "selectors": [
         "src/apm_cli/utils/archive.py",
         "src/apm_cli/deps/registry/extractor.py"

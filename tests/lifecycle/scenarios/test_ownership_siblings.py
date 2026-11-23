@@ -497,7 +497,7 @@ def _pair(deployed: str, **factors: str) -> dict[str, str]:
 
 
 _EDITED_OPS = {
-    "install": _pair("edited", OP="install", **_UNIT),
+    "install": _pair("edited", OP="install", LOCK="consistent", **_UNIT),
     "dry-run": _pair("edited", DRYRUN="on"),
     "update-flag": _pair("edited", UPDATE="on"),
     "select": _pair("edited", SELECT="on"),
@@ -564,7 +564,7 @@ def test_force_replaces_an_edited_deployed_skill(lifecycle_world) -> None:
 
 _USER_SKILL_AT_PATH = "---\nname: p-skill\ndescription: The user's own p-skill.\n---\n\nMine.\n"
 _UNOWNED_OPS = {
-    "dry-run": _pair("unowned", DRYRUN="on", **_UNIT),
+    "dry-run": _pair("unowned", DRYRUN="on", LOCK="consistent", **_UNIT),
     "install": _pair("unowned", OP="install"),
     "frozen": _pair("unowned", FROZEN="on"),
     "update-flag": _pair("unowned", UPDATE="on"),
@@ -808,21 +808,49 @@ def _hook_package(world) -> Scenario:
     return scenario
 
 
-@pytest.mark.parametrize("gate", ["revoked-after-deploy", "unapproved-exec"])
+def _deny_in_manifest(scenario: Scenario, package: str) -> None:
+    """A deny for *package* arrives in apm.yml (a teammate's commit), replacing its approval."""
+    manifest = scenario.world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    allow = data["executables"]["allow"]
+    keys = [key for key in allow if package in key]
+    assert keys, f"no approval of {package} in {allow}"
+    deny = data["executables"].setdefault("deny", {})
+    for key in keys:
+        del allow[key]
+        deny[key] = {"hooks": True}
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+    scenario.model = scenario.model.deny(package, scenario.kinds[package])
+
+
+# GATE level -> the gate change, made before (revoked, unapproved) or after
+# (denied) the lockfile is lost: a deny that arrives with no lockfile finds no
+# recorded deployment, so it reads as denied-executable.
+_CLOSED_GATES = ("denied-executable", "revoked-after-deploy", "unapproved-exec")
+
+
+@pytest.mark.parametrize("gate", _CLOSED_GATES)
 def test_a_closed_gate_retires_a_hook_without_a_lock(lifecycle_world, gate) -> None:
     scenario = _hook_package(lifecycle_world)
     hook = lifecycle_world.project / ".github/hooks/h-hook-session.json"
     assert hook.is_file()
     if gate == "revoked-after-deploy":
         scenario.run("deny h-hook")
-    else:
+    elif gate == "unapproved-exec":
         _drop_approval(scenario, "h-hook")
     _forget_lock(scenario)
-    step = scenario.run(
-        "install", credit=[_pair("present-provenance-unknown", PRIM="hook", GATE=gate)]
-    )
+    if gate == "denied-executable":
+        _deny_in_manifest(scenario, "h-hook")
+    step = scenario.run("install", credit=_closed_gate_credit(gate))
     assert not hook.exists(), step.output
     scenario.finish()
+
+
+def _closed_gate_credit(gate: str) -> list[dict[str, str]]:
+    return [
+        _pair("present-provenance-unknown", PRIM="hook", GATE=gate),
+        {"LOCK": "absent", "PRIM": "hook", "GATE": gate},
+    ]
 
 
 def test_a_withheld_hook_a_checkout_brings_back_is_kept_announced_and_detected(
@@ -1497,6 +1525,25 @@ def test_an_edited_mcp_entry_from_each_source_is_refused(lifecycle_world, src) -
     scenario.finish()
 
 
+_INLINE_DRY_RUN = ("install", "--mcp", "p-inline", "--dry-run", "--", INERT_COMMAND, "--stdio")
+
+
+def test_a_dry_run_inline_mcp_install_writes_nothing(lifecycle_world) -> None:
+    """``install --mcp NAME --dry-run -- CMD`` previews the server and changes nothing."""
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(lifecycle_world, (), policy="allow")
+    manifest = (lifecycle_world.project / "apm.yml").read_bytes()
+    step = scenario.run(
+        _INLINE_DRY_RUN,
+        credit=[{"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}],
+        says=[r"would add MCP server 'p-inline'"],
+    )
+    assert not step.changed, step.changed
+    assert not (lifecycle_world.project / ".mcp.json").exists()
+    assert (lifecycle_world.project / "apm.yml").read_bytes() == manifest
+    scenario.finish()
+
+
 @pytest.mark.parametrize("src", sorted(_MCP_SOURCES))
 def test_an_mcp_entry_without_a_lock_is_kept(lifecycle_world, src) -> None:
     use_policy(lifecycle_world, "allow")
@@ -1828,6 +1875,92 @@ def test_a_kept_manifest_lsp_edit_fails_and_names_what_it_wrote(lifecycle_world)
     scenario.finish()
 
 
+# -- #4871: a blocked stdio-to-socket upgrade keeps OpenCode's entry -------------
+#
+# PROMISE: P-LAW-ownership.preserve_unowned via I1-X2 -- a server held at its
+# locked render by a kept edit (#4626) is held on every previously managed
+# target that can render that config, including one (OpenCode) the new socket
+# config cannot reach, so stale cleanup never deletes its entry
+# (source: integration/lsp_integrator.py LSPIntegrator._hold_kept_servers).
+
+_OPENCODE = "opencode.json"
+
+
+def _declare_socket_upgrade(world, transport: str, revision: str) -> None:
+    """Declare ``root-s`` over *transport* and a stdio ``root-b`` at *revision*."""
+    manifest = world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    upgraded = {
+        "name": "root-s",
+        "command": INERT_COMMAND,
+        "transport": transport,
+        "extensionToLanguage": {".root-s": "root-s"},
+    }
+    if transport == "stdio":
+        upgraded["args"] = ["--stdio"]
+    sibling = {
+        "name": "root-b",
+        "command": INERT_COMMAND,
+        "args": ["--stdio", f"--{revision}"],
+        "extensionToLanguage": {".root-b": "root-b"},
+    }
+    data["dependencies"]["lsp"] = [upgraded, sibling]
+    manifest.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _opencode_servers(world) -> dict:
+    return json.loads((world.project / _OPENCODE).read_text(encoding="utf-8"))["lsp"]
+
+
+def _edit_json_entry(scenario: Scenario, relative: str, key: str, field: str, value) -> None:
+    path = scenario.world.project / relative
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config[key]["root-s"][field] = value
+    scenario.user_write(relative, json.dumps(config, indent=2) + "\n")
+
+
+def test_a_blocked_socket_upgrade_keeps_opencodes_entry(lifecycle_world) -> None:
+    """A held Copilot edit blocks the upgrade: OpenCode's edited entry survives (exit 1).
+
+    Once the Copilot edit is moved aside, the same upgrade replaces the
+    Copilot entry and removes the stdio entry OpenCode cannot express.
+    """
+    world = lifecycle_world
+    scenario, tree = _start(world, {}, targets=("copilot", "opencode"))
+    _declare_socket_upgrade(world, "stdio", "v1")
+    scenario.source_moved()
+    scenario.run("install")
+    _edit_json_entry(scenario, _LSP, "lspServers", "args", ["--stdio", "--mine"])
+    _edit_json_entry(scenario, _OPENCODE, "lsp", "command", [INERT_COMMAND, "--mine"])
+    # root-b updates in both files: judge root-s's entries, not whole files.
+    for relative in (_LSP, _OPENCODE):
+        scenario.release_user_write(relative)
+    opencode = _opencode_servers(world)["root-s"]
+    locked = scenario.lock()
+    claims = (locked.lsp_configs["root-s"], dict(locked.lsp_target_servers))
+    _declare_socket_upgrade(world, "socket", "v2")
+    scenario.source_moved()
+
+    step = scenario.run("install", exit=1)
+    _kept(step, f"LSP server 'root-s' in {_LSP}")
+    assert _opencode_servers(world)["root-s"] == opencode, "OpenCode's entry changed"
+    assert _opencode_servers(world)["root-b"]["command"][-1] == "--v2"
+    after = scenario.lock()
+    assert (after.lsp_configs["root-s"], dict(after.lsp_target_servers)) == claims
+    tree.assert_intact("blocked socket upgrade")
+    scenario.finish()
+
+    # Not blocked: the upgrade replaces Copilot's entry and drops OpenCode's.
+    config = json.loads((world.project / _LSP).read_text(encoding="utf-8"))
+    del config["lspServers"]["root-s"]
+    (world.project / _LSP).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    scenario.run("install")
+    servers = json.loads((world.project / _LSP).read_text(encoding="utf-8"))["lspServers"]
+    assert servers["root-s"]["transport"] == "socket"
+    assert set(_opencode_servers(world)) == {"root-b"}
+    scenario.finish()
+
+
 def test_unproven_mismatch_is_kept(lifecycle_world) -> None:
     """Without a receipt or locked render proving APM wrote it, a mismatch is kept; exit 1."""
     scenario, tree = _exec_scenario(lifecycle_world)
@@ -1864,6 +1997,9 @@ CREDITS = credits(
             row for rows in _UNOWNED_EXEC.values() for row in rows
         ],
         "test_a_users_lsp_entry_is_never_taken_over": [_pair("unowned", PRIM="lsp")],
+        "test_a_dry_run_inline_mcp_install_writes_nothing": [
+            {"OP": "mcp-install", "SRC": "inline-mcp", "DRYRUN": "on"}
+        ],
         "test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]": [
             _pair("unowned", SRC="inline-mcp")
         ],
@@ -1872,10 +2008,8 @@ CREDITS = credits(
         ],
         "test_deployed_executables_without_a_lock_are_kept": _UNKNOWN_EXEC,
         **{
-            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": [
-                _pair("present-provenance-unknown", PRIM="hook", GATE=gate)
-            ]
-            for gate in ("revoked-after-deploy", "unapproved-exec")
+            f"test_a_closed_gate_retires_a_hook_without_a_lock[{gate}]": _closed_gate_credit(gate)
+            for gate in _CLOSED_GATES
         },
         **{
             f"test_a_native_plugins_skill_in_the_users_hands_survives_install[{deployed}]": [

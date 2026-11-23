@@ -1,0 +1,19 @@
+{
+  "issue": 4703,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall of a dependency deleted a deployed file a local bundle still owned, leaving apm.lock.yaml recording a missing file, and printed a package failure while exiting 0; uninstall now keeps files the project-local owner still holds, keeps that owner's lock row without a spurious ownership failure, and exits non-zero whenever it reports a package failure.",
+  "failure_modes": [
+    "ownership",
+    "outcome"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_file_routing.py::test_uninstall_keeps_a_bundle_owned_instruction",
+    "tests/unit/commands/test_uninstall_cleanup_claims.py::test_cleanup_claims_exclude_paths_the_local_owner_still_holds",
+    "tests/unit/core/test_deployment_departing_owner_rows.py::test_departing_owner_proof_keeps_the_row_with_remaining_owners",
+    "tests/unit/commands/test_uninstall_summary_output.py::test_reported_package_failure_makes_uninstall_incomplete"
+  ]
+}

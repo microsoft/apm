@@ -16,6 +16,7 @@ from typing import Any
 
 from apm_cli.core.remediation import CODEX_PLUGIN_USER_SCOPE
 from apm_cli.core.scope import InstallScope
+from apm_cli.utils import git_env
 
 MINIMUM_CODEX_VERSION = "0.163.0"
 _NUMBER = r"(0|[1-9][0-9]*)"
@@ -227,7 +228,7 @@ class CodexNativeClient:
     def for_scope(cls, scope: InstallScope, cwd: Path) -> CodexNativeClient:
         """Resolve a runtime at or above the qualified minimum without changing settings."""
         cls.require_scope(scope)
-        executable = shutil.which("codex")
+        executable = git_env.trusted_executable("codex")
         if executable is None:
             raise CodexNativeError(
                 f"Codex native registration requires Codex CLI {MINIMUM_CODEX_VERSION} "

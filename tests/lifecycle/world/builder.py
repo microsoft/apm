@@ -9,6 +9,7 @@ Layout under ``base`` (an ``IsolatedApmEnvironment`` root, cloned per test)::
     work/elsewhere/  the cwd of user-scope commands (no apm.yml)
     bundles/         ``apm pack`` output of p-exec (default plugin format)
     bundles-lsp/     ``apm pack`` output of p-lsp (default plugin format)
+    bundles-pack/    ``apm pack`` output of p-pack (default plugin format)
     bundles-apm/     ``apm pack --format apm`` of a consumer of approved p-exec
                      (what ``apm unpack`` reads: the deployed hook and MCP entry)
     executables/     OS-aware shims (``shims.py``): trap ``claude`` / ``codex``
@@ -36,7 +37,7 @@ import yaml
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.contract import PackageRef, World
-from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
+from tests.lifecycle.world.packages import GIT_PACK_ONLY, GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
     MARKETPLACE_NAME,
     MARKETPLACE_REPO,
@@ -52,7 +53,9 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 TAG = "v1.0.0"
-_NATIVE = frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"})
+_NATIVE = frozenset(
+    {"p-native-claude", "p-native-codex", "p-native-claude-bin", "p-native-claude-exec"}
+)
 
 
 def _manifest(name: str) -> dict[str, object]:
@@ -82,7 +85,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
         factory.tag(repository, TAG, commit)
         served[f"{owner}/{repo}"] = repository.origin
 
-    for name in GIT_PUBLISHED:
+    for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY):
         publish(ORG, name, packages[name].root)
     trees = shared / "trees"
     for variant, document in policy_documents().items():
@@ -99,7 +102,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
             "description": f"Lifecycle world package {name}",
             "source": {"source": "github", "repo": f"{ORG}/{name}", "ref": TAG},
         }
-        for name in GIT_PUBLISHED
+        for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY)
     ]
     document = {"name": MARKETPLACE_NAME, "owner": {"name": "APM Lifecycle"}, "plugins": plugins}
     (catalog / ".claude-plugin" / "marketplace.json").write_text(
@@ -261,6 +264,7 @@ def build_template(base: Path) -> World:
         _checked(_engine(bind, user_cwd, env), "apm config set registry url")
         bundle = _pack_bundle(authored["p-exec"].root, base / "bundles", env)
         lsp_bundle = _pack_bundle(authored["p-lsp"].root, base / "bundles-lsp", env)
+        pack_bundle = _pack_bundle(authored["p-pack"].root, base / "bundles-pack", env)
         # ``apm unpack`` reads only the legacy APM bundle layout.
         apm_bundle = _pack_apm_bundle(authored["p-exec"].root, base / "bundles-apm", env)
     except Exception:
@@ -282,6 +286,13 @@ def build_template(base: Path) -> World:
         packages[f"{name}:marketplace"] = PackageRef(
             name, f"{name}@{MARKETPLACE_NAME}", kinds, "marketplace"
         )
+    for name in GIT_PACK_ONLY:
+        packages[f"{name}:git"] = PackageRef(
+            name, f"{ORG}/{name}#{TAG}", authored[name].kinds, "git"
+        )
+        packages[f"{name}:marketplace"] = PackageRef(
+            name, f"{name}@{MARKETPLACE_NAME}", authored[name].kinds, "marketplace"
+        )
     for name in registry.REGISTRY_PUBLISHED:
         version = registry.REGISTRY_PUBLISHED[name][0]
         packages[f"{name}:registry"] = PackageRef(
@@ -292,6 +303,9 @@ def build_template(base: Path) -> World:
     )
     packages["p-lsp:bundle"] = PackageRef(
         "p-lsp", str(lsp_bundle), authored["p-lsp"].kinds, "local-bundle"
+    )
+    packages["p-pack:bundle"] = PackageRef(
+        "p-pack", str(pack_bundle), authored["p-pack"].kinds, "local-bundle"
     )
     packages["p-exec:apm-bundle"] = PackageRef(
         "p-exec", str(apm_bundle), authored["p-exec"].kinds, "local-bundle"

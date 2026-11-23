@@ -522,7 +522,7 @@ def _admitted_names(lockfile: LockFile) -> set[str]:
     )
 
 
-class _DirectDependencyIndex:
+class DirectDependencyIndex:
     """Trace locked packages through their recorded parents to apm.yml entries.
 
     ``resolved_by`` holds the parent's lock key (replacement-enabled locks) or
@@ -607,6 +607,16 @@ def _authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDepende
             continue
         declarations.setdefault(declaration.name, declaration)
     return declarations
+
+
+def authored_mcp_declarations(manifest: dict[str, Any]) -> dict[str, MCPDependency]:
+    """Return a manifest's authored MCP declarations keyed by server name.
+
+    Public, read-only entry point to the canonical declaration parser install
+    uses; first declaration of a name wins. Raises ``ValueError`` for a
+    malformed ``dependencies`` block or an entry the MCP model rejects.
+    """
+    return _authored_mcp_declarations(manifest)
 
 
 def _get_server_configs(dependencies: list[Any] | tuple[Any, ...]) -> dict[str, dict[str, Any]]:
@@ -938,7 +948,7 @@ def _collect_locked_dependencies(
     refusable = result.refusable
     pending_packages = result.pending_packages
     direct_roots: dict[str, set[str] | None] = {}
-    direct_index = _DirectDependencyIndex(lockfile)
+    direct_index = DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     native_ownership_cache: dict[Path, frozenset[str]] = {}

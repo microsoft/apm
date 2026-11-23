@@ -11,6 +11,7 @@ local-package stale-file deletion. These tests pin its invariants:
 * unlink failures are retained for retry on next install
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -738,3 +739,75 @@ def test_refusals_name_a_symlinked_member_of_a_claimed_directory(project_root):
 
     assert refused == [(".agents/skills/kit/SKILL.md", SYMLINKED)]
     assert (skill / "SKILL.md").is_symlink() and final.is_symlink()
+
+
+@pytest.mark.parametrize(
+    ("recorded", "receipts_readable", "consentable"),
+    [
+        ("match", True, True),
+        ("conflict", True, False),
+        ("none", True, False),
+        ("match", False, False),
+    ],
+)
+def test_trust_lockfile_consent_needs_one_matching_recorded_hash(
+    tmp_path: Path, recorded: str, receipts_readable: bool, consentable: bool
+) -> None:
+    """#4295: consent fills missing evidence only from a single matching lock hash."""
+    from apm_cli.integration.cleanup import AUTHORIZED, UNPROVEN, DeploymentEvidence
+
+    rel = ".github/instructions/a.instructions.md"
+    target = _make_managed_file(tmp_path, rel)
+    hashes = {
+        "match": frozenset({compute_file_hash(target)}),
+        "conflict": frozenset({compute_file_hash(target), "sha256:" + "0" * 64}),
+        "none": frozenset(),
+    }[recorded]
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: hashes},
+        receipts_readable=receipts_readable,
+    )
+
+    assert evidence.verdict(rel, target) == UNPROVEN
+    evidence.consent_to_lockfile_hashes()
+
+    assert (evidence.verdict(rel, target) == AUTHORIZED) is consentable
+    target.write_text("edited after the decision\n", encoding="utf-8")
+    assert evidence.verdict(rel, target) == UNPROVEN
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")
+def test_safety_rejection_of_a_consent_kept_file_is_always_a_failure(
+    tmp_path: Path, diagnostics
+) -> None:
+    """#4815: consent kept it earlier, but a current path-safety rejection still fails."""
+    from apm_cli.integration.cleanup import DeploymentEvidence, consent_outcome
+
+    rel = ".github/hooks/kept.json"
+    target = _make_managed_file(tmp_path, rel)
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path,
+        receipts={},
+        render=lambda _owner: None,
+        owners={rel: ("pkg",)},
+        kept=(),
+        recorded_hashes={rel: frozenset({"sha256:" + "0" * 64})},
+    )
+    evidence.consent_to_lockfile_hashes()
+    assert evidence.refusals([rel]) and evidence.kept_under_consent() == frozenset({rel})
+    outside = tmp_path / "outside-hooks"
+    target.parent.rename(outside)
+    target.parent.symlink_to(outside, target_is_directory=True)
+
+    result = remove_stale_deployed_files(
+        [rel], tmp_path, dep_key="pkg", targets=None, diagnostics=diagnostics, evidence=evidence
+    )
+    failures, unsafe = consent_outcome(result, evidence)
+
+    assert rel in result.rejected and rel in failures and rel in unsafe
+    assert (outside / "kept.json").is_file()

@@ -1,7 +1,6 @@
 """MCP dependency model."""
 
 import json
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -11,6 +10,7 @@ from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.github_host import has_parser_dependent_url_chars
 from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
 
+from .server_names import validate_server_name
 from .subsets import parse_target_subset
 
 # Passthrough warnings already shown in this process (#4242): one command
@@ -130,7 +130,6 @@ def opencode_enabled_matches(current: dict, stored: dict) -> bool:
     )
 
 
-_NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -388,6 +387,14 @@ class MCPDependency:
             parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
 
+    def _registry_config_key(self) -> str | None:
+        """The config key a registry reference writes under (canonical owner), else None."""
+        if self.registry is False or not isinstance(self.name, str):
+            return None
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        return MCPClientAdapter.determine_config_key(self.name, None)
+
     def validate(self, strict: bool = True) -> None:
         """Validate the dependency. Raises ValueError on invalid state.
 
@@ -399,13 +406,12 @@ class MCPDependency:
         # ---- Universal hardening (always) ----
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
-        if not _NAME_REGEX.match(self.name):
-            raise ValueError(
-                f"Invalid MCP dependency name '{self.name}': "
-                f"must start with a letter, digit, '@', or '_' and contain "
-                f"only [a-zA-Z0-9._@/:=-] (max 128 chars). "
-                f"Example: 'io.github.acme/cool-server' or 'my-server'."
-            )
+        validate_server_name(
+            self.name,
+            "MCP",
+            example="'io.github.acme/cool-server' or 'my-server'",
+            config_key=self._registry_config_key(),
+        )
         # C2 (defense-in-depth): reject embedded ``..`` segments. The regex
         # above allows ``a/../../../evil`` because '/', '.', '-' are all in
         # the character class. Today no code path uses this name as a

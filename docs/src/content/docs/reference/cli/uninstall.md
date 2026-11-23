@@ -31,6 +31,7 @@ content. Global uninstalls also remove the Claude plugin declarations APM made.
 |---|---|
 | `--dry-run` | Show the removal plan without writes from the uninstall engine. `pre-uninstall` lifecycle scripts still run and may have side effects. Registry fallback and shared-slot survivor staging are skipped. |
 | `-v, --verbose` | Show detailed removal information. |
+| `--trust-lockfile` | Consent, for this run only, to delete a file that has no deployment evidence (no receipt, and the locked version cannot be rendered because its source is gone) when its bytes equal the hash `apm.lock.yaml` records. Every other file is kept and named. No other option implies it. |
 | `-g, --global` | Remove from the user scope under `$APM_HOME` (default `~/.apm`) instead of the current project. Target deployment cleanup still uses target-specific home variables or the operating-system home. |
 
 ## Examples
@@ -99,9 +100,13 @@ What gets removed, in order:
    A requested direct dependency that another installed package still
    needs is removed from `apm.yml` only: it stays installed, its lockfile
    entry now names that package as its parent, and `apm install --frozen`
-   keeps passing. The output says which package still needs it. For a
-   local (path) dependency, uninstall instead refuses before any change and
-   names the package that still needs it; uninstall that package first.
+   keeps passing. The output says which package still needs it. A local
+   (path) dependency also takes the lockfile identity it has under that
+   package, the same entry `apm install` records, and keeps its deployment
+   receipts. If the packages that need it cannot be read offline, or APM
+   cannot prove it wrote the package's files, uninstall refuses before any
+   change. Re-anchoring runs on its own: uninstall other packages in a
+   separate command.
    Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.
@@ -199,14 +204,37 @@ file and why, then offers two remedies:
   then rerun `apm uninstall`. Install rewrites a file it cannot prove it wrote.
 - If the source is unreachable, move each listed file aside or delete it, then
   run `apm uninstall` to finish the uninstall.
+- If the source is gone for good, rerun the same uninstall with
+  `--trust-lockfile` (for example `apm uninstall owner/repo --trust-lockfile`);
+  the remedy prints that exact command. It is offered only when the refusal
+  marks at least one file `--trust-lockfile would delete it`.
+
+The refusal marks each file `--trust-lockfile would delete it` or
+`kept even with --trust-lockfile`. `--trust-lockfile` adds one lockfile-only
+path: a file with no receipt whose locked version cannot be rendered is deleted
+when its bytes equal the one hash `apm.lock.yaml` records for it. It prints each
+such deleted path. The flag never deletes on the lockfile hash alone an edited
+file, a file a render or receipt disagrees with, a file the lockfile records no
+single hash for, an unreadable or symlinked file, or any file when receipt state
+cannot be read (including a receipt store no installation marker binds); those
+are kept and named. Receipt- or render-backed deletion still applies as without
+the flag, so the flag is not a preservation guarantee. In a skill
+directory, each eligible file is deleted and only the kept files stay. Kept
+files do not fail the command, and the package leaves `apm.yml` and
+`apm.lock.yaml`; a file that could not be deleted still fails it.
 
 After upgrading, uninstall needs this evidence. If the source is unreachable,
-use the second remedy. If a target-scoped file cannot be deleted, uninstall
+use the second or third remedy. If a target-scoped file cannot be deleted, uninstall
 lists the retained paths and exits before changing `apm.yml`. Files it already
 removed are dropped from `apm.lock.yaml`, so the lockfile claims only what is
 still on disk. Direct and orphan directories run first and may already be gone;
 declarations remain. Resolve the listed files and retry the same uninstall
 command.
+
+A file the removed package shares with your project's own content or a local
+bundle (`apm install <bundle>`) stays on disk and in `apm.lock.yaml` under that
+owner. If uninstall reports a package failure, it exits nonzero instead of
+printing `Uninstall complete`.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the

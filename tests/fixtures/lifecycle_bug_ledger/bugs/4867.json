@@ -1,0 +1,17 @@
+{
+  "issue": 4867,
+  "fixed_in": "Unreleased",
+  "summary": "When APM removed its last entry from a native MCP or hook config file it judged the file its own by content alone, so an empty skeleton the user created ({\"mcpServers\": {}} in .mcp.json, {} in .claude/settings.json) and APM merged into was deleted; APM now records which config files it created and deletes an emptied file only when it created it, the file holds only the empty skeleton and the record is local state outside any VCS-tracked path.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/security/test_incremental_deploy_differential.py::test_retiring_apm_entries_keeps_an_empty_config_file_the_user_created",
+    "tests/lifecycle/security/test_incremental_deploy_differential.py::test_a_pre_provenance_install_still_removes_the_config_file_apm_emptied",
+    "tests/unit/integration/test_config_file_provenance.py::test_an_empty_file_the_user_created_is_kept"
+  ]
+}

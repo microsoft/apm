@@ -4,7 +4,7 @@ import subprocess
 from typing import Any
 
 from .base import RuntimeAdapter, _stream_subprocess_output
-from .utils import find_runtime_binary
+from .utils import find_runtime_binary, require_runtime_binary
 
 
 class CodexRuntime(RuntimeAdapter):
@@ -37,7 +37,7 @@ class CodexRuntime(RuntimeAdapter):
         try:
             # Use codex exec to execute the prompt with real-time streaming
             # Always skip git repo check when running from APM
-            codex_binary = find_runtime_binary("codex") or "codex"
+            codex_binary = require_runtime_binary("codex")
             output_lines, return_code = _stream_subprocess_output(
                 [codex_binary, "exec", "--skip-git-repo-check", prompt_content],
                 timeout=300,
@@ -91,7 +91,11 @@ class CodexRuntime(RuntimeAdapter):
         try:
             # Try to get Codex version
             version_result = subprocess.run(
-                ["codex", "--version"], capture_output=True, text=True, encoding="utf-8", timeout=10
+                [require_runtime_binary("codex"), "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
             )
 
             version = version_result.stdout.strip() if version_result.returncode == 0 else "unknown"

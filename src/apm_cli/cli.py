@@ -415,6 +415,12 @@ class _OutputModeGroup(click.Group):
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         cmd = super().get_command(ctx, cmd_name)
+        if cmd_name == "install" and type(cmd) is _LazyCommand:
+            from apm_cli.install.fast_entry import fast_install_command
+
+            fast = fast_install_command(ctx, cmd)
+            if fast is not None:
+                return fast
         if isinstance(cmd, _LazyCommand):
             return cmd.resolved()
         return cmd
@@ -731,6 +737,11 @@ def _route_sigterm_to_interrupt() -> None:
 
 def main():
     """Main entry point for the CLI."""
+    from apm_cli.utils.git_env import disable_implicit_cwd_search
+
+    # A bare program name never resolves from the working directory, in this
+    # process or any APM helper child (Windows searches it before PATH).
+    disable_implicit_cwd_search()
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     _route_sigterm_to_interrupt()

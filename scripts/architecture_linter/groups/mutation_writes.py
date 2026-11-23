@@ -16,6 +16,12 @@ from scripts.architecture_linter.checks.mutation_hook_membership import (
 from scripts.architecture_linter.checks.mutation_hook_membership import (
     RULES as _HOOK_MEMBERSHIP_RULES,
 )
+from scripts.architecture_linter.checks.mutation_mcp_config_link_policy import (
+    COLLECTORS as _MCP_LINK_COLLECTORS,
+)
+from scripts.architecture_linter.checks.mutation_mcp_config_link_policy import (
+    RULES as _MCP_LINK_RULES,
+)
 from scripts.architecture_linter.checks.mutation_mcp_json_config_writer import (
     COLLECTORS as _MCP_JSON_COLLECTORS,
 )
@@ -41,6 +47,7 @@ RULES = (
     + _MCP_SCOPE_RULES
     + _MCP_REMOTE_RULES
     + _MCP_JSON_RULES
+    + _MCP_LINK_RULES
     + _HOOK_MEMBERSHIP_RULES
     + _ONBOARDING_RULES
     + _AUDIT_RULES
@@ -50,6 +57,7 @@ COLLECTORS = (
     + _MCP_SCOPE_COLLECTORS
     + _MCP_REMOTE_COLLECTORS
     + _MCP_JSON_COLLECTORS
+    + _MCP_LINK_COLLECTORS
     + _HOOK_MEMBERSHIP_COLLECTORS
 )
 
