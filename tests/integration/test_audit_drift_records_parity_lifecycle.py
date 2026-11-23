@@ -62,7 +62,8 @@ def _same_verdict(world: ReplayWorld, *args: str) -> tuple[CommandResult, Comman
     assert served.stdout == live.stdout, evidence
     # Default output is unchanged by records: the served/live line is --verbose only.
     assert _SUMMARY.search(served.stderr) is None, evidence
-    assert _SUMMARY.sub("", served.stderr).strip() == _SUMMARY.sub("", live.stderr).strip()
+    assert _SUMMARY.search(live.stderr) is None, evidence
+    assert served.stderr == live.stderr, evidence
     return served, live
 
 
@@ -89,7 +90,7 @@ def test_record_served_replay_gives_the_live_verdict(tmp_path: Path, apm_binary_
     )
     world.apm("install")
 
-    served, live = _same_verdict(world, "--ci", "--no-fail-fast")
+    served, _live = _same_verdict(world, "--ci", "--no-fail-fast")
     assert served.returncode == 0, served.stdout + served.stderr
     assert _replay_counts(world, records=True) == ("1", "2")
     assert _replay_counts(world, records=False) == ("0", "3")
@@ -126,7 +127,7 @@ def test_a_live_package_rendering_onto_a_served_file_replays_all_live(
     )
     world.apm("install", expect=None)
 
-    served, live = _same_verdict(world, "--ci", "--no-fail-fast")
+    _same_verdict(world, "--ci", "--no-fail-fast")
     # The clash sent the whole replay live: nothing is reported as served.
     assert _replay_counts(world, records=True) == ("0", "2")
     assert _replay_counts(world, records=False) == ("0", "2")
