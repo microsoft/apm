@@ -146,7 +146,7 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     ("user", "mcp", "copilot"): JsonEntry(".copilot/mcp-config.json", "mcpServers", "{pkg}-mcp"),
     ("user", "lsp", "copilot"): JsonEntry(".copilot/lsp-config.json", "lspServers", "{pkg}-server"),
     ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
-    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    # bin/ of a Claude marketplace or native plugin under HOME (user scope).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # Surfaces a native Claude plugin never uses: its skills load from the plugin.
@@ -1012,7 +1012,7 @@ def skill_package(factory, name: str, *, dependencies: Sequence[str] = ()) -> Pa
 
 OBLIGATIONS_PATH = Path(__file__).parents[2] / "quality" / "lifecycle_obligations.json"
 # Lanes whose generated obligations the scenario suites discharge (#4100-#4106).
-SCENARIO_LANES = frozenset({"T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
+SCENARIO_LANES = frozenset({"T-2", "T-3", "T-6a", "T-6b", "T-6c", "T-6d", "T-6e", "T-6g", "T-7b"})
 NODE_ROOT = "tests/lifecycle/scenarios"
 
 
@@ -1163,6 +1163,9 @@ NEWER_LOCK_REFUSALS = (
     *(f"pair|{partner}|LOCK=newer-generator" for partner in _NEWER_PARTNERS),
     *(f"pair|LOCK=newer-generator|{partner}" for partner in _NEWER_AFTER),
     "T4|OP=pack|SCOPE=project|LOCK=newer-generator",
+    "pair|LOCK=newer-generator|HOSTID=bare-default",
+    "pair|LOCK=newer-generator|HOSTID=proxy-logical",
+    "pair|LOCK=newer-generator|HOSTID=qualified-host-port",
 )
 
 EXPECTED_REFUSALS: Mapping[str, ExpectedRefusal] = {

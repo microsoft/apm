@@ -127,15 +127,15 @@ class TestUpdateLockfile:
 
         lock_path = tmp_path / "apm.lock.yaml"
         self._write_minimal_lockfile(lock_path)
-        real_load_yaml_str = yaml_io.load_yaml_str
+        real_load = yaml_io.load_machine_yaml_str
         load_calls = 0
 
-        def counting_load_yaml_str(text):
+        def counting_load(text):
             nonlocal load_calls
             load_calls += 1
-            return real_load_yaml_str(text)
+            return real_load(text)
 
-        monkeypatch.setattr(yaml_io, "load_yaml_str", counting_load_yaml_str)
+        monkeypatch.setattr(yaml_io, "load_machine_yaml_str", counting_load)
 
         MCPIntegrator.update_lockfile({"server-a"}, lock_path=lock_path)
 
