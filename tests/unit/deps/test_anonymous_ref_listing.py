@@ -176,16 +176,22 @@ def test_env_that_changes_gits_request_falls_back(name):
 
 
 def test_proxy_follows_libcurl_precedence_and_no_proxy():
-    assert arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://q:2"}) == "http://p:1"
+    assert arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://p:1"}) == "http://p:1"
     assert arl._proxy({"HTTPS_PROXY": "http://q:2"}) == "http://q:2"
     assert arl._proxy({"HTTP_PROXY": "http://q:2"}) is None
-    assert arl._proxy({"https_proxy": "", "HTTPS_PROXY": "http://q:2"}) is None
+    assert arl._proxy({"https_proxy": "", "HTTPS_PROXY": "http://q:2"}) == "http://q:2"
+    no_proxy_upper = {"HTTPS_PROXY": "http://q:2", "no_proxy": "", "NO_PROXY": "github.com"}
+    assert arl._proxy(no_proxy_upper) is None
     assert arl._proxy({"HTTPS_PROXY": "http://q:2", "NO_PROXY": ".github.com"}) is None
     assert arl._proxy({"HTTPS_PROXY": "http://q:2", "no_proxy": "*"}) is None
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "socks5://q:2"})
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "https://q:2"})
+    with pytest.raises(arl._Fallback):
+        arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://q:2"})
+    with pytest.raises(arl._Fallback):
+        arl._proxy({"HTTPS_PROXY": "http://q:2", "no_proxy": "a.com", "NO_PROXY": "b.com"})
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "http://user:pw@q:2"})
 
@@ -482,10 +488,11 @@ def test_a_worker_ending_without_a_result_falls_back(monkeypatch):
 
 
 def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkeypatch):
-    """Red if the context were built from APM's injected ssl.SSLContext."""
+    """Red if the context were built from the context class APM's injection publishes."""
     import sys
 
     import certifi
+    import urllib3.util.ssl_ as urllib3_ssl
 
     from apm_cli.core import tls_trust
 
@@ -498,15 +505,15 @@ def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkey
     state = tls_trust._capture_tls_publication_state()
     try:
         tls_trust.configure_tls_trust(env={"APM_EXTRA_CA_BUNDLE": certifi.where()})
-        injected = arl.ssl.SSLContext
+        # The context urllib3 (and so requests) builds once APM's trust is installed.
+        injected = urllib3_ssl.SSLContext(arl.ssl.PROTOCOL_TLS_CLIENT)
+        injected.load_verify_locations(cafile=str(git_ca))
 
         context = arl._git_trust_context(str(git_ca))
     finally:
         tls_trust._restore_tls_publication_state(state)
         tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION = recorded
 
-    # APM's OS-store or additive trust is active process-wide ...
-    assert injected is not tls_trust._STDLIB_SSL_CONTEXT
-    # ... yet the git-only context is a plain stdlib context with exactly git's CA.
+    assert len(injected.get_ca_certs()) > 1
     assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
     assert len(context.get_ca_certs()) == 1

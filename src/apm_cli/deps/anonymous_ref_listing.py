@@ -175,13 +175,24 @@ def _bypasses_proxy(no_proxy: str) -> bool:
     return False
 
 
+def _curl_env(env: Mapping[str, str], lower: str, upper: str) -> str:
+    """libcurl's lookup: an empty value counts as unset, lowercase first.
+
+    Both names set to different values falls back rather than modelling
+    precedence (stricter than libcurl, never looser).
+    """
+    low, up = env.get(lower) or "", env.get(upper) or ""
+    if low and up and low != up:
+        raise _Fallback(f"{lower} and {upper} disagree")
+    return low or up
+
+
 def _proxy(env: Mapping[str, str]) -> str | None:
     """The proxy libcurl would use for an https github.com URL, or ``None``."""
-    # libcurl reads the lowercase name first; set-but-empty means "none".
-    proxy = env["https_proxy"] if "https_proxy" in env else env.get("HTTPS_PROXY")
+    proxy = _curl_env(env, "https_proxy", "HTTPS_PROXY")
     if not proxy:
         return None
-    no_proxy = (env["no_proxy"] if "no_proxy" in env else env.get("NO_PROXY")) or ""
+    no_proxy = _curl_env(env, "no_proxy", "NO_PROXY")
     if no_proxy and _bypasses_proxy(no_proxy):
         return None
     parsed = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
