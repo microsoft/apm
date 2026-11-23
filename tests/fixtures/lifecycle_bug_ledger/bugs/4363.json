@@ -9,7 +9,7 @@
     "outcome.status_matches_state"
   ],
   "regression_tests": [
-    "tests/integration/test_locked_source_cache_parity_lifecycle.py::test_update_refusal_names_the_mismatch_as_an_error",
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_a_modified_cache_copy_it_cannot_rebuild",
     "tests/lifecycle/security/test_integrity.py::test_integrity_row"
   ]
 }

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -516,6 +517,7 @@ class TestSanitizeUrl:
 
 
 @trust_cached_repos()
+@trust_checkout_contents()
 class TestGetCheckoutIntegrityFailure:
     def test_evicts_on_integrity_failure(self, tmp_path):
         """When checkout exists but integrity check fails, evict and refetch."""

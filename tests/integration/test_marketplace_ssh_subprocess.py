@@ -15,10 +15,12 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.marketplace.client import _fetch_git
 from apm_cli.marketplace.models import MarketplaceSource
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
 
+@trust_checkout_contents()
 def test_ssh_marketplace_process_preserves_port_without_http_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
