@@ -155,3 +155,45 @@ def test_reanchor_rebuilds_replacement_requests_in_resolver_order(
     world.apm("uninstall", "./vendor/e")
 
     _assert_no_frozen_rewrites_nothing(world)
+
+
+def _aliased_package(root: Path, name: str, child: str, alias: str) -> None:
+    _skill_package(root, name)
+    (root / "apm.yml").write_text(
+        f"name: {name}\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        f"    - path: {child}\n      alias: {alias}\n",
+        encoding="utf-8",
+    )
+
+
+def test_a_reparented_descendant_under_another_alias_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e declares f as old-f, dev a declares f as new-f: f's winning edge installs elsewhere."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _aliased_package(vendor / "e", "e", "../f", "old-f")
+    _aliased_package(vendor / "a", "a", "../f", "new-f")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "under another name (new-f)" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

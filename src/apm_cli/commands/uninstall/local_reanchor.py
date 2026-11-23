@@ -82,21 +82,31 @@ def _root_identities(
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
-        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
-        row = lockfile.get_dependency(key)
-        if alias != row.alias:
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but the package that still needs it declares it under "
-                f"another name ({alias or 'no alias'}), which installs elsewhere"
-            )
-        if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
-            # An alias spelling (a symlink) installs as another package directory.
-            raise LocalReanchorRefused(
-                f"{label(key)} stays, but the package that still needs it declares it as "
-                f"{declared or 'another package'}, which installs elsewhere"
-            )
+        declared = _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
         identities[key] = (via[1], nearest[0], real_dir, declared)
     return identities
+
+
+def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir: Path):
+    """Return the winning edge's repo spelling, or refuse when it installs elsewhere.
+
+    Install creates the node from its first shallowest edge; another alias or
+    another package spelling there names another directory (#4889, #4999).
+    """
+    declared, alias = walk.local_edge_repos.get((key, parent), (None, None))
+    row = lockfile.get_dependency(key)
+    if alias != row.alias:
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but the package that still needs it declares it under "
+            f"another name ({alias or 'no alias'}), which installs elsewhere"
+        )
+    if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
+        # An alias spelling (a symlink) installs as another package directory.
+        raise LocalReanchorRefused(
+            f"{label(key)} stays, but the package that still needs it declares it as "
+            f"{declared or 'another package'}, which installs elsewhere"
+        )
+    return declared
 
 
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
@@ -186,6 +196,9 @@ def plan_local_reanchor(
         # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
         resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
         row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local" and key not in nodes:
+            # A re-parented descendant must still install where its row says.
+            _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
