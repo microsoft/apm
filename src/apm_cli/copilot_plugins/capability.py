@@ -104,10 +104,17 @@ def activate_native_registration(
 
 @contextlib.contextmanager
 def native_registration_scope(
-    targets: Iterable[Any] | None,
+    targets: Iterable[Any] | None, manifest: Any = None
 ) -> Iterator[NativeRegistrationCapability]:
-    """Publish the capability for one command body, then retire it."""
+    """Publish the capability for one command body, then retire it.
+
+    *manifest* is the root manifest the native route is decided by (#4995).
+    """
     capability = resolve_native_registration_capability(targets)
+    if capability.supported and manifest is not None:
+        from dataclasses import replace
+
+        capability = replace(capability, manifest=manifest)
     token = activate_native_registration(capability)
     try:
         yield capability

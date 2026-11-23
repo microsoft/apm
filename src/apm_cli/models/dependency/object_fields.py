@@ -25,7 +25,7 @@ _REMOTE_GIT_DEPENDENCY_FIELDS = frozenset(
         "type",
     }
 )
-_PARENT_GIT_DEPENDENCY_FIELDS = frozenset({"alias", "git", "path", "ref"})
+_PARENT_GIT_DEPENDENCY_FIELDS = frozenset({"alias", "git", "native", "path", "ref"})
 
 
 def parse_alias_override(raw: object) -> str | None:
@@ -79,10 +79,14 @@ def reject_unknown_git_fields(entry: dict, *, parent: bool) -> None:
     reject_unknown_fields(entry, allowed, dependency_type)
 
 
-def parse_native_route(raw: object) -> bool | None:
-    """Return a dependency's ``native:`` route choice (#4995); only booleans are valid."""
-    if raw is None:
+def parse_native_route(entry: dict) -> bool | None:
+    """Return a dependency entry's ``native:`` route choice (#4995); only booleans are valid.
+
+    An absent key is ``None``; a present null is rejected like any non-boolean.
+    """
+    if "native" not in entry:
         return None
+    raw = entry["native"]
     if not isinstance(raw, bool):
         raise ValueError(
             f"'native' field must be true or false, got {raw!r}; "
@@ -93,7 +97,7 @@ def parse_native_route(raw: object) -> bool | None:
 
 def apply_optional_dependency_fields(dep: Any, entry: dict) -> None:
     """Apply common alias, skills, targets and native fields to a dependency."""
-    dep.native = parse_native_route(entry.get("native"))
+    dep.native = parse_native_route(entry)
     alias = parse_alias_override(entry.get("alias"))
     if alias is not None:
         dep.alias = alias

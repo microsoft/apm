@@ -753,7 +753,7 @@ class APMPackage:
             raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
 
         native_plugins = data.get("native_plugins")
-        if native_plugins is not None and not isinstance(native_plugins, bool):
+        if "native_plugins" in data and not isinstance(native_plugins, bool):
             raise ValueError(
                 f"Invalid apm.yml: 'native_plugins' must be true or false, got {native_plugins!r}"
             )

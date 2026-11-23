@@ -60,6 +60,7 @@ from .object_fields import (
     apply_optional_dependency_fields,
     local_path_apm_yml_entry,
     parse_alias_override,
+    parse_native_route,
     reject_unknown_fields,
     reject_unknown_git_fields,
 )
@@ -922,6 +923,7 @@ class DependencyReference(ProviderCoordinateMixin):
                 virtual_path=normalized_path,
                 is_virtual=True,
                 is_parent_repo_inheritance=True,
+                native=parse_native_route(entry),
             )
 
         reject_unknown_git_fields(entry, parent=False)
@@ -2002,6 +2004,8 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
+            if self.native is not None:
+                entry["native"] = self.native
             return entry
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias or self.native is not None:
@@ -2026,6 +2030,8 @@ class DependencyReference(ProviderCoordinateMixin):
                 entry["skills"] = sorted(self.skill_subset)
             if self.target_subset:
                 entry["targets"] = sorted(self.target_subset)
+            if self.native is not None:
+                entry["native"] = self.native
             return entry
         if self.skill_subset or self.target_subset or self.native is not None:
             entry = {"git": self._format_reference(self.repo_url).split("#", 1)[0]}

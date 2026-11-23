@@ -107,5 +107,5 @@ def parse_registry_object_entry(dependency_reference_cls: Any, entry: dict) -> A
         registry_name=registry_name,
         skill_subset=skill_subset,
         target_subset=target_subset,
-        native=parse_native_route(entry.get("native")),
+        native=parse_native_route(entry),
     )

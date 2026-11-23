@@ -665,7 +665,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.copilot_plugins.capability import native_registration_scope
 
     try:
-        with native_registration_scope(targets):
+        with native_registration_scope(targets, route_manifest):
             with (
                 integrators["skill"].ownership_snapshot(replay_lockfile=lock),
                 _ReadOnlyProjectGuard(project_root, protected_subpaths),

@@ -111,7 +111,9 @@ def _apm_registration(settings: dict[str, dict]) -> list[str]:
 
 def _assert_loose(world: _World, name: str, skills: tuple[str, ...] = ("alpha",)) -> None:
     for skill in skills:
-        assert (world.project / ".claude/skills" / skill / "SKILL.md").is_file(), skill
+        # Claude Code reads .claude/skills; Copilot reads .agents/skills.
+        for root in (".claude/skills", ".agents/skills"):
+            assert (world.project / root / skill / "SKILL.md").is_file(), (root, skill)
     assert (world.project / ".claude/commands" / f"{name}-go.md").is_file()
     assert not (world.project / ".agents/plugins" / name).exists()
     assert _apm_registration(world.settings()) == []
@@ -263,10 +265,16 @@ def test_user_scope_native_false_deploys_loose_under_the_claude_home(
     result = world.run("install", "-g", "--no-policy", cwd=elsewhere)
 
     assert result.returncode == 0, _evidence(result)
-    assert (world.isolated.home / ".claude/skills/alpha/SKILL.md").is_file(), _evidence(result)
-    assert not (world.isolated.home / ".claude/plugins/marketplaces").exists() or not any(
-        "dn" in path.name for path in (world.isolated.home / ".claude/plugins").rglob("*")
+    home = world.isolated.home
+    assert (home / ".claude/skills/alpha/SKILL.md").is_file(), _evidence(result)
+    assert not (home / ".agents/plugins/dn").exists(), _evidence(result)
+    settings = home / ".claude/settings.json"
+    enabled = (
+        json.loads(settings.read_text("utf-8")).get("enabledPlugins", {})
+        if settings.exists()
+        else {}
     )
+    assert not any(key.startswith("dn@") for key in enabled), enabled
 
 
 def test_an_opted_out_dependency_gets_no_native_route_notice(
