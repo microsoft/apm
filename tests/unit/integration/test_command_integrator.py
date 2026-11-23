@@ -1157,7 +1157,7 @@ class TestSecurityScanFailClosed:
 
 
 class TestNonStringFrontmatterKeys:
-    """A non-string frontmatter key skips that command, never the batch (#4922)."""
+    """A non-string frontmatter key skips that command only, never the batch (#4922)."""
 
     @pytest.mark.parametrize(
         ("raw_key", "shown_key"),
@@ -1197,6 +1197,41 @@ class TestNonStringFrontmatterKeys:
         assert len(warnings) == 1, warnings
         assert warnings[0].startswith("Skipped command bad.prompt.md:")
         assert f"non-string frontmatter key {shown_key}" in warnings[0]
+
+    @pytest.mark.parametrize(
+        ("key", "label"),
+        [
+            ("1: x", "non-string frontmatter key 1 (int)"),
+            ("? 0x" + "f" * 5000 + "\n: x", "Exceeds the limit"),
+        ],
+        ids=["int", "int-too-large-to-render"],
+    )
+    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path, key, label):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        (tmp_path / ".claude").mkdir()
+        pkg_info = _make_package(
+            tmp_path,
+            {
+                "bad.prompt.md": f"---\n{key}\ndescription: Bad\n---\nBad body\n",
+                "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
+            },
+        )
+        diag = DiagnosticCollector()
+
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, tmp_path, diagnostics=diag
+        )
+
+        commands = tmp_path / ".claude" / "commands"
+        assert not (commands / "bad.md").exists()
+        assert frontmatter.load(commands / "good.md").metadata["description"] == "Good"
+        assert result.files_skipped == 1
+        warnings = [d.message for d in diag.by_category().get("warning", [])]
+        assert any(
+            m.startswith("Skipped command bad.prompt.md:") and label in m for m in warnings
+        ), warnings
 
 
 # ===================================================================
@@ -2046,41 +2081,4 @@ class TestClaudeNativeCommandFrontmatter:
         assert any(
             "not supported for cursor commands" in w and "disable-model-invocation" in w
             for w in warnings
-        ), warnings
-
-
-class TestNonStringFrontmatterKeys:
-    """A non-string frontmatter key skips that command only (#4922)."""
-
-    @pytest.mark.parametrize(
-        ("key", "label"),
-        [("1: x", "1"), ("? 0x" + "f" * 5000 + "\n: x", "<int>")],
-        ids=["int", "int-too-large-to-render"],
-    )
-    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path, key, label):
-        from apm_cli.integration.targets import KNOWN_TARGETS
-        from apm_cli.utils.diagnostics import DiagnosticCollector
-
-        (tmp_path / ".claude").mkdir()
-        pkg_info = _make_package(
-            tmp_path,
-            {
-                "bad.prompt.md": f"---\n{key}\ndescription: Bad\n---\nBad body\n",
-                "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
-            },
-        )
-        diag = DiagnosticCollector()
-
-        result = CommandIntegrator().integrate_commands_for_target(
-            KNOWN_TARGETS["claude"], pkg_info, tmp_path, diagnostics=diag
-        )
-
-        commands = tmp_path / ".claude" / "commands"
-        assert not (commands / "bad.md").exists()
-        assert frontmatter.load(commands / "good.md").metadata["description"] == "Good"
-        assert result.files_skipped == 1
-        warnings = [d.message for d in diag.by_category().get("warning", [])]
-        assert any(
-            "bad.prompt.md" in m and f"non-string frontmatter key(s): {label})" in m
-            for m in warnings
         ), warnings
