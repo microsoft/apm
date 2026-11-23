@@ -61,6 +61,7 @@
       "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; each receipt key keeps a short history of earlier hashes this installation wrote (core/receipt_history.py, read only by the session's trusted-baseline decision, never deletion evidence; #4428); cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
+        "src/apm_cli/core/_deployment_queries.py",
         "src/apm_cli/core/legacy_lock_evidence.py",
         "src/apm_cli/core/receipt_history.py",
         "src/apm_cli/integration/skill_support.py",
@@ -131,9 +132,15 @@
     },
     {
       "id": "install-entry-routing",
-      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage",
+      "decision": "Every install entry (package install and --dry-run) goes through run_install_pipeline; dry-run derives its preview from the pipeline plan; install --mcp reconciles its server through the install's MCP service stage; the one exception is the locked fast path (install/fast_entry.py then install/diff_apply.py), which serves only a bare 'apm install' or 'apm install --frozen', writes only files the verified lockfile, caches and package-bound records prove, never deletes, and runs the full pipeline on any doubt",
       "owner": "install/pipeline_entry.py (pipeline_preview, PipelinePreview, record_preview_resolution): run_install_pipeline is entered only through install/service.py InstallService, from a closed list of _install_apm_dependencies callers (commands/install.py, update.py, lock.py, deps/cli.py); dry_run=True stops before the first write and the preview projects its plan; install --mcp and apm mcp install hand their server to install/service_integration.py run_service_integrations, whose run_mcp_integration installs and records only that entry (install/mcp/entry_integration.py), so the command keeps no integrator or lockfile writes",
-      "selectors": ["src/apm_cli/install/pipeline_entry.py"],
+      "selectors": [
+        "src/apm_cli/install/diff_apply.py",
+        "src/apm_cli/install/fast_entry.py",
+        "src/apm_cli/install/fast_output.py",
+        "src/apm_cli/install/noop_diff.py",
+        "src/apm_cli/install/pipeline_entry.py"
+      ],
       "guards": ["install-deployment-install-entry-routing"]
     },
     {
