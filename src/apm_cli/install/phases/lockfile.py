@@ -16,10 +16,11 @@ Exposes:
 from __future__ import annotations
 
 import copy
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.cache.deploy_store import DeployStore
+from apm_cli.cache.deploy_store import stage as stage_deployed_bytes
 from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
@@ -56,8 +57,6 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     from apm_cli.utils.path_security import PathTraversalError
 
     out: dict = {}
-    # Every recorded hash also stores its bytes, so a lockfile hash can rebuild the file.
-    store = DeployStore.open_default() if rel_paths else None
     cowork_root: Path | None = None
     cowork_resolved = False
     for _rel in rel_paths or ():
@@ -83,9 +82,18 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
                 continue
             digest = canonical_digest(data)
             out[_rel] = f"sha256:{digest}"
-            if store is not None:
-                store.put(digest, data)
+            # Stored by the deploy store only once the install commits.
+            stage_deployed_bytes(_full, digest, hashlib.sha256(data).hexdigest(), data.isascii())
     return out
+
+
+def _package_bodies() -> dict:
+    """Per-package output lines the integrators captured this run (lane C renderer)."""
+    try:
+        from apm_cli.install.diff_apply import _BODIES
+    except ImportError:
+        return {}
+    return _BODIES
 
 
 class LockfileBuilder:
@@ -193,6 +201,8 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Bind this run's deployed bytes to each verified package (committed later).
+            self._stage_package_records(lockfile)
             # Intact native plugins deployed for their dependency (#3191); after
             # content hashes, which decide whether an existing record carries over.
             self._attach_native_plugins(lockfile)
@@ -552,6 +562,51 @@ class LockfileBuilder:
                     locked_dep.subset_pairings = pairing.to_lock_records()
                 else:
                     locked_dep.subset_pairings = None  # the widened flat product is exact
+
+    def _stage_package_records(self, lockfile: LockFile) -> None:
+        """Stage one package-bound render record per dependency verified and deployed this run.
+
+        A record binds the exact bytes this run deployed to the package's
+        verified content hash, so a later command can replay them without
+        trusting the lockfile alone. Only a dependency whose content hash was
+        verified this run, and whose every recorded file the integrators
+        produced or claimed and this run hashed, gets one.
+        """
+        from apm_cli.cache.deploy_store import package_record_key, stage_record, staged_file
+        from apm_cli.version import get_version
+
+        bodies = _package_bodies()
+        previous = getattr(self.ctx, "existing_lockfile", None)
+        version = get_version()
+        root = self.ctx.project_root
+        for dep_key, dep in lockfile.dependencies.items():
+            verified = self.ctx.package_hashes.get(dep_key)
+            lock_hashes = dict(getattr(dep, "deployed_file_hashes", None) or {})
+            produced = set(self.ctx.package_deployed_files.get(dep_key) or ())
+            if not verified or dep.content_hash != verified or not lock_hashes:
+                continue
+            files: dict[str, list[str]] = {}
+            ascii_only = True
+            for rel, value in lock_hashes.items():
+                staged = staged_file(root / rel) if rel in produced else None
+                if staged is None or f"sha256:{staged[0]}" != value or staged[1] is None:
+                    break
+                files[rel] = [staged[0], staged[1]]
+                ascii_only = ascii_only and staged[2]
+            else:
+                prior = previous.dependencies.get(dep_key) if previous is not None else None
+                fresh = prior is None or not getattr(prior, "deployed_files", None)
+                body = bodies.get(dep_key) if fresh else None
+                record = {"v": 1, "files": files, "ascii_only": ascii_only, "body": body}
+                key = package_record_key(
+                    dep.repo_url,
+                    dep.resolved_commit,
+                    dep.content_hash,
+                    self.ctx.targets,
+                    version,
+                    self.ctx.scope,
+                )
+                stage_record(key, record)
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():
