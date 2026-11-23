@@ -2814,6 +2814,18 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A second git-remote origin read appears outside the single canonical reader.",
     ),
     MutationCase(
+        guard_id="install-deployment-policy-remote-origin-owner",
+        rule_id="install-deployment-policy-remote-origin-owner",
+        path="src/apm_cli/install/fast_output.py",
+        old="    policy_gate.run(gate)\n",
+        new=(
+            "    from apm_cli.policy._remote import reuse_remote_reads\n\n"
+            "    with reuse_remote_reads():\n"
+            "        policy_gate.run(gate)\n"
+        ),
+        intent="A second caller reuses a remote read outside the record's no-op render.",
+    ),
+    MutationCase(
         guard_id="install-deployment-policy-violation-subjects",
         rule_id="install-deployment-policy-violation-subjects",
         path="src/apm_cli/install/phases/policy_target_check.py",

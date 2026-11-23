@@ -400,10 +400,22 @@ def test_git_config_a_child_git_reads_is_a_verdict_input(project: Path, capsys) 
     assert capsys.readouterr().out == ""
 
 
-def test_a_git_config_with_an_include_is_never_recorded(project: Path) -> None:
-    (project.parent / "user" / ".gitconfig").write_text("[include]\n\tpath = other\n")
+def test_a_git_config_include_is_followed_and_keyed(project: Path, capsys) -> None:
+    """An [include] (or [includeIf]) file is read by git, so its bytes are a verdict input."""
+    user = project.parent / "user"
+    (user / "extra.gitconfig").write_text("[core]\n\tautocrlf = false\n", encoding="utf-8")
+    (user / ".gitconfig").write_text(
+        '[includeIf "gitdir:~/work/"]\n\tpath = extra.gitconfig\n', encoding="utf-8"
+    )
     _record()
-    assert not (_home(project) / "verdicts").exists()
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "up to date in " in capsys.readouterr().out
+    (user / "extra.gitconfig").write_text(
+        '[url "https://mirror.example/"]\n\tinsteadOf = https://github.com/\n', encoding="utf-8"
+    )
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("row", ["  source: local\n", "  virtual_path: skills/x\n"])
@@ -546,3 +558,31 @@ def test_a_policy_age_replays_as_its_cache_entry_s_age_now(
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert "(cached, fetched 5m ago) -- enforcement=block" in capsys.readouterr().out
+
+
+def test_a_run_with_lifecycle_scripts_is_never_recorded(project: Path) -> None:
+    """W3d R1: scripts fire on every install; a replay fires none, so nothing is recorded."""
+    from apm_cli.core.lifecycle_scripts import discover_scripts
+
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\nlifecycle:\n  post-install:\n    - run: echo done\n",
+        encoding="utf-8",
+    )
+    assert discover_scripts(str(project))
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the POSIX policy directory is /etc/apm/policy.d")
+def test_a_policy_script_added_after_the_record_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The admin policy-script directory (PROGRAMDATA/APM/policy.d) is a verdict input."""
+    program_data = project.parent / "programdata"
+    (program_data / "APM" / "policy.d").mkdir(parents=True)
+    monkeypatch.setenv("PROGRAMDATA", str(program_data))
+    _record()
+    (program_data / "APM" / "policy.d" / "audit.json").write_text("{}", encoding="utf-8")
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""

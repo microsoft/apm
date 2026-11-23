@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..core.invocation_memo import forget_epoch
 from ..utils.git_env import get_git_executable
 from ..utils.github_host import (
     is_azure_devops_hostname,
@@ -61,7 +62,7 @@ def _git(project_root: Path, *args: str) -> str | None:
     return result.stdout.strip()
 
 
-_READ_ORIGINS: dict[str, str | None] = {}
+_READ_ORIGINS: dict[str, tuple[int, str | None]] = {}  # root -> (forget epoch, origin)
 _REUSING: list[bool] = []
 
 
@@ -72,6 +73,8 @@ def reuse_remote_reads() -> Iterator[None]:
     Only the verified-state record's render of the no-op it just proved enters
     this (install/verdict_record.py): the install never changes git remotes,
     and the record keys the git config bytes, so its git spawns add nothing.
+    An answer read before user code ran (core/invocation_memo.forget_epoch)
+    is never reused.
     """
     _REUSING.append(True)
     try:
@@ -91,16 +94,17 @@ def _git_remote_origin_url(project_root: Path) -> str | None:
     Raises:
         AmbiguousGitRemoteError: no ``origin`` and several other remotes.
     """
-    key = str(project_root)
-    if _REUSING and key in _READ_ORIGINS:
-        return _READ_ORIGINS[key]
+    key, epoch = str(project_root), forget_epoch()
+    read = _READ_ORIGINS.get(key)
+    if _REUSING and read is not None and read[0] == epoch:
+        return read[1]
     origin = _git(project_root, "remote", "get-url", "origin")
     if origin is None:
         names = sorted(n for n in (_git(project_root, "remote") or "").splitlines() if n)
         if len(names) > 1:
             raise AmbiguousGitRemoteError(names)
         origin = _git(project_root, "remote", "get-url", names[0]) if names else None
-    _READ_ORIGINS[key] = origin
+    _READ_ORIGINS[key] = (epoch, origin)
     return origin
 
 

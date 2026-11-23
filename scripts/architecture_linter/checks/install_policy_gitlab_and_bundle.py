@@ -136,6 +136,14 @@ _REMOTE_ORIGIN_READ_COUNT = 1
 _REMOTE_MODULE = "src/apm_cli/policy/_remote.py"
 
 
+# The process-scoped remote reuse is a closed seam: only the verified-state
+# record's write-time render enters it, and the owner drops answers read before
+# user code ran (#4977).
+_REUSE_CALL = re.compile(r"\breuse_remote_reads\(")
+_REUSE_CALLER = "src/apm_cli/install/verdict_record.py"
+_REUSE_EPOCH = re.compile(r"\bforget_epoch\(\)")
+
+
 def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     """Reading and parsing the project git remote for policy discovery has one owner.
 
@@ -183,6 +191,28 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
             message="Read the git remote origin only via _remote.py::_git_remote_origin_url",
             configured=False,
             respect_exempt=True,
+        )
+    )
+    if _count_re(owner, _REUSE_EPOCH) < 1:
+        findings.append(
+            _report(
+                rule_id,
+                _REMOTE_MODULE,
+                "policy/_remote.py must drop a reused remote read once user code ran "
+                "(core/invocation_memo.forget_epoch)",
+            )
+        )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(
+                provider, "src/apm_cli/", excluded=(_REMOTE_MODULE, _REUSE_CALLER)
+            ),
+            pattern=_REUSE_CALL,
+            message="Only install/verdict_record.py's no-op render may reuse a remote read",
+            configured=False,
+            respect_exempt=False,
         )
     )
     findings.extend(

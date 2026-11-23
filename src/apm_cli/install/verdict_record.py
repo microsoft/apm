@@ -38,7 +38,7 @@ SERVED_ARGV = (("install",), ("install", "--frozen"))
 
 # Environment that can change an install verdict or its output. A hit keys on
 # these (their values, or their absence) plus every name the recorded run read
-# (_env_log); the static guard in tests/unit/install/test_verdict_record.py fails
+# (_env_log); the static guard in tests/integration/test_verdict_record.py fails
 # when ``src/apm_cli`` reads an environment variable that is neither here nor in
 # ENV_NOT_VERDICT. Owner-read roots (the APM home, harness user roots) are
 # named only by their owners and keyed through the run's own reads.
@@ -156,7 +156,7 @@ _NO_HIT_ENV = (
 
 # Project target roots: every file in them (listing and bytes) is a verdict input,
 # which covers unmanaged files (D3) and the merged configs kept there (D4). The
-# coverage cell in tests/unit/install/test_verdict_record.py fails when a target
+# coverage cell in tests/integration/test_verdict_record.py fails when a target
 # root (integration/targets.KNOWN_TARGETS) or an MCP adapter's config path is not
 # covered here, in _PROJECT_SURFACES or in _USER_SURFACES.
 _GOVERNED_DIRS = (
@@ -435,7 +435,8 @@ def _git_files(root: Path, system: str) -> list[Path]:
     ``.git`` file followed to its gitdir and common dir), the global config
     (``GIT_CONFIG_GLOBAL``, else ``~/.gitconfig`` and the XDG file) and *system*,
     the path git itself reported (``git var GIT_CONFIG_SYSTEM``) for the binary
-    keyed beside it. ``GIT_*`` and PATH are keyed as values too.
+    keyed beside it, each followed through its includes. ``GIT_*`` and PATH are
+    keyed as values too.
     """
     env = dict(_env_prefixed("GIT_"))
     cwd = Path.cwd()
@@ -533,7 +534,53 @@ def _git_env_include() -> bool:
     return False
 
 
-_INCLUDE_RE = re.compile(rb"^\s*\[\s*include", re.IGNORECASE | re.MULTILINE)
+_SECTION_RE = re.compile(rb"^\s*\[\s*([A-Za-z][A-Za-z0-9.-]*)", re.MULTILINE)
+_INCLUDE_PATH_RE = re.compile(rb"^\s*path\s*=\s*(.*?)\s*$", re.IGNORECASE)
+_GIT_INCLUDE_LIMIT = 64
+
+
+def _git_includes(config: Path, data: bytes) -> list[Path]:
+    """Files an ``[include]`` or ``[includeIf]`` section of *config* names.
+
+    Every condition counts as met, a superset of what git reads, so a change in
+    any file git might include misses.
+    """
+    found: list[Path] = []
+    section = b""
+    for line in data.splitlines():
+        header = _SECTION_RE.match(line)
+        if header is not None:
+            section = header.group(1).lower()
+            continue
+        if not section.startswith(b"include"):
+            continue
+        match = _INCLUDE_PATH_RE.match(line)
+        if match is None:
+            continue
+        value = match.group(1).strip(b'"').decode("utf-8", "surrogateescape")
+        target = Path(os.path.expanduser(value))
+        found.append(target if target.is_absolute() else config.parent / target)
+    return found
+
+
+def _git_config_bytes(digest: _Digest, root: Path, git_system: str) -> None:
+    """Every git config file a child git may read, followed through its includes."""
+    queue, seen = list(_git_files(root, git_system)), set()
+    while queue:
+        path = queue.pop(0)
+        if str(path) in seen:
+            continue
+        seen.add(str(path))
+        if len(seen) > _GIT_INCLUDE_LIMIT:
+            raise ValueError("git config includes")
+        # Keyed bytes only, never trusted content: a dotfile symlink is followed.
+        try:
+            data: bytes | None = path.read_bytes()
+        except (FileNotFoundError, NotADirectoryError):
+            data = None
+        digest.put(f"git:{path}", b"\x00absent" if data is None else b"\x01" + data)
+        if data is not None:
+            queue.extend(_git_includes(path, data))
 
 
 def _owner_surfaces(root: Path) -> list[str]:
@@ -590,15 +637,7 @@ def _inputs(
         raise ValueError("git config include")
     digest.put("git-binary", _git_identity().encode("utf-8", "surrogateescape"))
     digest.put("git-system", git_system.encode("utf-8", "surrogateescape"))
-    for path in _git_files(root, git_system):
-        # Keyed bytes only, never trusted content: a dotfile symlink is followed.
-        try:
-            data: bytes | None = path.read_bytes()
-        except (FileNotFoundError, NotADirectoryError):
-            data = None
-        if data is not None and _INCLUDE_RE.search(data):
-            raise ValueError("git config include")
-        digest.put(f"git:{path}", b"\x00absent" if data is None else b"\x01" + data)
+    _git_config_bytes(digest, root, git_system)
     digest.put("surfaces", "\x00".join(surfaces).encode("utf-8", "surrogateescape"))
     for surface in surfaces:
         if not surface.startswith("\x00"):
@@ -620,6 +659,15 @@ def _inputs(
                 name = f"{rel}/{entry.name}" if rel else entry.name
                 digest.put(f"policy-mtime:{name}", b"%d" % entry.stat().st_mtime_ns)
                 digest.file(f"policy:{name}", entry.path)
+    from apm_cli.core.lifecycle_scripts import _get_policy_scripts_dir
+
+    for rel, files, dirs in _tree(str(_get_policy_scripts_dir())):
+        # An admin script added after the record misses; user and project scripts
+        # live in apm.yml files keyed above.
+        listing = [entry.name for entry in files] + ["/", *dirs]
+        digest.put(
+            f"lifecycle-listing:{rel}", "\x00".join(listing).encode("utf-8", "surrogateescape")
+        )
     for name in _GOVERNED_DIRS:
         base = os.path.join(root, name)
         digest.put(f"target:{name}", b"%d" % os.path.isdir(base))
@@ -805,56 +853,64 @@ def _trace(message: str) -> None:
         sys.stderr.write(f"[i] verdict record: {message}\n")
 
 
+class _Miss(Exception):
+    """The record does not prove this run; the message (if any) is the trace reason."""
+
+
+def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
+    """The record and its stdout, only when it proves this run; raises _Miss otherwise."""
+    raw = _read_nofollow(_record_path(root))
+    if raw is None or not _location_trusted(root):
+        raise _Miss("")
+    key = _key(create=False)
+    if key is None:
+        raise _Miss("no key")
+    record = json.loads(raw.decode("utf-8"))
+    lock_text = _read_nofollow(root / "apm.lock.yaml")
+    run_env, surfaces = record.get("run_env"), record.get("surfaces")
+    git_system = record.get("git_system")
+    if (
+        lock_text is None
+        or record.get("v") != RECORD_VERSION
+        or int(record.get("exit", 1)) != 0
+        or not (_names(run_env) and _names(surfaces) and isinstance(git_system, str))
+    ):
+        raise _Miss("")
+    lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
+    if dict(record.get("tags") or []).get("lock") != lock_tag:
+        raise _Miss("inputs changed: lock")  # before any other input is read
+    digest = _Digest(key)
+    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
+    _body(digest, record)
+    now = time.time()
+    issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
+    if now > expires or now < issued - _CLOCK_SKEW:
+        raise _Miss("expired")
+    if not hmac.compare_digest(digest.hexdigest(), str(record.get("mac", ""))):
+        old = dict(record.get("tags") or [])
+        changed = sorted(t for t, h in digest.tags if old.get(t) != h)
+        raise _Miss(f"inputs changed: {', '.join(changed[:6])}")
+    import yaml
+
+    lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
+    if not isinstance(lock, dict) or not _deployed_intact(root, lock):
+        raise _Miss("deployed bytes")
+    return record, _render_ages(str(record.get("stdout", "")))
+
+
 def replay(argv: list[str]) -> bool:
     """Print the recorded no-op and return True, or return False to run the CLI."""
     started = time.perf_counter()
     if not _served(argv) or not _hits_allowed():
         return False
-    root = Path.cwd()
     try:
-        raw = _read_nofollow(_record_path(root))
-        if raw is None or not _location_trusted(root):
-            return False
-        key = _key(create=False)
-        if key is None:
-            _trace("miss (no key)")
-            return False
-        record = json.loads(raw.decode("utf-8"))
-        lock_text = _read_nofollow(root / "apm.lock.yaml")
-        if lock_text is None or record.get("v") != RECORD_VERSION:
-            return False
-        run_env, surfaces = record.get("run_env"), record.get("surfaces")
-        git_system = record.get("git_system")
-        if not _names(run_env) or not _names(surfaces) or not isinstance(git_system, str):
-            return False
-        lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
-        if dict(record.get("tags") or []).get("lock") != lock_tag:
-            _trace("miss (inputs changed: lock)")
-            return False  # a changed lock misses before any other input is read
-        digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
-        _body(digest, record)
-        now = time.time()
-        issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
-        if now > expires or now < issued - _CLOCK_SKEW:
-            _trace("miss (expired)")
-            return False
-        if not hmac.compare_digest(digest.hexdigest(), str(record.get("mac", ""))):
-            old = dict(record.get("tags") or [])
-            changed = sorted(t for t, h in digest.tags if old.get(t) != h)
-            _trace(f"miss (inputs changed: {', '.join(changed[:6])})")
-            return False
-        import yaml
-
-        lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
-        if not isinstance(lock, dict) or not _deployed_intact(root, lock):
-            _trace("miss (deployed bytes)")
-            return False
-        stdout_text = _render_ages(str(record.get("stdout", "")))
+        record, stdout_text = _verified_stdout(argv, Path.cwd())
+    except _Miss as miss:
+        if str(miss):
+            _trace(f"miss ({miss})")
+        return False
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         _trace(f"miss ({type(exc).__name__})")
-        return False
-    if int(record.get("exit", 1)) != 0:
         return False
     elapsed = f"{time.perf_counter() - started:.1f}"
     sys.stdout.write(stdout_text.replace(_ELAPSED, elapsed))
@@ -987,6 +1043,13 @@ def recording(argv: list[str]) -> Iterator[None]:
 
 def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
     """After a successful run: record its no-op form when the run proved one."""
+    from apm_cli.core.lifecycle_scripts import discover_scripts
+
+    if discover_scripts(str(Path.cwd())):
+        # Scripts fire on every install (and may change any input after it was read);
+        # a replay fires none, so a run with scripts is never recorded (W3d R1).
+        _trace("no record (lifecycle scripts)")
+        return
     noop = bool(_VERIFIED_NOOP) and not _FULL_SUCCESS
     if not noop and not (_FULL_SUCCESS and "services" in _SEGMENTS):
         _trace("no record (no verified no-op or full success)")

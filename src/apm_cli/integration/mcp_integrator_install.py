@@ -25,6 +25,7 @@ from apm_cli.core.apm_yml import (
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.core.scope import manifest_file
 from apm_cli.core.target_catalog import accepted_target_values
+from apm_cli.install import verdict_record
 from apm_cli.install.errors import (
     InstallFailureAlreadyRendered,
     MCPNativeConflictError,
@@ -1494,10 +1495,8 @@ def _install_self_defined_deps(
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
 
+    _mark_unknown_noop_forms(servers_to_update, already_configured_self_defined)
     if already_configured_self_defined:
-        from apm_cli.install import verdict_record
-
-        verdict_record.unknown("mcp already-configured listing")
         if console:
             for name in already_configured_self_defined:
                 console.print(
@@ -1515,10 +1514,6 @@ def _install_self_defined_deps(
             continue
 
         is_update = dep.name in servers_to_update
-        if is_update:
-            from apm_cli.install import verdict_record
-
-            verdict_record.unknown("mcp update")
         synthetic_info = MCPIntegrator._build_self_defined_info(dep)
         self_defined_cache = {dep.name: synthetic_info}
         transport_label = dep.transport or "stdio"
@@ -1684,8 +1679,6 @@ def _install_self_defined_deps(
 
         if successful_runtimes:
             if console:
-                from apm_cli.install import verdict_record
-
                 label = "updated" if is_update else "configured"
                 with verdict_record.change_only():  # a no-op writes nothing to report
                     console.print(
@@ -1699,8 +1692,6 @@ def _install_self_defined_deps(
             if is_update:
                 successful_updates.add(dep.name)
         if failed_runtimes:
-            from apm_cli.install import verdict_record
-
             verdict_record.unknown("mcp failure")
             strict_failures = sorted(
                 failed_runtimes
@@ -1736,8 +1727,6 @@ def _print_mcp_summary(
     if configured_count == 0:
         _print_servers_up_to_date(console)
         return
-    from apm_cli.install import verdict_record
-
     if verdict_record.recording_active():
         # The no-op form of this footer, for the verified-state record (#4977).
         with verdict_record.noop_only():
@@ -1754,6 +1743,14 @@ def _print_mcp_summary(
         parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
     with verdict_record.change_only():
         console.print(f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]")
+
+
+def _mark_unknown_noop_forms(updates: Any, already_configured: Any) -> None:
+    """Outputs whose no-op form is not known: the verified-state record records nothing."""
+    if updates:
+        verdict_record.unknown("mcp update")
+    if already_configured:
+        verdict_record.unknown("mcp already-configured listing")
 
 
 def _print_servers_up_to_date(console: Any) -> None:
@@ -1839,10 +1836,6 @@ def run_mcp_install(  # noqa: PLR0913
         dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
     ]
     registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
-    if registry_deps:
-        from apm_cli.install import verdict_record
-
-        verdict_record.unknown("registry mcp")
 
     console = _get_console()
     # Track servers that were re-applied due to config drift
@@ -2007,6 +2000,7 @@ def run_mcp_install(  # noqa: PLR0913
 
     # --- Registry-based deps ---
     if registry_dep_names:
+        verdict_record.unknown("registry mcp")  # its no-op form is not known
         try:
             from apm_cli.registry.operations import MCPServerOperations
 

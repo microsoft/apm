@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 _OWNER_SECURITY_INFORMATION = 0x1
 _DACL_SECURITY_INFORMATION = 0x4
@@ -109,30 +110,35 @@ def private_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows o
         user, _keepalive = _current_user_sid(ctypes, wintypes, advapi, kernel)
         if not user or not owner.value or not advapi.EqualSid(owner, ctypes.c_void_p(user)):
             return False
-        if not dacl.value:
-            return False  # a NULL DACL grants everyone everything
-        ace_count = ctypes.c_ushort.from_address(dacl.value + 4).value  # ACL.AceCount
-        for index in range(ace_count):
-            ace = ctypes.c_void_p()
-            if not advapi.GetAce(dacl, index, ctypes.byref(ace)) or not ace.value:
-                return False
-            ace_type = ctypes.c_ubyte.from_address(ace.value).value
-            if ace_type not in _ACE_TYPES_KNOWN:
-                return False  # callback, compound or object ACEs may grant access: refuse
-            if ace_type != _ACCESS_ALLOWED_ACE_TYPE:
-                continue  # deny, audit, alarm and label ACEs never widen access
-            sid = ctypes.c_void_p(ace.value + 8)  # ACE_HEADER (4) + ACCESS_MASK (4)
-            if not advapi.IsValidSid(sid):
-                return False
-            if not (
-                advapi.EqualSid(sid, ctypes.c_void_p(user))
-                or advapi.IsWellKnownSid(sid, _WIN_LOCAL_SYSTEM_SID)
-                or advapi.IsWellKnownSid(sid, _WIN_BUILTIN_ADMINISTRATORS_SID)
-            ):
-                return False
-        return True
+        return _dacl_private(ctypes, advapi, dacl, user)
     finally:
         kernel.LocalFree(descriptor)
+
+
+def _dacl_private(ctypes: Any, advapi: Any, dacl: Any, user: Any) -> bool:  # pragma: no cover
+    """Every allowing ACE names the user, SYSTEM or Administrators (W3d B-a allowlist)."""
+    if not dacl.value:
+        return False  # a NULL DACL grants everyone everything
+    ace_count = ctypes.c_ushort.from_address(dacl.value + 4).value  # ACL.AceCount
+    for index in range(ace_count):
+        ace = ctypes.c_void_p()
+        if not advapi.GetAce(dacl, index, ctypes.byref(ace)) or not ace.value:
+            return False
+        ace_type = ctypes.c_ubyte.from_address(ace.value).value
+        if ace_type not in _ACE_TYPES_KNOWN:
+            return False  # callback, compound or object ACEs may grant access: refuse
+        if ace_type != _ACCESS_ALLOWED_ACE_TYPE:
+            continue  # deny, audit, alarm and label ACEs never widen access
+        sid = ctypes.c_void_p(ace.value + 8)  # ACE_HEADER (4) + ACCESS_MASK (4)
+        if not advapi.IsValidSid(sid):
+            return False
+        if not (
+            advapi.EqualSid(sid, ctypes.c_void_p(user))
+            or advapi.IsWellKnownSid(sid, _WIN_LOCAL_SYSTEM_SID)
+            or advapi.IsWellKnownSid(sid, _WIN_BUILTIN_ADMINISTRATORS_SID)
+        ):
+            return False
+    return True
 
 
 def restrict_to_current_user(path: Path) -> bool:  # pragma: no cover - Windows only
