@@ -91,6 +91,8 @@ def _present(*modules: str) -> bool:
 
 NOOP_ENGINE = _present("apm_cli.install.noop_diff", "apm_cli.install.desired_state")
 DIFF_ENGINE = _present("apm_cli.install.diff_apply")
+# S4 (a fresh, lockfile-less install served from a warm cache) has its own seam.
+FRESH_ENGINE = _present("apm_cli.install.fresh_apply")
 ANY_ENGINE = NOOP_ENGINE or DIFF_ENGINE
 
 
@@ -130,6 +132,7 @@ def _needs(present: bool, engine: str) -> Needs:
 
 NEEDS_NOOP = _needs(NOOP_ENGINE, "no-op")
 NEEDS_DIFF = _needs(DIFF_ENGINE, "diff-apply")
+NEEDS_FRESH = _needs(FRESH_ENGINE, "fresh-apply")
 NEEDS_ANY = _needs(ANY_ENGINE, "fast")
 
 
@@ -630,7 +633,7 @@ def _fresh_checkout(world: World) -> None:
     (world.project / "apm.lock.yaml").unlink()
 
 
-@NEEDS_DIFF
+@NEEDS_FRESH
 def test_fresh_install_on_a_warm_cache_applies_the_diff(twin: Twin) -> None:
     """Exit, output, project bytes AND the written lockfile bytes equal the full pipeline."""
     _converge(twin, "p-skill:git")
