@@ -103,3 +103,24 @@ def test_install_summary_names_only_the_natively_installed_dependency(
     assert (project / ".agents/plugins/native-kit/.claude-plugin/plugin.json").is_file()
     assert (project / ".claude/skills/alpha/SKILL.md").is_file()
     assert not (project / ".agents/plugins/loose-kit").exists()
+
+
+def test_global_install_notice_omits_the_project_only_loose_hint(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    isolated = IsolatedApmEnvironment.create(tmp_path / "world", base_env=dict(os.environ))
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=isolated.subprocess_env())
+    native = _plugin(factory, "native-kit")
+    env = factory.url_rewrite_subprocess_env(native, "https://github.com/fixture/native-kit.git")
+    cwd = isolated.work_root / "anywhere"
+    cwd.mkdir()
+
+    result = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180).run(
+        ("install", "-g", "--target", "claude", "fixture/native-kit#main"), cwd=cwd, env=env
+    )
+
+    assert result.returncode == 0, _evidence(result)
+    output = result.stdout + result.stderr
+    lines = [" ".join(line.split()) for line in output.splitlines()]
+    notices = [line for line in lines if "installed as a native plugin" in line]
+    assert notices == [f"[!] [fixture/native-kit] {_NOTICE}"], _evidence(result)

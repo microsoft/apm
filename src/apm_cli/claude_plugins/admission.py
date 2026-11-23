@@ -36,13 +36,19 @@ class ClaudeNativePluginError(RuntimeError):
 
 
 # The one install-summary notice for a dependency installed through the native
-# plugin route (#4998). Extend this text, never add a second notice.
+# plugin route (#4998). Extend this owner, never add a second notice.
 NATIVE_ROUTE_NOTICE = (
     "installed as a native plugin. Native plugins are reported not to load in "
     "git worktrees, in non-interactive claude -p runs (including "
     "claude-code-action) and in Copilot CLI 1.0.106. To deploy it loose instead, "
     "set native: false on this dependency in apm.yml."
 )
+
+
+def native_route_notice(*, user_scope: bool) -> str:
+    """The native-route notice; ``native: false`` keeps a plugin loose at both scopes (#4995)."""
+    del user_scope
+    return NATIVE_ROUTE_NOTICE
 
 
 @dataclass(frozen=True, slots=True)

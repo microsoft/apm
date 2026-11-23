@@ -637,6 +637,7 @@ journeys:
     - Skipped inactive experimental resolver
     files: []
     oracles:
+    - O1
     - O2
     - O3
     - O4
