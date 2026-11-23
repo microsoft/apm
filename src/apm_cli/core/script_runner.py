@@ -583,9 +583,16 @@ class ScriptRunner:
         # find_runtime_binary checks ~/.apm/runtimes/<name> first, then PATH outside
         # the project, which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
         if actual_command_args:
-            resolved = find_runtime_binary(actual_command_args[0])
-            if resolved:
-                actual_command_args[0] = resolved
+            name = actual_command_args[0]
+            resolved = find_runtime_binary(name)
+            if resolved is None:
+                # Never fall back to the bare name: the OS would search the
+                # working directory or a project path the resolver rejected.
+                raise RuntimeError(
+                    f"Runtime '{name}' was not found outside the project directory. "
+                    f"Install it with: apm runtime setup {name}"
+                )
+            actual_command_args[0] = resolved
         return subprocess.run(actual_command_args, check=True, env=env_vars)
 
     def _discover_prompt_file(self, name: str) -> Path | None:

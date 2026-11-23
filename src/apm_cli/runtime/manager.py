@@ -312,14 +312,8 @@ class RuntimeManager:
 
             # Check different installation paths based on runtime type
             # For all runtimes, check APM runtime directory first, then system PATH
-            binary_path = self.runtime_dir / binary_name
-            if binary_path.exists():
-                installed = True
-                path = str(binary_path)
-            else:
-                # Fallback to system PATH
-                path = git_env.trusted_executable(binary_name)
-                installed = path is not None
+            path = self._managed_binary(binary_name) or git_env.trusted_executable(binary_name)
+            installed = path is not None
 
             runtime_status = {
                 "description": info["description"],
@@ -356,12 +350,24 @@ class RuntimeManager:
         binary_name = self.supported_runtimes[runtime_name]["binary"]
 
         # For all runtimes, check APM runtime directory first, then system PATH
-        apm_binary = self.runtime_dir / binary_name
-        if apm_binary.exists() and apm_binary.is_file():
+        if self._managed_binary(binary_name) is not None:
             return True
 
         # Check in system PATH as fallback
         return git_env.trusted_executable(binary_name) is not None
+
+    def _managed_binary(self, binary_name: str) -> str | None:
+        """Return the APM-managed *binary_name* only while it stays inside the runtime dir."""
+        from ..utils.path_security import PathTraversalError, ensure_path_within
+
+        candidate = self.runtime_dir / binary_name
+        if not candidate.is_file():
+            return None
+        try:
+            ensure_path_within(candidate, self.runtime_dir)
+        except PathTraversalError:
+            return None
+        return str(candidate)
 
     def remove_runtime(self, runtime_name: str) -> bool:
         """Remove an installed runtime."""

@@ -23,7 +23,7 @@ from scripts.architecture_linter.models import Rule, Violation
 _RULE_ID = "transport-platform-external-executable-owner"
 _OWNER = "src/apm_cli/utils/git_env.py"
 _LAUNCHERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
-_LAUNCH_MODULES = frozenset({"subprocess", "os", "asyncio"})
+_LAUNCH_MODULES = frozenset({"subprocess", "os", "asyncio", "shutil"})
 
 
 def _is_literal_argv(node: ast.AST | None) -> bool:
@@ -57,11 +57,41 @@ def _launch_names(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], set[s
     return functions, subprocess_modules, os_modules
 
 
+def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
+    """Lines calling ``shutil.which`` under any import spelling."""
+    modules = {"shutil"}
+    functions: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "shutil"
+            )
+        elif isinstance(node, ast.ImportFrom) and node.module == "shutil":
+            functions.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "which"
+            )
+    lines: list[int] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (isinstance(func, ast.Name) and func.id in functions) or (
+            isinstance(func, ast.Attribute)
+            and func.attr == "which"
+            and isinstance(func.value, ast.Name)
+            and func.value.id in modules
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
 def _program_arg(node: ast.Call, names: tuple[set[str], set[str], set[str]]) -> ast.AST | None:
     """Return the argument naming the program if *node* launches one, else ``None``."""
     functions, subprocess_modules, os_modules = names
     func = node.func
     first = node.args[0] if node.args else None
+    if first is None:
+        first = next((kw.value for kw in node.keywords if kw.arg in {"args", "program"}), None)
     if isinstance(func, ast.Name):
         return first if func.id in functions else None
     if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
@@ -84,8 +114,8 @@ def _bare_launch_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
     literal_names = {
         target.id
         for node in nodes
-        if isinstance(node, ast.Assign) and _is_literal_argv(node.value)
-        for target in node.targets
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and _is_literal_argv(node.value)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
         if isinstance(target, ast.Name)
     }
     lines: list[int] = []
@@ -130,16 +160,6 @@ def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation
     )
     for path in _src_python(provider):
         facts = provider.file_facts(path)
-        for call in facts.calls:
-            if call.qualname == "shutil.which" and path != _OWNER:
-                findings.append(
-                    violation(
-                        _RULE_ID,
-                        path,
-                        "Locate helper programs with trusted_executable, not shutil.which",
-                        line=call.line,
-                    )
-                )
         if not any(
             (fact.module or "").split(".")[0] in _LAUNCH_MODULES
             or any(name.split(".")[0] in _LAUNCH_MODULES for name in fact.names)
@@ -147,7 +167,18 @@ def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation
         ):
             continue
         index = provider.tree_index(path)
-        for line in _bare_launch_lines(tuple(index.nodes) if index is not None else ()):
+        nodes = tuple(index.nodes) if index is not None else ()
+        if path != _OWNER:
+            findings.extend(
+                violation(
+                    _RULE_ID,
+                    path,
+                    "Locate helper programs with trusted_executable, not shutil.which",
+                    line=line,
+                )
+                for line in _which_lines(nodes)
+            )
+        for line in _bare_launch_lines(nodes):
             findings.append(
                 violation(
                     _RULE_ID,
