@@ -576,3 +576,21 @@ def test_a_head_with_trailing_whitespace_is_read_as_git_reads_it(tmp_path: Path)
         alternates_root=tmp_path / "cache" / "git" / "db_v1",
     )
     assert head.read_bytes().endswith(b"\r\n")
+
+
+def test_a_snapshot_apm_creates_passes_the_gate_on_every_later_command(tmp_path: Path) -> None:
+    from apm_cli.codex_plugins.snapshot import NativeSnapshot, _git, _index_files, repair_generation
+
+    root = tmp_path / "world" / "apm_modules" / "snapshot"
+    root.mkdir(parents=True)
+    (root / "plugin.json").write_text("{}\n", encoding="ascii")
+    _git(root, ["init", "--initial-branch=main", "--template="])
+    _index_files(root, [root / "plugin.json"])
+    _git(root, ["commit", "-m", "one"])
+    content = _git(root, ["rev-parse", "HEAD"])
+
+    repaired = repair_generation(NativeSnapshot(root, content, content))
+
+    assert repaired.content_commit == content
+    assert repaired.catalog_commit != content
+    assert (root / ".git" / "HEAD").read_text(encoding="ascii").startswith("ref: refs/heads/main")

@@ -70,6 +70,8 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
             "GIT_AUTHOR_EMAIL": "apm@localhost",
             "GIT_COMMITTER_NAME": "APM",
             "GIT_COMMITTER_EMAIL": "apm@localhost",
+            # Never let Git look past the snapshot for a repository.
+            "GIT_CEILING_DIRECTORIES": os.path.realpath(root.parent),
         }
     )
     try:
@@ -82,8 +84,6 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
                 "core.autocrlf=false",
                 "-c",
                 "commit.gpgsign=false",
-                # Never let Git look past the snapshot for a repository.
-                *(() if arguments[0] == "init" else ("--git-dir=.git", "--work-tree=.")),
                 *arguments,
             ],
             cwd=root,
