@@ -5553,7 +5553,7 @@ _ORPHAN_RULE = "install-deployment-orphan-selection"
             "src/apm_cli/commands/prune.py",
             "        orphaned_packages = list(decision.removed_paths)\n",
             "        orphaned_packages = list(decision.removed_paths)\n"
-            "        for package in installed_packages:\n"
+            "        for package in _scan_installed_packages(apm_modules_dir):\n"
             "            if package not in declared_deps:\n"
             "                orphaned_packages.append(package)\n",
             "Removal sites must not filter installed or locked sets",
@@ -5741,11 +5741,9 @@ def test_prune_hands_the_reachability_walk_to_the_orphan_owner() -> None:
     """Prune's retained keys still come from deps/reachability.py, via the owner (#3668)."""
     path = "src/apm_cli/commands/prune.py"
     source = _source(path)
-    old = "                reachability=ReachabilityProbe(\n"
+    old = "        reachability=ReachabilityProbe(\n"
     assert source.count(old) == 1
-    mutated = source.replace(
-        old, "                reachability=None if True else ReachabilityProbe(\n", 1
-    )
+    mutated = source.replace(old, "        reachability=None if True else ReachabilityProbe(\n", 1)
     ast.parse(mutated, filename=path)
     rule_id = "install-deployment-uninstall-reachability"
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
