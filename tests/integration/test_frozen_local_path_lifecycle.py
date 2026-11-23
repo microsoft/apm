@@ -131,11 +131,13 @@ def test_frozen_local_path_refuses_changed_snapshot_without_mutation(
     assert accepted_lock != locked_bytes
     accepted_deployment = deployed.read_bytes()
     assert b"accepted change" in accepted_deployment
+    accepted_cache = _snapshot(isolated.cache_root)
     replay = run(consumer.root, "install", "--frozen", "--no-policy")
     assert replay.returncode == 0, replay.stdout + replay.stderr
     assert lockfile.read_bytes() == accepted_lock
     assert deployed.read_bytes() == accepted_deployment
     after_cache = _snapshot(isolated.cache_root)
+    assert after_cache == accepted_cache, "a no-op frozen replay stores nothing new"
     added = {path: data for path, data in after_cache.items() if path not in before_cache}
     assert {path: after_cache[path] for path in before_cache} == before_cache
     # Only the committed accepted install may add cache content: deploy-store
