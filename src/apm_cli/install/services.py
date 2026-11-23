@@ -401,6 +401,13 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    from apm_cli.install.deployment_plan import keep_loose_for_parked_native
+
+    keep_loose_for_parked_native(
+        deployment_plan, ctx, package_name, diagnostics=diagnostics, logger=logger
+    )
+    # Drift replay asks the same plan which locked loose values it keeps (#5036).
+    result["deployment_plan"] = deployment_plan
     if native_claude_plugin is not None:
         result["native_plugin"] = True
         result["native_claude_plugin"] = True
@@ -619,6 +626,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
+    getattr(integrators.skill, "serve_natively", lambda _harnesses: None)(
+        frozenset(native_target_names)
+    )
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,
@@ -848,9 +858,8 @@ def integrate_local_bundle(
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
     import hashlib
-    import shutil
 
-    from apm_cli.utils.atomic_io import write_text_lf
+    from apm_cli.integration import write_seam
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -1113,11 +1122,12 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             if not dry_run:
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # Through the write seam: the install journals each write (#5046).
+                write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
                 if normalized_text is None:
-                    shutil.copy2(src, dest, follow_symlinks=False)
+                    write_seam.copy2(src, dest)
                 else:
-                    write_text_lf(dest, normalized_text)
+                    write_seam.write_text_lf(dest, normalized_text)
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
