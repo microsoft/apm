@@ -41,10 +41,6 @@ _LOCKFILE = "apm.lock.yaml"
 # Set while a replay renders into a private scratch tree: not a deployment.
 _replaying: ContextVar[bool] = ContextVar("apm_config_provenance_replay", default=False)
 
-# Per process: whether an installation had its own records when first seen, so
-# every write of one install classifies unrecorded files alike.
-_tracked_at_start: dict[str, bool] = {}
-
 
 class Origin(Enum):
     """Who created a config file, as this machine recorded it."""
@@ -117,7 +113,6 @@ class _UnreadableStore(ValueError):
 class _Store:
     path: Path
     files: dict[str, dict[str, Any]] = field(default_factory=dict)
-    installations: set[str] = field(default_factory=set)
 
     @classmethod
     def load(cls) -> _Store:
@@ -129,23 +124,15 @@ class _Store:
             if not _regular(path):
                 raise ValueError("not a regular file")
             data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("version") != _VERSION:
-                raise ValueError("unknown version")
-            files, installations = data.get("files", {}), data.get("installations", [])
-            if not isinstance(files, dict) or not isinstance(installations, list):
-                raise TypeError("invalid layout")
+            if data.get("version") != _VERSION or not isinstance(data.get("files"), list):
+                raise ValueError("unknown version or layout")
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{path}: {exc}") from exc
-        store.files = {
-            key: row
-            for key, row in files.items()
-            # A key that is not its own resolved form (relative, "..") proves nothing.
-            if isinstance(key, str)
-            and isinstance(row, dict)
-            and Path(key).is_absolute()
-            and config_file_key(key) == key
-        }
-        store.installations = {item for item in installations if isinstance(item, str)}
+        for row in data["files"]:
+            key = row.get("path") if isinstance(row, dict) else None
+            # A path that is not its own resolved form (relative, "..") proves nothing.
+            if isinstance(key, str) and Path(key).is_absolute() and config_file_key(key) == key:
+                store.files[key] = {k: v for k, v in row.items() if k != "path"}
         return store
 
     def lookup(self, path: Path) -> tuple[str, dict[str, Any] | None]:
@@ -180,15 +167,17 @@ class _Store:
         )
 
     def save(self) -> None:
-        from apm_cli.integration.write_seam import atomic_write_text, mkdir
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir, unlink
 
-        live = {key: row for key, row in self.files.items() if os.path.lexists(key)}
-        data = {
-            "version": _VERSION,
-            "installations": sorted(self.installations),
-            "files": dict(sorted(live.items())),
-        }
+        rows = [
+            {"path": key, **self.files[key]} for key in sorted(self.files) if os.path.lexists(key)
+        ]
+        if not rows:
+            if os.path.lexists(self.path):
+                unlink(self.path)  # like the other receipts: no records, no file
+            return
         # Machine-local evidence, not a user-editable config.
+        data = {"version": _VERSION, "files": rows}
         text = json.dumps(data, indent=2) + "\n"  # architecture-authority-exempt: evidence
         if _regular(self.path) and self.path.read_text(encoding="utf-8") == text:
             return  # a converged install rewrites nothing (I2)
@@ -226,18 +215,14 @@ def _holds_entries(data: bytes) -> bool:
     return any(isinstance(value, (dict, list)) and value for value in parsed.values())
 
 
-def _unrecorded_origin(store: _Store, manifest_root: Path, before: bytes) -> Origin:
+def _unrecorded_origin(manifest_root: Path, before: bytes) -> Origin:
     """A file APM writes into that already existed and has no record.
 
-    Only an installation from before the records (it has a lockfile but no
-    records yet) can hold such a file APM created: one with entries is that
-    install's file (content proof); an empty skeleton holds nothing APM wrote,
-    so it is the user's.
+    Only an installation that already has a lockfile can hold such a file an
+    earlier APM created, and that file holds APM's entries: it keeps the content
+    proof. An empty skeleton holds nothing APM wrote, so it is the user's.
     """
-    installation = config_file_key(manifest_root)
-    tracked = _tracked_at_start.setdefault(installation, installation in store.installations)
-    store.installations.add(installation)
-    if not tracked and (manifest_root / _LOCKFILE).exists() and _holds_entries(before):
+    if (manifest_root / _LOCKFILE).exists() and _holds_entries(before):
         return Origin.LEGACY
     return Origin.PREEXISTING
 
@@ -250,21 +235,16 @@ def _note(path: Path, before: bytes | None, after: bytes, manifest_root: Path | 
     recorded = _origin(row)
     if before is None:
         origin = Origin.CREATED
-    elif (
-        recorded is Origin.CREATED
-        and row.get("hash") != _digest(before)
-        and not _holds_entries(before)
-    ):
-        # A bare skeleton where APM's file was: replaced since (for example the user
-        # recreated it after a rollback), so not APM's. A file still holding entries
-        # was only touched by another APM writer; deletion re-checks the bytes.
+    elif recorded is Origin.CREATED and row.get("hash") != _digest(before):
+        # Not the bytes APM last wrote: replaced since (by the user, or recreated
+        # after a rollback), so never APM's again. Every APM writer records here.
         origin = Origin.PREEXISTING
     elif recorded is not None:
         origin = recorded
     elif manifest_root is None:
         return  # a rewrite of an unrecorded file stays unrecorded
     else:
-        origin = _unrecorded_origin(store, Path(manifest_root), before)
+        origin = _unrecorded_origin(Path(manifest_root), before)
     store.files[key] = {"origin": origin.value, "hash": _digest(after)}
     store.save()
 

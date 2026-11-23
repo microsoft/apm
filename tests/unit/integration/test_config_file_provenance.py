@@ -298,11 +298,10 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
     store = apm_home / "deployment-receipts" / "config-files" / "records.json"
     data = json.loads(store.read_text(encoding="utf-8"))
     created = {"origin": "created"}
-    data["files"] = {
-        **data["files"],
-        "project/.mcp.json": created,
-        f"{project.as_posix()}/sub/../.mcp.json": created,
-    }
+    data["files"] += [
+        {"path": "project/.mcp.json", **created},
+        {"path": f"{project.as_posix()}/sub/../.mcp.json", **created},
+    ]
     store.write_text(json.dumps(data), encoding="utf-8")
 
     assert config_file_origin(config) is Origin.PREEXISTING
@@ -373,3 +372,29 @@ def test_a_converged_write_leaves_the_record_store_untouched(tmp_path, apm_home)
 
     assert (store.stat().st_ino, store.read_bytes()) == before
     assert config_file_origin(config) is Origin.CREATED
+
+
+def test_a_replaced_file_stays_the_users_through_later_apm_writes(tmp_path, apm_home) -> None:
+    """(b): the user replaced APM's file with other bytes holding the same entries; a
+    later APM rewrite must not make the replacement APM's again, so retirement keeps it."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(json.dumps(json.loads(_WITH_ENTRY)), encoding="utf-8")  # replaced
+    _apm_writes(config, _WITH_ENTRY.replace("srv", "srv2"), manifest_root=project)
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.is_file()
+
+
+def test_an_empty_record_store_leaves_no_file(tmp_path, apm_home) -> None:
+    """Like the other receipts, a store with no records is removed, so a world that
+    never kept a record and one whose records all left hold the same state."""
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    assert _apm_empties(config, root=tmp_path / "project") is True
+
+    assert not (apm_home / "deployment-receipts" / "config-files").exists() or not any(
+        (apm_home / "deployment-receipts" / "config-files").iterdir()
+    )
