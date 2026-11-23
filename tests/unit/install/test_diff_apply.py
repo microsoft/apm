@@ -72,18 +72,33 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
 
-def test_only_the_memoized_read_ever_swaps_the_process_umask() -> None:
+def test_only_the_memoized_read_ever_swaps_the_process_umask(tmp_path: Path) -> None:
     """os.umask is process-wide: every reader goes through deploy_store.process_umask."""
+    from apm_cli.cache.deploy_store import plain_file_mode
+
     src = Path(diff_apply.__file__).parents[1]
     callers = set()
     for path in src.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
-            for call in (c for c in ast.walk(func) if isinstance(c, ast.Call)):
-                name = getattr(call.func, "attr", getattr(call.func, "id", ""))
-                if name == "umask":
-                    callers.add(f"{path.relative_to(src).as_posix()}::{func.name}")
+        owner = {}
+        for func in ast.walk(tree):
+            if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for node in ast.walk(func):
+                    owner.setdefault(id(node), func.name)
+        for call in (c for c in ast.walk(tree) if isinstance(c, ast.Call)):
+            if getattr(call.func, "attr", getattr(call.func, "id", "")) == "umask":
+                where = owner.get(id(call), "<module>")
+                callers.add(f"{path.relative_to(src).as_posix()}::{where}")
     assert callers == {"cache/deploy_store.py::process_umask"}
+
+    # And a fast apply's write gets exactly the plain mode the memo reports.
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    target = tmp_path / "out" / "a.md"
+    diff_apply._write(target, b"x\n", scratch)
+    assert target.read_bytes() == b"x\n"
+    if os.name != "nt":
+        assert target.stat().st_mode & 0o777 == plain_file_mode()
 
 
 @pytest.mark.parametrize("rel", ["../x", "/abs", "a\\b", "a//b", "a/./b", ""])
