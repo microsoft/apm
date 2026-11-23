@@ -25,6 +25,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows"),
     pytest.mark.e2e,
+    pytest.mark.promise("P-OWN-compiled-output-writes"),
 ]
 
 _GLOBAL_RULE = "---\ndescription: Global rule\n---\nGlobal body.\n"

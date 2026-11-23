@@ -111,19 +111,22 @@ def test_atomic_write_no_partial_file_on_failure(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
-def test_refuses_output_path_that_is_a_symlink(tmp_path: Path):
+def test_replaces_final_path_symlink_without_writing_its_target(tmp_path: Path):
     outside = tmp_path / "outside.md"
-    outside.write_text("outside content\n", encoding="utf-8")
+    outside.write_bytes(b"outside content\n")
+    outside.chmod(0o600)
+    before = (outside.read_bytes(), outside.stat().st_mode, outside.stat().st_mtime_ns)
     project = tmp_path / "project"
     project.mkdir()
     link = project / "AGENTS.md"
     link.symlink_to(outside)
 
-    with pytest.raises(OSError, match="Refusing deployment through a symlinked destination"):
-        CompiledOutputWriter().write(link, f"# A\n{BUILD_ID_PLACEHOLDER}\n")
+    CompiledOutputWriter(base_dir=project).write(link, "# A\n")
 
-    assert link.is_symlink()
-    assert outside.read_text(encoding="utf-8") == "outside content\n"
+    assert not link.is_symlink()
+    assert link.is_file()
+    assert link.read_text(encoding="utf-8") == "# A\n"
+    assert (outside.read_bytes(), outside.stat().st_mode, outside.stat().st_mtime_ns) == before
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
