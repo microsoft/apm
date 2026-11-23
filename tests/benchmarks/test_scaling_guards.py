@@ -19,6 +19,7 @@ import statistics
 import subprocess
 import sys
 import tempfile  # noqa: F401
+import threading
 import time
 from dataclasses import dataclass, field  # noqa: F401
 from pathlib import Path
@@ -281,25 +282,43 @@ class TestConsoleSingletonScaling:
 
         _reset_console()
 
-    def test_scaling_ratio(self):
-        from apm_cli.utils.console import _get_console
+    def test_repeated_calls_build_the_console_once(self):
+        """Count constructions and prove a lock-free fast path, not wall time (#4857).
 
-        def call_n(n):
-            for _ in range(n):
-                _get_console()
+        A 25-microsecond baseline made the old wall-clock ratio flaky on shared
+        runners. The O(1) promise is structural: after the first call the
+        singleton is returned without building a console or taking the lock.
+        """
+        from apm_cli.utils import console
 
-        t_small = _median_time(lambda: call_n(1000))
-        t_large = _median_time(lambda: call_n(10000))
+        if not console.RICH_AVAILABLE:
+            pytest.skip("rich is not installed")
 
-        if t_small < 1e-7:
-            pytest.skip("below measurement threshold -- too fast to measure reliably")
+        class _CountingConsole(console.Console):
+            built = 0
 
-        ratio = t_large / t_small
-        assert ratio < 15, (
-            f"Scaling ratio {ratio:.1f}x for 10x calls suggests "
-            f"caching regression (t_small={t_small:.6f}s, "
-            f"t_large={t_large:.6f}s)"
-        )
+            def __init__(self, *args, **kwargs):
+                type(self).built += 1
+                super().__init__(*args, **kwargs)
+
+        results: list[int] = []
+
+        def repeat() -> None:
+            results.extend(id(console._get_console()) for _ in range(10_000))
+
+        with patch.object(console, "Console", _CountingConsole):
+            first = console._get_console()
+            # Held by this thread: a call that takes the lock would block the worker.
+            with console._console_lock:
+                worker = threading.Thread(target=repeat, daemon=True)
+                worker.start()
+                worker.join(timeout=10)
+                blocked = worker.is_alive()
+
+        assert first is not None
+        assert not blocked, "a call after init waited on the singleton lock"
+        assert set(results) == {id(first)}, "repeated calls returned different consoles"
+        assert _CountingConsole.built == 1, f"the console was built {_CountingConsole.built} times"
 
 
 # ---------------------------------------------------------------------------
