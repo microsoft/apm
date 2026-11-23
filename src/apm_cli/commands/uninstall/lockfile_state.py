@@ -88,12 +88,20 @@ def reconcile_uninstall_deployment_state(
     return changed
 
 
-def retain_failed_claims(lockfile, removed_rows: dict, failed_paths) -> bool:
+def retain_failed_claims(
+    lockfile,
+    removed_rows: dict,
+    failed_paths,
+    removed_hashes: dict[str, str],
+) -> bool:
     """Keep each removed row's claim on the files sync could not remove (#4851).
 
-    The row returns narrowed to those files and their recorded hashes, through
-    the ledger owner, so the lock keeps tracking what is still on disk and the
-    next run can retry. Returns whether the lock changed.
+    Runs after MCP, LSP and native survivor derivation, so a claim-only row
+    never keeps a service alive. The row returns narrowed to those files, with
+    *removed_hashes* (the pre-removal cleanup snapshot, canonical ledger first)
+    as the integrity baseline, through the ledger owner, so the lock keeps
+    tracking what is still on disk and the next run can retry. Returns whether
+    the lock changed.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 
@@ -103,15 +111,41 @@ def retain_failed_claims(lockfile, removed_rows: dict, failed_paths) -> bool:
         kept = [path for path in row.deployed_files if path.replace("\\", "/") in failed]
         if not kept or key in lockfile.dependencies:
             continue
-        hashes = {
-            path: row.deployed_file_hashes[path]
-            for path in kept
-            if path in row.deployed_file_hashes
-        }
+        hashes = {}
+        for path in kept:
+            content_hash = removed_hashes.get(path) or row.deployed_file_hashes.get(path)
+            if content_hash:
+                hashes[path] = content_hash
+        row.native_plugin = None
         lockfile.dependencies[key] = row
         updates[key] = (kept, hashes)
+    present = set(lockfile.dependencies)
+    for key in updates:
+        _anchor_claim_row(lockfile.dependencies[key], present)
     DeploymentLedgerCodec.replace_legacy_owners(lockfile, updates)
     return bool(updates)
+
+
+def _anchor_claim_row(row, present: set[str]) -> None:
+    """Point a restored claim row's graph edges only at rows the lock keeps.
+
+    A parent removed in the same uninstall is gone; the claim anchors at the
+    root instead, so the replacement graph stays valid and the lock persists.
+    """
+    from dataclasses import replace
+
+    if row.resolved_by is not None and row.resolved_by not in present:
+        row.resolved_by = None
+    if row.declaring_parent is not None and row.declaring_parent not in present:
+        row.declaring_parent = None
+    binding = row.replacement
+    if binding is None:
+        return
+    if any(request.parent is None or request.parent in present for request in binding.requests):
+        binding.retain_parents(present)
+        return
+    first = next(iter(binding.requests))
+    binding.requests = {replace(first, parent=None): None}
 
 
 def lockfile_has_persisted_state(lockfile) -> bool:

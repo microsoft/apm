@@ -576,6 +576,37 @@ def _with_orphans(removed_keys: builtins.set, orphans: Any) -> builtins.set:
     return removed_keys
 
 
+def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
+    """Pop each locked *keys* row into *removed_rows*; return whether any was."""
+    popped = False
+    for key in keys:
+        if key in lockfile.dependencies:
+            removed_rows[key] = lockfile.dependencies.pop(key)
+            popped = True
+    return popped
+
+
+def _retain_failed_claims(
+    lockfile, removed_rows: dict, integration_cleanup, removed_hashes: dict, logger
+) -> bool:
+    """Restore claims sync could not remove (#4851); return whether the lock may persist."""
+    if not removed_rows or not integration_cleanup.failed_paths:
+        return True
+    from .lockfile_state import retain_failed_claims
+
+    try:
+        retain_failed_claims(
+            lockfile, removed_rows, integration_cleanup.failed_paths, removed_hashes
+        )
+    except Exception as state_err:
+        logger.warning(
+            f"Lockfile state could not be reconciled. {LOCKFILE_STATE_UNRECONCILED.sentence()}"
+        )
+        logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
+        return False
+    return True
+
+
 def _gate_denied_package_keys(
     apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
 ) -> dict[str, str]:
@@ -1436,10 +1467,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 if key in lockfile.dependencies:
                     removed_rows[key] = lockfile.dependencies.pop(key)
                     lockfile_updated = True
-            for orphan_key in actual_orphans:
-                if orphan_key in lockfile.dependencies:
-                    removed_rows[orphan_key] = lockfile.dependencies.pop(orphan_key)
-                    lockfile_updated = True
+            lockfile_updated |= _pop_lock_rows(lockfile, actual_orphans, removed_rows)
             lockfile_updated |= _reparent_still_needed(lockfile, still_needed_repairs)
 
         # Step 10: Sync integrations
@@ -1478,10 +1506,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         if lockfile:
             try:
-                from .lockfile_state import (
-                    reconcile_uninstall_deployment_state,
-                    retain_failed_claims,
-                )
+                from .lockfile_state import reconcile_uninstall_deployment_state
 
                 lockfile_updated = (
                     reconcile_uninstall_deployment_state(
@@ -1493,7 +1518,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                     )
                     or lockfile_updated
                 )
-                retain_failed_claims(lockfile, removed_rows, integration_cleanup.failed_paths)
             except Exception as state_err:
                 lockfile_ready = False
                 logger.warning(
@@ -1574,6 +1598,9 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger=logger,
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
+        lockfile_ready = lockfile_ready and _retain_failed_claims(
+            lockfile, removed_rows, integration_cleanup, all_deployed_file_hashes, logger
+        )
 
         # Persist survivors, then rebuild APM-owned native plugin registrations
         # from that locked state: only APM's own rows disappear, user bytes never do.
