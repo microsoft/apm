@@ -190,8 +190,12 @@ def test_an_explicit_bool_tag_is_accepted_on_load(tmp_path: Path) -> None:
             "<<: {native_plugins: off}\n",
             "'native_plugins' must be true or false, got 'off'",
         ),
+        (
+            "dependencies:\n  apm:\n    - <<: [{alias: k}, {native: Yes}]\n      path: ./pkg\n",
+            "'native' field must be true or false, got 'Yes'",
+        ),
     ],
-    ids=["dependency-merge", "top-level-merge"],
+    ids=["dependency-merge", "top-level-merge", "sequence-merge"],
 )
 def test_a_misspelled_boolean_behind_a_merge_key_is_rejected(
     tmp_path: Path, body: str, message: str
