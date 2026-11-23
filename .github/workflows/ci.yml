@@ -840,7 +840,7 @@ jobs:
         printf 'Runner logical CPUs: '
         nproc
         uv run --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
-          -n 4 --dist loadgroup --durations=20 \
+          -n 4 --dist loadgroup --durations=0 --durations-min=0.05 \
           -m 'lifecycle_smoke and not lifecycle_merge_group' @shard-files.txt
 
     # The M-GATE spines write their visited cells to build/gate-cells/;
