@@ -655,10 +655,20 @@ def test_an_abandoned_journal_declines_and_the_full_run_recovers_it(
     journal.after_write(killed)
     store = journal.store
     assert store is not None
+
+    def contents() -> dict[str, bytes]:
+        return {
+            f"{base.name}/{p.relative_to(base).as_posix()}": p.read_bytes()
+            for base in (project, store)
+            for p in sorted(base.rglob("*"))
+            if p.is_file()
+        }
+
+    untouched = contents()
     before = sorted(str(p.relative_to(project)) for p in project.rglob("*"))
 
     _assert_declines_with(project, monkeypatch, capsys, before, "interrupted install journal")
-    assert store.is_dir(), "the fast path never touches the journal"
+    assert contents() == untouched, "a decline reads; it never changes the project or the journal"
 
     replay_abandoned_deploys(project / APM_MODULES_DIR, None)
 
