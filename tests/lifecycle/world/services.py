@@ -109,6 +109,7 @@ POLICY_VARIANTS = (
     "scripts-deny",
     "unmanaged-deny",
     "unmanaged-deny-dirs",
+    "fields-warn",
     "max-depth-1",
     "max-depth-2",
 )
@@ -171,15 +172,19 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
                 "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
             },
         },
-        # Every package the M-GATE matrix declares (machines/_gate_matrix.py).
+        # Every dependency the M-GATE matrix declares (machines/_gate_matrix.py):
+        # its packages and, through ``**`` (``*`` stays in one segment), the
+        # namespaced registry server ``install --mcp`` requests.
         "deny-all-deps": {
             "name": "deny-all-deps",
             **base,
             "dependencies": {
                 "deny": [
-                    f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
+                    f"**/{name}"
+                    for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed", "p-bmix")
                 ]
             },
+            "mcp": {"deny": ["**"]},
         },
         "scripts-deny": {"name": "scripts-deny", **base, "manifest": {"scripts": "deny"}},
         "unmanaged-deny": {
@@ -191,6 +196,14 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
             "name": "unmanaged-deny-dirs",
             **base,
             "unmanaged_files": {"action": "deny", "directories": ["governed"]},
+        },
+        # scripts-deny and unmanaged-deny under enforcement: warn (#4957).
+        "fields-warn": {
+            "name": "fields-warn",
+            **base,
+            "enforcement": "warn",
+            "manifest": {"scripts": "deny"},
+            "unmanaged_files": {"action": "deny"},
         },
         "max-depth-1": {"name": "max-depth-1", **base, "dependencies": {"max_depth": 1}},
         "max-depth-2": {"name": "max-depth-2", **base, "dependencies": {"max_depth": 2}},

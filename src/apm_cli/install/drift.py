@@ -534,7 +534,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
-    from apm_cli.install.phases.local_content import _project_has_root_primitives
+    from apm_cli.install.phases.local_content import (
+        _project_has_root_primitives,
+        _root_holds_only_hook_primitives,
+    )
     from apm_cli.install.project_package import build_project_local_package_info
     from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_audit_targets
@@ -550,14 +553,17 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         raise CacheMissError(f"lockfile at {config.lockfile_path} is empty or unreadable")
 
     project_root = config.project_root.resolve()
-    if (
-        not config.user_scope
-        and _SELF_KEY not in lock.dependencies
-        and _project_has_root_primitives(project_root)
-    ):
+    self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
+    replays_root = (
+        _root_holds_only_hook_primitives(self_source_root)
+        if config.user_scope
+        else _project_has_root_primitives(project_root)
+    )
+    if _SELF_KEY not in lock.dependencies and replays_root:
         # Install integrates root .apm/ content whenever the directory exists,
         # even when it only merges hooks into shared configs and so records no
         # local_deployed_files (#3369). Replay the same root package in memory.
+        # At user scope only a hooks-only ~/.apm qualifies (#4837).
         lock.dependencies[_SELF_KEY] = lock.project_self_entry()
     scratch_root = (
         config.scratch_root.resolve()
@@ -572,7 +578,6 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         else project_root / "apm_modules"
     )
     live_modules_dir = project_root / "apm_modules"
-    self_source_root = get_source_root(InstallScope.USER) if config.user_scope else project_root
     deployment_modules_dir, deployment_frame = replay_deployment_frame(
         scratch_root, project_root, user_scope=config.user_scope
     )
@@ -651,12 +656,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     local_resolved_cache: dict[str, Path] = {}
     from apm_cli.agent_plugins.errors import AgentPluginTargetExcludedError
     from apm_cli.copilot_plugins.capability import native_registration_scope
+    from apm_cli.integration import config_file_provenance
 
     try:
         with native_registration_scope(targets):
             with (
                 integrators["skill"].ownership_snapshot(replay_lockfile=lock),
                 _ReadOnlyProjectGuard(project_root, protected_subpaths),
+                config_file_provenance.replay_render(),
             ):
                 for lock_dep in lock.get_all_dependencies():
                     if lock_dep.local_path == _SELF_KEY:

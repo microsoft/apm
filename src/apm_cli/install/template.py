@@ -566,6 +566,8 @@ def _integrate_materialization(
                     f"    [i] {dep_key}: retaining previously pinned "
                     f"skill(s): {', '.join(retained)}"
                 )
+        from apm_cli.install.diff_apply import capture_body
+
         int_result = integrate_package_primitives(
             m.package_info,
             ctx.project_root,
@@ -583,7 +585,7 @@ def _integrate_materialization(
             managed_files=ctx.managed_files,
             diagnostics=diagnostics,
             package_name=dep_key,
-            logger=logger,
+            logger=capture_body(logger, dep_key),
             scope=ctx.scope,
             skill_subset=selection.skill_subset,
             skill_pairing=selection.skill_pairing,

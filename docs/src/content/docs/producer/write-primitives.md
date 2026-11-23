@@ -112,7 +112,12 @@ Codex has no prompts.
 files. To reach them, ship the task as a skill with
 `disable-model-invocation: true` so it runs when called, not on its own. APM keeps
 `description`, `input`, `allowed-tools`, `model` and `argument-hint`, and drops
-other keys with a warning.
+other keys (listed with `--verbose`). For Claude, `.claude/commands/` also keeps
+the fields Claude Code
+[documents for command files](https://code.claude.com/docs/en/skills#frontmatter-reference),
+such as `disable-model-invocation`, `when_to_use` and `effort`, plus `arguments`
+when there is no `input`. Inline `hooks` are withheld with a warning until APM
+runs them through executable consent.
 
 ## Hooks and commands
 
