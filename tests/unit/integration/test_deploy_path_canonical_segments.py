@@ -116,3 +116,35 @@ def test_a_dot_segment_claim_consent_keeps_is_kept_not_removed(tmp_path: Path) -
     assert stats["files_removed"] == 0
     assert stats["errors"] == 0
     assert _DOTTED not in stats["unsafe_paths"]
+
+
+@pytest.mark.parametrize(
+    "claim", [".github/hooks/./../hooks/pkg-apm.json", ".github/hooks/../hooks/./pkg-apm.json"]
+)
+def test_consent_never_keeps_a_claim_that_also_spells_traversal(tmp_path: Path, claim: str) -> None:
+    # Only a pure "." spelling is consent-kept; ".." stays a safety rejection.
+    from apm_cli.integration.cleanup import DeploymentEvidence, remove_stale_deployed_files
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    path = tmp_path / _HOOK
+    path.parent.mkdir(parents=True)
+    path.write_text('{"hooks": {}}\n', encoding="utf-8")
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path, receipts={}, render=lambda _owner: None, kept=()
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result = remove_stale_deployed_files(
+        [claim],
+        tmp_path,
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={},
+        receipt_retirements=[],
+    )
+
+    assert claim in result.rejected
+    assert evidence.kept_under_consent() == frozenset()
+    assert path.exists()

@@ -1220,7 +1220,9 @@ def _consent_kept_noncanonical(
     Its canonical spelling must pass the same gate; anything else stays a
     safety rejection, and nothing is ever removed through the claim.
     """
-    if not evidence.lockfile_consent or "." not in stale_path.replace("\\", "/").split("/"):
+    segments = stale_path.replace("\\", "/").split("/")
+    # Only a pure "." spelling qualifies: ".." is traversal and is never kept.
+    if not evidence.lockfile_consent or "." not in segments or ".." in segments:
         return False
     return BaseIntegrator.validate_deploy_path(
         _claim_key(stale_path), project_root, targets=targets, user_scope=user_scope

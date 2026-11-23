@@ -4,7 +4,7 @@ PROMISE: P-INV-I7 -- with CLAUDE_CONFIG_DIR set to $HOME the Claude root scopes
 to ".", and ``apm install -g`` still deploys a dependency's skill there and
 records it, while a destination that escapes that root through a symlink is
 still refused with nothing written outside it (source: #5096 scope record).
-CELL: OP=install SRC=git PRIM=skill SCOPE=user TGT=claude(CLAUDE_CONFIG_DIR=HOME)
+CELL: OP=install|uninstall SRC=git PRIM=skill SCOPE=user TGT=claude(CLAUDE_CONFIG_DIR=HOME)
 GATE=destination-safe|destination-symlink-escape
 owner: integration/targets.py get_integration_prefixes (allow-list prefixes
 validate_deploy_path checks)
@@ -33,7 +33,7 @@ pytestmark = [
 _REMOTE = "https://github.com/fixture/skills"
 _SUBDIR = "packages/demo"
 _SKILL = "---\nname: demo\ndescription: Demo\n---\nDemo skill.\n"
-_INSTALL = ("install", "--global", "--no-policy", "--no-audit")
+_INSTALL = ("install", "--global", "--no-audit")
 
 
 def _evidence(result: CommandResult) -> str:
@@ -95,6 +95,32 @@ class _World:
             assert stream.isascii(), _evidence(result)
         return result
 
+    def uninstall(self) -> CommandResult:
+        result = self.runner.run(
+            ("uninstall", "--global", f"fixture/skills/{_SUBDIR}"),
+            scenario_id="claude-config-dir-home-uninstall",
+            cwd=self.cwd,
+            env=self.env,
+        )
+        for stream in (result.stdout, result.stderr):
+            assert stream.isascii(), _evidence(result)
+        return result
+
+    def state(self) -> dict[str, bytes]:
+        """Durable state under HOME: the manifest, lockfile and every deployed file.
+
+        Process locks, the version-check cache and the module cache are not
+        durable install state.
+        """
+        transient = (self.home / ".apm" / "apm_modules", self.home / ".cache")
+        return {
+            path.relative_to(self.home).as_posix(): path.read_bytes()
+            for path in sorted(self.home.rglob("*"))
+            if path.is_file()
+            and path.name != ".apm-lifecycle.lock"
+            and not any(path.is_relative_to(root) for root in transient)
+        }
+
     def claims(self) -> list[str]:
         lock = load_yaml(self.manifest.parent / "apm.lock.yaml")
         (row,) = lock["dependencies"]
@@ -116,6 +142,11 @@ def test_install_g_deploys_a_skill_when_claude_config_dir_is_home(
     # The Claude root is HOME itself: nothing lands under a default ~/.claude.
     assert not (world.home / ".claude" / "skills").exists(), _evidence(result)
 
+    removed = world.uninstall()
+
+    assert removed.returncode == 0, _evidence(removed)
+    assert not (world.home / "skills" / "demo").exists(), _evidence(removed)
+
 
 def test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused(
     tmp_path: Path, apm_binary_path: Path
@@ -128,10 +159,15 @@ def test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused(
     except (OSError, NotImplementedError):
         pytest.skip("symbolic links are unavailable")
 
+    before = world.state()
+
     result = world.install()
 
-    # The escape is refused before any write: nothing lands outside the root
-    # and no lockfile records it. The refusal wording is tracked in #5156.
+    # P-INV-I7: the escape is refused before any write. The manifest, lockfile
+    # and deployed set are byte-identical, the link stays, and nothing lands
+    # outside the root. The refusal wording is tracked in #5156.
     assert result.returncode == 1, _evidence(result)
+    assert world.state() == before, _evidence(result)
+    assert (world.home / "skills").is_symlink(), _evidence(result)
     assert list(outside.rglob("*")) == [], _evidence(result)
     assert not (world.manifest.parent / "apm.lock.yaml").exists(), _evidence(result)

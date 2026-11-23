@@ -575,7 +575,8 @@ class TargetProfile:
         honoured without any per-target branching.
         """
         mapping = self.primitives["skills"]
-        return f"{mapping.deploy_root or self.root_dir}/{self.skills_subdir}"
+        # Canonical spelling: a root of "." (CLAUDE_CONFIG_DIR=$HOME) is "skills".
+        return posixpath.normpath(f"{mapping.deploy_root or self.root_dir}/{self.skills_subdir}")
 
     def skills_deploy_path(self, project_root: Path) -> Path:
         """Return the actual skills root for static and resolved dynamic targets."""
@@ -1446,12 +1447,13 @@ def _flag_gated(profile: TargetProfile, *, create_config: bool = True) -> bool:
 def _root_prefixes(profile: TargetProfile) -> tuple[str, ...]:
     """Return the allow-list prefixes a target's own root contributes.
 
-    A user root equal to the deploy root (``CLAUDE_CONFIG_DIR=$HOME``) scopes
-    to ``.``, and its paths record without a ``./`` segment (#5096). The root
-    itself would then admit every path under it, so only the directories its
-    primitives deploy into are allowed; anything else stays refused.
+    A Claude user root equal to the deploy root (``CLAUDE_CONFIG_DIR=$HOME``)
+    scopes to ``.``, and its paths record without a ``./`` segment (#5096).
+    The root itself would then admit every path under it, so only the
+    directories its primitives deploy into are allowed; anything else stays
+    refused. Other home overrides at ``$HOME`` keep their ``./`` prefix.
     """
-    if posixpath.normpath(profile.root_dir.replace("\\", "/")) != ".":
+    if profile.name != "claude" or posixpath.normpath(profile.root_dir.replace("\\", "/")) != ".":
         return (profile.prefix,)
     return tuple(
         f"{posixpath.normpath(mapping.subdir)}/"

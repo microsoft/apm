@@ -2,6 +2,7 @@
 
 import errno
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Callable, Iterator, Mapping
@@ -1217,11 +1218,13 @@ class BaseIntegrator:
                         prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
-                prefix = (
-                    f"{effective_root}/{mapping.subdir}/"
-                    if mapping.subdir
-                    else f"{effective_root}/"
+                # Canonical spelling, so a root of "." routes "skills/..." claims (#5096).
+                prefix = posixpath.normpath(
+                    f"{effective_root}/{mapping.subdir}" if mapping.subdir else effective_root
                 )
+                prefix = "" if prefix == "." else f"{prefix}/"
+                if not prefix:
+                    continue  # a primitive at the root itself owns no prefix
                 if prim_name == "skills":
                     skill_prefixes.append(prefix)
                 elif prim_name == "hooks":
