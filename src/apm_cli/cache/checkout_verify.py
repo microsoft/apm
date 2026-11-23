@@ -90,7 +90,7 @@ class _Objects:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=cached_repo_env(git_subprocess_env(env), offline=True),
+            env=cached_repo_env(git_subprocess_env(env), repo, offline=True),
         )
 
     def read(self, oid: str, kind: str) -> bytes:

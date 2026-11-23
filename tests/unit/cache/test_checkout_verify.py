@@ -459,3 +459,18 @@ def test_a_special_file_in_a_copy_is_refused_without_reading_it(
     assert not worker.is_alive(), "the check read through a special file"
     assert outcome and "is not a regular file" in str(outcome[0])
     assert stat.S_ISFIFO(agents.lstat().st_mode) or agents.is_symlink()  # left as it was
+
+
+def test_a_checkout_without_its_own_repository_never_reads_an_enclosing_one(
+    tmp_path: Path,
+) -> None:
+    project, sha = _plain_repo(tmp_path)
+    checkout = project / "cache" / "checkout"
+    for rel in ("README.md", "pkg/AGENTS.md"):
+        (checkout / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(project / rel, checkout / rel)
+    (checkout / ".git").mkdir()
+    (checkout / ".git" / "HEAD").write_text(f"{sha}\n", encoding="ascii")
+
+    assert not verify_checkout(checkout, sha, env=neutral_git_env())
+    assert (project / ".git" / "objects").is_dir()

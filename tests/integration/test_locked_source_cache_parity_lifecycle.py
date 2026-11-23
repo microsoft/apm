@@ -31,7 +31,6 @@ from tests.integration._install_audit_replay_kit import (
     apm_package,
     tree_digest,
 )
-from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -203,18 +202,9 @@ def test_audit_ci_and_frozen_refuse_alike_when_the_commit_cannot_be_fetched(
     assert _rebuilt(frozen), _evidence(frozen)
     for refused in (frozen, plain):
         assert refused.returncode != 0, _evidence(refused)
-    # Naming the failed fetch on the [x] line is #4909's known cell below.
+    # The [x] line names the failed fetch: see the cell below.
 
 
-# The refusal above is safe but names the MCP-declaration check, not the fetch.
-_FROZEN_HIDES_FETCH_FAILURE = KnownFailure(
-    "#4909",
-    "install --frozen hides a failed re-download behind an MCP-declarations error",
-    r"no \[x\] line names the failed fetch",
-)
-
-
-@_FROZEN_HIDES_FETCH_FAILURE.mark()
 def test_frozen_refusal_names_the_failed_fetch_as_its_cause(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
