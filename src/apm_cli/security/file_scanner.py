@@ -178,9 +178,10 @@ def _content_entries(
     """
     if surface.kind == "executable":
         return (HookContentEntry(""),)
-    text = path.read_text(encoding="utf-8")
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
+        # Untranslated newlines: the canonical deployed-file hash alone normalizes them.
+        text = path.read_bytes().decode("utf-8")
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
         if is_deployed_hook_module_metadata(
             path, text, target_name=surface.target, recorded_hash=recorded_hash
@@ -195,6 +196,7 @@ def _content_entries(
             shared=surface.shared,
             nested_handlers=config.nested_handlers if config else None,
         )
+    text = path.read_text(encoding="utf-8")
     if surface.prompt_fields:
         document = tomllib.loads(text)
         return tuple(

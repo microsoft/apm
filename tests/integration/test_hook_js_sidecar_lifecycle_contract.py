@@ -887,6 +887,9 @@ _NESTED_REMOTE = f"https://gitlab.example.invalid/apm-fixture-org/{_NESTED_PACKA
 _NESTED_CLAUDE_SCRIPT = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/entry.js")
 _NESTED_CLAUDE_METADATA = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/package.json")
 _NESTED_CLAUDE_SIDECAR = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/package.json")
+_NESTED_CLAUDE_CR_METADATA = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/cr/package.json")
+# Bare CR survives the canonical deployed-file hash (only CRLF collapses).
+_CR_METADATA = b'{ "type": "commonjs" }\r'
 
 
 def test_required_claude_hook_keeps_nested_module_metadata(
@@ -925,6 +928,7 @@ def test_required_claude_hook_keeps_nested_module_metadata(
     scenario.sources.add_hook_asset(
         package, "esm", PurePosixPath("esm/package.json"), '{ "type": "module" }\n'
     )
+    scenario.sources.add_hook_asset(package, "esm", PurePosixPath("cr/package.json"), _CR_METADATA)
     repository = scenario.repositories.create(_NESTED_PACKAGE, source_tree=package.root)
     scenario.repositories.commit(repository, message="seed nested ES module hook package")
     scenario.repositories.install_url_rewrite(repository, _NESTED_REMOTE)
@@ -986,6 +990,7 @@ def test_required_claude_hook_keeps_nested_module_metadata(
     )
 
     # #4921: the sidecar and the nested metadata are module metadata, not hooks.
+    assert consumer.root.joinpath(*_NESTED_CLAUDE_CR_METADATA.parts).read_bytes() == _CR_METADATA
     audit = _run_audit(
         scenario, consumer.root, ("audit", "--ci"), environment, "nested-module-audit"
     )
@@ -996,9 +1001,9 @@ def test_required_claude_hook_keeps_nested_module_metadata(
         LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
     )
 
-    # Control: a type-only edit of the sidecar, an unrecorded package.json with
-    # valid metadata and an unrelated JSON file all stay reported, with and
-    # without drift.
+    # Control: a type-only edit of the sidecar, an LF -> bare CR edit of the
+    # nested metadata, an unrecorded package.json with valid metadata and an
+    # unrelated JSON file all stay reported, with and without drift.
     extra = _NESTED_CLAUDE_METADATA.parent / "extra.json"
     unrecorded = _NESTED_CLAUDE_METADATA.parent / "other" / "package.json"
     module_metadata = json.dumps({"type": "module"}, indent=2, sort_keys=True) + "\n"
@@ -1008,6 +1013,7 @@ def test_required_claude_hook_keeps_nested_module_metadata(
     consumer.root.joinpath(*_NESTED_CLAUDE_SIDECAR.parts).write_text(
         module_metadata, encoding="utf-8"
     )
+    consumer.root.joinpath(*_NESTED_CLAUDE_METADATA.parts).write_bytes(b'{ "type": "module" }\r')
     for args in (("audit", "--ci"), ("audit", "--no-drift")):
         audit = _run_audit(
             scenario, consumer.root, args, environment, "nested-module-control-" + args[-1][2:]
@@ -1017,6 +1023,7 @@ def test_required_claude_hook_keeps_nested_module_metadata(
             extra.as_posix(),
             unrecorded.as_posix(),
             _NESTED_CLAUDE_SIDECAR.as_posix(),
+            _NESTED_CLAUDE_METADATA.as_posix(),
         }
 
 
