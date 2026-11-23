@@ -212,7 +212,8 @@ def test_uninstall_preserves_unmanaged_skills(
     assert not (project.root / "apm.lock.yaml").exists()
     assert not (project.root / "apm_modules" / "_local" / package.name).exists()
     assert not load_yaml(project.manifest_path).get("dependencies", {}).get("apm", [])
-    assert "fixture-mcp" not in json.loads(mcp_config.read_text(encoding="utf-8"))["mcpServers"]
+    # APM created .mcp.json and its last entry left: the file goes (#4852).
+    assert not mcp_config.exists()
     for path in deployed_files:
         assert not (project.root / path).exists()
 

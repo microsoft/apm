@@ -102,6 +102,50 @@ def test_a_missing_source_is_judged_on_the_verified_deployed_root(
     assert retired == expected
 
 
+@pytest.mark.parametrize(
+    ("transitive", "allow", "refused"),
+    [(True, None, True), (False, None, False), (True, ("srv",), False)],
+    ids=["transitive", "direct", "transitive-listed"],
+)
+def test_a_native_plugins_mcp_server_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, allow: tuple[str, ...] | None, refused: bool
+) -> None:
+    """A transitive native plugin's server needs mcp.allow, as a loose one does (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": {"srv": {"command": "npx", "args": ["x"]}}})
+    )
+    mcp = McpPolicy(deny=("unrelated",)) if allow is None else McpPolicy(allow=allow)
+    policy = ApmPolicy(enforcement="block", mcp=mcp)
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None and "mcp-trust-transitive" in violation) is refused
+
+
+@pytest.mark.parametrize(
+    ("transitive", "refused"), [(True, True), (False, False)], ids=["transitive", "direct"]
+)
+def test_an_unreadable_native_mcp_bundle_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, refused: bool
+) -> None:
+    """A bundle APM cannot read never shows it is in mcp.allow (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": "./bundle.dxt"})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    policy = ApmPolicy(enforcement="block", mcp=McpPolicy(trust_transitive=False))
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None) is refused
+
+
 def _deployed_project(tmp_path: Path, names: tuple[str, ...]) -> tuple[Path, Path, LockFile]:
     """A project whose native plugins *names* are deployed and declared."""
     from apm_cli.claude_plugins.registrar import reconcile_native_plugins, scope_binding
@@ -230,3 +274,38 @@ def test_the_settings_preview_refuses_a_moved_marketplace_binding(tmp_path: Path
             lockfile=following,
             deploy_root=project,
         )
+
+
+@pytest.mark.parametrize(
+    ("mcp_servers", "depth", "trust", "subject"),
+    [
+        ("./bundle.dxt", 2, False, "acme/tool: MCP"),
+        ({"srv": {"command": "npx"}}, 2, False, "srv"),
+        ("./bundle.dxt", 1, False, None),
+        ("./bundle.dxt", 2, True, None),
+    ],
+    ids=["transitive-bundle", "transitive-server", "direct", "trust-transitive-true"],
+)
+def test_audit_judges_a_deployed_transitive_native_plugin_under_trust_transitive(
+    tmp_path: Path, mcp_servers, depth: int, trust: bool, subject: str | None
+) -> None:
+    """A policy applied after deployment fails audit for a transitive plugin's MCP (req-sc-016)."""
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    project, modules, lock = _deployed_project(tmp_path, ("tool",))
+    root = modules / "acme/tool"
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": mcp_servers})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    lock.dependencies["acme/tool"].depth = depth
+    lock.write(project / "apm.lock.yaml")
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(deny=("unrelated",), trust_transitive=trust)
+    )
+    result = run_policy_checks(project, policy, fail_fast=False)
+    checks = [c for c in result.checks if c.name == "mcp-trust-transitive"]
+    refs = [s.ref for c in checks if not c.passed for s in c.violation_subjects()]
+    assert bool(refs) is (subject is not None)
+    assert all(subject in ref for ref in refs)
