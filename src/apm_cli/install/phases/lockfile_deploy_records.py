@@ -58,7 +58,7 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
         stage_record,
         staged_file,
     )
-    from apm_cli.policy.effective_fingerprint import effective_policy_fingerprint
+    from apm_cli.policy.outcome_routing import effective_policy_fingerprint
     from apm_cli.version import get_version
 
     plain_mode = plain_file_mode()

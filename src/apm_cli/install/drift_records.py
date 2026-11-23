@@ -278,7 +278,14 @@ class ReplayRecords:
         *,
         enabled: bool,
     ) -> ReplayRecords:
-        """The record side of one replay; ``exec_policy`` is what the executables gate uses."""
+        """The record side of one replay.
+
+        ``config`` is the replay config the executables gate reads its policy
+        from: when records need a discovery and the caller gave none, it routes
+        the gate's policy from that same single discovery.
+        """
+        from dataclasses import replace
+
         policy_fetch, exec_policy = record_policy(config, project_root, enabled=enabled)
         records = cls(
             enabled=enabled and not config.user_scope,
@@ -288,7 +295,11 @@ class ReplayRecords:
             scratch_root=scratch_root,
             policy_fetch=policy_fetch,
         )
-        records.exec_policy = exec_policy
+        records.config = (
+            config
+            if exec_policy is config.policy_provider
+            else replace(config, policy_provider=exec_policy, policy_fetch=policy_fetch)
+        )
         return records
 
     def __init__(
@@ -301,7 +312,7 @@ class ReplayRecords:
         scratch_root: Path,
         policy_fetch: Callable[[], Any] | None,
     ) -> None:
-        self.exec_policy: Callable[[], Any] | None = None
+        self.config: Any = None
         global _LAST_SUMMARY
         _LAST_SUMMARY = None
         self._enabled = enabled and records_enabled()
@@ -321,7 +332,7 @@ class ReplayRecords:
     def _policy_fingerprint(self) -> str | None:
         if not self._fingerprinted:
             self._fingerprinted = True
-            from apm_cli.policy.effective_fingerprint import effective_policy_fingerprint
+            from apm_cli.policy.outcome_routing import effective_policy_fingerprint
 
             try:
                 fetch = self._policy_fetch() if self._policy_fetch is not None else None

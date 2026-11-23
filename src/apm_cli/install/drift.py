@@ -32,7 +32,7 @@ from __future__ import annotations
 import atexit
 import tempfile
 import tracemalloc
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import copytree, rmtree
 from typing import TYPE_CHECKING, Any
@@ -122,6 +122,8 @@ class ReplayConfig:
     policy_provider: Callable[[], Any] | None = None
     # Returns the discovery result *policy_provider* routes (records bind to it, #4940).
     policy_fetch: Callable[[], Any] | None = None
+    # Serve packages proven by their render record (#4940); False replays all live.
+    records: bool = True
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
 
@@ -521,10 +523,10 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = True) -> Path:
+def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
-    *records* lets packages proven by their render record be served
+    ``config.records`` lets packages proven by their render record be served
     (``install/drift_records.py``); ``False`` replays every package live.
 
     The scratch directory is registered for atexit cleanup so callers do
@@ -599,6 +601,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = Tru
     downloader, registry_resolver, registries, declared_transports = _replay_sources(
         config, project_root, apm_modules_dir
     )
+    if downloader is not None:
+        from apm_cli.cache.git_cache import attach_persistent_git_cache
+
+        attach_persistent_git_cache(downloader, read_only=True)
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
@@ -636,10 +642,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = Tru
     from apm_cli.install.exec_gate import ReplayExecAllowMap
 
     served = ReplayRecords.for_replay(
-        config, project_root, lock, targets, integrators, scratch_root, enabled=records
+        config, project_root, lock, targets, integrators, scratch_root, enabled=config.records
     )
+    # The records' discovery and the executables gate share one policy fetch.
+    config = served.config
     gated_allow_map = ReplayExecAllowMap(
-        project_root, served.exec_policy, user_scope=config.user_scope
+        project_root, config.policy_provider, user_scope=config.user_scope
     )
     local_parent_index = build_local_parent_index(lock)
     local_resolved_cache: dict[str, Path] = {}
@@ -787,7 +795,6 @@ def _replay_sources(
     """
     if config.cache_only:
         return None, None, None, None
-    from apm_cli.cache.git_cache import attach_persistent_git_cache
     from apm_cli.core.auth import AuthResolver
     from apm_cli.deps.github_downloader import GitHubPackageDownloader
     from apm_cli.deps.registry.resolver import RegistryPackageResolver
@@ -797,7 +804,6 @@ def _replay_sources(
     registries: dict[str, str] | None = None
     registry_resolver = None
     downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-    attach_persistent_git_cache(downloader, read_only=True)
     declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
     if (apm_yml := manifest_file(project_root)).exists():
         manifest = APMPackage.from_apm_yml(apm_yml)
@@ -821,7 +827,7 @@ def _replay_all_live(config: ReplayConfig, logger: CheckLogger, scratch_root: Pa
                     rmtree(child, ignore_errors=True)
                 else:
                     child.unlink(missing_ok=True)
-    return run_replay(config, _Restarted(logger), records=False)
+    return run_replay(replace(config, records=False), _Restarted(logger))
 
 
 class _Restarted:

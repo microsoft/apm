@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.policy.effective_fingerprint import effective_policy_fingerprint
+from apm_cli.policy.outcome_routing import effective_policy_fingerprint
 from apm_cli.policy.parser import load_policy
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-ci-audit-scratch-materialization")]
