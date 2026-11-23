@@ -74,14 +74,14 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         from pathlib import Path
         from types import SimpleNamespace
 
-        from apm_cli.cache.deploy_store import plain_file_mode
+        from apm_cli.cache.deploy_store import process_umask
         from apm_cli.cache.paths import read_only_caches
         from apm_cli.install import diff_apply
         from apm_cli.install.locking import lifecycle_operation
         from apm_cli.install.service import InstallService
         from apm_cli.install.transaction import ApplyRestoreIncomplete
 
-        plain_file_mode()  # read the umask once, before any worker thread exists
+        process_umask()  # read the umask once, before any worker thread exists
         current = click.get_current_context()
         root, argv = Path.cwd(), list(raw)
         disposition = InstallService.frozen_disposition(SimpleNamespace(frozen=frozen))

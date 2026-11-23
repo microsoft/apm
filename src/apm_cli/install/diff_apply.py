@@ -268,6 +268,7 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
 
 def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, staging: Path) -> Path:
     """Copy one locked package into *staging* (outside the project) and prove its content."""
+    from apm_cli.cache.deploy_store import process_umask
     from apm_cli.install.cache_pin import write_marker
     from apm_cli.install.source_helpers import locked_content_mismatch
 
@@ -279,9 +280,7 @@ def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, stag
     staging.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(checkout, staging, ignore=shutil.ignore_patterns(".git"))
     # The cache keeps checkouts owner-only; a materialized copy gets a normal dir mode.
-    mask = os.umask(0)
-    os.umask(mask)
-    os.chmod(staging, 0o777 & ~mask)
+    os.chmod(staging, 0o777 & ~process_umask())
     write_marker(staging, sha)
     if locked_content_mismatch(key, dep, staging, lockfile=lock):
         raise Decline("package copy differs from its locked content")

@@ -366,24 +366,29 @@ class DeployStore:
 
 
 @functools.cache
-def plain_file_mode() -> int:
-    """The permission bits a plain new file gets in this process (``0o666 & ~umask``).
+def process_umask() -> int:
+    """This process's umask, read once.
 
-    Read once per process: Linux reports the umask in ``/proc``; elsewhere the
-    only way is a process-wide ``os.umask`` swap, so it happens once, primed by
-    the install transaction before any worker thread exists.
+    Linux reports it in ``/proc``; elsewhere the only way is a process-wide
+    ``os.umask`` swap, so it happens once, primed by the install transaction
+    (and the fast entry) before any worker thread exists.
     """
     if sys.platform.startswith("linux"):
         try:
             with open("/proc/self/status", encoding="ascii") as status:
                 for line in status:
                     if line.startswith("Umask:"):
-                        return 0o666 & ~int(line.split()[1], 8)
+                        return int(line.split()[1], 8)
         except (OSError, ValueError):
             pass
     mask = os.umask(0o022)
     os.umask(mask)
-    return 0o666 & ~mask
+    return mask
+
+
+def plain_file_mode() -> int:
+    """The permission bits a plain new file gets in this process (``0o666 & ~umask``)."""
+    return 0o666 & ~process_umask()
 
 
 def package_record_key(

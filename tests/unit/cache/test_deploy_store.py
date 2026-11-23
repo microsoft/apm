@@ -96,28 +96,29 @@ def test_a_read_only_decision_never_creates_the_cache_root(
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_a_record_holds_only_under_the_mode_policy_it_was_written_with() -> None:
     """A replay writes plain files, so a different umask finds no record."""
-    from apm_cli.cache.deploy_store import package_record_key, plain_file_mode
+    from apm_cli.cache.deploy_store import package_record_key, plain_file_mode, process_umask
 
     ident = ("o/p", "a" * 40, "sha256:" + "b" * 64, ["copilot"], "1.0", "project")
     previous = os.umask(0o022)
     try:
-        plain_file_mode.cache_clear()
+        process_umask.cache_clear()
         written = package_record_key(*ident)
         assert plain_file_mode() == 0o644
         os.umask(0o077)
-        plain_file_mode.cache_clear()
+        process_umask.cache_clear()
         assert plain_file_mode() == 0o600
         assert package_record_key(*ident) != written
     finally:
         os.umask(previous)
-        plain_file_mode.cache_clear()
+        process_umask.cache_clear()
 
 
 def test_the_umask_is_read_at_most_once_and_before_the_install_starts_workers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A process-wide umask swap races other threads: one read, primed by the transaction."""
-    from apm_cli.cache.deploy_store import plain_file_mode
+    from apm_cli.cache.deploy_store import plain_file_mode, process_umask
+    from apm_cli.install.diff_apply import _write
     from apm_cli.install.transaction import InstallTransaction
 
     swaps: list[int] = []
@@ -128,7 +129,7 @@ def test_the_umask_is_read_at_most_once_and_before_the_install_starts_workers(
         return real_umask(mask)
 
     monkeypatch.setattr("os.umask", counting_umask)
-    plain_file_mode.cache_clear()
+    process_umask.cache_clear()
     try:
         InstallTransaction(
             manifest_path=tmp_path / "apm.yml",
@@ -137,12 +138,17 @@ def test_the_umask_is_read_at_most_once_and_before_the_install_starts_workers(
             logger=None,
             acquire_lock=False,
         ).rollback()
-        assert plain_file_mode.cache_info().currsize == 1, "primed before the pipeline"
-        for _ in range(3):
+        assert process_umask.cache_info().currsize == 1, "primed before the pipeline"
+        primed = len(swaps)
+        assert primed <= 2, "at most one swap (set and restore), and none on Linux"
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        for index in range(3):
             plain_file_mode()
-        assert len(swaps) <= 2, "at most one swap (set and restore), and none on Linux"
+            _write(tmp_path / "out" / f"{index}.md", b"x\n", scratch)
+        assert len(swaps) == primed, "a fast apply's writes never touch the umask"
     finally:
-        plain_file_mode.cache_clear()
+        process_umask.cache_clear()
 
 
 def test_bytes_that_do_not_hash_to_the_key_are_never_stored(tmp_path: Path) -> None:

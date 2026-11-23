@@ -72,6 +72,19 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
 
+def test_the_engine_never_swaps_the_process_umask() -> None:
+    """os.umask is process-wide: the engine reads the memoized mask instead."""
+    root = Path(diff_apply.__file__).parent
+    for name in _ENGINE_MODULES:
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        calls = {
+            c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, "id", "")
+            for c in ast.walk(tree)
+            if isinstance(c, ast.Call)
+        }
+        assert "umask" not in calls, name
+
+
 @pytest.mark.parametrize("rel", ["../x", "/abs", "a\\b", "a//b", "a/./b", ""])
 def test_unsafe_deployed_paths_decline(tmp_path: Path, rel: str) -> None:
     with pytest.raises(Decline, match="unsafe path"):
