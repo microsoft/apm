@@ -211,6 +211,51 @@ def test_trust_transitive_false_fails_audit_for_an_unlisted_transitive_server(
     assert name in _text(audit), _text(audit)
 
 
+@pytest.mark.parametrize("path", PATHS)
+def test_a_transitive_server_in_both_allow_and_deny_is_refused_at_install(
+    lifecycle_world, path
+) -> None:
+    """mcp.deny wins over mcp.allow for a transitive server: install refuses before any write."""
+    parent, child, name = _author(lifecycle_world, path)
+    project = lifecycle_world.project
+    before = {
+        rel: (project / rel).read_bytes() if (project / rel).exists() else None
+        for rel in ("apm.yml", "apm.lock.yaml")
+    }
+    result = _install_under_policy(
+        lifecycle_world, path, parent, child, trust_transitive=False, allow=[name], deny=[name]
+    )
+    text = _text(result)
+    assert result.returncode == 1, text
+    assert "mcp-denylist" in text or "denied by pattern" in text, text
+    assert not _configured(lifecycle_world, _CONFIGURED_NAME[path]), text
+    if path != "approved":
+        after = {
+            rel: (project / rel).read_bytes() if (project / rel).exists() else None
+            for rel in before
+        }
+        assert after == before, "a refused install changed apm.yml or apm.lock.yaml"
+
+
+@pytest.mark.parametrize("path", PATHS)
+def test_audit_reports_a_transitive_server_in_both_allow_and_deny(lifecycle_world, path) -> None:
+    """audit --ci fails a kept transitive server that mcp.deny names, even if mcp.allow lists it.
+
+    A one-run flag install already fails audit on the consumer trust check
+    (fail-fast), so that path asserts the failure and the server name.
+    """
+    parent, child, name = _author(lifecycle_world, path)
+    installed = _install(lifecycle_world, path, parent, child)
+    assert installed.returncode == 0, _text(installed)
+    _transitive_policy(lifecycle_world, path, trust_transitive=False, allow=[name], deny=[name])
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    text = _text(audit)
+    assert audit.returncode == 1, text
+    assert name in text, text
+    if path != "flag":
+        assert "mcp-denylist" in text, text
+
+
 def test_a_direct_dependency_server_is_not_transitive(lifecycle_world) -> None:
     """mcp.trust_transitive judges depth > 1 only: a direct dependency's server installs."""
     factory = LocalPackageFactory(lifecycle_world.root / "g1-direct")
