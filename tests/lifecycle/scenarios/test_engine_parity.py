@@ -327,9 +327,14 @@ def test_frozen_ci_on_a_warm_store_applies_the_diff(twin: Twin) -> None:
     _assert_decision(twin.ok("install", "--frozen"), DIFF)
 
 
-@NEEDS_DIFF
-def test_branch_switch_lockfile_swap_applies_the_diff(twin: Twin) -> None:
-    """Install v1, move to v2, then check out v1's manifest and lockfile again."""
+@NEEDS_ANY
+def test_branch_switch_lockfile_swap_matches_the_full_pipeline(twin: Twin) -> None:
+    """Install v1, move to v2, then check out v1's manifest and lockfile again.
+
+    The full pipeline keeps v2's bytes as a local edit of the swapped-in lock
+    ("1 local edit(s) to managed files"), so a diff decision is valid only if
+    it lands the same bytes; declining to FULL is the parity-safe answer.
+    """
     _converge(twin, "p-skill:git")
     v1 = {w.root: _snapshot(w) for w in twin.worlds}
     _publish_skill(twin, "Version two.", tag="v2.0.0")
@@ -342,7 +347,7 @@ def test_branch_switch_lockfile_swap_applies_the_diff(twin: Twin) -> None:
     twin.each(to_v2)
     twin.ok("install")
     twin.each(lambda w: _checkout(w, v1[w.root]))
-    _assert_decision(twin.ok("install"), DIFF)
+    _assert_decision(twin.ok("install"), DIFF, FULL)
 
 
 @NEEDS_ANY
