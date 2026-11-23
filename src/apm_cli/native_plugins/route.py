@@ -66,7 +66,11 @@ def frozen_route_change_reasons(lockfile: Any, manifest: Any) -> list[str]:
     return reasons
 
 
-class NativeRouteDriftError(ValueError):
+class NativeRouteError(ValueError):
+    """A replay cannot decide native routes: apm.yml's route is unreadable or drifted."""
+
+
+class NativeRouteDriftError(NativeRouteError):
     """The lock records a native plugin apm.yml now keeps loose; install has not moved it."""
 
     def __init__(self, reasons: list[str]) -> None:

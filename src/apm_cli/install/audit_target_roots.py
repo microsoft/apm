@@ -160,6 +160,7 @@ def replay_route_manifest(config: Any, lock: Any, targets: list[TargetProfile]) 
     from apm_cli.install.target_governance import install_governance, is_governed_by_install
     from apm_cli.native_plugins.route import (
         NativeRouteDriftError,
+        NativeRouteError,
         frozen_route_change_reasons,
         load_route_manifest,
         locked_route_manifest,
@@ -167,7 +168,10 @@ def replay_route_manifest(config: Any, lock: Any, targets: list[TargetProfile]) 
     from apm_cli.native_plugins.scopes import CLAUDE, COPILOT
 
     path = scope_manifest_path(config.project_root, user_scope=config.user_scope)
-    manifest = load_route_manifest(path)
+    try:
+        manifest = load_route_manifest(path)
+    except ValueError as exc:
+        raise NativeRouteError(str(exc)) from exc
     if not config.route_from_lock:
         if reasons := frozen_route_change_reasons(lock, manifest):
             raise NativeRouteDriftError(reasons)

@@ -1061,3 +1061,27 @@ def test_user_scope_replay_reads_the_route_from_apm_home(monkeypatch, tmp_path):
     # Only $APM_HOME's native_plugins: false makes a locked native record drift.
     with pytest.raises(NativeRouteDriftError, match="acme/plugin is locked on the native"):
         replay_route_manifest(config, _native_lock("acme/plugin"), [])
+
+
+def test_audit_drift_check_fails_the_check_on_a_route_refusal(tmp_path):
+    """Non-CI audit reports a refused route as a failed drift check, so JSON and
+    SARIF output still carry it, and writes nothing (#4995)."""
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.policy.ci_checks import _check_drift
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "apm.yml").write_text(
+        "name: proj\ndependencies:\n  apm:\n    - path: ./pkg\n      native: no\n",
+        encoding="utf-8",
+    )
+    lock = LockFile()
+    lockfile_path = get_lockfile_path(project_root)
+    lock.write(lockfile_path)
+    before = lockfile_path.read_bytes()
+
+    result, findings = _check_drift(project_root, lock)
+
+    assert result.passed is False and findings == []
+    assert "'native' field must be true or false, got 'no'" in result.message
+    assert lockfile_path.read_bytes() == before

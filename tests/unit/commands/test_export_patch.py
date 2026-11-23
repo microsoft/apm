@@ -732,6 +732,24 @@ def test_cli_policy_blocked_replay_exits_1_with_reason(tmp_path, monkeypatch):
     assert "Error exporting patches" not in text
 
 
+def test_cli_route_refusal_exits_1_with_reason(tmp_path, monkeypatch):
+    """A refused native route value names the field instead of a generic error (#4995)."""
+    project = _make_cli_project(tmp_path, monkeypatch)
+    (project / "apm.yml").write_text(
+        "name: cliproj\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - git: testorg/testpkg\n      native: no\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(export_patch, [], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    text = " ".join(result.output.split())
+    assert "Drift replay failed:" in text
+    assert "'native' field must be true or false, got 'no'" in text
+    assert "Error exporting patches" not in text
+
+
 def test_cli_rejects_out_dir_inside_apm_modules(tmp_path, monkeypatch):
     _make_cli_project(tmp_path, monkeypatch)
     result = CliRunner().invoke(export_patch, ["-o", "apm_modules/evil"], catch_exceptions=False)

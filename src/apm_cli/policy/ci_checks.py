@@ -1368,6 +1368,7 @@ def _check_drift(
     from ..install.errors import PolicyViolationError
     from ..install.phases.local_content import LocalPackageError
     from ..integration.targets import resolve_audit_targets
+    from ..native_plugins.route import NativeRouteError
 
     logger = CheckLogger(verbose=verbose)
     deployment_root = get_workspace_deploy_root(project_root)
@@ -1385,7 +1386,8 @@ def _check_drift(
 
         try:
             scratch = run_replay(config, logger)
-        except (AgentPluginDeploymentBoundaryError, CodexNativeError) as exc:
+        except (AgentPluginDeploymentBoundaryError, CodexNativeError, NativeRouteError) as exc:
+            # A failed check, so JSON and SARIF output still carry the refusal.
             return (
                 CheckResult(
                     name="drift",

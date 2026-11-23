@@ -713,6 +713,7 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
         run_replay,
     )
     from ..install.errors import PolicyViolationError
+    from ..native_plugins.route import NativeRouteError
 
     config = ReplayConfig(project_root=project_root, lockfile_path=lockfile_path)
     check_logger = CheckLogger(verbose=verbose)
@@ -721,7 +722,12 @@ def _run_export_patch(logger: CommandLogger, out_dir: str, dry_run: bool, verbos
     except CacheMissError as exc:
         logger.error(f"Cannot replay the locked install: {exc}")
         sys.exit(1)
-    except (LocalResolutionError, NotImplementedError, PolicyViolationError) as exc:
+    except (
+        LocalResolutionError,
+        NativeRouteError,
+        NotImplementedError,
+        PolicyViolationError,
+    ) as exc:
         logger.error(f"Drift replay failed: {exc}")
         sys.exit(1)
 
