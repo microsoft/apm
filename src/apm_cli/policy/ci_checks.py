@@ -1531,8 +1531,9 @@ def _modified_bundle_hooks_result(slugs: Sequence[str]) -> CheckResult:
         name="local-bundle-hooks",
         passed=False,
         message=(
-            f"{len(slugs)} local bundle(s) have hook entries changed outside APM; restore the "
-            "bundle's entries or uninstall the bundle, then move any change into your own hook"
+            f"{len(slugs)} local bundle(s) have hook entries changed outside APM; restore each "
+            "recorded entry first (uninstall refuses while an edited entry still runs the "
+            "bundle's script), and keep your own changes in a separate hook entry"
         ),
         details=[f"{slug}: a deployed hook entry was changed outside APM" for slug in slugs],
     )

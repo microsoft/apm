@@ -201,8 +201,9 @@ Fails when a local bundle's deployed hooks (or canvas extensions) are no longer
 admitted by the current executables trust, and when a bundle hook entry in a
 merged hook config was changed outside APM (for example a new `matcher`): APM
 can no longer match it to its recorded content, so the check names the bundle
-instead of losing track of the entry. Restore the bundle's entry or uninstall
-the bundle, and keep your own changes in a separate hook entry.
+instead of losing track of the entry. Restore the recorded entry first: `apm
+uninstall` refuses while an edited entry still runs the bundle's script. Keep
+your own changes in a separate hook entry.
 
 ### `hook-approval-pins`
 
