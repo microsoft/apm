@@ -799,6 +799,52 @@ def test_registry_receipt_survives_package_lock_rebuild(
     assert scenario.lock().dependencies
 
 
+def test_a_refused_deselection_never_keeps_a_baseline_with_another_native_key(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A registry server turns self-defined for codex only; claude's edit refuses (#4899).
+
+    The registry baseline keys the entry ``registered`` while codex now writes
+    ``io.example/registered``, so the refused claude baseline is not kept: the
+    lock records the new declaration and a later removal retires codex's entry.
+    """
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        _success(scenario.install())
+    assert set(scenario.servers("codex")) == {"registered"}
+    edited = {**scenario.servers("claude")["registered"], "url": "http://127.0.0.1:9/personal"}
+    scenario.edit("claude", "registered", edited)
+    document = tomlkit.parse(scenario.path("codex").read_text(encoding="utf-8"))
+    document["mcp_servers"].pop("registered")
+    scenario.path("codex").write_text(tomlkit.dumps(document), encoding="utf-8")
+    scenario.declare(
+        [
+            {
+                **_http("http://127.0.0.1:8000/registered"),
+                "name": "io.example/registered",
+                "targets": ["codex"],
+            }
+        ]
+    )
+
+    refused = scenario.install()
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert refused.returncode == 1, output
+    assert "Preserved MCP connection(s)" in output, output
+    assert set(scenario.servers("codex")) == {"io.example/registered"}
+    assert scenario.lock().mcp_target_servers == {"codex": ["io.example/registered"]}
+    assert scenario.lock().mcp_configs["io.example/registered"].get("registry") is False
+
+    scenario.declare([])
+    _success(scenario.install())
+    assert scenario.servers("codex") == {}
+    assert scenario.servers("claude")["registered"] == edited
+    assert scenario.lock().mcp_target_servers == {}
+
+
 @pytest.mark.parametrize("foreign_target", ["claude", "codex"])
 def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
