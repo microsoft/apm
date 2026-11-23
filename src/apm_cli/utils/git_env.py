@@ -368,11 +368,15 @@ def user_script_environment(env: dict[str, str]) -> dict[str, str]:
 
 
 def _links_into(directory: Path, root: Path) -> bool:
-    """Whether *directory* holds a symlink whose resolved target lies inside *root*."""
+    """Whether *directory* may hold a symlink whose resolved target lies inside *root*.
+
+    A directory that cannot be listed may still be searched by the shell, so it
+    counts as linking in: unchecked links never serve an APM-authored script.
+    """
     try:
         entries = list(directory.iterdir())
     except OSError:
-        return False
+        return True
     for entry in entries:
         if not entry.is_symlink():
             continue
