@@ -58,7 +58,10 @@ def record_refused_retirement(
     claims the run did not remove are kept for the retry: untouched ones, and
     every planned retirement that did not run, including a runtime that a
     still-declared server's ``targets:`` deselected. A claim the run revoked
-    for a requested server (a preserved collision) is not restored.
+    for a requested server (a preserved collision) is not restored. When the
+    declaration changed and a runtime claims the server for the first time,
+    the refused baseline would vouch for bytes APM never wrote there, so the
+    pending claim is dropped instead: the edited entry stays, unowned.
     """
     from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
     from apm_cli.integration.mcp_integrator import MCPIntegrator
@@ -71,24 +74,31 @@ def record_refused_retirement(
     retain_deferred_mcp_claims(managed_target_servers, retained, set(new_servers))
     new_hashes, old_hashes = native_hashes
     new_configs, old_configs = configs
-    pending_names: set[str] = set()
+    pending: dict[str, builtins.set] = {}
     for runtime, names, _exclude in planned:
         if runtime is not None and runtime in old_target_servers:
-            pending = names & retained[runtime]
-            if pending:
-                managed_target_servers.setdefault(runtime, set()).update(pending)
-                pending_names |= pending
-                # The retry compares against the baseline that was refused.
-                for name in pending & set(old_hashes.get(runtime, {})):
-                    new_hashes.setdefault(runtime, {})[name] = old_hashes[runtime][name]
+            pending.setdefault(runtime, set()).update(names & retained[runtime])
+    keep_baseline = {
+        name
+        for name in set().union(*pending.values(), set())
+        if _refused_baseline_is_ours(name, managed_target_servers, old_target_servers)
+        or old_configs.get(name) == new_configs.get(name)
+    }
+    for runtime, names in pending.items():
+        # The lockfile holds one declaration per server: the refused baseline
+        # stays only where APM itself wrote it on every runtime claiming the
+        # server; otherwise the edited entry is left unowned, never deleted.
+        for name in names & keep_baseline:
+            managed_target_servers.setdefault(runtime, set()).add(name)
+            if name in old_hashes.get(runtime, {}):
+                new_hashes.setdefault(runtime, {})[name] = old_hashes[runtime][name]
     claimed = set().union(*managed_target_servers.values())
     gone = removed_names(removed) - claimed
     kept_old = {name for name in old_servers if name not in gone}
-    # A pending retirement keeps its recorded declaration as its baseline; a new
-    # write keeps its own proof through its native hash, so the retry still
-    # refuses an edit that only matches the new declaration.
+    # A kept pending retirement keeps its recorded declaration as its baseline,
+    # so an identical retry still refuses an edit matching only the new one.
     baselines = {n: c for n, c in old_configs.items() if n in kept_old}
-    baselines.update({n: c for n, c in new_configs.items() if n not in pending_names})
+    baselines.update({n: c for n, c in new_configs.items() if n not in keep_baseline})
     new_provenance, old_provenance = provenance
     MCPIntegrator.update_lockfile(
         set(new_servers) | kept_old,
@@ -109,3 +119,16 @@ def record_refused_retirement(
 def removed_names(removed: dict[str | None, builtins.set]) -> builtins.set:
     """Every server name a retirement removed from at least one runtime."""
     return set().union(*removed.values()) if removed else set()
+
+
+def _refused_baseline_is_ours(
+    name: str,
+    managed_target_servers: dict[str, builtins.set],
+    old_target_servers: dict[str, builtins.set],
+) -> bool:
+    """Whether every runtime claiming *name* now also claimed it before this run."""
+    return all(
+        name in old_target_servers.get(runtime, set())
+        for runtime, names in managed_target_servers.items()
+        if name in names
+    )
