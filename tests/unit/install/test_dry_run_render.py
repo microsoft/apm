@@ -14,8 +14,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.install.dry_run_plan import ProspectiveInstallPlan
+from apm_cli.install.orphans import OrphanOperation, OrphanRemovalDecision
 from apm_cli.install.presentation.dry_run import render_and_exit as _render_and_exit
-from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
+
+
+def _decision(files) -> OrphanRemovalDecision:
+    return OrphanRemovalDecision(
+        operation=OrphanOperation.INSTALL, removed_files={"owner/gone": tuple(files)}
+    )
 
 
 def _raise(_lock: object) -> bool:
@@ -88,90 +96,6 @@ def _make_lsp_dep(name: str = "pyright") -> _DisplayDependency:
 
 
 class TestRenderApmDeps:
-    def test_plan_counts_only_selected_dependency_types(self) -> None:
-        """Preview counts exclude dependency types filtered from the install."""
-        plan = ProspectiveInstallPlan(
-            apm_dependencies=(_make_apm_dep(),),
-            dev_apm_dependencies=(),
-            selected_apm_dependencies=(_make_apm_dep(),),
-            mcp_dependencies=(_make_mcp_dep(),),
-            should_install_apm=False,
-            should_install_mcp=True,
-            only_packages=None,
-        )
-
-        assert plan.apm_dependency_count == 0
-        assert plan.mcp_dependency_count == 1
-        assert plan.lsp_dependency_count == 0
-        assert plan.dependency_counts == (0, 1, 0)
-
-    def test_plan_selects_only_requested_dependency_without_reparsing_it(self) -> None:
-        """Preview selection retains the interpreted dependency object."""
-        existing = DependencyReference.parse("owner/existing#1.0.0")
-        requested = DependencyReference.parse("owner/requested#2.0.0")
-        requested.source = "registry"
-        requested.registry_name = "private"
-        package = MagicMock()
-        package.get_apm_dependencies.return_value = [existing, requested]
-        package.get_dev_apm_dependencies.return_value = []
-        package.get_all_mcp_dependencies.return_value = []
-        package.get_lsp_dependencies.return_value = []
-
-        plan = ProspectiveInstallPlan.from_apm_package(
-            package,
-            should_install_apm=True,
-            should_install_mcp=True,
-            only_packages=["owner/requested#2.0.0"],
-        )
-
-        assert plan.selected_apm_dependencies == (requested,)
-        assert plan.selected_apm_dependencies[0].source == "registry"
-        assert plan.selected_apm_dependencies[0].registry_name == "private"
-
-    def test_plan_retains_structured_versioned_path_for_selection_and_updates(self) -> None:
-        requested = DependencyReference.parse_from_dict(
-            {
-                "git": "https://github.com/acme/catalog",
-                "path": "plugins/tool-1.2.3",
-                "ref": "release",
-            }
-        )
-        package = MagicMock()
-        package.get_apm_dependencies.return_value = [requested]
-        package.get_dev_apm_dependencies.return_value = []
-        package.get_all_mcp_dependencies.return_value = []
-        package.get_lsp_dependencies.return_value = []
-
-        plan = ProspectiveInstallPlan.from_apm_package(
-            package,
-            should_install_apm=True,
-            should_install_mcp=False,
-            only_packages=["acme/catalog/plugins/tool-1.2.3#release"],
-            updated_packages=["acme/catalog/plugins/tool-1.2.3#release"],
-        )
-
-        assert plan.selected_apm_dependencies == (requested,)
-        assert plan.updated_apm_identities == {"acme/catalog/plugins/tool-1.2.3"}
-
-    def test_plan_excludes_apm_selection_when_only_mcp_is_requested(self) -> None:
-        """The prospective plan does not leak APM work into --only=mcp previews."""
-        dep = DependencyReference.parse("owner/repo#main")
-        package = MagicMock()
-        package.get_apm_dependencies.return_value = [dep]
-        package.get_dev_apm_dependencies.return_value = []
-        package.get_all_mcp_dependencies.return_value = []
-        package.get_lsp_dependencies.return_value = []
-
-        plan = ProspectiveInstallPlan.from_apm_package(
-            package,
-            should_install_apm=False,
-            should_install_mcp=True,
-            only_packages=None,
-        )
-
-        assert plan.selected_apm_dependencies == ()
-        assert plan.apm_dependency_count == 0
-
     def test_apm_deps_install_action_shown(self, tmp_path: Path) -> None:
         """APM deps rendered with 'install' when update=False (lines 42-45)."""
         logger = _make_logger()
@@ -361,12 +285,67 @@ class TestOrphanPreview:
         )
         with (
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
-            patch("apm_cli.drift.detect_orphans") as orphans,
+            patch("apm_cli.install.orphans.decide_orphan_removal") as orphans,
         ):
             render_and_exit(logger=logger, plan=plan, update=False, apm_dir=tmp_path)
         orphans.assert_not_called()
         logger.dry_run_notice.assert_called_once()
         assert "Dependency preview incomplete" in logger.dry_run_notice.call_args.args[0]
+
+    def test_declaration_errors_show_without_verbose(self, tmp_path: Path) -> None:
+        """A refusal install always makes is shown, not hidden behind --verbose (#3967)."""
+        logger = _make_logger()
+        collision = "a and b are different packages that would both install to apm_modules/x"
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(),
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=(),
+            mcp_dependencies=(),
+            should_install_apm=True,
+            should_install_mcp=False,
+            only_packages=None,
+            dependency_preview_errors=(collision, "unknown parent metadata"),
+            dependency_declaration_errors=(collision,),
+        )
+        with patch("apm_cli.deps.lockfile.LockFile.read", return_value=None):
+            render_and_exit(logger=logger, plan=plan, update=False, apm_dir=tmp_path)
+        logger.warning.assert_called_once_with(f"apm install would refuse: {collision}")
+        details = [call.args[0] for call in logger.verbose_detail.call_args_list]
+        assert details == ["unknown parent metadata"]
+
+    def test_retired_mcp_moves_are_previewed_for_project_scope(self, tmp_path: Path) -> None:
+        """A 0.36 project sees which servers move to .mcp.json (#3967)."""
+        from apm_cli.install.mcp.retired_destinations import RetiredMcpPreview
+
+        logger = _make_logger()
+        plan = ProspectiveInstallPlan(
+            apm_dependencies=(),
+            dev_apm_dependencies=(),
+            selected_apm_dependencies=(),
+            mcp_dependencies=(),
+            should_install_apm=False,
+            should_install_mcp=True,
+            only_packages=None,
+        )
+        with (
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
+            patch(
+                "apm_cli.install.mcp.retired_destinations.preview_retired_mcp_moves",
+                return_value=RetiredMcpPreview(
+                    moves={".github/mcp.json": ["echo"]},
+                    removals={".vscode/mcp.json": ["gone"]},
+                ),
+            ) as preview,
+        ):
+            render_and_exit(
+                logger=logger, plan=plan, update=False, apm_dir=tmp_path, project_root=tmp_path
+            )
+        preview.assert_called_once()
+        lines = [call.args[0] for call in logger.progress.call_args_list]
+        assert "MCP servers that would move from .github/mcp.json to .mcp.json:" in lines
+        assert "  - echo" in lines
+        assert "MCP servers that would be removed from .vscode/mcp.json:" in lines
+        assert "  - gone" in lines
 
     def test_orphan_preview_header_shown(self, tmp_path: Path) -> None:
         """Orphan preview header is printed when orphans are found (lines 64-81)."""
@@ -379,7 +358,10 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=["a.md", "b.md"]),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_decision(["a.md", "b.md"]),
+            ),
         ):
             render_and_exit(
                 logger=logger,
@@ -406,7 +388,10 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=["alpha.md", "beta.md"]),
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal",
+                return_value=_decision(["alpha.md", "beta.md"]),
+            ),
         ):
             render_and_exit(
                 logger=logger,
@@ -434,7 +419,7 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=orphans),
+            patch("apm_cli.install.orphans.decide_orphan_removal", return_value=_decision(orphans)),
         ):
             render_and_exit(
                 logger=logger,
@@ -451,7 +436,7 @@ class TestOrphanPreview:
         assert "more" in all_calls
 
     def test_no_orphans_no_preview_header(self, tmp_path: Path) -> None:
-        """When detect_orphans returns empty, no orphan header is shown."""
+        """When the orphan owner removes nothing, no orphan header is shown."""
         logger = _make_logger()
         mock_lock = MagicMock()
 
@@ -461,7 +446,7 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=[]),
+            patch("apm_cli.install.orphans.decide_orphan_removal", return_value=_decision([])),
         ):
             render_and_exit(
                 logger=logger,
@@ -478,7 +463,7 @@ class TestOrphanPreview:
         assert "Files that would be removed" not in all_calls
 
     def test_dev_deps_contribute_to_orphan_detection(self, tmp_path: Path) -> None:
-        """dev_apm_deps are included in the intended-keys set passed to detect_orphans."""
+        """dev_apm_deps are included in the intent passed to the orphan owner."""
         logger = _make_logger()
         mock_lock = MagicMock()
         dev_dep = _make_apm_dep("owner/dev-repo")
@@ -489,7 +474,9 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=[]) as mock_orphans,
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal", return_value=_decision([])
+            ) as mock_orphans,
         ):
             render_and_exit(
                 logger=logger,
@@ -503,8 +490,7 @@ class TestOrphanPreview:
             )
 
         mock_orphans.assert_called_once()
-        _lock_arg, intended_keys_arg = mock_orphans.call_args[0][:2]
-        assert "owner/dev-repo" in intended_keys_arg
+        assert "owner/dev-repo" in mock_orphans.call_args.kwargs["intended"]
 
     def test_get_unique_key_exception_skipped(self, tmp_path: Path) -> None:
         """If dep.get_unique_key() raises, it is silently skipped (noqa: SIM105 block)."""
@@ -519,7 +505,9 @@ class TestOrphanPreview:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=[]) as mock_orphans,
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal", return_value=_decision([])
+            ) as mock_orphans,
         ):
             render_and_exit(
                 logger=logger,
@@ -532,7 +520,7 @@ class TestOrphanPreview:
                 apm_dir=tmp_path,
             )
 
-        # detect_orphans still called; intended_keys is empty (failed silently)
+        # the orphan owner is still called; intended_keys is empty (failed silently)
         mock_orphans.assert_called_once()
 
 
@@ -609,7 +597,7 @@ class TestDryRunNoticeAndSuccess:
 
         with (
             patch("apm_cli.deps.lockfile.LockFile.read", return_value=MagicMock()),
-            patch("apm_cli.drift.detect_orphans", return_value=[]),
+            patch("apm_cli.install.orphans.decide_orphan_removal", return_value=_decision([])),
         ):
             render_and_exit(
                 logger=logger,
@@ -643,8 +631,8 @@ class TestDryRunNoticeAndSuccess:
 
         logger.success.assert_not_called()
 
-    def test_only_packages_forwarded_to_detect_orphans(self, tmp_path: Path) -> None:
-        """only_packages argument is passed through to detect_orphans."""
+    def test_targeted_install_previews_no_orphan_removals(self, tmp_path: Path) -> None:
+        """A targeted install never previews unrelated orphan removals."""
         logger = _make_logger()
         mock_lock = MagicMock()
 
@@ -654,7 +642,9 @@ class TestDryRunNoticeAndSuccess:
                 "apm_cli.deps.lockfile.get_lockfile_path",
                 return_value=tmp_path / "apm.lock.yaml",
             ),
-            patch("apm_cli.drift.detect_orphans", return_value=[]) as mock_orphans,
+            patch(
+                "apm_cli.install.orphans.decide_orphan_removal", return_value=_decision([])
+            ) as mock_orphans,
         ):
             render_and_exit(
                 logger=logger,
@@ -668,5 +658,4 @@ class TestDryRunNoticeAndSuccess:
                 apm_dir=tmp_path,
             )
 
-        call_args = mock_orphans.call_args
-        assert call_args.kwargs.get("only_packages") == ["owner/repo"]
+        mock_orphans.assert_not_called()

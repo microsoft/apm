@@ -26,7 +26,6 @@ from functools import cache, lru_cache
 from pathlib import Path
 
 import pytest
-import rich
 
 from tests.utils.hermetic_packaged_sample import (
     HermeticPackagedSample,
@@ -51,37 +50,6 @@ def _integration_process_cwd_guard():
     except (FileNotFoundError, OSError):
         os.chdir(_REPO_ROOT)
     yield
-
-
-@pytest.fixture(autouse=True)
-def _reset_console_state():
-    """Reset APM and Rich console singletons before and after each test.
-
-    Several commands (e.g. ``pack --json``) call
-    ``set_console_stderr(True)`` to route rich/click output to stderr.
-    If a test exercises such a command and the function never reaches
-    its cleanup path, ``_console_stderr`` stays ``True`` and later
-    tests see empty stdout because ``click.echo(..., err=True)``
-    silently diverts output.
-
-    Tests that initialize Rich's process-global console while its
-    ``Console`` class is patched can also leave a ``MagicMock`` clock
-    behind. Rich progress then compares mock timestamps in later tests.
-
-    This fixture resets both singletons before and after each test so an
-    xdist worker cannot carry console state across test boundaries.
-    """
-    from apm_cli.utils.console import _reset_console
-
-    # ``rich._console`` is Rich's process-global default console (the one
-    # ``rich.get_console()``/``rich.print`` lazily create). Nulling it forces
-    # a fresh real console next call. The attribute has lived at this name
-    # since Rich 10.0; the project pins ``rich>=13.0.0`` (verified on 15.x).
-    _reset_console()
-    rich._console = None
-    yield
-    _reset_console()
-    rich._console = None
     try:
         os.getcwd()
     except (FileNotFoundError, OSError):

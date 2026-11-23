@@ -16,6 +16,11 @@ from dataclasses import dataclass
 
 import click
 
+from apm_cli.core.remediation import (
+    CLI_BINARY_OUTDATED,
+    CLI_INSTALLER_UNREACHABLE,
+)
+
 from ..bootstrap_mirror import (
     append_url_path,
     get_installer_base_url,
@@ -24,6 +29,7 @@ from ..bootstrap_mirror import (
     release_metadata_public_lookup_blocked,
 )
 from ..core.command_logger import CommandLogger
+from ..install.locking import serialized_lifecycle_unless
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
 from ..utils.subprocess_env import external_process_env
 from ..version import get_version
@@ -34,6 +40,7 @@ _INSTALL_SCRIPT_REF = "main"
 _ENV_SELF_UPDATE_CHANNEL = "APM_SELF_UPDATE_CHANNEL"
 _ENV_INSTALL_DIR = "APM_INSTALL_DIR"
 _ENV_VERSION = "VERSION"
+_ENV_PS_MODULE_PATH = "PSMODULEPATH"
 
 
 @dataclass(frozen=True)
@@ -112,7 +119,7 @@ def _get_manual_update_command(
             try:
                 installer_url = _get_update_installer_url(release)
             except RuntimeError:
-                return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+                return CLI_INSTALLER_UNREACHABLE.sentence()
         command = f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
         if release is not None:
             return f"$env:VERSION='{release.tag}'; {command}"
@@ -124,7 +131,7 @@ def _get_manual_update_command(
         try:
             installer_url = _get_update_installer_url(release)
         except RuntimeError:
-            return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
+            return CLI_INSTALLER_UNREACHABLE.sentence()
     command = f'curl -sSL "{installer_url}"'
     if release is not None:
         return f"{command} | env VERSION='{release.tag}' sh"
@@ -196,7 +203,13 @@ def _build_self_update_installer_env(
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
     env[_ENV_VERSION] = release.tag
-    if not _is_windows_platform():
+    if _is_windows_platform():
+        # A PowerShell 7 parent leaks its module path into Windows PowerShell
+        # through apm.exe, loading incompatible built-in modules (#3926). Without
+        # PSModulePath, each host rebuilds its own default module path.
+        for key in [key for key in env if key.upper() == _ENV_PS_MODULE_PATH]:
+            del env[key]
+    else:
         # Pass identity, not a second destination policy: install.sh owns routing.
         env["APM_SELF_UPDATE_SOURCE"] = os.path.abspath(
             sys.executable if getattr(sys, "frozen", False) else sys.argv[0]
@@ -217,6 +230,7 @@ def _build_self_update_installer_env(
     ),
 )
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
+@serialized_lifecycle_unless("check")
 def self_update(check: bool) -> None:
     """Update APM CLI to the latest version (like npm update -g npm).
 
@@ -246,6 +260,13 @@ def self_update(check: bool) -> None:
             if not check:
                 logger.progress("To update, reinstall from the repository.")
             return
+
+        from ..deps.egress_route import EgressRoute, EgressSurface, route_for
+
+        route = route_for(EgressSurface.SELF_UPDATE)
+        if route is not EgressRoute.DIRECT:
+            logger.error(f"The APM release route is {route.value}; cannot self-update.")
+            sys.exit(1)
 
         logger.progress(f"Current version: {current_version}")
         logger.start("Checking for updates...")
@@ -323,7 +344,7 @@ def self_update(check: bool) -> None:
 
         if check:
             logger.warning(f"Update available: {current_version} -> {release.version}")
-            logger.progress("Run 'apm self-update' (without --check) to install")
+            logger.progress(CLI_BINARY_OUTDATED.sentence())
             return
 
         # Proceed with update

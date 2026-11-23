@@ -10,11 +10,16 @@ from __future__ import annotations
 import os.path
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from apm_cli.cache.url_normalize import SCP_LIKE_RE
+from apm_cli.cache.url_normalize import SCP_LIKE_RE, normalize_repo_url
+from apm_cli.core.remediation import MARKETPLACE_HOST_CONFLICT
 from apm_cli.utils.github_host import default_host, is_valid_fqdn, validate_ssh_user
 from apm_cli.utils.path_security import decode_url_path_segments, validate_path_segments
+
+if TYPE_CHECKING:
+    from apm_cli.marketplace.models import MarketplaceSource
 
 _SCP_PREFIX_RE = re.compile(r"^[^/@:\s]+@(?:\[[^\]]+\]|[^/:\s]+):")
 
@@ -85,6 +90,74 @@ def parse_marketplace_source(
         return _parse_https_url(raw, host_flag)
 
     return _parse_shorthand(raw, host_flag)
+
+
+def marketplace_origin(source: MarketplaceSource) -> str:
+    """Return the canonical catalog origin that the lockfile records as ``source_url``.
+
+    The origin identifies the catalog independently of its machine-local alias.
+    A hosted ``marketplace.json`` URL is recorded as registered. A Git catalog
+    is recorded as its repository URL without userinfo, default port, trailing
+    ``/`` or ``.git``, with a lowercase host. A local filesystem catalog has no
+    portable origin and returns ``""``.
+    """
+    if not source.url or source.kind == "local":
+        return ""
+    if source.kind == "url":
+        return source.url
+    scheme, _, rest = normalize_repo_url(source.url).partition("://")
+    authority, slash, path = rest.partition("/")
+    return f"{scheme}://{authority.rpartition('@')[2]}{slash}{path}"
+
+
+def same_marketplace_origin(left: str | None, right: str | None) -> bool:
+    """Return whether two recorded catalog origins name the same catalog.
+
+    Comparison ignores the transport (HTTPS or SSH), userinfo, default ports,
+    a trailing ``.git`` and host case, so a lock written before origins were
+    canonicalized still matches its registration.
+    """
+    if not left or not right:
+        return False
+    return _origin_comparison_key(left) == _origin_comparison_key(right)
+
+
+def same_marketplace_catalog(left: MarketplaceSource, right: MarketplaceSource) -> bool:
+    """Return whether two registrations name the same catalog: origin and catalog path.
+
+    The lockfile records only the origin (``source_url``), so the fail-closed
+    lock check compares origins alone; a catalog moved to another path in the
+    same repository is not detectable from the lock until the path is locked.
+    """
+    return left.path == right.path and same_marketplace_origin(
+        marketplace_origin(left), marketplace_origin(right)
+    )
+
+
+def marketplace_policy_subject(origin_or_pattern: str) -> str:
+    """Return the ``host/path`` key ``marketplace.allow`` matches an origin by.
+
+    Applied to both sides: a recorded origin and an allow pattern, which may
+    be written with or without a scheme (``github.com/contoso/*``). Transport,
+    userinfo, default ports, a trailing ``.git`` and host case are ignored, as
+    in :func:`same_marketplace_origin`.
+    """
+    value = origin_or_pattern.strip()
+    if "://" not in value and not SCP_LIKE_RE.match(value):
+        value = f"https://{value}"
+    return _origin_comparison_key(value)
+
+
+def _origin_comparison_key(origin: str) -> str:
+    _scheme, _, rest = normalize_repo_url(origin).partition("://")
+    authority, slash, path = rest.partition("/")
+    key = f"{authority.rpartition('@')[2]}{slash}{path}"
+    # A hosted catalog URL's query can select a different catalog; keep it.
+    try:
+        query = urlsplit(origin).query
+    except ValueError:
+        query = ""
+    return f"{key}?{query}" if query else key
 
 
 def admit_marketplace_catalog_path(path: str) -> str:
@@ -285,8 +358,15 @@ def _reject_conflicting_host(host_flag: str | None, embedded_host: str | None, s
 
         raise ValueError(
             "Conflicting host: --host does not match the host embedded in SOURCE.\n"
-            f"To fix: drop --host and run: apm marketplace add {shlex.quote(source)}"
+            f"{MARKETPLACE_HOST_CONFLICT.bind(source=shlex.quote(source)).sentence()}"
         )
+
+
+def is_shorthand_marketplace_source(raw: str) -> bool:
+    """Return whether *raw* is ``OWNER/REPO`` or ``HOST/OWNER/REPO`` shorthand."""
+    return not (
+        "://" in raw or _looks_like_local_marketplace_source(raw) or _SCP_PREFIX_RE.match(raw)
+    )
 
 
 def _looks_like_local_marketplace_source(raw: str) -> bool:

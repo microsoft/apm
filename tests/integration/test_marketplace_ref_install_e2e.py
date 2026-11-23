@@ -198,6 +198,8 @@ def _run_install(
         patch(_PATCH_UPDATES, return_value=None),
         patch(_PATCH_VALIDATE_EXISTS, return_value=True),
         patch("apm_cli.marketplace.resolver.get_marketplace_by_name", return_value=source),
+        # The reinstall's #3959 origin check reads the same registration.
+        patch("apm_cli.marketplace.catalog_origin.get_marketplace_by_name", return_value=source),
         patch("apm_cli.marketplace.resolver.fetch_or_cache", return_value=_manifest()),
     ):
         return runner.invoke(

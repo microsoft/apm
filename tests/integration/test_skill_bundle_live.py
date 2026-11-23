@@ -28,6 +28,7 @@ import yaml
 pytestmark = [
     pytest.mark.live,
     pytest.mark.requires_network_integration,
+    pytest.mark.e2e,
 ]
 
 

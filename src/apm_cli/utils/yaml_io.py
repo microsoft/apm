@@ -29,6 +29,18 @@ _DUMP_DEFAULTS: dict[str, Any] = dict(
 )
 
 
+class _NoAliasSafeDumper(yaml.SafeDumper):
+    """SafeDumper that writes a repeated object out in full instead of ``&id001``.
+
+    PyYAML anchors any object that appears twice in the data. APM refuses
+    YAML anchors and aliases in apm.yml (OpenAPM req-mf-020(b)), so no file
+    APM writes may contain one.
+    """
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
+
+
 class _BoundedSafeLoader(yaml.SafeLoader):
     """SafeLoader that bounds YAML merge-key (``<<``) expansion.
 
@@ -356,6 +368,34 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text)
 
 
+def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
+    """Return every top-level *key* occurrence's scalar text, in document order.
+
+    Works on the composed node graph (no object construction, so no merge-key
+    expansion) and therefore sees duplicate keys that a loader would silently
+    collapse, in block or flow style. A ``null`` or non-scalar value is
+    ``None``. Returns ``None`` when the text is not parseable YAML or the
+    top-level mapping uses a ``<<`` merge key (its effective keys are only
+    known after construction), and ``[]`` when the document is not a mapping
+    or lacks *key*.
+    """
+    try:
+        node = yaml.compose(text, Loader=_BoundedSafeLoader)
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return None
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    values: list[str | None] = []
+    for key_node, value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            return None
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+            is_scalar = isinstance(value_node, yaml.ScalarNode)
+            null = is_scalar and value_node.tag == "tag:yaml.org,2002:null"
+            values.append(value_node.value if is_scalar and not null else None)
+    return values
+
+
 def _roundtrip_yaml() -> Any:
     """Return a configured ruamel.yaml round-trip parser."""
     from ruamel.yaml import YAML
@@ -370,11 +410,15 @@ def _roundtrip_yaml() -> Any:
         )
 
     rt = YAML(typ="rt")
+    # Write repeated objects in full: apm.yml may not contain anchors (req-mf-020(b)).
+    rt.representer.ignore_aliases = lambda _data: True
     # Class-level constructor registration is intentional: every round-trip
     # YAML instance in this process should reject unsafe Python tags.
     rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
     rt.preserve_quotes = True
     rt.indent(mapping=2, sequence=4, offset=2)
+    # Never fold a long scalar: a pinned fingerprint must stay on its key's line.
+    rt.width = 4096
     return rt
 
 
@@ -564,7 +608,7 @@ def dump_yaml(
     """
     from .atomic_io import write_text_lf
 
-    text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+    text = yaml_to_str(data, sort_keys=sort_keys)
     write_text_lf(Path(path), text)
 
 
@@ -574,7 +618,7 @@ def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
     Use instead of bare ``yaml.dump()`` when building YAML content
     for later file writes or string returns.
     """
-    return yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+    return yaml.dump(data, Dumper=_NoAliasSafeDumper, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
 
 
 def write_yaml_text_atomic(

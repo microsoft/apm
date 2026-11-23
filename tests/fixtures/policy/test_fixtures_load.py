@@ -252,8 +252,8 @@ class TestTargetAllowPolicy(unittest.TestCase):
     def test_target_allow_vscode_only(self):
         policy, _ = load_policy(FIXTURES_DIR / "apm-policy-target-allow.yml")
         self.assertEqual(policy.enforcement, "block")
-        self.assertIsNotNone(policy.compilation.target.allow)
-        self.assertEqual(policy.compilation.target.allow, ("vscode",))
+        # The deprecated vscode alias is canonicalized to copilot on parse.
+        self.assertEqual(policy.compilation.target.allow, ("copilot",))
 
 
 class TestProjectFixturesExist(unittest.TestCase):

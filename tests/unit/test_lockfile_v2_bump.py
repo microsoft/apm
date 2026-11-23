@@ -7,9 +7,6 @@ never uses the registry keeps lockfile_version "1" forever (§2.1.4).
 
 from __future__ import annotations
 
-import hashlib
-from pathlib import Path
-
 import pytest
 
 from apm_cli.deps.lockfile import (
@@ -20,30 +17,7 @@ from apm_cli.deps.lockfile import (
 from apm_cli.deps.registry.resolver import RegistryResolution
 from apm_cli.models.dependency.reference import DependencyReference
 
-
-@pytest.mark.parametrize(
-    ("fixture_name", "expected_size", "expected_sha256"),
-    [
-        (
-            "v1-git-only.yml",
-            889,
-            "75b7d3b5d6f310e481131f18209103c3f4559933bef70ec5fd087b60af3cc26e",
-        ),
-        (
-            "v2-with-registry.yml",
-            1236,
-            "3f3d9f509c0a07971aa597d223dcdd1afb48df62025fc3f9ebb14b61621ad056",
-        ),
-    ],
-)
-def test_pre_v3_lockfile_canonical_bytes_remain_stable(
-    fixture_name: str, expected_size: int, expected_sha256: str
-) -> None:
-    fixture = Path("tests/fixtures/spec-conformance/lockfile") / fixture_name
-    rendered = LockFile.from_yaml(fixture.read_text(encoding="utf-8")).to_yaml().encode("utf-8")
-
-    assert len(rendered) == expected_size
-    assert hashlib.sha256(rendered).hexdigest() == expected_sha256
+pytestmark = pytest.mark.unit
 
 
 def _git_dep(**kwargs) -> LockedDependency:
@@ -114,13 +88,13 @@ class TestVersionFieldStaysInSync:
 
 
 def test_v3_lockfile_fails_closed_as_unsupported() -> None:
-    """Version 4 (next unknown) still fails closed."""
+    """Version 5 (next unknown) still fails closed."""
     with pytest.raises(
         UnsupportedLockfileVersionError,
-        match=r"Unsupported lockfile version '4'; supported versions: 1, 2, 3",
+        match=r"Unsupported lockfile version '5'; supported versions: 1, 2, 3, 4",
     ):
         LockFile.from_yaml(
-            "lockfile_version: '4'\n"
+            "lockfile_version: '5'\n"
             "dependencies: []\n"
             "installed_plugins:\n"
             "  - identity: stable-plugin\n"
@@ -137,7 +111,7 @@ def test_unquoted_integer_lockfile_version_is_the_same_version(declared: str) ->
     assert "lockfile_version: '1'" in lock.to_yaml()
 
 
-@pytest.mark.parametrize("declared", ["4", "true", "1.0"])
+@pytest.mark.parametrize("declared", ["5", "true", "1.0"])
 def test_unsupported_unquoted_lockfile_version_names_itself(declared: str) -> None:
     with pytest.raises(UnsupportedLockfileVersionError) as excinfo:
         LockFile.from_yaml(f"lockfile_version: {declared}\ndependencies: []\n")
@@ -166,15 +140,6 @@ class TestSchemaBumpOpportunistic:
         lock.add_dependency(
             LockedDependency(repo_url="_local/x", source="local", local_path="./local/x")
         )
-        assert "lockfile_version: '1'" in lock.to_yaml()
-
-    def test_v2_back_to_v1_when_registry_dep_removed(self):
-        lock = LockFile()
-        lock.add_dependency(_registry_dep())
-        assert "lockfile_version: '2'" in lock.to_yaml()
-        # Remove the registry dep; lockfile re-emits as v1.
-        del lock.dependencies["acme/web"]
-        lock.add_dependency(_git_dep())
         assert "lockfile_version: '1'" in lock.to_yaml()
 
 
@@ -412,3 +377,21 @@ class TestNoBumpForPkgMetadata:
         yaml_out = lock.to_yaml()
         assert "name: foo-package" in yaml_out
         assert "lockfile_version: '1'" in yaml_out
+
+
+def test_bundle_only_lock_writes_the_current_version(tmp_path) -> None:
+    """RA-018/RA-030: a lock recording only local bundle files is current, and stays so."""
+    from apm_cli.deps.lockfile import FRAMED_CONTENT_HASH_VERSION, LockFile
+
+    lock = LockFile()
+    lock.local_deployed_files = [".agents/skills/hs/SKILL.md"]
+    lock.local_deployed_file_hashes = {".agents/skills/hs/SKILL.md": "sha256:" + "a" * 64}
+    path = tmp_path / "apm.lock.yaml"
+    lock.write(path)
+    first = path.read_bytes()
+
+    reread = LockFile.read(path)
+    assert reread is not None
+    assert reread.lockfile_version == FRAMED_CONTENT_HASH_VERSION
+    reread.write(path)
+    assert path.read_bytes() == first

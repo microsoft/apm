@@ -20,6 +20,9 @@ from apm_cli.install.manifest_reconcile import (
 from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.diagnostics import DiagnosticCollector
+from tests.utils.deployment_evidence import receipted_evidence
+
+pytestmark = pytest.mark.component
 
 
 class _RecordingLogger:
@@ -29,8 +32,8 @@ class _RecordingLogger:
         self.stale_cleanup_calls: list[tuple[str, int]] = []
         self.user_edit_calls: list[tuple[str, str]] = []
 
-    def stale_cleanup(self, dep_key: str, count: int) -> None:
-        self.stale_cleanup_calls.append((dep_key, count))
+    def stale_cleanup(self, dep_key: str, cleanup) -> None:
+        self.stale_cleanup_calls.append((dep_key, len(cleanup.announced_paths)))
 
     def cleanup_skipped_user_edit(self, rel_path: str, dep_key: str) -> None:
         self.user_edit_calls.append((rel_path, dep_key))
@@ -73,6 +76,7 @@ def test_contraction_deletion_is_surfaced_at_default_verbosity(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         logger=logger,
     )
 
@@ -88,6 +92,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
     """A user-edited dropped-target file MUST be kept AND reported via
     ``logger.cleanup_skipped_user_edit`` so the user learns APM preserved it."""
     lockfile, _claude_rel, cursor_rel, _claude_abs, cursor_abs = _seed_lockfile(tmp_path)
+    evidence = receipted_evidence(tmp_path)
     cursor_abs.write_text("# cursor rule\nUSER EDIT\n", encoding="utf-8")
     logger = _RecordingLogger()
 
@@ -97,6 +102,7 @@ def test_contraction_user_edit_skip_is_surfaced(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         logger=logger,
     )
 
@@ -120,6 +126,7 @@ def test_contraction_without_logger_still_deletes(tmp_path):
         active_targets=[KNOWN_TARGETS["claude"]],
         declared_targets=[KNOWN_TARGETS["claude"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
     )
 
     assert changed is True
@@ -157,6 +164,7 @@ def test_contraction_removes_only_selected_removed_target_ownership(tmp_path):
         active_targets=[KNOWN_TARGETS["agent-skills"]],
         declared_targets=[KNOWN_TARGETS["agent-skills"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -196,6 +204,7 @@ def test_selected_ownership_cleanup_removes_unique_active_target_file(tmp_path):
         active_targets=[KNOWN_TARGETS["opencode"]],
         declared_targets=[KNOWN_TARGETS["opencode"]],
         diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
         dependency_keys={removed.get_unique_key()},
         remove_selected_ownership=True,
         user_scope=True,
@@ -225,6 +234,7 @@ def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_
     )
     lockfile = LockFile()
     lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
     kept_abs.write_text("# edited\n", encoding="utf-8")
     key = removed.get_unique_key()
     outcome = SelectedCleanupOutcome()
@@ -235,6 +245,7 @@ def test_selected_cleanup_outcome_keeps_lock_truthful_after_partial_removal(tmp_
         active_targets=[target],
         declared_targets=[target],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         dependency_keys={key},
         remove_selected_ownership=True,
         selected_outcome=outcome,
@@ -267,6 +278,7 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
     )
     lockfile = LockFile()
     lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
     (tmp_path / kept_rel).write_text("# edited\n", encoding="utf-8")
     key = removed.get_unique_key()
     outcome = SelectedCleanupOutcome()
@@ -277,6 +289,7 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
         active_targets=[target],
         declared_targets=[target],
         diagnostics=DiagnosticCollector(),
+        evidence=evidence,
         dependency_keys={key},
         remove_selected_ownership=True,
         selected_outcome=outcome,
@@ -294,3 +307,182 @@ def test_selected_cleanup_outcome_keeps_preserved_profile_rows(tmp_path):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_selected_removal_keeps_a_skill_member_a_surviving_dependency_deploys(tmp_path):
+    """#4750: the departing owner's skill directory holds a survivor's member; it stays."""
+    skill = ".agents/skills/alpha"
+    own_rel, shared_rel = f"{skill}/SKILL.md", f"{skill}/shared.md"
+    own_abs, shared_abs = tmp_path / own_rel, tmp_path / shared_rel
+    own_abs.parent.mkdir(parents=True)
+    own_abs.write_text("# alpha\n", encoding="utf-8")
+    shared_abs.write_bytes(b"# shared by the survivor\n")
+    hashes = {own_rel: compute_file_hash(own_abs), shared_rel: compute_file_hash(shared_abs)}
+
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[shared_rel],
+        deployed_file_hashes={shared_rel: hashes[shared_rel]},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[skill],
+        deployed_file_hashes=hashes,
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=receipted_evidence(tmp_path),
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+    )
+
+    assert shared_abs.read_bytes() == b"# shared by the survivor\n"
+    assert not own_abs.exists()
+    assert lockfile.dependencies[survivor.get_unique_key()].deployed_files == [shared_rel]
+
+
+def test_selected_removal_keeps_a_member_edited_between_check_and_unlink(tmp_path):
+    """#4750: each member is rechecked immediately before its unlink; a late edit stays."""
+    skill = ".agents/skills/alpha"
+    own_rel, late_rel, shared_rel = (f"{skill}/{name}" for name in ("SKILL.md", "notes.md", "s.md"))
+    for rel, body in ((own_rel, "# alpha\n"), (late_rel, "notes\n"), (shared_rel, "shared\n")):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(body, encoding="utf-8")
+    hashes = {rel: compute_file_hash(tmp_path / rel) for rel in (own_rel, late_rel, shared_rel)}
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[shared_rel],
+        deployed_file_hashes={shared_rel: hashes[shared_rel]},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[skill],
+        deployed_file_hashes=hashes,
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+    evidence = receipted_evidence(tmp_path)
+    checked = evidence.verdict
+
+    def scan_then_user_edits(claim, physical, **kwargs):
+        verdict = checked(claim, physical, **kwargs)
+        if claim == late_rel and physical.read_text(encoding="utf-8") == "notes\n":
+            physical.write_text("edited after the check\n", encoding="utf-8")
+        return verdict
+
+    evidence.verdict = scan_then_user_edits  # the user's edit lands right after the check
+
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+    )
+
+    assert (tmp_path / late_rel).read_text(encoding="utf-8") == "edited after the check\n"
+    assert (tmp_path / shared_rel).read_text(encoding="utf-8") == "shared\n"
+    assert not (tmp_path / own_rel).exists()
+
+
+def _shared_skill_lock(tmp_path, own_files, survivor_claim):
+    """A departing owner claims the skill directory; a survivor claims one member."""
+    skill = ".agents/skills/alpha"
+    hashes = {rel: compute_file_hash(tmp_path / rel) for rel in own_files}
+    lockfile = LockFile()
+    survivor = LockedDependency(
+        repo_url="https://github.com/acme/survivor",
+        deployed_files=[survivor_claim],
+        deployed_file_hashes={},
+    )
+    removed = LockedDependency(
+        repo_url="https://github.com/acme/removed",
+        deployed_files=[skill],
+        deployed_file_hashes=hashes,
+    )
+    lockfile.add_dependency(survivor)
+    lockfile.add_dependency(removed)
+    return lockfile, removed
+
+
+def _remove_selected(tmp_path, lockfile, removed, evidence):
+    reconcile_target_deployed_files(
+        project_root=tmp_path,
+        lockfile=lockfile,
+        active_targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"]],
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        dependency_keys={removed.get_unique_key()},
+        remove_selected_ownership=True,
+    )
+
+
+def test_selected_removal_keeps_a_survivor_member_claimed_in_another_spelling(tmp_path):
+    """#4750: Shared.md and shared.md are one file on a case-insensitive filesystem."""
+    skill = tmp_path / ".agents/skills/alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
+    (skill / "shared.md").write_text("shared\n", encoding="utf-8")
+    one_file = (skill / "SHARED.md").exists()
+    if not one_file:
+        (skill / "Shared.md").write_text("survivor\n", encoding="utf-8")
+    own = [".agents/skills/alpha/SKILL.md", ".agents/skills/alpha/shared.md"]
+    lockfile, removed = _shared_skill_lock(tmp_path, own, ".agents/skills/alpha/Shared.md")
+
+    _remove_selected(tmp_path, lockfile, removed, receipted_evidence(tmp_path))
+
+    assert not (skill / "SKILL.md").exists()
+    if one_file:
+        # The survivor's claim names this very file: it stays byte-identical.
+        assert (skill / "shared.md").read_text(encoding="utf-8") == "shared\n"
+    else:
+        # Distinct files: the departing owner's goes, the survivor's stays.
+        assert not (skill / "shared.md").exists()
+        assert (skill / "Shared.md").read_text(encoding="utf-8") == "survivor\n"
+
+
+def test_selected_removal_keeps_a_member_whose_parent_became_a_link(tmp_path):
+    """#4750: a parent swapped for a link after the check never routes the unlink outside."""
+    skill = tmp_path / ".agents/skills/alpha"
+    (skill / "refs").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
+    (skill / "refs" / "x.md").write_text("ref\n", encoding="utf-8")
+    (skill / "s.md").write_text("shared\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("ref\n", encoding="utf-8")
+    own = [".agents/skills/alpha/SKILL.md", ".agents/skills/alpha/refs/x.md"]
+    lockfile, removed = _shared_skill_lock(tmp_path, own, ".agents/skills/alpha/s.md")
+    evidence = receipted_evidence(tmp_path)
+    checked = evidence.verdict
+
+    def check_then_swap(claim, physical, **kwargs):
+        verdict = checked(claim, physical, **kwargs)
+        refs = skill / "refs"
+        if claim.endswith("refs/x.md") and not refs.is_symlink():
+            refs.rename(tmp_path / "moved-refs")
+            try:
+                refs.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        return verdict
+
+    evidence.verdict = check_then_swap
+
+    _remove_selected(tmp_path, lockfile, removed, evidence)
+
+    assert (outside / "x.md").read_text(encoding="utf-8") == "ref\n"
+    assert (skill / "s.md").read_text(encoding="utf-8") == "shared\n"

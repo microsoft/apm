@@ -1,0 +1,7 @@
+---
+paths:
+  - "**"
+---
+
+# Everywhere
+Be kind.

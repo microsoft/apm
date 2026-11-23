@@ -14,7 +14,7 @@ from apm_cli.utils import file_ops
 from apm_cli.utils.file_ops import describe_path_obstruction
 from apm_cli.utils.path_security import PathTraversalError
 
-pytestmark = pytest.mark.windows_compat
+pytestmark = [pytest.mark.component, pytest.mark.windows_compat]
 
 _REMEDY = "Move it aside, then run the command again."
 

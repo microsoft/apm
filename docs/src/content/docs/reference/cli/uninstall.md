@@ -15,17 +15,15 @@ apm uninstall [OPTIONS] PACKAGES...
 
 ## Description
 
-`apm uninstall` is the inverse of `apm install <package>`. It removes selected
-packages and unused transitive dependencies from APM-managed state,
-including `apm_modules/`, configured targets, the manifest, and the lockfile.
-
-The command only deletes files tracked in the lockfile's `deployed_files` manifest, so hand-authored content in the same harness folders is left alone.
+`apm uninstall` removes selected packages and unused transitive dependencies.
+File cleanup uses the lockfile's `deployed_files` list, preserving hand-authored
+content. Global uninstalls also remove the Claude plugin declarations APM made.
 
 ## Arguments
 
 | Argument | Description |
 |---|---|
-| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. |
+| `PACKAGES...` | One or more packages to remove. Accepts shorthand (`owner/repo`), HTTPS URL, SSH URL, FQDN, marketplace notation (`name@marketplace`), an exact declared local path, or the portable `_local/<name>` identifier printed for a direct local dependency with matching lock metadata. Required. A local bundle installed with `apm install <bundle>` is not in `apm.yml`; uninstall refuses it and says so. An MCP server name is refused with the route that removes it: delete it under `dependencies.mcp` and run `apm install`, or uninstall the package that brings it in; a server from a local bundle cannot be uninstalled yet ([#3887](https://github.com/microsoft/apm/issues/3887)). |
 
 ## Options
 
@@ -98,6 +96,12 @@ What gets removed, in order:
    shared diamond dependencies. If a surviving package's manifest cannot be
    read, APM keeps every remaining candidate rather than guessing. Run again
    with `--verbose`, fix or restore the reported manifest, then retry.
+   A requested direct dependency that another installed package still
+   needs is removed from `apm.yml` only: it stays installed, its lockfile
+   entry now names that package as its parent, and `apm install --frozen`
+   keeps passing. The output says which package still needs it. For a
+   local (path) dependency, uninstall instead refuses before any change and
+   names the package that still needs it; uninstall that package first.
    Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.
@@ -109,17 +113,27 @@ What gets removed, in order:
    `.gemini/settings.json`, and `.kiro/hooks/` that the removed packages
    contributed. Remaining packages -- including transitive dependencies still
    required by another package -- have their hook entries rebuilt from the
-   post-removal lockfile.
+   post-removal lockfile. Remaining packages are rebuilt only into targets
+   `apm.lock.yaml` records: when `apm.yml` now declares a target the project
+   was not installed for, uninstall leaves it alone and says once to run
+   `apm install`, which deploys and records it.
 6. MCP and LSP servers contributed only by the removed packages. For current
    lockfiles, MCP cleanup touches only the runtimes recorded as owners in
    `mcp_target_servers`. An explicitly empty ownership map is a no-op. Older
    lockfiles adopt only self-defined entries that exactly match their stored
-   configuration baseline. When another surviving package declares the same LSP
+   configuration baseline. LSP cleanup works within the targets
+   `lsp_target_servers` records, or the `targets:` in `apm.yml` when declared;
+   a target saved with `apm config set target` or harness detection applies only when the
+   lockfile records none. When another surviving package declares the same LSP
    server name, ownership transfers to that package instead of deleting the
    shared entry. Cleanup attempts every owning runtime before exiting nonzero on
    failure. Fix the reported configs, then run `apm install` to reconcile stale
    entries.
 7. Lockfile entries. If no dependencies remain, `apm.lock.yaml` is deleted.
+8. After lockfile processing, remove the removed packages' native plugin roots
+   (`.agents/plugins/<plugin>/`, or `~/.agents/plugins/<plugin>/` with
+   `--global`) and the settings entries APM declared for them. A key you set to
+   `false`, your own entries and a root you edited are kept.
 
 When uninstall rebuilds a surviving package's loose skills, it deploys only the
 skills that package selects with `skills:`, as `apm install` does. APM records
@@ -143,9 +157,11 @@ Codex homes selected by `CODEX_HOME` (or `~/.codex`) follow the same rule for
 Codex agents and hooks, and Copilot CLI homes selected by `COPILOT_HOME` (or
 `~/.copilot`) for Copilot instructions, agents and hooks.
 
-`Cleaned N stale deployed files for DEPENDENCY` identifies the affected
-dependency, not the deletion location. An absolute local path in that message
-names the source package; cleanup removes its deployed files, not source files.
+`Cleaned N stale deployed files for DEPENDENCY:` identifies the affected
+dependency, not the deletion location, and lists each removed path below it (a
+removed skill directory is listed once, with a trailing `/`). An absolute local
+path in the header names the source package; cleanup removes its deployed
+files, not source files.
 
 Selection is atomic. If any requested identifier does not match a declaration,
 the command exits nonzero before lifecycle scripts or filesystem writes run. No
@@ -166,12 +182,31 @@ and lockfile ownership. Resolve the filesystem problem and retry the same
 command; `--verbose` includes the underlying error. Earlier deletions in a
 multi-package request are not rolled back.
 
-If a target-scoped file owned only by a removed package was edited or cannot be
-deleted, uninstall lists the retained paths and exits before changing `apm.yml`.
-Files it already removed are dropped from `apm.lock.yaml`, so the lockfile
-claims only what is still on disk. Direct and orphan directories run first and
-may already be gone; declarations remain. Resolve the listed files and retry the
-same uninstall command.
+Uninstall deletes a removed package's files only with evidence that APM wrote
+their current bytes: a local deployment receipt, or byte equality with what the
+locked version renders. It renders before removing the package from
+`apm_modules/`, fetching the locked commit when the checkout is gone; a lockfile
+hash alone is never evidence. The same check covers files a surviving shared
+package stops deploying because the removed package was the only one selecting
+them (for example a skill only it chose from a shared bundle). If a file it
+would delete was edited or has no evidence, uninstall exits 1 before changing
+anything: `apm.yml`,
+`apm.lock.yaml`, `apm_modules/` and every file stay as they were. It names each
+file and why, then offers two remedies:
+
+- Move aside any listed file that holds your edits, then run `apm install` to
+  re-establish deployment evidence (once, with access to the package source),
+  then rerun `apm uninstall`. Install rewrites a file it cannot prove it wrote.
+- If the source is unreachable, move each listed file aside or delete it, then
+  run `apm uninstall` to finish the uninstall.
+
+After upgrading, uninstall needs this evidence. If the source is unreachable,
+use the second remedy. If a target-scoped file cannot be deleted, uninstall
+lists the retained paths and exits before changing `apm.yml`. Files it already
+removed are dropped from `apm.lock.yaml`, so the lockfile claims only what is
+still on disk. Direct and orphan directories run first and may already be gone;
+declarations remain. Resolve the listed files and retry the same uninstall
+command.
 
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the
@@ -182,6 +217,13 @@ If safe LSP cleanup fails after package removal, uninstall exits nonzero,
 preserves the conflicting configuration, and tells you to repair the path or
 ownership conflict. Run `apm install` to reconcile project state, or
 `apm install --global` after a global uninstall.
+
+If updating native plugin settings fails, uninstall exits nonzero; package and
+manifest removals may already have happened. APM restores the previous
+`apm.lock.yaml`, so it still records the plugins to remove. Repair the reported
+issue, then run `apm install` (`apm install --global` for user scope) with the
+original `--target` selection to finish. Do not re-add removed package arguments. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 A package declared more than once -- in both `dependencies` and
 `devDependencies`, or under two spellings such as `owner/repo` and its HTTPS
@@ -200,6 +242,8 @@ it during cleanup.
 If more than one declaration would remain in that slot, uninstall fails without
 APM writes. Pass enough exact paths in one command that at most one declaration
 remains.
+
+When `apm.yml` declares the package in object form (`{name: my-plugin, marketplace: official}`), `apm uninstall my-plugin@official` selects that declaration directly. The marketplace name matches case-insensitively, and the lock row, `apm_modules/` checkout and deployed files are found through the lockfile. Neither the marketplace nor its catalog is contacted, with or without `--dry-run`.
 
 If a marketplace ref cannot be resolved (neither the lockfile nor the registry has a matching entry), APM logs an error and aborts without changes. Use `owner/repo` notation to uninstall directly, or run `apm deps list` to find the canonical name.
 

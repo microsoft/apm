@@ -113,6 +113,7 @@ def test_placement_cache_is_scoped_to_one_compile_invocation(tmp_path: Path) -> 
             assert result.success
 
     assert optimize_calls == 2
+    assert not list(tmp_path.glob("*.md"))
 
 
 def test_shared_placement_preserves_each_target_report(tmp_path: Path) -> None:
@@ -144,6 +145,7 @@ def test_shared_placement_preserves_each_target_report(tmp_path: Path) -> None:
     assert second_report is not None
     assert second_report.project_analysis == first_report.project_analysis
     assert second_report.project_analysis.directories_scanned > 0
+    assert not list(tmp_path.glob("*.md"))
 
 
 def test_reused_distributed_compiler_reports_latest_placement(tmp_path: Path) -> None:
@@ -160,3 +162,4 @@ def test_reused_distributed_compiler_reports_latest_placement(tmp_path: Path) ->
     report = compiler.get_compilation_results_for_display(is_dry_run=True)
     assert report is not None
     assert [summary.path for summary in report.placement_summaries] == [second_path]
+    assert not list(tmp_path.glob("*.md"))

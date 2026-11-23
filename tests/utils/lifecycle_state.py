@@ -10,7 +10,7 @@ import json
 import os
 import stat
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal, TypeAlias
 
@@ -28,6 +28,7 @@ from apm_cli.utils.path_security import (
 )
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.yaml_io import load_yaml_str
+from tests.lifecycle.snapshot import LifecycleSurfaceRoots, capture_surfaces
 
 LifecycleFileKind: TypeAlias = Literal["missing", "file", "directory", "symlink"]
 LifecycleFileRole: TypeAlias = Literal[
@@ -84,6 +85,11 @@ class LifecycleStateSnapshot:
     lsp_state_bytes: bytes
     files: tuple[LifecycleFileState, ...]
     semantic_bytes: bytes
+    # Gate surfaces, captured only when ``surfaces`` roots are supplied.
+    approval_stores: tuple[tuple[str, bytes], ...] = ()
+    policy_cache: tuple[tuple[str, str], ...] = ()
+    native_registries: tuple[tuple[str, bytes | None], ...] = ()
+    mcp_config_files: tuple[tuple[str, bytes | None], ...] = ()
 
     @classmethod
     def capture(
@@ -93,8 +99,28 @@ class LifecycleStateSnapshot:
         targets: Sequence[str] = (),
         config_paths: Sequence[PurePosixPath] = (),
         external_roots: Sequence[LifecycleStateRoot] = (),
+        surfaces: LifecycleSurfaceRoots | None = None,
     ) -> LifecycleStateSnapshot:
         """Capture deterministic durable state from explicit non-overlapping roots."""
+        snapshot = cls._capture_workspace(
+            workspace_root,
+            targets=targets,
+            config_paths=config_paths,
+            external_roots=external_roots,
+        )
+        if surfaces is None:
+            return snapshot
+        return replace(snapshot, **capture_surfaces(workspace_root.absolute(), surfaces))
+
+    @classmethod
+    def _capture_workspace(
+        cls,
+        workspace_root: Path,
+        *,
+        targets: Sequence[str],
+        config_paths: Sequence[PurePosixPath],
+        external_roots: Sequence[LifecycleStateRoot],
+    ) -> LifecycleStateSnapshot:
         root = workspace_root.absolute()
         if root.is_symlink():
             raise ValueError(f"Lifecycle workspace root must not be a symlink: {root}")

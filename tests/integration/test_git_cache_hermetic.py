@@ -24,6 +24,23 @@ from apm_cli.cache.git_cache import (
 )
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
+from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+
+_REAL_RUN = subprocess.run
+
+
+@pytest.fixture(autouse=True)
+def _isolated_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every git child, setup included, under a bounded environment.
+
+    The runner's GIT_DIR, global config (signing, transport policy) and
+    credential state never reach the fixtures, probes or cache calls.
+    """
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in isolated.process_environment.items():
+        monkeypatch.setenv(name, value)
 
 
 def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -38,7 +55,7 @@ def _proc(*, returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMo
 def cache(tmp_path: Path) -> GitCache:
     with (
         patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-        patch("apm_cli.cache.git_cache.os.chmod"),
+        patch("os.chmod"),
     ):
         return GitCache(tmp_path)
 
@@ -47,7 +64,7 @@ class TestGitCacheInit:
     def test_init_creates_directories_and_calls_cleanup(self, tmp_path: Path) -> None:
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete") as mock_cleanup,
-            patch("apm_cli.cache.git_cache.os.chmod") as mock_chmod,
+            patch("os.chmod") as mock_chmod,
         ):
             cache = GitCache(tmp_path)
 
@@ -70,7 +87,7 @@ class TestGitCacheInit:
 
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             cache = GitCache(tmp_path)
 
@@ -129,7 +146,7 @@ class TestGetCheckout:
     def test_refresh_ignores_existing_checkout(self, tmp_path: Path) -> None:
         with (
             patch("apm_cli.cache.git_cache.cleanup_incomplete"),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             cache = GitCache(tmp_path, refresh=True)
         url = "https://github.com/owner/repo.git"
@@ -195,177 +212,196 @@ class TestResolveSha:
         mock_resolve.assert_called_once_with("https://example.com/repo.git", "main", env={"K": "V"})
 
 
+class _Remote:
+    """A real local repository served to the cache over ``file://``.
+
+    ``main`` and ``v1.0.0`` point at the first commit; ``feature/topic`` holds a
+    second commit no ``main`` or tag ref names.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.work = root / "work"
+        self.work.mkdir()
+        self._git("init", "-q", "-b", "main")
+        (self.work / "README.md").write_text("first\n", encoding="utf-8")
+        self._git("add", "README.md")
+        self._git("commit", "-qm", "first")
+        self._git("tag", "v1.0.0")
+        self.main = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-qb", "feature/topic")
+        (self.work / "README.md").write_text("second\n", encoding="utf-8")
+        self._git("commit", "-qam", "second")
+        self.topic = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "main")
+        self.path = root / "remote.git"
+        _REAL_RUN(["git", "clone", "-q", "--bare", str(self.work), str(self.path)], check=True)
+        self.url = self.path.as_uri()
+
+    def _git(self, *args: str) -> str:
+        result = _REAL_RUN(
+            ["git", "-c", "user.name=APM Test", "-c", "user.email=apm@example.com", *args],
+            cwd=self.work,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+
+def _shard_dirs(root: Path) -> list[str]:
+    """Directories under a cache root: landed shards and any staged ``.inc.`` leftovers."""
+    return sorted(entry.name for entry in root.iterdir() if entry.is_dir())
+
+
+def _git_dir_has(bare_dir: Path, sha: str) -> bool:
+    probe = ["git", "--git-dir", str(bare_dir), "cat-file", "-e", f"{sha}^{{commit}}"]
+    return _REAL_RUN(probe, capture_output=True).returncode == 0
+
+
+@pytest.fixture()
+def remote(tmp_path: Path) -> _Remote:
+    return _Remote(tmp_path)
+
+
+class _GitChild:
+    """Stand-in for git child processes at ``subprocess.run``.
+
+    Records every child's argv and env. Each scripted reply is a
+    ``CompletedProcess`` or an exception; ``None`` runs the real git.
+    """
+
+    def __init__(self, *replies: object) -> None:
+        self._replies = list(replies)
+        self.calls: list[tuple[list[str], dict[str, str]]] = []
+
+    def __call__(self, args, **kwargs):
+        self.calls.append((list(args), dict(kwargs.get("env") or {})))
+        reply = self._replies.pop(0) if self._replies else None
+        if reply is None:
+            return _REAL_RUN(args, **kwargs)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    def subcommands(self) -> list[str]:
+        verbs = {"ls-remote", "clone", "fetch", "cat-file"}
+        return [next(arg for arg in argv if arg in verbs) for argv, _env in self.calls]
+
+
+def _done(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(["git"], returncode, stdout, stderr)
+
+
 class TestLsRemoteResolve:
-    @pytest.fixture(autouse=True)
-    def _validated_rewrites(self):
-        """Keep subprocess mocks focused on ls-remote after policy validation."""
-        with patch(
-            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
-            return_value=(None, _GitConfigSnapshot((), (), ())),
-        ):
-            yield
+    """``_ls_remote_resolve`` against a real remote; parser edge cases via the child."""
 
-    def test_returns_head_sha_when_ref_is_none(self, cache: GitCache) -> None:
-        sha = "1" * 40
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=f"{sha}\tHEAD\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={"DEFAULT": "1"}),
-        ):
-            result = cache._ls_remote_resolve("https://example.com/repo.git", None)
+    def test_returns_head_sha_when_ref_is_none(self, cache: GitCache, remote: _Remote) -> None:
+        assert cache._ls_remote_resolve(remote.url, None) == remote.main
 
-        assert result == sha
+    def test_matches_refs_heads_prefix(self, cache: GitCache, remote: _Remote) -> None:
+        assert cache._ls_remote_resolve(remote.url, "feature/topic") == remote.topic
 
-    def test_uses_explicit_env_when_provided(self, cache: GitCache) -> None:
+    def test_matches_refs_tags_prefix(self, cache: GitCache, remote: _Remote) -> None:
+        assert cache._ls_remote_resolve(remote.url, "v1.0.0") == remote.main
+
+    def test_falls_back_to_first_sha_when_no_exact_match(
+        self, cache: GitCache, remote: _Remote
+    ) -> None:
+        # ``topic`` matches refs/heads/feature/topic by tail only, never exactly.
+        assert cache._ls_remote_resolve(remote.url, "topic") == remote.topic
+
+    def test_unknown_ref_raises_runtime_error(self, cache: GitCache, remote: _Remote) -> None:
+        with pytest.raises(RuntimeError, match="Could not resolve ref 'missing'"):
+            cache._ls_remote_resolve(remote.url, "missing")
+
+    def test_non_zero_exit_raises_runtime_error(self, cache: GitCache, tmp_path: Path) -> None:
+        gone = (tmp_path / "gone.git").as_uri()
+        with pytest.raises(RuntimeError, match="git ls-remote failed"):
+            cache._ls_remote_resolve(gone, "main")
+
+    def test_appends_ref_to_ls_remote_command(
+        self, cache: GitCache, remote: _Remote, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        child = _GitChild(None)
+        monkeypatch.setattr("subprocess.run", child)
+
+        assert cache._ls_remote_resolve(remote.url, "main") == remote.main
+        (argv, _env), *_rest = child.calls
+        assert argv[1:] == [*_safe_git_args(), "ls-remote", remote.url, "main"]
+
+    def test_uses_explicit_env_when_provided(
+        self, cache: GitCache, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         sha = "2" * 40
-        explicit_env = {"TOKEN": "abc"}
-        with (
-            patch(
-                "subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/heads/main\n")
-            ) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch(
-                "apm_cli.utils.git_env.git_subprocess_env",
-                return_value={"DEFAULT": "1"},
-            ) as sanitize,
-        ):
-            result = cache._ls_remote_resolve(
-                "https://example.com/repo.git", "main", env=explicit_env
-            )
+        child = _GitChild(_done(stdout=f"{sha}\trefs/heads/main\n"))
+        monkeypatch.setattr("subprocess.run", child)
+        explicit_env = {**os.environ, "APM_MARKER": "explicit", "GIT_DIR": "/x"}
+
+        result = cache._ls_remote_resolve("https://example.com/repo.git", "main", env=explicit_env)
 
         assert result == sha
-        sanitize.assert_any_call(explicit_env)
-        assert mock_run.call_args.kwargs["env"]["DEFAULT"] == "1"
+        (_argv, env), *_rest = child.calls
+        assert env["APM_MARKER"] == "explicit"
+        assert "GIT_DIR" not in env, "the child env is sanitized, never passed raw"
 
-    def test_uses_default_git_env_when_env_not_provided(self, cache: GitCache) -> None:
+    def test_uses_default_git_env_when_env_not_provided(
+        self, cache: GitCache, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         sha = "3" * 40
-        default_env = {"DEFAULT": "1"}
-        with (
-            patch(
-                "subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/heads/main\n")
-            ) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value=default_env),
-        ):
-            result = cache._ls_remote_resolve("https://example.com/repo.git", "main")
+        child = _GitChild(_done(stdout=f"{sha}\trefs/heads/main\n"))
+        monkeypatch.setattr("subprocess.run", child)
+        monkeypatch.setenv("APM_MARKER", "ambient")
 
-        assert result == sha
-        assert mock_run.call_args.kwargs["env"] is default_env
+        assert cache._ls_remote_resolve("https://example.com/repo.git", "main") == sha
+        (_argv, env), *_rest = child.calls
+        assert env["APM_MARKER"] == "ambient"
 
-    def test_appends_ref_to_ls_remote_command(self, cache: GitCache) -> None:
-        sha = "4" * 40
-        with (
-            patch(
-                "subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/heads/main\n")
-            ) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            cache._ls_remote_resolve("https://example.com/repo.git", "main")
+    @pytest.mark.parametrize(
+        ("stdout", "ref", "expected"),
+        [
+            pytest.param(f"{'5' * 40}\tmain\n", "main", "5" * 40, id="exact-ref-name"),
+            pytest.param(
+                f"not-a-sha\trefs/heads/main\n{'a' * 40}\trefs/heads/other\n",
+                "missing",
+                "a" * 40,
+                id="skips-non-sha-lines",
+            ),
+        ],
+    )
+    def test_parses_child_output(
+        self,
+        cache: GitCache,
+        monkeypatch: pytest.MonkeyPatch,
+        stdout: str,
+        ref: str,
+        expected: str,
+    ) -> None:
+        monkeypatch.setattr("subprocess.run", _GitChild(_done(stdout=stdout)))
+        assert cache._ls_remote_resolve("https://example.com/repo.git", ref) == expected
 
-        assert mock_run.call_args.args[0] == [
-            "git",
-            *_safe_git_args(),
-            "ls-remote",
-            "https://example.com/repo.git",
-            "main",
-        ]
-
-    def test_matches_exact_remote_ref_name(self, cache: GitCache) -> None:
-        sha = "5" * 40
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=f"{sha}\tmain\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._ls_remote_resolve("https://example.com/repo.git", "main") == sha
-
-    def test_matches_refs_heads_prefix(self, cache: GitCache) -> None:
-        sha = "6" * 40
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/heads/main\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._ls_remote_resolve("https://example.com/repo.git", "main") == sha
-
-    def test_matches_refs_tags_prefix(self, cache: GitCache) -> None:
-        sha = "7" * 40
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=f"{sha}\trefs/tags/v1.0.0\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._ls_remote_resolve("https://example.com/repo.git", "v1.0.0") == sha
-
-    def test_falls_back_to_first_sha_when_no_exact_match(self, cache: GitCache) -> None:
-        first = "8" * 40
-        second = "9" * 40
-        stdout = f"{first}\trefs/heads/other\n{second}\trefs/tags/v1.0.0\n"
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=stdout)),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._ls_remote_resolve("https://example.com/repo.git", "missing") == first
-
-    def test_ignores_non_sha_lines_before_finding_valid_sha(self, cache: GitCache) -> None:
-        sha = "a" * 40
-        stdout = f"not-a-sha\trefs/heads/main\n{sha}\trefs/heads/other\n"
-        with (
-            patch("subprocess.run", return_value=_proc(stdout=stdout)),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._ls_remote_resolve("https://example.com/repo.git", "missing") == sha
-
-    def test_non_zero_exit_raises_runtime_error(self, cache: GitCache) -> None:
-        with (
-            patch("subprocess.run", return_value=_proc(returncode=128, stderr="fatal: denied")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            pytest.raises(RuntimeError, match="git ls-remote failed"),
-        ):
-            cache._ls_remote_resolve("https://example.com/repo.git", "main")
-
-    def test_timeout_raises_runtime_error(self, cache: GitCache) -> None:
-        with (
-            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 30)),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            pytest.raises(RuntimeError, match="Failed to resolve ref 'main'"),
-        ):
-            cache._ls_remote_resolve("https://example.com/repo.git", "main")
-
-    def test_oserror_raises_runtime_error(self, cache: GitCache) -> None:
-        with (
-            patch("subprocess.run", side_effect=OSError("git missing")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            pytest.raises(RuntimeError, match="Failed to resolve ref 'main'"),
-        ):
-            cache._ls_remote_resolve("https://example.com/repo.git", "main")
-
-    def test_no_sha_in_output_raises_runtime_error(self, cache: GitCache) -> None:
-        with (
-            patch("subprocess.run", return_value=_proc(stdout="nonsense\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            pytest.raises(RuntimeError, match="Could not resolve ref 'main'"),
-        ):
+    @pytest.mark.parametrize(
+        ("reply", "message"),
+        [
+            pytest.param(
+                subprocess.TimeoutExpired("git", 30), "Failed to resolve ref 'main'", id="timeout"
+            ),
+            pytest.param(OSError("git missing"), "Failed to resolve ref 'main'", id="oserror"),
+            pytest.param(_done(stdout="nonsense\n"), "Could not resolve ref 'main'", id="no-sha"),
+        ],
+    )
+    def test_child_failure_raises_runtime_error(
+        self,
+        cache: GitCache,
+        monkeypatch: pytest.MonkeyPatch,
+        reply: object,
+        message: str,
+    ) -> None:
+        monkeypatch.setattr("subprocess.run", _GitChild(reply))
+        with pytest.raises(RuntimeError, match=message):
             cache._ls_remote_resolve("https://example.com/repo.git", "main")
 
 
 class TestEnsureBareRepo:
-    @pytest.fixture(autouse=True)
-    def _validated_rewrites(self):
-        """Keep subprocess mocks focused on clone after policy validation."""
-        with patch(
-            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
-            return_value=(None, _GitConfigSnapshot((), (), ())),
-        ):
-            yield
-
     def test_existing_bare_repo_with_sha_is_reused(self, cache: GitCache) -> None:
         shard_key = cache_shard_key("https://example.com/repo.git")
         bare_dir = cache._db_root / shard_key
@@ -399,90 +435,64 @@ class TestEnsureBareRepo:
             bare_dir, "https://example.com/repo.git", "b" * 40, env=None
         )
 
-    def test_cold_miss_clones_and_lands_atomically(self, cache: GitCache) -> None:
-        shard_key = cache_shard_key("https://example.com/repo.git")
-        bare_dir = cache._db_root / shard_key
+    def test_cold_miss_clones_and_lands_atomically(self, cache: GitCache, remote: _Remote) -> None:
+        shard_key = cache_shard_key(remote.url)
 
-        def _land(staged: Path, final: Path, _lock: object) -> bool:
-            os.replace(staged, final)
-            return True
+        result = cache._ensure_bare_repo(remote.url, shard_key, remote.main)
 
-        with (
-            patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
-            patch("subprocess.run", return_value=_proc()) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.atomic_land", side_effect=_land) as mock_land,
-            patch("apm_cli.cache.git_cache.os.chmod"),
-        ):
-            result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "c" * 40)
+        assert result == cache._db_root / shard_key
+        assert _git_dir_has(result, remote.main)
+        # Only the landed shard remains: no staged sibling is left behind.
+        assert _shard_dirs(cache._db_root) == [shard_key]
 
-        assert result == bare_dir
-        assert bare_dir.is_dir()
-        mock_run.assert_called_once()
-        mock_land.assert_called_once()
+    def test_clone_failure_cleans_staged_directory(self, cache: GitCache, tmp_path: Path) -> None:
+        gone = (tmp_path / "gone.git").as_uri()
 
-    def test_clone_failure_cleans_staged_directory(self, cache: GitCache) -> None:
-        shard_key = cache_shard_key("https://example.com/repo.git")
+        with pytest.raises(RuntimeError, match="Failed to clone"):
+            cache._ensure_bare_repo(gone, cache_shard_key(gone), "d" * 40)
 
-        with (
-            patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
-            patch(
-                "subprocess.run",
-                side_effect=subprocess.CalledProcessError(1, "git", stderr="boom"),
-            ),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
-            patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
-            pytest.raises(RuntimeError, match="Failed to clone"),
-        ):
-            cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "d" * 40)
+        assert _shard_dirs(cache._db_root) == [], "the staged clone is removed"
 
-        mock_rmtree.assert_called_once()
+    @staticmethod
+    def _race(winner_argv: list[str]):
+        """Let a competing process land *winner_argv*'s repo first; the real land then loses."""
+        from apm_cli.cache.locking import atomic_land
 
-    def test_atomic_land_false_fetches_when_winner_lacks_sha(self, cache: GitCache) -> None:
-        shard_key = cache_shard_key("https://example.com/repo.git")
-        bare_dir = cache._db_root / shard_key
-        bare_dir.mkdir(parents=True)
+        def land(staged: Path, final: Path, lock: object) -> bool:
+            _REAL_RUN([*winner_argv, str(final)], check=True)
+            return atomic_land(staged, final, lock)
 
-        with (
-            patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
-            patch("subprocess.run", return_value=_proc()),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
-            patch.object(cache, "_bare_has_sha", return_value=False) as mock_has_sha,
-            patch.object(cache, "_fetch_into_bare_locked") as mock_fetch,
-            patch("apm_cli.cache.git_cache.os.chmod"),
-        ):
-            result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "e" * 40)
+        return patch("apm_cli.cache.git_cache.atomic_land", side_effect=land)
 
-        assert result == bare_dir
-        mock_has_sha.assert_called_once_with(bare_dir, "e" * 40, env=None)
-        mock_fetch.assert_called_once_with(
-            bare_dir, "https://example.com/repo.git", "e" * 40, env=None
+    def test_atomic_land_false_fetches_when_winner_lacks_sha(
+        self, cache: GitCache, remote: _Remote
+    ) -> None:
+        shard_key = cache_shard_key(remote.url)
+        winner = cache._db_root / shard_key
+
+        with self._race(["git", "init", "-q", "--bare"]):
+            result = cache._ensure_bare_repo(remote.url, shard_key, remote.main)
+
+        assert result == winner
+        assert _git_dir_has(winner, remote.main), "the empty winner must be fetched to the sha"
+        assert _shard_dirs(cache._db_root) == [shard_key]
+
+    def test_atomic_land_false_skips_fetch_when_winner_has_sha(
+        self, cache: GitCache, remote: _Remote, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        shard_key = cache_shard_key(remote.url)
+        winner = cache._db_root / shard_key
+        child = _GitChild()
+        monkeypatch.setattr("subprocess.run", child)
+
+        with self._race(["git", "clone", "-q", "--bare", str(remote.path)]):
+            result = cache._ensure_bare_repo(remote.url, shard_key, remote.main)
+
+        assert result == winner
+        assert _git_dir_has(winner, remote.main)
+        assert child.subcommands() == ["clone", "cat-file"], (
+            "a winner holding the sha is not fetched"
         )
-
-    def test_atomic_land_false_skips_fetch_when_winner_has_sha(self, cache: GitCache) -> None:
-        shard_key = cache_shard_key("https://example.com/repo.git")
-        bare_dir = cache._db_root / shard_key
-        bare_dir.mkdir(parents=True)
-
-        with (
-            patch("apm_cli.cache.git_cache.shard_lock", return_value=nullcontext()),
-            patch("subprocess.run", return_value=_proc()),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
-            patch.object(cache, "_bare_has_sha", return_value=True),
-            patch.object(cache, "_fetch_into_bare_locked") as mock_fetch,
-            patch("apm_cli.cache.git_cache.os.chmod"),
-        ):
-            result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "f" * 40)
-
-        assert result == bare_dir
-        mock_fetch.assert_not_called()
 
 
 class TestCreateCheckout:
@@ -547,7 +557,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", side_effect=_land),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._create_checkout(url, shard_key, "b" * 40)
 
@@ -568,7 +578,7 @@ class TestCreateCheckout:
             ),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
             pytest.raises(RuntimeError, match="Failed to create checkout"),
         ):
@@ -588,7 +598,7 @@ class TestCreateCheckout:
             patch("subprocess.run", side_effect=[clone_result, checkout_error]),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             patch("apm_cli.utils.file_ops.robust_rmtree") as mock_rmtree,
             pytest.raises(RuntimeError, match="Failed to create checkout"),
         ):
@@ -617,7 +627,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
         ):
             result = cache._create_checkout(url, shard_key, "e" * 40)
 
@@ -641,7 +651,7 @@ class TestCreateCheckout:
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
             patch("apm_cli.cache.git_cache.atomic_land", return_value=False),
             patch.object(cache, "_evict_checkout") as mock_evict,
-            patch("apm_cli.cache.git_cache.os.chmod"),
+            patch("os.chmod"),
             pytest.raises(RuntimeError, match="Race condition"),
         ):
             cache._create_checkout(url, shard_key, "f" * 40)
@@ -650,47 +660,37 @@ class TestCreateCheckout:
 
 
 class TestBareHasSha:
-    def test_returns_true_when_commit_exists(self, cache: GitCache, tmp_path: Path) -> None:
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        with (
-            patch("subprocess.run", return_value=_proc(stdout="commit\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._bare_has_sha(bare_dir, "a" * 40) is True
+    def test_returns_true_when_commit_exists(self, cache: GitCache, remote: _Remote) -> None:
+        assert cache._bare_has_sha(remote.path, remote.main) is True
 
-    def test_returns_false_when_git_reports_non_commit(
-        self, cache: GitCache, tmp_path: Path
+    def test_returns_false_when_object_is_not_a_commit(
+        self, cache: GitCache, remote: _Remote
     ) -> None:
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        with (
-            patch("subprocess.run", return_value=_proc(stdout="blob\n")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._bare_has_sha(bare_dir, "b" * 40) is False
+        tree = _REAL_RUN(
+            ["git", "--git-dir", str(remote.path), "rev-parse", f"{remote.main}^{{tree}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert cache._bare_has_sha(remote.path, tree) is False
 
-    def test_returns_false_on_timeout(self, cache: GitCache, tmp_path: Path) -> None:
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        with (
-            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 10)),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._bare_has_sha(bare_dir, "c" * 40) is False
+    def test_returns_false_when_commit_is_absent(self, cache: GitCache, remote: _Remote) -> None:
+        assert cache._bare_has_sha(remote.path, "c" * 40) is False
 
-    def test_returns_false_on_oserror(self, cache: GitCache, tmp_path: Path) -> None:
-        bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
-        with (
-            patch("subprocess.run", side_effect=OSError("boom")),
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            assert cache._bare_has_sha(bare_dir, "d" * 40) is False
+    @pytest.mark.parametrize(
+        "failure",
+        [subprocess.TimeoutExpired("git", 10), OSError("boom")],
+        ids=["timeout", "oserror"],
+    )
+    def test_returns_false_when_the_child_fails(
+        self,
+        cache: GitCache,
+        remote: _Remote,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: BaseException,
+    ) -> None:
+        monkeypatch.setattr("subprocess.run", _GitChild(failure))
+        assert cache._bare_has_sha(remote.path, remote.main) is False
 
 
 class TestFetchIntoBare:
@@ -726,62 +726,56 @@ class TestFetchIntoBare:
 
 
 class TestFetchIntoBareLocked:
-    @pytest.fixture(autouse=True)
-    def _validated_rewrites(self):
-        """Keep subprocess mocks focused on fetch after policy validation."""
-        with patch(
-            "apm_cli.utils.git_env._validated_git_url_rewrite_policy",
-            return_value=(None, _GitConfigSnapshot((), (), ())),
-        ):
-            yield
-
-    def test_fetches_specific_sha_successfully(self, cache: GitCache, tmp_path: Path) -> None:
+    def test_fetches_specific_sha_successfully(
+        self, cache: GitCache, remote: _Remote, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
+        _REAL_RUN(["git", "init", "-q", "--bare", str(bare_dir)], check=True)
+        child = _GitChild()
+        monkeypatch.setattr("subprocess.run", child)
 
-        with (
-            patch("subprocess.run", return_value=_proc()) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            cache._fetch_into_bare_locked(bare_dir, "https://example.com/repo.git", "a" * 40)
+        cache._fetch_into_bare_locked(bare_dir, remote.url, remote.topic)
 
-        assert mock_run.call_args_list[0].args[0] == [
-            "git",
+        assert _git_dir_has(bare_dir, remote.topic)
+        (argv, _env), *_rest = child.calls
+        assert argv[1:] == [
             *_safe_git_args(),
             "--git-dir",
             str(bare_dir),
             "fetch",
-            "https://example.com/repo.git",
-            "a" * 40,
+            remote.url,
+            remote.topic,
         ]
 
     def test_falls_back_to_explicit_remote_refs_when_fetch_by_sha_fails(
-        self, cache: GitCache, tmp_path: Path
+        self, cache: GitCache, remote: _Remote, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         bare_dir = tmp_path / "bare.git"
-        bare_dir.mkdir()
+        _REAL_RUN(["git", "init", "-q", "--bare", str(bare_dir)], check=True)
+        # The server refuses a fetch by sha; the ref fallback then runs for real.
+        child = _GitChild(subprocess.CalledProcessError(128, "git"), None)
+        monkeypatch.setattr("subprocess.run", child)
 
-        with (
-            patch(
-                "subprocess.run",
-                side_effect=[subprocess.CalledProcessError(1, "git"), _proc()],
-            ) as mock_run,
-            patch("apm_cli.utils.git_env.get_git_executable", return_value="git"),
-            patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}),
-        ):
-            cache._fetch_into_bare_locked(bare_dir, "https://example.com/repo.git", "b" * 40)
+        cache._fetch_into_bare_locked(bare_dir, remote.url, remote.topic)
 
-        assert mock_run.call_args_list[1].args[0] == [
-            "git",
+        assert _git_dir_has(bare_dir, remote.topic)
+        assert child.calls[1][0][1:] == [
             *_safe_git_args(),
             "--git-dir",
             str(bare_dir),
             "fetch",
-            "https://example.com/repo.git",
+            remote.url,
             "+refs/heads/*:refs/remotes/apm-fallback/*",
             "+refs/tags/*:refs/tags/*",
         ]
+        heads = _REAL_RUN(
+            ["git", "--git-dir", str(bare_dir), "for-each-ref", "--format=%(refname)"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        assert "refs/remotes/apm-fallback/feature/topic" in heads
+        assert "refs/tags/v1.0.0" in heads
 
 
 class TestEvictCheckout:

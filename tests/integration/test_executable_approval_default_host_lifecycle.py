@@ -26,6 +26,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 _REMOTE = "https://github.com/acme/hooky.git"
@@ -128,3 +129,46 @@ def test_approve_unlocks_default_host_dependency_hooks(
     rerun = apm("install", "--no-policy")
     assert "hooks skipped" not in rerun
     assert _claude_hook_commands(project) == [_HOOK_COMMAND]
+
+
+def test_pending_labels_an_ungated_deployed_hook_truthfully(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """Without an opt-in the hook deploys, so --pending must not call it unapproved."""
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    source = isolated.package_root / "hooky"
+    _hook_package(source)
+    repository = repositories.create("hooky", source_tree=source)
+    repositories.tag(repository, "v1.0.0", repositories.commit(repository, message="v1"))
+    env = repositories.url_rewrite_subprocess_env(repository, _REMOTE)
+    project = isolated.work_root / "consumer"
+    project.mkdir()
+    manifest = {
+        "name": "consumer",
+        "version": "0.1.0",
+        "target": "claude",
+        "dependencies": {"apm": ["acme/hooky#v1.0.0"]},
+    }
+    dump_yaml(manifest, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def apm(*args: str) -> str:
+        result = runner.run(args, cwd=project, env=env)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, f"apm {' '.join(args)}\n{output}"
+        return output
+
+    apm("install", "--no-policy")
+    assert _claude_hook_commands(project) == [_HOOK_COMMAND]
+    ungated = apm("approve", "--pending")
+    assert "[deployed: no executables policy]" in ungated, ungated
+    assert "[not approved]" not in ungated, ungated
+
+    dump_yaml({**manifest, "executables": {}}, project / "apm.yml")
+    gated = apm("approve", "--pending")
+    assert "[not approved]" in gated, gated
+    assert "[deployed: no executables policy]" not in gated, gated

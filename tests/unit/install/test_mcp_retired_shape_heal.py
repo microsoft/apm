@@ -21,7 +21,7 @@ from apm_cli.install.mcp.ownership import (
     mcp_native_hash,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.component
 
 _URL = "https://heal.example.invalid/sse"
 _REGISTRY = {"name": "io.example/heal"}
@@ -31,7 +31,9 @@ _RETIRED = {"type": "http", "url": _URL, "tools": ["*"], "id": ""}
 
 
 def _compare(tmp_path: Path, native: dict, *, managed: bool, fingerprint: str | None):
-    client = ClientFactory.create_client("copilot", project_root=tmp_path)
+    # The Copilot CLI shape (default tools, empty id) is the user-scope destination;
+    # project scope writes Claude's .mcp.json shape (#3866).
+    client = ClientFactory.create_client("copilot", project_root=tmp_path, user_scope=True)
     return compare_native_mcp_connection(
         client,
         "io.example/heal",
@@ -106,7 +108,10 @@ def test_frozen_heal_keeps_the_retired_receipt_verifiable(
 ) -> None:
     """--frozen heals without writing the lock, so the receipt still fingerprints the retired render."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-    client = ClientFactory.create_client(runtime, project_root=tmp_path)
+    monkeypatch.setenv("COPILOT_HOME", str(tmp_path / "copilot-home"))
+    client = ClientFactory.create_client(
+        runtime, project_root=tmp_path, user_scope=runtime == "copilot"
+    )
     current = client.render_server_config(_INFO)
     (retired,) = client.legacy_managed_renders(_INFO)
     native = dict(current)
@@ -246,11 +251,12 @@ def test_unsupported_skip_keeps_the_claim_when_removal_fails(tmp_path: Path) -> 
 
     path = _antigravity_with(tmp_path, {"heal": {"httpUrl": _URL}})
     claims = {"antigravity": {"io.example/heal"}}
-    # Fail the exact write the cleanup owner performs; permission bits are not
-    # enforced the same way on every platform (Windows ignores POSIX modes).
+    # Fail the exact write the cleanup owner performs (through the JSON style
+    # owner, #4526 G6); permission bits are not enforced the same way on every
+    # platform (Windows ignores POSIX modes).
     with (
         patch(
-            "apm_cli.integration.mcp_integrator.atomic_write_text",
+            "apm_cli.utils.json_config.atomic_write_text",
             side_effect=OSError("simulated write failure"),
         ) as write,
         pytest.raises(RequiredIntegrationError),

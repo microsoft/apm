@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from apm_cli.core.remediation import CODEX_AGENT_FRONTMATTER_NOT_MAPPING
 from apm_cli.integration import AgentIntegrator
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.diagnostics import (
@@ -16,6 +17,7 @@ from apm_cli.utils.diagnostics import (
     DiagnosticCollector,
 )
 from apm_cli.utils.yaml_io import yaml_to_str
+from tests.utils.deployment_evidence import prove_overwrites
 
 
 class TestAgentIntegrator:
@@ -1618,8 +1620,9 @@ class TestCodexAgentIntegration:
         self._assert_guide_link_reaches(copilot_file, copilot_text, skill)
         assert codex.links_resolved == copilot.links_resolved == 1
 
-    def test_codex_relative_link_survives_reinstall_and_update(self) -> None:
+    def test_codex_relative_link_survives_reinstall_and_update(self, monkeypatch) -> None:
         """Reinstall and source update rewrite links again from the new body."""
+        prove_overwrites(monkeypatch)
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         package_dir, skill = self._linked_package()
@@ -1672,8 +1675,9 @@ class TestCodexAgentIntegration:
         assert second.files_integrated == 0
         assert second.files_skipped == 0
 
-    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self) -> None:
+    def test_codex_stale_unresolved_link_is_repaired_on_reinstall(self, monkeypatch) -> None:
         """A managed TOML written before #2966 is repaired by the next install."""
+        prove_overwrites(monkeypatch)
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         package_dir, skill = self._linked_package()
@@ -1773,7 +1777,7 @@ class TestCodexAgentIntegration:
         assert len(warnings) == 1
         assert "must be a mapping and was ignored" in warnings[0].message
         assert "may inherit broader tool access" in warnings[0].message
-        assert "rerun 'apm install'" in warnings[0].message
+        assert CODEX_AGENT_FRONTMATTER_NOT_MAPPING.clause() in warnings[0].message
 
     def test_codex_agent_invalid_frontmatter_emits_warning(self):
         """Invalid YAML must not make Codex conversion fail open silently."""

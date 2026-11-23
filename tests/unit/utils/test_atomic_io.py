@@ -101,7 +101,7 @@ class TestAtomicWriteText:
         """Unsupported hard links and permission failures remain explicit."""
         target = tmp_path / "control.txt"
         with (
-            patch("apm_cli.utils.atomic_io.os.link", side_effect=error),
+            patch("os.link", side_effect=error),
             patch(
                 "apm_cli.utils.atomic_io._replace_atomic_file",
                 side_effect=AssertionError("create-only must not replace"),
@@ -139,11 +139,13 @@ class TestAtomicWriteText:
             created_tmp_names.append(name)
             return fd, name
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=capturing_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=capturing_mkstemp):
             atomic_write_text(target, "data")
 
         assert len(created_tmp_names) == 1
         assert Path(created_tmp_names[0]).parent == tmp_path
+        assert not Path(created_tmp_names[0]).exists()
+        assert target.read_text() == "data"
 
     def test_tmp_file_uses_apm_atomic_prefix(self, tmp_path: Path) -> None:
         """mkstemp is called with prefix='apm-atomic-'."""
@@ -159,10 +161,11 @@ class TestAtomicWriteText:
             captured_kwargs.append(dict(kwargs))
             return _orig_mkstemp(**kwargs)
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=mock_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=mock_mkstemp):
             atomic_write_text(target, "data")
 
         assert captured_kwargs[0]["prefix"] == "apm-atomic-"
+        assert target.read_text() == "data"
 
     @pytest.mark.parametrize(
         ("parameter", "value"),
@@ -186,7 +189,7 @@ class TestAtomicWriteText:
         target = tmp_path / "out.txt"
 
         with (
-            patch("apm_cli.utils.atomic_io.tempfile.mkstemp") as mock_mkstemp,
+            patch("tempfile.mkstemp") as mock_mkstemp,
             pytest.raises(ValueError, match="portable filename fragment"),
         ):
             atomic_write_text(target, "data", **{parameter: value})
@@ -202,7 +205,7 @@ class TestAtomicWriteText:
         target = tmp_path / "new_file.txt"
         assert not target.exists()
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             with patch("apm_cli.utils.atomic_io.hasattr", return_value=True):
                 atomic_write_text(target, "data", new_file_mode=0o600)
 
@@ -217,7 +220,7 @@ class TestAtomicWriteText:
         target.chmod(0o640)
         expected_mode = stat.S_IMODE(target.stat().st_mode)
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=0o600)
 
         mock_fchmod.assert_called_once()
@@ -228,10 +231,11 @@ class TestAtomicWriteText:
         """A new file without a requested mode does not call fchmod."""
         target = tmp_path / "out.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fchmod", create=True) as mock_fchmod:
+        with patch("os.fchmod", create=True) as mock_fchmod:
             atomic_write_text(target, "data", new_file_mode=None)
 
         mock_fchmod.assert_not_called()
+        assert target.read_text() == "data"
 
     # ------------------------------------------------------------------
     # Error paths
@@ -249,9 +253,9 @@ class TestAtomicWriteText:
             tmp_names.append(name)
             return fd, name
 
-        with patch("apm_cli.utils.atomic_io.tempfile.mkstemp", side_effect=capturing_mkstemp):
+        with patch("tempfile.mkstemp", side_effect=capturing_mkstemp):
             with patch(
-                "apm_cli.utils.atomic_io.os.fdopen",
+                "os.fdopen",
                 side_effect=OSError("disk full"),
             ):
                 with pytest.raises(OSError, match="disk full"):
@@ -265,8 +269,8 @@ class TestAtomicWriteText:
         """If cleanup unlink fails, the original write exception still propagates."""
         target = tmp_path / "fail_unlink.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fdopen", side_effect=RuntimeError("boom")):
-            with patch("apm_cli.utils.atomic_io.os.unlink", side_effect=OSError("locked")):
+        with patch("os.fdopen", side_effect=RuntimeError("boom")):
+            with patch("os.unlink", side_effect=OSError("locked")):
                 with pytest.raises(RuntimeError, match="boom"):
                     atomic_write_text(target, "data")
 
@@ -274,7 +278,7 @@ class TestAtomicWriteText:
         """If write fails, the target path must not be created."""
         target = tmp_path / "ghost.txt"
 
-        with patch("apm_cli.utils.atomic_io.os.fdopen", side_effect=OSError("nope")):
+        with patch("os.fdopen", side_effect=OSError("nope")):
             with pytest.raises(OSError):
                 atomic_write_text(target, "data")
 
@@ -348,3 +352,71 @@ class TestWriteTextLf:
         target = tmp_path / "u.md"
         write_text_lf(target, "café ☕ 日本語\r\n")
         assert target.read_text(encoding="utf-8") == "café ☕ 日本語\n"
+
+
+@pytest.mark.parametrize("writer", ["copy2", "copyfile"])
+def test_seam_copies_never_expose_a_partial_destination(tmp_path: Path, writer: str) -> None:
+    """#4691: a reader sees the old bytes until a rename, then the new ones, mode kept."""
+    import os
+
+    from apm_cli.integration import write_seam
+
+    source = tmp_path / "new.sh"
+    source.write_bytes(b"#!/bin/sh\necho new\n")
+    destination = tmp_path / "deployed.sh"
+    destination.write_bytes(b"#!/bin/sh\necho old\n")
+    if hasattr(os, "fchmod"):
+        os.chmod(source, 0o700)
+        os.chmod(destination, 0o700)
+    old_inode = destination.stat().st_ino
+    seen: list[bytes] = []
+    real_replace = os.replace
+
+    def observing_replace(src: str, dst: object) -> None:
+        seen.append(destination.read_bytes())
+        real_replace(src, dst)
+
+    with patch("os.replace", side_effect=observing_replace):
+        getattr(write_seam, writer)(source, destination)
+
+    assert seen == [b"#!/bin/sh\necho old\n"]
+    assert destination.read_bytes() == b"#!/bin/sh\necho new\n"
+    assert destination.stat().st_ino != old_inode or os.name == "nt"
+    if hasattr(os, "fchmod"):
+        assert stat.S_IMODE(destination.stat().st_mode) & 0o100
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["deployed.sh", "new.sh"]
+
+
+def test_a_failed_atomic_copy_leaves_the_destination_and_no_temp(tmp_path: Path) -> None:
+    from apm_cli.utils.atomic_io import atomic_copy
+
+    destination = tmp_path / "deployed.sh"
+    destination.write_bytes(b"old\n")
+
+    with pytest.raises(OSError):
+        atomic_copy(tmp_path / "missing", destination)
+
+    assert destination.read_bytes() == b"old\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["deployed.sh"]
+
+
+def test_a_failed_replacement_removes_a_read_only_staging_file(tmp_path: Path) -> None:
+    """#4691: staging made read-only by the source mode is still cleaned up."""
+    import os
+
+    from apm_cli.utils.atomic_io import atomic_copy
+
+    source = tmp_path / "source.md"
+    source.write_bytes(b"new\n")
+    os.chmod(source, stat.S_IREAD)
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    destination = deploy / "deployed.md"
+    destination.write_bytes(b"old\n")
+
+    with patch("os.replace", side_effect=PermissionError("replace refused")):
+        with pytest.raises(PermissionError, match="replace refused"):
+            atomic_copy(source, destination)
+
+    assert destination.read_bytes() == b"old\n"
+    assert [p.name for p in deploy.iterdir()] == ["deployed.md"]

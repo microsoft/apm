@@ -1,0 +1,44 @@
+# Merge Queue Freshness -- fails when main moves without the merge queue.
+#
+# merge-gate.yml's merge_group EXPECTED_CHECKS is the merge-time gate: full
+# integration, binary build, release validation and the global coverage
+# floor block a merge only there (ci-integration.yml + ci.yml on
+# merge_group). If merges bypass the queue, none of that runs and nothing
+# turns red. This scheduled check turns that silence into a failure: when
+# main received commits in the last 3 days but no merge_group run of
+# ci-integration.yml completed, it fails, naming the last merge_group run
+# and the main commits that landed since (scripts/merge_queue_freshness.py).
+#
+# Read-only: it only lists workflow runs and commits.
+name: Merge Queue Freshness
+
+on:
+  schedule:
+    # Daily at 05:30 UTC, after the 04:00 UTC nightly build-release run.
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    name: Merge Queue Freshness
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Require a recent merge_group run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: main
+          WINDOW_DAYS: '3'
+        run: python3 scripts/merge_queue_freshness.py

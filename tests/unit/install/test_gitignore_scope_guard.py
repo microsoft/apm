@@ -46,7 +46,7 @@ def _common_patches(deploy_root: Path) -> list[AbstractContextManager]:
             "apm_cli.integration.base_integrator.BaseIntegrator.normalize_managed_files",
             return_value=set(),
         ),
-        patch("apm_cli.commands._helpers._update_gitignore_for_apm_modules"),
+        patch("apm_cli.install.helpers.gitignore.update_gitignore_for_apm_modules"),
     ]
 
 

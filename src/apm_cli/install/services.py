@@ -15,19 +15,27 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.agent_plugins.errors import enforce_agent_plugin_deployment_boundary
+from apm_cli.core.remediation import claude_native_switch_loose_hooks
 
 from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import destination_tree_lines as _destination_tree_lines
 from .deployed_paths import format_target_collapse as _format_target_collapse
+from .deployed_paths import log_hook_display_payloads as _log_hook_display_payloads
 from .deployed_paths import skill_summary_paths as _skill_summary_paths
 from .deployment_plan import PackageDeploymentPlan, prepare_package_deployment
 from .exec_gate import plugin_bin_deployable, resolve_bin_skip
+from .local_bundle_agents import deploy_bundle_codex_agent as _deploy_bundle_codex_agent
 from .local_bundle_paths import bundle_deploy_relative_path as _bundle_rel
 from .local_bundle_paths import bundle_deploy_skip_warning as _bundle_skip_warning
 from .local_bundle_paths import bundle_pack_files as _bundle_pack_files
+from .local_bundle_paths import bundle_render_format_id as _bundle_render_format
 from .local_bundle_paths import bundle_slug_validation_error as _bundle_slug_error
 from .local_bundle_paths import known_bundle_deploy_prefixes as _known_bundle_prefixes
 from .local_bundle_paths import target_bundle_deploy_prefixes as _target_bundle_prefixes
 from .project_package import build_project_local_package_info
+from .target_filter import warn_target_reconcile_failure as _warn_target_reconcile_failure
+from .target_warnings import log_canvas_skip as _log_canvas_skip
+from .target_warnings import warn_unsupported_primitives
 
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
@@ -68,28 +76,6 @@ class IntegratorBundle:
     canvas: BaseIntegrator | None = None
 
 
-def _log_hook_display_payloads(
-    payloads: list,
-    verbose: bool,
-    log_fn: Any,
-    logger: Any,
-) -> None:
-    """Emit per-hook-file action summaries for hook transparency."""
-    for _payload in payloads:
-        _src = _payload.get("source_hook_file", "hook file")
-        _actions = _payload.get("actions", [])
-        if _actions:
-            for _act in _actions:
-                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
-        else:
-            log_fn(f"  |   Hook file integrated: {_src}")
-        if verbose and logger is not None:
-            _out_path = _payload.get("output_path", "")
-            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-            for _jline in _payload.get("rendered_json", "").splitlines():
-                logger.verbose_detail(f"  |     {_jline}")
-
-
 def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:
     """Return ``(label, deploy_dir)`` for a per-kind integration line."""
     if prim_name == "instructions" and mapping.output_compare:
@@ -123,79 +109,40 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def _log_hooks_skip(
-    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
-) -> None:
-    """Warn about skipped hooks only when the package actually ships them.
-
-    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
-    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
-    """
-    _install = Path(package_info.install_path)
-    has_hooks = False
-    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
-        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
-            has_hooks = True
-            break
-    if not has_hooks:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        logger.warning(
-            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
-        )
-
-
-def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
-    """Warn about skipped canvas extensions when the package ships them."""
-    _install = Path(package_info.install_path)
-    extensions_root = _install / ".apm" / "extensions"
-    try:
-        has_canvas = extensions_root.is_dir() and any(
-            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
-        )
-    except OSError:
-        has_canvas = False
-    if not has_canvas:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        logger.warning(
-            f"{_pkg_label}: canvas extension(s) skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
-        )
-
-
-def _warn_target_reconcile_failure(
-    diagnostics: DiagnosticCollector,
-    package_name: str,
-    reconcile_stats: dict,
-) -> None:
-    if not reconcile_stats.get("errors", 0):
-        return
-    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
-    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
-    if not isinstance(failed_targets, list):
-        failed_targets = ["unknown"]
-    if not isinstance(failed_paths, list):
-        failed_paths = ["unknown"]
-    diagnostics.warn(
-        "Could not fully reconcile hooks excluded by target restrictions",
-        package=package_name,
-        detail=(
-            f"targets: [{', '.join(failed_targets)}]; "
-            f"configs: [{', '.join(failed_paths)}]; run apm install again"
-        ),
-    )
-
-
 def _targets_explicitly_requested(ctx: InstallContext | None) -> bool:
     """Return True only when the active targets came from ``--target``."""
     decision = getattr(ctx, "target_decision", None)
     return getattr(decision, "source", None) == "--target flag"
+
+
+def _check_native_claude_transition(
+    reconcile_package_targets: Any,
+    package_info: Any,
+    project_root: Path,
+    targets: list[Any],
+    package: str,
+    flag: str = "",
+) -> None:
+    """Refuse native activation over retained or unreadable loose hook state."""
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+
+    if not callable(reconcile_package_targets):
+        return
+    reconcile_stats = reconcile_package_targets(
+        package_info,
+        project_root,
+        targets,
+        dry_run=True,
+    )
+    if reconcile_stats.get("errors") or reconcile_stats.get("files_removed"):
+        failed = ", ".join(reconcile_stats.get("failed_paths", []))
+        recovery = f"Repair unreadable hook settings or ownership. Inspect: {failed}"
+        if not reconcile_stats.get("errors"):
+            switch = claude_native_switch_loose_hooks(user_scope=bool(flag))
+            recovery = switch.bind(package=package).sentence()
+        raise ClaudeNativePluginError(
+            f"Cannot switch {package} to a native plugin. Hook settings were preserved. {recovery}"
+        )
 
 
 def integrate_package_primitives(  # noqa: PLR0913
@@ -220,6 +167,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     dep_target_subset: list[str] | None = None,
     trust_bin: bool | None = None,
     bin_skip_reason_override: str | None = None,
+    native_claude_user_scope: bool = False,
     deployment_plan: PackageDeploymentPlan | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
@@ -236,10 +184,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     (Amendment 6) is emitted once per install run for packages that
     contain non-skill primitives when the cowork target is active.
 
-    When *allow_executables* is provided, executable primitives (hooks,
-    bin/, MCP servers, canvas extensions) are only deployed for packages
-    whose key appears in the dict with the matching type set to ``True``.
-    Local project content (``package_name == "_local"``) is always trusted.
+    Executable primitives (hooks, bin/, MCP servers, canvas extensions) are
+    only deployed for packages the trust owner approves in
+    *allow_executables*; an omitted (``None``) map approves nothing, and only
+    an explicit ``authorized_exec_map`` approves everything. Local project
+    content (``package_name == "_local"``) is always trusted.
 
     When *trust_bin* is ``False`` (``--no-trust-bin``), bin/ deployment
     is skipped with reason ``"not_trusted"`` only when ``allowExecutables``
@@ -256,6 +205,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     """
     enforce_agent_plugin_deployment_boundary(package_info)
 
+    from apm_cli.core.deployment_ledger import recorded_writes
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
@@ -297,6 +247,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         logger=logger,
         scope=scope,
         skill_subset=skill_subset,
+        skill_pairing=skill_pairing,
         ctx=ctx,
         policy=policy,
         is_first_party=is_first_party,
@@ -304,6 +255,7 @@ def integrate_package_primitives(  # noqa: PLR0913
         trust_bin=trust_bin,
         bin_skip_reason_override=bin_skip_reason_override,
         read_only=scratch_root is not None,
+        native_claude_user_scope=native_claude_user_scope,
     )
     target_selection = deployment_plan.target_selection
     targets = list(target_selection.targets)
@@ -343,6 +295,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 
     codex_native = deployment_plan.codex_native
+    native_claude_plugin = deployment_plan.claude_native
+    native_target_names = native_claude_plugin.harnesses if native_claude_plugin else set()
     # Compatibility-only Codex data is opaque to every loose target adapter.
     projection_targets = deployment_plan.projection_targets
     source_plan = deployment_plan.source_plan
@@ -357,12 +311,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     ):
         return result
 
-    # A natively registered Agent Plugin stays opaque: Copilot loads the whole
-    # unit live from apm_modules, so decomposing its skills or MCP servers here
-    # would double-load them. The registrar owns this package instead. The
-    # short-circuit fires only AFTER target narrowing (so a dependency that
-    # excludes copilot is not registered) and AFTER the executable trust gate
-    # (so an Agent Plugin's MCP servers / bin cannot bypass a default-deny).
+    # A native Agent Plugin stays opaque (Copilot loads it whole from .agents/plugins); this
+    # fires only AFTER target narrowing and AFTER the executable trust gate.
     from apm_cli.copilot_plugins.capability import admits_native_plugin
     from apm_cli.install.native_plugin_admission import finalize_native_plugin
 
@@ -383,9 +333,14 @@ def integrate_package_primitives(  # noqa: PLR0913
             logger=logger,
         )
 
-    from apm_cli.install.target_warnings import warn_unsupported_primitives
-
-    warn_unsupported_primitives(package_info, package_name, targets, ctx, diagnostics, logger)
+    warn_unsupported_primitives(
+        package_info,
+        package_name,
+        projection_targets,
+        ctx,
+        diagnostics,
+        logger,
+    )
 
     def _log_integration(msg):
         if logger:
@@ -425,7 +380,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             package_info,
             project_root,
             source_plan,
-            user_scope=scope is InstallScope.USER,
+            user_scope=scope is InstallScope.USER or native_claude_user_scope,
             retiring_targets=frozenset(target.name for target in target_selection.excluded_targets),
         )
 
@@ -443,6 +398,22 @@ def integrate_package_primitives(  # noqa: PLR0913
         )
 
     _reconcile_excluded_targets()
+    if native_claude_plugin is not None:
+        result["native_plugin"] = True
+        result["native_claude_plugin"] = True
+        _check_native_claude_transition(
+            reconcile_package_targets,
+            package_info,
+            project_root,
+            [target for target in targets if target.name in native_target_names],
+            package_name,
+            " --global" if scope is InstallScope.USER else "",
+        )
+        if not projection_targets:
+            from apm_cli.claude_plugins.admission import queue_native_claude
+
+            queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
+            return result
 
     if codex_native is not None:
         _rc = (
@@ -456,13 +427,35 @@ def integrate_package_primitives(  # noqa: PLR0913
     # (per the 1/2/3+ collapse rule), not one per target.
     # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
     _per_kind: dict[str, dict[str, Any]] = {}
+    _hooks_registered = 0
 
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
-        # Executable approval gate: skip hooks if not approved.
+        # Executable approval gate: skip hooks if not approved, and retire
+        # the hooks this package deployed before it was gated (#3924).
         if _prim_name == "hooks" and not _hooks_approved:
-            _log_hooks_skip(package_name, package_info, targets, logger)
+            from apm_cli.install.exec_gate import log_hooks_skip
+
+            log_hooks_skip(package_name, package_info, logger, ctx)
+            if callable(reconcile_package_targets):
+                _warn_target_reconcile_failure(
+                    diagnostics,
+                    package_name,
+                    reconcile_package_targets(package_info, project_root, targets),
+                    "Could not fully remove hooks the executables gate no longer deploys",
+                )
+            from apm_cli.install.withheld_hooks import announce_withheld_hook_files
+
+            announce_withheld_hook_files(
+                package_name,
+                package_info,
+                project_root,
+                targets,
+                managed_files,
+                logger,
+                user_scope=scope is InstallScope.USER,
+            )
             continue
         # Executable approval gate: skip canvas if not approved.
         # First-party (is_first_party=True) always deploys.
@@ -471,17 +464,20 @@ def integrate_package_primitives(  # noqa: PLR0913
         # gate when is_first_party=False (defence-in-depth: a malicious dep
         # named _local must not bypass canvas trust via the name alone).
         if _prim_name == "canvas" and not is_first_party:
-            if allow_executables is None:
-                _dep_canvas_ok = True
-            else:
-                from apm_cli.install.exec_gate import resolve_package_key as _rpk
-                from apm_cli.security.executables import EXEC_TYPE_CANVAS, is_package_approved
+            from apm_cli.install.exec_gate import resolve_package_key as _rpk
+            from apm_cli.security.executables import (
+                EXEC_TYPE_CANVAS,
+                exec_map_authorizes_all,
+                package_type_approved,
+            )
 
-                _dep_canvas_ok = is_package_approved(
-                    allow_executables, _rpk(package_info, package_name), EXEC_TYPE_CANVAS
-                ) or is_package_approved(allow_executables, package_name, EXEC_TYPE_CANVAS)
+            _dep_canvas_ok = exec_map_authorizes_all(allow_executables) or package_type_approved(
+                allow_executables,
+                (_rpk(package_info, package_name), package_name),
+                EXEC_TYPE_CANVAS,
+            )
             if not _dep_canvas_ok:
-                _log_canvas_skip(package_name, package_info, logger)
+                _log_canvas_skip(package_name, package_info, logger, ctx)
                 continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
@@ -515,7 +511,7 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Sibling integrators don't accept this kwarg, so include it only
             # for hooks.
             if _prim_name == "hooks":
-                _call_kwargs["user_scope"] = scope is InstallScope.USER
+                _call_kwargs["user_scope"] = scope is InstallScope.USER or native_claude_user_scope
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
                 # Mirror retiring_targets (#3129) so a fallback preflight isn't
@@ -531,12 +527,10 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party
                 _call_kwargs["package_name"] = package_name
-            _int_result = getattr(_integrator, _entry.integrate_method)(
-                _target,
-                package_info,
-                project_root,
-                **_call_kwargs,
-            )
+            with recorded_writes(integrators.skill, _integrator, [_target], package_info):
+                _int_result = getattr(_integrator, _entry.integrate_method)(
+                    _target, package_info, project_root, **_call_kwargs
+                )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
@@ -547,6 +541,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Treat anything that is not a real int as 0 so we never
             # invent fake adopt counts.
             _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            _registered = getattr(_int_result, "hooks_registered", 0)
+            _hooks_registered += _registered if isinstance(_registered, int) else 0
             # Show the per-kind line whenever ANY work happened -- either
             # a fresh integrate or a silent adopt of pre-existing
             # byte-identical files. Adopt-only runs (e.g. re-install
@@ -590,25 +586,21 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _prim_name not in _per_kind:
             continue
         _info = _per_kind[_prim_name]
-        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
-        # Build the verb + count phrase. When at least one file was
-        # freshly integrated we lead with "N X integrated"; pure-adopt
-        # runs (no fresh writes) lead with "N X adopted" so the line
-        # still appears and the count is truthful.
+        # Build the verb + count phrase. Adoption (a file already holding the
+        # render) changes nothing, so it is silent unless --verbose: a repeat
+        # install is a quiet no-op (#4382/#4360, I2).
         _files = _info["files"]
-        _adopted = _info["adopted"]
+        _adopted = _info["adopted"] if _verbose else 0
+        _noun = _info["label"].removesuffix("s") if (_files or _adopted) == 1 else _info["label"]
         if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
+            _verb_phrase = f"{_files} {_noun} integrated"
             if _adopted > 0:
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
-        if _expansion:
-            _log_integration(f"  |-- {_verb_phrase}:")
-            for line in _expansion:
+            _verb_phrase = f"{_adopted} {_noun} adopted" if _adopted else ""
+        if _verb_phrase:
+            for line in _destination_tree_lines(_verb_phrase, _info["paths"], _verbose):
                 _log_integration(line)
-        else:
-            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
         # Emit per-hook-file action summaries for the hooks primitive.
         # display_payloads reflects post-path-rewrite data (what is
         # actually written to disk and executed), so this is faithful.
@@ -624,48 +616,49 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    skill_result = integrators.skill.integrate_package_skill(
-        package_info,
-        project_root,
-        diagnostics=diagnostics,
-        managed_files=managed_files,
-        force=force,
-        targets=projection_targets,
-        skill_subset=skill_subset,
-        skill_pairing=skill_pairing,
-        scope=scope,
-        policy=policy,
-        skip_bin=_skip_bin,
-        bin_skip_reason_override=_bin_skip_reason_override,
-        trust_bin=trust_bin,
-        source_plan=source_plan,
-    )
+    with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
+        skill_result = integrators.skill.integrate_package_skill(
+            package_info,
+            project_root,
+            diagnostics=diagnostics,
+            managed_files=managed_files,
+            force=force,
+            targets=projection_targets,
+            skill_subset=skill_subset,
+            skill_pairing=skill_pairing,
+            scope=scope,
+            policy=policy,
+            skip_bin=_skip_bin,
+            bin_skip_reason_override=_bin_skip_reason_override,
+            trust_bin=trust_bin,
+            source_plan=source_plan,
+        )
     _skill_target_paths = _skill_summary_paths(
         skill_result.target_paths, project_root, targets
     ) or ["skills/"]
     _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
     if skill_result.skill_created:
         result["skills"] += 1
-        if _skill_expansion:
-            _log_integration("  |-- Skill integrated:")
-            for line in _skill_expansion:
-                _log_integration(line)
-        else:
-            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
     if skill_result.sub_skills_promoted > 0:
         result["sub_skills"] += skill_result.sub_skills_promoted
+    # One tree line per package, whatever mix of root and promoted skills (#4089).
+    from apm_cli.integration.skill_support import skill_line_label, skills_integrated
+
+    _skill_count = skills_integrated(skill_result)
+    if _skill_count > 0:
+        _skill_label = skill_line_label(skill_result, _skill_count)
         if _skill_expansion:
-            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
+            _log_integration(f"  |-- {_skill_label}:")
             for line in _skill_expansion:
                 _log_integration(line)
         else:
-            _log_integration(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
-            )
+            _log_integration(f"  |-- {_skill_label} -> {_skill_suffix}")
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
         from apm_cli.install.exec_gate import log_bin_status
 
-        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
+        log_bin_status(
+            skill_result, _skill_suffix, package_name, package_info, _log_integration, ctx=ctx
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
     deployed.extend(
@@ -686,16 +679,20 @@ def integrate_package_primitives(  # noqa: PLR0913
             ),
         )
 
-    # A3: warm-cache visibility. If nothing was integrated for any kind AND
-    # no skill was created, emit one annotation so the user knows the dep
-    # was evaluated (the [+] header above already carries the SHA).
+    # A3: warm-cache visibility. If nothing changed (adopted files never count),
+    # say so once; the [+] header above already carries the SHA.
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
-    _total_integrated += int(skill_result.skill_created)
-    _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += _skill_count
     _total_integrated += int(skill_result.bin_deployed)
+    result["files_changed"] = _total_integrated
+    # Hook files this package registers, written or unchanged (#4033).
+    result["hooks_contributed"] = _hooks_registered
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
+    from apm_cli.claude_plugins.admission import queue_native_claude
+
+    queue_native_claude(ctx, package_name, native_claude_plugin, diagnostics)
     return result
 
 
@@ -742,6 +739,7 @@ def integrate_local_content(  # noqa: PLR0913
     same shape as ``integrate_package_primitives()``.
     """
     from ..integration.canvas_integrator import CanvasIntegrator
+    from ..security.executables import AUTHORIZED_FIRST_PARTY, authorized_exec_map
     from .package_resolution import effective_dependency_selection
 
     if source_root is None:
@@ -773,6 +771,7 @@ def integrate_local_content(  # noqa: PLR0913
         ctx=ctx,
         is_first_party=True,
         deployment_plan=deployment_plan,
+        allow_executables=authorized_exec_map(AUTHORIZED_FIRST_PARTY),
     )
 
 
@@ -832,15 +831,16 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        allow_executables: Effective executable approvals, or ``None`` when disabled.
+        allow_executables: Effective executable approvals; ``None`` approves nothing.
         approval_key: Exact local-bundle content identity for executable approval.
         create_config: Whether config reads may create the user config file.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
-        ``deployed_file_hashes`` (dict[str, str]), ``staged_files``
-        (compile input under ``apm_modules/``, never a deployment claim), ``skipped`` (int), and per-primitive counters
-        (``skills``, ``agents``, ``commands``, ...).
+        ``deployed_file_hashes``, ``staged_files`` / ``staged_file_hashes`` (compile
+        input under ``apm_modules/``, never deployment claims), ``staged_file_fallback_hashes``
+        (bundle digests of collision-skipped staging), ``skipped`` (int), and per-primitive
+        counters (``skills``, ``agents``, ``commands``, ...).
     """
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
@@ -898,7 +898,10 @@ def integrate_local_bundle(
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
+    written_files: list[str] = []
     staged_files: list[str] = []
+    staged_hashes: dict[str, str] = {}
+    staged_fallback_hashes: dict[str, str] = {}
     skipped = 0
 
     # py-arch-2: Filter bundle-metadata files (plugin.json, .mcp.json) out of
@@ -917,59 +920,31 @@ def integrate_local_bundle(
     slug = alias or bundle_info.package_id
     _known_deploy_prefixes = _known_bundle_prefixes()
 
-    # Security + feature gate: canvas extensions are executable Node bundles
-    # (``extension.mjs``).  A local / offline bundle copies its files
-    # verbatim WITHOUT routing through ``CanvasIntegrator``, so the
-    # experimental feature flag and the allowExecutables gate must be
-    # checked explicitly here.  When the canvas feature flag is OFF, drop
-    # paths silently (no-op; canvas type does not exist yet).  When ON,
-    # check allowExecutables: if no enforcement block is present (None)
-    # canvas deploys freely; otherwise the bundle slug must be approved for
-    # the ``canvas`` exec type.
-    from ..core.experimental import is_enabled
-    from ..integration.canvas_integrator import is_canvas_bundle_path
+    # Canvas extensions are executable: gated and retired like hooks and MCP.
+    from ..security.executables import EXEC_TYPE_HOOKS, package_type_approved
+    from .local_bundle_canvas import gate_bundle_canvas
 
-    _canvas_enabled = is_enabled("canvas", create_config=create_config)
-    if _canvas_enabled:
-        from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
-
-        _canvas_approved_bundle = allow_executables is None or (
-            approval_key is not None
-            and is_package_approved(allow_executables, approval_key, EXEC_TYPE_CANVAS)
-        )
-    else:
-        _canvas_approved_bundle = False
-
-    from ..security.executables import EXEC_TYPE_HOOKS
-    from ..security.executables import is_package_approved as _is_approved
-
-    _hooks_approved_bundle = allow_executables is None or (
-        approval_key is not None and _is_approved(allow_executables, approval_key, EXEC_TYPE_HOOKS)
+    _bundle_keys = () if approval_key is None else (approval_key,)
+    _hooks_approved_bundle = package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)
+    _canvas_ok, _canvas_blocked = gate_bundle_canvas(
+        pack_files,
+        project_root,
+        targets=targets,
+        slug=str(slug),
+        approval_key=approval_key,
+        allow_executables=allow_executables,
+        create_config=create_config,
+        scope=scope,
+        dry_run=dry_run,
+        report=lambda message: (
+            diagnostics.warn(message=message, package=str(slug))
+            if diagnostics is not None
+            else logger.warning(message)
+            if logger is not None
+            else None
+        ),
     )
-
-    if not (_canvas_enabled and _canvas_approved_bundle):
-        _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
-        if _blocked:
-            for _r in _blocked:
-                pack_files.pop(_r, None)
-            if _canvas_enabled:
-                # Canvas feature on but not approved: block and surface message.
-                skipped += len(_blocked)
-                _msg = (
-                    f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
-                    f"'{slug}': canvas extensions are executable extension.mjs code "
-                    "and are not approved for this exact bundle content. "
-                    "Add this to apm.yml:\n"
-                    "executables:\n"
-                    "  allow:\n"
-                    f'    "{approval_key}":\n'
-                    "      canvas: true\n"
-                    "Then rerun the install."
-                )
-                if diagnostics is not None:
-                    diagnostics.warn(message=_msg, package=str(slug))
-                elif logger is not None:
-                    logger.warning(_msg)
+    skipped += _canvas_blocked
 
     if logger:
         logger.verbose_detail(
@@ -1021,13 +996,9 @@ def integrate_local_bundle(
                 skipped += 1
                 continue
 
-            # Issue #1207 D2.b: for compile-only targets (opencode, codex,
-            # gemini -- no ``instructions`` primitive in their profile),
-            # bundle ``instructions/*.md`` files must be staged under
-            # ``apm_modules/<slug>/.apm/instructions/`` so ``apm compile``
-            # can merge them into the target's AGENTS.md / GEMINI.md /
-            # equivalent.  Deploying them verbatim to ``<root>/instructions/``
-            # is a no-op for these clients.
+            # Issue #1207 D2.b: targets without an ``instructions`` primitive
+            # (opencode, codex, gemini) get bundle instructions staged under
+            # ``apm_modules/<slug>/.apm/instructions/`` for ``apm compile``.
             _rel_norm = rel.replace("\\", "/")
             _deploy_rel = _bundle_rel(
                 _rel_norm,
@@ -1035,7 +1006,7 @@ def integrate_local_bundle(
                 _known_deploy_prefixes,
                 target=target,
                 hooks_approved=_hooks_approved_bundle,
-                canvas_approved=_canvas_enabled and _canvas_approved_bundle,
+                canvas_approved=_canvas_ok,
             )
             if _deploy_rel is None:
                 if _skip_warning := _bundle_skip_warning(
@@ -1044,7 +1015,7 @@ def integrate_local_bundle(
                     _known_deploy_prefixes,
                     target=target,
                     hooks_approved=_hooks_approved_bundle,
-                    canvas_approved=_canvas_enabled and _canvas_approved_bundle,
+                    canvas_approved=_canvas_ok,
                 ):
                     if diagnostics is not None:
                         diagnostics.warn(message=_skip_warning, package=str(slug))
@@ -1114,14 +1085,35 @@ def integrate_local_bundle(
             except ValueError:
                 record = dest.as_posix()
 
+            if _bundle_render_format(  # rendered (Codex TOML), never copied (#3714)
+                _rel_norm, _allowed_deploy_prefixes, _known_deploy_prefixes, target=target
+            ):
+                skipped += _deploy_bundle_codex_agent(
+                    src,
+                    dest,
+                    rel_path=_rel_norm,
+                    record=record,
+                    collision_roots=(project_root, deploy_root),
+                    expected_hash=expected_hash,
+                    target_name=target.name,
+                    slug=str(slug),
+                    force=force,
+                    dry_run=dry_run,
+                    diagnostics=diagnostics,
+                    logger=logger,
+                    deployed_files=deployed_files,
+                    deployed_hashes=deployed_hashes,
+                    written_files=written_files,
+                )
+                continue
+
             normalized_text = _normalized_bundle_text(src)
             if normalized_text is None:
                 desired_hash = expected_hash
             else:
                 desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
-            # Collision handling: skip if file exists and content differs
-            # and not force.  Idempotent (same content) writes are silent.
+            # Skip an existing file with different content unless --force.
             if not dry_run and dest.exists() and not force:
                 try:
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
@@ -1129,6 +1121,8 @@ def integrate_local_bundle(
                     existing_hash = None
                 if existing_hash and existing_hash != desired_hash:
                     skipped += 1
+                    if _staged:  # an edited, unrestaged file stays drift (#3718)
+                        staged_fallback_hashes[record] = f"sha256:{desired_hash}"
                     msg = (
                         f"Skipped {record}: file exists with different "
                         "content. Re-run with --force to overwrite."
@@ -1147,29 +1141,70 @@ def integrate_local_bundle(
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
-            # Claims carry the canonical ``sha256:<hex>`` form that
-            # ``compute_deployed_hashes`` writes, so stale-cleanup provenance
-            # checks compare equal. IM4: a real deploy hashes the on-disk bytes
-            # after LF normalization; a dry run previews the same digest.
-            if not _staged:
-                deployed_hashes[record] = (
-                    f"sha256:{desired_hash}" if dry_run else compute_file_hash(dest)
-                )
+            written_files.extend(() if dry_run or _staged else (record,))
+            # Canonical ``sha256:<hex>`` claims, staged ones included (#3718); IM4: a
+            # real deploy hashes LF-normalized disk bytes, a dry run previews them.
+            (staged_hashes if _staged else deployed_hashes)[record] = (
+                f"sha256:{desired_hash}" if dry_run else compute_file_hash(dest)
+            )
             if logger:
                 logger.verbose_detail(
                     f"[dry-run] would deploy {record}" if dry_run else f"deployed {record}"
                 )
 
+    if _canvas_ok and not dry_run:
+        from .local_bundle_canvas import record_bundle_canvas
+
+        record_bundle_canvas(project_root, targets, str(slug), approval_key, deployed_files)
+
+    from .local_bundle_hooks import integrate_local_bundle_hooks
+
+    hook_result = integrate_local_bundle_hooks(
+        bundle_info,
+        pack_files,
+        project_root,
+        targets=targets,
+        slug=str(slug),
+        hooks_approved=(
+            None
+            if not _hooks_approved_bundle and _hooks_denied_bundle(allow_executables, approval_key)
+            else _hooks_approved_bundle
+        ),
+        approval_key=approval_key,
+        force=force,
+        dry_run=dry_run,
+        scope=scope,
+        diagnostics=diagnostics,
+        logger=logger,
+    )
+    deployed_files.extend(record for record in hook_result.scripts if record not in deployed_hashes)
+    written_files.extend(hook_result.written)
+    deployed_hashes.update(hook_result.script_hashes)
+    skipped += hook_result.skipped
+
     return {
         "deployed_files": deployed_files,
         "deployed_file_hashes": deployed_hashes,
+        "written_files": written_files,
         "staged_files": staged_files,
+        "staged_file_hashes": staged_hashes,
+        "staged_file_fallback_hashes": staged_fallback_hashes,
         "skipped": skipped,
         "skills": 0,
         "agents": 0,
         "commands": 0,
-        "hooks": 0,
+        "hooks": hook_result.hook_files,
         "instructions": 0,
         "prompts": 0,
         "sub_skills": 0,
     }
+
+
+def _hooks_denied_bundle(allow_executables: Any, approval_key: str | None) -> bool:
+    """Whether a deny of this exact bundle, not a missing approval, withholds its hooks."""
+    if approval_key is None:
+        return False
+    from ..security.executables import EXEC_TYPE_HOOKS
+    from .local_bundle_handler import bundle_type_denied
+
+    return bundle_type_denied(allow_executables, approval_key, EXEC_TYPE_HOOKS)

@@ -68,6 +68,7 @@ _HEADER_OWNERS: Mapping[str, str | None] = MappingProxyType(
     {
         "src/apm_cli/core/auth.py": None,
         "src/apm_cli/core/auth_chain.py": None,
+        "src/apm_cli/core/catalog_credentials.py": "CatalogCredential",
         "src/apm_cli/deps/registry/auth.py": "RegistryAuthContext",
         "src/apm_cli/deps/registry_proxy.py": None,
         "src/apm_cli/utils/github_host.py": "set_authorization_header_git_env",
@@ -120,10 +121,6 @@ _EGRESS_EXEMPTIONS: Mapping[tuple[str, str], tuple[int, str]] = MappingProxyType
         ("src/apm_cli/deps/download_strategies.py", "DownloadDelegate.try_raw_download"): (
             1,
             "anonymous pre-auth raw content CDN fetch; never carries a credential",
-        ),
-        ("src/apm_cli/registry/client.py", "SimpleRegistryClient.__init__"): (
-            1,
-            "anonymous MCP registry session",
         ),
         ("src/apm_cli/registry/client.py", "SimpleRegistryClient._cached_get_json"): (
             3,

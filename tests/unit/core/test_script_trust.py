@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.core.script_trust import (
@@ -15,6 +16,8 @@ from apm_cli.core.script_trust import (
     trust_project_scripts,
     untrust_project_scripts,
 )
+
+pytestmark = pytest.mark.component
 
 
 def _write_apm_yml(path: Path, data: dict) -> Path:

@@ -27,6 +27,8 @@ import pytest
 
 from apm_cli.install.phases.lockfile import compute_deployed_hashes
 
+pytestmark = pytest.mark.component
+
 _SHA256_PREFIXED = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 

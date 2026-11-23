@@ -39,6 +39,11 @@ def test_install_context_importable():
 MAX_MODULE_LOC = 1000
 
 KNOWN_LARGE_MODULES = {
+    # Deletion evidence (#3701) threads one required evidence argument through
+    # every reconciliation deleter and skill path migration. Decomposition
+    # tracked as follow-up.
+    "pipeline.py": 1005,
+    "manifest_reconcile.py": 1010,
     # services.py grew past 1000 when exec-gate delegation helpers (main)
     # and canvas integration helpers (canvas PR) merged concurrently.
     # Further growth from target-reconcile warning helper extraction (#2362).
@@ -46,11 +51,19 @@ KNOWN_LARGE_MODULES = {
     # G2 adds the atomic native Agent Plugin deployment boundary before any
     # target reconciliation or generic integrator can mutate state.
     # Decomposition tracked as follow-up.
-    "services.py": 1175,
+    # Local plugin bundle hooks route through HookIntegrator (#3700).
+    # Bundle Codex agents render through AgentIntegrator (#3714).
+    "services.py": 1210,
     # drift.py crossed 1000 when replay target-root claim scoping (#2655)
     # merged atop main's replay growth. Decomposition tracked as follow-up.
     # Replay builds the project's own package through the install builder (#3151).
-    "drift.py": 1025,
+    # Root-only hook replay (#3600), native Claude cache verification (#3290)
+    # and local bundle hash drift through the deployed-hash verifier (#3989).
+    # Cleanup evidence renders recorded targets too (#3701).
+    # Replay copies ask install's locked content verdict (#4187).
+    "drift.py": 1058,
+    # The resolver takes its frozen pin mode from InstallService (#4012).
+    "phases/resolve.py": 1001,
 }
 
 

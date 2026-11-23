@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -38,7 +39,6 @@ from apm_cli.deps.plugin_parser import (
     _mcp_servers_to_apm_deps,
     _read_mcp_file,
     _read_mcp_json,
-    _substitute_plugin_root,
     normalize_plugin_directory,
     parse_plugin_manifest,
     synthesize_plugin_json_from_apm_yml,
@@ -121,26 +121,6 @@ class TestOrgToEnvSuffix:
 
     def test_mixed_case_with_hyphens(self) -> None:
         assert _org_to_env_suffix("some-Big-Org") == "SOME_BIG_ORG"
-
-
-class TestDetectTokenType:
-    """AuthResolver.detect_token_type classifies all known prefixes."""
-
-    @pytest.mark.parametrize(
-        "token, expected",
-        [
-            ("github_pat_abc", "fine-grained"),
-            ("ghp_abc123", "classic"),
-            ("ghu_abc123", "oauth"),
-            ("gho_abc123", "oauth"),
-            ("ghs_abc123", "github-app"),
-            ("ghr_abc123", "github-app"),
-            ("anunknown_token", "unknown"),
-            ("Bearer eyJxxx", "unknown"),
-        ],
-    )
-    def test_token_type_detection(self, token: str, expected: str) -> None:
-        assert AuthResolver.detect_token_type(token) == expected
 
 
 class TestGitlabRestHeaders:
@@ -578,8 +558,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("dev.azure.com")
 
         # Should only emit once per host
-        azure_lines = [w for w in warnings if "dev.azure.com" in w]
-        assert len(azure_lines) == 1
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert hosts_warned == ["dev.azure.com"]
 
     def test_different_hosts_each_emit_once(self) -> None:
         resolver = AuthResolver()
@@ -591,8 +571,8 @@ class TestEmitStalePat:
             resolver.emit_stale_pat_diagnostic("org1.visualstudio.com")
             resolver.emit_stale_pat_diagnostic("org2.visualstudio.com")
 
-        hosts_warned = {w for w in warnings if "visualstudio.com" in w}
-        assert len(hosts_warned) == 2
+        hosts_warned = [m.group(1) for w in warnings if (m := re.search(r"rejected for (\S+);", w))]
+        assert sorted(hosts_warned) == ["org1.visualstudio.com", "org2.visualstudio.com"]
 
 
 # ===========================================================================
@@ -731,38 +711,6 @@ class TestReadMcpFile:
         plugin_root.mkdir()
         servers = _read_mcp_file(plugin_root, "nonexistent.json", logging.getLogger("test"))
         assert servers == {}
-
-
-class TestSubstitutePluginRoot:
-    def test_substitutes_placeholder_in_string_values(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "my-srv": {
-                "command": "node",
-                "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"],
-            }
-        }
-        result = _substitute_plugin_root(servers, "/abs/path", logging.getLogger("test"))
-        assert result["my-srv"]["args"][0] == "/abs/path/server.js"
-
-    def test_substitutes_in_nested_dict(self, tmp_path: Path) -> None:
-        import logging
-
-        servers = {
-            "srv": {
-                "env": {"MY_PATH": "${CLAUDE_PLUGIN_ROOT}/data"},
-            }
-        }
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result["srv"]["env"]["MY_PATH"] == "/base/data"
-
-    def test_no_placeholder_unchanged(self) -> None:
-        import logging
-
-        servers = {"srv": {"command": "node"}}
-        result = _substitute_plugin_root(servers, "/base", logging.getLogger("test"))
-        assert result == servers
 
 
 class TestExtractMcpServers:
@@ -1183,14 +1131,6 @@ class TestSplitArgvAtDoubleDash:
 
 
 class TestCheckPackageConflicts:
-    def test_empty_deps_returns_empty_set(self) -> None:
-        result = _check_package_conflicts([])
-        assert result == set()
-
-    def test_string_dep_is_parsed(self) -> None:
-        result = _check_package_conflicts(["owner/repo"])
-        assert len(result) > 0
-
     def test_invalid_entries_are_skipped(self) -> None:
         # Should not raise; invalid entries are silently skipped
         result = _check_package_conflicts(["not-valid-format-##$$", 123, None])

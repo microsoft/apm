@@ -21,6 +21,8 @@ from apm_cli.policy.inheritance import resolve_policy_chain
 from apm_cli.policy.parser import load_policy
 from apm_cli.policy.schema import ApmPolicy
 
+pytestmark = pytest.mark.component
+
 PROPERTY_SEED = 0xA9C2026
 PROPERTY_PROFILE = settings(
     max_examples=24,
@@ -131,6 +133,9 @@ def enforceable_policy_data(draw: st.DrawFn) -> dict[str, Any]:
             "require": draw(_non_empty_unique(("internal", "official", "trusted"))),
             "allow_non_registry": False,
         },
+        "marketplace": {
+            "allow": draw(_non_empty_unique(("github.com/contoso/*", "gitlab.com/acme/**"))),
+        },
         "security": {
             "audit": {
                 "on_install": draw(st.sampled_from(("block", "off", "warn"))),
@@ -193,6 +198,7 @@ def _enforceable_fields(policy: ApmPolicy) -> dict[str, Any]:
         "unmanaged_files.exclude": policy.unmanaged_files.exclude,
         "registry_source.require": policy.registry_source.require,
         "registry_source.allow_non_registry": policy.registry_source.allow_non_registry,
+        "marketplace.allow": policy.marketplace.allow,
         "security.audit.on_install": policy.security.audit.on_install,
         "security.audit.external": policy.security.audit.external,
         "security.audit.scanners": policy.security.audit.scanners,
@@ -274,10 +280,10 @@ def _assert_policy_ttl_refreshes(data: dict[str, Any]) -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         project_root = Path(temp_dir)
         with patch("apm_cli.policy.discovery.policy_get", return_value=response) as request:
-            with patch("apm_cli.policy.discovery.time.time", return_value=cached_at):
+            with patch("time.time", return_value=cached_at):
                 cold = discovery._fetch_from_url(POLICY_URL, project_root)
             with patch(
-                "apm_cli.policy.discovery.time.time",
+                "time.time",
                 return_value=cached_at + ttl + 1,
             ):
                 refreshed = discovery._fetch_from_url(POLICY_URL, project_root)
@@ -299,7 +305,7 @@ def test_effective_policy_cache_serialization_is_lossless_and_canonical(
     effective = resolve_policy_chain([parsed])
 
     assert set(_enforceable_fields(effective)) == _schema_enforceable_field_paths(effective)
-    assert len(_enforceable_fields(effective)) == 39
+    assert len(_enforceable_fields(effective)) == 40
     _assert_cache_round_trip(effective)
 
 

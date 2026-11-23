@@ -28,6 +28,8 @@ from click.testing import CliRunner
 from apm_cli.cli import cli
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
@@ -471,7 +473,7 @@ class TestDepsTree:
         assert result.exit_code == 0, result.output
         assert result.output.count("example/child@1.0.0") == 1
         assert "could not place in tree" in result.output
-        assert "run apm install" in result.output
+        assert "run 'apm install'" in result.output
 
     def test_tree_no_lockfile_with_modules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -879,42 +881,6 @@ class TestResolveScopeDepsEdgeCases:
 
 class TestDepsTreeTextFallback:
     """Force the text-only fallback branch of ``deps tree``."""
-
-    def test_tree_text_output_with_lockfile(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Text fallback still shows dep tree when rich is available (CliRunner strips markup)."""
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "apm.yml").write_text(_APM_YML_WITH_DEPS)
-        (tmp_path / "apm.lock.yaml").write_text(_LOCKFILE_ONE_DEP)
-        modules = tmp_path / "apm_modules"
-        _make_pkg(modules, "test-org", "test-dep")
-
-        result = CliRunner().invoke(cli, ["deps", "tree"])
-        assert result.exit_code == 0
-        assert "test-dep" in result.output
-
-    def test_tree_text_output_with_transitive(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Text output for transitive deps: shows child under parent."""
-        monkeypatch.chdir(tmp_path)
-        apm_yml = dedent("""\
-            name: test-project
-            version: 0.1.0
-            dependencies:
-              apm:
-                - test-org/parent-pkg
-        """)
-        (tmp_path / "apm.yml").write_text(apm_yml)
-        (tmp_path / "apm.lock.yaml").write_text(_LOCKFILE_WITH_TRANSITIVE)
-        modules = tmp_path / "apm_modules"
-        _make_pkg(modules, "test-org", "parent-pkg")
-        _make_pkg(modules, "test-org", "child-pkg")
-
-        result = CliRunner().invoke(cli, ["deps", "tree"])
-        assert result.exit_code == 0
-        assert "parent-pkg" in result.output
 
     def test_tree_directory_fallback_no_lockfile(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

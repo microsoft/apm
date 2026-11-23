@@ -1,6 +1,10 @@
 """Tests for URL normalization and shard key derivation."""
 
+import pytest
+
 from apm_cli.cache.url_normalize import cache_shard_key, normalize_repo_url
+
+pytestmark = pytest.mark.unit
 
 # Re-export the tests from __init__.py into a proper test file
 # for pytest discovery. The __init__.py contains the test classes

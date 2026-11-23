@@ -22,6 +22,8 @@ from apm_cli.adapters.client.gemini import GeminiClientAdapter
 from apm_cli.adapters.client.kiro import KiroClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 
+pytestmark = pytest.mark.component
+
 _JSONC = '{\n  // user servers\n  "SERVERS": {\n    "user-srv": {"command": "mine"},\n  }\n}\n'
 _ENTRY = {"command": "apm-srv", "args": []}
 

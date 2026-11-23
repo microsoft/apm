@@ -25,12 +25,14 @@ from typing import TYPE_CHECKING
 
 from click import ClickException
 
+from apm_cli.core.remediation import AUDIT_TARGET_FLAG_DISABLED
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
     expand_all,
     normalize_target_name,
 )
+from apm_cli.integration import write_seam
 from apm_cli.utils.file_ops import obstructed_path_message
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -508,10 +510,19 @@ class TargetProfile:
     def effective_pack_prefixes(self) -> tuple[str, ...]:
         """Return the path prefixes used by pack-time file filtering.
 
-        Falls back to ``(self.prefix,)`` when :attr:`pack_prefixes` is empty,
-        so most targets need not override the field explicitly.
+        Falls back to ``(self.prefix,)`` plus every primitive ``deploy_root``
+        directory (e.g. ``.agents/skills/``) when :attr:`pack_prefixes` is
+        empty, so most targets need not override the field explicitly (#4202).
         """
-        return self.pack_prefixes if self.pack_prefixes else (self.prefix,)
+        if self.pack_prefixes:
+            return self.pack_prefixes
+        prefixes = [self.prefix]
+        for mapping in self.primitives.values():
+            if mapping.deploy_root:
+                prefix = f"{mapping.deploy_root}/{mapping.subdir}/"
+                if prefix not in prefixes:
+                    prefixes.append(prefix)
+        return tuple(prefixes)
 
     def supports(self, primitive: str) -> bool:
         """Return ``True`` if this target accepts *primitive*."""
@@ -798,8 +809,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # AntigravityClientAdapter), NOT settings.json.
     # Antigravity has no TOML command surface (legacy Gemini commands
     # convert to skills upstream), so there is no commands primitive.
-    # User scope: skills -> ~/.gemini/antigravity-cli/skills/; MCP ->
-    # ~/.gemini/config/mcp_config.json (handled by the adapter).
+    # User scope: skills -> ~/.gemini/config/skills/ (read by the
+    # Antigravity App, CLI and IDE); MCP -> ~/.gemini/config/mcp_config.json
+    # (handled by the adapter). Skills recorded under the retired
+    # ~/.gemini/antigravity-cli/ root are cleaned up as stale managed files.
     # Instructions/hooks are not offered at user scope because Antigravity
     # spreads them across heterogeneous ~/.gemini/ subdirs.
     # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
@@ -824,7 +837,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=True,
         detect_by_dir=False,
         user_supported="partial",
-        user_root_dir=".gemini/antigravity-cli",
+        user_root_dir=".gemini/config",
         unsupported_user_primitives=("instructions", "hooks"),
         hooks_config_display=".agents/hooks.json",
     ),
@@ -1795,8 +1808,12 @@ def resolve_targets(
 def materialize_project_target_profiles(
     project_root: Path,
     target_names: list[str] | tuple[str, ...],
+    created: list[Path] | None = None,
 ) -> list[TargetProfile]:
-    """Create project target roots and return their canonical profiles."""
+    """Create project target roots and return their canonical profiles.
+
+    Roots created here are appended to *created* when it is given.
+    """
     profiles: list[TargetProfile] = []
     for target_name in target_names:
         profile = KNOWN_TARGETS.get(target_name)
@@ -1810,7 +1827,9 @@ def materialize_project_target_profiles(
         # Skills-only roots are created by the skill integrator on first write,
         # so an install that deploys nothing leaves no empty directory behind.
         if not deploy_path.is_dir() and not profile.skills_only:
-            deploy_path.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(deploy_path, parents=True, exist_ok=True)
+            if created is not None:
+                created.append(deploy_path)
         profiles.append(profile)
     return profiles
 
@@ -1826,8 +1845,13 @@ def resolve_audit_targets(
     *,
     user_scope: bool = False,
     lockfile: LockFile | None = None,
+    include_recorded: bool = False,
 ) -> list[TargetProfile]:
-    """Resolve read-only audit profiles through target and deployment owners."""
+    """Resolve read-only audit profiles through target and deployment owners.
+
+    *include_recorded* adds the targets the lock recorded to a declared
+    manifest target set, so a render covers targets the manifest just dropped.
+    """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import get_workspace_deploy_root
     from apm_cli.core.target_detection import (
@@ -1846,8 +1870,11 @@ def resolve_audit_targets(
         if lock is not None
         else ()
     )
+    manifest_target = read_manifest_target(project_root)
+    if include_recorded and manifest_target and recorded:
+        manifest_target = sorted({*manifest_target, *recorded})
     decision = resolve_audit_target_decision(
-        manifest_target=read_manifest_target(project_root),
+        manifest_target=manifest_target,
         recorded_targets=recorded,
     )
     for name in decision.canonical_targets or ():
@@ -1860,8 +1887,8 @@ def resolve_audit_targets(
             flag = profile.requires_flag.replace("_", "-")
             raise AuditTargetDisabledError(
                 f"Cannot audit target '{name}': experimental feature "
-                f"'{flag}' is disabled. Run "
-                f"'apm experimental enable {flag}' to audit this installation."
+                f"'{flag}' is disabled. "
+                f"{AUDIT_TARGET_FLAG_DISABLED.bind(flag=flag).sentence()}"
             )
     from apm_cli.integration.skill_layout import (
         recorded_deployed_paths,

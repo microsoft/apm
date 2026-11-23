@@ -9,7 +9,9 @@ from hypothesis import strategies as st
 from apm_cli.models.dependency.subsets import (
     EdgeSelection,
     SelectionMergeError,
+    SkillTargetSelection,
     merge_edge_selections,
+    parse_target_subset,
     union_selection_names,
 )
 
@@ -122,3 +124,49 @@ def test_allow_insecure_requires_every_edge() -> None:
     denied = EdgeSelection(("org/a",), None, None)
     assert merge_edge_selections([allowed]).allow_insecure is True
     assert merge_edge_selections([allowed, denied]).allow_insecure is False
+
+
+@pytest.mark.parametrize(
+    ("declared", "expected"),
+    [
+        (["vscode"], ["copilot"]),
+        (["agents"], ["copilot"]),
+        (["copilot", "vscode", "claude"], ["claude", "copilot"]),
+    ],
+)
+def test_dependency_targets_resolve_aliases_to_canonical_names(declared, expected) -> None:
+    """#3855: a dependency edge records canonical target identifiers, deduplicated."""
+    assert parse_target_subset(declared) == expected
+
+
+def test_vscode_and_copilot_edges_merge_to_one_copilot_target() -> None:
+    """#3855: alias spellings of one target never record twice."""
+    merged = merge_edge_selections(
+        [
+            EdgeSelection(parent_chain=("org/a",), skill_subset=None, target_subset=("vscode",)),
+            EdgeSelection(parent_chain=("org/b",), skill_subset=None, target_subset=("copilot",)),
+        ]
+    )
+
+    assert merged.target_subset == ("copilot",)
+
+
+@pytest.mark.parametrize(
+    "records",
+    [None, [{"skills": ["alpha"], "targets": ["vscode"]}, {"targets": ["claude"]}]],
+    ids=["flat", "pairings"],
+)
+def test_lock_fields_that_recorded_vscode_decode_as_copilot(records) -> None:
+    """#3855: locks written before canonical recording replay unchanged."""
+    if records is None:
+        legacy = SkillTargetSelection.from_lock_fields(None, ["vscode"])
+        current = SkillTargetSelection.from_lock_fields(None, ["copilot"])
+    else:
+        legacy = SkillTargetSelection.from_lock_fields(None, ["claude", "vscode"], records)
+        current = SkillTargetSelection.from_lock_fields(
+            None,
+            ["claude", "copilot"],
+            [{"skills": ["alpha"], "targets": ["copilot"]}, {"targets": ["claude"]}],
+        )
+
+    assert legacy == current

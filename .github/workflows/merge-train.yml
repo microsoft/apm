@@ -1,0 +1,318 @@
+# Merge Train -- exact-SHA proof for a speculative merge result (#4574).
+#
+# A queue runner (or a person) pushes a train ref: main plus one or more PRs,
+# merged in order. This workflow proves that exact SHA and reports ONE check,
+# `train-gate`, read at that SHA through the Checks API.
+#
+# Refs (the suffix sets the scope):
+#   queue/t<id>/p<k>-guard  cheap guards only (lint chain, ratchets, tests/quality)
+#   queue/t<id>/p<k>-full   guards plus Tier 1 (ci.yml), Tier 2 (ci-integration.yml)
+#                           the spec checks (spec-conformance.yml) and the owner
+#                           check (owner-surface.yml)
+#   queue/b<sha12>/p0-full  full proof of a main SHA (base probe)
+# `*` does not cross `/`, so no other branch triggers this workflow. A manual
+# probe dispatches the queue branch itself (`gh workflow run merge-train.yml
+# --ref queue/t<id>/p<k>-full`); the scope job fails on any other ref. Every
+# job checks out the triggering commit only, never an input ref.
+#
+# Base: the head commit's `Queue-Base: <40-hex>` trailer, else the merge base
+# with origin/main. The lint chain's shrink-only ratchets compare against it.
+#
+# Trust model: only write-access users can push queue/* refs, the same
+# boundary as merge_group. Tier 2 needs the integration secrets, so it
+# receives `secrets: inherit`; nothing else does. Never add
+# pull_request_target or another push branch here.
+#
+# Queue refs are real branches. Train jobs may RESTORE caches, including
+# main's, but never save: every setup-uv step here sets save-cache: false
+# (#4531). Called ci.yml, ci-integration.yml and spec-conformance.yml jobs run as push events on
+# the queue branch, so any cache they save lands in that branch's scope only.
+#
+# train-gate subtracts the inherited baseline (#4704): failing node ids that the
+# base probe's train-failures.json already lists do not block the train.
+#
+# cleanup deletes the train branch after train-gate; it is the only job with
+# contents: write and never feeds the verdict. tests/quality/test_ci_topology.py
+# pins triggers, scope coverage, the gate, cleanup and the cache contract.
+name: Merge Train
+
+# Deleting a queue branch (cleanup does) also fires `push`, with
+# github.event.deleted true and the default branch's SHA. Every job skips
+# that event, so it never posts a check on main's commit.
+on:
+  push:
+    branches: ['queue/t*/p*', 'queue/b*/p*']
+  workflow_dispatch:
+
+# Every run has its own group, so no run is ever cancelled or replaced while
+# pending (a shared group with cancel-in-progress: false still replaces a
+# pending run when a third joins). The runner cancels abandoned runs itself.
+concurrency:
+  group: merge-train-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  scope:
+    name: scope
+    if: github.event.deleted != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      base_sha: ${{ steps.base.outputs.base_sha }}
+    steps:
+    - name: Parse scope
+      id: scope
+      env:
+        REF_NAME: ${{ github.ref_name }}
+      run: |
+        if [[ "$REF_NAME" =~ ^queue/t[0-9]+/p[0-9]+-(guard|full)$ ]]; then
+          scope="${BASH_REMATCH[1]}"
+        elif [[ "$REF_NAME" =~ ^queue/b[0-9a-f]{12}/p0-full$ ]]; then
+          scope=full
+        else
+          echo "::error::'$REF_NAME' is not a train ref (queue/t<id>/p<k>-guard|-full or queue/b<sha12>/p0-full); dispatch with --ref <queue branch>."
+          exit 1
+        fi
+        echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        filter: blob:none
+        persist-credentials: false
+
+    - name: Resolve train base
+      id: base
+      run: |
+        # The base is always the merge base with main. A Queue-Base trailer
+        # must name exactly that commit: an older ancestor would weaken the
+        # shrink-only ratchets' baseline-growth checks.
+        base="$(git merge-base HEAD origin/main)"
+        if ! [[ "$base" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::Train head has no merge base with origin/main; got '$base'."
+          exit 1
+        fi
+        trailer="$(git log -1 --format='%(trailers:key=Queue-Base,valueonly,separator=%x20)' HEAD | tr -d '[:space:]')"
+        if [ -n "$trailer" ] && [ "$trailer" != "$base" ]; then
+          echo "::error::Queue-Base trailer '$trailer' must equal the merge base with main ($base)."
+          exit 1
+        fi
+        echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+
+  # The cheap guards, on every train ref (about 5 min): the lint chain, the
+  # architecture ratchet contracts and every other tests/quality module, and
+  # the NOTICE drift check that merge_group requires.
+  guard:
+    name: guard
+    needs: [scope]
+    if: github.event.deleted != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: true
+        save-cache: false
+
+    - name: Install dependencies
+      run: uv sync --frozen --extra dev
+
+    - name: Lint chain
+      uses: ./.github/actions/lint-chain
+      with:
+        base-sha: ${{ needs.scope.outputs.base_sha }}
+
+    # Same selection as ci.yml's test-architecture-contracts job, never
+    # provisional (tests/quality/test_ci_topology.py pins it).
+    - name: Run ratchet contract tests
+      run: |
+        uv run --frozen --extra dev pytest -p no:cacheprovider -q \
+          tests/unit/scripts/test_check_test_assertions.py \
+          tests/unit/scripts/test_check_exact_test_duplicates.py \
+          tests/unit/scripts/test_check_complexity_ratchet.py \
+          tests/unit/scripts/test_check_obligation_status_ratchet.py \
+          tests/quality/test_test_taxonomy.py \
+          tests/quality/test_quality_baselines.py \
+          tests/quality/test_lifecycle_bug_ledger.py \
+          tests/quality/test_ci_topology.py \
+          tests/quality/test_promise_obligations.py \
+          tests/quality/test_cli_docs_surface.py \
+          tests/quality/test_journey_index.py \
+          tests/quality/test_generated_obligations.py \
+          tests/quality/test_known_cells_cite_open_issues.py \
+          tests/quality/test_known_cell_closing.py \
+          tests/quality/test_oracle_user_writes.py \
+          tests/quality/test_scenario_refusal_credit.py \
+          tests/quality/test_cli_command_literals.py
+
+    # The tests/quality modules the contracts step does not run.
+    - name: Run remaining quality tests
+      run: uv run --frozen --extra dev pytest -p no:cacheprovider -q tests/quality/test_gate_cell_obligations.py
+
+    - name: Verify NOTICE is up to date
+      run: uv run python scripts/generate-notice.py --check
+
+  tier1:
+    name: tier1
+    needs: [scope]
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      base_sha: ${{ needs.scope.outputs.base_sha }}
+
+  tier2:
+    name: tier2
+    needs: [scope]
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/ci-integration.yml
+    with:
+      base_sha: ${{ needs.scope.outputs.base_sha }}
+    secrets: inherit
+
+  spec:
+    name: spec
+    needs: [scope]
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/spec-conformance.yml
+    with:
+      base_sha: ${{ needs.scope.outputs.base_sha }}
+
+  owner:
+    name: owner
+    needs: [scope]
+    if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/owner-surface.yml
+    with:
+      base_sha: ${{ needs.scope.outputs.base_sha }}
+
+  train-gate:
+    name: train-gate
+    needs: [scope, guard, tier1, tier2, spec, owner]
+    if: always() && github.event.deleted != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # actions: read lists this run's jobs, reads failed job logs and downloads the
+    # base probe's train-failures artifact (the inherited baseline, #4704).
+    permissions:
+      actions: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        sparse-checkout: scripts/merge_queue
+        persist-credentials: false
+
+    # Failing node ids minus the base probe's train-failures.json. It never fails
+    # the job: on any error inherited_only is false and the next step decides alone.
+    - name: Subtract the inherited baseline
+      id: baseline
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RUN_ID: ${{ github.run_id }}
+        BASE_SHA: ${{ needs.scope.outputs.base_sha }}
+      run: python3 scripts/merge_queue/gate.py --run-id "$RUN_ID" --base-sha "$BASE_SHA" --out train-failures.json
+
+    - name: Require every train job
+      env:
+        INHERITED_ONLY: ${{ steps.baseline.outputs.inherited_only }}
+        REF: ${{ github.ref_name }}
+        SHA: ${{ github.sha }}
+        SCOPE: ${{ needs.scope.outputs.scope }}
+        BASE_SHA: ${{ needs.scope.outputs.base_sha }}
+        SCOPE_RESULT: ${{ needs.scope.result }}
+        GUARD_RESULT: ${{ needs.guard.result }}
+        TIER1_RESULT: ${{ needs.tier1.result }}
+        TIER2_RESULT: ${{ needs.tier2.result }}
+        SPEC_RESULT: ${{ needs.spec.result }}
+        OWNER_RESULT: ${{ needs.owner.result }}
+      run: |
+        {
+          echo "### train-gate"
+          echo
+          echo "| ref | sha | scope | base |"
+          echo "| --- | --- | --- | --- |"
+          echo "| $REF | $SHA | $SCOPE | $BASE_SHA |"
+          echo
+          echo "scope=$SCOPE_RESULT guard=$GUARD_RESULT tier1=$TIER1_RESULT tier2=$TIER2_RESULT spec=$SPEC_RESULT owner=$OWNER_RESULT"
+        } >> "$GITHUB_STEP_SUMMARY"
+        case "$SCOPE" in
+          full) tiers=success ;;
+          guard) tiers=skipped ;;
+          *) echo "::error::Unknown train scope '$SCOPE'."; exit 1 ;;
+        esac
+        # A job that ran and failed only on inherited node ids counts as green.
+        ok() { [ "$1" = "$2" ] || { [ "${INHERITED_ONLY:-false}" = true ] && [ "$2" = success ] && [ "$1" = failure ]; }; }
+        if [ "$SCOPE_RESULT" != success ] || ! ok "$GUARD_RESULT" success || ! ok "$TIER1_RESULT" "$tiers" || ! ok "$TIER2_RESULT" "$tiers" || ! ok "$SPEC_RESULT" "$tiers" || ! ok "$OWNER_RESULT" "$tiers"; then
+          echo "::error::Train is not green: scope=$SCOPE_RESULT guard=$GUARD_RESULT tier1=$TIER1_RESULT tier2=$TIER2_RESULT spec=$SPEC_RESULT owner=$OWNER_RESULT ($SCOPE scope)."
+          exit 1
+        fi
+        echo "Train green at $SHA ($SCOPE scope, inherited_only=${INHERITED_ONLY:-false})."
+
+    # The next train on this SHA, and the runner's classifier, read this report.
+    - name: Publish train-failures.json
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: train-failures
+        path: train-failures.json
+        retention-days: 14
+        if-no-files-found: ignore
+        overwrite: true
+
+  # Deletes the train branch once train-gate has reported. Its result is not
+  # part of the verdict: train-gate does not need it.
+  cleanup:
+    name: cleanup
+    needs: [scope, train-gate]
+    if: always() && github.event.deleted != true && startsWith(github.ref, 'refs/heads/queue/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: write
+    steps:
+    - name: Delete the train branch
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        # Same refs the scope job accepts; anything else is never deleted.
+        if [ "$GITHUB_REF" != "refs/heads/$GITHUB_REF_NAME" ] || ! [[ "$GITHUB_REF_NAME" =~ ^queue/t[0-9]+/p[0-9]+-(guard|full)$ || "$GITHUB_REF_NAME" =~ ^queue/b[0-9a-f]{12}/p0-full$ ]]; then
+          echo "::notice::'$GITHUB_REF' is not a train branch; nothing to delete."
+          exit 0
+        fi
+        if output="$(gh api -X DELETE "repos/$REPO/git/refs/heads/$GITHUB_REF_NAME" 2>&1)"; then
+          echo "Deleted $GITHUB_REF_NAME."
+        elif grep -q "Reference does not exist" <<<"$output"; then
+          echo "$GITHUB_REF_NAME was already deleted."
+        else
+          echo "::error::Could not delete $GITHUB_REF_NAME: $output"
+          exit 1
+        fi

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.36.1"
+version = "0.38.1"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -102,18 +102,18 @@ ignore = [
 ]
 
 [tool.ruff.lint.pylint]
-# High initial thresholds set just above current codebase maximums.
-# Prevents new code from exceeding the worst existing violations.
-# Tighten these over time via dedicated refactoring PRs.
-# Stage 1 thresholds (PR #1464, issue #1077).
-# Roadmap: Stage 2 targets max-complexity<=20, max-branches<=25 (McCabe standard).
+# Stage 1 absolute ceilings (PR #1464, issue #1077), enforced by `ruff check`.
+# Stage 2 limits (max-statements 120, max-args 12, max-branches 40,
+# max-returns 8, max-complexity 35) are enforced for new and changed code by
+# scripts/check_complexity_ratchet.py, with existing violators grandfathered
+# in the shrink-only tests/quality/complexity_baseline.json (issue #1076).
 max-statements = 200   # Stage 1 (was 275)
 max-args = 15          # Stage 1 (was 18)
 max-branches = 60      # Stage 1 (was 115)
 max-returns = 12       # Stage 1 (was 18)
 
 [tool.ruff.lint.mccabe]
-# Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
+# Stage 1 (was 100). Stage 2 (35) is enforced by the complexity ratchet.
 max-complexity = 50
 
 [tool.ruff.lint.isort]
@@ -170,6 +170,14 @@ only_mutate = [
     "src/apm_cli/policy/discovery.py",
     "src/apm_cli/compilation/link_resolver.py",
     "src/apm_cli/deps/lockfile.py",
+    "src/apm_cli/policy/outcome_routing.py",
+    "src/apm_cli/security/executables.py",
+    "src/apm_cli/install/pipeline_entry.py",
+    "src/apm_cli/install/commit_gate.py",
+    "src/apm_cli/deps/lockfile_write_authority.py",
+    "src/apm_cli/core/scope.py",
+    "src/apm_cli/deps/egress_route.py",
+    "src/apm_cli/core/remediation.py",
 ]
 pytest_add_cli_args = [
     "-n0",
@@ -182,13 +190,21 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/test_skill_subset_persistence.py",
     "tests/unit/test_dep_targets_persistence.py",
     "tests/unit/install/test_plan.py",
-    "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_covers_every_dataclass_leaf",
-    "tests/unit/policy/test_cache_merged_effective.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
+    "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_covers_every_dataclass_leaf",
+    "tests/unit/policy/test_cache_merged_effective_logic.py::test_policy_serializer_preserves_sparse_bin_deploy_shapes",
     "tests/unit/policy/test_cache_merged_effective.py::TestPolicyRoundTrip::test_all_effective_policy_fields_survive_cache_round_trip",
     "tests/unit/compilation/test_link_resolver.py",
-    "tests/unit/compilation/test_link_resolver_phase3.py",
     "tests/unit/compilation/test_link_resolver_resolution.py",
     "tests/unit/deps/test_lockfile_field_properties.py",
+    "tests/unit/policy/test_outcome_routing.py",
+    "tests/unit/security/test_resolve_exec_decision.py",
+    "tests/unit/security/test_exec_trust_context.py",
+    "tests/unit/install/test_pipeline_entry.py",
+    "tests/unit/install/test_commit_gate.py",
+    "tests/unit/deps/test_lockfile_write_authority.py",
+    "tests/unit/core/test_apm_home_resolution.py",
+    "tests/unit/deps/test_egress_route.py",
+    "tests/unit/core/test_remediation.py",
 ]
 timeout_constant = 1.0
 timeout_multiplier = 5.0
@@ -220,6 +236,7 @@ markers = [
     "requires_runtime_llm: requires llm runtime installed",
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
+    "promise: links a test module to one or more ids from tests/quality/promise-catalog.json (required on new test modules)",
     "lifecycle_smoke: promoted to the required PR-time Lifecycle Smoke (Linux) job -- see ci.yml's lifecycle-smoke job and docs/src/content/docs/contributing/integration-testing.md",
     "lifecycle_merge_group: unique lifecycle contracts retained in the full merge-group integration suite",
     "architecture_contract: platform-agnostic architecture-linter contract over repository source (applied to tests/integration/test_architecture_*); runs once on Linux, deselected on macOS, Windows and Linux arm64 release lanes",

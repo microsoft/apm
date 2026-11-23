@@ -1,0 +1,11 @@
+# apm journey golden v1: J03 step 3
+$ apm audit --ci -f sarif -o apm.sarif
+[exit 0]
+--- stdout
+--- stderr
+[!] Could not determine org from git remote; enforcement skipped (set policy.fetch_failure_default=block in apm.yml to fail closed)
+[>] Replaying install (cache-only)...
+[+] Replayed 2 package(s)
+[>] Diffing scratch vs working tree...
+[+] No drift detected
+[*] CI audit report written to apm.sarif

@@ -38,6 +38,7 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+from tests.utils.deployment_evidence import receipted_evidence
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -649,10 +650,17 @@ class TestSkillIntegratorSyncIntegration:
         (skill_dir / "SKILL.md").write_text("old")
 
         apm_package = _make_apm_package()
-        managed_files = {".agents/skills/old-skill"}
+        # The lockfile records the skill directory and its members; deleting a
+        # member needs deployment evidence (#3701).
+        managed_files = {".agents/skills/old-skill", ".agents/skills/old-skill/SKILL.md"}
 
         integrator = SkillIntegrator()
-        stats = integrator.sync_integration(apm_package, project_root, managed_files=managed_files)
+        stats = integrator.sync_integration(
+            apm_package,
+            project_root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(skill_dir, deploy_root=project_root),
+        )
         assert stats["files_removed"] >= 1
         assert not skill_dir.exists()
 
@@ -769,7 +777,7 @@ class TestPromoteSubSkills:
         assert not (target_root / "exclude-me").exists()
 
     def test_identical_content_skips_copy(self, tmp_path: Path) -> None:
-        """If target already has identical content, no error and count still 1."""
+        """Identical content re-promotes without error; only the first promote counts (#4184)."""
         sub_skills = tmp_path / "sub"
         sub_skills.mkdir()
         _make_skill_dir(sub_skills, "idempotent-skill")
@@ -778,10 +786,12 @@ class TestPromoteSubSkills:
         target_root.mkdir()
 
         # First promote
-        SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
-        # Second promote with identical content
-        count, _deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
-        assert count == 1
+        first_count, _ = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
+        assert first_count == 1
+        # Second promote with identical content: still deployed, but unchanged
+        count, deployed = SkillIntegrator._promote_sub_skills(sub_skills, target_root, "parent")
+        assert count == 0
+        assert deployed == [target_root / "idempotent-skill"]
 
 
 # ===========================================================================

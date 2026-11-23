@@ -5,17 +5,28 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
+
+from apm_cli.core.remediation import (
+    COMPILED_OUTPUTS_ORPHANED,
+    ORPHANED_PACKAGES_PRUNE,
+    TARGET_NOT_DEPLOYED,
+    USER_INSTRUCTIONS_MISSING,
+    USER_MANIFEST_INVALID,
+    USER_PACKAGES_MISSING,
+)
+from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
     from ...integration.targets import TargetProfile
 
 from ...compilation import AgentsCompiler, CompilationConfig
-from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
+from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
+from ...core.deprecations import deprecation_message
 from ...core.target_catalog import (
     TARGET_CAPABILITIES,
     expand_all,
@@ -24,10 +35,12 @@ from ...core.target_catalog import (
     target_help_fragment,
 )
 from ...core.target_detection import TargetParamType, should_compile_agents_md
+from ...deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from ...install.locking import serialized_lifecycle_unless
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
+    _rich_echo,
     _rich_error,
     _rich_info,
     _rich_panel,
@@ -37,6 +50,7 @@ from .._helpers import (
     _get_console,
     _rich_blank_line,
 )
+from .staging import report_staged_hash_drift
 from .watcher import _watch_mode
 
 
@@ -55,9 +69,9 @@ def _display_single_file_summary(
 
         import os
 
-        from rich.table import Table
+        from apm_cli.utils.console import new_table
 
-        table = Table(
+        table = new_table(
             title="Compilation Summary",
             show_header=True,
             header_style="bold cyan",
@@ -136,9 +150,9 @@ def _display_validation_errors(errors):
     try:
         console = _get_console()
         if console:
-            from rich.table import Table
+            from apm_cli.utils.console import new_table
 
-            error_table = Table(
+            error_table = new_table(
                 title="[x] Primitive Validation Errors",
                 show_header=True,
                 header_style="bold red",
@@ -171,7 +185,7 @@ def _display_validation_errors(errors):
     # Fallback to simple text output
     _rich_error("Validation errors found:")
     for error in errors:
-        click.echo(f"  [x] {error}")
+        _rich_echo(f"  [x] {error}", color="red")
 
 
 def _get_validation_suggestion(error_msg):
@@ -341,7 +355,7 @@ def _resolve_effective_target(
 
     _root = source_root or Path(".")
     config_target = None
-    apm_yml_path = _root / APM_YML_FILENAME
+    apm_yml_path = manifest_file(_root)
     if apm_yml_path.exists():
         config_target = package_target_selection(APMPackage.from_apm_yml(apm_yml_path))
         if isinstance(config_target, list) and len(config_target) == 1:
@@ -386,7 +400,7 @@ def _global_compile_targets(source_root: Path) -> tuple[list[TargetProfile], lis
     from ...integration.targets import KNOWN_TARGETS
     from ...models.manifest_targets import read_manifest_target_declaration
 
-    declaration = read_manifest_target_declaration(source_root / APM_YML_FILENAME)
+    declaration = read_manifest_target_declaration(manifest_file(source_root))
     if declaration is None or declaration.spelling is None:
         return list(KNOWN_TARGETS.values()), None
     declared = declaration.restriction(strict=True)
@@ -409,14 +423,14 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     from ...compilation import compile_user_root_contexts
     from ...core.errors import TargetResolutionError
     from ...core.scope import InstallScope, get_apm_dir
+    from ...models.manifest_io import InvalidManifestError
 
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
         display_path = _display_user_path(apm_modules)
         logger.error(
-            f"User-scope apm_modules not found: {display_path}. "
-            "Run 'apm install -g <package>' to install packages globally.",
+            f"User-scope apm_modules not found: {display_path}. {USER_PACKAGES_MISSING.sentence()}",
             symbol="error",
         )
         return 1
@@ -427,25 +441,29 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
     try:
         compile_targets, declared_targets = _global_compile_targets(source_root)
     except TargetResolutionError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        display_path = _display_user_path(manifest_file(source_root))
         summary = str(exc).split("\n\nFix with one of:", maxsplit=1)[0]
         logger.error(
-            f"{summary}\n\nFix {display_path} and rerun 'apm compile -g'.",
-            symbol="",
-        )
-        return 1
-    except yaml.YAMLError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
-        logger.error(
-            f"Failed to parse {display_path}: {exc}. Fix the manifest and rerun 'apm compile -g'.",
+            f"{summary}\n\n{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
             symbol="error",
         )
         return 1
+    except yaml.YAMLError as exc:
+        display_path = _display_user_path(manifest_file(source_root))
+        logger.error(
+            f"Failed to parse {display_path}: {exc}. "
+            f"{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
+            symbol="error",
+        )
+        return 1
+    except InvalidManifestError as exc:
+        logger.error(f"{exc}", symbol="error")
+        return 1
     except OSError as exc:
-        display_path = _display_user_path(source_root / APM_YML_FILENAME)
+        display_path = _display_user_path(manifest_file(source_root))
         logger.error(
             f"Failed to read {display_path}: {exc}. "
-            "Ensure it is a readable YAML file and rerun 'apm compile -g'.",
+            f"{USER_MANIFEST_INVALID.bind(path=display_path).sentence()}",
             symbol="error",
         )
         return 1
@@ -461,8 +479,12 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             if declared_names == target_names
             else f"{declared_names} -> {target_names}"
         )
-        selection_source = _display_user_path(source_root / APM_YML_FILENAME)
+        selection_source = _display_user_path(manifest_file(source_root))
     logger.verbose_detail(f"Global targets from {selection_source}: {provenance}")
+
+    # After the manifest is validated: its own errors keep their framing.
+    if not _dependency_policy_allows(logger, [source_root], user_scope=True):
+        return 1
 
     results = compile_user_root_contexts(
         compile_targets,
@@ -480,8 +502,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger, *, clean: bool = F
             )
         else:
             message = (
-                "No user-scope targets produced output -- run 'apm install -g <package>' "
-                "to add global instructions."
+                f"No user-scope targets produced output -- {USER_INSTRUCTIONS_MISSING.clause()}."
             )
         logger.info(message, symbol="info")
         return 0
@@ -579,7 +600,7 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
     from ...core.lifecycle_scripts import build_runner_from_context, event_for_dependencies
     from ...models.apm_package import APMPackage
 
-    manifest = source_root / APM_YML_FILENAME
+    manifest = manifest_file(source_root)
     if not manifest.exists():
         return
     project_root = str(source_root)
@@ -605,11 +626,16 @@ def _fire_pre_compile(logger: CommandLogger, verbose: bool, source_root: Path) -
 def _pre_compile_then_validate(
     logger: CommandLogger, verbose: bool, source_root: Path | None, *, clean: bool, run: bool
 ) -> None:
-    """When ``run``, fire pre-compile scripts, then check the project they may have populated."""
-    if not run or source_root is None:
-        return
-    _fire_pre_compile(logger, verbose, source_root)
-    _validate_project(logger, False, source_root, allow_empty=clean)
+    """When ``run``, fire pre-compile scripts, then check the project they may have populated.
+
+    Under the lifecycle lock, right before rendering, the org dependency policy
+    judges the current installed inventory again: a script or an install that
+    finished while compile waited for the lock may have changed it.
+    """
+    if run and source_root is not None:
+        _fire_pre_compile(logger, verbose, source_root)
+        _validate_project(logger, False, source_root, allow_empty=clean)
+    _enforce_dependency_policy(logger, [source_root or Path.cwd(), Path.cwd()])
 
 
 def _validate_project(
@@ -630,7 +656,7 @@ def _validate_project(
     from ...compilation.constitution import find_constitution
     from ...core.scope import InstallScope, get_modules_dir
 
-    if not (source_root / APM_YML_FILENAME).exists():
+    if not manifest_file(source_root).exists():
         logger.error("Not an APM project - no apm.yml found")
         logger.progress(" To initialize an APM project, run:")
         logger.progress("   apm init")
@@ -676,6 +702,132 @@ def _validate_project(
             sys.exit(1)
 
 
+def _rendered_dependencies(root: Path, *, user_scope: bool) -> list[tuple[str, Any]]:
+    """``(key, DependencyReference)`` for every installed package compile renders from *root*."""
+    from ...install.installed_dependencies import installed_dependency_subjects
+
+    return [(s.key, s.ref) for s in installed_dependency_subjects(root, user_scope=user_scope)]
+
+
+def _declared_across_roots(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Declared dependencies of any root's manifest installed under any root's apm_modules.
+
+    With ``--root`` the renderer reads the source manifest and the redirected
+    installation together, so a package can be declared in one root and
+    installed only in the other.
+    """
+    from ...core.scope import scope_manifest_path
+    from ...models.apm_package import APMPackage
+
+    found: dict[str, Any] = {}
+    if len(roots) < 2:
+        return found
+    for root in roots:
+        manifest = scope_manifest_path(root, user_scope=user_scope)
+        if not manifest.is_file():
+            continue
+        try:
+            declared = APMPackage.from_apm_yml(manifest).get_apm_dependencies()
+        except ValueError:
+            continue  # compile reports an invalid manifest itself
+        for dep in declared:
+            if dep.is_marketplace:
+                continue  # resolves at install; the lock names it
+            if any(dep.get_install_path(other / "apm_modules").is_dir() for other in roots):
+                found.setdefault(dep.get_unique_key(), dep)
+    return found
+
+
+def _policy_subjects(roots: list[Path], *, user_scope: bool) -> dict[str, Any]:
+    """Every installed package compile renders from *roots*, keyed by lock key."""
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = {
+        key: ref
+        for root in unique_roots
+        for key, ref in _rendered_dependencies(root, user_scope=user_scope)
+    }
+    for key, ref in _declared_across_roots(unique_roots, user_scope=user_scope).items():
+        subjects.setdefault(key, ref)  # the lock's effective source (replace:) wins
+    return subjects
+
+
+def _forget_compile_policy(logger: CommandLogger) -> None:
+    """Start a new compilation: resolve the policy and report warnings afresh (watch mode)."""
+    for name in ("_apm_compile_policy", "_apm_policy_warned"):
+        if name in vars(logger):
+            delattr(logger, name)
+
+
+def _dependency_policy_allows(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> bool:
+    """Whether org policy lets compile render what is installed under *roots*.
+
+    Compile renders installed dependency content (and the files it deployed)
+    into agent context, so it applies the dependency check install, update
+    and uninstall apply, routed through the trust policy owner so an unusable
+    policy fails closed as install does. ``enforcement: warn`` reports and
+    allows. Reports each denied package and the remediation when it refuses.
+    A warning already reported to *logger* (this command) is not repeated.
+    """
+    from ...core.remediation import COMPILE_DEPENDENCY_DENIED
+    from ...core.scope import manifest_root
+    from ...install.errors import PolicyViolationError
+    from ...install.exec_gate import policy_denied_dependencies
+    from ...policy.outcome_routing import resolve_trust_policy
+
+    unique_roots = list(dict.fromkeys(root.resolve() for root in roots))
+    subjects = _policy_subjects(unique_roots, user_scope=user_scope)
+    if not subjects:
+        return True
+    # One resolution per command: the recheck under the lock re-reads the
+    # inventory, not the policy (resolving reports its outcome once).
+    resolved = getattr(logger, "_apm_compile_policy", None)
+    if not isinstance(resolved, tuple):
+        try:
+            resolved = (
+                resolve_trust_policy(
+                    manifest_root(unique_roots[0], user_scope=user_scope), logger=logger
+                ),
+            )
+        except PolicyViolationError as exc:
+            logger.error(str(exc))
+            return False
+        logger._apm_compile_policy = resolved
+    policy = resolved[0]
+    denied = policy_denied_dependencies(subjects.items(), policy) if policy is not None else {}
+    enforcement = getattr(policy, "enforcement", "block")
+    if not denied or enforcement == "off":
+        return True
+    blocking = enforcement != "warn"
+    # The command judges twice (before and under its lock); warn once per package.
+    warned = getattr(logger, "_apm_policy_warned", None)
+    warned = warned if isinstance(warned, set) else set()
+    for key, reason in sorted(denied.items()):
+        message = f"{key}: {reason}"
+        if blocking:
+            logger.error(message)
+        elif message not in warned:
+            logger.warning(message)
+            warned.add(message)
+    if not blocking:
+        logger._apm_policy_warned = warned
+    if blocking:
+        logger.refusal(
+            "Compile blocked by org policy -- nothing was written. "
+            f"{COMPILE_DEPENDENCY_DENIED.sentence()}"
+        )
+    return not blocking
+
+
+def _enforce_dependency_policy(
+    logger: CommandLogger, roots: list[Path], *, user_scope: bool = False
+) -> None:
+    """Exit 1 before anything is written when org policy refuses the compile."""
+    if not _dependency_policy_allows(logger, roots, user_scope=user_scope):
+        sys.exit(1)
+
+
 def _run_validation_mode(logger: CommandLogger, verbose: bool, source_root: Path) -> None:
     """Run validation-only mode (``--validate`` flag).
 
@@ -709,7 +861,7 @@ def _run_validation_mode(logger: CommandLogger, verbose: bool, source_root: Path
     try:
         from ...models.apm_package import APMPackage
 
-        apm_pkg = APMPackage.from_apm_yml(source_root / APM_YML_FILENAME)
+        apm_pkg = APMPackage.from_apm_yml(manifest_file(source_root))
         mcp_count = len(apm_pkg.get_mcp_dependencies())
         if mcp_count > 0:
             logger.progress(f"  * {mcp_count} MCP dependencies")
@@ -738,10 +890,7 @@ def _run_watch_mode(
     :func:`_watch_mode`.
     """
     if clean:
-        logger.warning(
-            "--clean is ignored in watch mode; run 'apm compile --clean' "
-            "separately to remove orphaned outputs."
-        )
+        logger.warning(f"--clean is ignored in watch mode; {COMPILED_OUTPUTS_ORPHANED.clause()}.")
     effective_target, _detection_reason, config_target = _resolve_effective_target(
         target, source_root=source_root
     )
@@ -841,8 +990,46 @@ def _report_protected_no_write(
     )
 
 
+def _coerce_provenance_targets(value: object) -> list[str]:
+    """Return the user-facing target names shown on the provenance line."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    if isinstance(value, list):
+        return [str(t) for t in value]
+    if isinstance(value, frozenset):
+        return sorted(value)
+    return []
+
+
+def _report_target_without_compile_output(
+    logger: CommandLogger, effective_target: CompileTargetType
+) -> bool:
+    """Report the no-op for a target without root-context output.
+
+    Returns True when *effective_target* compiles nothing, so the caller
+    stops before running the compiler. Experimental targets whose flag is
+    off also get the canonical enable hint.
+    """
+    from ...core.target_detection import target_without_compile_output
+    from ...install.target_hints import emit_disabled_experimental_target_hint
+
+    capability = target_without_compile_output(effective_target)
+    if capability is None:
+        return False
+    emit_disabled_experimental_target_hint(capability.name, (), logger, create_config=False)
+    logger.progress(
+        f"{capability.name} has no compile outputs -- skipping. "
+        f"{TARGET_NOT_DEPLOYED.bind(target=capability.name).sentence()}",
+        symbol="info",
+    )
+    return True
+
+
 @serialized_lifecycle_unless("dry_run")
-def _run_compilation(
+@lockfile_writer(LockfileWriter.COMPILE)
+def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
     logger: CommandLogger,
     target: str | list[str] | None,
     output: str,
@@ -868,7 +1055,13 @@ def _run_compilation(
     Handles both distributed (default) and single-file (``--single-agents``)
     strategies, emits the canonical target-provenance line, runs the
     compiler, reports results, and hard-fails on critical security findings.
+    Compile reconciles apm.lock.yaml, so like every lockfile writer it refuses
+    a lockfile it may not rewrite before it changes anything.
     """
+    if not dry_run:
+        from ...deps.lockfile_generator import require_current_cli
+
+        require_current_cli(Path.cwd(), command="apm compile")
     _pre_compile_then_validate(logger, verbose, source_root, clean=clean, run=run_scripts)
     from ...core.target_detection import (
         REASON_NO_TARGET_FOLDER,
@@ -880,6 +1073,7 @@ def _run_compilation(
     logger.start("Starting context compilation...", symbol="cogs")
 
     _src = source_root or Path(".")
+    report_staged_hash_drift(logger, _src)
 
     # Resolve effective target using the shared helper (mirrors watch-mode path).
     effective_target, detection_reason, config_target = _resolve_effective_target(
@@ -894,17 +1088,6 @@ def _run_compilation(
     # the user wrote (e.g. "copilot"), so compile must too, otherwise
     # parity drifts (compile would print "agents, vscode" for the
     # same input).
-    def _coerce_provenance_targets(value):
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [t.strip() for t in value.split(",") if t.strip()]
-        if isinstance(value, list):
-            return [str(t) for t in value]
-        if isinstance(value, frozenset):
-            return sorted(value)
-        return []
-
     if detection_reason == "explicit --target flag":
         _provenance_targets = _coerce_provenance_targets(target)
         _provenance_source = "--target flag"
@@ -931,6 +1114,9 @@ def _run_compilation(
             ),
             symbol="info",
         )
+
+    if _report_target_without_compile_output(logger, effective_target):
+        return
 
     # Build config with distributed compilation flags (Task 7)
     config = CompilationConfig.from_apm_yml(
@@ -1044,6 +1230,15 @@ def _run_compilation(
                 elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
                     # The compiler already reported the expected cleanup outcome.
                     pass
+                elif result.stats.get("claude_native_rules_only"):
+                    # Claude reads .claude/rules/ directly; nothing to warn about (#3994).
+                    pass
+                elif result.stats.get("agents_md_suppressed_by_dedup"):
+                    # The compiler already explained the deduplicated AGENTS.md skip (#4209).
+                    pass
+                elif result.stats.get("primitives_found") == 0:
+                    # Nothing to compile is not a misconfigured target (#3994).
+                    logger.progress("No instructions to compile -- nothing written.", symbol="info")
                 else:
                     # Zero-output compile is the silent-success failure
                     # mode #820 guards against.  Don't claim success;
@@ -1054,7 +1249,7 @@ def _run_compilation(
                     logger.warning(
                         "Compilation completed but produced no output "
                         "files. Check that target directories exist "
-                        "(e.g. .github/, .claude/) or set 'target:' "
+                        "(e.g. .github/, .claude/) or set 'targets:' "
                         "in apm.yml / pass --target explicitly."
                     )
 
@@ -1120,6 +1315,11 @@ def _run_compilation(
                                 from ...compilation.output_writer import CompiledOutputWriter
 
                                 CompiledOutputWriter().write(output_path, final_content)
+                            from ...compilation.claude_agents_md import refresh_compiled_digest
+
+                            refresh_compiled_digest(
+                                compiler.base_dir, compiler.base_dir / output_path
+                            )
                         except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)
@@ -1189,7 +1389,7 @@ def _run_compilation(
             )
             for pkg in orphaned_packages:
                 logger.progress(f"  * {pkg}")
-            logger.progress(" Run 'apm prune' to remove orphaned packages")
+            logger.progress(f" {ORPHANED_PACKAGES_PRUNE.sentence()}")
     except Exception:
         pass  # Continue if orphan check fails
 
@@ -1301,9 +1501,8 @@ def _run_compilation(
     "no_dedup",
     default=False,
     help=(
-        "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
-        "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated, in .github/copilot-instructions.md even when the "
+        "Include instructions in AGENTS.md even when .claude/rules/ or "
+        ".github/instructions/ already deliver them, in .github/copilot-instructions.md even when the "
         "matching .github/instructions/ file is deployed, or in .agents/rules/ "
         "for Antigravity. Overrides the "
         "default deduplication that normally omits these sections to avoid "
@@ -1412,7 +1611,7 @@ def compile(  # noqa: PLR0913 -- Click handler
         # warnings.warn(DeprecationWarning) is invisible by default in
         # CLI output and would only ever fire for downstream library
         # consumers running with -W default, which we have none of.
-        logger.warning("'--target all' is deprecated; use '--all' instead.")
+        logger.warning(deprecation_message("compile-target-all"))
 
     # --global: compile user-scope root context files from ~/.apm/apm_modules.
     # Must be checked before --watch / --root guards so we return early.
@@ -1473,6 +1672,11 @@ def compile(  # noqa: PLR0913 -- Click handler
         # Source root: where apm.yml, .apm/, and the project tree are read
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
+        # Advisory only: a committed deployed file whose apm_modules link
+        # target is missing needs apm install (#3143); exit codes are unchanged.
+        from ...compilation.link_resolver import warn_missing_module_links
+
+        warn_missing_module_links(source_root, logger)
 
         # pre-compile scripts run inside _run_compilation, which checks the
         # project after them so a first compile finds what they generate.
@@ -1490,6 +1694,9 @@ def compile(  # noqa: PLR0913 -- Click handler
         if validate:
             _run_validation_mode(logger, verbose, source_root)
             return
+
+        # --root installs under the redirected cwd; judge both roots.
+        _enforce_dependency_policy(logger, [source_root, Path.cwd()])
 
         if watch:
             _run_watch_mode(

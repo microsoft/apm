@@ -9,7 +9,7 @@ import pytest
 from apm_cli.utils.yaml_io import load_yaml
 from tests.integration._target_compile_kit import Scenario, output, write, write_package
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 _RULES = ("global.mdc", "multi.mdc", "none.mdc", "py.mdc")
 

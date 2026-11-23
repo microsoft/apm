@@ -498,8 +498,11 @@ def _seed_unowned_mcp_config(project_root: Path, target: str) -> Path:
     return config
 
 
-def _write_claude_plugin_manifest(plugin_root: Path, manifest: Mapping[str, object]) -> None:
-    manifest_dir = plugin_root / ".claude-plugin"
+def _write_claude_plugin_manifest(
+    plugin_root: Path, manifest: Mapping[str, object], *, claude_format: bool = True
+) -> None:
+    """Write the manifest; a root-only plugin.json keeps the split route (#3921)."""
+    manifest_dir = plugin_root / ".claude-plugin" if claude_format else plugin_root
     manifest_dir.mkdir(parents=True, exist_ok=True)
     (manifest_dir / "plugin.json").write_text(
         json.dumps(dict(manifest), indent=2, sort_keys=True),
@@ -551,7 +554,11 @@ def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """A foreign schema declaration is a classification miss, not rejection."""
+    """A foreign schema declaration is a classification miss, not rejection.
+
+    At project scope a Claude-format plugin deploys intact (#3921): the inert
+    $schema field must not park it.
+    """
     scenario = _new_scenario(tmp_path / "foreign-schema-plugin", apm_binary_path)
     plugin_root = scenario.isolated.package_root / "schema-plugin"
     plugin_root.mkdir(parents=True)
@@ -576,10 +583,17 @@ def test_unrecognized_claude_plugin_schema_falls_back_to_legacy_structure(
         scenario_id="foreign-schema-plugin-install",
     )
 
-    skill_path = project.root / ".claude" / "skills" / "schema-plugin" / "SKILL.md"
+    skill_path = project.root / ".agents" / "plugins" / "schema-plugin" / "SKILL.md"
     assert skill_path.is_file(), _result_evidence(result)
     assert skill_path.read_bytes() == skill_bytes
     assert result.returncode == 0, _result_evidence(result)
+    settings = json.loads((project.root / ".claude" / "settings.json").read_text("utf-8"))
+    assert (
+        [key for key, on in settings["enabledPlugins"].items() if on]
+        == [key for key in settings["enabledPlugins"] if key.startswith("schema-plugin@")]
+        != []
+    )
+    assert "Parked native plugin" not in result.stdout + result.stderr
     assert "Unrecognized plugin manifest $schema" in " ".join(
         (result.stdout + result.stderr).split()
     )
@@ -595,7 +609,12 @@ def test_legacy_plugin_agent_source_classification_uses_declaration_before_path(
     apm_binary_path: Path,
     profile: TargetProfile,
 ) -> None:
-    """Only declared agents deploy; doc markdown and sibling assets are skipped."""
+    """Only declared agents deploy; doc markdown and sibling assets are skipped.
+
+    The manifest is a root plugin.json: at project scope that plugin keeps the
+    split route whose classifier this proves (#3921 deploys a Claude-format
+    plugin intact instead).
+    """
     scenario = _new_scenario(tmp_path / f"agent-classification-{profile.name}", apm_binary_path)
     plugin_root = scenario.isolated.package_root / "classification-plugin"
     agent_root = plugin_root / "agents" / "my-agent"
@@ -619,14 +638,17 @@ def test_legacy_plugin_agent_source_classification_uses_declaration_before_path(
             "version": "1.0.0",
             "agents": ["./agents/my-agent"],
         },
+        claude_format=False,
     )
-    project = scenario.consumers.create(f"agent-consumer-{profile.name}")
+    project = scenario.consumers.create(
+        f"agent-consumer-{profile.name}", dependencies=({"path": str(plugin_root)},)
+    )
     _prepare_target_root(project.root, profile)
 
     result = _run_success(
         scenario,
         project,
-        _direct_install_args(plugin_root, profile.name),
+        ("install", "--target", profile.name, "--no-policy", "--verbose"),
         environment=scenario.environment,
         scenario_id=f"agent-classification-{profile.name}-install",
     )

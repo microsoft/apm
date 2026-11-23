@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.models.apm_package import APMPackage
     from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.models.dependency.replacement import ReplacementRule
 
@@ -104,6 +105,7 @@ def _dep_ref_key(dep: DependencyReference) -> str:
     return build_dependency_unique_key(
         getattr(dep, "repo_url", ""),
         host=getattr(dep, "host", None),
+        port=getattr(dep, "port", None),
         source="local" if getattr(dep, "is_local", False) else getattr(dep, "source", None),
         local_path=getattr(dep, "local_path", None),
         is_virtual=getattr(dep, "is_virtual", False),
@@ -176,6 +178,11 @@ class UpdatePlan:
     @property
     def changed_entries(self) -> tuple[PlanEntry, ...]:
         return tuple(e for e in self.entries if e.has_changes)
+
+    def excluding(self, dep_keys: Iterable[str]) -> UpdatePlan:
+        """Return the plan without *dep_keys* (shown elsewhere, e.g. as pin rewrites)."""
+        skip = frozenset(dep_keys)
+        return UpdatePlan(entries=tuple(e for e in self.entries if e.dep_key not in skip))
 
     @property
     def summary_counts(self) -> dict[str, int]:
@@ -251,6 +258,7 @@ def build_update_plan(
         new_hash = (resolved_content_hashes or {}).get(key)
         same_source = old is not None and old.matches_replacement(dep)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
+        new_ref = _recorded_ref(dep, old, new_ref)
         # Unannotated registry dep (cached, not re-downloaded): no concrete
         # version was resolved this run, so treat the locked value as current.
         # Require the locked entry to also be registry-sourced -- otherwise a
@@ -375,6 +383,27 @@ _ACTION_ORDER = {
 }
 
 
+def _recorded_ref(
+    dep: DependencyReference, old: LockedDependency | None, new_ref: str | None
+) -> str | None:
+    """Return the ref the lockfile records for *dep*, compared against the lock.
+
+    A git dependency declared without a ref follows the remote default
+    branch. The resolver names that branch, but the lockfile records the
+    declared (absent) ref, so the plan compares absent with absent; a moved
+    branch still differs by commit (#4166).
+    """
+    if (
+        new_ref is not None
+        and old is not None
+        and old.resolved_ref is None
+        and getattr(dep, "reference", None) is None
+        and getattr(dep, "source", None) != "registry"
+    ):
+        return None
+    return new_ref
+
+
 def _extract_new_ref_and_commit(dep: DependencyReference) -> tuple[str | None, str | None]:
     """Pull ``(resolved_ref, resolved_commit)`` from a resolved dep.
 
@@ -495,6 +524,21 @@ _ACTION_SYMBOLS = {
     _ACTION_REMOVE: STATUS_SYMBOLS["remove"],
     _ACTION_UNCHANGED: STATUS_SYMBOLS["equal"],
 }
+
+
+def manifest_requires_lockfile(manifest: APMPackage) -> bool:
+    """Whether *manifest* declares state that only a lockfile can pin (#4050).
+
+    The one answer to "is a missing lockfile converged?": ``apm install``
+    writes no lockfile when the manifest declares no APM, MCP or LSP
+    dependency, so ``apm install --frozen`` replays that state as a no-op and
+    ``apm audit --ci`` accepts it; any declaration requires the lockfile.
+    """
+    return bool(
+        manifest.has_any_apm_dependencies()
+        or manifest.get_all_mcp_dependencies()
+        or manifest.get_lsp_dependencies()
+    )
 
 
 def lockfile_satisfies_manifest(

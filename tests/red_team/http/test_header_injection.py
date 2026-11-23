@@ -22,6 +22,8 @@ from apm_cli.core.script_executors import _execute_http
 
 from .conftest import make_event, make_http_script
 
+pytestmark = pytest.mark.component
+
 
 class TestHeaderCrlfRejected:
     @pytest.mark.parametrize(

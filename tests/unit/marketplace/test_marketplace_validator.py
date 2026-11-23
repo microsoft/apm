@@ -18,6 +18,8 @@ from apm_cli.marketplace.validator import (
     validate_plugin_schema,
 )
 
+pytestmark = pytest.mark.component
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

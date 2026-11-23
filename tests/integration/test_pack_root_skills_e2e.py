@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 def _run_apm(apm_binary_path: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run the installed APM CLI in a project directory."""
@@ -114,3 +116,37 @@ def test_init_then_pack_preserves_native_claude_skill(
     bundles = [path for path in (project / "build").iterdir() if path.is_dir()]
     assert len(bundles) == 1
     assert (bundles[0] / "skills" / "published" / "SKILL.md").is_file()
+
+
+def test_pack_archive_ships_root_skills_beside_apm_instructions(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """With .apm/ holding no skill, the archive ships the root skill a path install deploys."""
+    import zipfile
+
+    project = tmp_path / "f-bun"
+    skill = project / "skills" / "f-bun"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: f-bun\ndescription: Root skill beside .apm\n---\n\nUse f-bun.\n",
+        encoding="utf-8",
+    )
+    instructions = project / ".apm" / "instructions"
+    instructions.mkdir(parents=True)
+    (instructions / "f-bun.instructions.md").write_text(
+        "---\napplyTo: '**'\n---\n\nBe consistent.\n", encoding="utf-8"
+    )
+    (project / "apm.yml").write_text(
+        "name: f-bun\nversion: 1.0.0\nlicense: MIT\ndependencies:\n  apm: []\n",
+        encoding="utf-8",
+    )
+
+    result = _run_apm(apm_binary_path, project, "pack", "--archive", "-o", "out")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    names = {
+        name.split("/", 1)[1]
+        for name in zipfile.ZipFile(project / "out" / "f-bun-1.0.0.zip").namelist()
+    }
+    assert {"skills/f-bun/SKILL.md", "instructions/f-bun.instructions.md"} <= names, names
+    assert "Skipping root-level skills/" not in result.stdout + result.stderr

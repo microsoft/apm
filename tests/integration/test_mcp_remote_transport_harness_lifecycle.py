@@ -30,7 +30,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.e2e, pytest.mark.requires_apm
 _REGISTRY_NAME = "io.github.apm-fixture/remote-fixture"
 _SHORT_NAME = "remote-fixture"
 _URL = "https://mcp.example.invalid/endpoint"
-_CHANGED = ("vscode", "copilot", "claude", "gemini", "antigravity", "codex", "hermes")
+_CHANGED = ("copilot", "claude", "gemini", "antigravity", "codex", "hermes")
 _UNSUPPORTED_SSE = {"antigravity", "codex"}
 
 
@@ -41,11 +41,6 @@ def scene(tmp_path: Path, apm_binary_path: Path) -> Iterator[HarnessScene]:
         yield result
     finally:
         result.close()
-
-
-def _harnesses(user: bool, candidates: tuple[str, ...] = _CHANGED) -> tuple[str, ...]:
-    # VS Code has no user-scope MCP file; APM skips it under --global.
-    return tuple(name for name in candidates if not (user and name == "vscode"))
 
 
 def _assert_remote_entry(
@@ -64,7 +59,7 @@ def _assert_remote_entry(
         return
     assert key in servers, f"{harness} missing {key!r}: {servers}"
     entry = servers[key]
-    if harness in ("copilot", "claude", "vscode"):
+    if harness in ("copilot", "claude"):
         expected_type = "sse" if transport == "sse" else "http"
         assert entry.get("type") == expected_type, f"{harness}: {entry}"
         assert entry.get("url") == url, f"{harness}: {entry}"
@@ -108,14 +103,15 @@ def test_registry_remote_type_reaches_every_harness_in_its_native_shape(
     """A registry v0.1 ``type`` remote is rendered per harness and stays idempotent."""
     registry = scene.start_registry(registry_document(_REGISTRY_NAME, _URL, transport=transport))
     scene.write_manifest([{"name": _REGISTRY_NAME, "registry": registry}], user=user)
-    harnesses = _harnesses(user)
+    harnesses = _CHANGED
 
     result = scene.install(",".join(harnesses), user=user)
 
     assert result.returncode == 0, describe(result)
     for harness in harnesses:
-        key = _REGISTRY_NAME if harness == "vscode" else _SHORT_NAME
-        _assert_remote_entry(scene, harness, key=key, transport=transport, url=_URL, user=user)
+        _assert_remote_entry(
+            scene, harness, key=_SHORT_NAME, transport=transport, url=_URL, user=user
+        )
     if transport == "sse":
         _assert_unsupported_sse_not_claimed(
             scene,
@@ -163,6 +159,28 @@ def test_registry_remote_without_transport_defaults_to_streamable_http(
         )
 
 
+def test_each_registry_lookup_line_names_its_registry(scene: HarnessScene) -> None:
+    """Two registries print one lookup line each, naming the registry (#4244)."""
+    names = ("io.github.apm-fixture/first-remote", "io.github.apm-fixture/second-remote")
+    registries = [
+        scene.start_registry(
+            registry_document(name, f"https://{index}.example.invalid/mcp", transport=None)
+        )
+        for index, name in enumerate(names)
+    ]
+    scene.write_manifest(
+        [{"name": name, "registry": url} for name, url in zip(names, registries, strict=True)],
+        user=False,
+    )
+
+    result = scene.install("copilot", user=False)
+
+    assert result.returncode == 0, describe(result)
+    lookups = [line.strip() for line in result.stdout.splitlines() if "Looking up" in line]
+    expected = [f"[>] Looking up 1 MCP server in registry {url}..." for url in registries]
+    assert sorted(lookups) == sorted(expected), describe(result)
+
+
 _SELF_DEFINED = (
     ("sd-sse", "sse", "https://sse.example.invalid/sse"),
     ("sd-http", "http", "https://http.example.invalid/mcp"),
@@ -183,7 +201,7 @@ def test_self_defined_remotes_render_natively_and_unsupported_sse_is_skipped(
         {"name": "sd-stdio", "registry": False, "transport": "stdio", "command": "node"}
     )
     scene.write_manifest(declarations, user=user)
-    harnesses = _harnesses(user)
+    harnesses = _CHANGED
 
     result = scene.install(",".join(harnesses), user=user)
 
@@ -222,6 +240,10 @@ def test_harnesses_outside_the_changed_rows_keep_their_remote_shape(
     assert result.returncode == 0, describe(result)
     for harness, expected in _LOCKED_SHAPES.items():
         assert scene.servers(harness, user=user).get(_SHORT_NAME) == expected, harness
+    # A registry install for Windsurf writes its user-wide file even at project
+    # scope; the output names it there, as the self-defined route does (#3994).
+    named = "user-wide: ~/.codeium/windsurf/mcp_config.json" in " ".join(result.stdout.split())
+    assert named is not user, describe(result)
 
 
 @pytest.mark.parametrize(

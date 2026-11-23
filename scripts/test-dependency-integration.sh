@@ -166,7 +166,8 @@ EOF
     
     # Install multiple dependencies
     log_info "Installing multiple real dependencies"
-    if ! "$apm_binary" install; then
+    # The previous test left apm.lock.yaml here; under CI it would replay frozen.
+    if ! "$apm_binary" install --no-frozen; then
         log_error "Failed to install multiple dependencies"
         return 1
     fi

@@ -14,6 +14,8 @@ from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.yml_editor import add_plugin_entry
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
 
+pytestmark = pytest.mark.component
+
 _SHA = "a" * 40
 
 

@@ -19,7 +19,10 @@ registry-delegation-policy-target-      Compilation-target policy judges
 projection                              EffectiveTargetDecision.canonical_targets
 registry-delegation-output-diagnostics  AC12 doctor-status STATUS_SYMBOLS
                                         owner check; #3754 policy discovery
-                                        returns diagnostics as data
+                                        returns diagnostics as data; #4089
+                                        adapters emit through CommandLogger
+registry-delegation-deprecation-catalog Deprecation warning text lives only
+                                        in core/deprecations.py (#4019)
 registry-delegation-compiled-output-    AC2 "Compiled output writes must use
 writes                                  CompiledOutputWriter"
 registry-delegation-build-id-verification Build IDs are verified in their
@@ -52,6 +55,13 @@ from scripts.architecture_linter.checks.python_semantics import (
     binding_nodes,
     direct_definitions,
     import_bound_name,
+)
+from scripts.architecture_linter.checks.registry_deprecation_catalog import (
+    DEPRECATION_CATALOG,
+    check_deprecation_catalog_text,
+)
+from scripts.architecture_linter.checks.registry_output_guards import (
+    library_output_findings,
 )
 from scripts.architecture_linter.checks.registry_shared import (
     _SRC,
@@ -146,6 +156,14 @@ _DOCTOR_OWNER_NAME = "STATUS_SYMBOLS"
 # CommandLogger may render them. A stdlib ``logger.<level>`` call here reaches
 # the root handler on every install and bypasses verbose gating.
 _POLICY_DISCOVERY_FILE = "src/apm_cli/policy/discovery.py"
+# Target-resolution messages are plain text; the CLI output owner adds the
+# one status symbol (#3871).
+_TARGET_ERROR_MESSAGE_FILES: tuple[str, ...] = (
+    "src/apm_cli/core/errors.py",
+    "src/apm_cli/core/apm_yml.py",
+)
+_STATUS_PREFIX_LITERAL = re.compile(r"""(?:^|[\s(=,])[rbuf]{0,2}["']\[[x!i+*>]\] """)
+_STATUS_PREFIX_STRIP = re.compile(r"""(?:removeprefix|replace|lstrip)\(\s*["']\[[x!i+*>]\] ["']""")
 _USER_FACING_LOG_LEVELS: frozenset[str] = frozenset(
     {"info", "warning", "warn", "error", "exception", "critical"}
 )
@@ -239,7 +257,7 @@ _APM_HOME_OWNER = "src/apm_cli/core/scope.py"
 
 _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     "src/apm_cli/config.py": "CONFIG_DIR = os.fspath(get_apm_home())",
-    "src/apm_cli/core/lifecycle_scripts.py": 'return get_apm_home() / "apm.yml"',
+    "src/apm_cli/core/lifecycle_scripts.py": "return get_manifest_path(InstallScope.USER)",
     "src/apm_cli/core/script_trust.py": 'return get_apm_home() / "scripts-trust.json"',
     "src/apm_cli/core/script_executors.py": 'return get_apm_home() / "logs" / "scripts.log"',
     "src/apm_cli/install/locking.py": "lock_path = get_apm_home() / _LIFECYCLE_LOCK_NAME",
@@ -248,7 +266,7 @@ _APM_HOME_CONSUMER_NEEDLES: dict[str, str] = {
     ),
     "src/apm_cli/security/executables.py": 'return get_apm_home() / "approvals.yml"',
     "src/apm_cli/core/deployment_ledger.py": (
-        'self.state_path = apm_home / "deployment-receipts" / f"{key}.json"'
+        'state_path = get_apm_home() / "deployment-receipts" / f"{key}.json"'
     ),
 }
 
@@ -412,15 +430,69 @@ def _target_exemption(index: TreeIndex, node: ast.AST, lines: tuple[str, ...]) -
     return None
 
 
-# The deprecated singular ``target:`` key (#3762): one warning emitter in the
-# declaration owner and one rewrite path, reachable only from the explicit
-# ``apm manifest migrate`` command. Install never rewrites the manifest.
+# The deprecated singular ``target:`` key (#3762, #3868): one warning emitter
+# in the declaration owner, and one target rewrite mapping
+# (``rewrite_target_names``) that the warning's suggestion
+# (``targets_replacement``) and the ``apm init`` re-init both use; every
+# rewritten manifest is verified before it is written. Install never rewrites
+# the manifest.
 _TARGET_DEPRECATION_OWNER = "src/apm_cli/models/manifest_targets.py"
 _TARGET_DEPRECATION_FUNCTION = "_warn_deprecated_manifest_keys"
 _TARGET_DEPRECATION_PHRASE = "uses the deprecated 'target:' key"
-_TARGET_MIGRATION_MODULE = "manifest_target_migration"
-_TARGET_MIGRATION_OWNER = "src/apm_cli/models/manifest_target_migration.py"
-_TARGET_MIGRATION_COMMAND = "src/apm_cli/commands/manifest.py"
+_TARGET_REWRITE_OWNER = _TARGET_DEPRECATION_OWNER
+_TARGET_REWRITE_FUNCTIONS = frozenset(
+    {
+        "rewrite_target_names",
+        "bootstrap_target_names",
+        "verify_rewritten_manifest",
+        "targets_replacement",
+    }
+)
+# Each rewrite path must call the owner. The scaffold writer used by init and
+# every bootstrap verifies what it renders, and the user-manifest bootstrap
+# spells its targets through the owner (#3870).
+_TARGET_REWRITE_CALLS: dict[str, tuple[str, ...]] = {
+    _TARGET_REWRITE_OWNER: (
+        "def rewrite_target_names(",
+        "def bootstrap_target_names(",
+        "def option_target_names(",
+        "def verify_rewritten_manifest(",
+        "    _refuse_ide_targets(selected)",
+        "    _refuse_ide_targets([target] if isinstance(target, str) else target)",
+        "return rewrite_target_names(self) or ()",
+        "declaration.targets_replacement(user_scope=user_scope)",
+    ),
+    "src/apm_cli/commands/init.py": (
+        "rewrite_target_names(ManifestTargetDeclaration.from_mapping(data, apm_yml_path))",
+        "targets = option_target_names(target_flag)",
+    ),
+    "src/apm_cli/install/manifest_helpers.py": (
+        "return option_target_names(target)",
+        "return bootstrap_manifest_targets(target, manifest_display)",
+    ),
+    "src/apm_cli/install/mcp/command.py": (
+        'config["targets"] = list(bootstrap_target_names(supported_runtimes))',
+    ),
+    "src/apm_cli/commands/install.py": (
+        "manifest_targets = preflight_bootstrap_targets(",
+        "from ..install.mcp.command import user_manifest_bootstrap_config as _bootstrap",
+        "initial_manifest_config = _bootstrap(mcp_manifest_path, supported_runtimes,",
+    ),
+    "src/apm_cli/models/manifest_bootstrap.py": (
+        "    verify_rewritten_manifest(out_file, content)",
+    ),
+}
+# Authored (unvalidated) names feed only the rewrite mapping.
+_TARGET_AUTHORED_NAMES_CALL = ".authored_names("
+# The former second authority for --target -> manifest tokens (#3878).
+_RETIRED_TARGET_OPTION_MAPPERS = frozenset({"manifest_targets_from_target_option"})
+
+
+def _has_rewrite_call(line: str, required: str) -> bool:
+    # An indented token pins the statement to that nesting level.
+    if required[:1].isspace():
+        return line.rstrip() == required
+    return required in line
 
 
 def _target_deprecation_findings(
@@ -432,7 +504,7 @@ def _target_deprecation_findings(
         for definition in facts.definitions
     ):
         emitters.add(path)
-    if path != _TARGET_DEPRECATION_OWNER:
+    if path != DEPRECATION_CATALOG:
         findings.extend(
             violation(
                 rule_id,
@@ -445,24 +517,49 @@ def _target_deprecation_findings(
             for literal in facts.literals
             if _TARGET_DEPRECATION_PHRASE in literal.value_repr
         )
-    if path == _TARGET_MIGRATION_OWNER:
-        return findings
-    for fact in facts.imports:
-        module = (fact.module or "").split(".")[-1]
-        if module != _TARGET_MIGRATION_MODULE and _TARGET_MIGRATION_MODULE not in fact.names:
-            continue
-        importers.add(path)
-        if path != _TARGET_MIGRATION_COMMAND:
-            findings.append(
-                violation(
-                    rule_id,
-                    path,
-                    "only 'apm manifest migrate' may rewrite apm.yml's 'target:' key; "
-                    "install and other commands must never rewrite the manifest",
-                    line=fact.line,
-                    column=fact.column + 1,
-                )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"{definition.name} decides manifest target tokens outside the owner; "
+            f"use {_TARGET_REWRITE_OWNER}::option_target_names",
+            line=definition.line,
+        )
+        for definition in facts.definitions
+        if definition.name in _RETIRED_TARGET_OPTION_MAPPERS
+    )
+    findings.extend(
+        violation(
+            rule_id,
+            path,
+            f"apm.yml target rewrites must call the rewrite owner: {required_call}",
+        )
+        for required_call in _TARGET_REWRITE_CALLS.get(path, ())
+        if not any(_has_rewrite_call(line, required_call) for line in facts.lines)
+    )
+    if path != _TARGET_REWRITE_OWNER:
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "authored target names feed only the apm.yml target rewrite mapping; "
+                f"use {_TARGET_REWRITE_OWNER}::rewrite_target_names",
+                line=number,
             )
+            for number, line in enumerate(facts.lines, start=1)
+            if _TARGET_AUTHORED_NAMES_CALL in line
+        )
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"the target rewrite mapping is owned by {_TARGET_REWRITE_OWNER}; "
+                f"do not define another {definition.name}",
+                line=definition.line,
+            )
+            for definition in facts.definitions
+            if definition.name in _TARGET_REWRITE_FUNCTIONS
+        )
     return findings
 
 
@@ -479,15 +576,37 @@ def _target_deprecation_wiring(
                 f"in {_TARGET_DEPRECATION_OWNER}",
             )
         )
-    if _TARGET_MIGRATION_COMMAND not in importers:
-        findings.append(
-            violation(
-                rule_id,
-                _TARGET_MIGRATION_COMMAND,
-                f"'apm manifest migrate' must route through {_TARGET_MIGRATION_OWNER}",
-            )
-        )
     return findings
+
+
+# Raw apm.yml readers pass the manifest path so the deprecated-key warnings fire
+# (#3965). Only callers parsing a config an APMPackage reader already loaded
+# (and so already warned for) may omit it.
+_PATHLESS_RESTRICTION_READERS = frozenset(
+    {
+        "src/apm_cli/integration/mcp_integrator_install.py",
+        "src/apm_cli/integration/mcp_integrator.py",
+    }
+)
+
+
+def _pathless_restriction_reads(rule_id: str, path: str, index) -> list[Violation]:
+    if path in _PATHLESS_RESTRICTION_READERS:
+        return []
+    return [
+        violation(
+            rule_id,
+            path,
+            "manifest_target_restriction needs the manifest path so deprecated "
+            "target keys warn (#3965)",
+            line=node.lineno,
+        )
+        for node in index.nodes
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None))
+        == "manifest_target_restriction"
+        and len(node.args) + len(node.keywords) < 2
+    ]
 
 
 def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
@@ -500,7 +619,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
     ``# architecture-authority-exempt: <concept>`` naming it.
 
     The deprecated ``target:`` key has one warning emitter in the declaration
-    owner and one rewrite module, imported only by ``apm manifest migrate``.
+    owner, and the warning and ``apm init`` re-init share one rewrite mapping.
     """
     rule_id = "registry_delegation.target_vocabulary"
     findings: list[Violation] = []
@@ -517,6 +636,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
         index = provider.tree_index(path)
         if index is None:
             continue
+        findings.extend(_pathless_restriction_reads(rule_id, path, index))
         for node in index.nodes:
             reason = _raw_target_read(node, path)
             if reason is None:
@@ -544,7 +664,7 @@ def _check_target_vocabulary(provider: FactsProvider) -> Iterable[Violation]:
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -647,7 +767,7 @@ def _check_policy_target_projection(provider: FactsProvider) -> Iterable[Violati
 
 
 _POLICY_TARGET_SEAMS: frozenset[str] = frozenset(
-    {"run_dependency_policy_checks", "run_policy_preflight"}
+    {"enforce_mcp_policy", "run_dependency_policy_checks", "run_policy_preflight"}
 )
 _POLICY_TARGET_CHECK = "_check_compilation_target"
 _POLICY_TARGET_SEAM_PARAMETER = "effective_target"
@@ -763,6 +883,7 @@ def _check_audit_target_selection(provider: FactsProvider) -> Iterable[Violation
     for name, owner in (
         ("resolve_audit_targets", profile_owner),
         ("resolve_audit_target_decision", _EFFECTIVE_TARGET_OWNER),
+        ("resolve_deployment_target_decision", _EFFECTIVE_TARGET_OWNER),
     ):
         definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
         findings.extend(failures)
@@ -921,14 +1042,56 @@ def _check_install_target_selection(provider: FactsProvider) -> Iterable[Violati
 def _check_output_diagnostics(provider: FactsProvider) -> Iterable[Violation]:
     """User-facing output must route through the CommandLogger / console owner.
 
-    Combines the AC12 doctor-status guard with the #3754 policy-discovery
-    guard; both report under ``registry_delegation.output_diagnostics``.
+    Combines the AC12 doctor-status guard, the #3754 policy-discovery guard
+    and the #4089 library-output guard (MCP client adapters and the safe
+    installer emit through CommandLogger); all report under
+    ``registry_delegation.output_diagnostics``.
     """
     rule_id = "registry_delegation.output_diagnostics"
     return (
         *_doctor_status_findings(provider, rule_id),
+        *_target_error_status_findings(provider, rule_id),
         *_policy_discovery_output_findings(provider, rule_id),
+        *library_output_findings(provider, rule_id),
     )
+
+
+def _target_error_status_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Target error messages carry no status symbol, and nobody strips one (#3871)."""
+    findings: list[Violation] = []
+    for path in _TARGET_ERROR_MESSAGE_FILES:
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "target error messages must be plain text; CommandLogger or Click adds "
+                "the status symbol",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_LITERAL.search(line)
+        )
+    for path in _python_paths(provider, under=_SRC):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "do not strip a status symbol from a message; keep messages plain and let "
+                "the CLI output owner add it",
+                line=number,
+            )
+            for number, line in enumerate(facts.lines, start=1)
+            if _STATUS_PREFIX_STRIP.search(line)
+        )
+    return findings
 
 
 def _policy_discovery_output_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
@@ -1564,6 +1727,91 @@ def _check_process_interrupt_signals(provider: FactsProvider) -> Iterable[Violat
     return tuple(findings)
 
 
+_MANIFEST_BOOTSTRAP_OWNER = "src/apm_cli/models/manifest_bootstrap.py"
+_MANIFEST_BOOTSTRAP_FUNCTIONS = ("bootstrap_config", "write_minimal_manifest")
+# Historical names kept only as re-exports of the owner; a definition means a
+# second writer has come back.
+_RETIRED_BOOTSTRAP_WRITERS = ("_create_minimal_apm_yml", "_get_bootstrap_config")
+_INSTALL_LAYER = "src/apm_cli/install/"
+_COMMANDS_PACKAGE = "apm_cli.commands"
+
+
+def _absolute_import_module(path: str, module: str | None, level: int) -> str:
+    """Resolve an import statement's target module for a file under ``src/``."""
+    if level == 0:
+        return module or ""
+    package = path.removeprefix("src/").removesuffix(".py").split("/")[:-1]
+    base = package[: len(package) - (level - 1)] if level > 1 else package
+    return ".".join([*base, *([module] if module else [])])
+
+
+def _imports_commands(path: str, fact: object) -> bool:
+    target = _absolute_import_module(path, getattr(fact, "module", None), fact.level)
+    if target == _COMMANDS_PACKAGE or target.startswith(_COMMANDS_PACKAGE + "."):
+        return True
+    names = getattr(fact, "names", ())
+    if target == "apm_cli" and "commands" in names:
+        return True
+    # ``import apm_cli.commands.x`` carries the dotted module in ``names``.
+    return fact.level == 0 and any(
+        name == _COMMANDS_PACKAGE or name.startswith(_COMMANDS_PACKAGE + ".") for name in names
+    )
+
+
+def _check_install_layering(provider: FactsProvider) -> Iterable[Violation]:
+    """The install layer never imports the commands layer (#3879).
+
+    The minimal apm.yml bootstrap writer is owned by
+    ``models/manifest_bootstrap.py`` (defined nowhere else), so ``apm init``,
+    the install auto-bootstrap and the ``install --mcp`` user-manifest
+    bootstrap share it without ``install/`` importing ``commands/``. Any
+    import from ``src/apm_cli/install/**`` into ``apm_cli.commands``
+    (absolute, relative or ``TYPE_CHECKING``-only) is refused.
+    """
+    rule_id = "registry_delegation.install_layering"
+    findings: list[Violation] = []
+    for name in _MANIFEST_BOOTSTRAP_FUNCTIONS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        if not failures and definers != frozenset({_MANIFEST_BOOTSTRAP_OWNER}):
+            findings.append(
+                violation(
+                    rule_id,
+                    _MANIFEST_BOOTSTRAP_OWNER,
+                    f"{name} must be defined only by {_MANIFEST_BOOTSTRAP_OWNER}",
+                )
+            )
+    for name in _RETIRED_BOOTSTRAP_WRITERS:
+        definers, failures = _defining_files(provider, rule_id, name, kinds=("function",))
+        findings.extend(failures)
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                f"{name} is a re-export of {_MANIFEST_BOOTSTRAP_OWNER}; do not redefine it",
+            )
+            for path in sorted(definers)
+        )
+    for path in _python_paths(provider, under=_INSTALL_LAYER):
+        facts, failures = checked_facts(provider, path, rule_id, require_python=True)
+        if failures:
+            findings.extend(failures)
+            continue
+        findings.extend(
+            violation(
+                rule_id,
+                path,
+                "the install layer must not import the commands layer; move the shared "
+                "helper below both (see models/manifest_bootstrap.py, install/orphans.py)",
+                line=fact.line,
+                column=fact.column + 1,
+            )
+            for fact in facts.imports
+            if _imports_commands(path, fact)
+        )
+    return findings
+
+
 def _check_version_rendering(provider: FactsProvider) -> Iterable[Violation]:
     """CLI version rendering must route through ``version_output.py``.
 
@@ -1716,9 +1964,19 @@ RULES: tuple[Rule, ...] = (
         guard_ids=("registry-delegation-output-diagnostics",),
         description=(
             "User-facing status symbols must come from utils/console.py STATUS_SYMBOLS; "
-            "policy discovery returns diagnostics as data, not logger output."
+            "policy discovery returns diagnostics as data, not logger output; MCP client "
+            "adapters and the safe installer emit through CommandLogger."
         ),
         check=_check_output_diagnostics,
+    ),
+    Rule(
+        id="registry_delegation.deprecation_catalog",
+        group=GROUP,
+        guard_ids=("registry-delegation-deprecation-catalog",),
+        description="Deprecation warning text is spelled only in core/deprecations.py.",
+        check=lambda provider: check_deprecation_catalog_text(
+            provider, "registry_delegation.deprecation_catalog"
+        ),
     ),
     Rule(
         id="registry_delegation.compiled_output_writes",
@@ -1750,6 +2008,16 @@ RULES: tuple[Rule, ...] = (
             "primitives/models.py (resolve_user_invocable)."
         ),
         check=_check_user_invocable_resolution,
+    ),
+    Rule(
+        id="registry_delegation.install_layering",
+        group=GROUP,
+        guard_ids=("registry-delegation-install-layering",),
+        description=(
+            "The install layer never imports the commands layer; the minimal apm.yml "
+            "bootstrap writer lives in models/manifest_bootstrap.py."
+        ),
+        check=_check_install_layering,
     ),
     Rule(
         id="registry_delegation.version_rendering",

@@ -27,6 +27,8 @@ import pytest
 from apm_cli.commands.compile.watcher import APMFileHandler
 from apm_cli.core.target_detection import should_compile_gemini_md
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def fake_logger():

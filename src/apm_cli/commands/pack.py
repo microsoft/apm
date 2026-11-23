@@ -7,6 +7,13 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    AGENT_PLUGIN_BUNDLE_CONSUMER,
+    BUNDLE_TARGET_MISMATCH,
+    DEPLOYMENT_RECORDS_STALE,
+)
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat, cli_format_choices, resolve_bundle_format
 from ..bundle.unpacker import unpack_bundle
 from ..core.build_orchestrator import (
@@ -17,10 +24,14 @@ from ..core.build_orchestrator import (
     OutputKind,
 )
 from ..core.command_logger import CommandLogger
+from ..core.deprecations import deprecation_message
+from ..core.plugin_manifest import plugin_manifest_notes_once
 from ..core.target_detection import TargetParamType
+from ..deps.lockfile_write_authority import LockfileWriter, lockfile_writer
+from ..install.locking import serialized_lifecycle_unless
 
 MARKETPLACE_DOCS_URL = (
-    "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
+    "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
 )
 
 _PACK_HELP = """\
@@ -28,9 +39,10 @@ Pack distributable artifacts from your APM project.
 
 Reads apm.yml to decide what to produce:
 
+\b
   dependencies: block  ->  bundle (directory or archive; see --archive and --archive-format)
   marketplace: block   ->  selected marketplace artifacts
-  target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
+  targets:             ->  ecosystem-specific plugin.json (claude/copilot/codex)
   both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
@@ -59,23 +71,29 @@ Examples:
   # marketplace.claude.output / marketplace.codex.output
 
 Exit codes:
+
+\b
   0  Success
-  1  Build or runtime error
-  2  Manifest schema validation error
+  1  Build or runtime error (including apm.yml parse or schema errors)
+  2  Usage error (invalid flags or arguments)
   3  Version alignment check failed (--check-versions)
   4  Marketplace working-tree drift detected (--check-clean)
   5  Strict marketplace metadata check failed (--strict-metadata)
 """
 
 
-def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
+def _emit_json_error_or_raise(
+    ctx, json_output: bool, code: str, message: str, warnings: "list[str] | None" = None
+):
     """Emit a JSON error envelope to stdout or raise ClickException."""
     if json_output:
         from ..marketplace.builder import BuildReport
 
         click.echo(
             json_mod.dumps(
-                BuildReport.failure_to_json_dict(errors=[{"code": code, "message": message}])
+                BuildReport.failure_to_json_dict(
+                    errors=[{"code": code, "message": message}], warnings=warnings
+                )
             )
         )
         ctx.exit(1)
@@ -361,12 +379,27 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
-    # Authoring-path nudge (#1777): warn when the author's own package declares
-    # no license. Suppressed under --json (machine output). Never blocks pack.
-    if not json_output:
-        from ..export.authoring import warn_if_license_undeclared
+    from ..deps.lockfile_generator import (
+        LockfileGeneratorError,
+        check_current_cli,
+        refusal_exit,
+    )
 
-        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
+    try:
+        check_current_cli(project_root, command="apm pack")
+    except LockfileGeneratorError as exc:
+        if not json_output:
+            raise refusal_exit(exc) from exc
+        _emit_json_error_or_raise(ctx, json_output, "lockfile_generator", str(exc))
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Under --json it goes to the report's warnings (#4203). Never blocks pack.
+    from ..export.authoring import warn_if_license_undeclared
+
+    authoring_warnings: list[str] = []
+    warn_if_license_undeclared(
+        manifest_file(project_root),
+        authoring_warnings.append if json_output else logger.warning,
+    )
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -378,19 +411,16 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
 
         try:
             detected, _reason = detect_target(project_root)
-            effective_target = detected if detected else None
+            # "minimal" means no target folder was found: record no target.
+            effective_target = detected if detected and detected != "minimal" else None
         except Exception:
             effective_target = None
     else:
-        logger.warning(
-            "--target is deprecated and will be removed in a future release. "
-            "Bundles are target-agnostic; the value is recorded as informational "
-            "pack.target metadata only and is ignored by 'apm install'."
-        )
+        logger.warning(deprecation_message("pack-target"))
         effective_target = target
     options = BuildOptions(
         project_root=project_root,
-        apm_yml_path=project_root / "apm.yml",
+        apm_yml_path=manifest_file(project_root),
         bundle_format=bundle_format,
         bundle_target=effective_target,
         bundle_archive=archive,
@@ -407,7 +437,8 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
     )
 
     try:
-        result = BuildOrchestrator().run(options, logger=logger)
+        with plugin_manifest_notes_once():
+            result = BuildOrchestrator().run(options, logger=logger)
     except MetadataEnrichmentError as exc:
         if json_output:
             from ..marketplace.builder import BuildReport
@@ -416,7 +447,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 json_mod.dumps(
                     BuildReport.failure_to_json_dict(
                         errors=[{"code": "metadata_incomplete", "message": str(exc)}],
-                        warnings=list(exc.metadata_enrichment.warnings),
+                        warnings=[*authoring_warnings, *exc.metadata_enrichment.warnings],
                         dry_run=effective_dry_run,
                         metadata_enrichment=exc.metadata_enrichment,
                     )
@@ -426,7 +457,9 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             logger.error(str(exc))
         ctx.exit(5)
     except BuildError as exc:
-        _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
+        _emit_json_error_or_raise(
+            ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
+        )
         return
 
     # -- Release gates (--check-versions / --check-clean) --
@@ -463,9 +496,19 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
             if source != ConfigSource.NONE:
                 from ..marketplace.migration import load_marketplace_config
 
-                gate_config = load_marketplace_config(project_root)
+                # The build above loaded this config and collected its load
+                # warnings. The render loop below reports them, except under an
+                # implicit --check-clean dry run (non-JSON), which skips every
+                # producer: only there does this reload report them (#4046).
+                report_reload = implicit_check_clean_dry_run and not json_output
+                gate_config = load_marketplace_config(
+                    project_root,
+                    warn_callback=logger.warning if report_reload else lambda _message: None,
+                )
         except MarketplaceYmlError as exc:
-            _emit_json_error_or_raise(ctx, json_output, "build_error", str(exc))
+            _emit_json_error_or_raise(
+                ctx, json_output, "build_error", str(exc), warnings=authoring_warnings
+            )
             return
 
         if gate_config is None:
@@ -604,7 +647,7 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
         envelope = {
             "ok": True,
             "dry_run": effective_dry_run,
-            "warnings": list(result.warnings),
+            "warnings": [*authoring_warnings, *result.warnings],
             "errors": [],
             "metadata_enrichment": {"certifiable": True, "outcomes": []},
             "marketplace": {"outputs": []},
@@ -623,6 +666,11 @@ def pack_cmd(  # noqa: C901, PLR0912, PLR0913 -- Click handler, one param per CL
                 )
             elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
                 envelope["plugin_manifests"] = sub.payload
+            elif sub.kind is OutputKind.BUNDLE and sub.payload is not None:
+                envelope["bundle"] = {
+                    "path": Path(sub.payload.bundle_path).as_posix(),
+                    "files": list(sub.payload.files),
+                }
         if drift_metadata_enrichment is not None:
             envelope["metadata_enrichment"] = drift_metadata_enrichment.to_json_dict()
             metadata_warnings = set(drift_metadata_enrichment.warnings)
@@ -693,19 +741,19 @@ def _emit_drift_recipe(
         pack_command += f" --marketplace-path {shlex.quote(f'{output_format}={output_override}')}"
     stage_command = f"git add -- {shlex.quote(out_path)}"
 
-    logger.info("")
+    click.echo("")  # a blank separator carries no status prefix
     logger.info("    To recover cleanly (fold into the current commit):")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command}                       # regenerate locally")
     logger.info(f"      {stage_command}")
     logger.info("      git commit --amend --no-edit   # fold into the current commit")
     logger.info("      git push --force-with-lease    # safe re-push")
-    logger.info("")
+    click.echo("")
     logger.info("    Or as a follow-up commit:")
-    logger.info("")
+    click.echo("")
     logger.info(f"      {pack_command} && {stage_command}")
     logger.info("      git commit -m 'chore(marketplace): regen'")
-    logger.info("")
+    click.echo("")
     logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
     logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
     logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
@@ -724,6 +772,11 @@ def _bundle_size_suffix(bundle_path) -> str:
     if size < 1024 * 1024:
         return f" ({size / 1024:.1f} KiB)"
     return f" ({size / (1024 * 1024):.1f} MiB)"
+
+
+def _lock_note(pack_result) -> str:
+    """Every bundle embeds apm.lock.yaml; name it when the file list omits it (#3994)."""
+    return "" if "apm.lock.yaml" in pack_result.files else " plus apm.lock.yaml"
 
 
 def _render_bundle_result(
@@ -753,7 +806,8 @@ def _render_bundle_result(
                 logger.verbose_detail(f"    {original} -> {mapped}")
         if pack_result.files:
             logger.dry_run_notice(
-                f"Would pack {len(pack_result.files)} file(s) -> {pack_result.bundle_path}"
+                f"Would pack {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+                f"{pack_result.bundle_path}"
             )
             for f in pack_result.files:
                 logger.tree_item(f"  {f}")
@@ -771,7 +825,8 @@ def _render_bundle_result(
     else:
         size_suffix = _bundle_size_suffix(pack_result.bundle_path)
         logger.success(
-            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}{size_suffix}"
+            f"Packed {len(pack_result.files)} file(s){_lock_note(pack_result)} -> "
+            f"{pack_result.bundle_path}{size_suffix}"
         )
         for f in pack_result.files:
             logger.verbose_detail(f"    {f}")
@@ -791,14 +846,27 @@ def _render_bundle_result(
             )
         elif fmt == BundleFormat.CLAUDE_PLUGIN:
             logger.progress(
-                "Claude plugin bundle ready -- contains plugin.json plus "
-                "plugin-native directories and an embedded apm.lock.yaml."
+                "Claude plugin bundle ready -- contains plugin.json, "
+                "plugin-native directories, and an embedded apm.lock.yaml "
+                "for integrity verification."
             )
         # Issue #1207: target-agnostic bundles install into any consumer
         # project.  Print a copy-pasteable share line so packing creates
         # the social hand-off naturally.
         if pack_result.bundle_path:
-            logger.info(f"Share with: apm install {pack_result.bundle_path}")
+            # A bare 'build/x' would parse as owner/repo; spell it as a path.
+            share = Path(pack_result.bundle_path)
+            share_arg = str(share) if share.is_absolute() else f"./{share.as_posix()}"
+            # Only the Claude plugin layout installs imperatively (#3994).
+            if fmt == BundleFormat.CLAUDE_PLUGIN:
+                logger.info(f"Share with: apm install {share_arg}")
+            elif fmt == BundleFormat.AGENT_PLUGIN:
+                logger.info(f"Share: consumers {AGENT_PLUGIN_BUNDLE_CONSUMER.clause()}.")
+            else:
+                logger.info(
+                    f"Share with: apm unpack {share_arg} (deprecated legacy layout; "
+                    "pack without --format apm to share with 'apm install')"
+                )
 
 
 def _render_marketplace_result(logger, report, dry_run, extra_warnings=None, outputs=None):
@@ -878,7 +946,8 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     name="unpack",
     help=(
         "[Deprecated] Extract an APM bundle into the current project. "
-        "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
+        "Reads only '--format apm' bundles; install plugin bundles (the default) "
+        "with 'apm install <bundle-path>'. This command will be removed in a future release."
     ),
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
@@ -901,13 +970,16 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
+@serialized_lifecycle_unless("dry_run")
+@lockfile_writer(LockfileWriter.UNPACK)
 def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
     """Extract an APM bundle into the project."""
-    logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
-    logger.warning(
-        "'apm unpack' is deprecated and will be removed in a future release. "
-        "Use 'apm install <bundle-path>' instead.",
-    )
+    from ..core.command_logger import InstallLogger
+    from ..install.bundle_admission import apm_bundle_admission, record_unpacked_files
+    from ..install.errors import InstallFailureAlreadyRendered, PolicyViolationError
+
+    logger = InstallLogger(verbose=verbose, dry_run=dry_run, command="unpack")
+    logger.warning(deprecation_message("unpack"))
     try:
         logger.start(f"Unpacking {bundle_path} -> {output}")
 
@@ -917,6 +989,7 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            admit=apm_bundle_admission(Path(output), logger, dry_run=dry_run),
         )
 
         # Surface bundle metadata and warn on target mismatch
@@ -959,7 +1032,15 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
                 )
             verified_msg = " (verified)" if result.verified else ""
             logger.success(f"Unpacked {len(result.files)} file(s){verified_msg}")
+        record_unpacked_files(Path(output), result.written_files, logger)
+        logger.render_summary()
 
+    except PolicyViolationError as exc:
+        logger.refusal(str(exc))
+        logger.render_summary()
+        sys.exit(1)
+    except InstallFailureAlreadyRendered:
+        sys.exit(1)
     except (FileNotFoundError, ValueError) as exc:
         logger.error(str(exc))
         sys.exit(1)
@@ -1000,7 +1081,8 @@ def _warn_empty(logger, target, result):
         else:
             logger.warning(f"No files to pack for target '{target}'")
             logger.verbose_detail(
-                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
+                "    Hint: check that apm.lock.yaml has deployed_files entries "
+                f"({DEPLOYMENT_RECORDS_STALE.clause()})"
             )
     else:
         logger.warning("No deployed files found -- empty bundle created")
@@ -1045,6 +1127,5 @@ def _log_bundle_meta(result, output_dir, logger):
             f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
         )
         logger.verbose_detail(
-            f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to run: apm pack --target {display_project}"
+            f"    {BUNDLE_TARGET_MISMATCH.bind(target=display_project).sentence()}"
         )

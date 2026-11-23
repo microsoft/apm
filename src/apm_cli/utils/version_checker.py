@@ -330,6 +330,26 @@ def parse_version(version_str: str) -> tuple[int, int, int, str] | None:
     return (major, minor, patch, prerelease)
 
 
+_RELEASE_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\+[0-9A-Za-z.-]+)?$")
+_PRERELEASE_RANK = {"a": 0, "b": 1, "rc": 2}
+_STABLE_RANK = 3
+
+
+def release_precedence(version: str) -> tuple[int, int, int, int, int] | None:
+    """Return a sortable key for an APM release version, or ``None`` if invalid.
+
+    Accepts ``X.Y.Z`` and the ``aN`` / ``bN`` / ``rcN`` prereleases APM
+    publishes. Prereleases sort before their release and numerically within
+    a kind (``a9 < a10``). ``+build`` metadata is accepted and ignored.
+    """
+    match = _RELEASE_RE.match(version)
+    if not match:
+        return None
+    major, minor, patch, kind, number = match.groups()
+    rank = _PRERELEASE_RANK[kind] if kind else _STABLE_RANK
+    return (int(major), int(minor), int(patch), rank, int(number) if number else 0)
+
+
 def is_newer_version(current: str, latest: str) -> bool:
     """
     Compare two semantic versions.
@@ -341,34 +361,13 @@ def is_newer_version(current: str, latest: str) -> bool:
     Returns:
         True if latest is newer than current
     """
-    current_parts = parse_version(current)
-    latest_parts = parse_version(latest)
+    current_key = release_precedence(current)
+    latest_key = release_precedence(latest)
 
     # If either version is invalid, assume no update needed
-    if not current_parts or not latest_parts:
+    if current_key is None or latest_key is None:
         return False
-
-    curr_maj, curr_min, curr_patch, curr_pre = current_parts
-    lat_maj, lat_min, lat_patch, lat_pre = latest_parts
-
-    # Compare major.minor.patch
-    if (lat_maj, lat_min, lat_patch) > (curr_maj, curr_min, curr_patch):
-        return True
-
-    if (lat_maj, lat_min, lat_patch) < (curr_maj, curr_min, curr_patch):
-        return False
-
-    # Same major.minor.patch - compare prerelease
-    # Stable releases (no prerelease) are newer than prereleases
-    if not lat_pre and curr_pre:
-        return True
-
-    if lat_pre and not curr_pre:
-        return False
-
-    # Both have prereleases - compare them lexicographically
-    # This handles a1 < a2 < b1 < rc1, etc.
-    return lat_pre > curr_pre
+    return latest_key > current_key
 
 
 def get_update_cache_path() -> Path:

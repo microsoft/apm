@@ -27,7 +27,10 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
-from tests.integration.conftest import _reset_console_state
+from apm_cli.utils import themed_console
+from tests.conftest import _reset_console_state
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -570,14 +573,19 @@ class TestOutdatedParallel:
         """The integration guard isolates Rich's process-global console."""
         guard = _reset_console_state.__wrapped__()
         rich._console = MagicMock()
+        themed_console._console = MagicMock()
 
         next(guard)
         assert rich._console is None
+        # A themed console cached by an earlier test keeps that test's width (#4773).
+        assert themed_console._console is None
 
         rich._console = MagicMock()
+        themed_console._console = MagicMock()
         with pytest.raises(StopIteration):
             next(guard)
         assert rich._console is None
+        assert themed_console._console is None
 
     def test_multiple_deps_parallel(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

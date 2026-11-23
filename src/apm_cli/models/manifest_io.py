@@ -1,11 +1,15 @@
-"""Read owner for ``apm.yml`` manifests: one mapping per top-level key.
+"""Read owner for ``apm.yml`` manifests: one mapping per top-level key, no anchors.
 
 YAML loaders disagree on duplicate mapping keys: the bounded PyYAML loader
 keeps the last value silently, while the ruamel round-trip loader raises a
 parser-internal error. A manifest with two ``dependencies:`` blocks (a
 common merge-conflict leftover) would therefore drop packages on one path
-and fail with an unreadable traceback-style message on another. Every
-``apm.yml`` read routes through this module so the file is rejected with
+and fail with an unreadable traceback-style message on another.
+
+OpenAPM req-mf-020(b) also requires a consumer to reject YAML anchors and
+aliases (``&name`` / ``*name``) in a manifest.
+
+Every ``apm.yml`` read routes through this module so the file is rejected with
 one actionable error before any command touches the project.
 """
 
@@ -19,7 +23,11 @@ import yaml
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
-class DuplicateManifestKeyError(ValueError):
+class InvalidManifestError(ValueError):
+    """An ``apm.yml`` that every command refuses before touching the project."""
+
+
+class DuplicateManifestKeyError(InvalidManifestError):
     """Raised when an ``apm.yml`` declares the same top-level key twice."""
 
     def __init__(self, path: Path, key: str, first_line: int, second_line: int) -> None:
@@ -61,12 +69,54 @@ def reject_duplicate_manifest_keys(path: Path, text: str) -> None:
         first_lines[key_node.value] = line
 
 
-def read_manifest_text(path: str | Path) -> str:
-    """Return ``apm.yml`` text after rejecting duplicate top-level keys."""
+class ManifestAnchorError(InvalidManifestError):
+    """Raised when an ``apm.yml`` uses a YAML anchor or alias (req-mf-020(b))."""
+
+    def __init__(self, path: Path, kind: str, name: str, line: int) -> None:
+        self.path = path
+        self.kind = kind
+        self.line = line
+        sigil = "&" if kind == "anchor" else "*"
+        super().__init__(
+            f"{path} uses the YAML {kind} '{sigil}{name}' on line {line}. "
+            "apm.yml must not use YAML anchors (&name) or aliases (*name). "
+            "Write the value out in full wherever it is used, then retry."
+        )
+
+
+def reject_manifest_anchors(path: Path, text: str) -> None:
+    """Raise :class:`ManifestAnchorError` for the first anchor or alias in *text*.
+
+    Scanning tokens never builds or expands the document. Malformed YAML with
+    no anchor before the error is left to the bounded manifest loader.
+    """
+    try:
+        for token in yaml.scan(text, Loader=yaml.SafeLoader):
+            if isinstance(token, yaml.AnchorToken | yaml.AliasToken):
+                kind = "anchor" if isinstance(token, yaml.AnchorToken) else "alias"
+                raise ManifestAnchorError(path, kind, token.value, token.start_mark.line + 1)
+    except (yaml.YAMLError, RecursionError):
+        return
+
+
+def check_manifest_text(path: str | Path, text: str) -> str:
+    """Return *text* after the checks every ``apm.yml`` read applies."""
     manifest_path = Path(path)
-    text = manifest_path.read_text(encoding="utf-8")
     reject_duplicate_manifest_keys(manifest_path, text)
+    reject_manifest_anchors(manifest_path, text)
     return text
+
+
+def read_manifest_text(path: str | Path) -> str:
+    """Return ``apm.yml`` text after rejecting duplicate keys, anchors and aliases."""
+    return check_manifest_text(path, Path(path).read_text(encoding="utf-8"))
+
+
+def load_manifest_text(path: str | Path, text: str) -> Any:
+    """Load in-memory ``apm.yml`` text, such as a rewrite, with the read checks."""
+    from ..utils.yaml_io import load_yaml_str
+
+    return load_yaml_str(check_manifest_text(path, text))
 
 
 def load_manifest(path: str | Path) -> Any:

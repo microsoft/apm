@@ -88,17 +88,13 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint="Use '--target grok-cloud' to deploy skills.",
     ),
-    "marketplace_authoring": ExperimentalFlag(
-        name="marketplace_authoring",
-        description="Enable marketplace authoring commands (init, build, publish, etc.).",
-        default=False,
-        hint="Run 'apm marketplace --help' to see available commands.",
-    ),
     "registries": ExperimentalFlag(
         name="registries",
         description="Enable REST-based APM package registries in apm.yml.",
         default=False,
-        hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
+        hint=(
+            "Use registries: in apm.yml. See https://microsoft.github.io/apm/reference/registries/"
+        ),
     ),
     "canvas": ExperimentalFlag(
         name="canvas",
@@ -107,7 +103,7 @@ FLAGS: dict[str, ExperimentalFlag] = {
         hint=(
             "Author a canvas under .apm/extensions/<name>/extension.mjs, then "
             "'apm install' deploys it to .github/extensions/. Dependency-provided "
-            "canvases are executable and blocked unless approved via allowExecutables "
+            "canvases are executable and blocked unless approved via executables.allow "
             "in apm.yml and 'apm approve <pkg>'. See "
             "https://microsoft.github.io/apm/integrations/canvas/"
         ),
@@ -167,9 +163,11 @@ def _get_experimental_section(*, create_config: bool = True) -> dict:
     If the value is not a dict (e.g. user hand-edited the file to an int
     or string), returns an empty dict so every consumer fails closed.
     """
-    from apm_cli.config import get_config
+    from apm_cli.config import get_config_if_exists
 
-    experimental = get_config(create=create_config).get("experimental", {})
+    # A flag read is a pure read: defaults stay in memory (H6).
+    del create_config
+    experimental = get_config_if_exists().get("experimental", {})
     return experimental if isinstance(experimental, dict) else {}
 
 

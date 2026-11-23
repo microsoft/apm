@@ -277,11 +277,11 @@ class TestCheckRequiredPackagesDeployed:
         assert not result.passed
         assert "1 required package" in result.message
 
-    def test_required_not_in_manifest_skipped(self):
-        # Package in require but not in deps -- check 3 handles it, not 4
+    def test_required_not_in_manifest_is_not_skipped(self):
+        # An undeclared required package cannot be located in the lock (#3993).
         policy = DependencyPolicy(require=("acme/missing",))
         result = _check_required_packages_deployed([], _lock(), policy)
-        assert result.passed
+        assert not result.passed
 
 
 class TestCheckRequiredPackageVersion:
@@ -710,30 +710,26 @@ class TestCheckUnmanagedFiles:
 
 
 class TestLoadRawApmYml:
-    def test_file_absent_returns_none(self, tmp_path):
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
     def test_valid_yml_returns_dict(self, tmp_path):
         (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
         result = _load_raw_apm_yml(tmp_path)
         assert isinstance(result, dict)
         assert result["name"] == "test"
 
-    def test_malformed_yaml_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_text("name: [\nunot closed", encoding="utf-8")
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
-    def test_non_mapping_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_text("- item1\n- item2\n", encoding="utf-8")
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
-
-    def test_non_utf8_returns_none(self, tmp_path):
-        (tmp_path / "apm.yml").write_bytes(b"\xff\xfe" + b"\x00" * 100)
-        result = _load_raw_apm_yml(tmp_path)
-        assert result is None
+    @pytest.mark.parametrize(
+        "content",
+        [
+            None,
+            b"name: [\nunot closed",
+            b"- item1\n- item2\n",
+            b"\xff\xfe" + b"\x00" * 100,
+        ],
+        ids=["absent", "malformed_yaml", "non_mapping", "non_utf8"],
+    )
+    def test_unusable_file_returns_none(self, tmp_path, content):
+        if content is not None:
+            (tmp_path / "apm.yml").write_bytes(content)
+        assert _load_raw_apm_yml(tmp_path) is None
 
 
 class TestRunDependencyPolicyChecks:
@@ -1707,42 +1703,42 @@ class TestComputeCrossRepoMisconfigRisk:
     def _source(self, host="corp.ghe.com"):
         return MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host=host)
 
-    def test_dep_ref_returns_none(self):
-        plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
-        src = self._source()
-        dep_ref = DependencyReference.parse("some/thing")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", dep_ref)
-        assert result is None
+    def test_bare_url_source_returns_risk(self):
+        # A structured ref parsed from a bare locator still defaults to github.com (#3937).
+        plugin = MarketplacePlugin(name="p", source={"type": "url", "url": "other/repo"})
+        result = _compute_cross_repo_misconfig_risk(plugin, self._source(), "other/repo")
+        assert result is not None
+        assert result.suggested_qualified_repo == "corp.ghe.com/other/repo"
 
     def test_non_dict_source_returns_none(self):
         plugin = MarketplacePlugin(name="p", source="./local")
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace/local")
         assert result is None
 
     def test_non_github_type_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "npm", "package": "@scope/pkg"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "scope/pkg")
         assert result is None
 
     def test_in_marketplace_returns_none(self):
         # Repo field points to the marketplace itself -> in-marketplace
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "acme/marketplace"})
         src = self._source()
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "acme/marketplace")
         assert result is None
 
     def test_github_com_no_prefix_needed_returns_none(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = MarketplaceSource(name="mkt", owner="acme", repo="marketplace", host="github.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is None
 
     def test_ghe_cross_repo_returns_risk(self):
         plugin = MarketplacePlugin(name="p", source={"type": "github", "repo": "other/repo"})
         src = self._source("corp.ghe.com")
-        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo", None)
+        result = _compute_cross_repo_misconfig_risk(plugin, src, "other/repo")
         assert result is not None
         assert result.marketplace_host == "corp.ghe.com"
         assert result.bare_repo_field == "other/repo"

@@ -10,9 +10,8 @@ configured origin and base path. A case-only host difference stays in origin.
 
 from __future__ import annotations
 
-import hashlib
+import dataclasses
 import io
-import json
 import os
 import posixpath
 import sys
@@ -26,6 +25,7 @@ from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_github_https_fixture import openssl_executable
+from tests.utils.local_package_registry import LocalPackageRegistry
 from tests.utils.local_scripted_https_proxy import (
     ScriptedRequest,
     ScriptedResponse,
@@ -38,6 +38,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only fixture"),
+    pytest.mark.e2e,
 ]
 
 REGISTRY_HOST = "registry.corp.example"
@@ -70,26 +71,13 @@ def _archive() -> bytes:
 class _Gateway:
     def __init__(self, mode: str) -> None:
         self.mode = mode
-        self.archive = _archive()
+        self.packages = LocalPackageRegistry(BASE)
+        self.packages.seed("acme/widget", "1.0.0", _archive())
 
-    def _payload(self, path: str) -> ScriptedResponse:
+    def _payload(self, request: ScriptedRequest, path: str) -> ScriptedResponse:
         tail = path.rstrip("/").split("/v1/packages/", 1)[-1]
-        if tail == "acme/widget/versions":
-            body = {
-                "versions": [
-                    {
-                        "version": "1.0.0",
-                        "digest": hashlib.sha256(self.archive).hexdigest(),
-                        "published_at": "2026-01-01T00:00:00Z",
-                    }
-                ]
-            }
-            return ScriptedResponse(
-                200, {"Content-Type": "application/json"}, json.dumps(body).encode()
-            )
-        if tail == "acme/widget/versions/1.0.0/download":
-            return ScriptedResponse(200, {"Content-Type": "application/zip"}, self.archive)
-        return ScriptedResponse(404)
+        target = f"{BASE}/v1/packages/{tail}"
+        return self.packages.handle(dataclasses.replace(request, target=target))
 
     def registry(self, request: ScriptedRequest) -> ScriptedResponse:
         path = request.path
@@ -98,19 +86,19 @@ class _Gateway:
             base_path = path.split("/hop", 1)[0]
             if hops < 6:
                 return ScriptedResponse(307, {"Location": f"{path}/hop{hops}"})
-            return self._payload(base_path)
+            return self._payload(request, base_path)
         if self.mode == "case-only-host":
             if path.endswith("/"):
-                return self._payload(path)
+                return self._payload(request, path)
             return ScriptedResponse(307, {"Location": f"https://{REGISTRY_HOST.upper()}{path}/"})
         if path.startswith(BASE + "/v1/") and not path.endswith("/"):
             tail = path[len(BASE) :]
             location = _LOCATIONS[self.mode].format(path=path, tail=tail)
             return ScriptedResponse(307, {"Location": location})
-        return self._payload(path)
+        return self._payload(request, path)
 
     def other(self, request: ScriptedRequest) -> ScriptedResponse:
-        return self._payload(request.path)
+        return self._payload(request, request.path)
 
 
 def _run(tmp_path: Path, binary: Path, mode: str) -> tuple[CommandResult, list[ScriptedRequest]]:

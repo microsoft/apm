@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.integration.base_integrator import kept_edit_message
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import (
@@ -28,6 +31,8 @@ from tests.utils.scenario_rows import (
     ScenarioObservation,
     ScenarioRow,
 )
+
+pytestmark = pytest.mark.e2e
 
 _AUDIT_ARGS = (
     "audit",
@@ -349,6 +354,18 @@ def test_concurrent_real_lifecycles_are_worker_isolated(
         )
 
 
+def _git(cwd: Path, receipt: _LifecycleReceipt, *args: str) -> None:
+    subprocess.run(
+        ("git", "-c", "user.name=APM Test", "-c", "user.email=apm@example.invalid", *args),
+        cwd=cwd,
+        env=receipt.isolated.subprocess_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -377,6 +394,13 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
     lock_path = project_root / "apm.lock.yaml"
     lock = load_yaml(lock_path)
     locked_dependency = lock["dependencies"][0]
+    deployed_bytes = (project_root / instruction_path).read_bytes()
+    committed_lock = lock_path.read_bytes()
+    if mutation == "content-hash":
+        # The project is under version control, so the printed remedy can run.
+        _git(project_root, receipt, "init", "-q")
+        _git(project_root, receipt, "add", "apm.yml", "apm.lock.yaml")
+        _git(project_root, receipt, "commit", "-q", "-m", "consumer")
 
     if mutation == "deployed-file":
         (project_root / instruction_path).write_text(
@@ -411,27 +435,108 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
         negative_args = ("audit", "--ci", "--no-policy", "--format", "json")
 
     recovery_args = ["install", "--target", "copilot"]
-    if mutation in {"content-hash", "resolved-commit", "source-identity"}:
+    if mutation in {"resolved-commit", "source-identity"}:
         recovery_args.append("--update")
-    result, recovery, clean_audit = runner.run_sequence(
-        (
-            negative_args,
-            tuple(recovery_args),
-            ("audit", "--ci", "--no-policy", "--format", "json"),
-        ),
-        expected_returncodes=(1, 0, 0),
-        scenario_id=f"{scenario_id}-tamper-repair",
-        cwd=project_root,
-        env=environment,
-    )
-
     if mutation == "content-hash":
-        normalized_stdout = " ".join(result.stdout.split())
-        assert "Content hash mismatch" in normalized_stdout
-        assert f"expected sha256:{'0' * 64}" in normalized_stdout
-        assert "This may indicate a supply-chain attack." in normalized_stdout
-        assert "Use 'apm install --update' to accept new content" in normalized_stdout
-        assert result.stderr == ""
+        # An unchanged commit never re-pins new content through an update
+        # (#4027); the printed remedy restores the committed lockfile.
+        (result,) = runner.run_sequence(
+            (negative_args,),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper",
+            cwd=project_root,
+            env=environment,
+        )
+        refused = runner.run_sequence(
+            (("install", "--target", "copilot", "--update"),),
+            expected_returncodes=(1,),
+            scenario_id=f"{scenario_id}-tamper-update",
+            cwd=project_root,
+            env=environment,
+        )[0]
+        assert "Content hash mismatch" in " ".join(refused.stdout.split())
+        assert load_yaml(lock_path)["dependencies"][0]["content_hash"] == f"sha256:{'0' * 64}"
+        # Execute the printed remedy: the lockfile changed, so restore it from
+        # version control with the exact command the refusal names.
+        restore = re.search(
+            r"for example '(git checkout -- [^']+)'", " ".join(result.stderr.split())
+        )
+        assert restore, result.stderr
+        restore_argv = shlex.split(restore.group(1))
+        assert restore_argv[:3] == ["git", "checkout", "--"], restore_argv
+        _git(project_root, receipt, *restore_argv[1:])
+        assert lock_path.read_bytes() == committed_lock
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+    elif mutation == "deployed-file":
+        # A plain install keeps the edited file APM's receipt proves it
+        # deployed, names it with the runnable remedy and succeeds (RA-012);
+        # following the remedy (move the file aside, then install) restores it.
+        result, kept = runner.run_sequence(
+            (negative_args, tuple(recovery_args)),
+            expected_returncodes=(1, 0),
+            scenario_id=f"{scenario_id}-tamper-kept",
+            cwd=project_root,
+            env=environment,
+        )
+        kept_text = " ".join((kept.stdout + kept.stderr).split())
+        assert kept_edit_message(instruction_path, user_scope=False, proven_edit=True) in kept_text
+        assert (project_root / instruction_path).read_text(encoding="utf-8") == (
+            "# Mutated generated deployment\n"
+        )
+        # Execute the printed remedy: move the edited file aside, then install.
+        moved = receipt.isolated.work_root / "kept-instruction.md"
+        (project_root / instruction_path).rename(moved)
+        recovery, clean_audit = runner.run_sequence(
+            (tuple(recovery_args), ("audit", "--ci", "--no-policy", "--format", "json")),
+            expected_returncodes=(0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+    else:
+        result, recovery, clean_audit = runner.run_sequence(
+            (
+                negative_args,
+                tuple(recovery_args),
+                ("audit", "--ci", "--no-policy", "--format", "json"),
+            ),
+            expected_returncodes=(1, 0, 0),
+            scenario_id=f"{scenario_id}-tamper-repair",
+            cwd=project_root,
+            env=environment,
+        )
+
+    if mutation == "deployed-file":
+        assert (project_root / instruction_path).read_bytes() == deployed_bytes
+        assert moved.read_text(encoding="utf-8") == "# Mutated generated deployment\n"
+    if mutation == "content-hash":
+        assert lock_path.read_bytes() == committed_lock
+    if mutation == "content-hash":
+        # The refusal is an error line, so it goes to stderr (RA-004).
+        normalized_stderr = " ".join(result.stderr.split())
+        assert "Content hash mismatch" in normalized_stderr
+        assert f"expected sha256:{'0' * 64}" in normalized_stderr
+        assert "This may indicate a supply-chain attack." in normalized_stderr
+        # The remedy names both causes (RA-003): stale package copies, or a
+        # changed lockfile restored from version control.
+        lock_file = str(project_root / "apm.lock.yaml")
+        assert (
+            "If the package copies changed, run 'apm cache clean --yes' to discard the "
+            "cached package copies, then retry." in normalized_stderr
+        ), result.stderr
+        assert f"If {lock_file} changed, restore {lock_file} from version control" in (
+            normalized_stderr
+        ), result.stderr
+        assert (
+            "then run 'apm install' to verify the dependency against the committed lockfile."
+            in normalized_stderr
+        ), result.stderr
     else:
         payload = json.loads(result.stdout)
         failed_checks = {check["name"]: check for check in payload["checks"] if not check["passed"]}
@@ -442,7 +547,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             assert set(failed_checks) == {"content-integrity", "drift"}
             assert instruction_path in failed_checks["content-integrity"]["details"][0]
             assert (
-                "'apm install' to restore drifted files"
+                "move the edited files aside, then run 'apm install'"
                 in (failed_checks["content-integrity"]["message"])
             )
         elif mutation == "resolved-ref":
@@ -455,7 +560,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
             ]
         elif mutation == "resolved-commit":
             assert set(failed_checks) == {"ref-consistency"}
-            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
+            assert "run 'apm update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: "
                 f"manifest commit '{receipt.commit_sha}' != "
@@ -471,7 +576,7 @@ def test_generated_artifact_tampering_reports_cause_and_recovers(
                     "inline_diff": "",
                 }
             ]
-            assert "run 'apm install --update'" in (failed_checks["ref-consistency"]["message"])
+            assert "run 'apm update'" in (failed_checks["ref-consistency"]["message"])
             assert failed_checks["ref-consistency"]["details"] == [
                 f"gitlab.example.invalid/group/fixture-{scenario_id}: not found in lockfile"
             ]

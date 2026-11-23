@@ -22,7 +22,7 @@ Source: `src/apm_cli/deps/lockfile.py`.
 ### apm.yml
 
 The package manifest. A YAML file at the package root that declares
-`name`, `version`, `dependencies`, `scripts`, `targets` / `target`, and metadata. Both
+`name`, `version`, `dependencies`, `scripts`, `targets` (singular `target` is deprecated), and metadata. Both
 the unit of authoring and the unit of consumption -- a directory becomes
 an APM package the moment it has an `apm.yml`.
 
@@ -68,7 +68,7 @@ The `apm compile` command. Aggregates instructions from your package and
 NOT per-harness deployment. `apm install` writes primitives into harness
 directories (`.github/`, `.claude/`, `.cursor/`, etc.).
 
-See: [Compilation guide](/apm/producer/compile/).
+See: [Compilation guide](/apm/consumer/choose-harnesses/#compiled-outputs).
 Source: `src/apm_cli/commands/compile/`.
 
 ### dev-only primitive
@@ -95,7 +95,7 @@ NOT a separate token type. It is a standard GitHub PAT; the
 `GITHUB_APM_PAT` name exists so APM-scoped tokens do not collide with
 other tooling.
 
-See: [Authentication](/apm/consumer/authentication/).
+See: [Authentication](/apm/getting-started/authentication/).
 Source: `src/apm_cli/core/auth.py`.
 
 ### harness
@@ -115,7 +115,7 @@ Source: `src/apm_cli/integration/targets.py` (see `KNOWN_TARGETS`).
 A primitive type whose contents run at a defined lifecycle event in the
 host harness (for example `PreToolUse`). Supported on every harness
 except Grok Build, OpenCode, Hermes, and Grok Bot -- see the matrix in
-[primitives and targets](/apm/concepts/primitives-and-targets/).
+[primitives and targets](/apm/concepts/how-apm-works/).
 
 NOT an APM CLI lifecycle event. Hooks fire inside the agent runtime,
 not inside `apm install` or `apm compile`.
@@ -195,7 +195,7 @@ standard pipeline.
 NOT a different thing from a package at runtime. Plugin format is the
 input shape; once detected, APM handles plugins exactly like packages.
 
-See: [Plugins guide](/apm/producer/author-primitives/).
+See: [Plugins guide](/apm/producer/write-primitives/).
 Source: `src/apm_cli/bundle/local_bundle.py`,
 `src/apm_cli/commands/install.py`.
 
@@ -209,7 +209,7 @@ file is written to disk, including for transitive MCP servers.
 NOT the same as `audit`. Policy enforces at install time; audit reports
 after the fact.
 
-See: [Governance guide](/apm/enterprise/governance-guide/).
+See: [Governance guide](/apm/enterprise/security/).
 Source: `src/apm_cli/policy/`.
 
 ### primitive
@@ -223,7 +223,7 @@ NOT every file in a package. Only files matching the primitive layout
 under recognised directories (`agents/`, `skills/`, `prompts/`,
 `instructions/`, `hooks/`, `commands/`, `extensions/`) are deployed.
 
-See: [Primitives and targets](/apm/concepts/primitives-and-targets/).
+See: [Primitives and targets](/apm/concepts/how-apm-works/).
 Source: `src/apm_cli/integration/`.
 
 ### registry
@@ -253,16 +253,16 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 ### target
 
-The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
+The `targets:` field in `apm.yml` (singular `target:` is deprecated). Names which harnesses the package
 compiles for (`copilot`, `claude`, `grok-build`, `cursor`, `codex`, `gemini`,
 `antigravity`, `opencode`, `windsurf`, `kiro`, `hermes`, `grok-bot`, or
-`agent-skills`). `all` is a CLI `--target` value only. Drives which integrator runs and
+`agent-skills`; `vscode` is a deprecated alias of `copilot`). `all` is a CLI `--target` value only. Drives which integrator runs and
 which directories receive output during `apm install` and `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the
 runtime that consumes the compiled output.
 
-See: [Primitives and targets](/apm/concepts/primitives-and-targets/).
+See: [Primitives and targets](/apm/concepts/how-apm-works/).
 Source: `src/apm_cli/integration/targets.py`,
 `src/apm_cli/core/target_detection.py`.
 
@@ -284,8 +284,9 @@ Source: `src/apm_cli/install/context.py`,
 The install-time consent step before APM writes a new MCP server config
 to disk. Required because an MCP server pulled in transitively by a deep
 dependency can introduce a new outbound integration the user did not
-explicitly request. Today this is enforced via `--trust-transitive-mcp`
-opt-in plus `apm-policy.yml` allow-listing; an interactive prompt is on
+explicitly request. Today this is enforced via `apm approve` pins in
+`apm.yml` (or a one-run `--trust-transitive-mcp`) plus `apm-policy.yml`
+allow-listing; an interactive prompt is on
 the Promise 2 roadmap.
 
 Source: `src/apm_cli/install/mcp/`,

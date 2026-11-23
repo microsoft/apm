@@ -13,8 +13,10 @@ import yaml
 from apm_cli.install.deployable_source_plan import DeployableSourcePlan
 from apm_cli.integration.base_integrator import IntegrationResult
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
 from apm_cli.utils.yaml_io import loads_frontmatter
+from tests.utils.deployment_evidence import prove_overwrites, receipted_evidence
 
 
 def _make_package_info(package_dir, name="test-pkg"):
@@ -37,6 +39,9 @@ def _make_package_info(package_dir, name="test-pkg"):
         resolved_reference=resolved_ref,
         installed_at=datetime.now().isoformat(),
     )
+
+
+_PY_SCOPED = "---\napplyTo: '**/*.py'\n---\n\n"
 
 
 class TestInstructionIntegrator:
@@ -314,8 +319,9 @@ class TestInstructionIntegrator:
         assert result.files_skipped == 1
         assert (target_dir / "python.instructions.md").read_text() == "# User version"
 
-    def test_integrate_overwrites_managed_file(self):
+    def test_integrate_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when managed_files includes it (APM-owned)."""
+        prove_overwrites(monkeypatch)
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -439,8 +445,12 @@ class TestInstructionSyncIntegration:
             ".github/instructions/testing.instructions.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -456,8 +466,12 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/python.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1
@@ -527,8 +541,12 @@ class TestInstructionSyncIntegration:
 
         managed = {".github/instructions/nonexistent.instructions.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["copilot"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 0
@@ -564,8 +582,9 @@ class TestInstructionNameCollision:
             installed_at=datetime.now().isoformat(),
         )
 
-    def test_install_overwrites_when_managed(self):
+    def test_install_overwrites_when_managed(self, monkeypatch):
         """APM-managed file with same name is overwritten."""
+        prove_overwrites(monkeypatch)
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -584,8 +603,9 @@ class TestInstructionNameCollision:
         assert result.files_integrated == 1
         assert (target_dir / "python.instructions.md").read_text() == "# APM Python standards"
 
-    def test_two_packages_same_instruction_name_last_wins(self):
+    def test_two_packages_same_instruction_name_last_wins(self, monkeypatch):
         """When two packages deploy the same filename, last-installed wins (managed file update)."""
+        prove_overwrites(monkeypatch)
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
 
@@ -891,8 +911,9 @@ class TestCursorRulesIntegration:
         assert result.files_skipped == 1
         assert (rules_dir / "python.mdc").read_text() == "# Stale rules"
 
-    def test_overwrites_managed_file(self):
+    def test_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when it's in managed_files."""
+        prove_overwrites(monkeypatch)
         (self.project_root / ".cursor").mkdir()
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir()
@@ -991,8 +1012,12 @@ class TestCursorRulesSyncIntegration:
             ".cursor/rules/testing.mdc",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -1007,8 +1032,12 @@ class TestCursorRulesSyncIntegration:
 
         managed = {".cursor/rules/python.mdc"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_cursor(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["cursor"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1
@@ -1111,7 +1140,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1148,7 +1177,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "test.instructions.md").write_text("# Test")
+        (inst_dir / "test.instructions.md").write_text(_PY_SCOPED + "# Test")
 
         pkg_info = _make_package_info(pkg)
         self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1162,7 +1191,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "security.instructions.md").write_text("# Security")
+        (inst_dir / "security.instructions.md").write_text(_PY_SCOPED + "# Security")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1177,8 +1206,8 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
-        (inst_dir / "testing.instructions.md").write_text("# Testing")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
+        (inst_dir / "testing.instructions.md").write_text(_PY_SCOPED + "# Testing")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1209,7 +1238,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# APM rules")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# APM rules")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(
@@ -1231,7 +1260,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# APM rules")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# APM rules")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(
@@ -1242,8 +1271,9 @@ class TestClaudeRulesIntegration:
         assert result.files_skipped == 1
         assert (rules_dir / "python.md").read_text() == "# Stale rules"
 
-    def test_overwrites_managed_file(self):
+    def test_overwrites_managed_file(self, monkeypatch):
         """Overwrites file when it's in managed_files."""
+        prove_overwrites(monkeypatch)
         (self.project_root / ".claude").mkdir()
         rules_dir = self.project_root / ".claude" / "rules"
         rules_dir.mkdir()
@@ -1252,7 +1282,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Updated")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Updated")
 
         pkg_info = _make_package_info(pkg)
         managed = {".claude/rules/python.md"}
@@ -1268,7 +1298,7 @@ class TestClaudeRulesIntegration:
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
-        (inst_dir / "python.instructions.md").write_text("# Python")
+        (inst_dir / "python.instructions.md").write_text(_PY_SCOPED + "# Python")
 
         pkg_info = _make_package_info(pkg)
         result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
@@ -1301,9 +1331,27 @@ class TestClaudeRulesIntegration:
         assert "# TypeScript" in deployed
         assert "Use strict mode." in deployed
 
-    def test_unconditional_rule_has_no_frontmatter(self):
-        """Instructions without applyTo become unconditional rules."""
+    def test_unconditional_rule_routes_to_agents_md(self):
+        """Project instructions without applyTo load from AGENTS.md, not rules (#3939)."""
         (self.project_root / ".claude").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "general.instructions.md").write_text(
+            "---\ndescription: General guidelines\n---\n\n# General\n\nAlways lint."
+        )
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+
+        assert result.target_paths == []
+        assert not (self.project_root / ".claude" / "rules" / "general.md").exists()
+
+    def test_unconditional_rule_has_no_frontmatter(self):
+        """A blocked AGENTS.md route keeps unconditional rules without frontmatter."""
+        (self.project_root / ".claude").mkdir()
+        (self.project_root / "CLAUDE.md").write_text("# Team notes\n")
 
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
@@ -1320,7 +1368,7 @@ class TestClaudeRulesIntegration:
         assert "# General" in deployed
         assert "Always lint." in deployed
 
-    def test_crlf_rule_file_rewritten_to_lf_not_adopted(self):
+    def test_crlf_rule_file_rewritten_to_lf_not_adopted(self, monkeypatch):
         """A stale CRLF rule file is rewritten to LF, not adopted (apm#1889).
 
         read_text() collapses CRLF->LF, so a text-mode equality check would
@@ -1328,6 +1376,7 @@ class TestClaudeRulesIntegration:
         platform-dependent hash in the lockfile. The adopt check compares the
         on-disk bytes against the LF output, so the file is re-written as LF.
         """
+        prove_overwrites(monkeypatch)
         (self.project_root / ".claude").mkdir()
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
@@ -1395,8 +1444,12 @@ class TestClaudeRulesSyncIntegration:
             ".claude/rules/testing.md",
         }
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 2
@@ -1411,8 +1464,12 @@ class TestClaudeRulesSyncIntegration:
 
         managed = {".claude/rules/python.md"}
         apm_package = Mock()
-        result = self.integrator.sync_integration_claude(
-            apm_package, self.project_root, managed_files=managed
+        result = self.integrator.sync_for_target(
+            KNOWN_TARGETS["claude"],
+            apm_package,
+            self.project_root,
+            managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
         assert result["files_removed"] == 1

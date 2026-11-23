@@ -87,7 +87,36 @@ def select_manifest_dependency(
             if dependency.is_local and dependency.get_unique_key() in locked_alias_keys:
                 matched_entries[index] = entry
 
-    matches = list(matched_entries.values())
+    return _selection_from_matches(list(matched_entries.values()))
+
+
+def select_marketplace_declaration(
+    plugin_name: str,
+    marketplace_name: str,
+    manifest_dependencies: list[object],
+) -> DependencySelection:
+    """Select the object-form ``{name, marketplace}`` declaration for ``plugin@marketplace``.
+
+    Matching is case-insensitive, like registry and catalog lookups, and reads
+    only the manifest: no lockfile, registry or catalog is consulted.
+    """
+    alias, plugin = marketplace_name.casefold(), plugin_name.casefold()
+    matches: list[object] = []
+    for entry in manifest_dependencies:
+        try:
+            declared = parse_dependency_entry(entry)
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if (
+            declared.is_marketplace
+            and (declared.marketplace_name or "").casefold() == alias
+            and (declared.marketplace_plugin_name or "").casefold() == plugin
+        ):
+            matches.append(entry)
+    return _selection_from_matches(matches)
+
+
+def _selection_from_matches(matches: list[object]) -> DependencySelection:
     if matches and len(manifest_declarations_of(matches, matches[:1])) == len(matches):
         return DependencySelection(
             status=DependencySelectionStatus.MATCHED,

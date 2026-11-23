@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
 import yaml
 
 from apm_cli.deps import apm_resolver
@@ -33,6 +34,8 @@ from apm_cli.deps.apm_resolver import APMDependencyResolver
 from apm_cli.deps.dependency_graph import DependencyNode
 from apm_cli.models.apm_package import APMPackage, DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+
+pytestmark = pytest.mark.component
 
 
 def _write_pkg(root: Path, name: str, deps: list[str] | None = None) -> Path:

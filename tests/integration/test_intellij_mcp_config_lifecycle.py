@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.core.remediation import JETBRAINS_MCP_CONFIG_UNUSABLE
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.artifact_snapshot import ArtifactSnapshot
@@ -354,7 +355,7 @@ def test_transitive_package_migrates_owned_entries_and_cleans_by_provenance(
             (
                 "install",
                 "--target",
-                "vscode",
+                "copilot",
                 "--trust-transitive-mcp",
                 "--no-policy",
             ),
@@ -426,7 +427,8 @@ def test_malformed_installed_destination_fails_without_rewrite(
     assert result.returncode == 1
     assert "MCP configuration failed for selected runtime(s)" in result.stderr + result.stdout
     assert "is malformed JSON" in result.stderr + result.stdout
-    assert "Fix the file, then rerun apm install" in result.stderr + result.stdout
+    advice = JETBRAINS_MCP_CONFIG_UNUSABLE.bind(fix="fix the file").sentence()
+    assert advice in " ".join((result.stderr + result.stdout).split())
     assert "MCP server written to apm.yml" not in result.stderr + result.stdout
     assert "Run with --verbose" not in result.stderr + result.stdout
     assert canonical.read_bytes() == original
@@ -501,7 +503,7 @@ def test_uninstall_with_malformed_intellij_config_is_nonzero(
     assert "Uninstall incomplete" in uninstall.stderr + uninstall.stdout
     assert "Uninstall complete" not in uninstall.stderr + uninstall.stdout
     normalized_output = " ".join((uninstall.stderr + uninstall.stdout).split())
-    assert normalized_output.count("rerun apm install") == 1
+    assert normalized_output.count(JETBRAINS_MCP_CONFIG_UNUSABLE.bind(fix="").option()) == 1
     assert canonical.read_bytes() == original
 
 
@@ -642,7 +644,7 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     tmp_path: Path,
     apm_binary_path: Path,
 ) -> None:
-    """A failed IntelliJ target does not prevent later VS Code cleanup."""
+    """A failed IntelliJ target does not prevent Copilot cleanup."""
     isolated = _create_environment(tmp_path, "continued-uninstall")
     package = isolated.package_root / "agent-config"
     package.mkdir()
@@ -658,7 +660,7 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
         (
             "install",
             "--target",
-            "intellij,vscode",
+            "intellij,copilot",
             "--trust-transitive-mcp",
             "--no-policy",
         ),
@@ -667,8 +669,8 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
         env=environment,
     )
     assert install.returncode == 0, install.stderr + install.stdout
-    vscode_path = project / ".vscode" / "mcp.json"
-    assert "managed-server" in json.loads(vscode_path.read_text(encoding="utf-8"))["servers"]
+    copilot_path = project / ".mcp.json"
+    assert "managed-server" in json.loads(copilot_path.read_text(encoding="utf-8"))["mcpServers"]
     canonical.write_bytes(b"{malformed\n")
 
     uninstall = runner.run(
@@ -679,7 +681,8 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     )
 
     assert uninstall.returncode == 1
-    assert "managed-server" not in json.loads(vscode_path.read_text(encoding="utf-8"))["servers"]
+    copilot_servers = json.loads(copilot_path.read_text(encoding="utf-8")).get("mcpServers", {})
+    assert "managed-server" not in copilot_servers
     output = uninstall.stderr + uninstall.stdout
     assert "Uninstall incomplete" in output
     assert "run 'apm install'" in " ".join(output.split())

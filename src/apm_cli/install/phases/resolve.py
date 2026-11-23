@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from apm_cli.core.remediation import REPLACEMENT_RULES_PARTIAL_INSTALL
 from apm_cli.install.helpers.ref_reuse import (
     annotate_update_plan_refs,
 )
@@ -21,7 +22,13 @@ from apm_cli.install.helpers.ref_reuse import (
     requires_remote_ref_resolution as _requires_remote_ref_resolution,
 )
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.pipeline_entry import record_preview_resolution
 from apm_cli.install.presentation.resolution import report_resolved_dependencies
+from apm_cli.install.repository_access import not_found_next_step
+from apm_cli.install.source_helpers import (
+    download_registry_package,
+    with_preserved_install_hint,
+)
 from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.models.dependency import materialization as _materialization
@@ -113,15 +120,6 @@ def _materialization_migration_logger(
     return report
 
 
-def _with_preserved_install_hint(message: str, install_path: Path | None) -> str:
-    """Explain that a failed replacement left the current install active."""
-    if install_path is None or not install_path.exists():
-        return message
-    return (
-        f"{message}. The existing installation remains active; fix the cause and retry the install."
-    )
-
-
 def _prepare_callback_materialization_path(
     dependency: Any,
     modules_dir: Path,
@@ -170,7 +168,7 @@ def _activate_validated_candidate(
     """Publish one accepted candidate, then expose its download metadata."""
     from apm_cli.utils.content_hash import compute_package_hash
 
-    content_hash = compute_package_hash(candidate_path)
+    content_hash = compute_package_hash(candidate_path, framed=True)
     live_path = staging_session.publish_replacement(candidate_path)
     with callback_lock:
         pending = pending_downloads.pop(candidate_path, None)
@@ -240,7 +238,6 @@ def _setup_downloader(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 3. Auth resolver + downloader
     # ------------------------------------------------------------------
-    import os as _os
 
     from apm_cli.core.auth import AuthResolver
     from apm_cli.deps import github_downloader as _ghd_mod
@@ -264,20 +261,11 @@ def _setup_downloader(ctx: InstallContext) -> None:
     downloader.shared_clone_cache = shared_cache
 
     # WS3 (#1116): attach persistent cross-run git cache unless disabled
-    # via APM_NO_CACHE environment variable.
-    if not _os.environ.get("APM_NO_CACHE"):
-        from apm_cli.cache.paths import get_cache_root
+    # via APM_NO_CACHE; a --dry-run preview never writes the cache.
+    from apm_cli.cache.git_cache import attach_persistent_git_cache
 
-        try:
-            from apm_cli.cache.git_cache import GitCache
-
-            _cache_root = get_cache_root()
-            downloader.persistent_git_cache = GitCache(
-                _cache_root,
-                refresh=ctx.refresh,
-            )
-        except (OSError, ValueError):
-            pass  # Cache unavailable (permissions, missing dir) -- degrade gracefully
+    if not ctx.dry_run:
+        attach_persistent_git_cache(downloader, refresh=ctx.refresh)
 
     # Perf #1433: attach the InstallLogger so the subdir download path
     # can emit verbose-only [perf] lines (subdir cache state, bare
@@ -331,10 +319,14 @@ def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     )
 
 
-def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
-    """Raise when the resolver recorded fatal dependency-resolution errors."""
+def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph, failures=()) -> None:
+    """Raise on fatal resolution errors; show the download *failures* behind them once."""
+    if ctx.dry_run:
+        return record_preview_resolution(ctx, dependency_graph)
     if not dependency_graph.resolution_errors:
         return
+    for _display, failure in failures if ctx.logger else ():
+        ctx.logger.verbose_detail(f"  {failure}")
     for error in dependency_graph.resolution_errors:
         if ctx.logger and not error.startswith("Marketplace package materialization failed:"):
             ctx.logger.error(error)
@@ -342,11 +334,11 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-def _attach_resolver_marketplace_provenance(
-    ctx: InstallContext,
-    resolver,
-) -> None:
-    """Carry manifest-resolved marketplace identity into lockfile assembly."""
+def _attach_resolver_marketplace_provenance(ctx: InstallContext, resolver) -> None:
+    """Carry manifest-resolved marketplace identity into selection and lockfile assembly."""
+    if ctx.only_packages and resolver.selected_marketplace_keys:
+        # Selecting ``plugin@marketplace`` selects the package it resolved to.
+        ctx.only_packages = [*ctx.only_packages, *resolver.selected_marketplace_keys]
     if not resolver.marketplace_provenance:
         return
     if ctx.marketplace_provenance is None:
@@ -385,7 +377,7 @@ def _resolve_dependencies(
         _warn_insecure_dependencies,
     )
     from apm_cli.install.package_selection import selected_dependency_keys
-    from apm_cli.install.phases.local_content import _copy_local_package
+    from apm_cli.install.phases.local_content import copy_local_dependency
 
     # 3b. Dedicated registry resolver (design §3.1, §8)
     # Built when:
@@ -427,7 +419,6 @@ def _resolve_dependencies(
 
     # 5. Download callback for transitive resolution
     scope = ctx.scope
-    project_root = ctx.project_root
     # Local-path package references in apm.yml are relative to the
     # manifest's location (source_root), not the deploy override.
     # source_root is required on InstallContext; equals project_root
@@ -454,6 +445,10 @@ def _resolve_dependencies(
 
     verbose = ctx.verbose  # noqa: F841
 
+    from apm_cli.install.phases.policy_gate import _prefetch_policy_refusal
+
+    refuse_before_fetch = _prefetch_policy_refusal(ctx)
+
     def download_callback(dep_ref, modules_dir, parent_chain="", parent_pkg=None):
         """Download a package during dependency resolution.
 
@@ -468,6 +463,8 @@ def _resolve_dependencies(
                 transitive ``../sibling`` resolves against the declaring
                 package's directory rather than the root consumer (#857).
         """
+        if refuse_before_fetch(dep_ref):
+            return None
         install_path = replacement_path = None
         try:
             install_path = _prepare_callback_materialization_path(
@@ -559,10 +556,9 @@ def _resolve_dependencies(
                                 None,
                             )
                         return replacement_path
-                registry_resolver.download_package(dep_ref, replacement_path)
+                download_registry_package(ctx, dep_ref, replacement_path, _locked_reg)
                 _annotate_registry_dep_ref(dep_ref, registry_resolver)
-                # Mark as already-downloaded so the parallel pre-download
-                # phase skips this dep. No SHA for registry deps.
+                # Mark as downloaded so pre-download skips it; registry deps have no SHA.
                 with callback_lock:
                     pending_callback_downloads[replacement_path] = (
                         dep_ref.get_unique_key(),
@@ -572,54 +568,38 @@ def _resolve_dependencies(
 
             # Handle local packages: copy instead of git clone
             if dep_ref.is_local and dep_ref.local_path:
-                if (
-                    scope is InstallScope.USER
-                    and not Path(dep_ref.local_path).expanduser().is_absolute()
-                ):
-                    # At user scope, relative local paths have no meaningful
-                    # root (cwd is arbitrary, $HOME is not a project).  Only
-                    # absolute paths are unambiguous; reject relative refs.
-                    # Note: callback_failures is a set (see line ~105),
-                    # so use .add() rather than dict-style assignment.
-                    with callback_lock:
-                        callback_failures.add(dep_ref.get_unique_key())
-                    _tui = getattr(ctx, "tui", None)
-                    if _tui is not None:
-                        _tui.task_failed(dep_ref.get_unique_key())
-                    return None
-                # Anchor relative paths on the *declaring* package's source
-                # directory when available (#857). Falls back to project_root
-                # for direct deps and for parents that predate source_path.
-                # Direct deps from the root project anchor at ``source_root``
-                # (which equals ``project_root`` unless ``apm install --root``
-                # redirects writes -- then it stays at $PWD).  Transitive
-                # deps from a parent local package anchor at that package's
-                # source_path, which is already an absolute path and not
-                # affected by ``--root``.
-                base_dir = (
-                    parent_pkg.source_path
-                    if dep_ref.replacement is None
-                    and parent_pkg is not None
-                    and parent_pkg.source_path is not None
-                    else source_root
-                )
-                result_path = _copy_local_package(
+                # The declaring package anchors relative paths (#857, #4153).
+                failure = copy_local_dependency(
                     dep_ref,
                     replacement_path,
-                    base_dir,
-                    project_root=project_root,
-                    logger=logger,
+                    declaring_dir=(
+                        parent_pkg.source_path
+                        if dep_ref.replacement is None and parent_pkg is not None
+                        else None
+                    ),
+                    source_root=source_root,
+                    user_scope=scope is InstallScope.USER,
                 )
-                if result_path:
-                    with callback_lock:
-                        pending_callback_downloads[replacement_path] = (
-                            dep_ref.get_unique_key(),
-                            None,
+                dep_key = dep_ref.get_unique_key()
+                with callback_lock:
+                    if failure is None:
+                        pending_callback_downloads[replacement_path] = (dep_key, None)
+                        return replacement_path
+                    callback_failures.add(dep_key)  # the barrier stops (#3874)
+                    if dep_key in direct_dep_keys and logger:
+                        logger.error(failure)
+                    elif dep_key not in direct_dep_keys:
+                        via = f" (via {parent_chain})" if parent_chain else ""
+                        transitive_failures.append(
+                            (
+                                dep_ref.local_path,
+                                f"Failed to resolve transitive dep {dep_ref.local_path}{via}: "
+                                f"{failure}",
+                            )
                         )
-                    return replacement_path
                 _tui = getattr(ctx, "tui", None)
                 if _tui is not None:
-                    _tui.task_failed(dep_ref.get_unique_key())
+                    _tui.task_failed(dep_key)
                 return None
 
             # --- Git-source semver range resolution (issue #1488) ---
@@ -741,17 +721,12 @@ def _resolve_dependencies(
             else:
                 chain_hint = f" (via {parent_chain})" if parent_chain else ""
                 fail_msg = f"Failed to resolve transitive dep {dep_ref.repo_url}{chain_hint}: {e}"
-            fail_msg = _with_preserved_install_hint(fail_msg, install_path)
+            fail_msg = with_preserved_install_hint(fail_msg, install_path)
+            fail_msg += not_found_next_step(
+                e, dep_ref, is_direct=is_direct, scope=getattr(ctx, "scope", None)
+            )
 
-            # Verbose: inline detail via logger (single output path).
-            # Deferred diagnostics below cover the non-logger case.
-            # F7 (#1116): single critical section for both the logger
-            # emission and the result-recording so concurrent failures
-            # don't interleave their lines.
             with callback_lock:
-                if logger:
-                    logger.verbose_detail(f"  {fail_msg}")
-                # Collect for deferred diagnostics summary (always, even non-verbose)
                 callback_failures.add(dep_key)
                 transitive_failures.append((dep_display, fail_msg))
             _tui = getattr(ctx, "tui", None)
@@ -763,6 +738,7 @@ def _resolve_dependencies(
     # 6. Resolver creation + dependency resolution
     # ------------------------------------------------------------------
     from apm_cli.install.legacy_plugin_compat import validate_cached_legacy_plugin
+    from apm_cli.install.service import InstallService
 
     resolver = APMDependencyResolver(
         apm_modules_dir=ctx.apm_modules_dir,
@@ -781,7 +757,8 @@ def _resolve_dependencies(
         update_keys=update_keys,
         existing_lockfile=existing_lockfile,
         reference_resolver=downloader,
-        frozen=ctx.frozen,
+        frozen=InstallService.frozen_disposition(ctx).replay,
+        preview=ctx.dry_run,
         cache_validation_callback=partial(
             validate_cached_legacy_plugin,
             lockfile=existing_lockfile,
@@ -791,7 +768,10 @@ def _resolve_dependencies(
 
     # The graph reads source_root; apm_modules_dir remains the deployment root.
     dependency_graph = _build_dependency_graph(ctx, resolver)
-    _fail_on_resolution_errors(ctx, dependency_graph)
+    from apm_cli.install.phases.policy_gate import _drop_policy_refused_replacement_errors
+
+    _drop_policy_refused_replacement_errors(ctx, dependency_graph)
+    _fail_on_resolution_errors(ctx, dependency_graph, transitive_failures)
 
     # Fold remote-parent local_path rejections into ``callback_failures`` so
     # the integrate phase skips them via the same gate used for download
@@ -837,7 +817,9 @@ def _resolve_dependencies(
         deps_to_install,
         downloader,
         update_refs=update_refs,
-        failed_keys=callback_failures,
+        # A dependency refused by identity is never contacted, not even for its ref.
+        failed_keys=callback_failures
+        | {dep.get_unique_key() for dep in ctx.prefetch_policy_denials},
     )
 
     # ------------------------------------------------------------------
@@ -868,17 +850,13 @@ def _resolve_dependencies(
     try:
         tree = dependency_graph.dependency_tree
         for node in tree.nodes.values():
-            if node.dependency_ref.replacement is not None:
-                dep_base_dirs[node.dependency_ref.get_unique_key()] = source_root
-                continue
+            # Only declaring-package dirs; path_anchoring decides the rest.
             parent_node = node.parent
-            if parent_node is None or parent_node.package is None:
+            if node.dependency_ref.replacement is not None or parent_node is None:
                 continue
-            anchor = (
-                parent_node.package.source_path
-                if parent_node.package.source_path is not None
-                else project_root
-            )
+            anchor = getattr(parent_node.package, "source_path", None)
+            if anchor is None:
+                continue
             key = node.dependency_ref.get_unique_key()
             existing = dep_base_dirs.get(key)
             if existing is not None and existing != anchor:
@@ -898,7 +876,7 @@ def _resolve_dependencies(
             dep_base_dirs[key] = anchor
     except (AttributeError, KeyError):
         # Tree shape may differ across releases; fall back to empty map
-        # (callers default to project_root anchoring, matching legacy).
+        # (callers fall back to the root anchor in path_anchoring).
         # Narrow set: real bugs (TypeError/NameError) should surface, not
         # silently degrade to legacy anchoring.
         dep_base_dirs = {}
@@ -944,17 +922,17 @@ def _record_update_plan_complete_dep_keys(ctx: InstallContext) -> None:
 
 def _record_partial_subtree_reconciliation(ctx: InstallContext) -> None:
     """Classify the selected packages' previous descendants for a partial install."""
-    # An incomplete graph cannot prove that no retained package still needs a
-    # candidate, so a failed resolution keeps every previous entry.
-    if not ctx.only_packages or ctx.existing_lockfile is None or ctx.callback_failures:
+    if not ctx.only_packages or ctx.existing_lockfile is None:
         return
     from apm_cli.install.package_selection import previous_selected_subtree_keys
 
+    # An incomplete graph cannot prove that no retained package still needs a
+    # candidate, so a failed resolution keeps every previous entry.
     dropped, rescued = previous_selected_subtree_keys(
         ctx.only_packages,
         ctx.all_apm_deps,
         ctx.existing_lockfile,
-        ctx.update_plan_complete_dep_keys,
+        None if ctx.callback_failures else ctx.update_plan_complete_dep_keys,
     )
     ctx.partial_dropped_dep_keys = dropped
     ctx.partial_rescued_dep_keys = rescued
@@ -982,10 +960,8 @@ def run(ctx: InstallContext) -> None:
             ctx.existing_lockfile, getattr(ctx.apm_package, "replace_rules", None)
         )
         if not unchanged:
-            raise RuntimeError(
-                "Replacement rules changed during a partial install. Run 'apm install' "
-                "without package selectors to apply the complete replacement table."
-            )
+            advice = REPLACEMENT_RULES_PARTIAL_INSTALL.sentence()
+            raise RuntimeError(f"Replacement rules changed during a partial install. {advice}")
     _ensure_modules_dir(ctx)
     staging_session = resolution_for_context(ctx)
     materialization_reader = _materialization.CachedMaterializationPathReader()
@@ -996,5 +972,9 @@ def run(ctx: InstallContext) -> None:
     _record_update_plan_complete_dep_keys(ctx)
     _record_partial_subtree_reconciliation(ctx)
     if ctx.only_packages:
+        from apm_cli.install.package_selection import with_unlocked_local_dependencies
+
+        complete = ctx.deps_to_install
         _apply_only_filter(ctx)
+        ctx.deps_to_install = with_unlocked_local_dependencies(ctx, complete)
     _compute_intended_dep_keys(ctx)

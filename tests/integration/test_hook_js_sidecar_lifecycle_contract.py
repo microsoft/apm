@@ -18,10 +18,10 @@ from apm_cli.integration.targets import KNOWN_TARGETS
 from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
-from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.lifecycle_scenario import LifecycleScenario, new_lifecycle_scenario
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
-from tests.utils.local_git_repository import LocalGitRepository, LocalGitRepositoryFactory
-from tests.utils.local_package import LocalPackage, LocalPackageFactory
+from tests.utils.local_git_repository import LocalGitRepository
+from tests.utils.local_package import LocalPackage
 
 pytestmark = [
     pytest.mark.integration,
@@ -61,17 +61,6 @@ _COPILOT_CAPTURE_PATHS = (
 
 
 @dataclass(frozen=True)
-class _Scenario:
-    """One isolated installed-CLI lifecycle workspace."""
-
-    isolated: IsolatedApmEnvironment
-    sources: LocalPackageFactory
-    consumers: LocalPackageFactory
-    repositories: LocalGitRepositoryFactory
-    runner: ApmLifecycleRunner
-
-
-@dataclass(frozen=True)
 class _PublishedPackage:
     """A package published through a production-shaped local Git remote."""
 
@@ -79,25 +68,6 @@ class _PublishedPackage:
     repository: LocalGitRepository
     dependency: dict[str, object]
     environment: dict[str, str]
-
-
-def _new_scenario(root: Path, apm_binary_path: Path) -> _Scenario:
-    isolated = IsolatedApmEnvironment.create(root, base_env=dict(os.environ))
-    environment = isolated.subprocess_env()
-    return _Scenario(
-        isolated=isolated,
-        sources=LocalPackageFactory(isolated.package_root),
-        consumers=LocalPackageFactory(isolated.work_root),
-        repositories=LocalGitRepositoryFactory(
-            isolated.repository_root,
-            env=environment,
-        ),
-        runner=ApmLifecycleRunner(
-            (str(apm_binary_path),),
-            timeout_seconds=90,
-            scenario_timeout_seconds=300,
-        ),
-    )
 
 
 def _hook_document() -> dict[str, object]:
@@ -119,7 +89,7 @@ def _script(marker: str) -> str:
     )
 
 
-def _publish(scenario: _Scenario) -> _PublishedPackage:
+def _publish(scenario: LifecycleScenario) -> _PublishedPackage:
     package = scenario.sources.create(_PACKAGE_NAME)
     scenario.sources.add_hook(package, "esm", _hook_document())
     scenario.sources.add_hook_asset(
@@ -159,7 +129,7 @@ def _publish(scenario: _Scenario) -> _PublishedPackage:
 
 
 def _consumer(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     published: _PublishedPackage,
     *,
     name: str,
@@ -180,7 +150,7 @@ def _consumer(
 
 
 def _run_success(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     consumer: LocalPackage,
     args: tuple[str, ...],
     *,
@@ -200,6 +170,16 @@ def _run_success(
         f"stderr={result.stderr!r}"
     )
     return result
+
+
+def _assert_legacy_sidecar_kept(result: CommandResult, sidecar: Path, claim: str) -> None:
+    """A legacy sidecar an older APM wrote has no receipt and is not in the
+    locked render, so a lockfile hash alone no longer deletes it (#3701): it is
+    kept and named. The documented manual fix is to delete it."""
+    output = " ".join((result.stdout + result.stderr).split())
+    assert sidecar.is_file()
+    assert claim in output and "no local deployment receipt" in output, output
+    sidecar.unlink()
 
 
 def _capture_copilot(consumer: LocalPackage) -> LifecycleStateSnapshot:
@@ -239,7 +219,7 @@ def _deployed_command(consumer: LocalPackage) -> tuple[str, ...]:
 
 
 def _execute_hook(
-    scenario: _Scenario,
+    scenario: LifecycleScenario,
     consumer: LocalPackage,
     *,
     environment: dict[str, str],
@@ -265,7 +245,7 @@ def _execute_hook(
     )
 
 
-def _advance_hook(published: _PublishedPackage, scenario: _Scenario) -> None:
+def _advance_hook(published: _PublishedPackage, scenario: LifecycleScenario) -> None:
     script = published.repository.worktree / ".apm" / "hooks" / "esm" / "entry.mjs"
     script.write_text(_script("esm-hook-v2"), encoding="utf-8")
     scenario.repositories.commit(published.repository, message="update JavaScript hook")
@@ -303,7 +283,7 @@ def _seed_legacy_managed_sidecar(
     return seeded
 
 
-def _capture_global(scenario: _Scenario) -> LifecycleStateSnapshot:
+def _capture_global(scenario: LifecycleScenario) -> LifecycleStateSnapshot:
     copilot_root = scenario.isolated.home / ".copilot"
     return LifecycleStateSnapshot.capture(
         scenario.isolated.config_root,
@@ -325,7 +305,7 @@ def _capture_global(scenario: _Scenario) -> LifecycleStateSnapshot:
     )
 
 
-def _seed_global_legacy_sidecar(scenario: _Scenario) -> LifecycleStateSnapshot:
+def _seed_global_legacy_sidecar(scenario: LifecycleScenario) -> LifecycleStateSnapshot:
     sidecar = scenario.isolated.home / ".copilot"
     sidecar = sidecar.joinpath(*_GLOBAL_FORBIDDEN_SIDECAR.parts)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
@@ -393,7 +373,7 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
     target_selector: str,
 ) -> None:
     """Install, update, replay, uninstall, and reinstall an executable ESM hook."""
-    scenario = _new_scenario(tmp_path / target_selector, apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / target_selector, apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -438,12 +418,21 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
         "--parallel-downloads",
         "0",
     )
-    _run_success(
+    updated = _run_success(
         scenario,
         consumer,
         update_args,
         environment=published.environment,
         scenario_id=f"{target_selector}-update",
+    )
+    legacy_sidecar = consumer.root.joinpath(*_FORBIDDEN_SIDECAR.parts)
+    _assert_legacy_sidecar_kept(updated, legacy_sidecar, _FORBIDDEN_SIDECAR.as_posix())
+    _run_success(
+        scenario,
+        consumer,
+        install_args,
+        environment=published.environment,
+        scenario_id=f"{target_selector}-install-after-manual-fix",
     )
     _assert_copilot_contract(consumer, expected_marker="esm-hook-v2")
     _execute_hook(
@@ -488,6 +477,14 @@ def test_required_copilot_and_vscode_js_hook_lifecycle(
     _assert_exact_state(after_update, _capture_copilot(consumer))
 
     _seed_legacy_managed_sidecar(consumer)
+    refused = scenario.runner.run(
+        ("uninstall", _REMOTE_URL),
+        scenario_id=f"{target_selector}-uninstall-refused",
+        cwd=consumer.root,
+        env=published.environment,
+    )
+    assert refused.returncode == 1, refused.stdout + refused.stderr
+    _assert_legacy_sidecar_kept(refused, legacy_sidecar, _FORBIDDEN_SIDECAR.as_posix())
     _run_success(
         scenario,
         consumer,
@@ -533,7 +530,7 @@ def test_required_target_contraction_removes_retained_sidecar(
     apm_binary_path: Path,
 ) -> None:
     """A dropped target loses its managed sidecar without touching user hooks."""
-    scenario = _new_scenario(tmp_path / "target-contraction", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "target-contraction", apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -619,7 +616,7 @@ def test_required_user_edited_legacy_sidecar_is_preserved(
     apm_binary_path: Path,
 ) -> None:
     """Cleanup must retain user-edited bytes at a formerly managed sidecar path."""
-    scenario = _new_scenario(tmp_path / "user-sidecar", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "user-sidecar", apm_binary_path)
     published = _publish(scenario)
     consumer = _consumer(
         scenario,
@@ -668,7 +665,7 @@ def test_required_global_copilot_sidecar_lifecycle(
     apm_binary_path: Path,
 ) -> None:
     """Global Copilot hooks omit, clean, and never recreate the legacy sidecar."""
-    scenario = _new_scenario(tmp_path / "global-copilot", apm_binary_path)
+    scenario = new_lifecycle_scenario(tmp_path / "global-copilot", apm_binary_path)
     published = _publish(scenario)
     cwd = scenario.consumers.create("global-copilot-cwd").root
     copilot_root = scenario.isolated.home / ".copilot"
@@ -780,6 +777,26 @@ def test_required_global_copilot_sidecar_lifecycle(
         env=published.environment,
     )
     assert reinstall.returncode == 0, f"stdout={reinstall.stdout!r}\nstderr={reinstall.stderr!r}"
+    _assert_legacy_sidecar_kept(
+        reinstall,
+        copilot_root.joinpath(*_GLOBAL_FORBIDDEN_SIDECAR.parts),
+        _GLOBAL_FORBIDDEN_SIDECAR.name,
+    )
+    reinstall = scenario.runner.run(
+        (
+            "install",
+            "--global",
+            "--target",
+            "copilot",
+            "--no-policy",
+            "--parallel-downloads",
+            "0",
+        ),
+        scenario_id="global-copilot-reinstall-after-manual-fix",
+        cwd=cwd,
+        env=published.environment,
+    )
+    assert reinstall.returncode == 0, f"stdout={reinstall.stdout!r}\nstderr={reinstall.stderr!r}"
     cleaned = _capture_global(scenario)
     assert (
         cleaned.file(
@@ -861,4 +878,108 @@ def test_required_global_copilot_sidecar_lifecycle(
             root_id="copilot-user",
         ).content
         == user_content.encode()
+    )
+
+
+_NESTED_PACKAGE = "nested-module-kit"
+_NESTED_REMOTE = f"https://gitlab.example.invalid/apm-fixture-org/{_NESTED_PACKAGE}.git"
+_NESTED_CLAUDE_SCRIPT = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/entry.js")
+_NESTED_CLAUDE_METADATA = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/esm/esm/package.json")
+_NESTED_CLAUDE_SIDECAR = PurePosixPath(f".claude/hooks/{_NESTED_PACKAGE}/package.json")
+
+
+def test_required_claude_hook_keeps_nested_module_metadata(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """A nested package.json governs its .js scripts after deploy (#2950).
+
+    The package root declares no module type, so the hooks root sidecar is
+    CommonJS; the ES module under esm/ runs only if its own package.json
+    deploys beside it.
+    """
+    scenario = new_lifecycle_scenario(tmp_path / "nested-module", apm_binary_path)
+    package = scenario.sources.create(_NESTED_PACKAGE)
+    scenario.sources.add_hook(
+        package,
+        "esm",
+        {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f"node ./esm/esm/entry.js {_HOOK_OUTPUT.as_posix()}",
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+    )
+    scenario.sources.add_hook_asset(
+        package, "esm", PurePosixPath("esm/entry.js"), _script("nested-esm-hook")
+    )
+    scenario.sources.add_hook_asset(
+        package, "esm", PurePosixPath("esm/package.json"), '{ "type": "module" }\n'
+    )
+    repository = scenario.repositories.create(_NESTED_PACKAGE, source_tree=package.root)
+    scenario.repositories.commit(repository, message="seed nested ES module hook package")
+    scenario.repositories.install_url_rewrite(repository, _NESTED_REMOTE)
+    environment = scenario.isolated.subprocess_env()
+    consumer = scenario.consumers.create(
+        "nested-module-consumer",
+        dependencies=(
+            {"git": _NESTED_REMOTE, "type": "gitlab", "ref": "main", "alias": _NESTED_PACKAGE},
+        ),
+        targets=("claude",),
+    )
+    for args, scenario_id in (
+        (("install", "--parallel-downloads", "0"), "nested-module-declare"),
+        (("approve", _NESTED_PACKAGE), "nested-module-approve"),
+        (("install", "--parallel-downloads", "0"), "nested-module-install"),
+    ):
+        _run_success(scenario, consumer, args, environment=environment, scenario_id=scenario_id)
+
+    paths = (_NESTED_CLAUDE_SCRIPT, _NESTED_CLAUDE_METADATA, _NESTED_CLAUDE_SIDECAR)
+    deployed = LifecycleStateSnapshot.capture(
+        consumer.root, targets=("claude",), config_paths=paths
+    )
+    assert deployed.file(_NESTED_CLAUDE_SCRIPT.as_posix()).kind == "file"
+    assert deployed.file(_NESTED_CLAUDE_METADATA.as_posix()).kind == "file"
+    assert json.loads(deployed.file(_NESTED_CLAUDE_METADATA.as_posix()).content.decode()) == {
+        "type": "module"
+    }
+    assert json.loads(deployed.file(_NESTED_CLAUDE_SIDECAR.as_posix()).content.decode()) == {
+        "type": "commonjs"
+    }
+    lock = LockFile.read(consumer.root / "apm.lock.yaml")
+    assert lock is not None
+    recorded = {
+        path for dep in lock.get_package_dependencies() for path in (dep.deployed_files or ())
+    }
+    assert _NESTED_CLAUDE_METADATA.as_posix() in recorded, sorted(recorded)
+
+    result = ApmLifecycleRunner(("node",), timeout_seconds=30, scenario_timeout_seconds=30).run(
+        (_NESTED_CLAUDE_SCRIPT.as_posix(), _HOOK_OUTPUT.as_posix()),
+        scenario_id="nested-module-execute",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    assert consumer.root.joinpath(*_HOOK_OUTPUT.parts).read_text(encoding="utf-8") == (
+        "nested-esm-hook\n"
+    )
+
+    _run_success(
+        scenario,
+        consumer,
+        ("install", "--parallel-downloads", "0"),
+        environment=environment,
+        scenario_id="nested-module-converged",
+    )
+    _assert_exact_state(
+        deployed,
+        LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
     )

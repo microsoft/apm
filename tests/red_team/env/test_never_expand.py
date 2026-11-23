@@ -16,6 +16,8 @@ from apm_cli.core.script_executors import _build_script_env, _expand_env_vars
 
 from .fixtures.helpers import capture_http_headers
 
+pytestmark = pytest.mark.component
+
 NEVER_EXPAND = ["GITHUB_APM_PAT", "GITHUB_TOKEN", "GH_TOKEN", "ADO_APM_PAT"]
 
 

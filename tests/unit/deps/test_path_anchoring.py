@@ -30,6 +30,8 @@ from apm_cli.deps.path_anchoring import (
     resolve_local_dep_dirs,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _local(repo_url: str, local_path: str, resolved_by: str | None = None) -> LockedDependency:
     return LockedDependency(
@@ -100,8 +102,8 @@ class TestParentWalk:
         lockfile = _lockfile(*dependencies)
         with patch.object(
             path_anchoring,
-            "_find_parent",
-            wraps=path_anchoring._find_parent,
+            "_find_parents",
+            wraps=path_anchoring._find_parents,
         ) as find_parent:
             resolved = resolve_local_dep_dirs(lockfile, tmp_path)
 

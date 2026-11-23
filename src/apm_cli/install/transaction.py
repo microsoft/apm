@@ -12,12 +12,15 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from apm_cli.core.scope import manifest_file
 from apm_cli.install.locking import acquire_lifecycle_lock
 from apm_cli.install.resolution_staging import ResolutionStagingSession
+from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
+    from apm_cli.install.deploy_snapshot import DeployJournal
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
@@ -83,8 +86,17 @@ def _maybe_rollback_manifest(
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
-    The resolution journal is intentionally limited to paths prepared below
-    ``apm_modules``. Native target integrations are outside this transaction.
+    The resolution journal is limited to paths prepared below ``apm_modules``.
+    From :meth:`journal_deploy_writes` on, the transaction listens at the
+    integrator write seam (``integration/write_seam.py``) and records the
+    prior state of each path the first time it is written (#4282). A rollback
+    restores the recorded paths and discards the staged lockfile, so disk and
+    ``apm.lock.yaml`` keep their pre-command state. After
+    :meth:`release_deploy_targets` (every gate that scans deployed bytes
+    passed) the journal is discarded as soon as the staged lockfile reaches
+    disk: from then on the lockfile records what was written. On every
+    rollback, target roots the attempt created
+    (:meth:`track_created_target_roots`) are removed when left empty.
     """
 
     def __init__(
@@ -112,10 +124,16 @@ class InstallTransaction:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
             self._resolution = ResolutionStagingSession(apm_modules_dir)
+            # Marketplace ref pins resolved by this attempt; written on commit only.
+            self._ref_pins = open_ref_pin_stage()
         except BaseException:
             self._release_workspace_lock()
             raise
         self._lock = threading.RLock()
+        self._deploy_journal: DeployJournal | None = None
+        self._journal_released = False
+        self._journal_held_until_commit = False
+        self._created_target_roots: list[Path] = []
         self.committed = False
         self._completed = False
         self._rolled_back = False
@@ -146,8 +164,11 @@ class InstallTransaction:
                 raise RuntimeError("Cannot commit an install transaction after rollback")
             try:
                 if not self.committed:
+                    if not self._settle_at_lockfile_commit():
+                        self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    self._ref_pins.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
@@ -183,8 +204,11 @@ class InstallTransaction:
         if result.disposition is InstallDisposition.DRY_RUN:
             with self._lock:
                 if self._rolled_back:
-                    raise RuntimeError("Cannot complete an install transaction after rollback")
+                    # A preview whose staging already rolled back changed nothing.
+                    return result
                 try:
+                    self._settle_deploy_journal()
+                    self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
                     self._report_resolution_cleanup_issues(cleanup_issues)
                     self._completed = True
@@ -200,17 +224,147 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
+    def journal_deploy_writes(self, ctx: Any = None) -> None:
+        """Record, at the integrator write seam, the prior state of every path written from now on.
+
+        ``--frozen`` withholds the lockfile, so its no-rewrite check runs after
+        the pipeline: the journal is then kept until this install commits and
+        a refusal there rolls back every journaled path (#4638).
+        """
+        from apm_cli.core.scope import get_apm_home
+        from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+        from apm_cli.integration import write_seam
+
+        with self._lock:
+            if self._deploy_journal is not None or self.committed or self._rolled_back:
+                return
+            if ctx is not None:
+                from apm_cli.install.service import InstallService
+
+                frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
+                self._journal_held_until_commit = frozen
+            store_parent = get_apm_home() / "install-snapshots"
+            if self._workspace_lock is not None:
+                # Under the lifecycle lock no other install owns a journal here.
+                reap_abandoned_journals(store_parent)
+            self._deploy_journal = DeployJournal(store_parent)
+            write_seam.listen(self._record_deploy_write)
+
+    def _record_deploy_write(self, path: Path, contents: bool) -> None:
+        """Keep *path*'s prior state the first time this attempt touches it."""
+        journal = self._deploy_journal
+        if journal is not None:
+            journal.record(path, contents=contents)
+
+    def track_created_target_roots(self, roots: list[Path]) -> None:
+        """Follow the target roots this attempt creates; rollback removes empty ones."""
+        self._created_target_roots = roots
+
+    def _remove_created_target_roots(self) -> None:
+        """Remove target roots this attempt created that a failure left empty (#4159)."""
+        from apm_cli.install.deploy_snapshot import remove_empty_directories
+
+        remove_empty_directories(self._created_target_roots)
+
+    @property
+    def restores_deploy_targets(self) -> bool:
+        """Whether rollback will restore the paths the deploy journal recorded."""
+        journal = self._deploy_journal
+        return journal is not None and bool(journal.units)
+
+    def release_deploy_targets(self) -> None:
+        """Every gate that scans deployed bytes passed: keep the journal until the lock commits."""
+        from apm_cli.deps.lockfile_write_authority import after_lockfile_commit
+
+        with self._lock:
+            if self._deploy_journal is None or self._journal_released:
+                return
+            self._journal_released = True
+            if self._journal_held_until_commit:
+                return
+        # Settle at the durable commit, before receipt binding or any other
+        # fallible post-commit action: the lockfile then records the deploys.
+        after_lockfile_commit(self._settle_deploy_journal, first=True)
+
+    def _settle_at_lockfile_commit(self) -> bool:
+        """Keep a released journal until the staged lockfile reaches disk (#4664).
+
+        A command that runs the pipeline inside its own lockfile writer (``apm
+        update``, ``apm deps update``) completes this transaction before the
+        writer commits. The journal then still restores every deployed path if
+        that commit fails or the command is abandoned; a successful commit
+        settles it (:meth:`release_deploy_targets`).
+        """
+        from apm_cli.deps.lockfile_write_authority import unless_lockfile_commits
+
+        if not self._journal_released or self._deploy_journal is None:
+            return False
+        return unless_lockfile_commits(self._undo_deploys)
+
+    def _undo_deploys(self) -> None:
+        """Restore the journaled paths and drop target roots this attempt created.
+
+        Rollback and an uncommitted completed transaction (#4664) both undo here.
+        """
+        self._restore_deploy_targets()
+        self._remove_created_target_roots()
+
+    def _take_deploy_journal(self) -> DeployJournal | None:
+        """Stop listening at the write seam and hand over the journal."""
+        from apm_cli.integration import write_seam
+
+        with self._lock:
+            journal, self._deploy_journal = self._deploy_journal, None
+        write_seam.stop_listening(self._record_deploy_write)
+        return journal
+
+    def _settle_deploy_journal(self) -> None:
+        """The lockfile records what was written: drop the pre-write copies."""
+        journal = self._take_deploy_journal()
+        if journal is not None:
+            journal.discard()
+
+    def _restore_deploy_targets(self) -> None:
+        """Put every journaled path back and discard the lockfile this attempt staged."""
+        from apm_cli.deps.lockfile_write_authority import discard_staged_lockfile_writes
+
+        journal = self._take_deploy_journal()
+        if journal is None:
+            return
+        # Even with nothing deployed (a lockfile-only attempt) the staged
+        # lockfile of a rolled-back attempt must not be published.
+        discard_staged_lockfile_writes()
+        if not journal.units:
+            journal.discard()
+            return
+        issues = journal.restore()
+        if self._logger is None:
+            return
+        if not issues:
+            self._logger.progress("Deployed files restored to their previous state.")
+            return
+        self._logger.warning(
+            "Some deployed files could not be restored. Close programs using them, "
+            "then copy them back from the retained pre-install copies before retrying."
+        )
+        for path, reason in issues:
+            self._logger.warning(f"Deploy restore path {path}: {reason}")
+
     def rollback(self) -> None:
-        """Restore the manifest and only resolution paths prepared here."""
+        """Restore the manifest, journaled deploy paths and resolution paths."""
         with self._lock:
             if self.committed or self._rolled_back:
                 return
             try:
+                self._ref_pins.discard()
                 try:
-                    cleanup_issues = self._resolution.rollback() or []
-                    self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._undo_deploys()
                 finally:
-                    self._restore_manifest()
+                    try:
+                        cleanup_issues = self._resolution.rollback() or []
+                        self._report_resolution_cleanup_issues(cleanup_issues)
+                    finally:
+                        self._restore_manifest()
                 self._rolled_back = True
                 self._completed = True
             finally:
@@ -254,7 +408,7 @@ def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
     """Return the context transaction's journal, creating a legacy adapter."""
     if ctx.transaction is None:
         ctx.transaction = InstallTransaction(
-            manifest_path=ctx.source_root / "apm.yml",
+            manifest_path=manifest_file(ctx.source_root),
             apm_modules_dir=ctx.apm_modules_dir,
             validation=None,
             logger=ctx.logger,
@@ -280,7 +434,7 @@ def transactional_pipeline(
                 manifest_path = get_manifest_path(scope)
                 modules_dir = get_modules_dir(scope)
             except (AttributeError, TypeError):
-                manifest_path = Path.cwd() / "apm.yml"
+                manifest_path = manifest_file(Path.cwd())
                 modules_dir = Path.cwd() / "apm_modules"
             transaction = InstallTransaction(
                 manifest_path=manifest_path,
@@ -301,3 +455,19 @@ def transactional_pipeline(
         return result
 
     return wrapped
+
+
+def stage_existing_copy(ctx: Any, path: Path, locked: Any, *, skip: bool = False) -> None:
+    """Preserve an existing ``apm_modules`` copy before a re-fetch replaces it.
+
+    The install transaction restores it byte for byte when the attempt is
+    refused (for example on a content hash mismatch) and discards it once the
+    attempt completes, so a refused install leaves ``apm_modules`` as it was.
+    Only a copy whose *locked* row records a ``content_hash`` is staged: that is
+    the row a content hash refusal can reject. *skip* marks a copy this attempt
+    already fetched (it is staged already).
+    """
+    if skip or not getattr(locked, "content_hash", None):
+        return
+    if path.exists() or path.is_symlink():
+        resolution_for_context(ctx).prepare_path(path)

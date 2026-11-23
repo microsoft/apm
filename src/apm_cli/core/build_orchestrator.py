@@ -22,8 +22,11 @@ from typing import Any, Protocol
 
 import yaml
 
+from apm_cli.core.scope import manifest_file
+
 from ..bundle.formats import BundleFormat
 from ..utils.yaml_io import load_yaml
+from .remediation import CLAUDE_PLUGIN_LAYOUT
 
 
 class OutputKind(enum.Enum):
@@ -186,7 +189,7 @@ class MarketplaceProducer:
         if source == ConfigSource.LEGACY_YML:
             yml_for_builder = project_root / "marketplace.yml"
         else:
-            yml_for_builder = project_root / "apm.yml"
+            yml_for_builder = manifest_file(project_root)
 
         mkt_opts = MktBuildOptions(
             dry_run=options.dry_run,
@@ -362,7 +365,7 @@ class PluginManifestProducer:
                 pass
 
         try:
-            targets = manifest_target_restriction(data)
+            targets = manifest_target_restriction(data, options.apm_yml_path)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -400,8 +403,8 @@ class PluginManifestProducer:
         ):
             raise BuildError(
                 "The selected targets only request Claude plugin metadata, but Agent Plugin "
-                "output is active. Run 'apm pack --claude-plugin' for the historical Claude "
-                "layout, or add dependencies to produce an Agent Plugin bundle."
+                "output is active. Add dependencies to produce an Agent Plugin bundle, "
+                f"or {CLAUDE_PLUGIN_LAYOUT.clause()}."
             )
 
         outputs: list[Path] = []
@@ -473,7 +476,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     if legacy.is_file():
         out.add(OutputKind.MARKETPLACE)
 
-    # Check target: field for 'claude' or 'copilot' (plugin-manifest ecosystems).
+    # Check target: field for plugin-manifest ecosystems (claude, copilot, codex).
     if data:
         from ..models.manifest_targets import manifest_target_restriction
         from .errors import (
@@ -484,7 +487,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
         from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
 
         try:
-            targets = manifest_target_restriction(data)
+            targets = manifest_target_restriction(data, apm_yml_path)
         except (
             ConflictingTargetsError,
             EmptyTargetsListError,
@@ -518,13 +521,16 @@ class BuildOrchestrator:
     def run(self, options: BuildOptions, logger: Any = None) -> BuildResult:
         outputs_needed = detect_outputs(options.apm_yml_path)
         if not outputs_needed:
+            from .plugin_manifest import PLUGIN_MANIFEST_ECOSYSTEMS
+
+            ecosystems = ", ".join(f"'{name}'" for name in sorted(PLUGIN_MANIFEST_ECOSYSTEMS))
             raise BuildError(
                 "apm.yml has neither 'dependencies:' nor 'marketplace:' "
-                "block, and 'target:' does not include 'claude' or "
-                "'copilot'. Nothing to pack. Add dependencies via "
+                f"block, and 'targets:' includes none of {ecosystems}. "
+                "Nothing to pack. Add dependencies via "
                 "'apm install <pkg>', scaffold a marketplace block "
-                "with 'apm marketplace init', or set 'target:' to "
-                "include 'claude' or 'copilot'. See "
+                "with 'apm marketplace init', or add one of those "
+                "ecosystems to 'targets:'. See "
                 "https://microsoft.github.io/apm/reference/cli/pack/."
             )
 

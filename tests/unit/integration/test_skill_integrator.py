@@ -27,6 +27,7 @@ from apm_cli.models.apm_package import (
     PackageType,
     ResolvedReference,
 )
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _setup_agents_orphan_cleanup(project_root: Path, skill_names: list[str]) -> None:
@@ -1495,6 +1496,35 @@ Use this skill for comprehensive guidance.
 
         assert result.skill_created is True
         assert result.references_copied == 4  # All 4 files
+
+    def test_native_skill_adopts_identical_unmanaged_copy(self):
+        """An unmanaged copy equal to the install's output is adopted, not skipped (#3994)."""
+        from apm_cli.utils.diagnostics import CATEGORY_COLLISION, DiagnosticCollector
+
+        package_dir = self.project_root / "upstream" / "review"
+        package_dir.mkdir(parents=True)
+        (package_dir / "SKILL.md").write_text("---\nname: review\ndescription: Review\n---\n")
+        (package_dir / "LICENSE").write_text("MIT\n")
+        pkg = self._create_package_info(name="review", install_path=package_dir)
+
+        target = self.project_root / ".agents" / "skills" / "review"
+        shutil.copytree(package_dir, target)
+        diag = DiagnosticCollector()
+        result = self.integrator.integrate_package_skill(
+            pkg, self.project_root, diagnostics=diag, managed_files=set()
+        )
+        assert target in result.target_paths
+        assert CATEGORY_COLLISION not in diag.by_category()
+
+        # A differing copy is still user content and stays untouched.
+        (target / "SKILL.md").write_text("# edited\n")
+        diag = DiagnosticCollector()
+        result = SkillIntegrator().integrate_package_skill(
+            pkg, self.project_root, diagnostics=diag, managed_files=set()
+        )
+        assert target not in (result.target_paths or [])
+        assert CATEGORY_COLLISION in diag.by_category()
+        assert (target / "SKILL.md").read_text() == "# edited\n"
 
     def test_native_skill_cross_package_collision_records_diagnostic(self):
         """Two distinct packages that both deploy a same-named skill should warn on the second install.
@@ -3061,12 +3091,17 @@ class TestCursorSkillIntegration:
         cursor_skill.mkdir(parents=True)
         (cursor_skill / "SKILL.md").write_text("# Old\n")
 
-        managed_files = {".agents/skills/old-skill"}
+        # Lockfiles list the directory and its members; members need
+        # deployment evidence (#3701). Both entries count as removed.
+        managed_files = {".agents/skills/old-skill", ".agents/skills/old-skill/SKILL.md"}
         result = self.integrator.sync_integration(
-            None, self.project_root, managed_files=managed_files
+            None,
+            self.project_root,
+            managed_files=managed_files,
+            evidence=receipted_evidence(self.project_root),
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2
         assert not cursor_skill.exists()
 
     # ========== Test: SKILL.md content preserved ==========
@@ -3233,16 +3268,17 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".agents/skills/my-skill"}
+        managed = {".agents/skills/my-skill", ".agents/skills/my-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[resolved],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not skills_dir.exists()
 
     def test_manifest_removal_with_config_opencode(self):
@@ -3264,16 +3300,17 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Skill")
 
-        managed = {".agents/skills/test-skill"}
+        managed = {".agents/skills/test-skill", ".agents/skills/test-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[resolved],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not skills_dir.exists()
 
     def test_manifest_removal_preserves_unmanaged(self):
@@ -3288,16 +3325,17 @@ class TestSyncIntegrationDynamicPrefixes:
         (skills_dir / "user-skill").mkdir(parents=True)
         (skills_dir / "user-skill" / "SKILL.md").write_text("# User")
 
-        managed = {".agents/skills/managed-skill"}
+        managed = {".agents/skills/managed-skill", ".agents/skills/managed-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
             targets=[copilot],
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
         assert not (skills_dir / "managed-skill").exists()
         assert (skills_dir / "user-skill").exists()
 
@@ -3307,15 +3345,16 @@ class TestSyncIntegrationDynamicPrefixes:
         skills_dir.mkdir(parents=True)
         (skills_dir / "SKILL.md").write_text("# Orphan")
 
-        managed = {".agents/skills/orphan-skill"}
+        managed = {".agents/skills/orphan-skill", ".agents/skills/orphan-skill/SKILL.md"}
         apm_package = Mock()
         result = self.integrator.sync_integration(
             apm_package,
             self.project_root,
             managed_files=managed,
+            evidence=receipted_evidence(self.project_root),
         )
 
-        assert result["files_removed"] == 1
+        assert result["files_removed"] == 2  # member file + directory (#3701)
 
 
 class TestUninstallPhase2SkillTargets:
@@ -4209,6 +4248,33 @@ class TestPluginBinDeploy:
         # the install layer can hint the user to re-run with -g.
         assert result.bin_deployed == 0
         assert result.bin_skipped_reason == "project_scope"
+
+    def test_refused_bin_is_silent_for_plugin_without_bin(self, tmp_path: Path) -> None:
+        """A bin/ refusal is reported only when the plugin ships bin/ (#3994)."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+        with_bin = tmp_path / "apm_modules" / "withbin"
+        (with_bin / "bin").mkdir(parents=True)
+        (with_bin / "bin" / "tool").write_text("#!/bin/sh\necho hi\n")
+        without_bin = tmp_path / "apm_modules" / "nobin"
+        without_bin.mkdir(parents=True)
+
+        reasons = {
+            pkg_dir.name: SkillIntegrator()
+            .integrate_package_skill(
+                self._make_plugin_package(pkg_dir),
+                project_root,
+                scope=InstallScope.USER,
+                skip_bin=True,
+            )
+            .bin_skipped_reason
+            for pkg_dir in (with_bin, without_bin)
+        }
+
+        assert reasons == {"withbin": "not_approved", "nobin": None}
 
     def test_force_overwrites_identical_bin(self, tmp_path: Path) -> None:
         """force=True copies bin/ executables even when src and dest hashes match."""

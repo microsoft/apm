@@ -9,6 +9,8 @@ import pytest
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
 
+pytestmark = pytest.mark.component
+
 
 def _skill(root: Path, name: str) -> Path:
     skill = root / name

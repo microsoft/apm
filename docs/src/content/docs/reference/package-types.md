@@ -15,7 +15,7 @@ Pick the form that matches the author's intent -- APM preserves it.
 | `SKILL.md` (alone or with apm.yml -- HYBRID) | "I am one skill bundle" | Copy the whole bundle to `<target>/skills/<name>/` |
 | `skills/<name>/SKILL.md` (nested) | "I ship many skills in one repo" | Promote each nested skill to `<target>/skills/<name>/` |
 | `hooks/*.json` or `.apm/hooks/*.json` only (no apm.yml or SKILL.md) | "I ship a set of harness hooks" | Register hooks and referenced resources for the selected targets |
-| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
+| `plugin.json` (no `$schema`, or unrecognized `$schema`) / `.claude-plugin/` | Claude plugin collection | Artifact mapping; [eligible Claude user plugins](#plugin-collection-pluginjson) register intact |
 | `plugin.json` with the recognized Agent Plugins `$schema` | Portable Agent Plugin | Installed whole and registered when the effective targets include Copilot |
 | `.codex-plugin/plugin.json` without higher-precedence package intent | Codex compatibility bundle | Complete native registration with Codex CLI 0.163.0 or later at user scope only |
 | Marketplace entry with inline `lspServers` or `mcpServers` | Catalog owns server metadata | Synthesize and validate `apm.yml`, then deploy servers |
@@ -226,7 +226,7 @@ Discovery is non-recursive; arbitrary directories are not packages.
 follow the selected targets and existing executable approval rules. Claude
 and Codex use their native configuration files; Copilot uses `.github/hooks/`.
 Installation does not execute the hooks. See
-[hook authoring](../../producer/author-primitives/hooks-and-commands/)
+[hook authoring](../../producer/write-primitives/#hooks-and-commands)
 for command paths, resource selection, and target restrictions.
 
 `apm install` restores the locked revision; `apm update` refreshes it.
@@ -259,11 +259,19 @@ metadata variant changes.
 
 ## Plugin collection (`plugin.json`)
 
-A Claude-native plugin layout. A `plugin.json` with no `$schema` field, or with
-an unrecognized `$schema`, is detected by its structure as this layout. APM
-dissects the plugin artifacts and maps them into runtime directories. An
-unrecognized schema is a warning, not a rejection; only the recognized Agent
-Plugins schema selects the portable Agent Plugin route.
+APM detects a Claude plugin collection by structure when `plugin.json` omits
+`$schema` or declares an unrecognized schema (a warning). Only the recognized
+Agent Plugins schema selects the portable Agent Plugin route.
+
+APM normally maps artifacts to runtime directories. For the `claude` target
+(and `copilot` at project scope), APM deploys the plugin intact to
+`.agents/plugins/` instead, which requires `.claude-plugin/plugin.json`. A
+root-only `plugin.json` (an `apm pack` bundle) or a dependency with a `skills:`
+selection is mapped to runtime directories at project scope and parked with
+`--global`. Native admission failures park the
+plugin and do not fall back to loose files. See
+[Native plugins](../../consumer/install-plugins/#native-plugins)
+for capability and runtime qualification limits.
 
 ```
 my-plugin/
@@ -274,10 +282,14 @@ my-plugin/
     +-- search/SKILL.md
 ```
 
-**What gets installed:** each artifact listed in `plugin.json` is mapped to
-the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
-to cherry-pick plugin skills by leaf name or a source-relative path under
-`skills/`, such as `productivity/grill-me`.
+**What gets installed:** by default, APM maps declared artifacts to runtime
+directories; `--skill` selects skills by leaf name or source-relative path
+under `skills/` (for example, `productivity/grill-me`).
+
+On the native route, APM deploys the complete plugin without duplicate loose
+commands or hooks. Partial skill selections are parked; `--skill '*'` resets to
+complete selection, not a subset. Standalone APM content and other selected
+targets keep their existing routes.
 
 A declared key is authoritative for its primitive: it replaces the default
 directory scan rather than adding to it. `"skills": ["./skills/search"]`
@@ -294,7 +306,7 @@ remove the key to restore discovery.
 
 **Marketplace version checks:** a local Plugin collection may omit `apm.yml`.
 For `apm pack --check-versions`, APM uses `plugin.json`'s `version` only when
-`apm.yml` is absent. See [Versioning strategies](../../producer/versioning-strategies/)
+`apm.yml` is absent. See [Versioning strategies](../../producer/release-a-version/)
 for manifest precedence, failure behavior, and a plugin-only example.
 
 Declared component paths are requirements, not hints. If an `agents`,
@@ -324,12 +336,11 @@ my-plugin/
 ```
 
 **What gets installed:** nothing is dissected. With `--target copilot`, APM
-keeps the plugin whole under `apm_modules/` and registers it with Copilot as a
-live directory marketplace. APM does not require or inspect a Copilot binary
-during install. Stable Copilot CLI 1.0.81 or newer is the supported runtime for
-loading the generated projection.
-Copilot loads the unit from APM's bytes -- it never copies it. See
-[Install Agent Plugins for Copilot](../../consumer/copilot-agent-plugins/).
+deploys the plugin whole to `.agents/plugins/<plugin>/` and declares it in
+`.github/copilot/settings.json`. APM does not require or inspect a Copilot
+binary during install. Stable Copilot CLI 1.0.81 or newer is the supported
+runtime for loading it. See
+[Native plugins](../../consumer/install-plugins/#native-plugins).
 
 :::caution[Runtime compatibility and other targets]
 Any target set that excludes Copilot refuses this native install rather than
@@ -353,7 +364,7 @@ See [apm pack](../cli/pack/#agent-plugin-bundle---format-agent-plugin).
 
 ## See also
 
-- [Your First Package](../../getting-started/first-package/) -- hands-on
+- [Your First Package](../../producer/create-a-package/) -- hands-on
   walkthrough for scaffolding and publishing.
 - [`apm install`](../cli/install/) and [`apm pack`](../cli/pack/) -- install,
   package, and validation options.

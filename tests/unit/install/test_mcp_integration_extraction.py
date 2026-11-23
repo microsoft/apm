@@ -32,6 +32,8 @@ from apm_cli.policy.discovery import PolicyFetchResult
 from apm_cli.policy.install_preflight import PolicyBlockError
 from apm_cli.policy.parser import load_policy
 
+pytestmark = pytest.mark.component
+
 FIXTURE_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "policy"
 MCP_POLICY_FIXTURE = FIXTURE_DIR / "apm-policy-mcp.yml"
 
@@ -107,6 +109,7 @@ class TestRunMcpIntegrationInstallBranch:
             native_hashes={},
             logger=ANY,
             fail_on_write_error=True,
+            stamp_version=False,
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -333,110 +336,28 @@ class TestRunMcpIntegrationInstallBranch:
 class TestRunMcpIntegrationEmptyDepsBranch:
     """``should_install=True`` and ``mcp_deps`` empty."""
 
+    @pytest.mark.parametrize(("version", "stamped"), [("0.35.0", True), ("0.37.0", False)])
     @patch(_PATCH_TARGET)
-    def test_no_deps_no_old_servers_is_a_noop(self, mock_mcp):
-        run_mcp_integration(**_base_kwargs(mcp_deps=[]))
+    def test_no_deps_stamps_a_lock_whose_claims_it_translated(
+        self, mock_mcp, tmp_path, version, stamped
+    ):
+        from apm_cli.deps.lockfile import LockFile
 
-        mock_mcp.remove_stale.assert_not_called()
-        mock_mcp.update_lockfile.assert_not_called()
-        mock_mcp.install.assert_not_called()
-
-    @patch(_PATCH_TARGET)
-    def test_no_deps_with_old_servers_prunes_them(self, mock_mcp):
-        """Regression for #2077: orphaned servers must be removed and the
-        lockfile cleared even when the manifest declares zero MCP deps."""
-        count, _apm_config = run_mcp_integration(
-            **_base_kwargs(
-                mcp_deps=[],
-                old_mcp_servers={"io.github.acme/orphan"},
-                old_mcp_configs={"io.github.acme/orphan": {"name": "orphan"}},
-                old_mcp_target_servers={"copilot": {"io.github.acme/orphan"}},
-            )
-        )
-
-        assert count == 0
-        mock_mcp.remove_stale.assert_called_once()
-        assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan"}
-        mock_mcp.update_lockfile.assert_called_once_with(
-            set(),
-            Path("/nonexistent/apm.lock.yaml"),
-            mcp_configs={},
-            mcp_target_servers={},
-            mcp_config_provenance={},
-            logger=ANY,
-            fail_on_write_error=True,
-        )
-
-    @patch(_PATCH_TARGET)
-    def test_cleanup_is_scoped_to_effective_target(self, mock_mcp):
+        mock_mcp.get_server_names.return_value = set()
         run_mcp_integration(
             **_base_kwargs(
                 mcp_deps=[],
-                old_mcp_servers={"stale"},
-                old_mcp_configs={"stale": {"name": "stale"}},
-                old_mcp_target_servers={"claude": {"stale"}},
-                target_decision=EffectiveTargetDecision("claude", "apm config target"),
+                project_root=tmp_path,
+                old_mcp_servers={"orphan"},
+                old_mcp_configs={"orphan": {"name": "orphan"}},
+                old_mcp_target_servers={"copilot": {"orphan"}},
+                pre_install_lock=LockFile(
+                    apm_version=version, mcp_target_servers={"copilot": ["orphan"]}
+                ),
             )
         )
 
-        assert mock_mcp.remove_stale.call_count == 1
-        assert mock_mcp.remove_stale.call_args.args[1] == "claude"
-
-    @patch(_PATCH_TARGET)
-    def test_no_deps_with_explicit_empty_ownership_skips_cleanup(self, mock_mcp):
-        with patch(
-            "apm_cli.install.mcp.ownership.adopt_legacy_mcp_target_servers",
-            return_value={"copilot": {"same-name-user-entry"}},
-        ) as adopt:
-            run_mcp_integration(
-                **_base_kwargs(
-                    mcp_deps=[],
-                    old_mcp_servers={"same-name-user-entry"},
-                    old_mcp_configs={"same-name-user-entry": {"name": "same-name-user-entry"}},
-                    old_mcp_target_servers={},
-                    old_mcp_target_servers_present=True,
-                )
-            )
-
-        adopt.assert_not_called()
-        mock_mcp.remove_stale.assert_not_called()
-        mock_mcp.update_lockfile.assert_called_once()
-
-
-class TestRunMcpIntegrationRestoreBranch:
-    """``should_install=False`` (``--only=apm``-style)."""
-
-    @patch(_PATCH_TARGET)
-    def test_restores_old_servers_when_not_installing_mcp(self, mock_mcp):
-        run_mcp_integration(
-            **_base_kwargs(
-                mcp_deps=[],
-                should_install=False,
-                old_mcp_servers={"io.github.acme/kept"},
-                old_mcp_configs={"io.github.acme/kept": {"name": "kept"}},
-                old_mcp_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
-                old_mcp_target_servers={"copilot": ["io.github.acme/kept"]},
-            )
-        )
-
-        mock_mcp.update_lockfile.assert_called_once_with(
-            {"io.github.acme/kept"},
-            Path("/nonexistent/apm.lock.yaml"),
-            mcp_configs={"io.github.acme/kept": {"name": "kept"}},
-            mcp_target_servers={"copilot": ["io.github.acme/kept"]},
-            mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
-            logger=ANY,
-            fail_on_write_error=True,
-        )
-        mock_mcp.install.assert_not_called()
-        mock_mcp.remove_stale.assert_not_called()
-
-    @patch(_PATCH_TARGET)
-    def test_no_op_when_not_installing_and_no_old_servers(self, mock_mcp):
-        run_mcp_integration(**_base_kwargs(mcp_deps=[], should_install=False))
-
-        mock_mcp.update_lockfile.assert_not_called()
-        mock_mcp.install.assert_not_called()
+        assert mock_mcp.update_lockfile.call_args.kwargs["stamp_version"] is stamped
 
 
 class TestRunMcpIntegrationPolicyBlock:
@@ -462,6 +383,63 @@ class TestRunMcpIntegrationPolicyBlock:
 
         mock_mcp.install.assert_not_called()
         mock_mcp.update_lockfile.assert_not_called()
+
+    @patch(_PATCH_TARGET)
+    def test_server_only_claude_loads_natively_skips_the_loose_preflight(self, mock_mcp):
+        """#3290: native admission already vetted it; APM writes it nowhere."""
+        mock_mcp.install.return_value = 0
+        mock_mcp.get_server_names.return_value = set()
+        native = MCPDependency(
+            name="io.github.untrusted/evil-transitive",
+            transport="stdio",
+            native_runtimes=frozenset({"claude"}),
+        )
+
+        with patch(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            return_value=self._fetch_result(),
+        ):
+            run_mcp_integration(**_base_kwargs(mcp_deps=[native], runtime="claude"))
+            with pytest.raises(PolicyBlockError):
+                run_mcp_integration(**_base_kwargs(mcp_deps=[native], runtime="copilot"))
+
+    @patch(_PATCH_TARGET)
+    def test_policy_block_hint_names_direct_dependency_from_view(self, mock_mcp):
+        """#3835 review: the merged-set preflight hints the direct apm.yml
+        entry the view traced, not the declaring package's display name."""
+        from apm_cli.install.mcp.integration import PreparedMcpIntegration
+        from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
+        name = "io.github.untrusted/evil-transitive"
+        evil_dep = MCPDependency(name=name, transport="stdio", resolved_by="parent-pkg")
+        view = CurrentMcpConfigView(
+            dependencies=(evil_dep,),
+            configs={},
+            provenance={name: "parent-pkg"},
+            problems=(),
+            brought_in_by={name: "acme/parent-pkg"},
+        )
+        logger = _make_logger()
+
+        with (
+            patch(
+                "apm_cli.policy.install_preflight.discover_policy_with_chain",
+                return_value=self._fetch_result(),
+            ),
+            patch.object(logger, "policy_violation") as mock_violation,
+            pytest.raises(PolicyBlockError),
+        ):
+            run_mcp_integration(
+                **_base_kwargs(
+                    mcp_deps=[evil_dep],
+                    logger=logger,
+                    prepared=PreparedMcpIntegration([evil_dep], view, None),
+                )
+            )
+
+        assert {c.kwargs["declared_by"] for c in mock_violation.call_args_list} == {
+            "acme/parent-pkg"
+        }
 
     @patch(_PATCH_TARGET)
     def test_no_policy_flag_skips_preflight_and_installs(self, mock_mcp):

@@ -15,6 +15,8 @@ from apm_cli.deps.registry.semver import (
     pick_best,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestIsSemverRange:
     """``is_semver_range`` is the parse-time gate for registry-routed deps."""

@@ -18,7 +18,7 @@ apm marketplace add SOURCE [--name N] [--ref R | --branch B] [--host FQDN] [--pa
 apm marketplace list
 apm marketplace browse NAME [--offline]
 apm marketplace update [NAME]
-apm marketplace remove NAME
+apm marketplace remove NAME [--yes]
 apm marketplace validate NAME
 
 # Author
@@ -60,12 +60,16 @@ machine, list them under `marketplaces:` in the user manifest
 (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`) and run
 `apm install -g`. Manual registrations always win a name conflict. See
 [Declare marketplaces in your user manifest](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-your-user-manifest).
+A project can commit its marketplaces in its own `apm.yml` instead; that map
+is never registered and wins inside the project. See
+[Declare marketplaces in a project](../../../consumer/installing-from-marketplaces/#declare-marketplaces-in-a-project).
 
 Accepted forms:
 
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
-  (`gitlab.com/team/marketplace`).
+  (`gitlab.com/team/marketplace`). Both shorthand forms accept `#ref`, for
+  example `acme/marketplace#v1.0.0`.
 - HTTPS git URL -- Azure DevOps Services, a configured Azure DevOps Server,
   GitLab, Gitea, Bitbucket Server, or another self-hosted git server. Add
   `#ref` to pin the marketplace, for example
@@ -142,6 +146,10 @@ apm marketplace add https://gitea.example.com/org/repo.git#v1.0.0 --name custom
 # Hosted marketplace.json URL
 apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
+# Private hosted marketplace.json URL (Bearer token)
+export APM_MARKETPLACE_TOKEN_CATALOG=your_token
+apm marketplace add https://catalog.example.com/team/marketplace.json --name catalog
+
 # SSH
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
 apm marketplace add ssh://git@gitea.example.com:2222/org/repo.git --name custom
@@ -192,12 +200,23 @@ Generic HTTPS can use a local Git credential helper; plain HTTP suppresses
 credentials, HTTPS-to-HTTP Git URL rewrites are rejected, and generic SSH is
 token-free and noninteractive. See the
 [authentication transport table](../../../getting-started/authentication/#generic-marketplace-git-transport)
-for the full policy. Hosted `marketplace.json`
-URLs are public HTTPS only: APM sends no auth headers. Use a
-git-backed marketplace for private catalogs. When packages are
-installed from a hosted JSON URL, the lockfile records the source URL
-and fetched content digest. See
+for the full policy. A hosted `marketplace.json` URL is fetched
+anonymously unless you register it with `--name`; then APM sends only
+that name's `APM_MARKETPLACE_*` credential (see
+[Private hosted catalogs](#private-hosted-catalogs)). When packages are
+installed from a remote catalog (hosted JSON URL or Git), the lockfile
+records the catalog origin (`source_url`) and a content digest
+(`source_digest`); local catalogs record neither. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
+
+**One catalog, one name.** Registering a second name for a catalog that is
+already registered (same origin and `--path`) succeeds with a `[!]` warning
+naming the existing alias. Re-adding an existing name with a different URL
+rebinds it on this machine only; a project whose lockfile recorded the old
+origin then fails `apm update`, `apm install <plugin>@<alias>` and
+`apm outdated` rather than switching catalogs; `apm install` keeps replaying
+the locked marketplace. See
+[lockfile `source_url`](../../lockfile-spec/#per-entry-fields).
 
 **Azure DevOps.** Services (`dev.azure.com`, `*.visualstudio.com`) use
 `ADO_APM_PAT`, then the Azure CLI bearer. Server hosts registered through
@@ -206,6 +225,39 @@ include an explicit HTTPS port but must use a root-hosted collection path;
 APM rejects `/tfs/` prefixes. APM tries the Azure DevOps Items API first,
 then subprocess git. See
 [Authentication](../../../getting-started/authentication/#azure-devops).
+
+#### Private hosted catalogs
+
+A hosted `marketplace.json` that requires a login authenticates with:
+
+| Variable | Sent as |
+|---|---|
+| `APM_MARKETPLACE_TOKEN_<NAME>` | `Authorization: Bearer <token>` |
+| `APM_MARKETPLACE_USER_<NAME>` + `APM_MARKETPLACE_PASS_<NAME>` | `Authorization: Basic <base64(user:pass)>` |
+
+`<NAME>` is the `--name` you registered, uppercased, with `-` and `.` mapped
+to `_` (`corp-main` -> `CORP_MAIN`), like the registry variables. Bearer wins
+when both are set.
+
+- **Binding.** Only `apm marketplace add <url> --name NAME` binds NAME to the
+  URL. A name taken from the catalog's own `name` field never selects a
+  credential. Re-adding a bound name with another URL fails; run
+  `apm marketplace remove NAME` first. Two bound names that map to the same
+  variables (`corp-main`, `corp.main`) are rejected.
+- **Scope.** The credential is sent only to the registered scheme, host and
+  port, under the catalog's directory, with the same query. Every redirect
+  hop is checked: a hop outside that scope continues without the credential,
+  and HTTPS-to-HTTP redirects are refused. `.netrc` and Git, GitHub, ADO and
+  registry credentials are never used for catalog requests, and catalog
+  credentials never authenticate package downloads.
+- **Denied access.** HTTP 401, 403 or a redirect to a sign-in page fails
+  with `Access to marketplace 'NAME' was denied` and the variable to set,
+  and exits 1. It is never served from cache: a denied `apm marketplace
+  update` keeps the last cached catalog and does not report it as updated.
+
+Applies to `add`, `browse`, `search`, `apm view`, `apm install` and
+`update`. Variable values never appear in URLs, `apm.yml`, the lockfile or
+output; a malformed value is reported by variable name only.
 
 ### `apm marketplace list`
 
@@ -219,7 +271,10 @@ apm marketplace list --verbose
 
 ### `apm marketplace browse NAME`
 
-Show the packages exposed by a registered marketplace.
+Show the packages exposed by a registered marketplace. Each plugin prints
+its full install name (`plugin@marketplace`) and version, with the
+description wrapped underneath. `--offline` reads a live local `apm.yml`
+catalog without network access.
 
 ```bash
 apm marketplace browse awesome-agents
@@ -228,7 +283,10 @@ apm marketplace browse awesome-agents
 ### `apm marketplace update [NAME]`
 
 Refresh the local cache for one marketplace, or all when `NAME` is
-omitted.
+omitted. Each catalog is revalidated (a conditional request where the host
+supports it). If a catalog cannot be fetched or is invalid, its last valid
+cached copy is kept and the command exits non-zero, naming every catalog that
+failed; catalogs that did refresh stay refreshed.
 
 ```bash
 apm marketplace update                 # refresh every registered marketplace
@@ -331,7 +389,8 @@ apm marketplace audit local --strict
 ### `apm marketplace outdated`
 
 Show packages in the authoring config that have newer upstream
-versions available.
+versions available. Local-path entries (such as `source: ./`) have no
+remote tags and are listed as skipped.
 
 | Flag | Description |
 |---|---|
@@ -379,9 +438,18 @@ remote, as `apm marketplace check` requires; otherwise the command exits
 
 ### `apm marketplace package set NAME`
 
-Update fields on an existing package entry. Same flag set as
-`package add` minus `--name` and `--no-verify` (`--subdir` has no `-s`
-short form); only the fields you pass are modified.
+Update fields on an existing package entry. Only the fields you pass are
+modified.
+
+| Flag | Description |
+|---|---|
+| `--version` | Semver range (e.g. `>=1.0.0`). |
+| `--ref` | Pin to a git ref (SHA, tag, or `HEAD`). |
+| `--subdir` | Subdirectory inside the source repo. |
+| `--tag-pattern` | Tag pattern (e.g. `v{version}`). |
+| `--category` | Package category (e.g. `developer-tools`). |
+| `--tags` | Comma-separated tags. |
+| `--include-prerelease` | Include prerelease versions. |
 
 ### `apm marketplace package remove NAME`
 

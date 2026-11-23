@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.compilation.claude_formatter import ClaudeFormatter
+from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.distributed_compiler import DistributedAgentsCompiler
 from apm_cli.compilation.template_builder import (
     GLOBAL_INSTRUCTIONS_HEADING,
@@ -23,6 +23,8 @@ from apm_cli.compilation.template_builder import (
     render_instructions_block,
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+pytestmark = pytest.mark.component
 
 
 def _make_instruction(
@@ -319,10 +321,24 @@ class TestDistributedCompilerIncludesGlobals:
         assert "g.md" in content
 
 
-class TestClaudeFormatterIncludesGlobals:
-    """Issue #1072: ``apm compile -t claude`` must include global content."""
+def _compile_claude(tmp_path: Path, primitives: PrimitiveCollection) -> dict[str, str]:
+    """Compile the Claude target and return its root context files."""
+    compiler = AgentsCompiler(str(tmp_path))
+    result = compiler.compile(CompilationConfig(target="claude", resolve_links=False), primitives)
+    assert result.success, result.errors
+    return {
+        name: (tmp_path / name).read_text(encoding="utf-8") for name in ("AGENTS.md", "CLAUDE.md")
+    }
 
-    def test_global_instruction_appears_in_claude_md(self, tmp_path):
+
+class TestClaudeTargetIncludesGlobals:
+    """Issue #1072: ``apm compile -t claude`` must include global content.
+
+    Since #3939 Claude reads instructions from AGENTS.md through the
+    ``@AGENTS.md`` import in the generated CLAUDE.md.
+    """
+
+    def test_global_instruction_appears_in_claude_agents_md(self, tmp_path):
         primitives = PrimitiveCollection()
         global_inst = _make_instruction(
             name="global",
@@ -339,33 +355,12 @@ class TestClaudeFormatterIncludesGlobals:
         primitives.add_primitive(global_inst)
         primitives.add_primitive(scoped_inst)
 
-        formatter = ClaudeFormatter(str(tmp_path))
-        placement_map = {tmp_path: [global_inst, scoped_inst]}
-        result = formatter.format_distributed(primitives, placement_map)
+        files = _compile_claude(tmp_path, primitives)
 
-        claude_path = tmp_path / "CLAUDE.md"
-        assert claude_path in result.content_map
-        content = result.content_map[claude_path]
-        assert "GLOBAL_BODY" in content
-        assert "SCOPED_BODY" in content
-        # Project Standards groups Claude instructions below the CLAUDE.md title.
-        assert "## Project Standards" in content
-        assert "### Global Instructions" in content
-        assert content.index("GLOBAL_BODY") < content.index("SCOPED_BODY")
-
-    def test_only_globals_emits_general_section_only(self, tmp_path):
-        primitives = PrimitiveCollection()
-        inst = _make_instruction(name="g", file_path=tmp_path / "g.md", apply_to="", content="ONLY")
-        primitives.add_primitive(inst)
-
-        formatter = ClaudeFormatter(str(tmp_path))
-        placement_map = {tmp_path: [inst]}
-        result = formatter.format_distributed(primitives, placement_map)
-        content = result.content_map[tmp_path / "CLAUDE.md"]
-
-        assert "ONLY" in content
-        assert "### Global Instructions" in content
-        assert "## Files matching" not in content
+        assert "GLOBAL_BODY" in files["AGENTS.md"]
+        assert "SCOPED_BODY" in files["AGENTS.md"]
+        assert "@AGENTS.md" in files["CLAUDE.md"].splitlines()
+        assert "GLOBAL_BODY" not in files["CLAUDE.md"]
 
 
 @pytest.mark.parametrize(
@@ -394,8 +389,6 @@ def test_global_instruction_is_never_silently_dropped(tmp_path, renderer):
     else:
         primitives = PrimitiveCollection()
         primitives.add_primitive(inst)
-        formatter = ClaudeFormatter(str(tmp_path))
-        result = formatter.format_distributed(primitives, {tmp_path: [inst]})
-        text = result.content_map[tmp_path / "CLAUDE.md"]
+        text = _compile_claude(tmp_path, primitives)["AGENTS.md"]
 
     assert "GLOBAL_SENTINEL" in text

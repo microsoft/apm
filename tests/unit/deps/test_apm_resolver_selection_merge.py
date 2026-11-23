@@ -123,6 +123,27 @@ def test_target_subsets_union(tmp_path: Path) -> None:
     assert _bundle_ref(graph).target_subset == ["claude", "copilot"]
 
 
+def test_vscode_and_copilot_edges_resolve_to_one_canonical_target(tmp_path: Path) -> None:
+    """#3855: alias spellings across edges record one canonical copilot target."""
+    graph = _resolve(
+        tmp_path,
+        ["org/a", "org/b"],
+        {"org/a": [_edge(targets=["vscode"])], "org/b": [_edge(targets=["copilot"])]},
+    )
+    assert _bundle_ref(graph).target_subset == ["copilot"]
+
+
+def test_locked_target_subset_that_recorded_vscode_reads_as_copilot() -> None:
+    """#3855: an older lock entry replays with the canonical target name."""
+    from apm_cli.deps.lockfile import LockedDependency
+
+    locked = LockedDependency.from_dict(
+        {"repo_url": f"https://github.com/{BUNDLE}.git", "target_subset": ["vscode", "claude"]}
+    )
+
+    assert locked.target_subset == ["claude", "copilot"]
+
+
 def test_dev_edge_still_contributes_before_prod_wins(tmp_path: Path) -> None:
     modules = tmp_path / "apm_modules"
     _write_pkg(modules, BUNDLE)

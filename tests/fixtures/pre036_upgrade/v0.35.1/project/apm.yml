@@ -1,0 +1,9 @@
+name: legacy-project
+version: 1.0.0
+targets:
+- claude
+- cursor
+- codex
+dependencies:
+  apm:
+  - path: ../pkg

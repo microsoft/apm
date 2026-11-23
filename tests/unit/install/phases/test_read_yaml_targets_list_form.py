@@ -22,6 +22,8 @@ import pytest
 
 from apm_cli.models.apm_package import APMPackage
 
+pytestmark = pytest.mark.component
+
 
 def _ctx_with_apm_yml(tmp_path: Path, body: str) -> MagicMock:
     project = tmp_path / "proj"
@@ -119,7 +121,7 @@ def test_read_yaml_targets_unknown_token_in_list_raises_clean_error(tmp_path):
     with pytest.raises(UnknownTargetError) as exc_info:
         _read_yaml_targets(ctx)
     headline = str(exc_info.value).splitlines()[0]
-    assert headline == "[x] Unknown target 'bogus'"
+    assert headline == "Unknown target 'bogus'"
 
 
 # ---------------------------------------------------------------------------

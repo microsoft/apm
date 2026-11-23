@@ -18,7 +18,11 @@ import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install import validation
+
+pytestmark = pytest.mark.unit
 
 
 def _make_resolver():

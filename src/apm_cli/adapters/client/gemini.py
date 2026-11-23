@@ -30,9 +30,10 @@ import json
 import logging
 from pathlib import Path
 
+from ...core.command_logger import library_logger
 from ...mcp_transport import canonical_remote_transport
-from ...utils.console import _rich_error, _rich_success
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import warn_unreadable_config_once
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
             with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read %s: %s", config_path, exc)
+            warn_unreadable_config_once(logger, config_path, exc)
             return {}
 
     def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
@@ -148,7 +149,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         # three placeholder syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``)
         # are resolved at install time before being written to
         # ``.gemini/settings.json``. See issue #1266.
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["command"] = raw["command"]
             if raw.get("cwd") is not None:
@@ -268,7 +269,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         the target CLI settings file.
         """
         if not server_url:
-            _rich_error("server_url cannot be empty", symbol="error")
+            library_logger().error("server_url cannot be empty", symbol="error")
             return False
 
         if not self.user_scope and not self._get_config_dir().is_dir():
@@ -286,7 +287,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 server_info = self.registry_client.find_server_by_reference(server_url)
 
             if not server_info:
-                _rich_error(f"MCP server '{server_url}' not found in registry", symbol="error")
+                library_logger().error(
+                    f"MCP server '{server_url}' not found in registry", symbol="error"
+                )
                 return False
 
             config_key = self.determine_config_key(server_url, server_name, server_info)
@@ -294,18 +297,12 @@ class GeminiClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if server_config is None:
                 return False
-            if self.update_config({config_key: server_config}) is False:
-                return False
-
-            _rich_success(
-                f"Configured MCP server '{config_key}' for {self.target_name}",
-                symbol="success",
-            )
-            return True
+            # Integrator's install tree reports success once (#3994, #4089).
+            return self.update_config({config_key: server_config}) is not False
 
         except Exception as e:
             logger.debug("%s MCP configuration failed: %s", self.target_name, e)
-            _rich_error(
+            library_logger().error(
                 f"Failed to configure MCP server for {self.target_name}",
                 symbol="error",
             )

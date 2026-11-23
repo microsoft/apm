@@ -105,7 +105,9 @@ _LOCKFILE_CONSUMERS = (
     "src/apm_cli/bundle/agent_plugin_exporter.py",
     "src/apm_cli/commands/outdated.py",
     "src/apm_cli/commands/lock.py",
+    "src/apm_cli/install/bundle_admission.py",
 )
+_LOCKFILE_READ_SCOPES = {"lock.py": "lock_export", "bundle_admission.py": "_recorded_lockfile"}
 
 
 def _facts_for(provider: FactsProvider, path: str, rule_id: str):
@@ -269,10 +271,10 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
         if consumer_failures or consumer.tree_index is None:
             continue
         nodes = consumer.tree_index.nodes
-        if consumer_path == "src/apm_cli/commands/lock.py":
-            export = consumer.tree_index.function("lock_export")
+        if (scope := _LOCKFILE_READ_SCOPES.get(consumer_path.rsplit("/", 1)[-1])) is not None:
+            export = consumer.tree_index.function(scope)
             if export is None:
-                findings.append(_summary(rule_id, consumer_path, "Lockfile export must exist"))
+                findings.append(_summary(rule_id, consumer_path, f"{scope} must exist"))
                 continue
             nodes = consumer.tree_index.own_scope(export)
         imported = {
@@ -289,7 +291,7 @@ def check_lockfile_read_resolution(provider: FactsProvider) -> tuple[Violation, 
                 and keyword.value.value is True
                 for keyword in calls[0].keywords
             )
-            if consumer_path in {"src/apm_cli/commands/outdated.py", "src/apm_cli/commands/lock.py"}
+            if scope is not None or consumer_path == "src/apm_cli/commands/outdated.py"
             else _keyword_is_name(calls[0], "read_only", "dry_run")
         )
         if (
@@ -694,6 +696,36 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 "Nested root package directories must be rejected via nested_materialization_pairs",
             )
         )
+    # #3696: distinct packages sharing one host-blind directory are rejected by
+    # the materialization owner before the resolver fetches or stages them.
+    replacement_path = "src/apm_cli/models/dependency/replacement.py"
+    replacement, replacement_errors = _facts_for(provider, replacement_path, rule_id)
+    findings.extend(replacement_errors)
+    if not replacement_errors and _present_re(
+        replacement, re.compile(r"\.get_install_path\(|_slots\b")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                replacement_path,
+                "Replacement binding must not keep its own apm_modules slot occupancy; "
+                "MaterializationSlots owns shared-directory rejection",
+            )
+        )
+    if not errors and (
+        not _present_re(materialization, re.compile(r"^class MaterializationSlots\b"))
+        or not _present(resolver, "slots = MaterializationSlots(modules_dir)")
+        or not _present(resolver, "collision = slots.claim(dep_ref, parent)")
+        or not _present(resolver, "if self._reject_shared_slots(tree, slots,")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _MATERIALIZATION_OWNER,
+                "Packages sharing one apm_modules directory must be rejected via "
+                "MaterializationSlots before fetch",
+            )
+        )
     unique_key_body = _awk_body(
         identity, re.compile(r"^def build_dependency_unique_key\("), re.compile(r"^def ")
     )
@@ -733,6 +765,35 @@ def check_dependency_identity(provider: FactsProvider) -> tuple[Violation, ...]:
                 rule_id,
                 _IDENTITY_OWNER,
                 "Package identity casing must route through is_github_hostname",
+            )
+        )
+    # #3927: a non-default port names another server, so both identity models
+    # hand it to the one key builder and the builder qualifies the host with it.
+    lockfile, lockfile_errors = _facts_for(provider, _LOCKFILE_OWNER, rule_id)
+    executables, executables_errors = _facts_for(
+        provider, "src/apm_cli/security/executables.py", rule_id
+    )
+    findings.extend(lockfile_errors)
+    findings.extend(executables_errors)
+    key_method = re.compile(r"^    def get_unique_key\(")
+    method_boundary = re.compile(r"^    def ")
+    deny_body = _awk_body(
+        executables, re.compile(r"^def canonical_exec_identity\("), re.compile(r"^def ")
+    )
+    if not (lockfile_errors or executables_errors) and (
+        not _body_has(unique_key_body, "if port:")
+        or not _body_has(_awk_body(reference, key_method, method_boundary), "port=self.port,")
+        or not _body_has(_awk_body(lockfile, key_method, method_boundary), "port=self.port,")
+        or not _present(identity, "return replace(dependency, port=None).get_unique_key()")
+        or not _body_has(deny_body, "canonical = build_port_blind_dependency_key(reference)")
+    ):
+        findings.append(
+            _summary(
+                rule_id,
+                _IDENTITY_OWNER,
+                "Dependency unique keys must carry the non-default port through "
+                "build_dependency_unique_key; deny identity must drop it via "
+                "build_port_blind_dependency_key",
             )
         )
     embedded_subpath_body = _awk_body(

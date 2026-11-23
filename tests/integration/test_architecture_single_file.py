@@ -26,9 +26,9 @@ RULE = "install-deployment-single-file-materialization"
             "admitted = bypass_admission(dependency, source.parent)",
         ),
         (
-            "src/apm_cli/install/service.py",
-            "observed_hash = compute_local_package_hash(selected_source)",
-            "observed_hash = private_frozen_hash(selected_source)",
+            "src/apm_cli/install/local_content_verdict.py",
+            "observed_hash = compute_local_package_hash(\n",
+            "observed_hash = private_frozen_hash(\n",
         ),
         (
             "src/apm_cli/install/drift.py",

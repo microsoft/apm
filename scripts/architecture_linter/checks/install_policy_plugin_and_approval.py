@@ -144,7 +144,7 @@ _APPROVAL_ADAPTER = "src/apm_cli/commands/approve.py"
 _POLICY_OUTCOME_DEF = re.compile(r"^POLICY_RESOLUTION_FAILURE_OUTCOMES = frozenset\(")
 
 
-_POLICY_OUTCOME_IMPORT = "from ..policy.outcome_routing import POLICY_RESOLUTION_FAILURE_OUTCOMES"
+_POLICY_OUTCOME_IMPORT = "from ..policy.outcome_routing import resolve_trust_policy"
 
 
 _POLICY_OUTCOME_LITERALS = re.compile(
@@ -176,7 +176,7 @@ def check_approval_outcome_routing(provider: FactsProvider) -> tuple[Violation, 
             _report(
                 rule_id,
                 _APPROVAL_ADAPTER,
-                "Approval fallback outcomes must import POLICY_RESOLUTION_FAILURE_OUTCOMES; "
+                "Approval must route policy outcomes through resolve_trust_policy; "
                 f"missing: {_POLICY_OUTCOME_IMPORT}",
             )
         )
@@ -186,8 +186,8 @@ def check_approval_outcome_routing(provider: FactsProvider) -> tuple[Violation, 
             _report(
                 rule_id,
                 _APPROVAL_ADAPTER,
-                "Approval fallback outcomes must not restate policy outcome string "
-                "literals; use POLICY_RESOLUTION_FAILURE_OUTCOMES",
+                "Approval must not restate policy outcome string literals; "
+                "use resolve_trust_policy",
                 line,
                 column,
             )
@@ -199,20 +199,40 @@ _AUDIT_ADAPTER = "src/apm_cli/commands/audit.py"
 
 
 _DISCOVER_POLICY_CALL = re.compile(r"discover_policy\(")
+_CHAIN_DISCOVERY_CALL = re.compile(r"\bdiscover_policy_with_chain\(")
+_AUDIT_CI_GATE_DEF = re.compile(r"^def _audit_ci_gate\(")
+_TOP_LEVEL_DEF = re.compile(r"^def ")
 
 
 def check_audit_policy_discovery(provider: FactsProvider) -> tuple[Violation, ...]:
     """Audit policy sources must use chain-aware discovery, not discover_policy()."""
-    return tuple(
-        _banned(
-            provider,
-            rule_id=RULE_AUDIT_POLICY_DISCOVERY,
-            paths=(_AUDIT_ADAPTER,),
-            pattern=_DISCOVER_POLICY_CALL,
-            message="Audit policy sources must use chain-aware discovery, not discover_policy(",
-            respect_exempt=True,
-        )
+    rule_id = RULE_AUDIT_POLICY_DISCOVERY
+    adapter, failures = _configured(provider, _AUDIT_ADAPTER, rule_id)
+    if failures:
+        return failures
+    findings = _banned(
+        provider,
+        rule_id=rule_id,
+        paths=(_AUDIT_ADAPTER,),
+        pattern=_DISCOVER_POLICY_CALL,
+        message="Audit policy sources must use chain-aware discovery, not discover_policy(",
+        respect_exempt=True,
     )
+    gate_body: list[tuple[int, str]] = []
+    for number, text in adapter:
+        if gate_body and _TOP_LEVEL_DEF.search(text):
+            break
+        if gate_body or _AUDIT_CI_GATE_DEF.search(text):
+            gate_body.append((number, text))
+    if not _has_re(gate_body, _CHAIN_DISCOVERY_CALL):
+        findings.append(
+            _report(
+                rule_id,
+                _AUDIT_ADAPTER,
+                "_audit_ci_gate must discover policy through discover_policy_with_chain(",
+            )
+        )
+    return tuple(findings)
 
 
 _POLICY_INHERITANCE = "src/apm_cli/policy/inheritance.py"

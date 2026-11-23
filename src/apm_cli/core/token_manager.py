@@ -175,6 +175,13 @@ def credential_fill_env(base_env: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+# Upper bound for a ``git credential fill`` password accepted by
+# ``GitHubTokenManager._is_valid_credential_token``. Enterprise IdP tokens
+# issued through Git Credential Manager carry extra claims and exceed 2600
+# characters, so the cap only guards against unbounded garbage output.
+MAX_CREDENTIAL_TOKEN_LENGTH = 16384
+
+
 class GitHubTokenManager:
     """Manages GitHub token environment setup for different AI runtimes."""
 
@@ -226,7 +233,7 @@ class GitHubTokenManager:
         """
         if not token:
             return False
-        if len(token) > 1024:
+        if len(token) > MAX_CREDENTIAL_TOKEN_LENGTH:
             return False
         if any(c in token for c in (" ", "\t", "\n", "\r")):
             return False
@@ -434,7 +441,9 @@ class GitHubTokenManager:
         return True
 
     @staticmethod
-    def resolve_credential_from_gh_cli(host: str | None) -> str | None:
+    def resolve_credential_from_gh_cli(
+        host: str | None, *, env: Mapping[str, str] | None = None
+    ) -> str | None:
         """Resolve a token from the active gh CLI account for *host*.
 
         Uses ``gh auth token --hostname <host>`` as a non-interactive fallback
@@ -446,6 +455,8 @@ class GitHubTokenManager:
         subprocess. A non-zero exit, invalid output, missing ``gh`` binary,
         or timeout all return ``None``; ``stderr`` is debug-logged on
         non-zero exit so ``--verbose`` users can see why the call missed.
+        *env* replaces the inherited environment (strict host credentials
+        pass one without GitHub-class tokens).
         """
         if not GitHubTokenManager._supports_gh_cli_host(host):
             return None
@@ -458,7 +469,7 @@ class GitHubTokenManager:
                 timeout=GitHubTokenManager._get_credential_timeout(),
                 stdin=subprocess.DEVNULL,
                 env={
-                    **os.environ,
+                    **(os.environ if env is None else env),
                     "GH_PROMPT_DISABLED": "1",
                     "GH_NO_UPDATE_NOTIFIER": "1",
                 },

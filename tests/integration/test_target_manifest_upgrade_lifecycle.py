@@ -7,7 +7,12 @@ project whose ``apm.yml`` and ``apm.lock.yaml`` were produced by 0.35.1 or
 
 * ``install``, ``install --frozen``, ``update`` and ``compile --dry-run`` never
   rewrite the manifest and never change the deployed target set or the
-  lockfile's deployment rows. A 0.36.0 lockfile stays byte-identical.
+  lockfile's deployment rows, except for the one move #3866 makes on the first
+  install: Copilot project MCP servers leave ``.github/mcp.json`` (and the
+  former ``vscode`` alias's ``.vscode/mcp.json``) for ``.mcp.json``, and their
+  deployment rows are recorded for ``copilot``; and the one move #3939 makes:
+  Claude always-on and directory rules leave ``.claude/rules/`` because Claude
+  loads them from compiled ``AGENTS.md``. Nothing changes after that.
 * ``audit --ci`` writes nothing.
 * Only compilation-target policy verdicts change, exactly as the brief
   predicts: comma-separated and alias spellings stop failing, ``target: all``
@@ -24,7 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.compilation.claude_agents_md import routes_to_agents_md
+from apm_cli.utils.yaml_io import load_yaml, loads_frontmatter
 from tests.integration._policy_scope_kit import output, tree_snapshot
 from tests.integration._target_policy_kit import (
     block_policy,
@@ -39,6 +45,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.e2e,
 ]
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t2"
@@ -54,6 +61,19 @@ VERDICTS = {
     "plural-all": True,
 }
 _UNSTABLE_KEYS = frozenset({"apm_version", "generated_at", "content_hash", "deployed_file_hashes"})
+# Each case's declared targets, hand-written from the fixture manifests:
+# 'vscode' is the copilot alias, and 'all' is treated as omitted (auto-detect).
+_DECLARED_TARGETS = {
+    "singular": ["claude"],
+    "singular-csv": ["claude", "copilot"],
+    "singular-alias": ["copilot"],
+    "singular-all": [],
+    "plural": ["claude", "copilot"],
+    "plural-alias": ["copilot"],
+    "plural-all": [],
+}
+# Cases whose apm.yml names copilot explicitly.
+_DECLARES_COPILOT = frozenset({"singular-csv", "plural"})
 
 
 def _normalized_lock(path: Path) -> object:
@@ -81,6 +101,47 @@ def _project_files(project: Path) -> dict[str, str]:
     return tree_snapshot(project, exclude=(".git", "apm_modules", ".apm-local"))
 
 
+_RETIRED_MCP_FILES = frozenset({".github/mcp.json", ".vscode/mcp.json"})
+# Every fixture's retired file holds only APM's own server, so the move empties
+# it. An emptied file APM wrote is deleted; .github/mcp.json is a copilot
+# detection signal, so only while the manifest keeps copilot selected (#4524).
+_DELETABLE_RETIRED_MCP_FILES = frozenset({".vscode/mcp.json"})
+_COPILOT_RETIRED_MCP_FILE = ".github/mcp.json"
+
+
+def _after_mcp_move(
+    rows: set[tuple], files: set[str], *, declares_copilot: bool
+) -> tuple[set[tuple], set[str]]:
+    """The deployment rows and files #3866's one-time MCP destination move yields."""
+    moved_rows = {
+        (kind, target, value, "copilot" if runtime == "vscode" else runtime)
+        for kind, target, value, runtime in rows
+    }
+    moved_files = set(files) - _DELETABLE_RETIRED_MCP_FILES
+    if declares_copilot:
+        moved_files.discard(_COPILOT_RETIRED_MCP_FILE)
+    if files & _RETIRED_MCP_FILES:
+        moved_files.add(".mcp.json")
+    return moved_rows, moved_files
+
+
+def _claude_agents_md_rules(package: Path) -> frozenset[str]:
+    """The ``.claude/rules/`` files #3939's one-time move retires for *package*."""
+    retired = set()
+    for source in (package / ".apm" / "instructions").glob("*.instructions.md"):
+        metadata = loads_frontmatter(source.read_text(encoding="utf-8")).metadata or {}
+        if routes_to_agents_md(metadata.get("applyTo")):
+            retired.add(f".claude/rules/{source.name.removesuffix('.instructions.md')}.md")
+    return frozenset(retired)
+
+
+def _after_claude_agents_md_move(
+    retired: frozenset[str], rows: set[tuple], files: set[str]
+) -> tuple[set[tuple], set[str]]:
+    """The deployment rows and files left once Claude rules move to AGENTS.md."""
+    return {row for row in rows if row[2] not in retired}, set(files) - retired
+
+
 @pytest.mark.parametrize("case", list(VERDICTS))
 @pytest.mark.parametrize("version", VERSIONS)
 def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
@@ -94,9 +155,18 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         shutil.copytree(source / case, project, dirs_exist_ok=True)
         manifest = (project / "apm.yml").read_bytes()
         lock_path = project / "apm.lock.yaml"
-        original_lock = lock_path.read_bytes()
-        original_rows = _deployment_rows(lock_path)
-        original_files = _project_files(project)
+        retired = _claude_agents_md_rules(source / "pkg")
+        assert retired, "fixture package must exercise the #3939 move"
+        original_rows, original_paths = _after_claude_agents_md_move(
+            retired,
+            *_after_mcp_move(
+                _deployment_rows(lock_path),
+                set(_project_files(project)),
+                declares_copilot=case in _DECLARES_COPILOT,
+            ),
+        )
+        settled_files: dict[str, str] | None = None
+        settled_lock_bytes: bytes | None = None
 
         for step, args in (
             ("1-install", ("install",)),
@@ -109,16 +179,37 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
             assert (project / "apm.yml").read_bytes() == manifest, f"[{step}] rewrote apm.yml"
             assert _deployment_rows(lock_path) == original_rows, f"[{step}] deployment churn"
             files = _project_files(project)
-            assert set(files) == set(original_files), (
-                f"[{step}] deployed set changed: {sorted(set(files) ^ set(original_files))}"
+            assert set(files) == original_paths, (
+                f"[{step}] deployed set changed: {sorted(set(files) ^ original_paths)}"
             )
-            if version == "v0.36.0":
-                assert lock_path.read_bytes() == original_lock, f"[{step}] lockfile churn"
-                assert files == original_files, (
-                    f"[{step}] content churn: {changed_paths(original_files, files)}"
+            if settled_files is None:
+                settled_files, settled_lock_bytes = files, lock_path.read_bytes()
+            elif version == "v0.36.0":
+                assert lock_path.read_bytes() == settled_lock_bytes, f"[{step}] lockfile churn"
+                assert files == settled_files, (
+                    f"[{step}] content churn: {changed_paths(settled_files, files)}"
                 )
         settled_lock = lock_path.read_bytes()
-        assert _normalized_lock(lock_path) == _normalized_lock(source / case / "apm.lock.yaml")
+        fixture_lock = _normalized_lock(source / case / "apm.lock.yaml")
+        settled = _normalized_lock(lock_path)
+        # The first writable install promotes the old lock to version 4 once
+        # (hash framing hardening, #4000); every later step kept these bytes.
+        assert fixture_lock.pop("lockfile_version") in {"1", "2", "3"}
+        assert settled.pop("lockfile_version") == "4"
+        # The first writable install records exactly the targets apm.yml
+        # declares (#4517); a pre-0.37 lock has none.
+        assert "manifest_targets" not in fixture_lock
+        assert settled.pop("manifest_targets") == _DECLARED_TARGETS[case]
+        for dependency in fixture_lock.get("dependencies") or []:
+            dependency["deployed_files"] = [
+                path for path in dependency.get("deployed_files") or [] if path not in retired
+            ]
+        for lock in (fixture_lock, settled):
+            lock.pop("deployments", None)
+            servers = lock.get("mcp_target_servers") or {}
+            if "vscode" in servers:
+                servers["copilot"] = sorted({*servers.pop("vscode"), *servers.get("copilot", ())})
+        assert settled == fixture_lock
 
         before = tree_snapshot(project)
         tw.run(project, "audit", "--ci", step="5-audit-unrestricted")

@@ -30,10 +30,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from git.exc import GitCommandError
-
 from ..core.auth_chain import AdoAuthChainExhaustedError
-from ..core.auth_outcome import classify_auth_outcome
+from ..core.auth_outcome import (
+    RepositoryNotFoundError,
+    classify_auth_outcome,
+    is_repository_not_found,
+)
 from ..models.apm_package import (
     DependencyReference,
     GitReferenceType,
@@ -50,6 +52,7 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from .git_lazy import git_command_error, loaded_git_module, new_git_command_error
 from .git_remote_ops import validate_ls_remote_tag_output
 from .github_rate_limit import raise_for_github_throttle
 from .transport_selection import ProtocolPreference, initial_transport_scheme
@@ -92,9 +95,7 @@ class _DownloaderContext(Protocol):
         repo_url_base: str,
         *,
         use_ssh: bool = ...,
-        dep_ref: DependencyReference | None = ...,
-        token: str | None = ...,
-        auth_scheme: str = ...,
+        dep_ref: DependencyReference,
     ) -> str: ...
     def _clone_with_fallback(self, *args, **kwargs): ...
     def _sanitize_git_error(self, error_message: str) -> str: ...
@@ -150,9 +151,9 @@ class GitReferenceResolver:
         if dep_ref.is_artifactory():
             return []
 
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             # PROXY_REGISTRY_ONLY=1: the proxy is the only sanctioned source,
             # so skip the direct ls-remote against the upstream host. Mirrors
             # the is_artifactory() short-circuit above: a registry-only
@@ -166,7 +167,6 @@ class GitReferenceResolver:
             repo_url_base,
             use_ssh=candidate_uses_ssh,
             dep_ref=dep_ref,
-            token="",
         )
         anonymous_plan = host._transport_selector.select(
             dep_ref=dep_ref,
@@ -190,12 +190,10 @@ class GitReferenceResolver:
         if public_github_https_first:
             dep_token = None
             dep_auth_ctx = None
-            dep_auth_scheme = "basic"
             transport_plan = anonymous_plan
         else:
             dep_token = host._resolve_dep_token(dep_ref)
             dep_auth_ctx = host._resolve_dep_auth_ctx(dep_ref)
-            dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
             transport_plan = host._transport_selector.select(
                 dep_ref=dep_ref,
                 cli_pref=host._protocol_pref,
@@ -253,8 +251,6 @@ class GitReferenceResolver:
                 repo_url_base,
                 use_ssh=use_ssh,
                 dep_ref=dep_ref,
-                token=(None if use_ssh else ""),
-                auth_scheme=dep_auth_scheme if transport_attempt.use_token else "basic",
             )
 
         # Keep the GitPython object as a test seam. The network call itself
@@ -262,11 +258,14 @@ class GitReferenceResolver:
         # this method.
         from . import github_downloader as _gd
 
-        g = _gd.git.cmd.Git()
+        # Read ``git`` from the module dict: a test double or an already
+        # loaded GitPython is honoured, but this probe never imports GitPython.
+        _git_cls = getattr(getattr(loaded_git_module(vars(_gd)), "cmd", None), "Git", None)
+        g = _git_cls() if _git_cls is not None else None
         ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
         def _run_remote(url: str, env: dict[str, str]) -> str:
-            if type(g).__module__.startswith("unittest.mock"):
+            if g is not None and type(g).__module__.startswith("unittest.mock"):
                 return g.ls_remote(*ls_args, url, env=env)
             from ..utils.git_env import git_remote_refs
 
@@ -274,7 +273,7 @@ class GitReferenceResolver:
             if result.returncode != 0:
                 # auth-delegated: try_with_fallback (or the caller's resolved
                 # context) selects this environment.
-                raise GitCommandError(
+                raise new_git_command_error(
                     [get_git_executable(), "ls-remote", *ls_args, url],
                     result.returncode,
                     stderr=result.stderr,
@@ -285,7 +284,7 @@ class GitReferenceResolver:
             try:
                 output = _run_remote(remote_url, ls_env)
                 return ("ok", output)
-            except GitCommandError as exc:
+            except git_command_error() as exc:
                 return ("err", exc)
 
         ado_chain = is_ado and not use_ssh
@@ -300,8 +299,6 @@ class GitReferenceResolver:
                     repo_url_base,
                     use_ssh=False,
                     dep_ref=dep_ref,
-                    token="",
-                    auth_scheme="basic",
                 )
                 return ("ok", _run_remote(public_url, git_env))
 
@@ -317,7 +314,7 @@ class GitReferenceResolver:
                     unauth_first=True,
                     base_env=host.git_env,
                 )
-            except (GitCommandError, OSError) as exc:
+            except (git_command_error(), OSError) as exc:
                 outcome = ("err", exc)
         elif ado_chain:
 
@@ -337,7 +334,7 @@ class GitReferenceResolver:
                     remote_url=transport_attempt.effective_url or remote_url,
                     base_env=host.git_env,
                 )
-            except (GitCommandError, OSError, AdoAuthChainExhaustedError) as exc:
+            except (git_command_error(), OSError, AdoAuthChainExhaustedError) as exc:
                 outcome = ("err", exc)
             ado_attempts = getattr(outcome[1], "attempts", None) if outcome[0] == "err" else None
         else:
@@ -355,6 +352,16 @@ class GitReferenceResolver:
         is_generic = not is_ado and not is_github
 
         ref_kind = "remote refs" if include_heads else "remote tags"
+        if is_repository_not_found(e):
+            raise RepositoryNotFoundError(
+                host.auth_resolver.build_not_found_message(
+                    dep_host or default_host(),
+                    repo_url_base,
+                    dependency_repository_owner(dep_ref),
+                    port=dep_ref.port,
+                    host_type=dep_ref.host_type,
+                )
+            ) from e
         error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
         if (
             public_github_https_first
@@ -423,9 +430,9 @@ class GitReferenceResolver:
         if re.match(r"^[a-f0-9]{40}$", ref.lower() or ""):
             return ref.lower()
 
-        from .registry_proxy import is_enforce_only
+        from .egress_route import EgressSurface, is_refused
 
-        if is_enforce_only():
+        if is_refused(EgressSurface.SOURCE_ENUMERATION):
             # PROXY_REGISTRY_ONLY=1: the commits API is on the upstream host,
             # which the mode forbids contacting. Callers already treat None
             # as "keep the ref name" and fall through to proxy resolution.
@@ -603,7 +610,7 @@ class GitReferenceResolver:
                     resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
                     ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
 
-                except GitCommandError:
+                except git_command_error():
                     try:
                         host._clone_with_fallback(
                             dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
@@ -642,7 +649,7 @@ class GitReferenceResolver:
                                 f"{dep_ref.repo_url}: {sanitized_error}"
                             )
 
-                    except GitCommandError as e:
+                    except git_command_error() as e:
                         if "Authentication failed" in str(
                             e
                         ) or "remote: Repository not found" in str(e):

@@ -152,16 +152,75 @@ class GitUrlRewriteError(ValueError):
         super().__init__(f"{message}; {_URL_REWRITE_RECOVERY}")
 
 
+_CONFIG_ORIGIN_COMMAND = "'git config --show-origin --list'"
+_PROBE_DETAIL_MAX_CHARS = 200
+_PROBE_SEVERITY_RE = re.compile(r"^(?:fatal|error|warning):\s*", re.IGNORECASE)
+# A value may itself contain apostrophes: mask through the last "' for '" Git
+# appends, or to the end of the line when that suffix is absent.
+_PROBE_CONFIG_VALUE_RE = re.compile(r"(config value )'(?:.*'(?= for ')|.*$)", re.IGNORECASE)
+_PROBE_FILE_LINE_RE = re.compile(r"\bline (\d+) in file (.+?)\s*$")
+_PROBE_FILE_AT_LINE_RE = re.compile(r"in file '([^']+)' at line (\d+)")
+_PROBE_FILE_ACCESS_RE = re.compile(r"unable to (?:access|read config file) '([^']+)'")
+
+
+def _probe_stderr_line(stderr: bytes | str | None) -> str:
+    """Return Git's first diagnostic line, redacted and printable ASCII."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    if not stderr:
+        return ""
+    first = next((line.strip() for line in stderr.splitlines() if line.strip()), "")
+    line = _PROBE_SEVERITY_RE.sub("", first)
+    line = _PROBE_CONFIG_VALUE_RE.sub(r"\1'***'", redact_git_diagnostic(line))
+    return "".join(ch if " " <= ch <= "~" else "?" for ch in line)
+
+
+def _probe_remedy(line: str) -> str:
+    """Return one runnable next step for the configuration Git reported."""
+    inspect = f"check Git configuration with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if "'$GIT_DIR' too big" in line:
+        return (
+            "the project path is too long for Git; move the project to a shorter path "
+            "or run 'git config --global core.longpaths true', then retry"
+        )
+    if match := _PROBE_FILE_LINE_RE.search(line):
+        number, path = match.groups()
+    elif match := _PROBE_FILE_AT_LINE_RE.search(line):
+        path, number = match.groups()
+    elif match := _PROBE_FILE_ACCESS_RE.search(line):
+        path, number = match.group(1), None
+    else:
+        return inspect
+    if len(path) > _PROBE_DETAIL_MAX_CHARS:
+        return inspect
+    check = f"then check with {_CONFIG_ORIGIN_COMMAND} and retry"
+    if number is None:
+        return f"fix or remove the config file '{path}', {check}"
+    return f"fix line {number} of '{path}', {check}"
+
+
 class GitUrlRewriteProbeError(ValueError):
     """An actionable failure to inspect effective Git configuration."""
 
-    def __init__(self, category: str) -> None:
-        """Initialize a safe probe failure without rendering raw Git output."""
+    def __init__(self, category: str, *, stderr: bytes | str | None = None) -> None:
+        """Initialize a probe failure; Git's first stderr line is shown redacted."""
         self.category = category
-        super().__init__(
-            f"Unable to verify Git URL rewrite safety ({category}); "
-            f"check Git configuration and retry; {_URL_REWRITE_INSPECTION}"
-        )
+        line = _probe_stderr_line(stderr)
+        self.detail = line
+        if len(line) > _PROBE_DETAIL_MAX_CHARS:
+            self.detail = f"{line[: _PROBE_DETAIL_MAX_CHARS - 3]}..."
+        if line:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}: {self.detail}); "
+                f"{_probe_remedy(line)}"
+            )
+        else:
+            message = (
+                f"Unable to verify Git URL rewrite safety ({category}); "
+                f"check Git configuration and retry; locate each config file with "
+                f"{_CONFIG_ORIGIN_COMMAND}; {_URL_REWRITE_INSPECTION}"
+            )
+        super().__init__(message)
 
 
 def _run_git_config(
@@ -227,8 +286,10 @@ def _executable_exclusion_root() -> Path:
     for directory in ancestors:
         if (directory / ".git").exists():
             return directory
+    from apm_cli.core.scope import manifest_file
+
     for directory in ancestors:
-        if (directory / "apm.yml").is_file():
+        if manifest_file(directory).is_file():
             return directory
     return cwd
 
@@ -593,7 +654,12 @@ def _read_effective_git_config(
     probe_env = dict(env)
     probe_cwd: str | None = None
     if git_dir is not None:
-        command.extend(("--git-dir", str(git_dir)))
+        # Git refuses an explicit GIT_DIR longer than PATH_MAX - 40 (220 on
+        # Windows) with "'$GIT_DIR' too big", which deep staged clones reach
+        # (#4397). A relative GIT_DIR from its parent probes the same config.
+        absolute_git_dir = Path(os.path.abspath(git_dir))
+        command.append(f"--git-dir={absolute_git_dir.name}")
+        probe_cwd = str(absolute_git_dir.parent)
     elif worktree is not None:
         command.extend(("-C", str(worktree)))
     else:
@@ -622,7 +688,7 @@ def _read_effective_git_config(
     except OSError as exc:
         raise GitUrlRewriteProbeError("Git config probe could not start") from exc
     if result.returncode != 0 or not isinstance(result.stdout, bytes):
-        raise GitUrlRewriteProbeError("Git config probe failed")
+        raise GitUrlRewriteProbeError("Git config probe failed", stderr=result.stderr)
 
     fields = tuple(field for field in result.stdout.split(b"\0") if field)
     if len(fields) % 2:

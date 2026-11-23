@@ -224,7 +224,9 @@ _TO_DEPENDENCY_REF_KEEP = re.compile(r"to_dependency_ref")
 _CLASS_BOUNDARY = re.compile(r"^class ")
 
 
-_LOCKED_SUBSET_NEEDLES = ("DependencyReference(", "skill_subset=", "self.skill_subset")
+# One fragment for the keyword and its source: ``_replay_pairing`` also reads
+# ``self.skill_subset``, so separate needles would pass with ``skill_subset=None``.
+_LOCKED_SUBSET_NEEDLES = ("DependencyReference(", "skill_subset=sorted(self.skill_subset)")
 
 
 def check_locked_skill_subset(provider: FactsProvider) -> tuple[Violation, ...]:

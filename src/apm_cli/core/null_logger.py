@@ -24,7 +24,7 @@ class NullCommandLogger:
 
     Implements only the subset of ``CommandLogger`` needed by
     the integrators: ``start``, ``progress``, ``info``, ``success``,
-    ``warning``, ``error``, ``verbose_detail``, ``tree_item``, and
+    ``warning``, ``error``, ``verbose_detail``, ``tree_item``, ``blank_line``, and
     ``package_inline_warning``.
 
     **Not implemented** (will raise ``AttributeError`` if called):
@@ -45,11 +45,21 @@ class NullCommandLogger:
 
     verbose = False
 
+    def __init__(self, targets_owner: object | None = None) -> None:
+        # A command logger here owns the once-per-command Targets line.
+        self._targets_owner = targets_owner
+
     def start(self, message: str, symbol: str = "running"):
         _rich_info(message, symbol=symbol)
 
     def progress(self, message: str, symbol: str = "info"):
         _rich_info(message, symbol=symbol)
+
+    def announce_targets(self, line: str) -> None:
+        if self._targets_owner is not None:
+            self._targets_owner.announce_targets(line)
+            return
+        _rich_info(line, symbol="info")
 
     def info(self, message: str, symbol: str = "info", *, soft_wrap: bool = False):
         # Only soft-wrapped calls pass the flag; the default call shape stays unchanged.
@@ -58,7 +68,7 @@ class NullCommandLogger:
             return
         _rich_info(message, symbol=symbol)
 
-    def mcp_lookup_heartbeat(self, count: int):
+    def mcp_lookup_heartbeat(self, count: int, registry: str | None = None):
         """Mirror of ``CommandLogger.mcp_lookup_heartbeat`` (F4, #1116).
 
         Provided so ``MCPIntegrator`` can call this unconditionally
@@ -68,7 +78,8 @@ class NullCommandLogger:
         if count <= 0:
             return
         noun = "server" if count == 1 else "servers"
-        _rich_info(f"Looking up {count} MCP {noun} in registry...", symbol="running")
+        where = f"registry {registry}" if registry else "registry"
+        _rich_info(f"Looking up {count} MCP {noun} in {where}...", symbol="running")
 
     def success(self, message: str, symbol: str = "sparkles"):
         _rich_success(message, symbol=symbol)
@@ -79,12 +90,18 @@ class NullCommandLogger:
     def error(self, message: str, symbol: str = "error"):
         _rich_error(message, symbol=symbol)
 
+    def refusal(self, message: str) -> None:
+        _rich_error(message, symbol="error", err=True)
+
     def verbose_detail(self, message: str):
         """Discard verbose details (no CLI context to show them)."""
         pass
 
     def tree_item(self, message: str):
         _rich_echo(message, color="green")
+
+    def blank_line(self):
+        _rich_echo("")
 
     def package_inline_warning(self, message: str):
         """Discard inline warnings (verbose is always False)."""

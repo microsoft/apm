@@ -31,12 +31,13 @@ custom ``$COPILOT_HOME`` is refused).
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.experimental import is_enabled
+from apm_cli.core.remediation import CANVAS_EXTENSIONS_BLOCKED, LOCAL_FILE_UNMANAGED
 from apm_cli.install.cache_pin import MARKER_FILENAME
+from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -46,6 +47,7 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
+    from apm_cli.integration.cleanup import DeploymentEvidence
     from apm_cli.integration.targets import TargetProfile
 
 #: Entry file that marks a directory under ``.apm/extensions/`` as a canvas.
@@ -234,6 +236,7 @@ class CanvasIntegrator(BaseIntegrator):
         managed = self.normalize_managed_files(managed_files) or set()
         effective_root = mapping.deploy_root or target.root_dir
         extensions_dir = project_root / effective_root / mapping.subdir
+        prior_members = self._prior_members_by_bundle(extensions_dir, project_root, managed)
 
         files_integrated = 0
         files_skipped = 0
@@ -251,6 +254,7 @@ class CanvasIntegrator(BaseIntegrator):
                 package_name=package_name,
                 target_paths=target_paths,
                 source_plan=source_plan,
+                prior_members=prior_members.get(bundle.name, ()),
             )
             if outcome == "integrated":
                 files_integrated += 1
@@ -274,6 +278,7 @@ class CanvasIntegrator(BaseIntegrator):
         apm_package,
         project_root: Path,
         managed_files: set[str] | None = None,
+        evidence: DeploymentEvidence | None = None,
     ) -> dict[str, int]:
         """Remove APM-managed canvas files for a single *target*.
 
@@ -291,6 +296,7 @@ class CanvasIntegrator(BaseIntegrator):
             managed_files,
             prefix=prefix,
             targets=[target],
+            evidence=evidence,
         )
         # Remove the now-empty .github/extensions/<name>/ directories left
         # behind once their files are gone.
@@ -322,6 +328,7 @@ class CanvasIntegrator(BaseIntegrator):
         package_name: str,
         target_paths: list[Path],
         source_plan=None,
+        prior_members: tuple[str, ...] | list[str] = (),
     ) -> str:
         """Deploy one canvas bundle atomically.
 
@@ -394,9 +401,14 @@ class CanvasIntegrator(BaseIntegrator):
             self._warn(
                 diagnostics,
                 f"Skipping canvas '{name}' -- local file exists at {collision} "
-                "(not managed by APM). Use 'apm install --force' to overwrite.",
+                f"(not managed by APM). {LOCAL_FILE_UNMANAGED.sentence()}",
                 package_name,
             )
+            return "skipped"
+
+        # A kept member (planned or dropped) leaves the whole bundle as it is.
+        dropped = self._dropped_members(planned, project_root, prior_members)
+        if self._keeps_edited_bundle(planned, dropped, force, diagnostics, target_paths):
             return "skipped"
 
         # Adopt when every planned file already exists byte-identical: keep
@@ -407,7 +419,7 @@ class CanvasIntegrator(BaseIntegrator):
             return "adopted"
 
         for src, dest, _rel in planned:
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
             # Guard: reject dest if it is a symlink (TOCTOU defence --
             # a symlink could redirect shutil.copyfile to an arbitrary
             # location outside the project root).
@@ -418,9 +430,96 @@ class CanvasIntegrator(BaseIntegrator):
                     package_name,
                 )
                 return "skipped"
-            shutil.copyfile(src, dest)
+            write_seam.copyfile(src, dest)
+            self.note_rendered_write(dest)
             target_paths.append(dest)
         return "integrated"
+
+    def _keeps_edited_bundle(
+        self,
+        planned: list[tuple[Path, Path, str]],
+        dropped: list[tuple[Path, str]],
+        force: bool,
+        diagnostics,
+        target_paths: list[Path],
+    ) -> bool:
+        """Leave a bundle whole when any member is an edit install must keep (#4626).
+
+        Each member goes through the shared overwrite gate, which names a kept
+        member and carries its prior lock entry; the bundle's other deployed
+        members stay as they are, so a half-updated extension never runs. A
+        kept edit that holds back other new content (a changed, new or
+        dropped member) blocks the install. A member the new version drops is
+        judged too (its own bytes are its render) and is retained with its
+        prior claim whenever the bundle is kept.
+        """
+        if self._overwrite_gate is None:
+            return False
+        held_back = bool(dropped) or any(
+            self._brings_new_content(dest, src, rel) for src, dest, rel in planned
+        )
+        kept_dropped = [
+            path
+            for path, rel in dropped
+            if not force
+            and self.keeps_unproven_file(
+                path, path, rel, force, diagnostics, target_paths, held_back=True
+            )
+        ]
+        kept = [
+            dest
+            for src, dest, rel in planned
+            if self.keeps_edited_output(
+                dest, src, rel, force, diagnostics, target_paths, held_back=held_back
+            )
+        ]
+        if not kept and not kept_dropped:
+            return False
+        target_paths.extend(
+            dest for _src, dest, _rel in planned if dest not in kept and dest.is_file()
+        )
+        target_paths.extend(path for path, _rel in dropped if path not in kept_dropped)
+        return True
+
+    def _brings_new_content(self, dest: Path, src: Path, rel: str) -> bool:
+        """Whether *src* differs from what APM last deployed at *dest*.
+
+        The deployed bytes are this checkout's receipt, else a pre-0.37 lock's
+        recorded hash (#4398), else the bytes on disk.
+        """
+        if not dest.is_file():
+            return True
+        gate = self._overwrite_gate
+        legacy = gate.session.legacy_recorded_hash(rel) if gate and gate.session else None
+        baseline = self._receipted_hash(dest) or legacy or self._file_hash(dest)
+        return baseline != self._file_hash(src)
+
+    @staticmethod
+    def _prior_members_by_bundle(
+        extensions_dir: Path, project_root: Path, managed: set[str]
+    ) -> dict[str, list[str]]:
+        """Partition the managed canvas claims by bundle name once per call."""
+        prefix = portable_relpath(extensions_dir, project_root) + "/"
+        members: dict[str, list[str]] = {}
+        for rel in managed:
+            if rel.startswith(prefix):
+                name = rel[len(prefix) :].split("/", 1)[0]
+                members.setdefault(name, []).append(rel)
+        return members
+
+    @staticmethod
+    def _dropped_members(
+        planned: list[tuple[Path, Path, str]],
+        project_root: Path,
+        prior_members: tuple[str, ...] | list[str],
+    ) -> list[tuple[Path, str]]:
+        """This bundle's managed members on disk that the new version no longer ships."""
+        shipped = {rel for _src, _dest, rel in planned}
+        return [
+            (project_root / rel, rel)
+            for rel in sorted(prior_members)
+            if rel not in shipped and (project_root / rel).is_file()
+        ]
 
     def _plan_bundle_files(
         self,
@@ -486,8 +585,8 @@ class CanvasIntegrator(BaseIntegrator):
             message=(
                 f"Blocked {len(bundles)} canvas extension(s) ({names}) from '{pkg}': "
                 f"canvas extensions are executable {CANVAS_MARKER} code and are not "
-                f"trusted by default. Run 'apm approve {pkg}' to trust '{pkg}' and "
-                f"deploy them to {deploy_dir}."
+                "trusted by default. "
+                f"{CANVAS_EXTENSIONS_BLOCKED.bind(package=pkg, deploy_dir=deploy_dir).sentence()}"
             ),
             package=package_name or "",
         )

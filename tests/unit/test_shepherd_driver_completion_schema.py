@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 from jsonschema import Draft7Validator
 
+pytestmark = pytest.mark.component
+
 ROOT = Path(__file__).parents[2]
 CANONICAL_SCHEMA = (
     ROOT / "packages/autopilot/autopilot-pr-merge-worker/assets/completion-schema.json"

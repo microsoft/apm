@@ -39,6 +39,7 @@ from ..models.validation import InvalidVirtualPackageExtensionError
 from ..utils.github_host import (
     build_ado_ssh_url,
     build_ssh_url,
+    default_host,
     is_azure_devops_hostname,
     is_full_commit_sha,
     is_github_hostname,
@@ -49,6 +50,7 @@ from .client import fetch_or_cache
 from .errors import PluginNotFoundError
 from .models import MarketplacePlugin, MarketplaceSource
 from .registry import get_marketplace_by_name
+from .source_identity import marketplace_origin
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,12 @@ _MARKETPLACE_RE = re.compile(r"^([a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+)(?:#(.+))?$")
 # Characters that signal a semver range rather than a raw git ref
 _SEMVER_RANGE_CHARS = re.compile(r"[~^<>=!]")
 _IMPLICIT_MARKETPLACE_REFS = frozenset({"main", "HEAD"})
+_SCP_LOCATOR_RE = re.compile(r"^[^@/:]+@([^:/]+):")
 
 
 @dataclass(frozen=True)
 class CrossRepoMisconfigRisk:
-    """Signal that a cross-repo dict ``type: github`` source on an enterprise
+    """Signal that a cross-repo dict source (any type, #3937) on an enterprise
     GitHub-family marketplace declares a bare ``owner/repo`` whose canonical
     falls back to ``github.com`` -- the same syntactic ambiguity that powers
     a dependency-confusion attack (#1326, formerly diagnosed only as #1305).
@@ -76,9 +79,12 @@ class CrossRepoMisconfigRisk:
     should have been ``corp.ghe.com/owner/repo`` -- and the resolver cannot
     distinguish them.
 
-    Consumer contract (#1326): the install command consults this sentinel
-    BEFORE any outbound validation HTTP call and refuses the package
-    fail-closed when it is non-``None``. The earlier #1305 design surfaced
+    Consumer contract (#1326, #3913):
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`
+    refuses the package fail-closed when this sentinel is non-``None``, on
+    every install path (CLI argument, ``apm.yml`` entry, transitive
+    dependency, ``apm update``) and BEFORE any outbound request to the
+    package. The earlier #1305 design surfaced
     only an advisory hint on validation failure, which left the success
     path (attacker pre-stages the bare namespace on public github.com)
     silently exploitable. Cross-host explicit qualification by the
@@ -91,6 +97,7 @@ class CrossRepoMisconfigRisk:
     marketplace_host: str
     bare_repo_field: str
     suggested_qualified_repo: str
+    locator_field: str = "repo"
 
 
 @dataclass
@@ -104,9 +111,10 @@ class MarketplacePluginResolution:
     :meth:`~apm_cli.models.dependency.reference.DependencyReference.parse`
     on :attr:`canonical` to avoid mis-parsing nested paths as GitLab project segments.
     :attr:`cross_repo_misconfig_risk` is non-``None`` only for the
-    cross-repo bare-on-enterprise pattern (#1305 / #1326); the install
-    command consumes it as a pre-validation fail-closed signal so a
-    dependency-confusion attempt cannot reach an outbound HTTP probe.
+    cross-repo bare-on-enterprise pattern (#1305 / #1326); install paths
+    pass every resolution through
+    :func:`~apm_cli.marketplace.dependency_confusion.admit_marketplace_resolution`
+    so a dependency-confusion attempt cannot reach an outbound HTTP probe.
     """
 
     canonical: str
@@ -236,10 +244,16 @@ def _is_in_marketplace_source(plugin: MarketplacePlugin, source: MarketplaceSour
     if not isinstance(s, dict):
         return False
     source_type = _coerce_dict_plugin_type(s)
-    if source_type in ("github", "git-subdir", "gitlab"):
-        return _repo_field_matches_marketplace(
-            s.get("repo", ""), source.owner, source.repo, source.host
-        )
+    if source_type in ("github", "git-subdir", "gitlab", "url"):
+        # Same locator synonyms the resolvers and the #1326 sentinel read (#3945).
+        _field, locator = _dict_source_locator(s)
+        if _repo_field_matches_marketplace(locator, source.owner, source.repo, source.host):
+            return True
+        if source_type == "url" and is_github_hostname(source.host):
+            # A ``url:`` locator embeds its path; GitHub-family repositories are
+            # always ``owner/repo``, so the catalog slug is an exact prefix.
+            path = _normalize_repo_field_for_match(locator.split("#", 1)[0], source.host)
+            return path.startswith(f"{_marketplace_project_slug(source.owner, source.repo)}/")
     return False
 
 
@@ -320,86 +334,134 @@ def _needs_canonical_host_prefix(canonical: str, host: str) -> bool:
     return first_segment.lower() != h.lower()
 
 
+def _dict_source_locator(source: dict) -> tuple[str, str]:
+    """Return ``(field, locator)`` a dict source resolves from, or ``("", "")``.
+
+    Mirrors the field fallbacks of :func:`_resolve_github_source`,
+    :func:`_resolve_git_subdir_source` and :func:`_resolve_url_source`.
+    """
+    source_type = _coerce_dict_plugin_type(source)
+    if source_type == "github":
+        keys: tuple[str, ...] = ("repo", "repository")
+    elif source_type in ("git-subdir", "gitlab"):
+        keys = ("repo", "url")
+    elif source_type == "url":
+        keys = ("url",)
+    else:
+        return "", ""
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return key, value
+    return "", ""
+
+
+def _bare_dict_locator(source: dict) -> tuple[str, str] | None:
+    """Return ``(field, owner/repo)`` when a dict source's locator names no host.
+
+    URL, SCP shorthand, and host-qualified shorthand (``github.com/owner/repo``)
+    declare explicit intent and return ``None``; so does a locator without ``/``.
+    """
+    locator_field, locator = _dict_source_locator(source)
+    bare = locator.strip().lstrip("/")
+    if "/" not in bare:
+        return None
+    # #1326: an already-host-qualified locator declares explicit intent (e.g.
+    # ``repo: github.com/owner/repo`` on a ``*.ghe.com`` marketplace is an
+    # unambiguous declared cross-host dependency). Only the truly-bare
+    # ``owner/repo`` form is ambiguous. Extract the host from URL and SCP
+    # shorthand forms too: a bare ``split("/", 1)[0]`` would classify
+    # ``https://...`` as having a ``https:`` first segment (not a host).
+    bare_lower = bare.lower()
+    if bare_lower.startswith(("https://", "http://", "ssh://")):
+        explicit_host = (urlparse(bare).hostname or "").strip()
+    elif scp := _SCP_LOCATOR_RE.match(bare):
+        # SCP shorthand with any user: ``git@host:owner/repo``
+        explicit_host = scp.group(1).strip()
+    else:
+        explicit_host = bare.split("/", 1)[0]
+    # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist: the
+    # goal is to distinguish "looks like a hostname" (explicit intent) from
+    # "bare owner/repo" (ambiguous). Restricting to known hosts would refuse
+    # legitimate self-hosted Git servers; the real protection is the
+    # fail-closed refusal of the bare form.
+    if is_supported_git_host(explicit_host):
+        return None
+    return locator_field, bare
+
+
+def _default_host_is(host: str) -> bool:
+    """True when ``GITHUB_HOST`` makes bare ``owner/repo`` resolve to *host*, so it
+    never falls back to public ``github.com`` (#3945).
+
+    Uses :func:`default_host`, which every install path sees; a manifest
+    ``default_host:`` scope is not active during marketplace resolution.
+    """
+    return default_host().strip().lower() == host.strip().lower()
+
+
+def _bare_locator_means_marketplace_host(
+    plugin: MarketplacePlugin, source: MarketplaceSource
+) -> bool:
+    """True when a bare dict locator on a ``*.ghe.com`` marketplace names that host.
+
+    Either it names the catalog repository itself (#1285; ``repo:`` and its
+    ``repository:`` / ``url:`` synonyms, #3945), or ``GITHUB_HOST`` is the
+    marketplace host (#3945). The resolver then host-qualifies the
+    canonical so later parsing cannot route it anywhere else.
+    """
+    if not isinstance(plugin.source, dict) or _bare_dict_locator(plugin.source) is None:
+        return False
+    host = source.host.strip().lower()
+    if not is_github_hostname(host) or host == "github.com":
+        return False
+    return _is_in_marketplace_source(plugin, source) or _default_host_is(host)
+
+
 def _compute_cross_repo_misconfig_risk(
     plugin: MarketplacePlugin,
     source: MarketplaceSource,
     canonical: str,
-    dep_ref: DependencyReference | None,
 ) -> CrossRepoMisconfigRisk | None:
-    """Identify the #1305 misconfiguration: cross-repo dict ``type: github``
-    source with bare ``repo`` on an enterprise GitHub-family marketplace.
+    """Identify the #1305 misconfiguration: a cross-repo dict source with a
+    bare ``owner/repo`` locator on an enterprise GitHub-family marketplace.
 
     Returns a :class:`CrossRepoMisconfigRisk` when **all** of:
 
-    - ``dep_ref`` is ``None`` (GitHub-family virtual-shorthand path; GitLab and
-      self-managed FQDNs build a structured ref upstream and sidestep the bug)
-    - ``plugin.source`` is a dict whose normalized type is ``github`` (other
-      dict types -- ``gitlab``, ``git-subdir`` -- hit the same auth-routing
-      bug but the "host-qualify with marketplace host" remediation only
-      matches operator intent for the GitHub family)
+    - ``plugin.source`` is a dict of any resolvable type (``github``,
+      ``git-subdir``, ``gitlab``, ``url``; #3937). A bare locator carries no
+      host, so every one of them falls back to public ``github.com``.
     - the source is **not** an in-marketplace reference (PR #1292 already
-      backfills the host for those)
+      backfills the host for those; ``repo:``, ``repository:`` and ``url:``
+      all count, #3945)
     - ``_needs_canonical_host_prefix`` agrees the canonical is bare and the
       host is GitHub-family enterprise (``*.ghe.com``; idempotent against
       already host-qualified, URL, and SSH forms)
-    - the ``repo`` field is a non-empty ``owner/repo`` shorthand
+    - the locator (``repo`` and its per-type fallbacks) is a non-empty,
+      non-host-qualified ``owner/repo`` shorthand
+    - ``GITHUB_HOST`` is not the marketplace host (#3945)
 
-    Otherwise returns ``None``. Pure -- no logging, no side effects.
+    A structured reference built from a bare locator (``type: url``, packed
+    ``git-subdir``) still defaults to ``github.com``, so it does not exempt the
+    source. Otherwise returns ``None``. Pure -- no logging, no side effects.
     """
-    if dep_ref is not None:
-        return None
     if not isinstance(plugin.source, dict):
-        return None
-    if _coerce_dict_plugin_type(plugin.source) != "github":
         return None
     if _is_in_marketplace_source(plugin, source):
         return None
     if not _needs_canonical_host_prefix(canonical, source.host):
         return None
-    repo_field = plugin.source.get("repo", "")
-    if not isinstance(repo_field, str):
+    bare_locator = _bare_dict_locator(plugin.source)
+    if bare_locator is None:
         return None
-    bare = repo_field.strip().lstrip("/")
-    if "/" not in bare:
+    if _default_host_is(source.host):
         return None
-    # #1326: an already-host-qualified `repo:` field declares explicit intent
-    # (e.g. ``repo: github.com/owner/repo`` on a ``*.ghe.com`` marketplace is
-    # an unambiguous declared cross-host dependency). Only the truly-bare
-    # ``owner/repo`` form is the dependency-confusion vector this sentinel
-    # flags. ``_needs_canonical_host_prefix`` above already returns False
-    # for SAME-host qualification (its idempotency clause) and for URL /
-    # SSH SCP shorthand canonicals; this is the symmetric guard for the
-    # remaining case -- CROSS-host shorthand qualification (``github.com/...``
-    # on a ``*.ghe.com`` marketplace), which the idempotency check cannot
-    # detect because the canonical starts with a different host than
-    # ``source.host``.
-    #
-    # Defense in depth: extract the host from URL and SCP shorthand forms
-    # too, so the guard is robust even if a future upstream refactor lets
-    # those forms reach this point. A bare ``split("/", 1)[0]`` would
-    # otherwise classify ``https://...`` as having a ``https:`` first
-    # segment (not a host) and incorrectly attach the sentinel.
-    explicit_host = ""
-    bare_lower = bare.lower()
-    if bare_lower.startswith(("https://", "http://", "ssh://")):
-        explicit_host = (urlparse(bare).hostname or "").strip()
-    elif bare.startswith("git@") and ":" in bare:
-        # SCP shorthand: ``git@host:owner/repo``
-        explicit_host = bare[4:].split(":", 1)[0].strip()
-    else:
-        explicit_host = bare.split("/", 1)[0]
-    # ``is_supported_git_host`` accepts any valid FQDN, not an allowlist.
-    # This is intentional: the goal is to distinguish "looks like a
-    # hostname" (explicit intent) from "bare owner/repo" (ambiguous).
-    # Restricting to known hosts would silently refuse legitimate
-    # self-hosted Git servers and create a false sense of security --
-    # the real protection is the fail-closed refusal of the bare form.
-    if is_supported_git_host(explicit_host):
-        return None
+    locator_field, bare = bare_locator
     return CrossRepoMisconfigRisk(
         marketplace_host=source.host,
         bare_repo_field=bare,
         suggested_qualified_repo=f"{source.host}/{bare}",
+        locator_field=locator_field,
     )
 
 
@@ -528,7 +590,7 @@ def parse_marketplace_ref(
                 "Semver ranges are not supported in marketplace refs. "
                 "Use a raw git tag, branch, or SHA instead "
                 "(e.g. 'plugin@mkt#v2.0.0'). "
-                "See: https://microsoft.github.io/apm/guides/marketplaces/"
+                "See: https://microsoft.github.io/apm/consumer/installing-from-marketplaces/"
             )
         return (match.group(1), match.group(2), ref)
     return None
@@ -630,19 +692,25 @@ def _resolve_git_subdir_source(source: dict) -> str:
 
 def _dependency_reference_from_packed_source(
     plugin: MarketplacePlugin,
+    *,
+    bare_host: str | None = None,
 ) -> DependencyReference | None:
-    """Parse packed or explicitly qualified sources before catalog-local routing."""
+    """Parse packed or explicitly qualified sources before catalog-local routing.
+
+    *bare_host* host-qualifies a bare ``url:`` locator before parsing, so a
+    locator known to name that host keeps its ref and path (#3945).
+    """
     source = plugin.source
     if not isinstance(source, dict):
         return None
 
     source_type = _coerce_dict_plugin_type(source)
-    if source_type == "url":
-        remote = source.get("url")
-    elif source_type == "git-subdir" and not source.get("repo"):
+    if source_type == "url" or (source_type == "git-subdir" and not source.get("repo")):
         # Pack emits git-subdir repository identity in ``url``. Hand-authored
         # ``repo`` forms retain the existing marketplace-relative routing.
         remote = source.get("url")
+        if bare_host and isinstance(remote, str) and remote.strip():
+            remote = f"{bare_host}/{remote.strip().lstrip('/')}"
     elif source_type in {"github", "git-subdir", "gitlab"}:
         remote = source.get("repo") or source.get("repository")
         if not isinstance(remote, str) or not (
@@ -927,6 +995,8 @@ def resolve_marketplace_plugin(
     version_spec: str | None = None,
     auth_resolver: object | None = None,
     warning_handler: Callable[[str], None] | None = None,
+    enforce_ref_pins: bool = True,
+    accept_ref_change: bool = False,
 ) -> MarketplacePluginResolution:
     """Resolve a marketplace plugin reference to a canonical string and plugin row.
 
@@ -951,6 +1021,11 @@ def resolve_marketplace_plugin(
             stdlib logging.  Callers typically pass
             ``CommandLogger.warning`` so warnings render through the CLI
             output system.
+        enforce_ref_pins: When ``True`` (installs), a ref that contradicts the
+            recorded version pin raises ``RefPinMismatchError`` and a new ref is
+            staged for the install transaction. Read-only callers pass ``False``.
+        accept_ref_change: When ``True`` (an explicit ``apm update`` of this
+            plugin), a changed ref is staged in place of the recorded pin.
 
     Returns:
         :class:`MarketplacePluginResolution` (iterates as ``(canonical, plugin)``).
@@ -960,6 +1035,7 @@ def resolve_marketplace_plugin(
         PluginNotFoundError: If the plugin is not in the marketplace.
         MarketplaceFetchError: If the marketplace cannot be fetched.
         ValueError: If the plugin source cannot be resolved.
+        RefPinMismatchError: If the resolved ref contradicts the recorded pin.
     """
 
     def _emit_warning(msg: str) -> None:
@@ -971,6 +1047,9 @@ def resolve_marketplace_plugin(
 
     source = get_marketplace_by_name(marketplace_name)
     manifest = fetch_or_cache(source, auth_resolver=auth_resolver)
+    # Lock evidence names the catalog, never the machine-local alias (#3912).
+    source_url = marketplace_origin(source)
+    source_digest = manifest.source_digest if source_url else ""
 
     plugin = manifest.find_plugin(plugin_name)
     if plugin is None:
@@ -998,8 +1077,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=dep_ref,
             cross_repo_misconfig_risk=None,
-            source_url=manifest.source_url,
-            source_digest=manifest.source_digest,
+            source_url=source_url,
+            source_digest=source_digest,
         )
 
     source_kind = source.kind
@@ -1018,11 +1097,16 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=None,
             cross_repo_misconfig_risk=None,
-            source_url=manifest.source_url,
-            source_digest=manifest.source_digest,
+            source_url=source_url,
+            source_digest=source_digest,
         )
 
-    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(plugin)
+    # A bare locator that names the marketplace host is parsed with that host,
+    # not the ``github.com`` default (#3945).
+    names_marketplace_host = _bare_locator_means_marketplace_host(plugin, source)
+    dep_ref: DependencyReference | None = _dependency_reference_from_packed_source(
+        plugin, bare_host=source.host if names_marketplace_host else None
+    )
     if dep_ref is not None:
         canonical = dep_ref.to_canonical()
     else:
@@ -1058,11 +1142,12 @@ def resolve_marketplace_plugin(
     # because there is no nested-group ambiguity to disambiguate, but the bare
     # canonical drops the host that ``DependencyReference.parse`` needs to route auth
     # at the enterprise host instead of falling back to ``github.com``. Backfill the
-    # host so the canonical self-routes, scoped to in-marketplace sources where the
-    # host is unambiguously the registered marketplace host (#1285).
+    # host so the canonical self-routes, scoped to sources where the host is
+    # unambiguously the registered marketplace host: in-marketplace sources
+    # (#1285) and bare locators when GITHUB_HOST is the marketplace host (#3945).
     if (
         dep_ref is None
-        and _is_in_marketplace_source(plugin, source)
+        and (_is_in_marketplace_source(plugin, source) or names_marketplace_host)
         and _needs_canonical_host_prefix(canonical, source.host)
     ):
         canonical = f"{source.host}/{canonical}"
@@ -1072,19 +1157,25 @@ def resolve_marketplace_plugin(
             plugin_name,
             marketplace_name,
         )
+        if not _is_in_marketplace_source(plugin, source):
+            logger.debug(
+                "%s@%s: bare cross-repo locator resolved to '%s' because GITHUB_HOST is"
+                " the marketplace host (#3945); host-qualify it as github.com/... for"
+                " public GitHub",
+                plugin_name,
+                marketplace_name,
+                source.host,
+            )
 
     # ---- Cross-repo misconfig sentinel (#1305) ----
     # PR #1292's host backfill only covers in-marketplace sources. A cross-repo
-    # dict ``type: github`` source with a bare ``repo`` on an enterprise
+    # dict source of any type with a bare ``repo`` on an enterprise
     # marketplace cannot be safely backfilled here -- the bare syntax also
     # legitimately means "a github.com open-source dep from this enterprise
     # marketplace" -- so the canonical stays bare and downstream auth routes at
-    # github.com. Attach a sentinel so the install command can emit an
-    # actionable hint ONLY when the package subsequently fails validation; the
-    # legitimate cross-host path validates fine and never sees the hint.
-    cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
-        plugin, source, canonical, dep_ref
-    )
+    # github.com. Attach a sentinel; admit_marketplace_resolution refuses it on
+    # every install path (#1326, #3913).
+    cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(plugin, source, canonical)
 
     # ---- Propagate marketplace registered ref (#1811) ----
     # Relative string sources on GitHub-family marketplaces have no structured
@@ -1109,7 +1200,9 @@ def resolve_marketplace_plugin(
     resolved_tag_name: str | None = None
     resolved_version: str | None = None
     resolved_at: str | None = None
-    if version_spec:
+    # A risky resolution is refused by admit_marketplace_resolution; skip the
+    # tag lookup so no request reaches the ambiguous package remote (#1326).
+    if version_spec and cross_repo_misconfig_risk is None:
         from .version_resolver import is_version_constraint
 
         base = canonical.split("#", 1)[0]
@@ -1204,33 +1297,31 @@ def resolve_marketplace_plugin(
         else:
             canonical = f"{base}#{resolved_override}"
 
-    # ---- Ref immutability check (advisory) ----
-    # Record the plugin -> ref mapping (scoped by version) and warn if
-    # it changed since the last install (potential ref-swap attack).
-    # Using the plugin's declared version field ensures legitimate
-    # version bumps never trigger false-positive warnings.
+    # ---- Ref immutability check (trust on first use) ----
+    # A recorded pin that disagrees with the resolved ref is a refusal; a new
+    # or matching ref is staged and written only when the install commits.
+    # Pins key on the version a range resolved to, else the plugin's declared
+    # version, so a release never collides with an earlier pin. A raw ref
+    # override is the consumer's own choice and neither checks nor moves the
+    # publisher's pin. An explicit ``apm update`` of the plugin accepts a
+    # changed ref and records it on commit.
     current_ref = canonical.split("#", 1)[1] if "#" in canonical else None
-    plugin_version = plugin.version or ""
-    if current_ref:
-        from .version_pins import check_ref_pin, record_ref_pin
+    raw_ref_override = bool(version_spec) and resolved_constraint is None
+    if current_ref and enforce_ref_pins and not raw_ref_override:
+        from .version_pins import enforce_ref_pin
 
-        previous_ref = check_ref_pin(
+        replaced_ref = enforce_ref_pin(
             marketplace_name,
             plugin_name,
             current_ref,
-            version=plugin_version,
+            version=resolved_version or plugin.version or "",
+            accept_change=accept_ref_change,
         )
-        if previous_ref is not None:
+        if replaced_ref is not None:
             _emit_warning(
-                f"Plugin {plugin_name}@{marketplace_name} ref changed: was '{previous_ref}', now '{current_ref}'. "
-                "This may indicate a ref swap attack."
+                f"Plugin {plugin_name}@{marketplace_name} ref changed: was "
+                f"'{replaced_ref}', now '{current_ref}'. Accepted by this update."
             )
-        record_ref_pin(
-            marketplace_name,
-            plugin_name,
-            current_ref,
-            version=plugin_version,
-        )
 
     logger.debug(
         "Resolved %s@%s -> %s",
@@ -1247,11 +1338,20 @@ def resolve_marketplace_plugin(
     try:
         from .shadow_detector import detect_shadows
 
-        shadows = detect_shadows(plugin_name, marketplace_name, auth_resolver=auth_resolver)
+        skipped: list[str] = []
+        shadows = detect_shadows(
+            plugin_name, marketplace_name, auth_resolver=auth_resolver, skipped=skipped
+        )
         for shadow in shadows:
             _emit_warning(
                 f"Plugin '{plugin_name}' also found in marketplace '{shadow.marketplace_name}'. "
                 "Verify you are installing from the intended source."
+            )
+        if skipped:
+            _emit_warning(
+                f"Did not check {', '.join(repr(name) for name in skipped)} for another "
+                f"'{plugin_name}': not cached, and an explicit refresh fetches only the "
+                "catalogs it needs."
             )
     except Exception:
         # Shadow detection must never break installation
@@ -1262,8 +1362,8 @@ def resolve_marketplace_plugin(
         plugin=plugin,
         dependency_reference=dep_ref,
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
-        source_url=manifest.source_url,
-        source_digest=manifest.source_digest,
+        source_url=source_url,
+        source_digest=source_digest,
         constraint=resolved_constraint,
         resolved_tag=resolved_tag_name,
         resolved_version=resolved_version,

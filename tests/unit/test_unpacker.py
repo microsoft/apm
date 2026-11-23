@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.bundle.unpacker import unpack_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from tests.utils.unpack_admission import unpack_bundle
 
 
 def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
@@ -80,6 +80,17 @@ class TestUnpackBundle:
         result = unpack_bundle(bundle, output)
 
         assert result.verified
+
+    def test_unpack_names_a_plugin_bundle_instead_of_missing_files(self, tmp_path):
+        """The default plugin layout is routed to 'apm install' (#3994)."""
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        (bundle / ".github" / "agents" / "a.md").unlink()
+        (bundle / "plugin.json").write_text("{}", encoding="utf-8")
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"plugin-format bundle.*apm install"):
+            unpack_bundle(bundle, output)
 
     def test_unpack_verify_missing_file(self, tmp_path):
         deployed = [".github/agents/a.md", ".github/agents/missing.md"]
@@ -395,6 +406,175 @@ class TestUnpackBundle:
         assert result.pack_meta == {}
 
 
+class TestUnpackAdmission:
+    """Admission (org policy and integrity) runs before a preview or a write."""
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_refused_admission_writes_nothing(self, tmp_path, dry_run):
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        output = tmp_path / "target"
+        output.mkdir()
+
+        def refuse(candidate):
+            raise ValueError("refused")
+
+        with pytest.raises(ValueError, match="refused"):
+            unpack_bundle(bundle, output, dry_run=dry_run, admit=refuse)
+        assert not any(output.iterdir())
+
+    def test_admission_sees_every_file_it_would_write(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/s/"])
+        (bundle / ".github" / "skills" / "s" / "SKILL.md").write_text("x", encoding="utf-8")
+        seen = []
+
+        unpack_bundle(bundle, tmp_path / "target", admit=seen.append)
+
+        assert ".github/skills/s/SKILL.md" in seen[0].files
+        assert seen[0].lockfile.get_package_dependencies()[0].repo_url == "owner/repo"
+
+
+class TestUnpackWrittenFiles:
+    """Only files this unpack copied are reported for the lockfile record."""
+
+    def test_skipped_non_content_files_are_not_claimed(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/s/"])
+        skill = bundle / ".github/skills/s"
+        (skill / "SKILL.md").write_text("x", encoding="utf-8")
+        (skill / "__pycache__").mkdir()
+        (skill / "__pycache__" / "m.cpython-312.pyc").write_bytes(b"bundle")
+        output = tmp_path / "target"
+        existing = output / ".github/skills/s/__pycache__/m.cpython-312.pyc"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"user")
+
+        result = unpack_bundle(bundle, output)
+
+        assert result.written_files == [".github/skills/s/SKILL.md"]
+        assert existing.read_bytes() == b"user"
+
+
+class TestApmBundleAdmission:
+    """``apm unpack`` admission evaluates the bundle against the output project's policy."""
+
+    @staticmethod
+    def _registry_candidate(tmp_path, registry_url):
+        from apm_cli.bundle.unpacker import UnpackCandidate
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="acme/widget",
+                source="registry",
+                version="1.0.0",
+                resolved_url=f"{registry_url}/v1/packages/acme/widget/versions/1.0.0/download",
+                resolved_hash="sha256:" + "0" * 64,
+            )
+        )
+        return UnpackCandidate(
+            source_dir=tmp_path, lockfile=lockfile, files=[], pack_meta={"target": "claude"}
+        )
+
+    def test_registry_dependency_keeps_its_configured_registry_name(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from apm_cli.install.bundle_admission import apm_bundle_admission
+        from apm_cli.policy.discovery import PolicyFetchResult
+        from apm_cli.policy.schema import ApmPolicy, RegistrySourcePolicy
+
+        url = "https://registry.example.com/apm"
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            f"name: project\nversion: 1.0.0\nregistries:\n  corp:\n    url: {url}\n"
+            "  default: corp\n",
+            encoding="utf-8",
+        )
+        policy = ApmPolicy(
+            enforcement="block",
+            registry_source=RegistrySourcePolicy(require=("corp",), allow_non_registry=False),
+        )
+        monkeypatch.setattr(
+            "apm_cli.policy.install_preflight.discover_policy_with_chain",
+            lambda root: PolicyFetchResult(
+                policy=policy, source="org:acme/.github", outcome="found"
+            ),
+        )
+        monkeypatch.setattr(
+            "apm_cli.deps.registry.feature_gate.require_package_registry_enabled",
+            lambda *a, **k: None,
+        )
+
+        admit = apm_bundle_admission(project, MagicMock(), dry_run=False)
+        admit(self._registry_candidate(tmp_path, url))
+
+        from apm_cli.install.errors import PolicyViolationError
+
+        with pytest.raises(PolicyViolationError):
+            admit(self._registry_candidate(tmp_path, "https://other.example.com/apm"))
+
+
+class TestApmBundleIntegrity:
+    """``--format apm`` bundles are checked against their per-file lock hashes."""
+
+    @staticmethod
+    def _check(bundle, logger):
+        from apm_cli.install.bundle_admission import apm_bundle_integrity
+
+        lockfile = LockFile.read(bundle / "apm.lock.yaml")
+        return apm_bundle_integrity(bundle, lockfile, [".github/agents/a.md"], logger)
+
+    @staticmethod
+    def _hashed_bundle(tmp_path):
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".github/agents/a.md"],
+                deployed_file_hashes={
+                    ".github/agents/a.md": compute_file_hash(bundle / ".github/agents/a.md")
+                },
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        return bundle
+
+    def test_matching_hashes_pass_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        logger = MagicMock()
+        self._check(self._hashed_bundle(tmp_path), logger)(True)
+        logger.warning.assert_not_called()
+
+    def test_altered_file_is_refused_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = self._hashed_bundle(tmp_path)
+        (bundle / ".github/agents/a.md").write_text("altered", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"Hash mismatch: \.github/agents/a\.md"):
+            self._check(bundle, MagicMock())(True)
+
+    def test_altered_file_warns_without_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = self._hashed_bundle(tmp_path)
+        (bundle / ".github/agents/a.md").write_text("altered", encoding="utf-8")
+        logger = MagicMock()
+        self._check(bundle, logger)(False)
+        assert ".github/agents/a.md" in logger.warning.call_args.args[0]
+
+    def test_unhashed_file_is_refused_under_require_hashes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md"])
+        with pytest.raises(ValueError, match="No locked hash"):
+            self._check(bundle, MagicMock())(True)
+        self._check(bundle, MagicMock())(False)
+
+
 class TestUnpackCmdLogging:
     """Verify CLI output for the unpack command."""
 
@@ -539,9 +719,8 @@ class TestUnpackCanvasTrust:
     """Canvas extensions are executable code: unpack must enforce the feature gate.
 
     The ``canvas`` experimental flag controls feature availability.
-    When OFF, canvas paths are silently dropped.  When ON, canvas files
-    are allowed (``apm unpack`` is deprecated and has no project context
-    for allowExecutables enforcement).
+    When OFF, canvas paths are dropped.  When ON, unpack refuses them:
+    only ``apm install <bundle>`` applies the executables gate.
     """
 
     @pytest.fixture(autouse=True)
@@ -573,18 +752,17 @@ class TestUnpackCanvasTrust:
         assert not (output / ".github" / "extensions" / "widget").exists()
         assert (output / ".github" / "agents" / "a.md").exists()
 
-    def test_canvas_deployed_when_flag_on(self, tmp_path, enable_canvas):
-        """Canvas deploys when the experimental flag is on (apm unpack has no allowExecutables)."""
+    def test_canvas_refused_when_flag_on(self, tmp_path, enable_canvas):
+        """With the flag on, canvas is executable content that unpack refuses."""
         deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
         bundle = _build_bundle_dir(tmp_path, deployed)
         output = tmp_path / "target"
         output.mkdir()
 
-        result = unpack_bundle(bundle, output)
+        with pytest.raises(ValueError, match="apm install"):
+            unpack_bundle(bundle, output)
 
-        assert result.canvas_blocked == 0
-        assert ".github/extensions/widget/extension.mjs" in result.files
-        assert (output / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+        assert list(output.iterdir()) == []
 
     def test_canvas_blocked_when_flag_off_no_trust(self, tmp_path):
         """When the experimental flag is off, canvas is always blocked regardless."""
@@ -610,6 +788,104 @@ class TestUnpackCanvasTrust:
         assert result.canvas_blocked == 1
         assert result.files == []
         assert not (output / ".github" / "extensions").exists()
+
+
+class TestUnpackRefusesExecutables:
+    """``apm unpack`` cannot apply the executables gate, so it deploys none (#4027)."""
+
+    @pytest.mark.parametrize(
+        "executable",
+        [
+            ".github/hooks/pkg-hooks.json",
+            ".github/hooks/scripts/pkg/run.sh",
+            ".claude/settings.json",
+            ".cursor/hooks.json",
+            ".vscode/mcp.json",
+            ".codex/config.toml",
+            ".github/skills/tool/bin/tool",
+            ".agents/mcp_config.json",
+            ".kiro/settings/mcp.json",
+            ".claude/skills/apm-lsp/.claude-plugin/plugin.json",
+            ".github/lsp.json",
+        ],
+    )
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_executable_content_is_refused_before_any_write(self, tmp_path, executable, dry_run):
+        bundle = _build_bundle_dir(tmp_path, [".github/agents/a.md", executable])
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"apm install .*test-pkg-1\.0\.0"):
+            unpack_bundle(bundle, output, dry_run=dry_run)
+
+        assert list(output.iterdir()) == []
+
+    def test_executable_inside_a_directory_entry_is_refused(self, tmp_path):
+        bundle = _build_bundle_dir(tmp_path, [".github/skills/tool/"])
+        (bundle / ".github/skills/tool/bin").mkdir()
+        (bundle / ".github/skills/tool/bin/run").write_text("x", encoding="utf-8")
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match="bin executable"):
+            unpack_bundle(bundle, output)
+
+    def test_file_listed_with_its_directory_is_counted_once(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path, [".github/skills/tool/", ".github/skills/tool/bin/run"]
+        )
+        output = tmp_path / "target"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match=r"Refusing to unpack 1 executable file"):
+            unpack_bundle(bundle, output)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "apm-hooks.json",
+            ".github/hooks/apm-hooks.json",
+            "lsp-config.json",
+            "config.yaml",
+            ".claude.json",
+            ".opencode/agents/opencode.json",
+        ],
+    )
+    def test_config_names_are_executable_content(self, path):
+        from apm_cli.bundle.unpacker import executable_content_kind
+
+        assert executable_content_kind(path) is not None
+
+    def test_owner_catalog_paths_are_executable_content(self):
+        from apm_cli.bundle.unpacker import executable_content_kind
+        from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
+        from apm_cli.integration.lsp_integrator import _LSP_TARGET_SPECS
+
+        paths = ["/".join(spec.project_relative_path) for spec in _LSP_TARGET_SPECS.values()]
+        paths += list(PLUGIN_ECOSYSTEM_PATHS.values())
+        paths += [f".claude/skills/x/{p}" for p in PLUGIN_ECOSYSTEM_PATHS.values()]
+        assert all(executable_content_kind(p) == "hook, MCP or LSP configuration" for p in paths)
+
+    def test_client_settings_names_are_bounded_by_depth(self):
+        from apm_cli.bundle.unpacker import executable_content_kind
+
+        assert executable_content_kind(".github/skills/x/settings.json") is None
+
+    def test_non_executable_content_still_unpacks(self, tmp_path):
+        deployed = [
+            ".github/agents/a.md",
+            ".github/skills/tool/SKILL.md",
+            ".github/skills/tool/scripts/helper.py",
+            ".github/instructions/b.instructions.md",
+        ]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output)
+
+        assert set(result.files) == set(deployed)
+        assert all((output / f).exists() for f in deployed)
 
 
 # ---------------------------------------------------------------------------

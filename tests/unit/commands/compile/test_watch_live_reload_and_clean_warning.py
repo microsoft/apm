@@ -29,6 +29,8 @@ from click.testing import CliRunner
 from apm_cli.commands.compile.cli import compile as compile_cmd
 from apm_cli.commands.compile.watcher import APMFileHandler
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def fake_logger():

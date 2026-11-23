@@ -11,7 +11,9 @@ At project scope APM only writes to ``.cursor/mcp.json`` when the ``.cursor/`` d
 import json
 import os
 from pathlib import Path
+from typing import ClassVar
 
+from ...core.command_logger import library_logger
 from ...core.token_manager import GitHubTokenManager
 from ...mcp_transport import canonical_remote_transport
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
@@ -37,6 +39,10 @@ class CursorClientAdapter(CopilotClientAdapter):
     # those referenced values are not baked into the file. Explicit mcp.env
     # literals remain literal below; shared GitHub token injection is separate.
     _supports_runtime_env_substitution: bool = True
+
+    # cursor.com/docs/mcp "Config interpolation": ${workspaceFolder} is the
+    # folder that contains .cursor/mcp.json.
+    plugin_root_project_reference: ClassVar[str | None] = "${workspaceFolder}"
 
     def _format_runtime_env_placeholder(self, name: str) -> str:
         """Return Cursor's native env-var placeholder syntax."""
@@ -179,7 +185,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         config: dict = {}
 
         # --- raw stdio (self-defined deps) ---
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config["type"] = "stdio"
             config["command"] = raw["command"]
@@ -265,7 +271,7 @@ class CursorClientAdapter(CopilotClientAdapter):
         Cursor-specific success message.
         """
         if not server_url:
-            print("Error: server_url cannot be empty")
+            library_logger().error("server_url cannot be empty")
             return False
 
         # Project scope is opt-in; global installs work from any directory.
@@ -281,12 +287,9 @@ class CursorClientAdapter(CopilotClientAdapter):
             config_key = self.determine_config_key(server_url, server_name, server_info)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
-            if self.update_config({config_key: server_config}) is False:
-                return False
-
-            print(f"Successfully configured MCP server '{config_key}' for Cursor")
-            return True
+            # The integrator's install tree reports success once (#3994).
+            return self.update_config({config_key: server_config}) is not False
 
         except Exception as e:
-            print(f"Error configuring MCP server: {e}")
+            library_logger().error(f"Error configuring MCP server: {e}")
             return False

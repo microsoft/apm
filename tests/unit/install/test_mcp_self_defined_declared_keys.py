@@ -21,11 +21,16 @@ from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 from apm_cli.models.dependency.mcp import MCPDependency
 
+pytestmark = pytest.mark.component
+
 ALL_RUNTIMES = sorted(ClientFactory.supported_clients())
 # VS Code always keyed servers by their declared name, so it never wrote a
 # truncated entry. OpenCode's detector reads ``mcpServers`` while the adapter
 # writes ``mcp``, so APM cannot observe its existing keys.
 LEGACY_RUNTIMES = [rt for rt in ALL_RUNTIMES if rt not in {"vscode", "opencode"}]
+# ``vscode`` stays registered only to clean its retired destination; install
+# never selects it (#3866).
+INSTALL_RUNTIMES = [rt for rt in ALL_RUNTIMES if rt != "vscode"]
 SIGNAL_DIRS = (
     ".agent",
     ".agents",
@@ -111,7 +116,7 @@ def _install(deps, runtime, project_root, managed=None, logger=None, stored=None
 
 
 @pytest.mark.parametrize("transport", ["http", "stdio"])
-@pytest.mark.parametrize("runtime", ALL_RUNTIMES)
+@pytest.mark.parametrize("runtime", INSTALL_RUNTIMES)
 def test_reverse_dns_name_is_written_and_owned_under_declared_key(project, runtime, transport):
     managed: dict[str, set[str]] = {}
 
@@ -123,7 +128,7 @@ def test_reverse_dns_name_is_written_and_owned_under_declared_key(project, runti
     assert managed == {runtime: {REVERSE_DNS}}
 
 
-@pytest.mark.parametrize("runtime", ALL_RUNTIMES)
+@pytest.mark.parametrize("runtime", INSTALL_RUNTIMES)
 def test_declared_names_sharing_final_segment_do_not_collide(project, runtime):
     deps = [_dep(REVERSE_DNS, "http"), _dep(SAME_SEGMENT, "stdio")]
     managed: dict[str, set[str]] = {}
@@ -134,7 +139,7 @@ def test_declared_names_sharing_final_segment_do_not_collide(project, runtime):
     assert managed == {runtime: {REVERSE_DNS, SAME_SEGMENT}}
 
 
-@pytest.mark.parametrize("runtime", ALL_RUNTIMES)
+@pytest.mark.parametrize("runtime", INSTALL_RUNTIMES)
 def test_scoped_and_plain_self_defined_names_keep_their_keys(project, runtime):
     deps = [_dep("@scope/server", "stdio"), _dep("plain-server", "http")]
 
@@ -179,7 +184,7 @@ def test_registry_lookup_failure_does_not_raise(project, runtime):
     assert [item["server"] for item in summary.failed] == [REVERSE_DNS]
 
 
-@pytest.mark.parametrize("runtime", [rt for rt in ALL_RUNTIMES if rt != "vscode"])
+@pytest.mark.parametrize("runtime", INSTALL_RUNTIMES)
 def test_adapter_fetch_failure_returns_false(project, runtime):
     adapter = ClientFactory.create_client(runtime, project_root=project, user_scope=False)
     with patch.object(adapter, "_fetch_server_info", side_effect=RuntimeError("lookup failed")):

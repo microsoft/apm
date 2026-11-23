@@ -21,6 +21,8 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
 from apm_cli.models.validation import PackageType
 
+pytestmark = pytest.mark.component
+
 
 def _set_home(monkeypatch, home: Path) -> None:
     """Set the user's home directory portably across POSIX and Windows.

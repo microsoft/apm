@@ -1,0 +1,17 @@
+# apm journey golden v1: J05 step 6
+$ rm -rf apm_modules .agents .claude .github
+[exit 0]
+--- stdout
+--- stderr
+$ apm install --frozen
+[exit 0]
+--- stdout
+[>] Installing dependencies from apm.yml...
+[>] Resolving claude-plugins-official-commit-commands...
+[i] Targets: claude  (source: apm.yml)
+  [+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>
+1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot). Start a new session, or run /reload-plugins in Claude, to load them.
+
+[*] Installed 1 APM dependency in <DUR>.
+[i] Deployed files verified against apm.lock.yaml.
+--- stderr

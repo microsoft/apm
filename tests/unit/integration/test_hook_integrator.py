@@ -31,6 +31,7 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.integration.hook_ownership import dependency_hook_sources
 from apm_cli.models.apm_package import APMPackage, PackageInfo
+from tests.utils.deployment_evidence import receipted_evidence
 
 
 def _make_package_info(install_path: Path, name: str = "test-pkg") -> PackageInfo:
@@ -1447,6 +1448,7 @@ class TestCursorIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1622,6 +1624,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1673,6 +1676,7 @@ class TestSyncIntegration:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == 1
@@ -1728,24 +1732,6 @@ class TestScriptPathRewriting:
 
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
         assert ".github/hooks/scripts/my-pkg/hooks/script.sh" in cmd
-        assert len(scripts) == 1
-
-    def test_rewrite_relative_path(self, temp_project):
-        """Test rewriting relative ./path references."""
-        pkg_dir = temp_project / "pkg"
-        (pkg_dir / "scripts").mkdir(parents=True, exist_ok=True)
-        (pkg_dir / "scripts" / "check.sh").write_text("#!/bin/bash")
-
-        integrator = HookIntegrator()
-        cmd, scripts = integrator._rewrite_command_for_target(
-            "./scripts/check.sh",
-            pkg_dir,
-            "my-pkg",
-            "vscode",
-        )
-
-        assert "./" not in cmd
-        assert ".github/hooks/scripts/my-pkg/scripts/check.sh" in cmd
         assert len(scripts) == 1
 
     def test_system_command_unchanged(self, temp_project):
@@ -2836,6 +2822,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] > 0
 
@@ -2883,6 +2870,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=managed_files,
             managed_file_hashes=compute_deployed_hashes(managed_files, temp_project),
+            evidence=receipted_evidence(temp_project),
         )
         assert stats["files_removed"] >= 2
         assert not (temp_project / ".github" / "hooks" / "ralph-loop-hooks.json").exists()
@@ -2910,6 +2898,7 @@ class TestEndToEnd:
             temp_project,
             managed_files=native,
             managed_file_hashes={path.replace("/", "\\"): hashes[path] for path in hashes},
+            evidence=receipted_evidence(temp_project),
         )
 
         assert stats["files_removed"] == len(posix) >= 2
@@ -3544,6 +3533,7 @@ class TestScopeResolvedHookDeployment:
             self.root,
             managed_files=managed,
             managed_file_hashes=compute_deployed_hashes(managed, self.root),
+            evidence=receipted_evidence(self.root),
             targets=[copilot_target],
         )
         assert stats["files_removed"] > 0
@@ -5069,3 +5059,22 @@ class TestHookScriptAdopt:
         for script in ["posttooluse.py", "stop.py", "userpromptsubmit.py"]:
             assert (scripts_dir_target / script) in result.target_paths
         assert (scripts_dir_target / "pretooluse.py") not in result.target_paths
+
+
+@pytest.mark.parametrize("spec", ["local-bundle/x", "gitlab.com/local-bundle/x"])
+def test_dependency_named_local_bundle_stays_dependency_owned(spec: str) -> None:
+    """A dependency cannot claim the local-bundle hook marker namespace (#3700)."""
+    from apm_cli.integration.hook_ownership import (
+        dependency_hook_source_marker,
+        drop_dependency_owned_entries,
+        is_local_bundle_hook_source,
+        local_bundle_hook_source_marker,
+    )
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    marker = dependency_hook_source_marker(DependencyReference.parse(spec))
+    bundle_marker = local_bundle_hook_source_marker("x")
+    assert not is_local_bundle_hook_source(marker)
+    hooks = {"PreToolUse": [{"_apm_source": marker}, {"_apm_source": bundle_marker}]}
+    assert drop_dependency_owned_entries(hooks)
+    assert hooks == {"PreToolUse": [{"_apm_source": bundle_marker}]}

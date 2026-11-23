@@ -11,7 +11,7 @@ For CLI flags that pair with these variables, see the [reference index](./). For
 
 ## Authentication
 
-PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../consumer/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
+PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../../getting-started/authentication/) for the resolution chain and [Security model](../../enterprise/security/) for token scoping.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
@@ -21,6 +21,7 @@ PAT / bearer credentials APM reads when cloning packages, calling host APIs, or 
 | `GH_TOKEN` | `gh` CLI token. Last in the GitHub `modules` chain before `gh auth token` and credential helpers. | unset | Forwarded to the Copilot runtime. |
 | `GITHUB_COPILOT_PAT` | First-choice token for the Copilot runtime. | unset | Only consulted by the `copilot` purpose. |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | Forwarded to the Copilot runtime when present. | unset | Not part of the `modules` resolution chain. |
+| `APM_STRICT_HOST_CREDENTIALS` | Set to `1` (or `true`/`yes`/`on`) to send `GITHUB_APM_PAT_<ORG>`, `GITHUB_APM_PAT`, `GITHUB_TOKEN` and `GH_TOKEN` only to the configured host (`GITHUB_HOST`, else `github.com`); other `github.com` / `*.ghe.com` hosts use `gh auth token` or a credential helper run without those variables. | unset | Unrecognised values turn strict mode on and print a warning. See [Authentication](../../getting-started/authentication/). |
 | `GITHUB_HOST` | GHES / GHE Cloud hostname (e.g. `ghe.example.com`). Switches host classification, transport selection, and auth chain. | `github.com` | Process-wide; affects clone URLs and host detection. |
 | `GITLAB_APM_PAT` | APM module access on GitLab SaaS or self-managed. First in the `gitlab_modules` chain. | unset | |
 | `GITLAB_TOKEN` | GitLab fallback token. | unset | |
@@ -68,10 +69,12 @@ The additive setting does not derive trust settings for `apm run` children or co
 | `MCP_REGISTRY_READ_TIMEOUT` | Read timeout for registry HTTP calls, in seconds (float). | implementation default | Non-positive / non-numeric values are ignored. |
 | `PROXY_REGISTRY_URL` | Enterprise package proxy base URL. See [Registry proxy](../../enterprise/registry-proxy/). | unset | When set, APM resolves package downloads through the proxy. |
 | `PROXY_REGISTRY_TOKEN` | Bearer token for `PROXY_REGISTRY_URL`. | unset | Required for authenticated proxies. |
-| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to silence the plaintext-token warning when `PROXY_REGISTRY_TOKEN` is sent to an `http://` `PROXY_REGISTRY_URL`. | unset | `http://` proxy URLs are accepted without it; use only for a trusted internal proxy. |
-| `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any download not served by the proxy. | unset | Air-gapped deployments. |
-| `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is normalized to uppercase with non-alphanumerics replaced by `_`. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | Set to `1` to authorize sending `PROXY_REGISTRY_TOKEN` over `http://` to a host that is not loopback or a private network address. | unset | Without it, the token is sent over `http://` only to loopback or private network hosts. Use only for a trusted internal proxy. |
+| `PROXY_REGISTRY_ONLY` | Set to `1` to refuse any dependency content not served by the proxy, including marketplace catalogs and lookups in the default MCP registry. Policy fetches and `apm self-update` stay direct; the automatic update check is skipped. | unset | Air-gapped deployments. |
+| `APM_REGISTRY_TOKEN_<NAME>` | Bearer token for configured package registry `<NAME>`. | unset | `<NAME>` is the registry name uppercased, with `-` and `.` replaced by `_`. |
 | `APM_REGISTRY_USER_<NAME>` / `APM_REGISTRY_PASS_<NAME>` | Basic-auth credentials for configured package registry `<NAME>`. | unset | Used when a bearer token is not supplied. |
+| `APM_MARKETPLACE_TOKEN_<NAME>` | Bearer token for a hosted `marketplace.json` registered with `apm marketplace add URL --name <NAME>`. | unset | `<NAME>` normalized like registry names. Sent only within the registered URL's scope; never to packages. See [Private hosted catalogs](../cli/marketplace/#private-hosted-catalogs). |
+| `APM_MARKETPLACE_USER_<NAME>` / `APM_MARKETPLACE_PASS_<NAME>` | Basic-auth credentials for that hosted catalog. | unset | Used when no bearer token is set. |
 | `ARTIFACTORY_BASE_URL` | Legacy alias for `PROXY_REGISTRY_URL`. | unset | Prefer `PROXY_REGISTRY_URL` in new setups. |
 | `ARTIFACTORY_ONLY` | Legacy alias for `PROXY_REGISTRY_ONLY`. | unset | Prefer `PROXY_REGISTRY_ONLY`. |
 | `ARTIFACTORY_MAX_ARCHIVE_MB` | Maximum archive size accepted from Artifactory, in MB. | `500` | Integer-like string. |

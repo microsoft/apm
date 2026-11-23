@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from apm_cli.export.declared_license import read_declared_license
+
+pytestmark = pytest.mark.component
 
 
 def test_reads_license_from_apm_yml(tmp_path):

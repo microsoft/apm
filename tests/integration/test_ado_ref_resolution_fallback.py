@@ -49,7 +49,7 @@ def test_ado_semver_ref_resolution_retries_stale_pat_with_cli_bearer(
     )
     with (
         patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
-        patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run),
+        patch("subprocess.run", side_effect=_run),
     ):
         resolution = _maybe_resolve_git_semver(
             dep_ref=dep,
@@ -114,7 +114,7 @@ def test_bearer_fallback_scrubs_inherited_authorization_header(
     )
     with (
         patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
-        patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run),
+        patch("subprocess.run", side_effect=_run),
     ):
         resolution = _maybe_resolve_git_semver(
             dep_ref=dep,
@@ -172,7 +172,7 @@ def test_ado_ref_listing_reports_every_chain_step_when_exhausted(monkeypatch) ->
     )
     with (
         patch("apm_cli.core.azure_cli.get_bearer_provider", return_value=provider),
-        patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_rejected),
+        patch("subprocess.run", side_effect=_rejected),
         pytest.raises(GitLsRemoteError) as raised,
     ):
         resolver.list_remote_refs("example/project/package")

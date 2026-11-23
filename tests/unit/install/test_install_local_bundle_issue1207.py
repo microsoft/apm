@@ -32,9 +32,10 @@ from click.testing import CliRunner
 
 from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.bundle.formats import BundleFormat
-from apm_cli.bundle.local_bundle import check_target_mismatch
 from apm_cli.install.services import integrate_local_bundle
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+pytestmark = pytest.mark.component
 
 # ---------------------------------------------------------------------------
 # Minimal fixtures -- intentionally lighter than the air-gap E2E suite.
@@ -113,19 +114,6 @@ def _bundle_info(bundle_dir: Path, *, bundle_format: str = "claude-plugin"):
 # ---------------------------------------------------------------------------
 # D1: pack.target "all" -> no mismatch warning
 # ---------------------------------------------------------------------------
-
-
-class TestPackTargetAllIsUniversal:
-    def test_check_target_mismatch_returns_none_for_all(self) -> None:
-        assert check_target_mismatch(["all"], ["opencode"]) is None
-        assert check_target_mismatch(["all"], ["copilot", "claude"]) is None
-        assert check_target_mismatch(["all"], []) is None
-
-    def test_check_target_mismatch_still_warns_on_real_mismatch(self) -> None:
-        warning = check_target_mismatch(["copilot"], ["opencode"])
-        assert warning is not None
-        assert "copilot" in warning
-        assert "opencode" in warning
 
 
 # ---------------------------------------------------------------------------

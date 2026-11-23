@@ -217,7 +217,7 @@ are active for this `panel-mode` and surface. Do not spawn
 | `oss-growth-hacker` | Adoption Strategist | Surface-gated |
 | `auth-expert` | Auth / Token Reviewer | Surface-gated |
 | `doc-writer` | Documentation Reviewer | Surface-gated |
-| `test-coverage-expert` | Test-Presence Reviewer | Core unless docs-only (`src/` untouched) |
+| `test-coverage-expert` | Test-Presence Reviewer | Core when `src/` is touched or the diff has a test cut (see `assets/panel-mode.md`); skip otherwise |
 | `performance-expert` | Package-Manager Performance Reviewer | Surface-gated |
 | `apm-ceo` | Strategic Arbiter / Synthesizer | Always |
 
@@ -267,7 +267,7 @@ and surface.
 | Mode | Roster | Context | Comment |
 |------|--------|---------|---------|
 | full | Surface-gated specialists + CEO | Shared brief + owned files | yes |
-| lean | Highest-signal surface owner, test-coverage if `src/` touched, CEO. Architect optional on tiny diffs. | Shared brief only | yes |
+| lean | Highest-signal surface owner, test-coverage if `src/` touched or a test cut, CEO. Architect optional on tiny diffs. | Shared brief only | yes |
 | delta | CEO + previously-active personas whose owned files changed since last panel head; test-coverage only if tests or `src/` changed in range | Brief + last comment + diff | yes if head or watermark changed; else noop |
 
 Even `full` is surface-gated. Never spawn inactive stubs.
@@ -410,9 +410,13 @@ When active, the performance-expert reviews against BOTH:
 
 ### Test Coverage Expert
 
-**Active by default on every PR that touches `src/**/*.py`.** Skip
-(do not spawn) on a documentation-only PR -- the diff contains zero
-`src/**/*.py` files.
+**Active by default on every PR that touches `src/**/*.py`, and on
+every PR with a test cut** as defined in `assets/panel-mode.md`
+(a `tests/` file deleted, moved, or renamed, or a test function,
+assertion, or policy gate removed inside a kept file). The cut trigger
+runs the persona's cut/merge review on test-only clean-up PRs. Pure
+test additions do not trigger it. Skip (do not spawn) when neither
+holds, e.g. a documentation-only PR.
 
 The test-coverage-expert is paired with the devx-ux-expert lens and
 defends the user-promise contracts the DevX persona enumerates (CLI
@@ -648,6 +652,12 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
      diagrams). `lean` and `delta` omit diagrams.
    - The recommended follow-ups list renders the CEO's curated subset,
      not every finding. Full per-persona findings collapse at the bottom.
+   - Follow-ups are fixes for THIS PR, not new issues. Review follow-ups
+     are fixed and folded into the PR where they were found (or a
+     successor PR in the same lane if that PR already merged); never
+     recommend filing a follow-up issue. Only design or scope decisions
+     explicitly made by a maintainer (a human) may be tracked as
+     issues.
    - NEVER render the words "Verdict", "APPROVE", "REJECT", "blocked",
      "merge gate", or any equivalent. The panel is advisory.
    - Reconcile with prior panel receipts and later human replies.

@@ -57,6 +57,8 @@ causes APM to exclude a directory that still contains Git.
 
 Symptom: `403`, `401`, "authentication required", or "Repository not found" on a repo you can clone manually with `git`.
 
+The error names the host and the credential source APM tried (for example `credential tried: GITHUB_APM_PAT_ACME`, or the sources it checked when none held a token), never the token value. A host that answers "not found" is reported as `Repository <owner/repo> not found on <host>`, not as a network error: check the name, or that the credential can read a private repository. For a dependency declared in `apm.yml`, the error ends with `Run 'apm uninstall <owner/repo>'` to drop it.
+
 ### GitHub precedence chain
 
 APM resolves a token per host class. For `github.com`, GHE Cloud, and GHES the order is:
@@ -236,15 +238,48 @@ records. Changed or missing dependencies may resolve again on a later install,
 so review the resulting pins before committing. Preview, best-effort readers,
 and lockfiles invalid for other reasons keep their existing behavior.
 
+### Lockfile written by a newer APM
+
+`apm.lock.yaml` records the APM version that wrote it in `apm_version`. If your
+APM is older, `apm install` (including `--frozen` and `-g`), `apm update`,
+`apm uninstall`, `apm prune`, `apm lock`, `apm compile`, `apm audit` and
+`apm pack` stop before changing anything and name both versions:
+
+```text
+Refusing to run 'apm install' on apm.lock.yaml: it was written by APM 0.38.0,
+newer than this APM 0.37.0. ...
+```
+
+An older APM can drop or misread what a newer one recorded, so there is no
+override. Upgrade (`apm self-update`, `brew upgrade apm`, or
+`python3 -m pip install --upgrade apm-cli`) and retry. Read-only commands such
+as `apm deps list` and `apm outdated` still run with a warning. Pin the same APM
+version in CI as your team uses locally. Prereleases sort before their release
+(`0.37.0rc1` < `0.37.0`); `+build` suffixes are ignored. A lockfile whose
+`apm_version` appears twice or is not a valid APM version is refused too:
+restore it from version control.
+
+`apm install <bundle>` warns, but still installs, when the bundle's embedded
+`apm.lock.yaml` was written by a newer APM; the warning names both versions.
+
+APM 0.36 and earlier also refuse a lockfile that APM 0.37 promoted to
+`lockfile_version: "4"` (hash framing hardening):
+
+```text
+Unsupported lockfile version '4'; supported versions: ...
+```
+
+Upgrade APM to 0.37 or later everywhere that lockfile is installed, CI included.
+
 ### Drifted refs
 
 To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
 
 ```bash
-apm install --update
+apm update
 ```
 
-This is the only flag that will move pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
+`apm update` (or `apm install --refresh`) moves pins forward; a bare `apm install` keeps existing pins where they are still satisfiable.
 
 ### Detecting drift in CI
 
@@ -286,7 +321,7 @@ Bypass the cache and re-resolve refs for a single run:
 apm install --refresh
 ```
 
-This re-fetches every dependency from upstream and rewrites cache entries.
+This re-fetches every dependency from upstream and rewrites cache entries. It also revalidates each marketplace it reads and fails, rather than using cached marketplace data, when one is unreachable; a plain `apm install` keeps using the cache.
 
 Disable the cache entirely (read and write) for one invocation:
 
@@ -440,7 +475,7 @@ downloads:**
    apm --version
    ```
 
-   Requires Python 3.11+. See [pip install](../../getting-started/installation/#pip-install).
+   Requires Python 3.11+. See [pip install](../../getting-started/installation/#install-the-cli).
 
 3. **Submit the binary to Microsoft** if your organisation needs the detection
    cleared for an older release: use the

@@ -14,9 +14,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.deps.github_rate_limit import GitHubThrottle, GitHubThrottleError
 from apm_cli.install import validation
 from apm_cli.models.apm_package import DependencyReference
+
+pytestmark = pytest.mark.unit
 
 
 class TestValidateRateLimitClassification:

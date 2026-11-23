@@ -10,6 +10,8 @@ from apm_cli.install.errors import RequiredIntegrationError
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from tests.utils.managed_mcp import install_managed_mcp
 
+pytestmark = pytest.mark.component
+
 
 def test_codex_install_preserves_windows_literal_paths(tmp_path: Path) -> None:
     """Install a server without rewriting unrelated Windows path settings."""

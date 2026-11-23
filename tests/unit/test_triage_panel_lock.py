@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.component
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = REPO_ROOT / ".github" / "workflows" / "triage-panel.lock.yml"
 ACTIONS_LOCK_PATH = REPO_ROOT / ".github" / "aw" / "actions-lock.json"

@@ -78,7 +78,9 @@ def test_install_update_write_nested_hook_metadata(
         approval = runner.invoke(cli, ["approve", "../hookpkg"], catch_exceptions=False)
         assert approval.exit_code == 0, approval.output
         manifest = yaml.safe_load((project / "apm.yml").read_text(encoding="utf-8"))
-        assert manifest["executables"]["allow"]["../hookpkg#1.0.0"]["hooks"] is True
+        # The approval is pinned to the hook file under the version-blind key.
+        [(item, pin)] = manifest["executables"]["allow"]["../hookpkg"]["hooks"].items()
+        assert item == ".apm/hooks/pre.json" and pin.startswith("sha256:")
 
         if operation == "update":
             # An unchanged local lock is a no-op; exercise update's real write path.

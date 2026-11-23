@@ -51,6 +51,7 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+from tests.utils.deployment_evidence import receipted_evidence
 
 pytestmark = [pytest.mark.integration, pytest.mark.platform_sensitive]
 
@@ -1171,12 +1172,13 @@ class TestSyncIntegrationHooks:
 
         managed = {".github/hooks/my-pkg-hooks.json"}
         integrator = HookIntegrator()
-        # Stale cleanup deletes only on a matching recorded hash (#3663).
+        # Deletion needs deployment evidence, never a lockfile hash alone (#3701).
         stats = integrator.sync_integration(
             _make_apm_package(),
             project_root,
             managed_files=managed,
             managed_file_hashes=compute_deployed_hashes(managed, project_root),
+            evidence=receipted_evidence(hook_file, deploy_root=project_root),
         )
         assert stats["files_removed"] >= 1
         assert not hook_file.exists()
@@ -1491,7 +1493,18 @@ class TestSkillIntegratorPromoteSubSkillsForce:
 class TestSkillIntegratorIntegrateSkillBundle:
     """_integrate_skill_bundle: skill subset filtering."""
 
-    def test_skill_subset_filters_to_named_skills_only(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "skill_subset",
+        [
+            pytest.param(("skill-alpha",), id="leaf"),
+            pytest.param(("category/skill-alpha",), id="source-prefixed"),
+        ],
+    )
+    def test_skill_subset_filters_to_named_skills_only(
+        self,
+        tmp_path: Path,
+        skill_subset: tuple[str, ...],
+    ) -> None:
         project_root = _make_copilot_project(tmp_path)
         _make_lockfile(project_root)
 
@@ -1506,7 +1519,7 @@ class TestSkillIntegratorIntegrateSkillBundle:
 
         integrator = SkillIntegrator()
         result = integrator.integrate_package_skill(
-            pkg_info, project_root, skill_subset=("skill-alpha",)
+            pkg_info, project_root, skill_subset=skill_subset
         )
         assert isinstance(result, SkillIntegrationResult)
         # Only skill-alpha should be deployed

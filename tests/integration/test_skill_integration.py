@@ -15,6 +15,7 @@ import pytest
 pytestmark = [
     pytest.mark.requires_github_token,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 
@@ -97,6 +98,7 @@ class TestSkillInstallIntegration:
         # The content should be preserved
         assert skill_content == integrated_content, "Integrated skill content should match original"
 
+    @pytest.mark.req("req-tg-003")
     def test_install_creates_correct_structure(self, temp_project, apm_binary_path):
         """Integrated skill should have SKILL.md in .agents/skills/{name}/."""
         # Install skill

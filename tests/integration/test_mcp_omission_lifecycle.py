@@ -38,6 +38,10 @@ class _Scenario:
         result = self.runner.run(args, cwd=self.project, env=self.env)
         assert result.returncode == 0, result.stdout + result.stderr
 
+    def run_any(self, *args: str):
+        """Run the installed CLI and return the result whatever its exit code."""
+        return self.runner.run(args, cwd=self.project, env=self.env)
+
     def audit(self, *, passed: bool) -> dict:
         """Observe all durable bytes and metadata independently of the lockfile."""
         roots = {
@@ -187,7 +191,13 @@ def test_omitted_mcp_stays_omitted_across_install_audit_and_repeat(
         assert native.read_bytes() == native_before
 
 
-@pytest.mark.parametrize("root_declared", [False, True])
+@pytest.mark.parametrize(
+    "root_declared",
+    [
+        False,
+        True,
+    ],
+)
 def test_skills_only_preserves_admitted_baseline_and_real_drift(
     tmp_path: Path, apm_binary_path: Path, root_declared: bool
 ) -> None:
@@ -208,7 +218,10 @@ def test_skills_only_preserves_admitted_baseline_and_real_drift(
         ]
         dump_yaml(data, manifest_path)
         scenario.audit(passed=False)
-    scenario.run("install", "--trust-transitive-mcp")
+    # The admitted baseline comes from a pinned approval in apm.yml (#3902);
+    # a one-off --trust-transitive-mcp run is not consent audit accepts.
+    scenario.run("approve", "firebase/agent-skills")
+    scenario.run("install")
     scenario.audit(passed=True)
     lock_path = scenario.project / "apm.lock.yaml"
     baseline = load_yaml(lock_path)
@@ -221,42 +234,21 @@ def test_skills_only_preserves_admitted_baseline_and_real_drift(
     after = load_yaml(lock_path)
     for field in ("mcp_configs", "mcp_servers", "mcp_config_provenance", "mcp_target_servers"):
         assert after.get(field) == baseline.get(field)
+    assert not after.get("mcp_omissions"), "a kept admitted baseline records no omission"
     assert native.read_bytes() == native_before
     frozen_lock = lock_path.read_bytes()
-    refusal = scenario.runner.run(
-        ("install", "--only", "apm", "--frozen"), cwd=scenario.project, env=scenario.env
-    )
-    assert refusal.returncode == 1, refusal.stdout + refusal.stderr
-    assert "firebase" in refusal.stdout + refusal.stderr
+    # The approval travels in apm.yml, so --frozen reproduces it without a flag.
+    scenario.run("install", "--only", "apm", "--frozen")
     assert lock_path.read_bytes() == frozen_lock
     assert native.read_bytes() == native_before
     scenario.run("install", "--only", "apm", "--frozen", "--trust-transitive-mcp")
     assert lock_path.read_bytes() == frozen_lock
     assert native.read_bytes() == native_before
     scenario.audit(passed=True)
-    source_manifest = (
-        scenario.project / "apm.yml"
-        if root_declared
-        else scenario.project / "apm_modules/firebase/agent-skills/apm.yml"
-    )
-    original = source_manifest.read_bytes()
-    for mutation in ("changed", "removed"):
-        data = load_yaml(source_manifest)
-        if mutation == "changed":
-            data["dependencies"]["mcp"][0]["args"] = ["different"]
-        else:
-            data["dependencies"].pop("mcp")
-        dump_yaml(data, source_manifest)
-        check = scenario.audit(passed=False)
-        name = "root-service" if root_declared else "firebase"
-        assert any(detail.startswith(f"{name}:") for detail in check["details"])
-        source_manifest.write_bytes(original)
-
-    if not root_declared:
-        source_manifest.unlink()
-        check = scenario.audit(passed=False)
-        assert any("firebase:" in detail for detail in check["details"])
-        source_manifest.write_bytes(original)
+    if root_declared:
+        _assert_root_mcp_drift_is_reported(scenario)
+    else:
+        _assert_cached_copy_is_verified_from_source(scenario, native)
 
     data = load_yaml(lock_path)
     data.pop("mcp_configs")
@@ -286,3 +278,73 @@ def test_direct_mcp_admission_supersedes_prior_omission(
     dump_yaml(manifest, manifest_path)
     check = scenario.audit(passed=False)
     assert any(detail.startswith("firebase:") for detail in check["details"])
+
+
+def _assert_root_mcp_drift_is_reported(scenario: _Scenario) -> None:
+    """A changed or removed root MCP declaration is real drift audit reports."""
+    source_manifest = scenario.project / "apm.yml"
+    original = source_manifest.read_bytes()
+    for mutation in ("changed", "removed"):
+        data = load_yaml(source_manifest)
+        if mutation == "changed":
+            data["dependencies"]["mcp"][0]["args"] = ["different"]
+        else:
+            data["dependencies"].pop("mcp")
+        dump_yaml(data, source_manifest)
+        check = scenario.audit(passed=False)
+        assert any(detail.startswith("root-service:") for detail in check["details"])
+        source_manifest.write_bytes(original)
+
+
+def _durable_outside_modules(project: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*"))
+        if path.is_file() and path.relative_to(project).parts[0] not in ("apm_modules", ".git")
+    }
+
+
+def _assert_cached_copy_is_verified_from_source(scenario: _Scenario, native: Path) -> None:
+    """An edited apm_modules copy with a clean locked source: one verdict (I3).
+
+    ``audit --ci`` and ``install --frozen`` on the same state both pass and
+    name an edited copy with the shared entry/expected/observed line; frozen
+    judges lock sync from the verified copy it restores (#4389). The lockfile,
+    ``.mcp.json`` and deployed files keep their bytes.
+    """
+    dep_key = "firebase/agent-skills"
+    source_manifest = scenario.project / "apm_modules" / dep_key / "apm.yml"
+    original = source_manifest.read_bytes()
+    lock_rows = load_yaml(scenario.project / "apm.lock.yaml")["dependencies"]
+    expected = next(row["content_hash"] for row in lock_rows if row["repo_url"] == dep_key)
+    line = f"Content hash mismatch for {dep_key}: expected {expected}, got sha256:"
+    frozen_args = ("install", "--only", "apm", "--frozen")
+    baseline = scenario.run_any(*frozen_args)
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    for mutation in ("changed", "removed", "deleted"):
+        if mutation == "deleted":
+            source_manifest.unlink()
+        else:
+            data = load_yaml(source_manifest)
+            if mutation == "changed":
+                data["dependencies"]["mcp"][0]["args"] = ["different"]
+            else:
+                data["dependencies"].pop("mcp")
+            dump_yaml(data, source_manifest)
+        before = _durable_outside_modules(scenario.project)
+        native_before = native.read_bytes()
+
+        # I3 paired probe on one state.
+        audit = scenario.run_any("audit", "--ci", "--no-policy")
+        assert _durable_outside_modules(scenario.project) == before, "I5: audit --ci wrote"
+        frozen = scenario.run_any(*frozen_args)
+        for result in (audit, frozen):
+            text = " ".join((result.stdout + result.stderr).split())
+            assert result.returncode == 0, (mutation, result.stdout, result.stderr)
+            # A deleted synthesized plugin manifest is rebuilt by frozen's own
+            # normalization, so only audit has a contradicting copy to name.
+            if mutation != "deleted" or result is audit:
+                assert line in text, (mutation, result.stdout, result.stderr)
+        assert _durable_outside_modules(scenario.project) == before, mutation
+        assert native.read_bytes() == native_before, mutation
+        assert source_manifest.read_bytes() == original, "frozen restores the locked copy"

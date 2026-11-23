@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from apm_cli.core.remediation import HOOK_RECONCILE_INCOMPLETE
 from apm_cli.models.apm_package import canonical_package_targets
 
 if TYPE_CHECKING:
@@ -30,8 +32,9 @@ class EffectivePackageTargets:
 def log_package_target_restriction(
     logger: InstallLogger | None,
     target_selection: EffectivePackageTargets,
+    package_name: str,
 ) -> None:
-    """Name declared and effective targets when a package narrows them."""
+    """Name the package and its declared and effective targets when it narrows them."""
     if logger is None or not target_selection.package_restriction_active:
         return
     declared = (
@@ -41,7 +44,8 @@ def log_package_target_restriction(
     )
     effective = ", ".join(target.name for target in target_selection.targets) or "none"
     logger.verbose_detail(
-        f"Package target restriction: [{declared}]; effective targets: [{effective}]"
+        f"Package target restriction for {package_name}: [{declared}]; "
+        f"effective targets: [{effective}]"
     )
 
 
@@ -68,6 +72,31 @@ def filter_targets_for_dependency(
     return filtered_targets, allowed_dep_targets, True
 
 
+def warn_target_reconcile_failure(
+    diagnostics: DiagnosticCollector,
+    package_name: str,
+    reconcile_stats: dict,
+    message: str = "Could not fully reconcile hooks excluded by target restrictions",
+) -> None:
+    """Report incomplete hook cleanup alongside target restriction diagnostics."""
+    if not reconcile_stats.get("errors", 0):
+        return
+    failed_targets = reconcile_stats.get("failed_targets") or ["unknown"]
+    failed_paths = reconcile_stats.get("failed_paths") or ["unknown"]
+    if not isinstance(failed_targets, list):
+        failed_targets = ["unknown"]
+    if not isinstance(failed_paths, list):
+        failed_paths = ["unknown"]
+    diagnostics.warn(
+        message,
+        package=package_name,
+        detail=(
+            f"targets: [{', '.join(failed_targets)}]; "
+            f"configs: [{', '.join(failed_paths)}]; {HOOK_RECONCILE_INCOMPLETE.clause()}"
+        ),
+    )
+
+
 # A package declaring this target ships portable, cross-client skills.
 CROSS_CLIENT_SKILLS_TARGET = "agent-skills"
 
@@ -86,6 +115,24 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
         CROSS_CLIENT_SKILLS_TARGET in package_allowed
         and target.capability.accepts_agent_skills_packages
     )
+
+
+def recorded_package_targets(package: object) -> list[str]:
+    """Return the package's own ``targets:`` restriction as the lockfile records it (#4850).
+
+    Empty when the package admits every target (no ``targets:`` or ``all``),
+    the same restriction :func:`resolve_effective_package_targets` applies.
+    """
+    declared = canonical_package_targets(package)
+    return sorted(declared) if declared and "all" not in declared else []
+
+
+def recorded_targets_exclude(target: TargetProfile, recorded: Iterable[str]) -> bool:
+    """Return whether a recorded package restriction keeps *target* out (#4850)."""
+    allowed = frozenset(recorded)
+    if not allowed or "all" in allowed:
+        return False
+    return not package_allows_target(target, allowed)
 
 
 def _no_target_hint(declared: list[str], requested: str) -> str:

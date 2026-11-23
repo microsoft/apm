@@ -22,6 +22,8 @@ from apm_cli.models.results import InstallResult
 
 from .conftest import PYEXE, fire_via_context, stub_policy, trust, write_project
 
+pytestmark = pytest.mark.component
+
 
 def test_pre_runs_before_pipeline_before_post(
     apm_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

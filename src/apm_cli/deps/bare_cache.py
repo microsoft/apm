@@ -32,13 +32,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from git import Repo
-
 from ..models.dependency.host_virtual import dependency_repository_owner
 from ..utils.git_env import run_git_text
 from ..utils.git_sparse import apply_sparse_cone, materialize_tracked_symlinks
+from .git_lazy import bind_git_name
 
 if TYPE_CHECKING:
+    from git import Repo
+
     from ..models.apm_package import DependencyReference
 
 _log = logging.getLogger(__name__)
@@ -747,7 +748,8 @@ def clone_with_fallback(
         RuntimeError: If the planned attempt(s) all fail.
     """
     repo_holder: list[Repo] = []
-    _repo = repo_cls if repo_cls is not None else Repo
+    git_repo = bind_git_name(globals(), "Repo")
+    _repo = repo_cls if repo_cls is not None else git_repo
     supported = {"branch", "depth", "no_checkout", "single_branch"}
     unsupported = sorted(set(clone_kwargs) - supported)
     if unsupported:
@@ -759,7 +761,7 @@ def clone_with_fallback(
         # Retries always start from a clean target, matching the bare path.
         if target.exists():
             _rmtree(target)
-        if repo_cls is not None and repo_cls is not Repo:
+        if repo_cls is not None and repo_cls is not git_repo:
             repo_holder.append(
                 getattr(_repo, "clone_from")(  # noqa: B009 - injected test double only
                     url,
@@ -866,13 +868,24 @@ def build_clone_failure_message(
     last_error: Exception | None,
     last_attempt_scheme: str | None,
     public_github_non_auth_failure: bool = False,
+    repository_not_found: bool = False,
 ) -> str:
     """Build the aggregate ``RuntimeError`` message for a failed transport plan.
 
     Extracted from :meth:`GitHubPackageDownloader._execute_transport_plan`
     to keep that module under the file-length guardrail. Pure formatting:
-    no I/O, no clone attempts.
+    no I/O, no clone attempts. A host that answered "not found" gets the
+    canonical not-found message alone: protocol fallback and network advice
+    cannot help a missing repository.
     """
+    if repository_not_found:
+        return auth_resolver.build_not_found_message(
+            dep_host or default_host_fn(),
+            repo_url_base,
+            dependency_repository_owner(dep_ref) if dep_ref else None,
+            port=dep_ref.port if dep_ref else None,
+            host_type=dep_ref.host_type if dep_ref else None,
+        )
     if plan.strict and len(plan.attempts) >= 1:
         tried = plan.attempts[0].label
         error_msg = f"Failed to clone repository {repo_url_base} via {tried}. "
@@ -972,3 +985,11 @@ def build_clone_failure_message(
         error_msg += f" Last error: {git_subprocess_error_text(last_error)}"
 
     return error_msg
+
+
+def __getattr__(name: str) -> Any:
+    # ``Repo`` stays a module attribute (a patch target) without importing
+    # GitPython until a clone needs it.
+    if name == "Repo":
+        return bind_git_name(globals(), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

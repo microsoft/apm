@@ -41,6 +41,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.e2e,
 ]
 
 CLAUDE_COPILOT = {"allow": ["claude", "copilot"]}
@@ -234,7 +235,9 @@ def test_mcp_add_judges_alias_targets_canonically(tmp_path: Path, apm_binary_pat
         alias = tw.consumer("alias", {"targets": ["vscode"]}, dependencies=[])
         result = tw.run(alias, "install", *mcp_args, step="1-mcp-alias", expected=(0, 1))
         assert result.returncode == 0, output(result)
-        assert (alias / ".vscode" / "mcp.json").is_file(), "vscode alias MCP destination moved"
+        # The alias selects copilot exactly, including its .mcp.json destination.
+        assert (alias / ".mcp.json").is_file(), "vscode alias missed the copilot MCP destination"
+        assert not (alias / ".vscode" / "mcp.json").exists()
         assert not (alias / ".github" / "mcp.json").exists()
 
         outside = tw.consumer("outside", {"targets": ["claude", "cursor"]}, dependencies=[])

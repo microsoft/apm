@@ -145,11 +145,21 @@ def test_subset_fails_closed_on_prepared_replay_error(
         prepared_replay_error="scratch materialization failed: disk quota exceeded",
     )
 
-    for check_name in ("skill-subset-consistency", "config-consistency"):
-        check = next(check for check in result.checks if check.name == check_name)
-        assert check.passed is False
-        assert check.details == ["scratch materialization failed: disk quota exceeded"]
-        assert check.message == "replay failed: scratch materialization failed: disk quota exceeded"
+    error = "scratch materialization failed: disk quota exceeded"
+    checks = {check.name: check for check in result.checks}
+    owner, pointer = checks["skill-subset-consistency"], checks["config-consistency"]
+    assert owner.passed is False and pointer.passed is False
+    # One finding, reported once under its owning check (RA-005).
+    assert owner.details == [error]
+    assert error not in owner.message
+    assert pointer.details == []
+    assert pointer.message == (
+        "not verified: the install replay failed (reported under skill-subset-consistency)"
+    )
+    owned = run_baseline_checks(
+        subset_project, fail_fast=False, prepared_replay_error=error, replay_error_owner="drift"
+    )
+    assert all(error not in (check.message, *check.details) for check in owned.checks)
 
 
 def test_prepared_tree_does_not_override_manifest_lock_subset_mismatch(

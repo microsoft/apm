@@ -44,6 +44,10 @@ class DirectDependencyError(RuntimeError):
     """
 
 
+class PreviewIncomplete(Exception):
+    """``--dry-run`` stops where install would refuse; errors are on the context."""
+
+
 class InstallFailureAlreadyRendered(RuntimeError):
     """Signal a failed install whose user-facing diagnostics are complete."""
 
@@ -54,6 +58,30 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
     def __init__(self, message: str, *, wrote_connections: bool) -> None:
         super().__init__(message)
         self.wrote_connections = wrote_connections
+
+
+class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
+    """Same-name LSP entries APM did not write were preserved (#4628), or
+    managed entries a user edited were kept with no collector to count them (#4626).
+
+    *preserved* maps each runtime to the server names left as the user wrote
+    them; every other server in the install was still configured, and
+    *wrote_servers* says whether any of them changed a config.
+    """
+
+    def __init__(
+        self, message: str, *, preserved: dict[str, set[str]], wrote_servers: bool = True
+    ) -> None:
+        super().__init__(message)
+        self.preserved = preserved
+        self.wrote_servers = wrote_servers
+
+
+class LSPUserEntryRefusal(LSPUserEntryConflictError):
+    """An LSP user-entry conflict that wrote no server: the install commits nothing (#4697)."""
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
 
 class RequiredIntegrationError(RuntimeError):
@@ -118,12 +146,12 @@ class FrozenInstallError(RuntimeError):
 
 
 def install_failure_message(error: Exception) -> str:
-    """Keep canonical conflict guidance intact and frame other install failures."""
-    from apm_cli.deps.lockfile import LockfileConflictError
+    """Keep canonical lockfile guidance intact and frame other install failures."""
+    from apm_cli.deps.lockfile import LockfileConflictError, LockfileRefusal
 
     return (
         str(error)
-        if isinstance(error, LockfileConflictError)
+        if isinstance(error, (LockfileConflictError, LockfileRefusal))
         else f"Error installing dependencies: {error}"
     )
 
@@ -135,6 +163,50 @@ def log_frozen_install_error(error: FrozenInstallError, logger: InstallLogger) -
         logger.error_detail(reason)
     if tip := frozen_install_tip(error):
         logger.info(tip)
+
+
+def log_authentication_error(error: AuthenticationError, logger: InstallLogger) -> None:
+    """Render auth diagnostics on the default path, not only under --verbose (#1015)."""
+    logger.error(str(error))
+    if error.diagnostic_context:
+        logger.error_detail(error.diagnostic_context)
+    logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+
+
+def render_apm_dependency_failure(
+    error: Exception, logger: InstallLogger, *, verbose: bool
+) -> InstallFailureAlreadyRendered:
+    """Render a failed APM dependency phase once; the caller raises the returned marker.
+
+    Auth and frozen errors use their own renderers. A native plugin settings refusal
+    or the LSP capability gate is already actionable, so it prints verbatim with any
+    raw decoder detail behind --verbose. A policy violation prints as a refusal
+    without nesting (#832); anything else gets the "Failed to install" prefix.
+    """
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+
+    if isinstance(error, AuthenticationError):
+        log_authentication_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, FrozenInstallError):
+        log_frozen_install_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    verbatim = (CopilotSettingsCollisionError, ClaudeNativePluginError, RequiredIntegrationError)
+    if isinstance(error, verbatim):
+        logger.error(str(error))
+        if detail := getattr(error, "detail", None):
+            logger.verbose_detail(detail)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, PolicyViolationError):
+        message = str(error)
+        logger.refusal(message)
+    else:
+        message = f"Failed to install APM dependencies: {error}"
+        logger.error(message)
+    if not verbose:
+        logger.progress("Run with --verbose for detailed diagnostics")
+    return InstallFailureAlreadyRendered(message)
 
 
 def frozen_install_tip(error: FrozenInstallError) -> str:
@@ -153,10 +225,9 @@ def frozen_install_tip(error: FrozenInstallError) -> str:
         lock_state = "MCP lock state"
     else:
         lock_state = "package lock state"
-    return (
-        f"Tip: rerun 'apm install' without --frozen to create or repair {lock_state}, "
-        "retaining the original options, including --root DIR or --global if specified."
-    )
+    from apm_cli.core.remediation import FROZEN_LOCK_STATE_DRIFT
+
+    return f"Tip: {FROZEN_LOCK_STATE_DRIFT.bind(lock_state=lock_state).sentence()}"
 
 
 class PolicyViolationError(RuntimeError):
@@ -174,6 +245,9 @@ class PolicyViolationError(RuntimeError):
         Human-readable origin string (e.g. ``"org:acme/.github"``).  May
         be empty when discovery failed before a source was resolved.
     """
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
     def __init__(
         self,

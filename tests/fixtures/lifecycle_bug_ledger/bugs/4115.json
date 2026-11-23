@@ -1,0 +1,15 @@
+{
+  "issue": 4115,
+  "fixed_in": "0.37.0",
+  "summary": "PERF-H2: the PR Windows gate ran only windows_compat unit tests while main push ran the full Windows unit suite, so Windows-only unit regressions passed PR checks and turned main red (11 of 21 red main pushes, 2026-11-05..19).",
+  "failure_modes": [
+    "portability",
+    "observation"
+  ],
+  "properties": [
+    "portability.byte_deterministic"
+  ],
+  "regression_tests": [
+    "tests/quality/test_ci_topology.py::test_pr_windows_gate_runs_every_windows_unit_node"
+  ]
+}

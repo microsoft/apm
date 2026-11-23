@@ -15,7 +15,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .errors import MarketplaceError
-from .models import MarketplaceManifest, MarketplaceSource, url_names_remote_manifest
+from .models import (
+    ORIGIN_MANUAL,
+    MarketplaceManifest,
+    MarketplaceSource,
+    url_names_remote_manifest,
+)
 
 # A marketplace alias must satisfy this pattern so it can appear on the right
 # of ``@`` in ``apm install <plugin>@<marketplace>`` syntax.
@@ -69,10 +74,15 @@ def is_valid_alias(value: str) -> bool:
 
 
 def split_source_fragment_ref(source: str) -> tuple[str, str]:
-    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
+    """Split a ``#ref`` from an HTTPS git URL or OWNER/REPO shorthand source."""
+    from .source_identity import is_shorthand_marketplace_source
+
     raw = (source or "").strip()
     if raw.lower().startswith("ssh://") and "#" in raw:
         raise ValueError("SSH URL fragments are not supported; use --ref REF instead.")
+    if is_shorthand_marketplace_source(raw):
+        base, _, fragment = raw.partition("#")
+        return (base, fragment) if fragment else (raw, "")
     if not raw.lower().startswith("https://"):
         return raw, ""
     parsed = urlsplit(raw)
@@ -131,11 +141,16 @@ def probe_registration(
     is_direct_url: bool,
     offline: bool = False,
     explicit_path: str | None = None,
+    origin: str = ORIGIN_MANUAL,
+    credential_bound: bool = False,
 ) -> tuple[MarketplaceSource, MarketplaceManifest]:
     """Locate and fetch the marketplace manifest behind a parsed source.
 
     Returns the source to register (with the detected manifest path) and
-    the fetched manifest.
+    the fetched manifest. *origin* tags both sources, so a project-declared
+    catalog is cached under its own identity, not its name.
+    *credential_bound* binds *name* to a hosted catalog URL for this first
+    fetch only; nothing is persisted here.
 
     Raises:
         MarketplaceManifestNotFoundError: No manifest at any probed path.
@@ -151,6 +166,8 @@ def probe_registration(
         url=url,
         ref=effective_ref,
         path="" if is_direct_url else "marketplace.json",
+        origin=origin,
+        credential_bound=credential_bound,
     )
     if is_direct_url or local_source_points_to_file(probe_source):
         if explicit_path is not None:
@@ -177,7 +194,14 @@ def probe_registration(
             probe_source.display_source, local=probe_source.kind == "local"
         )
 
-    fetch_source = MarketplaceSource(name=name, url=url, ref=effective_ref, path=detected_path)
+    fetch_source = MarketplaceSource(
+        name=name,
+        url=url,
+        ref=effective_ref,
+        path=detected_path,
+        origin=origin,
+        credential_bound=credential_bound,
+    )
     manifest = client.fetch_marketplace(
         fetch_source,
         force_refresh=True,

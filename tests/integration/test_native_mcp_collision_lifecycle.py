@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,7 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
     user_scope: bool,
     foreign_target: str,
 ) -> None:
-    """Preserve foreign bytes while recording only the nonconflicting target write."""
+    """Preserve foreign bytes and refuse before writing any target (#4268)."""
     isolated = IsolatedApmEnvironment.create(tmp_path / "scenario", base_env=dict(os.environ))
     project = isolated.work_root / "consumer"
     project.mkdir()
@@ -87,6 +88,7 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
         },
         root / "apm.yml",
     )
+    tree = sorted(path.relative_to(project).as_posix() for path in project.rglob("*"))
     result = ApmLifecycleRunner((str(apm_binary_path),)).run(
         (
             "install",
@@ -101,17 +103,11 @@ def test_differing_foreign_connection_is_incomplete_with_truthful_ownership(
     )
     evidence = f"command={result.command!r}\n{result.stdout}\n{result.stderr}"
     assert foreign_path.read_bytes() == original, evidence
-    written_target = "codex" if foreign_target == "claude" else "claude"
-    written_path = paths[written_target]
-    assert written_path.is_file(), evidence
-    if written_target == "codex":
-        written = tomlkit.parse(written_path.read_text(encoding="utf-8"))["mcp_servers"]
-    else:
-        written = json.loads(written_path.read_text(encoding="utf-8"))["mcpServers"]
-    assert written["notes"]["url"] == requested_url, evidence
-    lock = LockFile.read(root / "apm.lock.yaml")
-    assert lock is not None, evidence
-    assert lock.mcp_target_servers == {written_target: ["notes"]}, evidence
+    other_path = paths["codex" if foreign_target == "claude" else "claude"]
+    assert not other_path.exists() or "notes" not in other_path.read_text("utf-8"), evidence
+    lock = LockFile.read(root / "apm.lock.yaml") if (root / "apm.lock.yaml").exists() else None
+    assert lock is None or not lock.mcp_target_servers, evidence
+    assert sorted(p.relative_to(project).as_posix() for p in project.rglob("*")) == tree, evidence
     assert result.returncode != 0, evidence
     assert foreign_target in (result.stdout + result.stderr).lower(), evidence
 
@@ -147,6 +143,19 @@ class _Scenario:
         return self.runner.run(
             (*args, *(("--global",) if self.user_scope else ())),
             cwd=self.project,
+            env=environment,
+            scenario_id="native-mcp-collision-lifecycle",
+        )
+
+    def audit(self) -> CommandResult:
+        """Run the CI audit at this scope's root (audit has no --global flag)."""
+        environment = self.isolated.subprocess_env(
+            overrides={"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": str(self.isolated.home / ".codex")}
+        )
+        environment.update(self.environment_overrides)
+        return self.runner.run(
+            ("audit", "--ci", "--no-policy"),
+            cwd=self.root,
             env=environment,
             scenario_id="native-mcp-collision-lifecycle",
         )
@@ -216,6 +225,16 @@ def _http(url: str = "http://127.0.0.1:8000/company") -> dict[str, Any]:
     return {"name": "notes", "registry": False, "transport": "http", "url": url}
 
 
+def _apm_state(isolated: IsolatedApmEnvironment) -> list[tuple[str, bytes | None]]:
+    """Every path (directories included) under APM home and the APM cache."""
+    state: list[tuple[str, bytes | None]] = []
+    for base in (isolated.config_root, isolated.cache_root):
+        for path in sorted(base.rglob("*")) if base.exists() else ():
+            data = path.read_bytes() if path.is_file() else None
+            state.append((path.relative_to(isolated.root).as_posix(), data))
+    return state
+
+
 def _success(result: CommandResult) -> None:
     assert result.returncode == 0, f"{result.command!r}\n{result.stdout}\n{result.stderr}"
 
@@ -249,14 +268,28 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     foreign_target: str,
     identical: bool,
 ) -> None:
-    """Direct adds never adopt foreign matches or overwrite differing connections."""
+    """Direct adds never adopt foreign matches or overwrite differing connections.
+
+    An identical foreign entry needs no write, so install and --frozen both pass
+    without claiming it; a differing one is refused by both.
+    """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     requested = _http()["url"]
     scenario.write(foreign_target, requested if identical else "http://127.0.0.1:9/personal")
     before = scenario.path(foreign_target).read_bytes()
+    manifest_before = (scenario.root / "apm.yml").read_bytes()
     added = scenario.install("--mcp", "notes", "--url", requested)
     assert (added.returncode == 0) is identical, added.stdout + added.stderr
     other = "codex" if foreign_target == "claude" else "claude"
+    if not identical:
+        # A refused direct add writes nothing (#4759). Record the entry on the
+        # other target alone, then the repeats below exercise the two-target
+        # reconciliation against that recorded claim.
+        assert (scenario.root / "apm.yml").read_bytes() == manifest_before
+        assert not scenario.path(other).exists()
+        assert scenario.path(foreign_target).read_bytes() == before
+        scenario.declare([_http()])
+        _success(scenario.install(targets=other))
     assert scenario.path(foreign_target).read_bytes() == before
     assert scenario.servers(other)["notes"]["url"] == requested
     assert scenario.lock().mcp_target_servers == {other: ["notes"]}
@@ -264,9 +297,8 @@ def test_direct_collision_repeat_force_frozen_and_prune(
     other_bytes = scenario.path(other).read_bytes()
     for flags in ((), ("--force",), ("--frozen",)):
         repeated = scenario.install(*flags)
-        expected_success = identical and "--frozen" not in flags
-        assert (repeated.returncode == 0) is expected_success, repeated.stdout + repeated.stderr
-        if "--frozen" in flags:
+        assert (repeated.returncode == 0) is identical, repeated.stdout + repeated.stderr
+        if "--frozen" in flags and not identical:
             assert "ownership is not recorded" in " ".join(repeated.stdout.split())
         assert scenario.path(foreign_target).read_bytes() == before
         assert scenario.path(other).read_bytes() == other_bytes
@@ -348,9 +380,10 @@ def test_managed_package_root_override_and_target_narrowing(
     before = tuple(scenario.path(target).read_bytes() for target in ("claude", "codex"))
     _success(scenario.install("--trust-transitive-mcp"))
     assert tuple(scenario.path(target).read_bytes() for target in ("claude", "codex")) == before
+    # A narrowed --target leaves claude's still-declared entry alone (#4562).
     _success(scenario.install("--trust-transitive-mcp", targets="codex"))
-    assert scenario.servers("claude") == {}
-    assert scenario.lock().mcp_target_servers == {"codex": ["notes"]}
+    assert tuple(scenario.path(target).read_bytes() for target in ("claude", "codex")) == before
+    assert scenario.lock().mcp_target_servers == {"claude": ["notes"], "codex": ["notes"]}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -422,24 +455,38 @@ def test_partial_install_retains_deferred_names_in_active_target(
     apm_binary_path: Path,
     target: str,
 ) -> None:
-    """Persist new writes and deferred retirements, but never resurrect a revoked claim."""
+    """A user-edited recorded claim refuses before any write, then retires cleanly (#4741)."""
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([{**_http(), "name": "old"}, _http()])
     _success(scenario.install(targets=target))
     personal = {**scenario.servers(target)["notes"], "url": "http://127.0.0.1:9/personal"}
     scenario.edit(target, "notes", personal)
+    config_before = scenario.path(target).read_bytes()
+    lock_before = (scenario.root / "apm.lock.yaml").read_bytes()
     scenario.declare([{**_http(), "name": "new"}, _http()])
     result = scenario.install(targets=target)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert set(scenario.servers(target)) == {"old", "new", "notes"}
-    assert scenario.servers(target)["notes"] == personal
-    assert scenario.lock().mcp_target_servers == {target: ["new", "old"]}
-    assert "old" in scenario.lock().mcp_configs
+    assert scenario.path(target).read_bytes() == config_before
+    assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
+    # The refusal kept the edited claim, so retiring it preserves the entry.
     scenario.declare([{**_http(), "name": "new"}])
-    _success(scenario.install(targets=target))
-    assert set(scenario.servers(target)) == {"new", "notes"}
+    kept = scenario.install(targets=target)
+    assert kept.returncode == 1, kept.stdout + kept.stderr
+    kept_output = " ".join((kept.stdout + kept.stderr).split())
+    assert "Preserved MCP connection(s) notes" in kept_output, kept_output
+    assert set(scenario.servers(target)) == {"new", "notes", "old"}
     assert scenario.servers(target)["notes"] == personal
-    assert scenario.lock().mcp_target_servers == {target: ["new"]}
+    path = scenario.path(target)
+    if target == "claude":
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["mcpServers"].pop("notes")
+        path.write_text(json.dumps(document), encoding="utf-8")
+    else:
+        document = tomlkit.parse(path.read_text(encoding="utf-8"))
+        document["mcp_servers"].pop("notes")
+        path.write_text(tomlkit.dumps(document), encoding="utf-8")
+    _success(scenario.install(targets=target))
+    assert set(scenario.servers(target)) == {"new"}
 
 
 @pytest.mark.parametrize("cwd_mode", ["absent", "declared", "native-only"])
@@ -567,7 +614,7 @@ def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
     apm_binary_path: Path,
     foreign_target: str,
 ) -> None:
-    """A failed registry target cannot publish an unattempted self-defined baseline."""
+    """A registry collision refuses before any write, so no baseline is published (#4741)."""
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([_http()])
     _success(scenario.install())
@@ -578,18 +625,15 @@ def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
     updated = _http("http://127.0.0.1:8000/updated")
     with _registry(scenario) as registry:
         scenario.declare([{"name": "io.example/registered", "registry": registry.url}, updated])
-        partial = scenario.install()
-        assert partial.returncode == 1, partial.stdout + partial.stderr
+        configs_before = {
+            target: scenario.path(target).read_bytes() for target in ("claude", "codex")
+        }
+        lock_before = (scenario.root / "apm.lock.yaml").read_bytes()
+        refused = scenario.install()
+        assert refused.returncode == 1, refused.stdout + refused.stderr
         for target in ("claude", "codex"):
-            assert urlparse(scenario.servers(target)["notes"]["url"]) == urlparse(updated["url"])
-        assert scenario.servers(foreign_target)["registered"] == personal
-        assert urlparse(scenario.lock().mcp_configs["notes"]["url"]) == urlparse(updated["url"])
-        assert scenario.lock().mcp_target_servers[foreign_target] == ["notes"]
-        written_target = "codex" if foreign_target == "claude" else "claude"
-        assert scenario.lock().mcp_target_servers[written_target] == [
-            "io.example/registered",
-            "notes",
-        ]
+            assert scenario.path(target).read_bytes() == configs_before[target]
+        assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
         scenario.edit(
             foreign_target,
             "registered",
@@ -597,6 +641,8 @@ def test_registry_partial_conflict_does_not_skip_managed_self_defined_update(
         )
         _success(scenario.install())
         assert scenario.lock().mcp_target_servers[foreign_target] == ["notes"]
+        for target in ("claude", "codex"):
+            assert urlparse(scenario.servers(target)["notes"]["url"]) == urlparse(updated["url"])
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -628,12 +674,12 @@ def test_metadata_only_replacement_write_retains_registry_receipt(
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_registry_write_before_all_self_defined_conflicts_is_persisted(
+def test_a_self_defined_conflict_is_refused_before_the_registry_write(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
     apm_binary_path: Path,
     target: str,
 ) -> None:
-    """A failed ordinary install still records the real registry-phase write."""
+    """An unrecorded self-defined collision refuses before any MCP write (#4268)."""
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.write(target, "http://127.0.0.1:9/personal")
     personal = scenario.servers(target)["notes"]
@@ -641,13 +687,54 @@ def test_registry_write_before_all_self_defined_conflicts_is_persisted(
         scenario.declare([{"name": "io.example/registered", "registry": registry.url}, _http()])
         result = scenario.install(targets=target)
         assert result.returncode == 1, result.stdout + result.stderr
-        assert registry.request_paths
-    assert scenario.servers(target)["notes"] == personal
-    assert "registered" in scenario.servers(target)
-    assert scenario.lock().mcp_target_servers == {target: ["io.example/registered"]}
+    assert scenario.servers(target) == {"notes": personal}
+    lock_path = scenario.root / "apm.lock.yaml"
+    assert not lock_path.exists() or not scenario.lock().mcp_target_servers
     scenario.declare([])
     _success(scenario.install(targets=target))
     assert scenario.servers(target) == {"notes": personal}
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_colliding_registry_server_is_refused_before_any_write(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+    target: str,
+) -> None:
+    """A registry server is projected before any write; recorded, it installs again (#4741)."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    personal_url = "http://127.0.0.1:9/personal"
+    scenario.write(target, personal_url)
+    personal = (
+        {"type": "http", "url": personal_url} if target == "claude" else {"url": personal_url}
+    )
+    scenario.edit(target, "registered", personal)
+    before = scenario.path(target).read_bytes()
+    other = scenario.path("codex" if target == "claude" else "claude")
+    with _registry(scenario) as registry:
+        scenario.declare([{"name": "io.example/registered", "registry": registry.url}])
+        refused = scenario.install()
+        output = " ".join((refused.stdout + refused.stderr).split())
+        assert refused.returncode == 1, output
+        assert f"conflicts with the existing {target} connection" in output, output
+        assert scenario.path(target).read_bytes() == before, output
+        assert not other.exists() or "registered" not in other.read_text("utf-8"), output
+        lock_path = scenario.root / "apm.lock.yaml"
+        assert not lock_path.exists() or not scenario.lock().mcp_target_servers, output
+
+        data = scenario.path(target).read_text(encoding="utf-8")
+        if target == "claude":
+            document = json.loads(data)
+            document["mcpServers"].pop("registered")
+            scenario.path(target).write_text(json.dumps(document), encoding="utf-8")
+        else:
+            document = tomlkit.parse(data)
+            document["mcp_servers"].pop("registered")
+            scenario.path(target).write_text(tomlkit.dumps(document), encoding="utf-8")
+        _success(scenario.install())
+        _success(scenario.install())
+    assert "registered" in scenario.servers(target)
+    assert sorted(scenario.lock().mcp_target_servers) == ["claude", "codex"]
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -694,3 +781,52 @@ def test_registry_receipt_never_adopts_or_deletes_unverified_native_state(
     result = scenario.install(targets=target)
     assert result.returncode == (1 if evidence == "edited" else 0)
     assert scenario.path(target).read_bytes() == before
+
+
+def test_user_disabled_matching_codex_connection_installs_and_replays_frozen(
+    scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
+    apm_binary_path: Path,
+) -> None:
+    """A user's own entry equal to the declaration, only switched off, is no conflict."""
+    scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
+    declared = {"name": "notes", "registry": False, "transport": "stdio", "command": "INERT"}
+    scenario.declare([declared])
+    manifest = load_yaml(scenario.root / "apm.yml")
+    manifest["executables"] = {"allow": {"notes": {"mcp": True}}}
+    dump_yaml(manifest, scenario.root / "apm.yml")
+    path = scenario.path("codex")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '# user comment\n[mcp_servers.notes]\ncommand = "INERT"\nenabled = false\n',
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    # Zero bytes of the user's entry change, and replay and audit agree it is fine.
+    _success(scenario.install(targets="codex"))
+    assert path.read_bytes() == before
+    assert scenario.lock().mcp_target_servers == {}
+    lock_before = (scenario.root / "apm.lock.yaml").read_bytes()
+    _success(scenario.install("--frozen", targets="codex"))
+    _success(scenario.audit())
+    assert path.read_bytes() == before
+    assert (scenario.root / "apm.lock.yaml").read_bytes() == lock_before
+
+    # A different command stays a conflict on install and on replay.
+    scenario.edit("codex", "notes", {"command": "OTHER", "enabled": False})
+    edited = path.read_bytes()
+    for flags in ((), ("--frozen",)):
+        refused = scenario.install(*flags, targets="codex")
+        assert refused.returncode == 1, refused.stdout + refused.stderr
+        assert path.read_bytes() == edited
+    # The CI audit reaches the frozen verdict for the same entry and names it (#4477),
+    # and comparing it writes nothing under APM home or the APM cache, even on a
+    # CI runner whose APM cache starts empty.
+    shutil.rmtree(scenario.isolated.cache_root)
+    scenario.isolated.cache_root.mkdir()
+    apm_state = _apm_state(scenario.isolated)
+    audited = scenario.audit()
+    assert audited.returncode == 1, audited.stdout + audited.stderr
+    assert "MCP server 'notes' target 'codex'" in audited.stdout + audited.stderr
+    assert path.read_bytes() == edited
+    assert _apm_state(scenario.isolated) == apm_state

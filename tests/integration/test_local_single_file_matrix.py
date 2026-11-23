@@ -122,12 +122,23 @@ def _assert_state(
         for p in materialized.rglob("*")
         if p.is_file() and p.name != ".apm-pin"
     ) == [f".apm/{directory}/{source.name}", "apm.yml"]
-    package_digest = sha256()
-    for relative_path in (f".apm/{directory}/{source.name}", "apm.yml"):
-        package_digest.update(relative_path.encode("utf-8"))
-        package_digest.update((materialized / relative_path).read_bytes())
-    assert dependency["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+    assert dependency["content_hash"] == _framed_package_digest(
+        materialized, (f".apm/{directory}/{source.name}", "apm.yml")
+    )
     return lock
+
+
+def _framed_package_digest(root: Path, relative_paths: tuple[str, ...]) -> str:
+    """Independent oracle for the lockfile version 4 package stream (req-lk-016).
+
+    Per file in byte-wise path order: the UTF-8 path, one NUL, then the raw
+    SHA-256 digest of the file bytes. Deliberately not the code under test.
+    """
+    digest = sha256()
+    for relative_path in sorted(relative_paths):
+        digest.update(relative_path.encode("utf-8") + b"\0")
+        digest.update(sha256((root / relative_path).read_bytes()).digest())
+    return f"sha256:{digest.hexdigest()}"
 
 
 def _assert_audit_read_only(scenario: _Scenario, *, user: bool = False) -> None:
@@ -263,10 +274,11 @@ def test_project_absolute_and_home_file_claude_lifecycle(
         "instructions": (
             "instructions",
             "Local rules",
-            b"---\ndescription: Local rules\napplyTo: 'src/**'\n"
+            # Path-scoped: Claude loads directory globs from AGENTS.md (#3939).
+            b"---\ndescription: Local rules\napplyTo: 'src/**/*.py'\n"
             b"---\n# Rule\nUse initial guidance.\n",
             ".claude/rules/xyz.md",
-            b'---\npaths:\n  - "src/**"\n---\n\n# Rule\nUse initial guidance.\n',
+            b'---\npaths:\n  - "src/**/*.py"\n---\n\n# Rule\nUse initial guidance.\n',
         ),
         "prompt": (
             "prompts",
@@ -340,10 +352,7 @@ def test_project_absolute_and_home_file_claude_lifecycle(
             "version": "1.0.0",
             "description": description,
         }
-        package_digest = sha256()
-        for relative_path in sorted((primitive_relative, "apm.yml")):
-            package_digest.update(relative_path.encode("utf-8"))
-            package_digest.update((materialized / relative_path).read_bytes())
+        package_digest = _framed_package_digest(materialized, (primitive_relative, "apm.yml"))
         native_digest = f"sha256:{sha256(expected_native).hexdigest()}"
         lock = load_yaml(root / "apm.lock.yaml")
         assert len(lock["dependencies"]) == 1
@@ -354,7 +363,7 @@ def test_project_absolute_and_home_file_claude_lifecycle(
         assert dependency["package_type"] == "apm_package"
         assert dependency["deployed_files"] == [native_relative]
         assert dependency["deployed_file_hashes"] == {native_relative: native_digest}
-        assert dependency["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+        assert dependency["content_hash"] == package_digest
         assert dependency["content_hash"] != native_digest
         assert lock["deployments"] == [
             {
@@ -593,7 +602,9 @@ def test_direct_file_symlink_retarget_preserves_owned_state(
 
 
 @pytest.mark.parametrize(("kind", "directory"), _KINDS)
-@pytest.mark.parametrize("escape", ["absolute", "parent-traversal"])
+@pytest.mark.parametrize(
+    "escape", ["absolute", "parent-traversal", "backslash-traversal", "mixed-traversal"]
+)
 def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
     tmp_path: Path, apm_binary_path: Path, kind: str, directory: str, escape: str
 ) -> None:
@@ -608,9 +619,16 @@ def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
     personal.write_bytes(b"User-owned content.\n")
     outside = scenario.isolated.home / f"private.{kind}.md"
     outside.write_bytes(_content("consumer-only bytes"))
-    child = outside.as_posix() if escape == "absolute" else f"../../../../../home/{outside.name}"
+    traversal = f"../../../../../home/{outside.name}"
+    child = {
+        "absolute": outside.as_posix(),
+        "parent-traversal": traversal,
+        # #4699: backslash forms normalise to the / form and hit the same guard.
+        "backslash-traversal": traversal.replace("/", "\\"),
+        "mixed-traversal": "..\\..\\../../../home/" + outside.name,
+    }[escape]
     remote_root = root / "apm_modules" / "fixture-local-file" / "remote-parent"
-    assert (remote_root / child).resolve() == outside.resolve()
+    assert (remote_root / child.replace("\\", "/")).resolve() == outside.resolve()
     parent = LocalPackageFactory(scenario.isolated.package_root).create(
         "remote-parent", dependencies=({"path": child},), targets=("copilot",)
     )
@@ -663,6 +681,8 @@ def test_remote_parent_cannot_adopt_local_file_or_erase_prior_ownership(
         assert "absolute paths inside remote packages are not allowed" in diagnostic
     else:
         assert "outside" in diagnostic
+        # Parity (#4699): every traversal spelling is refused naming its / form.
+        assert f"Refusing to install local_path dependency '{traversal}'" in diagnostic
     assert token not in result.stdout + result.stderr
     assert scenario.project.manifest_path.read_bytes() == manifest_before
     current = load_yaml(root / "apm.lock.yaml")
@@ -803,9 +823,7 @@ def test_declaration_rename_and_same_name_conflict_preserve_identity(
     }
     for row in lock["dependencies"]:
         materialized = scenario.project.root / "apm_modules" / row["alias"]
-        package_digest = sha256()
-        for relative_path in (f".apm/instructions/{renamed.name}", "apm.yml"):
-            package_digest.update(relative_path.encode())
-            package_digest.update((materialized / relative_path).read_bytes())
-        assert row["content_hash"] == f"sha256:{package_digest.hexdigest()}"
+        assert row["content_hash"] == _framed_package_digest(
+            materialized, (f".apm/instructions/{renamed.name}", "apm.yml")
+        )
     _assert_audit_read_only(scenario)

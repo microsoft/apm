@@ -5,7 +5,13 @@ from __future__ import annotations
 import os
 import time
 from contextlib import nullcontext
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from apm_cli.core.remediation import (
+    PROJECT_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import manifest_file
 
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
@@ -13,6 +19,7 @@ from ...core.command_logger import CommandLogger
 from ...install.locking import lifecycle_operation
 from ...primitives.discovery import PRIMITIVE_SUFFIXES, clear_discovery_cache
 from ...utils import perf_stats
+from .staging import report_staged_hash_drift
 
 # Skill modules use a fixed filename (``SKILL.md``) rather than a suffix
 # pattern, so the watcher checks basename equality in addition to the
@@ -204,6 +211,13 @@ class APMFileHandler:
             dry_run=self.dry_run,
             target=effective_target,
         )
+        from .cli import _dependency_policy_allows, _forget_compile_policy
+
+        # Policy or installed packages can change during a watch session.
+        _forget_compile_policy(self.logger)
+        if not _dependency_policy_allows(self.logger, [Path(".")]):
+            return
+        report_staged_hash_drift(self.logger, Path("."))
         result = AgentsCompiler(".").compile(config, logger=self.logger)
         retained_outputs = _report_retained_watch_outputs(
             self.logger,
@@ -251,8 +265,6 @@ def _watch_mode(
     logger = CommandLogger("compile-watch", verbose=verbose, dry_run=dry_run)
 
     try:
-        from pathlib import Path
-
         from watchdog.events import FileSystemEventHandler
         from watchdog.observers import Observer
 
@@ -286,13 +298,13 @@ def _watch_mode(
             observer.schedule(event_handler, ".github/agents", recursive=True)
             watch_paths.append(".github/agents/")
 
-        if Path(APM_YML_FILENAME).exists():
+        if manifest_file(Path(".")).exists():
             observer.schedule(event_handler, ".", recursive=False)
             watch_paths.append(APM_YML_FILENAME)
 
         if not watch_paths:
             logger.warning("No APM directories found to watch")
-            logger.progress("Run 'apm init' to create an APM project")
+            logger.progress(PROJECT_MANIFEST_MISSING.sentence())
             return
 
         observer.start()
@@ -323,6 +335,7 @@ def _watch_mode(
                 dry_run=dry_run,
                 target=effective_target,
             )
+            report_staged_hash_drift(logger, Path("."))
             result = AgentsCompiler(".").compile(config)
         retained_outputs = _report_retained_watch_outputs(logger, result, dry_run=dry_run)
 

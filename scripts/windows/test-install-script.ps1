@@ -25,6 +25,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# First release whose self-update drops the inherited PSModulePath (#3926).
+$PsModulePathFixVersion = [version]"0.37.0"
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..\..")
 $InstallScript = Join-Path $RepoRoot "install.ps1"
@@ -634,12 +637,22 @@ function Test-SelfUpdateCommand {
         # here ensures the downloaded installer reuses our isolated prefix
         # instead of writing to %LOCALAPPDATA%\Programs\apm. self-update's
         # subprocess inherits these via os.environ -> external_process_env().
+        # A pre-#3926 $OlderVersion self-update leaks this pwsh host's
+        # PSModulePath into Windows PowerShell 5.1, which then loads
+        # PowerShell 7's Archive module and fails Expand-Archive. Clear it
+        # only for such binaries so a fixed $OlderVersion still proves
+        # self-update from an inherited PowerShell 7 environment.
         $savedTempDir    = $env:APM_TEMP_DIR
         $savedInstallDir = $env:APM_INSTALL_DIR
         $savedVersion    = $env:VERSION
+        $savedModulePath = $env:PSModulePath
         $env:APM_TEMP_DIR    = $prefix.TmpDir
         $env:APM_INSTALL_DIR = $prefix.BinDir
         $env:VERSION         = $PinnedVersion
+        $olderCore = [version]($OlderVersion.TrimStart("v") -replace '[^0-9.].*$', '')
+        if ($olderCore -lt $PsModulePathFixVersion) {
+            Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
+        }
         try {
             $output = @()
             $selfUpdateExit = 1
@@ -662,6 +675,7 @@ function Test-SelfUpdateCommand {
             if ($null -ne $savedTempDir)    { $env:APM_TEMP_DIR = $savedTempDir }       else { Remove-Item Env:APM_TEMP_DIR -ErrorAction SilentlyContinue }
             if ($null -ne $savedInstallDir) { $env:APM_INSTALL_DIR = $savedInstallDir } else { Remove-Item Env:APM_INSTALL_DIR -ErrorAction SilentlyContinue }
             if ($null -ne $savedVersion)    { $env:VERSION = $savedVersion }            else { Remove-Item Env:VERSION -ErrorAction SilentlyContinue }
+            if ($null -ne $savedModulePath) { $env:PSModulePath = $savedModulePath }
         }
 
         Write-Info "self-update output (last 20 lines):"

@@ -11,6 +11,8 @@ import pytest
 
 from apm_cli.core.script_executors import _expand_env_vars
 
+pytestmark = pytest.mark.unit
+
 
 class TestCaseInsensitivity:
     """IGNORECASE means lowercase credential names are still blocked."""

@@ -130,6 +130,12 @@ from apm_cli.utils.reflink import (
 # ===========================================================================
 
 
+def _anonymous(url: str):
+    from apm_cli.core.catalog_credentials import anonymous_catalog_credential
+
+    return anonymous_catalog_credential("catalog", url, bound=False)
+
+
 class TestBaseAdapterHelpers:
     """Tests for module-level helpers in adapters/client/base.py."""
 
@@ -786,16 +792,17 @@ class TestClaudeClientAdapter:
         result = ClaudeClientAdapter._normalize_mcp_entry_for_claude_code("not-a-dict")
         assert result == "not-a-dict"
 
-    def test_rewrite_self_defined_skill_command_converged(self) -> None:
+    def test_rewrite_self_defined_skill_command_converged(self, tmp_path: Path) -> None:
         """Converged skill prefix is rewritten to Claude-specific path."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command(
-            ".agents/skills/my-skill/run.sh"
-        )
+        (tmp_path / ".claude" / "skills" / "my-skill").mkdir(parents=True)
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command(".agents/skills/my-skill/run.sh")
         assert result == ".claude/skills/my-skill/run.sh"
 
-    def test_rewrite_self_defined_skill_command_other(self) -> None:
+    def test_rewrite_self_defined_skill_command_other(self, tmp_path: Path) -> None:
         """Non-converged commands pass through unchanged."""
-        result = ClaudeClientAdapter._rewrite_self_defined_skill_command("npx")
+        adapter = ClaudeClientAdapter(project_root=tmp_path)
+        result = adapter._rewrite_self_defined_skill_command("npx")
         assert result == "npx"
 
     def test_merge_mcp_server_dicts_shallow_merge(self) -> None:
@@ -1962,7 +1969,10 @@ class TestMarketplaceClientLocalFetch:
         from apm_cli.marketplace.client import _fetch_url_direct
 
         with pytest.raises(MarketplaceFetchError, match="HTTPS"):
-            _fetch_url_direct("http://insecure.example.com/marketplace.json")
+            _fetch_url_direct(
+                "http://insecure.example.com/marketplace.json",
+                credential=_anonymous("http://insecure.example.com/marketplace.json"),
+            )
 
     def test_fetch_url_direct_with_mocked_response(self, tmp_path: Path) -> None:
         """_fetch_url_direct parses JSON from mocked HTTP response."""
@@ -1977,7 +1987,10 @@ class TestMarketplaceClientLocalFetch:
         mock_resp.close = MagicMock()
 
         with patch("apm_cli.marketplace.client._http_get", return_value=mock_resp):
-            result = _fetch_url_direct("https://cdn.example.com/marketplace.json")
+            result = _fetch_url_direct(
+                "https://cdn.example.com/marketplace.json",
+                credential=_anonymous("https://cdn.example.com/marketplace.json"),
+            )
         assert result is not None
         assert result.data["name"] == "remote-market"
         assert result.etag == '"v1"'
@@ -1993,7 +2006,10 @@ class TestMarketplaceClientLocalFetch:
 
         with patch("apm_cli.marketplace.client._http_get", return_value=mock_resp):
             with pytest.raises(MarketplaceFetchError, match="404"):
-                _fetch_url_direct("https://cdn.example.com/marketplace.json")
+                _fetch_url_direct(
+                    "https://cdn.example.com/marketplace.json",
+                    credential=_anonymous("https://cdn.example.com/marketplace.json"),
+                )
 
     def test_fetch_url_direct_304_returns_none(self) -> None:
         """_fetch_url_direct returns None on 304 Not Modified."""
@@ -2005,7 +2021,10 @@ class TestMarketplaceClientLocalFetch:
         mock_resp.close = MagicMock()
 
         with patch("apm_cli.marketplace.client._http_get", return_value=mock_resp):
-            result = _fetch_url_direct("https://cdn.example.com/marketplace.json")
+            result = _fetch_url_direct(
+                "https://cdn.example.com/marketplace.json",
+                credential=_anonymous("https://cdn.example.com/marketplace.json"),
+            )
         assert result is None
 
 
@@ -3183,6 +3202,7 @@ class TestMarketplaceClientHTTP:
             with pytest.raises(MarketplaceFetchError, match="digest mismatch"):
                 _fetch_url_direct(
                     "https://cdn.example.com/marketplace.json",
+                    credential=_anonymous("https://cdn.example.com/marketplace.json"),
                     expected_digest="sha256:wrongdigest",
                 )
 
@@ -3201,7 +3221,10 @@ class TestMarketplaceClientHTTP:
 
         with patch("apm_cli.marketplace.client._http_get", return_value=mock_resp):
             with pytest.raises(MarketplaceFetchError, match="root must be an object"):
-                _fetch_url_direct("https://cdn.example.com/marketplace.json")
+                _fetch_url_direct(
+                    "https://cdn.example.com/marketplace.json",
+                    credential=_anonymous("https://cdn.example.com/marketplace.json"),
+                )
 
 
 # ===========================================================================
@@ -4132,7 +4155,7 @@ class TestMCPConflictMatrix:
 
         from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
 
-        with pytest.raises(click.UsageError, match="cannot use --only apm"):
+        with pytest.raises(click.UsageError, match="--only apm cannot be combined"):
             validate_mcp_conflicts(**self._base_kwargs(only="apm"))
 
     def test_e4_transport_flags_with_mcp(self) -> None:
@@ -4150,7 +4173,7 @@ class TestMCPConflictMatrix:
 
         from apm_cli.install.mcp.conflicts import validate_mcp_conflicts
 
-        with pytest.raises(click.UsageError, match="use 'apm update'"):
+        with pytest.raises(click.UsageError, match="run 'apm update' to update MCP entries"):
             validate_mcp_conflicts(**self._base_kwargs(update=True))
 
     def test_e9_header_without_url(self) -> None:
@@ -4236,24 +4259,30 @@ class TestMCPConflictMatrix:
 class TestDriftHelpers:
     """Tests for pure drift detection functions in drift.py."""
 
-    def test_detect_orphans_empty_on_partial_install(self) -> None:
-        """detect_orphans returns empty set on partial install."""
-        from apm_cli.drift import detect_orphans
+    @staticmethod
+    def _install_orphan_files(lockfile, intended):
+        from apm_cli.install.orphans import (
+            DeploymentClaims,
+            OrphanOperation,
+            decide_orphan_removal,
+        )
 
-        result = detect_orphans(None, set(), only_packages=["pkg-a"], logger=None)
-        assert result == set()
+        decision = decide_orphan_removal(
+            operation=OrphanOperation.INSTALL,
+            roots=(),
+            candidate_universe=lockfile,
+            installed_paths=None,
+            resolved_keys=None,
+            intended=intended,
+            materialized=None,
+            reachability=None,
+            deployment_claims=DeploymentClaims(live_files=None, retained={}),
+        )
+        return {path for files in decision.removed_files.values() for path in files}
 
-    def test_detect_orphans_empty_on_first_install(self) -> None:
-        """detect_orphans returns empty set when no existing lockfile."""
-        from apm_cli.drift import detect_orphans
-
-        result = detect_orphans(None, set(), only_packages=[], logger=None)
-        assert result == set()
-
-    def test_detect_orphans_finds_removed_packages(self) -> None:
-        """detect_orphans returns files from packages no longer in manifest."""
+    def test_install_orphans_find_removed_packages(self) -> None:
+        """The install orphan decision removes files of packages no longer in the manifest."""
         from apm_cli.deps.lockfile import LockedDependency, LockFile
-        from apm_cli.drift import detect_orphans
 
         lf = LockFile(
             dependencies={
@@ -4264,13 +4293,11 @@ class TestDriftHelpers:
             }
         )
         # Package is NOT in intended_dep_keys
-        orphans = detect_orphans(lf, set(), only_packages=[], logger=None)
-        assert ".agents/skills/pkg/run.py" in orphans
+        assert ".agents/skills/pkg/run.py" in self._install_orphan_files(lf, set())
 
-    def test_detect_orphans_no_orphans_when_present(self) -> None:
-        """detect_orphans returns empty when all packages still in manifest."""
+    def test_install_orphans_empty_when_present(self) -> None:
+        """No files are removed when every package is still in the manifest."""
         from apm_cli.deps.lockfile import LockedDependency, LockFile
-        from apm_cli.drift import detect_orphans
 
         lf = LockFile(
             dependencies={
@@ -4280,8 +4307,7 @@ class TestDriftHelpers:
                 )
             }
         )
-        orphans = detect_orphans(lf, {"owner/pkg"}, only_packages=[], logger=None)
-        assert orphans == set()
+        assert self._install_orphan_files(lf, {"owner/pkg"}) == set()
 
     def test_detect_stale_files_returns_removed_files(self) -> None:
         """detect_stale_files returns paths no longer in new_deployed."""

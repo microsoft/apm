@@ -9,6 +9,8 @@ from apm_cli.utils.github_host import (
     unambiguous_https_hostname,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize(
     ("url", "expected"),

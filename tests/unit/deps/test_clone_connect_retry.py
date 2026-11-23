@@ -70,7 +70,7 @@ def test_connect_retry_preserves_action_arguments(
         else subprocess.CalledProcessError(128, ["git", "clone"], stderr=stream)
     )
     action = MagicMock(side_effect=[error, None])
-    with patch("apm_cli.deps.clone_engine.time.sleep") as sleep:
+    with patch("apm_cli.deps.clone_engine._retry_sleep") as sleep:
         _execute(host, tmp_path, action)
     assert action.call_count == 2
     first, second = action.call_args_list
@@ -108,7 +108,7 @@ def test_non_connect_failure_is_not_retried(
     host: MagicMock, tmp_path: Path, error: Exception
 ) -> None:
     action = MagicMock(side_effect=error)
-    with patch("apm_cli.deps.clone_engine.time.sleep") as sleep:
+    with patch("apm_cli.deps.clone_engine._retry_sleep") as sleep:
         with pytest.raises((RuntimeError, ValueError, AssertionError)):
             _execute(host, tmp_path, action)
     action.assert_called_once()
@@ -125,7 +125,7 @@ def test_persistent_connection_failure_preserves_final_diagnostic(
             subprocess.CalledProcessError(128, ["git"], stderr=final),
         ]
     )
-    with patch("apm_cli.deps.clone_engine.time.sleep") as sleep:
+    with patch("apm_cli.deps.clone_engine._retry_sleep") as sleep:
         with pytest.raises(RuntimeError, match="after 9127 ms"):
             _execute(host, tmp_path, action)
     assert action.call_count == 2
@@ -143,7 +143,7 @@ def test_public_anonymous_retry_stays_inside_auth_callback(
     error = subprocess.CalledProcessError(128, ["git"], stderr=CONNECT)
     action = MagicMock(side_effect=[error, error if persistent else None])
     with (
-        patch("apm_cli.deps.clone_engine.time.sleep"),
+        patch("apm_cli.deps.clone_engine._retry_sleep"),
         patch.object(resolver, "uses_public_github_anonymous_first", return_value=True),
         patch.object(resolver, "build_public_github_anonymous_git_env", return_value=env),
         patch.object(resolver, "resolve") as resolve,
@@ -178,7 +178,7 @@ def test_ado_retry_stays_inside_primary_auth_attempt(
     action = MagicMock(side_effect=[error, error if persistent else None])
     with (
         patch.dict("os.environ", {"ADO_APM_PAT": "test-pat"}),
-        patch("apm_cli.deps.clone_engine.time.sleep"),
+        patch("apm_cli.deps.clone_engine._retry_sleep"),
         patch("apm_cli.core.azure_cli.get_bearer_provider") as bearer_provider,
         pytest.raises(RuntimeError) if persistent else nullcontext(),
     ):
@@ -215,10 +215,10 @@ def test_clone_callbacks_clean_partial_target_before_retry(
 
     engine = CloneEngine(host)
     dep = DependencyReference.parse("microsoft/apm-sample-package")
-    with patch("apm_cli.deps.clone_engine.time.sleep") as sleep:
+    with patch("apm_cli.deps.clone_engine._retry_sleep") as sleep:
         if bare:
             with (
-                patch("apm_cli.deps.bare_cache.subprocess.run", side_effect=fail_then_succeed),
+                patch("subprocess.run", side_effect=fail_then_succeed),
                 patch(
                     "apm_cli.utils.git_env.git_clone_env",
                     side_effect=lambda _u, env, *_a, **_k: env,

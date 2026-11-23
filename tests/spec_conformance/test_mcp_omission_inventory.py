@@ -7,6 +7,7 @@ import pytest
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
 from apm_cli.models.apm_package import APMPackage
+from apm_cli.security.trust import McpAdmission
 
 pytestmark = pytest.mark.component
 
@@ -38,7 +39,7 @@ def test_omission_evidence_never_uses_inventory_as_identity(tmp_path: Path, fiel
     lock.add_dependency(dependency)
     modules = tmp_path / "apm_modules"
     selected = CurrentMcpConfigView.derive(
-        root, lock, modules, trust_transitive_self_defined=False, include_dependency_mcp=False
+        root, lock, modules, admission=McpAdmission(None), include_dependency_mcp=False
     )
     assert selected.problems == ()
     assert selected.configs == {}
@@ -56,7 +57,7 @@ def test_omission_evidence_never_uses_inventory_as_identity(tmp_path: Path, fiel
     restored = LockFile.read(lock_path)
     assert restored is not None
     current = CurrentMcpConfigView.derive(
-        root, restored, modules, trust_transitive_self_defined=True
+        root, restored, modules, admission=McpAdmission(None, one_off=True)
     )
     assert current.problems == ()
     assert set(current.configs) == {"service"}
@@ -76,7 +77,7 @@ def test_omission_evidence_never_uses_inventory_as_identity(tmp_path: Path, fiel
     restored.dependencies.clear()
     restored.add_dependency(different_identity)
     changed = CurrentMcpConfigView.derive(
-        root, restored, modules, trust_transitive_self_defined=True
+        root, restored, modules, admission=McpAdmission(None, one_off=True)
     )
     assert changed.configs == current.configs
     assert (

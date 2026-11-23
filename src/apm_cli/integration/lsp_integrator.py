@@ -11,20 +11,24 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.core.null_logger import NullCommandLogger
-from apm_cli.deps.lockfile import LockFile, LockfileSymlinkError, get_lockfile_path
+from apm_cli.deps.lockfile import LockFile, LockfileRefusal, get_lockfile_path
+from apm_cli.deps.lockfile_write_authority import lockfile_exists
+from apm_cli.integration import write_seam
 from apm_cli.integration._shared import (
     deduplicate_deps,
     resolve_locked_apm_yml_sources,
 )
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.write_seam import atomic_write_text
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import atomic_write_text, umask_file_mode
+from apm_cli.utils.atomic_io import umask_file_mode
 from apm_cli.utils.path_security import PathTraversalError
+from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -120,6 +124,9 @@ class _LSPTargetSpec:
     # Shown once when APM creates the servers key, for a harness where that
     # key has a side effect beyond the servers APM writes.
     servers_key_created_note: str | None = None
+    # Native project-root reference for an authored ${CLAUDE_PLUGIN_ROOT} at
+    # project scope (#3825); None writes the absolute package path.
+    plugin_root_project_reference: str | None = None
 
     def user_root(self) -> Path:
         """Return the runtime's user root through the harness user-root owner."""
@@ -166,6 +173,31 @@ class _PreparedTargetConfig:
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
+    # Same-name entries APM did not write, left as the user wrote them (#4628):
+    # *preserved* differ from the package's entry, *matching* already equal it.
+    preserved: tuple[str, ...] = ()
+    matching: tuple[str, ...] = ()
+    # Managed server name -> "drift" | "blocked" | "unproven" for an entry kept (#4626).
+    kept: dict[str, str] = field(default_factory=dict)
+    # Servers held at a locked render this target cannot express: not written (#4626).
+    withheld: tuple[str, ...] = ()
+
+
+@dataclass
+class LspInstallRecord:
+    """What one ``LSPIntegrator.install`` call is told and what it kept.
+
+    *locked_configs* (in) are the server configs of the existing lock, the
+    evidence of which entry APM wrote (#4626); ``None`` judges no entry.
+    *kept_unowned* (out) maps runtime -> server names left as the user wrote
+    them, never to be recorded as APM-owned (#4628). *kept_edits* (out) maps a
+    managed server whose edit install kept to ``"drift"``, ``"blocked"`` or
+    ``"unproven"``; the caller keeps its locked config (#4626).
+    """
+
+    locked_configs: dict[str, dict] | None = None
+    kept_unowned: dict[str, builtins.set] = field(default_factory=dict)
+    kept_edits: dict[str, str] = field(default_factory=dict)
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -194,6 +226,10 @@ _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
             ("skills", "apm-lsp", ".claude-plugin"),
             ("skills", "apm-lsp"),
         ),
+        # code.claude.com/docs/en/plugins-reference "Where each variable
+        # resolves": plugin LSP command, args, env and workspaceFolder
+        # substitute ${CLAUDE_PROJECT_DIR}.
+        plugin_root_project_reference="${CLAUDE_PROJECT_DIR}",
     ),
     "copilot": _LSPTargetSpec(
         runtime="copilot",
@@ -242,6 +278,7 @@ class LSPIntegrator:
         lock_path: Path | None = None,
         logger=None,
         diagnostics=None,
+        claude_native_keys: frozenset[str] = frozenset(),
     ) -> list:
         """Collect LSP dependencies from resolved APM packages listed in apm.lock.
 
@@ -250,8 +287,11 @@ class LSPIntegrator:
         Falls back to scanning all apm.yml files if no lock file is available.
 
         Declaring-package provenance is attached so the install pipeline can
-        enforce executable approval before exposing transitive servers.
+        enforce executable approval before exposing transitive servers, with
+        the runtimes that load each server natively from its plugin.
         """
+        from apm_cli.claude_plugins.admission import native_service_runtimes
+
         if logger is None:
             logger = NullCommandLogger()
         if not apm_modules_dir.exists():
@@ -277,6 +317,7 @@ class LSPIntegrator:
                 pkg = APMPackage.from_apm_yml(apm_yml_path)
                 lsp = pkg.get_lsp_dependencies()
                 if lsp:
+                    native_runtimes: frozenset[str] = frozenset()
                     if locked_dependency is None:
                         owner = apm_yml_path.parent.relative_to(apm_modules_dir).as_posix()
                         approval_keys: tuple[str, ...] = ()
@@ -287,11 +328,15 @@ class LSPIntegrator:
 
                         owner = locked_dependency.get_unique_key()
                         approval_keys = locked_dependency_approval_keys(locked_dependency)
+                        native_runtimes = native_service_runtimes(
+                            owner, locked_dependency, claude_native_keys
+                        )
                     collected.extend(
                         replace(
                             dependency,
                             resolved_by=owner,
                             approval_keys=approval_keys,
+                            native_runtimes=native_runtimes,
                         )
                         for dependency in lsp
                     )
@@ -401,6 +446,41 @@ class LSPIntegrator:
         return out
 
     @staticmethod
+    def _render_plugin_roots(
+        servers: dict[str, dict],
+        lsp_deps: list,
+        spec: _LSPTargetSpec,
+        *,
+        project_root: Path,
+        user_scope: bool,
+    ) -> dict[str, dict]:
+        """Expand authored ``${CLAUDE_PLUGIN_ROOT}`` for one target and scope."""
+        from apm_cli.deps.plugin_root_render import (
+            finalize_project_root,
+            plugin_root_of,
+            render_plugin_root,
+        )
+
+        roots: dict[str, str] = {}
+        for dep in lsp_deps:
+            root = plugin_root_of(dep)
+            if root and hasattr(dep, "name"):
+                roots.setdefault(dep.name, root)
+        reference = None if user_scope else spec.plugin_root_project_reference
+        return {
+            name: finalize_project_root(
+                render_plugin_root(
+                    entry,
+                    plugin_root=roots.get(name),
+                    project_root=project_root,
+                    project_relative=reference is not None,
+                ),
+                reference,
+            )
+            for name, entry in servers.items()
+        }
+
+    @staticmethod
     def expressible_server_names(lsp_deps: list, runtime: str) -> builtins.set:
         """Return the names of *lsp_deps* that *runtime* can write.
 
@@ -409,11 +489,50 @@ class LSPIntegrator:
         claimed, and later cleanup cannot delete a same-name user entry.
         """
         servers = LSPIntegrator._servers_for_target(
-            LSPIntegrator._base_server_entries(lsp_deps),
+            LSPIntegrator._base_server_entries(LSPIntegrator.deps_for_runtime(lsp_deps, runtime)),
             _LSP_TARGET_SPECS[runtime],
             warn=lambda _message: None,
         )
         return builtins.set(servers)
+
+    @staticmethod
+    def matching_entry_names(
+        lsp_deps: list, runtime: str, *, project_root: Path, user_scope: bool
+    ) -> builtins.set:
+        """Names whose *runtime* config entry already equals what install would write.
+
+        A frozen install needs no recorded claim for them: install leaves such
+        an entry as it is whoever wrote it (#4628), as MCP does for a matching
+        native connection.
+        """
+        spec = _LSP_TARGET_SPECS[runtime]
+        runtime_deps = LSPIntegrator.deps_for_runtime(lsp_deps, runtime)
+        servers = LSPIntegrator._servers_for_target(
+            LSPIntegrator._base_server_entries(runtime_deps), spec, warn=lambda _message: None
+        )
+        if not servers:
+            return builtins.set()
+        try:
+            servers = LSPIntegrator._render_plugin_roots(
+                servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
+            )
+            config = LSPIntegrator._read_json_object(
+                LSPIntegrator._target_config_path(spec, project_root, user_scope=user_scope)
+            )
+        except (OSError, ValueError):
+            return builtins.set()
+        servers_key = spec.servers_key(user_scope=user_scope)
+        existing = config if servers_key is None else config.get(servers_key)
+        if not isinstance(existing, dict):
+            return builtins.set()
+        return {name for name, entry in servers.items() if existing.get(name) == entry}
+
+    @staticmethod
+    def deps_for_runtime(lsp_deps: list, runtime: str) -> list:
+        """Drop servers *runtime* loads natively from their plugin (never APM's copy)."""
+        from apm_cli.install.mcp.native_runtimes import native_runtimes_of
+
+        return [dep for dep in lsp_deps if runtime not in native_runtimes_of(dep)]
 
     # ------------------------------------------------------------------
     # Target resolution
@@ -490,16 +609,9 @@ class LSPIntegrator:
                 candidates.append("opencode")
 
         if exclude:
-            exclusions = {exclude}
-            try:
-                from apm_cli.core.target_detection import EffectiveTargetDecision
+            from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
-                exclusions.update(
-                    EffectiveTargetDecision(exclude, "--exclude").canonical_targets or ()
-                )
-            except KeyError:
-                pass
-            candidates = [target for target in candidates if target not in exclusions]
+            candidates = filter_excluded_mcp_runtimes(candidates, exclude)
 
         if not candidates:
             return []
@@ -633,8 +745,18 @@ class LSPIntegrator:
         user_scope: bool,
         managed_server_names: builtins.set | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
+        locked_servers: dict[str, dict] | None = None,
+        held: builtins.set | frozenset = frozenset(),
     ) -> _PreparedTargetConfig:
-        """Validate and render one target config without writing it."""
+        """Validate and render one target config without writing it.
+
+        *locked_servers* holds the entries APM renders for this target from
+        the locked server configs: a managed entry that differs from both the
+        new render and the locked one is kept, never rewritten (#4626).
+        ``None`` (a caller without lock evidence) judges no entry. A *held*
+        server, kept on another target, stays at its locked render here too.
+        """
         config_path = LSPIntegrator._target_config_path(
             spec,
             project_root,
@@ -724,23 +846,53 @@ class LSPIntegrator:
             config[servers_key] = existing
 
         changed: builtins.set = builtins.set()
+        preserved: list[str] = []
+        matching: list[str] = []
+        kept: dict[str, str] = {}
+        withheld: list[str] = []
         for name, server_config in servers.items():
-            # A same-name entry APM does not manage is user content: refuse to
-            # overwrite it (and so never claim it) unless --force is given.
-            if (
-                (protected_plugin or spec.shared_config)
-                and name in existing
-                and existing[name] != server_config
-                and name not in managed_names
-                and not force
-            ):
+            if name in held:
+                # One recorded baseline per server: hold every target at it (#4626).
+                server_config = (locked_servers or {}).get(name)
+                if server_config is None:
+                    withheld.append(name)
+                    continue
+            # A same-name entry APM does not manage is user content: never
+            # overwrite it (and so never claim it).
+            foreign = name in existing and name not in managed_names
+            unmanaged = foreign and existing[name] != server_config
+            if unmanaged and (protected_plugin or spec.shared_config) and not force:
                 raise FileExistsError(
                     f"LSP server '{name}' already exists in "
                     f"{spec.label(user_scope=user_scope)} and is not managed by APM; "
                     "rename it or rerun with --force"
                 )
-            if existing.get(name) != server_config:
-                changed.add(name)
+            if (
+                foreign
+                and not (protected_plugin or spec.shared_config)
+                and name not in (legacy_server_names or ())
+            ):
+                # Kept like a native MCP connection: equality alone never
+                # establishes ownership, and --force does not take it.
+                (preserved if unmanaged else matching).append(name)
+                continue
+            if existing.get(name) == server_config:
+                existing[name] = server_config
+                continue
+            kind = (
+                None
+                if force
+                or locked_servers is None
+                or name not in existing
+                or (name not in managed_names and name not in (legacy_server_names or ()))
+                else LSPIntegrator._kept_entry_kind(
+                    existing[name], locked_servers.get(name), server_config
+                )
+            )
+            if kind is not None:
+                kept[name] = kind
+                continue
+            changed.add(name)
             existing[name] = server_config
 
         return _PreparedTargetConfig(
@@ -749,12 +901,124 @@ class LSPIntegrator:
             changed=changed,
             created_servers_key=created_servers_key,
             owner_only=user_scope,
+            preserved=tuple(preserved),
+            matching=tuple(matching),
+            withheld=tuple(withheld),
+            kept=kept,
         )
+
+    @staticmethod
+    def _locked_target_servers(
+        locked_configs: dict[str, dict] | None,
+        runtime_deps: list,
+        spec: _LSPTargetSpec,
+        *,
+        project_root: Path,
+        user_scope: bool,
+    ) -> dict[str, dict] | None:
+        """The entries APM renders for *spec* from the locked server configs (#4626).
+
+        Only servers this install renders are judged; each locked config goes
+        through the same rendering as a fresh declaration, with the declaring
+        package's current root. ``None`` without locked configs.
+        """
+        if locked_configs is None:
+            return None
+        names = {dep.name for dep in runtime_deps if hasattr(dep, "name")}
+        locked = [
+            {**config, "name": name}
+            for name, config in locked_configs.items()
+            if name in names and isinstance(config, dict)
+        ]
+        servers = LSPIntegrator._servers_for_target(
+            LSPIntegrator._base_server_entries(locked), spec, warn=lambda _message: None
+        )
+        return LSPIntegrator._render_plugin_roots(
+            servers, runtime_deps, spec, project_root=project_root, user_scope=user_scope
+        )
+
+    @staticmethod
+    def _blocking_keeps(prepared_targets: list) -> builtins.set:
+        """Servers kept as a blocked or unproven edit: they fail the install (#4626)."""
+        return {
+            name
+            for _runtime, _spec, prepared in prepared_targets
+            for name, kind in prepared.kept.items()
+            if kind != "drift"
+        }
+
+    @staticmethod
+    def _hold_kept_servers(prepared_targets: list, inputs: dict) -> list:
+        """Re-prepare targets so a server kept on one target is held on all (#4626).
+
+        The lock records one config per server: writing a new render to one
+        target while another keeps an edit would leave that target past the
+        recorded baseline.
+        """
+        kept = builtins.set().union(*(prepared.kept for _r, _s, prepared in prepared_targets))
+        if not kept:
+            return prepared_targets
+        held = []
+        for runtime, spec, prepared in prepared_targets:
+            servers, options = inputs[runtime]
+            if kept & (builtins.set(servers) - builtins.set(prepared.kept)):
+                # A target's own keeps are re-judged, never withheld: that drops their claim.
+                rebuilt = LSPIntegrator._prepare_target_config(
+                    spec, servers, **options, held=frozenset(kept - builtins.set(prepared.kept))
+                )
+                # The held render is the locked one: keep the original kinds.
+                prepared = replace(rebuilt, kept={**rebuilt.kept, **prepared.kept})
+            held.append((runtime, spec, prepared))
+        return held
+
+    @staticmethod
+    def _report_kept_entries(
+        prepared_targets: list,
+        *,
+        user_scope: bool,
+        diagnostics,
+        logger,
+        kept_edits: dict[str, str] | None,
+    ) -> None:
+        """Name each kept entry: a drift edit warns, a blocked or unproven one fails (#4626)."""
+        from apm_cli.integration.base_integrator import kept_entry_message
+
+        for _runtime, spec, prepared in prepared_targets:
+            for name, kind in sorted(prepared.kept.items()):
+                if kept_edits is not None:
+                    kept_edits[name] = kind
+                message = kept_entry_message(
+                    f"LSP server '{name}' in {spec.label(user_scope=user_scope)}",
+                    user_scope=user_scope,
+                    proven_edit=kind != "unproven",
+                )
+                if diagnostics is None:
+                    (logger.warning if kind == "drift" else logger.error)(message)
+                elif kind == "drift":
+                    diagnostics.warn(message)
+                else:
+                    diagnostics.error(message)
+
+    @staticmethod
+    def _kept_entry_kind(current: object, locked: dict | None, rendered: dict) -> str | None:
+        """Judge one managed entry that differs from the new render (#4626).
+
+        ``None`` replaces it: it still holds the entry APM rendered from the
+        locked config. Otherwise it is kept: ``"unproven"`` without a locked
+        render, else the proven edit's ``"drift"`` or ``"blocked"``.
+        """
+        from apm_cli.integration.base_integrator import edit_kind
+
+        if locked is None:
+            return "unproven"
+        if current == locked:
+            return None
+        return edit_kind(locked, rendered)
 
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
-        prepared.path.parent.mkdir(parents=True, exist_ok=True)
+        write_seam.mkdir(prepared.path.parent, parents=True, exist_ok=True)
         LSPIntegrator._atomic_write_config(
             prepared.path, prepared.content, owner_only=prepared.owner_only
         )
@@ -845,10 +1109,10 @@ class LSPIntegrator:
             if servers_key is not None:
                 owned_keys.add(servers_key)
             if not servers and owned_keys and set(config) <= owned_keys:
-                config_path.unlink()
+                write_seam.unlink(config_path)
                 for directory in spec.cleanup_empty_dirs(project_root, user_scope=user_scope):
                     try:
-                        directory.rmdir()
+                        write_seam.rmdir(directory)
                     except OSError:
                         break
             else:
@@ -941,7 +1205,7 @@ class LSPIntegrator:
         try:
             lockfile = lockfile_state
             if lockfile is None and lock_path is not None:
-                lockfile = LockFile.read(lock_path) if lock_path.exists() else LockFile()
+                lockfile = LockFile.read(lock_path) if lockfile_exists(lock_path) else LockFile()
             if lockfile is None:
                 lockfile = LockFile()
             lockfile.lsp_servers = sorted(lsp_server_names)
@@ -971,7 +1235,7 @@ class LSPIntegrator:
             if fail_on_write_error:
                 from apm_cli.install.errors import RequiredIntegrationError
 
-                if isinstance(exc, LockfileSymlinkError):
+                if isinstance(exc, LockfileRefusal):
                     raise RequiredIntegrationError(str(exc)) from exc
                 raise RequiredIntegrationError(
                     "LSP lockfile update failed. Check apm.lock.yaml permissions, then retry."
@@ -993,8 +1257,14 @@ class LSPIntegrator:
         managed_server_names: builtins.set | None = None,
         managed_target_servers: dict[str, set[str]] | None = None,
         force: bool = False,
+        legacy_server_names: builtins.set | None = None,
+        record: LspInstallRecord | None = None,
     ) -> int:
-        """Install LSP dependencies by writing target-specific runtime config."""
+        """Install LSP dependencies by writing target-specific runtime config.
+
+        *record*, when given, carries the lock evidence in and the kept user
+        entries and edits out (:class:`LspInstallRecord`).
+        """
         if logger is None:
             logger = NullCommandLogger()
         if not lsp_deps:
@@ -1007,33 +1277,46 @@ class LSPIntegrator:
             logger.warning("No LSP-compatible runtimes detected")
             return 0
 
-        base_servers = LSPIntegrator._base_server_entries(lsp_deps)
-        if not base_servers:
-            return 0
-
         prepared_targets: list[tuple[str, _LSPTargetSpec, _PreparedTargetConfig]] = []
+        inputs: dict[str, tuple[dict[str, dict], dict]] = {}
         for runtime in runtimes:
             spec = _LSP_TARGET_SPECS[runtime]
+            runtime_deps = LSPIntegrator.deps_for_runtime(lsp_deps, runtime)
             servers = LSPIntegrator._servers_for_target(
-                base_servers,
+                LSPIntegrator._base_server_entries(runtime_deps),
                 spec,
                 warn=diagnostics.warn if diagnostics is not None else logger.warning,
             )
             if not servers:
                 continue
+            servers = LSPIntegrator._render_plugin_roots(
+                servers,
+                runtime_deps,
+                spec,
+                project_root=project_root_path,
+                user_scope=user_scope,
+            )
             try:
                 managed_names = managed_server_names
                 if managed_target_servers is not None:
                     managed_names = managed_target_servers.get(runtime, set())
-                prepared = LSPIntegrator._prepare_target_config(
-                    spec,
-                    servers,
-                    project_root=project_root_path,
-                    user_scope=user_scope,
-                    managed_server_names=managed_names,
-                    force=force,
-                )
+                options = {
+                    "project_root": project_root_path,
+                    "user_scope": user_scope,
+                    "managed_server_names": managed_names,
+                    "force": force,
+                    "legacy_server_names": legacy_server_names,
+                    "locked_servers": LSPIntegrator._locked_target_servers(
+                        record.locked_configs if record is not None else None,
+                        runtime_deps,
+                        spec,
+                        project_root=project_root_path,
+                        user_scope=user_scope,
+                    ),
+                }
+                prepared = LSPIntegrator._prepare_target_config(spec, servers, **options)
                 prepared_targets.append((runtime, spec, prepared))
+                inputs[runtime] = (servers, options)
             except Exception as exc:
                 _log.debug(
                     "Failed to write LSP config to %s",
@@ -1055,11 +1338,43 @@ class LSPIntegrator:
                         "only for a reviewed ownership collision."
                     ) from exc
 
+        prepared_targets = LSPIntegrator._hold_kept_servers(prepared_targets, inputs)
+        LSPIntegrator._report_kept_entries(
+            prepared_targets,
+            user_scope=user_scope,
+            diagnostics=diagnostics,
+            logger=logger,
+            kept_edits=record.kept_edits if record is not None else None,
+        )
         changed_servers: builtins.set = builtins.set()
+        preserved: dict[str, builtins.set] = {}
+        written: list[str] = []
         for runtime, spec, prepared in prepared_targets:
+            unwritten = {*prepared.preserved, *prepared.matching, *prepared.withheld}
+            if record is not None and unwritten:
+                record.kept_unowned.setdefault(runtime, builtins.set()).update(unwritten)
+            for name in prepared.matching:
+                logger.verbose_detail(
+                    f"LSP server '{name}' already matches the {runtime} entry in "
+                    f"{spec.label(user_scope=user_scope)}; APM did not write it, so "
+                    "it stays yours"
+                )
+            if prepared.preserved:
+                preserved[runtime] = builtins.set(prepared.preserved)
+                for name in prepared.preserved:
+                    logger.error(
+                        f"LSP server '{name}' conflicts with the existing {runtime} entry "
+                        f"in {spec.label(user_scope=user_scope)}. Preserved that entry. "
+                        "Rename or remove the conflicting entry yourself, then retry the "
+                        "same install command. --force does not take ownership of user "
+                        "entries."
+                    )
             try:
+                previous = prepared.path.read_bytes() if prepared.path.is_file() else None
                 changed = LSPIntegrator._write_prepared_target_config(prepared)
                 changed_servers.update(changed)
+                if prepared.path.read_bytes() != previous:
+                    written.append(portable_relpath(prepared.path, project_root_path))
                 if changed:
                     noun = "server" if len(changed) == 1 else "servers"
                     logger.progress(
@@ -1104,4 +1419,31 @@ class LSPIntegrator:
                         "Review the path and permissions, then retry."
                     ) from exc
 
+        blocking = LSPIntegrator._blocking_keeps(prepared_targets)
+        if blocking and written:
+            # Name what the failed install still wrote, as file-level keeps do (#4626).
+            logger.info(f"This install wrote {len(written)} file(s), recorded in apm.lock.yaml:")
+            for label in written:
+                getattr(logger, "error_detail", logger.info)(f"  {label}")
+        if blocking and diagnostics is None and not preserved:
+            # No collector counts the keep: fail the install here (#4626).
+            from apm_cli.install.errors import LSPUserEntryConflictError
+
+            raise LSPUserEntryConflictError(
+                "LSP installation incomplete: kept " + ", ".join(sorted(blocking)),
+                preserved={},
+                wrote_servers=bool(changed_servers),
+            )
+        if preserved:
+            from apm_cli.install.errors import LSPUserEntryConflictError
+
+            message = "LSP installation incomplete: " + ", ".join(
+                f"{name} ({runtime})"
+                for runtime, names in sorted(preserved.items())
+                for name in sorted(names)
+            )
+            logger.error(message)
+            raise LSPUserEntryConflictError(
+                message, preserved=preserved, wrote_servers=bool(changed_servers)
+            )
         return len(changed_servers)

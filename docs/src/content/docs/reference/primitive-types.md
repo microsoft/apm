@@ -205,7 +205,7 @@ Conflict detection uses O(1) name-indexed lookups, so performance remains consta
 
 ## Testing
 
-Comprehensive test suite in `tests/test_enhanced_discovery.py` covers:
+Comprehensive test suite in `tests/unit/primitives/test_enhanced_discovery.py` covers:
 
 - Source tracking functionality
 - Conflict detection accuracy
@@ -217,14 +217,5 @@ Comprehensive test suite in `tests/test_enhanced_discovery.py` covers:
 Run tests with:
 
 ```bash
-python -m pytest tests/test_enhanced_discovery.py -v
+python -m pytest tests/unit/primitives/test_enhanced_discovery.py -v
 ```
-
-## Future Enhancements
-
-The enhanced discovery system is designed to support future features:
-
-- **Compilation Integration**: Source attribution in generated `AGENTS.md` files
-- **CLI Commands**: `apm deps list`, `apm compile --trace` commands
-- **Advanced Conflict Resolution**: User-configurable conflict resolution strategies
-- **Performance Optimization**: Caching and incremental discovery for large projects

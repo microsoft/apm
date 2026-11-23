@@ -10,6 +10,8 @@ import yaml
 
 from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
 
+pytestmark = pytest.mark.component
+
 
 def _write_apm_yml(tmp_path: Path, data: dict) -> Path:
     """Write an apm.yml file and return its path."""

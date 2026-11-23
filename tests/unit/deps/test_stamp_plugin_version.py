@@ -13,6 +13,8 @@ import pytest
 from apm_cli.deps.package_validator import stamp_plugin_version
 from apm_cli.models.validation import PackageType
 
+pytestmark = pytest.mark.component
+
 
 def _pkg(version="0.0.0"):
     return SimpleNamespace(version=version)

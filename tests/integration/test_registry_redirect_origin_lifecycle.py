@@ -11,9 +11,8 @@ replay fetch and for ``apm publish``.
 
 from __future__ import annotations
 
-import hashlib
+import dataclasses
 import io
-import json
 import os
 import sys
 import zipfile
@@ -27,6 +26,7 @@ from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_github_https_fixture import openssl_executable
+from tests.utils.local_package_registry import LocalPackageRegistry
 from tests.utils.local_scripted_https_proxy import (
     ScriptedHttpsProxy,
     ScriptedRequest,
@@ -40,6 +40,7 @@ pytestmark = [
     pytest.mark.lifecycle_smoke,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI required"),
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only fixture"),
+    pytest.mark.e2e,
 ]
 
 REGISTRY_HOST = "registry.corp.example"
@@ -62,8 +63,11 @@ class RegistryGateway:
     """Registry origin behind a configurable redirecting gateway."""
 
     mode: str = "direct"
-    archive: bytes = field(default_factory=_archive)
-    published: list[bytes] = field(default_factory=list)
+    registry: LocalPackageRegistry = field(default_factory=lambda: LocalPackageRegistry(BASE))
+
+    @property
+    def published(self) -> list[bytes]:
+        return self.registry.published
 
     def _canonical(self, path: str) -> str:
         return path.rstrip("/")
@@ -91,36 +95,11 @@ class RegistryGateway:
 
     def serve(self, request: ScriptedRequest) -> ScriptedResponse:
         path = self._canonical(request.path)
-        if not path.startswith(BASE + "/") and not path.startswith("/other-tenant/"):
+        if path.startswith("/other-tenant/"):
+            path = BASE + path[len("/other-tenant") :]
+        elif not path.startswith(BASE + "/"):
             return ScriptedResponse(404)
-        tail = path.split("/v1/packages/", 1)[-1]
-        if request.method == "PUT":
-            self.published.append(request.body)
-            payload = {
-                "package": "acme/widget",
-                "version": "1.0.0",
-                "digest": "sha256:" + hashlib.sha256(request.body).hexdigest(),
-                "published_at": "2026-01-01T00:00:00Z",
-            }
-            return ScriptedResponse(
-                201, {"Content-Type": "application/json"}, json.dumps(payload).encode()
-            )
-        if tail == "acme/widget/versions":
-            body = {
-                "versions": [
-                    {
-                        "version": "1.0.0",
-                        "digest": hashlib.sha256(self.archive).hexdigest(),
-                        "published_at": "2026-01-01T00:00:00Z",
-                    }
-                ]
-            }
-            return ScriptedResponse(
-                200, {"Content-Type": "application/json"}, json.dumps(body).encode()
-            )
-        if tail == "acme/widget/versions/1.0.0/download":
-            return ScriptedResponse(200, {"Content-Type": "application/zip"}, self.archive)
-        return ScriptedResponse(404)
+        return self.registry.handle(dataclasses.replace(request, target=path))
 
 
 class _Scenario:
@@ -176,6 +155,7 @@ class _Scenario:
             },
         }
         if consumer:
+            self.gateway.registry.seed("acme/widget", "1.0.0", _archive())
             manifest["targets"] = ["copilot"]
             manifest["dependencies"] = {"apm": ["acme/widget#1.0.0"]}
         dump_yaml(manifest, self.project / "apm.yml")

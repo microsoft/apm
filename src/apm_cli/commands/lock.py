@@ -43,6 +43,13 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.remediation import (
+    LOCKFILE_MISSING_LOCK,
+    PROJECT_MANIFEST_MISSING,
+    USER_MANIFEST_MISSING,
+)
+from apm_cli.core.scope import manifest_file
+from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_writer
 from apm_cli.install.locking import serialized_lifecycle
 
 from ..core.command_logger import InstallLogger
@@ -77,7 +84,7 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     elif isinstance(e, (DirectDependencyError, PolicyViolationError)):
         _rich_error(str(e))
     else:
-        _rich_error(f"Error generating lockfile: {e}")
+        _rich_error(f"Error generating lockfile: {e}", symbol="error")
         if not verbose:
             _rich_info("Run with --verbose for detailed diagnostics.", symbol="info")
     sys.exit(1)
@@ -172,6 +179,7 @@ def lock(
 
 
 @serialized_lifecycle
+@lockfile_writer(LockfileWriter.LOCK)
 def _run_lock(
     *,
     verbose: bool,
@@ -184,16 +192,15 @@ def _run_lock(
     """Resolve dependencies and write apm.lock.yaml (bare ``apm lock``)."""
     import os
 
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import InstallScope, get_manifest_path
     from apm_cli.models.apm_package import APMPackage
 
     if global_:
         scope = InstallScope.USER
-        manifest_path = get_apm_dir(scope) / "apm.yml"
+        manifest_path = get_manifest_path(scope)
         if not manifest_path.is_file():
             _rich_error(
-                f"No apm.yml found in {manifest_path.parent}. "
-                "Run 'apm install -g <org/repo>' to create one."
+                f"No apm.yml found in {manifest_path.parent}. {USER_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         project_root = manifest_path.parent
@@ -203,7 +210,7 @@ def _run_lock(
         if manifest_path is None:
             _rich_error(
                 "No apm.yml found in this directory or any parent directory. "
-                "Run 'apm init' to create one."
+                f"{PROJECT_MANIFEST_MISSING.sentence()}"
             )
             sys.exit(1)
         project_root = manifest_path.parent
@@ -213,11 +220,14 @@ def _run_lock(
                 symbol="info",
             )
 
+    from apm_cli.deps.lockfile_generator import require_current_cli
+
+    require_current_cli(project_root, command="apm lock")
     if project_root != Path.cwd().resolve():
         os.chdir(project_root)
 
     try:
-        apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+        apm_package = APMPackage.from_apm_yml(manifest_file(Path(".")))
     except (FileNotFoundError, ValueError) as e:
         _rich_error(f"Failed to parse apm.yml: {e}")
         sys.exit(1)
@@ -226,18 +236,21 @@ def _run_lock(
 
     try:
         from apm_cli.commands.install import _install_apm_dependencies
+        from apm_cli.install.service import InstallService
 
-        result = _install_apm_dependencies(
-            apm_package,
-            update_refs=update_refs,
-            verbose=verbose,
-            scope=scope,
-            parallel_downloads=parallel_downloads,
-            logger=logger,
-            no_policy=no_policy,
-            target=target,
-            lockfile_only=True,
-        )
+        # `apm lock --update` re-resolves like `apm update`: revalidate catalogs (#3961).
+        with InstallService.catalog_freshness(update_refs=update_refs, refresh=False):
+            result = _install_apm_dependencies(
+                apm_package,
+                update_refs=update_refs,
+                verbose=verbose,
+                scope=scope,
+                parallel_downloads=parallel_downloads,
+                logger=logger,
+                no_policy=no_policy,
+                target=target,
+                lockfile_only=True,
+            )
     except click.UsageError:
         raise
     except Exception as e:
@@ -308,7 +321,7 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     lockfile_path = resolve_lockfile_path_for_read(project_root, read_only=True)
     lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
-        _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
+        _rich_error(f"No lockfile found at {lockfile_path}. {LOCKFILE_MISSING_LOCK.sentence()}")
         sys.exit(1)
 
     resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)

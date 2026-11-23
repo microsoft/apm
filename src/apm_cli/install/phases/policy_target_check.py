@@ -84,6 +84,7 @@ def run(ctx: InstallContext) -> None:
     #    dep-policy violations that already surfaced in the gate phase.
     # ------------------------------------------------------------------
     from apm_cli.install.phases.policy_gate import PolicyViolationError
+    from apm_cli.policy.install_preflight import emit_check_violations
 
     enforcement = policy.enforcement
     has_blocking = False
@@ -95,14 +96,11 @@ def run(ctx: InstallContext) -> None:
             continue
 
         severity = "block" if enforcement == "block" else "warn"
-        reason = check.message
-        if check.details:
-            reason = f"{check.message}: {', '.join(check.details[:5])}"
 
         if ctx.logger:
-            ctx.logger.policy_violation(
-                dep_ref=check.name,
-                reason=reason,
+            emit_check_violations(
+                ctx.logger,
+                check,
                 severity=severity,
                 source=getattr(getattr(ctx, "policy_fetch", None), "source", None),
             )

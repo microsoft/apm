@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestStatusSymbols:
     """Tests for STATUS_SYMBOLS dictionary."""
@@ -149,7 +151,8 @@ class TestRichEcho:
             _rich_echo("colorama msg", color="red")
 
         captured = capsys.readouterr()
-        assert "colorama msg" in captured.out
+        assert "colorama msg" in captured.err
+        assert "colorama msg" not in captured.out
 
     def test_colorama_fallback_bold(self, capsys):
         from apm_cli.utils.console import _rich_echo
@@ -338,7 +341,7 @@ class TestCreateFilesTable:
     def test_returns_none_on_exception(self):
         from apm_cli.utils.console import _create_files_table
 
-        with patch("apm_cli.utils.console.Table", side_effect=Exception("boom")):
+        with patch("rich.table.Table", side_effect=Exception("boom")):
             result = _create_files_table([{"name": "x", "description": "y"}])
         assert result is None
 
@@ -433,10 +436,30 @@ def _reimport_console_without(blocked_modules: list[str]):
                 del sys.modules[key]
         # Restore originals.
         sys.modules.update(saved)
+        # Importing a submodule also binds it on its parent package, so
+        # ``from apm_cli.utils import console`` would keep returning the
+        # discarded copy while ``sys.modules`` holds the original.
+        for key, module in saved.items():
+            parent, _, child = key.rpartition(".")
+            if parent in sys.modules and sys.modules[parent] is not None:
+                setattr(sys.modules[parent], child, module)
 
 
 class TestImportFallbacks:
     """Cover the except-ImportError branches at module level (lines 18-23, 31-34)."""
+
+    def test_reimport_leaves_package_attribute_on_the_original_module(self):
+        """A later ``from apm_cli.utils import console`` must reach the live module.
+
+        Otherwise a monkeypatch through the package attribute misses callers that
+        import from ``sys.modules``, which made order-dependent failures elsewhere.
+        """
+        import apm_cli.utils
+
+        original = sys.modules["apm_cli.utils.console"]
+        _reimport_console_without(["rich"])
+        assert sys.modules["apm_cli.utils.console"] is original
+        assert apm_cli.utils.console is original
 
     def test_rich_unavailable_sets_constants(self):
         """Lines 18-23: RICH_AVAILABLE=False and sentinel Any assignments."""
@@ -572,9 +595,9 @@ class TestRichErrorNarrowWidthWrapping:
             "Claude-import route, then reinstall."
         )
         buffer = io.StringIO()
-        narrow_console = Console(file=buffer, width=20, force_terminal=False)
+        narrow_console = Console(file=buffer, width=20, force_terminal=True, color_system=None)
         with patch(
-            "apm_cli.utils.console._get_console",
+            "apm_cli.utils.console._get_stderr_console",
             return_value=narrow_console,
         ):
             _rich_error(message, symbol="error")
@@ -591,3 +614,135 @@ class TestRichErrorNarrowWidthWrapping:
         normalized = " ".join(rendered.split())
         assert "Claude import" in normalized
         assert "No import setting was changed" in normalized
+
+
+def test_warning_never_wraps_remediation_command(monkeypatch, capsys):
+    """A command hint on a continuation line stays copy-pasteable (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_warning
+
+    monkeypatch.setenv("COLUMNS", "40")
+    _reset_console()
+    command = "apm approve github.com/acme/a-long-package-name/sub/path"
+    try:
+        _rich_warning(f"Parked MCP server 'x' needs approval\n    Approve: {command}")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert f"    Approve: {command}\n" in out
+
+
+def test_info_never_splits_a_url(monkeypatch, capsys):
+    """A docs URL is printed as one copyable token at 80 columns (#3994)."""
+    from apm_cli.utils.console import _reset_console, _rich_info
+
+    monkeypatch.setenv("COLUMNS", "80")
+    _reset_console()
+    url = "https://microsoft.github.io/apm/consumer/installing-from-marketplaces/#install-patterns"
+    try:
+        _rich_info(f"See: {url}", symbol="info")
+        out = capsys.readouterr().out
+    finally:
+        _reset_console()
+    assert url in out
+
+
+def test_truncated_cells_use_ascii_ellipsis(capsys):
+    """Rich's U+2026 ellipsis never reaches output; '...' does (#3994)."""
+    from rich.table import Table
+
+    from apm_cli.utils.console import new_console
+
+    console = new_console(width=30, force_terminal=False)
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=12)
+    table.add_row("a-very-long-package-name-that-will-truncate")
+    console.print(table)
+    out = capsys.readouterr().out
+    assert "\u2026" not in out
+    assert "..." in out
+
+
+def test_ascii_ellipsis_keeps_ansi_styles_intact():
+    """In a color terminal the dots never land inside an SGR escape (#3994)."""
+    import io
+    import re
+
+    from rich.table import Table
+    from rich.text import Text
+
+    from apm_cli.utils.console import new_console
+
+    buf = io.StringIO()
+    console = new_console(file=buf, width=40, force_terminal=True, color_system="standard")
+    table = Table()
+    table.add_column("Name", overflow="ellipsis", no_wrap=True, max_width=10)
+    table.add_row(Text("abcdefgh", style="green") + Text("ijklmnop", style="blue"))
+    console.print(table)
+    out = buf.getvalue()
+    assert "\u2026" not in out
+    assert ".." in out
+    assert not re.search(r"\x1b\[[0-9;]*\.", out)
+    assert "\x1b[32mabcdefgh\x1b[0m" in out
+
+
+class _Stream:
+    """A writable stream that reports whether it is a terminal."""
+
+    def __init__(self, tty: bool) -> None:
+        self.tty = tty
+
+    def isatty(self) -> bool:
+        return self.tty
+
+    def write(self, _text: str) -> int:
+        return 0
+
+    def flush(self) -> None:
+        pass
+
+
+def test_windows_console_width_full_when_piped_rich_detection_when_interactive(monkeypatch):
+    """Piped Windows output keeps COLUMNS; a legacy terminal keeps Rich's detection (#4409)."""
+    import types
+
+    from rich import console as rich_console
+
+    import apm_cli.utils.console as console_mod
+
+    monkeypatch.setattr(console_mod, "os", types.SimpleNamespace(name="nt"), raising=False)
+    monkeypatch.setattr(rich_console, "detect_legacy_windows", lambda: True)
+    monkeypatch.setenv("COLUMNS", "400")
+    piped = console_mod.new_console(file=_Stream(False))
+    interactive = console_mod.new_console(file=_Stream(True))
+    rich_auto = rich_console.Console(file=_Stream(True))
+    assert piped.width == 400
+    assert interactive.legacy_windows is True
+    assert interactive.width == rich_auto.width < 400
+
+
+def test_new_table_draws_ascii_on_a_utf_console():
+    """new_table() owns the box, so even a plain UTF Rich console renders ASCII (#4089)."""
+    import io
+
+    from rich.console import Console
+
+    from apm_cli.utils.console import new_table
+
+    buf = io.StringIO()
+    table = new_table(title="Files")
+    table.add_column("File")
+    table.add_row("apm.yml")
+    Console(file=buf, width=40, force_terminal=False).print(table)
+    out = buf.getvalue()
+    assert out.isascii(), out
+    assert "+" in out
+
+
+def test_new_table_rejects_a_unicode_box():
+    from rich import box
+
+    from apm_cli.utils.console import new_table
+
+    assert new_table(box=None).box is None
+    with pytest.raises(ValueError, match="ASCII boxes only"):
+        new_table(box=box.ROUNDED)

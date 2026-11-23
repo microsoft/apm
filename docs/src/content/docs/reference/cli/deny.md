@@ -16,8 +16,9 @@ apm deny [OPTIONS] PACKAGES...
 `apm deny` blocks executable primitives from one or more dependency packages.
 By default, it writes the decision to the project's committed
 `apm.yml` under `executables.deny`. Pass `--user` to write a machine-local
-decision to `$APM_HOME/config.json` (default `~/.apm/config.json`) instead. Run the command from an APM project:
-an `apm.yml` file is required for both scopes.
+decision to `$APM_HOME/config.json` (default `~/.apm/config.json`) instead. Without `--user`, run
+the command from an APM project. `--user` also works outside a project and
+reads the packages `apm install -g` installed.
 
 A deny takes precedence over an allow. For the full precedence model and the
 executable types covered by the gate, see
@@ -27,14 +28,30 @@ executable types covered by the gate, see
 
 | Argument or flag | Description |
 |---|---|
-| `PACKAGES...` | One or more package references, such as `owner/repo`. Required. |
+| `PACKAGES...` | One or more installed packages, by identity (`owner/repo`), install spec (`plugin@marketplace`) or local path. Required. |
 | `--user` | Record the deny in `$APM_HOME/config.json` (default `~/.apm/config.json`) instead of `apm.yml`. |
+| `-g`, `--global` | Deny packages `apm install -g` installed, from any directory. |
 
-For an installed package that declares executable types, APM records those
-types. When no executable declaration is found -- because the package is not
-installed or declares no executables -- APM blocks all supported executable
-types for that reference. Writing a deny also removes a matching allow from the
-selected store.
+Every reference resolves to the installed package's identity, the key the
+deny is recorded under. A reference that matches no installed package exits 1
+and writes nothing. For an installed package that declares executable types,
+APM records those types; one that declares none yet gets all supported
+executable types blocked. Writing a deny also removes a matching allow from the
+selected store. To lift a deny, run `apm approve <pkg>` against the same store
+(add `--user` for a `--user` deny).
+
+The next `apm install` or `apm update` stops deploying the denied package's
+hooks and removes the hook entries and scripts it deployed earlier from every
+harness config. Removing an approval while the gate is on has the same effect.
+Hook files and the package's MCP entries are removed this way even when
+`apm.lock.yaml` is missing: APM finds what it deployed from this machine's
+deployment records. Edited files and entries stay, and `apm audit --ci`
+reports them. Until then, `apm audit --ci` reports the leftover hooks as drift.
+`apm install --frozen` also removes them, but cannot update `apm.lock.yaml`,
+so it exits `1` naming each retired file and the decision that retired it,
+or the package whose recorded decision changed. Run `apm install` without
+`--frozen` and commit `apm.lock.yaml`.
+`apm install --dry-run` previews the retirement without removing anything.
 
 ## Examples
 

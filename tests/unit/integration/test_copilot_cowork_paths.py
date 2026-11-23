@@ -69,7 +69,7 @@ class TestResolveCoworkSkillsDir:
         tenant_dir = cloud_dir / "OneDrive - Tenant"
         tenant_dir.mkdir(parents=True)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -87,7 +87,7 @@ class TestResolveCoworkSkillsDir:
         cloud_dir.mkdir(parents=True)
         # No OneDrive dirs
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -102,7 +102,7 @@ class TestResolveCoworkSkillsDir:
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
         # No Library/CloudStorage at all
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -119,7 +119,7 @@ class TestResolveCoworkSkillsDir:
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -136,7 +136,7 @@ class TestResolveCoworkSkillsDir:
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -156,7 +156,7 @@ class TestResolveCoworkSkillsDir:
         (cloud_dir / "OneDrive - TenantA").mkdir(parents=True)
         (cloud_dir / "OneDrive - TenantB").mkdir(parents=True)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -176,7 +176,7 @@ class TestResolveCoworkSkillsDir:
     ) -> None:
         monkeypatch.delenv("APM_COPILOT_COWORK_SKILLS_DIR", raising=False)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "linux"),
+            patch("sys.platform", "linux"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -199,7 +199,7 @@ class TestResolveCoworkSkillsDir:
         (cloud / "OneDrive - Tenant").mkdir(parents=True)
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value="/config/skills"),
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -227,7 +227,7 @@ class TestResolveCoworkSkillsDir:
         tenant.mkdir(parents=True)
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -258,7 +258,7 @@ class TestResolveCoworkSkillsDir:
         # No CloudStorage directory -- auto-detect returns None.
         with (
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "darwin"),
+            patch("sys.platform", "darwin"),
             patch(
                 "apm_cli.integration.copilot_cowork_paths.Path.home",
                 return_value=tmp_path,
@@ -281,7 +281,7 @@ class TestResolveCoworkSkillsDir:
         monkeypatch.setenv("ONEDRIVECOMMERCIAL", str(od_root))
         monkeypatch.delenv("ONEDRIVE", raising=False)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "win32"),
+            patch("sys.platform", "win32"),
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
         ):
             result = resolve_copilot_cowork_skills_dir()
@@ -298,7 +298,7 @@ class TestResolveCoworkSkillsDir:
         monkeypatch.delenv("ONEDRIVECOMMERCIAL", raising=False)
         monkeypatch.setenv("ONEDRIVE", str(od_root))
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "win32"),
+            patch("sys.platform", "win32"),
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
         ):
             result = resolve_copilot_cowork_skills_dir()
@@ -313,7 +313,7 @@ class TestResolveCoworkSkillsDir:
         monkeypatch.delenv("ONEDRIVECOMMERCIAL", raising=False)
         monkeypatch.delenv("ONEDRIVE", raising=False)
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "win32"),
+            patch("sys.platform", "win32"),
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
         ):
             result = resolve_copilot_cowork_skills_dir()
@@ -329,7 +329,7 @@ class TestResolveCoworkSkillsDir:
         monkeypatch.setenv("ONEDRIVECOMMERCIAL", "")
         monkeypatch.setenv("ONEDRIVE", str(od_root))
         with (
-            patch("apm_cli.integration.copilot_cowork_paths.sys.platform", "win32"),
+            patch("sys.platform", "win32"),
             patch("apm_cli.config.get_copilot_cowork_skills_dir", return_value=None),
         ):
             result = resolve_copilot_cowork_skills_dir()

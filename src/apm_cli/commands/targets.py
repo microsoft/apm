@@ -19,6 +19,28 @@ from pathlib import Path
 
 import click
 
+from apm_cli.core.scope import manifest_file
+
+
+def _manifest_targets(project_root: Path) -> list[str] | None:
+    """Return the targets apm.yml restricts deployment to, read like install does."""
+    from apm_cli.constants import APM_YML_FILENAME
+    from apm_cli.models.apm_package import APMPackage, package_target_declaration
+
+    manifest = manifest_file(project_root)
+    if not manifest.is_file():
+        return None
+    try:
+        declaration = package_target_declaration(APMPackage.from_apm_yml(manifest))
+        if declaration.selection == "all":
+            from apm_cli.core.target_catalog import expand_all
+
+            # Singular ``target: all`` deploys the install set; restriction() folds it.
+            return list(expand_all("install"))
+        return declaration.restriction()
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(f"Failed to read {APM_YML_FILENAME}: {exc}") from exc
+
 
 @click.group(
     invoke_without_command=True,
@@ -48,6 +70,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     if ctx.invoked_subcommand is not None:
         return  # delegate to sub-command
 
+    from apm_cli.constants import APM_YML_FILENAME
     from apm_cli.core.errors import AmbiguousHarnessError, NoHarnessError
     from apm_cli.core.target_detection import (
         CANONICAL_DEPLOY_DIRS,
@@ -58,6 +81,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     )
 
     project_root = Path.cwd()
+    yaml_targets = _manifest_targets(project_root)
     # Explicit-only targets (agent-skills, grok-bot, ...) are never
     # auto-detected, so they are excluded from the apm targets table and
     # visible only in JSON output with --all (convergence item 13).
@@ -66,9 +90,13 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     # On ambiguous-harness, show all detected signals (the user ran
     # ``apm targets`` precisely to see what's there).
     # On no-harness error, report empty active list.
+    manifest_source: str | None = None
     try:
-        resolved = resolve_targets(project_root)
+        # Same precedence as install: apm.yml targets win over detected signals (#3792).
+        resolved = resolve_targets(project_root, yaml_targets=yaml_targets)
         active = resolved.targets
+        if resolved.source == APM_YML_FILENAME:
+            manifest_source = resolved.source
     except AmbiguousHarnessError:
         signals = detect_signals(project_root)
         active = sorted({s.target for s in signals})
@@ -81,9 +109,15 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
     all_signals = detect_signals(project_root)
 
     # Build per-target row data from canonical tables.
+    def _active_source(name: str) -> str | None:
+        # Targets declared in apm.yml report the manifest, not a folder signal (#4210).
+        if manifest_source is not None:
+            return manifest_source
+        return next((s.source for s in all_signals if s.target == name), None)
+
     def _row(name: str) -> dict:
         is_active = name in active
-        active_source = next((s.source for s in all_signals if s.target == name), None)
+        active_source = _active_source(name)
         return {
             "target": name,
             "status": "active" if is_active else "inactive",
@@ -117,7 +151,7 @@ def targets(ctx: click.Context, *, as_json: bool, show_all: bool) -> None:
                     {
                         "target": name,
                         "status": "active" if name in active else "inactive",
-                        "source": None,
+                        "source": _active_source(name) if name in active else None,
                         "deploy_dir": f"{profile.root_dir}/",
                         "needs": None,
                         "meta_target": capability.meta_target,

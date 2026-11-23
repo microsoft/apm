@@ -43,6 +43,15 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+Local paths written with backslashes (`.\pkg`, `..\pkg`, `~\pkg`) are
+normalised to `/` on read and behave exactly like `./pkg`, `../pkg` and
+`~/pkg`. Windows drive-letter and UNC paths are not normalised.
+
+Bare `owner/repo` shorthand resolves against the manifest's top-level
+`default_host:` (bare hostname, e.g. `default_host: gitlab.com`), else
+`GITHUB_HOST`, else `github.com`. Each manifest uses its own value, and
+`apm install PKG` writes entries on that host as shorthand.
+
 GitHub and package-registry owner/repository identifiers are normalized to
 lowercase only for comparison, lock keys, and cache identity. The first
 declaration selects the repository display spelling retained in `apm.yml`,
@@ -118,9 +127,10 @@ fallback enabled with `--allow-protocol-fallback`).
   percent-encoded userinfo is rejected. The user is presentation-only and
   not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
-  is set. Manifest identity includes `host:port`, while the lockfile dedup
-  key uses `host/repo`; the same repository reached through different
-  ports maps to one lockfile key.
+  is set. Manifest identity and the lockfile key both include `host:port`
+  (`host:port/owner/repo`), so the same repository path on two ports is two
+  packages; they share one `apm_modules/` directory, so install rejects the
+  pair unless one sets `alias:`.
 
 ## Transport selection (SSH vs HTTPS)
 
@@ -193,6 +203,8 @@ aliases, or marketplace dependencies.
 
 Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
 
+An `x-` vendor-extension key (`x-[a-z][a-z0-9-]*`) in an entry is ignored and kept on rewrite; any other unknown key fails the parse.
+
 The legacy string suffix `@alias` is not supported; write `alias:` explicitly
 instead so `@` remains reserved for git usernames and version syntax.
 
@@ -215,6 +227,11 @@ asks for `alpha` on `claude`, another for `gamma` on `copilot`; `alpha` deploys
 only for Claude and `gamma` only for Copilot, in any declaration order.
 `apm.lock.yaml` records this as `subset_pairings`, and `--frozen` fails if the
 pairing changed.
+
+`apm_modules/` paths do not include the host, so `acme/tool` and
+`gitlab.example.com/acme/tool` (or two dependencies with the same `alias:`)
+would share `apm_modules/acme/tool`. Install fails before fetching and names
+both declarations; remove one, or set `alias:` on one of them.
 
 Aliases are persisted in `apm.lock.yaml` for replay and removal without changing
 source identity or local `../sibling` source anchors. After upgrading an older
@@ -364,13 +381,62 @@ object-form `version: v1.0.1` or `apm install pkg@catalog#v1.0.1` for a literal
 ref; CLI marketplace suffixes do not accept ranges. Raw refs bypass tag resolution. The lockfile records the resolved ref, not the marketplace
 placeholder. Semver selections also record the existing advisory `resolved_at`
 UTC timestamp; audit and replay do not use it to choose a version.
+A catalog entry with `registry:` resolves through that package registry
+instead: `apm install pkg@catalog` writes `{id, registry, version}` to
+`apm.yml`, and the lockfile records the exact `version`, `resolved_url` and
+`resolved_hash` with no commit. Locked entries replay, including `--frozen`,
+without the catalog, through a registry declared in `apm.yml`, like any
+registry dependency.
 Unknown keys in a marketplace entry are rejected.
+A committed install records each plugin version's catalog ref under
+`APM_HOME` (`cache/marketplace/version-pins.json`, keyed by the resolved
+version). If the catalog later points that version at another ref, install
+refuses (exit 1) and names both refs; `apm update`
+accepts the new ref. A raw
+ref override (`version: main`) never checks or records a pin, and a failed or
+`--dry-run` install records nothing.
+On a `*.ghe.com` marketplace, a plugin source of any type (`github`,
+`git-subdir`, `gitlab`, `url`) with a bare cross-repo `owner/repo` is refused
+as a dependency-confusion risk (#1326)
+before APM contacts the package repository or writes any file. This applies to
+`apm install name@marketplace`, `apm.yml` entries, transitive declarations, and
+`apm update`. Bare entries are admitted when `GITHUB_HOST` is the marketplace
+host; a manifest `default_host:` does not admit them. Locked entries replay without the catalog; run
+`apm update` to re-check entries an older APM locked.
 
-The `marketplace` value names a marketplace registered with
-`apm marketplace add` or declared in the user manifest's `marketplaces:`
-list (`$APM_HOME/apm.yml`, default `~/.apm/apm.yml`, reconciled by
-`apm install -g`). Dependencies and
-project manifests cannot declare `marketplaces:`.
+Once the lockfile records an entry, `apm install` and `apm install --frozen`
+replay its locked commit without reading the catalog or needing the
+marketplace registration; catalog edits do not move it. New entries, entries
+whose `name`, `marketplace` or `version` changed, and `apm update` resolve
+through the catalog, and `--frozen` fails for an unlocked entry.
+`apm install --refresh`, `apm update` and `apm marketplace update` revalidate
+the marketplace and fail rather than use stale cached data. Exception
+until 0.38 (#2903): the lockfile does not record catalog-inline MCP/LSP
+servers, so a package with locked servers and no
+`apm_modules/` copy reads the catalog for server metadata only, also under
+`--frozen` (the locked commit still pins it; a catalog that now selects
+another commit fails until `apm update <name>@<marketplace>`); one with no
+locked servers (`--only=apm`, root-overridden server) fails its content-hash
+check when cold -- run `apm update` for it.
+
+The `marketplace` value names a marketplace declared in the root project's
+`marketplaces:` map, registered with `apm marketplace add`, or declared in the
+user manifest's `marketplaces:` list (`$APM_HOME/apm.yml`, default
+`~/.apm/apm.yml`, reconciled by `apm install -g`).
+
+A root project `apm.yml` may declare `marketplaces:` in the user-manifest
+shape (`name`, `source`, optional `ref`). `apm install` and `apm update` then
+resolve those names with no registration (fresh clone, CI). The map is never
+written to the marketplace registry; inside the project it wins over a
+same-named registration, with one `[i]` line, and over a lock row recorded
+from another catalog: `apm install` / `apm update` re-resolve it through the
+map (one `[i]` line); `apm install --frozen` refuses. When the root declares a map,
+a transitive `marketplace: <name>` must name one of its entries, or the
+install fails showing the entry to add. A dependency's `apm.yml` that
+declares `marketplaces:` is refused. Org policy `marketplace.allow` can
+restrict the declared and locked catalogs (see governance.md).
+`apm uninstall name@marketplace` removes an object-form entry offline, with
+its lock row and deployed files.
 
 For object-form declarations, `apm audit --ci` uses recorded
 `discovered_via` + `marketplace_plugin_name` to find one locked coordinate.
@@ -380,6 +446,18 @@ ambiguous evidence fails. Audit does not fetch the catalog, so removing a local
 catalog registration does not invalidate otherwise valid installed evidence.
 Omitting `version` removes the selector comparison, not the unique-provenance
 and full locked-commit requirements.
+
+The lock also records the catalog origin as `source_url` (and a
+`source_digest`) for every remote catalog kind, including Git; local catalogs
+record neither. The alias is machine-local: if it now points at a different
+origin, re-resolving the entry (`apm update`, `apm install <plugin>@<alias>`,
+`apm outdated`) fails and names both origins; `apm install` keeps replaying the
+locked catalog. Restore the alias with `apm marketplace add <locked-origin>
+--name <alias>`; to switch, remove the entry from `apm.yml`, run `apm install`,
+add it back and run `apm install` again. At user scope (`-g`) the same steps
+use `~/.apm/apm.yml` and `apm install -g`, and also repair a mistakenly changed
+`~/.apm/apm.lock.yaml`. Only the origin is compared, not the catalog path. Rows without `source_url` (pre-0.37 locks) keep working and gain
+it on the next lock write.
 
 Producer-emitted `source: url` and `source: git-subdir` objects resolve
 through the same Git dependency parser as direct object-form dependencies.
@@ -453,6 +531,11 @@ dependencies:
       alias: review-prompt                 # optional local alias
 ```
 
+A registry `url` must use `https://`. `http://` is a parse error unless the
+host is loopback or an RFC 1918 private address, or the entry sets
+`insecure: true`. Unknown keys in a registry entry are rejected; `x-` keys
+are ignored.
+
 Object-form fields:
 
 | Field | Required | Notes |
@@ -483,6 +566,21 @@ their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
 git-source semver resolution fields (`constraint` / `resolved_at`) or a
 revision-pin tag annotation (`resolved_tag`).
+
+From APM 0.37 a writable `apm install` promotes `apm.lock.yaml` to
+`lockfile_version: "4"` (hash framing hardening) when every package verifies;
+otherwise the version stays. Older lockfiles still verify; `--frozen` and
+`apm audit` never rewrite them. APM 0.36 and earlier refuse version `"4"`:
+update CI to 0.37 before committing.
+
+On replay (`apm install`, `apm install --frozen`), a registry dep is
+fetched through a registry declared in `apm.yml`: the one serving the
+locked `resolved_url` (a mirror), else its configured registry (a moved
+endpoint; the old URL is never contacted, and one `[i]` line names both
+URLs). The bytes must match `resolved_hash` before extraction; the
+lockfile is unchanged. A mismatch fails the install and names the
+package, both URLs and both hashes. `apm update` re-resolves and records
+the new URL.
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
@@ -554,8 +652,8 @@ receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
 compile/install targets. The older top-level `target:` key is deprecated
-(warning on the consumer manifest only, removal in v1.0); `apm manifest
-migrate` rewrites it and never touches per-dependency `targets:`.
+(warning on the consumer manifest only, naming the exact `targets:`
+replacement; removal in a future release).
 Per-dependency `targets:` (inside a
 `dependencies.apm` entry) selects which active targets receive that
 dependency's target-scoped primitives. They compose via intersection. See
@@ -564,8 +662,9 @@ dependency's target-scoped primitives. They compose via intersection. See
 - Type: list of target keys. Stable targets are `copilot`, `claude`, `grok-build`,
   `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`,
   `opencode`, `agent-skills`, `hermes`, and `grok-bot`. Experimental targets are `openclaw`,
-  `copilot-cowork`, `copilot-app`, and `grok-cloud`. Use `copilot`, not the
-  target alias `vscode`, for Copilot-family dependency routing.
+  `copilot-cowork`, `copilot-app`, and `grok-cloud`. `vscode` is a
+  deprecated alias of `copilot` (recorded as `copilot` in the lockfile; the
+  consumer manifest warns); use `copilot`.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install
@@ -597,7 +696,9 @@ lives in `docs/src/content/docs/reference/manifest-schema.md` section
 
 When your `apm.yml` and one or more parent packages declare the same
 dependency, APM installs it once with the sorted union of every declaration's
-`skills:` and of every declaration's `targets:`. A declaration that omits the
+`skills:` and of every declaration's `targets:`, but each skill deploys only to
+the targets of the declaration that selected it (`subset_pairings`, see the
+object-form section). A declaration that omits the
 field selects everything. Declaration order does not matter. `apm uninstall`
 of one parent narrows the union to the remaining declarations, and
 `apm audit --ci` checks the lockfile against that union. If the declarations
@@ -624,9 +725,9 @@ dependencies:
       headers:
         X-Custom: "value"
         # Env-var placeholders in headers/env values:
-        #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
+        #   ${VAR} or ${env:VAR}  -> Copilot: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor: translated to ${env:VAR} and resolved at runtime.
@@ -658,7 +759,7 @@ dependencies:
         #                            entry, switch between ${VAR} and ${env:VAR}
         #                            and reinstall with the same scope/targets.
         #                            Review/back up manual edits to that entry first.
-        #   ${input:<id>}         -> VS Code prompts user at runtime
+        #   ${input:<id>}         -> not supported by any target; use ${VAR}
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
         # see manifest-schema section 4.2.4 for reinstall preservation semantics.
@@ -673,6 +774,16 @@ dependencies:
       args: ["--port", "3000"]
       env:
         API_KEY: ${{ secrets.KEY }}
+
+    # Per-server targets: install targets INTERSECT this list (omitted = all;
+    # no overlap = skipped with a warning). Never written into native config.
+    # Dropping a target here or from manifest targets: prunes it on reinstall.
+    # Project-scope claude and copilot share .mcp.json: either name reaches both.
+    - name: claude-only-tools
+      registry: false
+      transport: stdio
+      command: ./bin/claude-tools
+      targets: [claude]
 
     # Self-defined HTTP server
     - name: internal-kb
@@ -699,7 +810,7 @@ dependencies:
 
 Remote transport: `http`/`streamable-http` are Streamable HTTP; registry servers
 take it from `remotes[].type` (missing = Streamable HTTP). Native keys per
-harness: Copilot CLI, Claude, VS Code `type: http|sse` + `url`; Gemini `httpUrl`
+harness: Copilot, Claude `type: http|sse` + `url`; Gemini `httpUrl`
 (Streamable HTTP) or `url` (SSE); Antigravity `serverUrl`; Codex `url`; Hermes
 `url`, plus `transport: sse` for SSE (Hermes also keeps stdio `cwd` and extra
 keys such as `timeout` or `auth`). SSE on
@@ -732,7 +843,7 @@ OpenCode 2 layout), APM writes there instead: `false` becomes
 `disabled: true`, `true` or omission writes no field, and other values warn
 and leave the file unchanged. Set `codemode: false` as an extra field to
 bypass Code Mode. See the
-[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp----listmcpdependency)
+[manifest schema](https://microsoft.github.io/apm/reference/manifest-schema/#42-dependenciesmcp--listmcpdependency)
 for the dependency contract and
 [OpenCode 2 configuration](https://microsoft.github.io/apm/consumer/install-mcp-servers/#opencode-2-configuration)
 for format selection.
@@ -742,11 +853,11 @@ maps that type to the Docker launcher automatically, preserves Docker
 run options before the image, and appends package arguments after the
 image. Options-only `runtimeArguments` (no leading `run`) gain
 `run -i --rm` ahead of them. Copilot, Codex, Gemini, and related adapters select `npm`, OCI,
-then PyPI; VS Code selects `npm`, PyPI, then OCI. Docker must be
+then PyPI. Docker must be
 available when the harness starts an OCI server. Do not add per-target
 launcher overrides.
 
-For VS Code and Copilot-family adapters, non-container `npm`, `pypi`,
+For Copilot-family adapters, non-container `npm`, `pypi`,
 and generic packages preserve typed v0.1 `runtimeArguments` and
 `packageArguments` in authored order, with exactly one semantic package
 identity. Legacy `value_hint` arguments remain compatible. Registry
@@ -773,10 +884,16 @@ The root project activates both sections during `apm install`. Direct
 and transitive dependency packages contribute only `dependencies.mcp`;
 their development MCP entries do not enter the consumer's target config
 or `mcp_config_provenance`. A transitive package's MCP entry is admitted
-without `--trust-transitive-mcp` only as a plain reference to the
-consumer's registry; self-defined entries and entries that set their own
-`registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or
-extra keys are skipped until re-declared or trusted.
+without approval only as a plain reference to the consumer's registry;
+self-defined entries and entries that set their own `registry:` URL or
+`env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys are parked
+(`untrusted-transitive`) until re-declared or pinned with
+`apm approve <pkg>` (commit `apm.yml`). A pinned server whose definition
+later changes parks as `definition-changed` until re-approved. A legacy
+`mcp: true` grant never admits a transitive server. `--trust-transitive-mcp`
+deploys them for one run only and warns that the next install without the
+flag removes them; `apm audit --ci` fails a lock that admitted a server
+`apm.yml` does not approve.
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
@@ -926,18 +1043,22 @@ enterprise security guide for the threat model.
 ## What the lockfile pins
 
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
-of the ref format in apm.yml. Running `apm install` without `--update` reuses
+of the ref format in apm.yml. Plain `apm install` reuses
 the locked SHA when the dependency identity, declared ref and effective host
 provider match. An unseeded mutable ref resolves upstream even when another
 package or sibling path has a lock entry.
-`apm install --update`, `apm install --refresh`, `apm update` (including
-`--force`), `apm lock --update`, and `apm outdated` establish mutable refs from
+`apm update` (including `--force`), `apm install --refresh`,
+`apm lock --update`, `apm outdated`, and the deprecated `apm install --update`
+(use `apm update`) establish mutable refs from
 upstream instead of using a persistent bare-cache ref as current-state evidence.
 
 `--frozen` checks declared refs, full commit pins, host providers and HTTP/HTTPS
 transport against the lock, including transport changes under an unchanged
 semver range. It does not check whether an upstream branch moved. Review an
-intentional declaration change and run `apm install --update` to refresh the lock.
+intentional declaration change and run `apm update` to refresh the lock.
+
+APM refuses to change, replay, audit or pack a lockfile written by a newer
+APM, naming both versions; upgrade APM (there is no override).
 
 For local `.agent.md`, `.instructions.md`, and `.prompt.md` dependencies, the
 locked content hash covers the ordinary materialized package, including its

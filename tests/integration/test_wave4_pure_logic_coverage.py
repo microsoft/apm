@@ -928,7 +928,7 @@ class TestUnpackBundle:
     """Test unpack_bundle function."""
 
     def test_unpack_from_directory(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         bundle_dir = tmp_path / "my-bundle"
         bundle_dir.mkdir()
@@ -955,7 +955,7 @@ class TestUnpackBundle:
         assert deployed.read_text(encoding="utf-8") == "# Hello\n"
 
     def test_unpack_from_tarball(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = _create_bundle_tarball(
             tmp_path,
@@ -969,7 +969,7 @@ class TestUnpackBundle:
         assert deployed.read_text(encoding="utf-8") == "# Test\n"
 
     def test_unpack_dry_run(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = _create_bundle_tarball(
             tmp_path,
@@ -981,14 +981,14 @@ class TestUnpackBundle:
         assert result.extracted_dir.exists()
 
     def test_unpack_missing_bundle_raises(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         with pytest.raises(FileNotFoundError):
             unpack_bundle(tmp_path / "nonexistent.tar.gz")
 
     def test_unpack_with_path_traversal_tarball(self, tmp_path: Path) -> None:
         """Tar entries with absolute paths are rejected."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = tmp_path / "evil.tar.gz"
         inner_dir = tmp_path / "evil-source"
@@ -1005,7 +1005,7 @@ class TestUnpackBundle:
 
     def test_unpack_with_symlink_tarball(self, tmp_path: Path) -> None:
         """Tar entries with symlinks are rejected."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tar_path = tmp_path / "symlink.tar.gz"
         with tarfile.open(tar_path, "w:gz") as tar:
@@ -1021,7 +1021,7 @@ class TestUnpackBundle:
 
     def test_unpack_legacy_lockfile_name(self, tmp_path: Path) -> None:
         """Bundle with legacy apm.lock is supported."""
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         bundle_dir = tmp_path / "legacy-bundle"
         bundle_dir.mkdir()

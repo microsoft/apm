@@ -23,7 +23,7 @@ from tests.integration._target_compile_kit import (
     write_project,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 INSTALL = ("install", "--no-policy")
 
@@ -88,12 +88,12 @@ def test_same_name_user_rules_survive_install_update_uninstall(
     assert not (project / ".claude/rules/py.md").exists()
     assert not (project / ".cursor/rules/py.mdc").exists()
 
-    forced = _seed(tmp_path / "forced", {".claude/rules/global.md": "USER claude rule\n"})
+    # Claude loads the always-on instruction from AGENTS.md (#3939), so only a
+    # path-scoped rule can collide with a hand-authored .claude/rules/ file.
+    forced = _seed(tmp_path / "forced", {".claude/rules/py.md": "USER claude rule\n"})
     forced_project = write_project(tmp_path / "forced", ("claude",))
     scenario.run(*INSTALL, "--force", cwd=forced_project)
-    assert (forced_project / ".claude/rules/global.md").read_bytes() != forced[
-        ".claude/rules/global.md"
-    ]
+    assert (forced_project / ".claude/rules/py.md").read_bytes() != forced[".claude/rules/py.md"]
 
 
 def test_same_name_user_rule_survives_global_install_and_uninstall(
@@ -253,7 +253,7 @@ def test_identical_user_hook_and_root_context_survive_uninstall_and_compile_clea
 def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """VS Code, Copilot, Gemini and Kiro configs with comments fail closed, bytes intact."""
+    """Copilot, Gemini and Kiro configs with comments fail closed, bytes intact."""
     scenario = Scenario.create(tmp_path, apm_binary_path)
     write(
         tmp_path / "pkg/apm.yml",
@@ -261,13 +261,12 @@ def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
         "    - name: pkgsrv\n      registry: false\n      transport: stdio\n"
         "      command: pkgcmd\n",
     )
-    project = write_project(tmp_path / "proj", ("vscode", "copilot", "gemini", "kiro"))
+    project = write_project(tmp_path / "proj", ("copilot", "gemini", "kiro"))
     servers = (
         '{\n  // user comment\n  "mcpServers": {"mine": {"command": "mine"}},\n  "theme": "x"\n}\n'
     )
     configs = {
-        ".vscode/mcp.json": '{\n  // user comment\n  "servers": {"mine": {"command": "mine"}}\n}\n',
-        ".github/mcp.json": servers,
+        ".mcp.json": servers,
         ".gemini/settings.json": servers,
         ".kiro/settings/mcp.json": servers,
     }
@@ -278,11 +277,9 @@ def test_jsonc_mcp_configs_are_never_rewritten_from_scratch(
     assert output(refused).count("Could not parse") >= len(configs), output(refused)
 
     for relative in configs:
-        key = "servers" if relative.startswith(".vscode") else "mcpServers"
-        write(project / relative, json.dumps({key: {"mine": {"command": "mine"}}}) + "\n")
+        write(project / relative, json.dumps({"mcpServers": {"mine": {"command": "mine"}}}) + "\n")
     scenario.run(*INSTALL, cwd=project)
     scenario.run("uninstall", "../pkg", cwd=project)
     for relative in configs:
-        key = "servers" if relative.startswith(".vscode") else "mcpServers"
         data = json.loads((project / relative).read_text(encoding="utf-8"))
-        assert set(data[key]) == {"mine"}, relative
+        assert set(data["mcpServers"]) == {"mine"}, relative

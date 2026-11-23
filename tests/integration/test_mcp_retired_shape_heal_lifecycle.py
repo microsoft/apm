@@ -38,7 +38,7 @@ _REGISTRY_DOCUMENT = {
     "version": "1.0.0",
     "remotes": [{"type": "sse", "url": "https://registry-sse.example.invalid/sse"}],
 }
-_PROJECT_TARGETS = ("vscode", "copilot", "claude", "gemini", "antigravity", "hermes")
+_PROJECT_TARGETS = ("copilot", "claude", "gemini", "antigravity", "hermes")
 _USER_TARGETS = ("copilot", "claude", "gemini", "antigravity", "hermes")
 _SSE = "https://sse.example.invalid/sse"
 _REGISTRY_SSE = "https://registry-sse.example.invalid/sse"
@@ -79,13 +79,12 @@ def _targets(user: bool) -> tuple[str, ...]:
 
 
 def _entry(scene: HarnessScene, harness: str, name: str, *, user: bool) -> dict:
-    key = _REGISTRY_NAME if (harness == "vscode" and name == "heal-registry") else name
-    return scene.servers(harness, user=user).get(key) or {}
+    return scene.servers(harness, user=user).get(name) or {}
 
 
 def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> None:
     targets = _targets(user)
-    for harness in ("copilot", "claude", "vscode"):
+    for harness in ("copilot", "claude"):
         if harness not in targets:
             continue
         for name, url in (("heal-sse", _SSE), ("heal-registry", _REGISTRY_SSE)):
@@ -110,6 +109,30 @@ def _assert_healed(scene: HarnessScene, *, user: bool, claims: bool = True) -> N
         assert (entry.get("url"), entry.get("transport")) == (url, "sse"), (name, entry)
     assert "transport" not in _entry(scene, "hermes", "heal-streamable", user=user)
     assert _entry(scene, "hermes", "heal-stdio", user=user).get("cwd") == "/srv/heal-fixture"
+
+
+def _assert_retired_destinations_healed(scene: HarnessScene, label: str, warnings: list) -> None:
+    """APM's entries leave .github/mcp.json and .vscode/mcp.json once proven (#3866).
+
+    v0.36.0 recorded a fingerprint for every entry, so both files empty out;
+    .vscode/mcp.json is deleted, while .github/mcp.json stays (empty) because it
+    is a copilot detection signal. v0.35.1 recorded none: self-defined entries
+    are proven by that release's render, but the registry entry cannot be, so
+    it is kept and named.
+    """
+    retired = {".github/mcp.json": "mcpServers", ".vscode/mcp.json": "servers"}
+    if label == "v0.36.0":
+        assert not (scene.project / ".vscode/mcp.json").exists()
+        github = json.loads((scene.project / ".github/mcp.json").read_text(encoding="utf-8"))
+        assert github == {"mcpServers": {}}, github
+        return
+    kept = {".github/mcp.json": "heal-registry", ".vscode/mcp.json": _REGISTRY_NAME}
+    for relative, key in retired.items():
+        document = json.loads((scene.project / relative).read_text(encoding="utf-8"))
+        assert set(document[key]) == {kept[relative]}, (relative, document)
+        assert any(
+            f"Kept MCP server '{_REGISTRY_NAME}' in {relative}" in seg for seg in warnings
+        ), warnings
 
 
 def _snapshot(scene: HarnessScene, *, user: bool) -> dict[str, bytes | None]:
@@ -160,6 +183,8 @@ def test_upgrade_rewrites_apm_owned_entries_into_the_current_shape(
     audit = None if frozen else _audit(scene, user=user)
     _assert_healed(scene, user=user, claims=not frozen)
     warnings = warning_segments(result)
+    if not user:
+        _assert_retired_destinations_healed(scene, label, warnings)
     assert any("antigravity" in seg.lower() and "heal-sse" in seg for seg in warnings), warnings
     if frozen:
         # --frozen never writes apm.lock.yaml (req-lk-006); the claim drops on the next install.
@@ -202,14 +227,23 @@ def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScen
         for harness in ("copilot", "claude", "hermes")
     }
 
+    unhealed = _entry(scene, "copilot", "heal-sse", user=False)
+
     result = scene.run(*_command("install", user=False))
 
     assert result.returncode != 0, describe(result)
     assert "heal-foreign" in result.stdout + result.stderr
+    retired = json.loads((scene.project / ".github/mcp.json").read_text(encoding="utf-8"))
+    assert retired["mcpServers"]["heal-foreign"] == {
+        "type": "http",
+        "url": foreign_url,
+        "tools": ["*"],
+    }
     for harness, entry in foreign.items():
         assert _entry(scene, harness, "heal-foreign", user=False) == entry, harness
         assert harness not in scene.claimed_runtimes("heal-foreign", user=False)
-    assert _entry(scene, "copilot", "heal-sse", user=False).get("type") == "sse"
+    # The unrecorded collision refuses before any write, so nothing heals (#4268).
+    assert _entry(scene, "copilot", "heal-sse", user=False) == unhealed
 
 
 # --------------------------------------------------------------------------
@@ -305,21 +339,22 @@ def test_heal_does_not_slip_past_a_declared_transport_deny(scene: HarnessScene) 
 
 
 @_needs_openssl
-def test_registry_sse_heal_is_not_newly_blocked_by_effective_transport(
+def test_registry_sse_heal_is_blocked_by_effective_transport(
     scene: HarnessScene,
 ) -> None:
-    """Only declared transports are judged in 0.36.1, so the healed SSE remote passes."""
+    """0.37 (#3764): policy judges the effective registry transport, so SSE is blocked pre-write."""
     _governed(scene, drop=("heal-sse",))
+    before = _snapshot(scene, user=False)
     with local_gitlab_policy_fixture(scene.isolated.root / "policy-proxy") as fixture:
         fixture.publish({_POLICY_PROJECT: _policy(["stdio", "http", "streamable-http"])})
-        verdict_before = _transport_verdict(scene, fixture)
 
         result = _governed_install(scene, fixture)
 
-        assert result.returncode == 0, describe(result)
-        copilot = _entry(scene, "copilot", "heal-registry", user=False)
-        assert copilot.get("type") == "sse", copilot
-        assert _transport_verdict(scene, fixture) == verdict_before is True
+        assert result.returncode != 0, describe(result)
+        assert "heal-registry" in result.stdout + result.stderr
+        assert "transport 'sse' not in allowed" in result.stdout + result.stderr
+        assert _snapshot(scene, user=False) == before, "blocked install rewrote native files"
+        assert _transport_verdict(scene, fixture) is False
 
 
 @_needs_openssl

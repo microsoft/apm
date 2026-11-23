@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.constants import APM_YML_FILENAME
+from apm_cli.core.scope import manifest_file
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency
@@ -126,7 +126,7 @@ def installed_manifest_children(apm_modules_dir: Path) -> DeclaredChildren:
         try:
             parent_ref = dep.to_dependency_ref()
             install_dir = parent_ref.get_install_path(apm_modules_dir)
-            manifest = install_dir / APM_YML_FILENAME
+            manifest = manifest_file(install_dir)
             if manifest.is_file():
                 package = APMPackage.from_apm_yml(
                     manifest, source_path=install_dir, create_config=False

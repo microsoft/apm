@@ -273,10 +273,10 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
                 '            getattr(observer, "record")(_target)\n',
             ),
             (
-                "            _int_result = getattr(_integrator, _entry.integrate_method)(\n"
-                "                _target,\n",
-                "            _int_result = getattr(_integrator, _entry.integrate_method)(\n"
-                "                rogue_target,\n",
+                "_int_result = getattr(_integrator, _entry.integrate_method)(\n"
+                "                    _target, package_info,",
+                "_int_result = getattr(_integrator, _entry.integrate_method)(\n"
+                "                    rogue_target, package_info,",
             ),
         ),
     ),
@@ -756,14 +756,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        prepared_replay.modules_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
-            "        prepared_replay.project_root\n"
-            "        if prepared_replay is not None\n"
-            "        else project_root / APM_MODULES_DIR,\n"
-            "        trust_transitive_self_defined=True,\n",
+            "        modules_root=prepared_replay.modules_root if prepared_replay is not None else None,\n",
+            "        modules_root=prepared_replay.project_root if prepared_replay is not None else None,\n",
         ),
     ),
     CompoundMutation(
@@ -780,8 +774,8 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         AUDIT_RULE,
         "src/apm_cli/policy/ci_checks.py",
         _replace(
-            "        else project_root / APM_MODULES_DIR,\n",
-            '        else project_root / "apm_modules",\n',
+            "modules_root if modules_root is not None else project_root / APM_MODULES_DIR,\n",
+            'modules_root if modules_root is not None else project_root / "apm_modules",\n',
         ),
     ),
     CompoundMutation(
@@ -790,12 +784,9 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         "src/apm_cli/policy/ci_checks.py",
         _replace(
             "    if prepared_replay_error is not None:\n"
-            "        return CheckResult(\n"
-            '            name="skill-subset-consistency",\n'
-            "            passed=False,\n"
-            '            message=f"replay failed: '
-            '{prepared_replay_error}",\n'
-            "            details=[prepared_replay_error],\n"
+            "        return replay_failure_check(\n"
+            '            "skill-subset-consistency", prepared_replay_error, '
+            "owner=replay_error_owner\n"
             "        )\n"
             "    modules_root = (\n",
             "    modules_root = (\n",
@@ -829,6 +820,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         _replace(
             "        selection = select_manifest_dependency(",
             "        selection = select_manifest_dependency_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-selection-owner",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    declared_selections = _select_marketplace_declarations(mkt_refs_set, current_deps)",
+            "    declared_selections = {}",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-removal-target",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "                dep_ref = _parse_dependency_entry(_removal_target(package, lockfile))",
+            "                dep_ref = _parse_dependency_entry(package)",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-shared-coordinate",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    packages_not_found.extend(\n        _refuse_unsafe_marketplace_removals(",
+            "    packages_not_found.extend(\n        list(",
+        ),
+    ),
+    CompoundMutation(
+        "uninstall-object-form-lock-key",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "                key = _removed_lock_key(pkg, lockfile)",
+            "                key = _parse_dependency_entry(pkg).get_unique_key()",
         ),
     ),
     CompoundMutation(
@@ -890,6 +917,42 @@ MUTATIONS: tuple[CompoundMutation, ...] = (
         UNINSTALL_RULE,
         "src/apm_cli/commands/uninstall/cli.py",
         append="\n\ndef _first_section(package, dev_deps):\n    return package in dev_deps\n",
+    ),
+    CompoundMutation(
+        "audit-package-selection-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        _replace(
+            "        selection = select_installed_lock_key(package, manifest, lockfile)",
+            "        selection = None",
+        ),
+    ),
+    CompoundMutation(
+        "audit-package-second-selector",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/audit.py",
+        append=(
+            "\n\ndef _lock_key_for(package):\n"
+            "    return parse_dependency_entry(package).get_unique_key()\n"
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-uninstall-route",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/engine.py",
+        _replace(
+            "    selected, _refused = _validate_uninstall_packages(",
+            "    selected, _refused = _validate_uninstall_packages_disabled(",
+        ),
+    ),
+    CompoundMutation(
+        "read-only-selection-shared-candidates",
+        UNINSTALL_RULE,
+        "src/apm_cli/commands/uninstall/cli.py",
+        _replace(
+            "    return had_dev_section, prod_deps, dev_deps, manifest_dependency_entries(data)",
+            "    return had_dev_section, prod_deps, dev_deps, [*prod_deps, *dev_deps]",
+        ),
     ),
     *(
         CompoundMutation(

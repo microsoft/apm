@@ -126,7 +126,7 @@ class TestUnpackerRejectsWindowsAbsolutePaths:
         return tarball_path
 
     def test_rejects_windows_drive_letter_in_unpack(self, tmp_path: Path) -> None:
-        from apm_cli.bundle.unpacker import unpack_bundle
+        from tests.utils.unpack_admission import unpack_bundle
 
         tarball = self._make_tarball_with_members(
             tmp_path,

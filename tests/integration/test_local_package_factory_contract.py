@@ -457,7 +457,7 @@ def test_relative_dependency_uses_portable_manifest_path(
 
     windows_parent = factory.create("windows-parent")
     monkeypatch.setattr(
-        "tests.utils.local_package.os.path.relpath",
+        "os.path.relpath",
         lambda *_args: r"..\dependency",
     )
     factory.add_relative_dependency(windows_parent, child)

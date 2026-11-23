@@ -15,6 +15,7 @@ from tests.utils.local_package import LocalPackageFactory
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
+    pytest.mark.e2e,
 ]
 
 _SKILL = b"---\nname: review\ndescription: Fixture review\n---\n# review\nFrom the package.\n"

@@ -22,9 +22,11 @@ class _RegistryServer(ThreadingHTTPServer):
         self,
         server_document: Mapping[str, Any],
         request_paths: deque[str],
+        request_authorizations: deque[str | None],
     ) -> None:
         self.server_document = dict(server_document)
         self.request_paths = request_paths
+        self.request_authorizations = request_authorizations
         super().__init__(("127.0.0.1", 0), _RegistryRequestHandler)
 
 
@@ -37,6 +39,7 @@ class _RegistryRequestHandler(BaseHTTPRequestHandler):
         """Return one v0.1 search or detail response."""
         parsed = urlparse(self.path)
         self.server.request_paths.append(self.path)
+        self.server.request_authorizations.append(self.headers.get("Authorization"))
         if parsed.path == "/v0.1/servers":
             payload = {
                 "servers": [
@@ -81,6 +84,8 @@ class LocalMcpRegistry:
     _server: _RegistryServer
     _thread: threading.Thread
     request_paths: deque[str] = field(default_factory=deque)
+    # The Authorization header of each request, in order (None when absent).
+    request_authorizations: deque[str | None] = field(default_factory=deque)
 
     @property
     def url(self) -> str:
@@ -118,7 +123,8 @@ class LocalMcpRegistryFactory:
         if not isinstance(server_document.get("name"), str):
             raise ValueError("server_document.name must be a string")
         request_paths: deque[str] = deque()
-        server = _RegistryServer(server_document, request_paths)
+        request_authorizations: deque[str | None] = deque()
+        server = _RegistryServer(server_document, request_paths, request_authorizations)
         thread = threading.Thread(
             target=server.serve_forever,
             name=f"mcp-registry-{self._root.name}",
@@ -136,4 +142,5 @@ class LocalMcpRegistryFactory:
             _server=server,
             _thread=thread,
             request_paths=request_paths,
+            request_authorizations=request_authorizations,
         )

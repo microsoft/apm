@@ -26,6 +26,8 @@ from apm_cli.core.script_executors import _HTTP_CONNECT_TIMEOUT, _MAX_HTTP_TIMEO
 
 from .conftest import make_http_script
 
+pytestmark = pytest.mark.component
+
 
 def _read_deadline(timeout: object) -> float:
     """Extract the read element from a scalar-or-tuple requests timeout."""

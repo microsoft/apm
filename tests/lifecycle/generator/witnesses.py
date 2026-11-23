@@ -1,0 +1,337 @@
+"""Machine witnesses of generated lifecycle obligations (#4096, #4097, #4099).
+
+The state machines credit their own cell ids through
+``oracles.check_obligation``: M-SOURCE ``T3|<op>|<form>|<kind>``,
+``T5|<dry-run|real>|<op>|<form>`` and the context ids
+``X|<op>|<form>|<FACTOR>=<value>`` and the rule cells it witnesses directly
+(``rule|...``), M-SCOPE-LOCK ``T4|<op>|<scope>|<lock>`` (its lockfile spine and
+its drift spine: stale and absent lockfiles, side-door commands),
+the M-GATE matrix ``G1|<op>|<prim>|<gate>|<scope>``.
+This module translates each machine id into the factor assignment it proves
+and lists the generated obligations that assignment implies (every pair and
+named triple whose values it fixes). Such an obligation is ``required`` with
+the machine spine as witness, and the receipt of any listed machine id
+discharges it (``credited_by``). A machine id the machine records as a strict
+known cell with an owning issue makes the obligation ``known-failing``.
+
+A GATE matrix id credits only the implied ids that name GATE (its anchor):
+the step proves what the gate level did to that command, so a refusal under
+a dependency deny never discharges a success cell without a GATE value.
+A lockfile cell also carries what its step acted on (``lock_context``: source,
+primitive, gate level, target, network, prior deployment) and credits only the
+implied ids that name LOCK (its anchor), so a refused write under a newer
+lockfile never discharges a success cell.
+
+Machine vocabulary that has no factor value here (``deps``/``outdated``
+reads, ``corrupt``/``symlink`` locks, the ``native`` kind) implies nothing.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from itertools import combinations
+
+from tests.lifecycle.generator.factors import ON, ORDER, TRIPLES, cell_id
+
+SOURCE_SPINE = (
+    "tests/lifecycle/machines/test_m_source.py::test_source_spine_covers_every_form_and_op"
+)
+SCOPE_LOCK_SPINE = (
+    "tests/lifecycle/machines/test_m_scope_lock.py::"
+    "test_scope_lock_spine_refuses_every_write_and_keeps_reads[{scope}]"
+)
+# M-SOURCE dependency form -> SRC (the world marketplace is a git repository).
+FORM_SOURCES: Mapping[str, str] = {
+    "shorthand": "git",
+    "git-object": "git",
+    "local-path": "local-path",
+    "marketplace-object": "marketplace-git",
+    "plugin-at-mkt": "marketplace-git",
+    "bundle": "local-bundle",
+    "native": "native-plugin",
+    "pkg-registry": "pkg-registry",
+    "mcp-registry": "mcp-registry",
+    "inline-mcp": "inline-mcp",
+    "local-mkt": "marketplace-local",
+    "file-mkt": "marketplace-file",
+}
+# M-SCOPE-LOCK op -> (OP, modifiers).
+LOCK_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "install": ("install", ()),
+    "install-frozen": ("install", ("FROZEN",)),
+    "update": ("update", ()),
+    "lock": ("lock", ()),
+    "prune": ("prune", ()),
+    "compile": ("compile", ()),
+    "add": ("install", ("SELECT",)),
+    "remove": ("uninstall", ("SELECT",)),
+    "audit": ("audit", ()),
+    "audit-ci": ("audit", ()),
+    "deny": ("approve-deny", ()),
+    "mcp-install": ("mcp-install", ()),
+    "bundle": ("bundle-install", ()),
+    "marketplace": ("marketplace", ()),
+}
+LOCK_STATES: Mapping[str, str] = {
+    "consistent": "consistent",
+    "newer": "newer-generator",
+    "stale": "stale",
+    "absent": "absent",
+}
+DRIFT_SPINE = (
+    "tests/lifecycle/machines/test_m_scope_lock.py::"
+    "test_scope_lock_drift_spine_credits_stale_absent_and_side_doors[{scope}]"
+)
+GATE_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[{scope}]"
+)
+GATE_BUNDLE_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
+)
+GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
+GATE_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+)
+# M-GATE matrix and side-door spine op -> (OP, modifiers).
+GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
+    "bundle": ("bundle-install", ()),
+    "pack": ("pack", ()),
+    "install": ("install", ()),
+    "install-frozen": ("install", ("FROZEN",)),
+    "update": ("update", ()),
+    "lock": ("lock", ()),
+    "audit": ("audit", ()),
+    "audit-ci": ("audit", ()),
+    "compile": ("compile", ()),
+    "prune": ("prune", ()),
+    "uninstall": ("uninstall", ()),
+    "approve": ("approve-deny", ()),
+    "deny": ("approve-deny", ()),
+    "mcp-install": ("mcp-install", ()),
+    "marketplace": ("marketplace", ()),
+}
+
+
+@dataclass(frozen=True)
+class MachineCell:
+    """One machine cell id, its witness node and the factor values it proves."""
+
+    id: str
+    witness: str
+    lane: str
+    assignment: Mapping[str, str]
+    tracking: str | None = None
+    # When set, only implied ids that name this factor are credited.
+    anchor: str | None = None
+
+
+def _source_assignment(key: str) -> dict[str, str] | None:
+    family, *parts = key.split("|")
+    if family == "X":
+        op, form, *contexts = parts
+        op = "bundle-install" if form == "bundle" and op == "install" else op
+        assignment = {"OP": op, "SRC": FORM_SOURCES[form]}
+        assignment.update(context.split("=", 1) for context in contexts)
+        return assignment
+    if family == "T3":
+        op, form, kind = parts
+        if kind == "native":
+            return None
+        op = "bundle-install" if form == "bundle" and op == "install" else op
+        return {"OP": op, "SRC": FORM_SOURCES[form], "PRIM": kind}
+    mode, op, form = parts
+    op = "bundle-install" if form == "bundle" and op == "install" else op
+    assignment = {"OP": op, "SRC": FORM_SOURCES[form]}
+    return {**assignment, "DRYRUN": ON} if mode == "dry-run" else assignment
+
+
+def _lock_assignment(key: str, *, context: bool = False) -> dict[str, str] | None:
+    from tests.lifecycle.machines.test_m_scope_lock import lock_context
+
+    _, op, scope, lock = key.split("|")
+    if op not in LOCK_OPS or lock not in LOCK_STATES:
+        return None
+    name, modifiers = LOCK_OPS[op]
+    return {
+        **(lock_context(op, lock) if context else {}),
+        "OP": name,
+        "SCOPE": scope,
+        "LOCK": LOCK_STATES[lock],
+        **dict.fromkeys(modifiers, ON),
+    }
+
+
+def _gate_assignment(key: str) -> dict[str, str]:
+    if key.startswith("rule|"):
+        return {}
+    _, op, prim, gate, scope, *_ = key.split("|")
+    name, flags = GATE_OPS[op]
+    return {"OP": name, "PRIM": prim, "GATE": gate, "SCOPE": scope, **dict.fromkeys(flags, ON)}
+
+
+def machine_cells() -> list[MachineCell]:
+    """Every machine cell id with a factor translation, sorted by id."""
+    from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
+    from tests.lifecycle.machines._gate_bin import bin_cells
+    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
+    from tests.lifecycle.machines._gate_matrix import matrix_cells
+    from tests.lifecycle.machines.test_m_scope_lock import drift_cells
+
+    cells: list[MachineCell] = []
+    known_source = test_m_source.KNOWN_CELLS_BY_ID
+    for key in sorted(test_m_source.rule_cells()):
+        known = known_source.get(key)
+        tracking = known.tracking if known else None
+        cells.append(MachineCell(key, SOURCE_SPINE, "T-2", {}, tracking))
+    source_cells = test_m_source.t3_cells() | test_m_source.t5_cells()
+    for key in sorted(source_cells | test_m_source.x_cells()):
+        assignment = _source_assignment(key)
+        if assignment:
+            known = known_source.get(key)
+            tracking = known.tracking if known else None
+            cells.append(MachineCell(key, SOURCE_SPINE, "T-2", assignment, tracking))
+    spines = ((SCOPE_LOCK_SPINE, test_m_scope_lock.t4_cells), (DRIFT_SPINE, drift_cells))
+    for scope in test_m_scope_lock.SCOPES:
+        for spine, enumerate_cells in spines:
+            witness = spine.format(scope=scope)
+            for key in sorted(enumerate_cells(scope)):
+                known = test_m_scope_lock.KNOWN_T4.get(key)
+                tracking = known.tracking if known else None
+                assignment = _lock_assignment(key)
+                if assignment:
+                    cells.append(MachineCell(key, witness, "T-3", assignment, tracking))
+                    # The step's context, credited only on the ids that name LOCK.
+                    context = _lock_assignment(key, context=True) or {}
+                    cells.append(MachineCell(key, witness, "T-3", context, tracking, "LOCK"))
+    side_doors = (
+        (GATE_BUNDLE_SPINE, bundle_cells()),
+        (GATE_PACK_SPINE, pack_cells()),
+        (GATE_BIN_SPINE, bin_cells()),
+    )
+    for witness, keys in side_doors:
+        for key in sorted(keys):
+            assignment = _gate_assignment(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+    for scope in test_m_gate.MATRIX_SCOPES:
+        for key in sorted(matrix_cells(scope)):
+            witness = GATE_SPINE.format(scope=scope)
+            assignment = _gate_assignment(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+    return cells
+
+
+def implied(assignment: Mapping[str, str]) -> Iterator[str]:
+    """Pair and named-triple ids whose every value *assignment* fixes."""
+    names = [name for name in ORDER if name in assignment]
+    for first, second in combinations(names, 2):
+        yield cell_id("pair", {first: assignment[first], second: assignment[second]})
+    for family, factors in TRIPLES.items():
+        if all(name in assignment for name in factors):
+            yield cell_id(family, {name: assignment[name] for name in factors})
+
+
+def credits(cell: MachineCell) -> Iterator[str]:
+    """Obligation ids a receipt of *cell* discharges.
+
+    A rule cell id (``rule|...``) is its own obligation and implies nothing
+    else; an anchored cell credits only the implied ids that name its anchor.
+    """
+    if cell.id.startswith("rule|"):
+        yield cell.id
+        return
+    for key in implied(cell.assignment):
+        if not cell.anchor or f"|{cell.anchor}=" in key:
+            yield key
+
+
+@dataclass(frozen=True)
+class Witness:
+    node: str
+    lane: str
+    credited_by: tuple[str, ...]
+    tracking: str | None = None
+
+
+def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
+    """Obligation id -> its machine witness (the first spine, by node, that implies it).
+
+    Receipts of passing machine ids discharge the obligation; when every
+    implying id of that spine is a strict known cell, the obligation is
+    known-failing with the first owning issue.
+    """
+    by_node: dict[str, dict[str, list[MachineCell]]] = {}
+    for cell in machine_cells():
+        for key in credits(cell):
+            if key in obligations:
+                by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
+    witnesses: dict[str, Witness] = {}
+    for key, nodes in sorted(by_node.items()):
+        node = sorted(nodes)[0]
+        cells = nodes[node]
+        passing = tuple(sorted(cell.id for cell in cells if cell.tracking is None))
+        if passing:
+            witnesses[key] = Witness(node, cells[0].lane, passing)
+        else:
+            issues = sorted(str(cell.tracking) for cell in cells)
+            witnesses[key] = Witness(
+                node, cells[0].lane, tuple(sorted(c.id for c in cells)), issues[0]
+            )
+    return witnesses
+
+
+# -- scenario witnesses ----------------------------------------------------------
+
+SCENARIO_MODULES = (
+    "test_cache_presence",
+    "test_concurrency",
+    "test_failure_phase",
+    "test_file_routing",
+    "test_graph_version",
+    "test_history_upgrade",
+    "test_mcp_write_receipts",
+    "test_network_offline",
+    "test_ownership_siblings",
+    "test_platform",
+    "test_policy_pairs",
+)
+
+
+def scenario_credits() -> list:
+    """Every ``Credit`` the scenario suites declare in their module ``CREDITS``."""
+    import importlib
+
+    found = []
+    for name in SCENARIO_MODULES:
+        module = importlib.import_module(f"tests.lifecycle.scenarios.{name}")
+        found.extend(getattr(module, "CREDITS", ()))
+    return found
+
+
+def scenario_witnesses(
+    obligations: Mapping[str, object], lanes: Mapping[str, str]
+) -> dict[str, Witness]:
+    """Obligation id -> its scenario witness, for ids in a scenario lane.
+
+    The first passing node (by node id) whose credited assignment implies the
+    id is its witness; when only strict known rows imply it, the obligation is
+    known-failing with the first owning issue. Scenario steps credit the id
+    itself (``tests/lifecycle/scenarios/_kit.py`` credit_step), so there are
+    no aliases.
+    """
+    from tests.lifecycle.scenarios._kit import SCENARIO_LANES
+
+    by_key: dict[str, list] = {}
+    for credit in scenario_credits():
+        for key in implied(credit.assignment):
+            if key in obligations and lanes.get(key) in SCENARIO_LANES:
+                by_key.setdefault(key, []).append(credit)
+    witnesses: dict[str, Witness] = {}
+    for key, found in sorted(by_key.items()):
+        passing = sorted(credit.node for credit in found if credit.tracking is None)
+        if passing:
+            witnesses[key] = Witness(passing[0], lanes[key], ())
+        else:
+            first = sorted(found, key=lambda credit: (credit.node, credit.tracking))[0]
+            witnesses[key] = Witness(first.node, lanes[key], (), first.tracking)
+    return witnesses

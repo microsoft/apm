@@ -29,11 +29,14 @@ from typing import ClassVar
 
 import pytest
 
+from apm_cli.deps.registry.extractor import HashMismatchError
 from apm_cli.deps.registry.resolver import (
     RegistryPackageResolver,
     RegistryResolutionError,
 )
 from apm_cli.models.dependency.reference import DependencyReference
+
+pytestmark = pytest.mark.component
 
 # ───────────────────────────────────────────────────────────────────────────
 # Test HTTP server scaffolding
@@ -246,7 +249,7 @@ class TestE2EErrorPaths:
         with _running_server(routes) as (host, port):
             base = f"http://{host}:{port}"
             resolver = RegistryPackageResolver({"corp": base})
-            with pytest.raises(Exception) as excinfo:
+            with pytest.raises(HashMismatchError) as excinfo:
                 resolver.download_package(_make_dep(), tmp_path / "p")
             # Either HashMismatchError directly or wrapped in RegistryResolutionError
             assert (
@@ -300,6 +303,7 @@ class TestE2EAuthHeader:
             resolver.download_package(_make_dep(), tmp_path / "x")
         assert "Authorization" not in seen_headers["versions"]
         assert "Authorization" not in seen_headers["download"]
+        assert (tmp_path / "x" / "apm.yml").is_file()
 
     def test_anonymous_when_no_env(self, tmp_path, monkeypatch):
         monkeypatch.delenv("APM_REGISTRY_TOKEN_CORP", raising=False)
@@ -327,3 +331,4 @@ class TestE2EAuthHeader:
             resolver = RegistryPackageResolver({"corp": base})
             resolver.download_package(_make_dep(), tmp_path / "x")
         assert "Authorization" not in seen_headers["versions"]
+        assert (tmp_path / "x" / "apm.yml").is_file()

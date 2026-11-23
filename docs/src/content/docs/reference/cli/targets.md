@@ -40,7 +40,7 @@ Invoking `apm targets` without arguments prints the resolved-target
 table.
 
 :::note[Planned]
-Subcommands such as `apm targets add` are reserved on the group for
+Subcommand names such as `add` are reserved on the group for
 future use. They are not implemented yet.
 :::
 
@@ -79,6 +79,9 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   kiro         inactive   needs .kiro/                             .kiro/
 ```
 
+When `targets:` is declared in `apm.yml`, each declared target shows
+`apm.yml` as its source.
+
 Machine-readable form:
 
 ```bash
@@ -102,7 +105,7 @@ match per target is enough to activate it.
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
 | `kiro` | `.kiro/` directory | `.kiro/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 
@@ -110,6 +113,10 @@ Notes:
   decide whether a marker is "real".
 - A `CLAUDE.md` written as documentation will still activate the
   `claude` target. Pin `targets:` in `apm.yml` to override.
+- A root `.mcp.json` is not a signal: Claude Code and Copilot both read it.
+- `vscode` is a deprecated alias of `copilot` and has no row of its own.
+  `intellij` is an IDE, not a target: APM never records it in `targets:`;
+  use `copilot` for GitHub Copilot in JetBrains IDEs.
 - If no signals are found and `apm.yml` declares no `targets:`,
   `apm targets` prints the full table with every row inactive and an
   info hint to create a harness config or declare `targets:`
@@ -126,4 +133,4 @@ Notes:
 - [`apm install`](../install/) -- uses the same target resolution to decide which harness configs to wire.
 - [`apm compile`](../compile/) -- compiles primitives for the targets shown here.
 - [Targets matrix](../../targets-matrix/) -- per-target output layout and feature support.
-- [Concepts: primitives and targets](../../../concepts/primitives-and-targets/)
+- [Concepts: primitives and targets](../../targets-matrix/)

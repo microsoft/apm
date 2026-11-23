@@ -44,6 +44,22 @@ class TestScriptRunner:
         )
         assert result == "codex exec --verbose --skip-git-repo-check"
 
+    def test_transform_documented_codex_exec_script_names_exec_once(self):
+        """The run.md script 'codex exec <flags> x.prompt.md' keeps one exec (#3994)."""
+        original = "codex exec --skip-git-repo-check hello-world.prompt.md"
+        result = self.script_runner._transform_runtime_command(
+            original, "hello-world.prompt.md", self.compiled_content, self.compiled_path
+        )
+        assert result == "codex exec --skip-git-repo-check"
+
+    def test_transform_llm_stdin_redirect_is_not_an_argument(self):
+        """'llm < x.prompt.md' passes the prompt, never a literal '<' (#3994)."""
+        original = "llm < hello-world.prompt.md"
+        result = self.script_runner._transform_runtime_command(
+            original, "hello-world.prompt.md", self.compiled_content, self.compiled_path
+        )
+        assert result == "llm"
+
     def test_transform_runtime_command_env_var_simple(self):
         """Test environment variable with simple codex command."""
         original = "DEBUG=true codex hello-world.prompt.md"
@@ -841,7 +857,7 @@ class TestExecuteRuntimeCommandResolution:
     def setup_method(self):
         self.runner = ScriptRunner()
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=r"C:\npm\copilot.cmd")
     def test_resolves_executable(self, mock_find_runtime, mock_run):
         """The executable should be resolved via find_runtime_binary on all platforms."""
@@ -855,7 +871,7 @@ class TestExecuteRuntimeCommandResolution:
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == r"C:\npm\copilot.cmd"
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     def test_keeps_original_when_find_returns_none(self, mock_find_runtime, mock_run):
         """If find_runtime_binary can't find it, keep the original name."""
@@ -866,7 +882,7 @@ class TestExecuteRuntimeCommandResolution:
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == "copilot"
 
-    @patch("apm_cli.core.script_runner.subprocess.run")
+    @patch("subprocess.run")
     @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     def test_resolves_on_non_windows(self, mock_find_runtime, mock_run):
         """find_runtime_binary should be called on all platforms, not just Windows."""

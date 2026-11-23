@@ -15,9 +15,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from ...core.command_logger import library_logger
 from ...mcp_transport import canonical_remote_transport
-from ...utils.console import _rich_error, _rich_success
 from ._remote_shapes import active_remote_shape, remote_shape_row, skip_unsupported_remote
+from .base import warn_unreadable_config_once
 from .copilot import CopilotClientAdapter
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class KiroClientAdapter(CopilotClientAdapter):
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Could not read %s: %s", config_path, exc)
+            warn_unreadable_config_once(logger, config_path, exc)
             return {}
 
     def update_config(self, config_updates: dict[str, dict[str, Any]]) -> bool | None:
@@ -107,7 +108,7 @@ class KiroClientAdapter(CopilotClientAdapter):
         if runtime_vars is None:
             runtime_vars = {}
 
-        raw = server_info.get("_raw_stdio")
+        raw = self._self_defined_stdio(server_info)
         if raw:
             config: dict[str, Any] = {"command": raw["command"]}
             if raw.get("cwd") is not None:
@@ -189,7 +190,7 @@ class KiroClientAdapter(CopilotClientAdapter):
     ) -> bool:
         """Configure an MCP server in Kiro's MCP config."""
         if not server_url:
-            _rich_error("server_url cannot be empty", symbol="error")
+            library_logger().error("server_url cannot be empty", symbol="error")
             return False
 
         if not self.user_scope and not self._get_kiro_root().is_dir():
@@ -215,12 +216,11 @@ class KiroClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if not enabled:
                 server_config["disabled"] = True
-            if self.update_config({config_key: server_config}) is False:
-                return False
-
-            _rich_success(f"Configured MCP server '{config_key}' for Kiro", symbol="success")
-            return True
+            # Integrator's install tree reports success once (#3994, #4089).
+            return self.update_config({config_key: server_config}) is not False
         except Exception as exc:
             logger.debug("Kiro MCP configuration failed: %s", exc)
-            _rich_error(f"Failed to configure MCP server '{config_key}' for Kiro", symbol="error")
+            library_logger().error(
+                f"Failed to configure MCP server '{config_key}' for Kiro", symbol="error"
+            )
             return False

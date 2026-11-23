@@ -7,7 +7,10 @@ sidebar:
 
 Start with [CONTRIBUTING.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md)
 for issue-first scope approval, PR eligibility, small corrections, private
-security reporting, and the transition for existing contributions.
+security reporting, and the transition for existing contributions. To list your
+organization, follow
+[Adding your organization to ADOPTERS.md](https://github.com/microsoft/apm/blob/main/CONTRIBUTING.md#adding-your-organization-to-adoptersmd):
+no issue or scope record needed.
 [GOVERNANCE.md](https://github.com/microsoft/apm/blob/main/GOVERNANCE.md) names
 the responsible human maintainers and explains decisions and responsibilities.
 The [public maintainer roster](https://github.com/microsoft/apm/blob/main/MAINTAINERS.md)
@@ -189,7 +192,7 @@ apm install --target claude
 
 The local exclusion avoids changing repository-wide ignore rules. This install
 also adds deploy paths to `apm.lock.yaml`; leave that local override uncommitted.
-Check the [target catalogue](../../concepts/primitives-and-targets/#target-catalogue)
+Check the [target catalogue](../../reference/targets-matrix/)
 for other targets; some write to more than one root.
 
 ## Testing
@@ -216,12 +219,20 @@ to force serial execution. The default selection in `pyproject.toml` excludes
 
 For performance changes, prefer deterministic operation-count regressions over
 wall-clock thresholds. Run the consolidated scan regressions with
-`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py`.
+`uv run --extra dev pytest -q tests/unit/test_performance_scan_regressions.py tests/integration/test_performance_scan_regressions.py`.
 They check deferred error-only imports, at most two indexed ZIP member lookups,
 and uninstall deduplication without comparing previously selected entries.
 Archive parsing and canonical dependency matching retain their existing costs.
 Deferring a direct import does not prove a cold-start speedup: other modules may
 still load the same dependency transitively.
+
+To measure end-to-end user journeys (install cold, warm and `--frozen`, update,
+compile, audit, pack) on realistic dependency trees and monorepos, use the
+seeded fixtures and the harness described in
+[`tests/fixtures/perf/README.md`](https://github.com/microsoft/apm/blob/main/tests/fixtures/perf/README.md).
+For example, `uv run python -m tests.benchmarks.journeys run --fixtures tree-10 --runs 1 --rtt 0`.
+The harness runs offline against a local mirror with an injectable round-trip
+time and counts requests per command.
 
 Without `uv`, use a standard Python venv and pip:
 
@@ -275,51 +286,61 @@ Gates only move upward. When actual coverage exceeds the gate by at least
 CI's coverage summaries include a "Lowest-coverage files" section, rendered by
 `scripts/coverage-summary.py`, to identify where new tests would help.
 
-### Running the bounded mutation pilot
+### Mutation testing owner modules
 
-The advisory mutation pilot covers five stable owners: dependency subset
-selection, update-plan construction, cached-policy serialization, canonical
-in-package link projection, and lockfile field normalization (the fail-closed
-`host_type`/`exec_status` normalizers, not the `@dataclass` reconstruction
-methods `to_dict`/`from_dict`/`to_dependency_ref` -- mutmut cannot mutate
-`@dataclass` methods; those are defended by PR #2246's manual mutation-break
-twins instead). It runs nightly or by manual workflow
-dispatch, not as required PR CI, and has a 20-minute hosted job budget.
+`scripts/run_mutation_pilot.py` mutation-tests canonical owner modules. Each
+owner names one source file, the functions to mutate and the unit-test seams
+that must kill them (`OWNERS`). The five original pilot owners (subset
+selection, update plans, policy serialization, link projection, lockfile
+normalization) are joined by the 0.37 owner moves: policy-outcome routing,
+executable trust context, install entry routing, install commit order,
+lockfile write authority, APM home resolution, egress routing and
+remediation advice (#4121). mutmut 3.6.0 cannot mutate a method of a
+`@dataclass` or any function with a decorator other than `staticmethod` or
+`classmethod`, so those owners cover the plain functions their decorated
+entry points call.
 
-Run the exact-function allowlist locally:
-
-```bash
-uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --output mutation-pilot-report.json
-```
-
-The command fails on new survivors, timeouts, suspicious results, unchecked
-mutants, and incomplete outcomes. It writes a sorted, timestamp-free JSON
-report even when survivor comparison fails. Pass `--reuse-cache` only when
-the allowlisted source, test seams, configuration, runner, and lockfile
-are unchanged.
-
-To inspect existing mutmut metadata without executing mutants:
+`.github/workflows/mutation-pilot.yml` runs nightly, or by manual dispatch,
+with one shard per owner. It is not required PR CI. Run one owner locally:
 
 ```bash
 uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --report-only --output mutation-pilot-report.json
+  --owner egress-route-policy --negative-control --output mutation-report.json
 ```
 
-The reviewed survivor allowlist lives in
-[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json).
-Do not update it to make a run green. Review every surviving diff with
-`mutmut show` and add behavioral tests for real contract gaps.
-Mutant numbers can shift when a function changes. Compare the old and new
-diffs before replacing an accepted ID; a renamed survivor is not a newly
-killed behavior. Add missing coverage to the owner's configured test seam,
-not only to tests outside the pilot.
-Use `--update-baseline` only when the baseline change itself has been reviewed:
+Omit `--owner` to run every owner. A run fails on a mutant that survives
+without being recorded, on a kill rate below the owner's floor, and on
+timeouts, suspicious results, unchecked mutants or other incomplete outcomes.
+`--negative-control` also proves that losing one killed mutant would fail
+the floor. The report is sorted and timestamp-free, and it is written even
+when the comparison fails. Use `--report-only` to read existing mutmut
+metadata, and `--reuse-cache` only when the owner source, seams,
+configuration, runner and lockfile are unchanged.
+
+[`tests/mutation/baseline.json`](https://github.com/microsoft/apm/blob/main/tests/mutation/baseline.json)
+records, per owner, its `kill_rate_floor` and its survivors:
+
+- `equivalent_survivors` maps each mutant no test can kill to the reason it
+  behaves like the original code.
+- `accepted_survivors` is an unexplained allowlist kept only for the five
+  original pilot owners; every other owner must leave it empty.
+
+Do not update the baseline to make a run green. Review each surviving diff
+with `mutmut show <name>`, then add a behavioral test to the owner's seam, or
+record the mutant as equivalent with its reason. Seams must not `chdir`: mutmut
+resolves its source paths against the process working directory, so patch
+`Path.cwd` and `HOME` instead. Mutant numbers shift when a function changes;
+compare old and new diffs before replacing an ID. `--update-baseline` runs
+every owner, keeps recorded reasons, refuses a new owner's survivor that has
+neither a test nor a reason, and resets each floor to the measured rate:
 
 ```bash
 uv run --frozen --extra dev python scripts/run_mutation_pilot.py \
-  --update-baseline --output mutation-pilot-report.json
+  --update-baseline --output mutation-report.json
 ```
+
+Other fault-injection harnesses (#4514) reuse `run_owners()` with their own
+`Owner` entries.
 
 ## Coding Style
 
@@ -332,10 +353,41 @@ defines the complete enforced step list; mirror it before pushing or claiming
 green CI.
 
 Ruff lint and format are only part of that job. It also checks YAML I/O,
-file length, portable relative paths, duplication, auth-protocol boundaries,
-and architecture boundaries. Its Python scope includes the architecture-linter
+file length, portable relative paths, duplication, complexity, auth-protocol
+boundaries, and architecture boundaries. Its Python scope includes the architecture-linter
 scripts as well as `src/` and `tests/`. CI checks the PR merge result, so changes
 on `main` can introduce failures even when the branch alone passes.
+
+### Complexity ratchet
+
+New and changed functions must meet the Stage 2 limits: at most 120
+statements, 40 branches, McCabe complexity 35, 12 arguments and 8 returns.
+Functions that already exceeded them are listed in
+[`tests/quality/complexity_baseline.json`](https://github.com/microsoft/apm/blob/main/tests/quality/complexity_baseline.json),
+keyed by file and function qualname. The list can only shrink.
+
+```bash
+git fetch origin main
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --base-ref origin/main
+```
+
+The check fails when:
+
+- a function outside the baseline exceeds a limit (`# noqa` does not exempt it);
+- the baseline gains an entry compared with the base branch (needs `--base-ref`,
+  which CI always passes);
+- a listed function is now within limits but still in the baseline.
+
+Fix a new violation by splitting the function, not by editing the baseline.
+Renaming a grandfathered function, or moving it to another file or class,
+counts as new code. After you bring a grandfathered function within limits,
+prune its entry:
+
+```bash
+uv run --frozen --extra dev python scripts/check_complexity_ratchet.py --update-baseline
+```
+
+`--update-baseline` only removes entries; it refuses to add new ones.
 
 ### Architecture guardrails
 
@@ -364,6 +416,18 @@ bash scripts/lint-architecture-boundaries.sh
 
 The check fails closed when metadata is malformed, missing, or not listed in the
 index.
+
+Every module under `src/apm_cli/` must match one owner's `selectors` or appear in
+`.apm/architecture/unowned-modules.json`. That list only shrinks: a new module
+needs an owner, and when you give a listed module an owner, remove its entry and
+lower `UNOWNED_MODULE_CEILING` in
+`scripts/architecture_linter/checks/registry_module_ownership.py` to match.
+
+Every CLI command must be classified in
+`scripts/architecture_linter/checks/install_lifecycle_serialization.py`. A command
+that writes lifecycle state uses `@serialized_lifecycle` (or its `_unless` /
+`_when` variants) and is listed in `SERIALIZED_LIFECYCLE_ROUTES`. A command that
+writes no lifecycle state is listed as exempt, with the reason.
 
 `InstallTransaction` owns one acquisition of the shared lifecycle `FileLock`.
 Commit, rollback, and context exit are the normal release paths; explicit release
@@ -489,8 +553,9 @@ other user-facing strings. The CLI accepts both forms on input. Persist flag
 state only in `~/.apm/config.json` through `update_config`.
 
 When a flag graduates to the default, remove its gate and `FLAGS` entry in the
-same PR. Add a `CHANGELOG.md` entry under `Changed`, with a migration note if
-the previous default differed.
+same PR. Add one changelog fragment: `changelog.d/<pr>.changed.md`, or, if users
+must act because the previous default differed, only
+`changelog.d/<pr>.breaking-changes-and-upgrade-notes.md` with the migration.
 
 ## Adding or changing a normative requirement (OpenAPM v0.1)
 
@@ -503,14 +568,24 @@ coupled edits in the same PR:
 2. **Manifest:** update
    `docs/public/specs/manifests/openapm-v0.1.requirements.yml`
    to remain a byte-equivalent projection of the canonical anchors.
-3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test under
-   `tests/spec_conformance/`. If a real assertion is not yet possible, call
+3. **Test:** add or extend a `@pytest.mark.req("req-XXX")` test. The marker
+   binds from any test under `tests/` (an installed-CLI test in
+   `tests/integration/` counts); `tests/spec_conformance/` holds the
+   requirement-specific ones. If a real assertion is not yet possible, call
    `waive("...")` from `_helpers.py` with a one-line rationale. The waiver
    appears in `CONFORMANCE.md` as visible debt, not test coverage.
+   Only a behavioral test counts as coverage: one that reaches `apm_cli`
+   (not its constants or YAML helpers), `tests.integration`, `tests.unit` or
+   the CLI runner `tests.utils.apm_lifecycle_runner`, or takes the
+   `apm_binary_path` fixture. A requirement whose tests only assert spec text or
+   fixture shape is reported `text-only` (rule:
+   `tests/spec_conformance/_test_kind.py`).
 
-Regenerate the conformance statement after these edits:
+Regenerate the conformance statement after these edits (the full collect-only
+run over `tests/` writes the coverage map):
 
 ```bash
+uv run --extra dev pytest tests --collect-only -q -p no:xdist
 uv run --extra dev python -m tests.spec_conformance.gen_statement
 ```
 

@@ -1,0 +1,23 @@
+{
+  "issue": 3994,
+  "summary": "Cold restore and edited deployment failure checks include byte-specific transactional assertions.",
+  "failure_modes": [
+    "idempotency",
+    "reference",
+    "transaction"
+  ],
+  "properties": [
+    "idempotency.byte_stable",
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_clone_restore_is_idempotent_across_targets",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_clone_restores_missing_files_and_refuses_edited_skill",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_update_replaces_adds_and_removes_then_converges",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_cold_update_with_edited_skill_is_all_or_nothing",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_edit_frozen_audit_revert_prune_uninstall_chain",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_global_cold_install_and_update",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_lockfile_tamper_fails_closed_without_writes",
+    "tests/integration/test_cold_restore_edit_audit_chain_lifecycle.py::test_uninstall_after_apm_home_wipe_keeps_user_files"
+  ]
+}

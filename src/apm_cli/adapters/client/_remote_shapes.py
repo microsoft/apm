@@ -26,13 +26,13 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from ...core.command_logger import library_logger
 from ...mcp_transport import (
     CANONICAL_REMOTE_TRANSPORTS,
     TRANSPORT_SSE,
     TRANSPORT_STREAMABLE_HTTP,
     canonical_remote_transport,
 )
-from ...utils.console import _rich_warning
 
 
 class _Unsupported:
@@ -279,6 +279,12 @@ UNVERIFIED_REMOTE_SHAPES: frozenset[str] = frozenset(
 )
 
 
+def harness_label(runtime: str) -> str:
+    """Product name of a runtime for user-facing output ("OpenCode", "VS Code")."""
+    row = REMOTE_SHAPES.get(runtime)
+    return row.label if row is not None else runtime.title()
+
+
 def remote_shape_row(runtime: str) -> RemoteShape:
     """Return the row an adapter class binds in its own body."""
     return REMOTE_SHAPES[runtime]
@@ -364,7 +370,7 @@ def skip_unsupported_remote(
     if adapter._comparison_render_depth:
         raise UnsupportedRemoteTransportError(message)
     if warn is None:
-        _rich_warning(message, symbol="warning")
+        library_logger().warning(message, symbol="warning")
     else:
         warn(message)
 

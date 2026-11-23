@@ -30,6 +30,8 @@ from apm_cli.marketplace.models import (
 from apm_cli.marketplace.resolver import resolve_marketplace_plugin
 from apm_cli.models.apm_package import DependencyReference
 
+pytestmark = pytest.mark.unit
+
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 

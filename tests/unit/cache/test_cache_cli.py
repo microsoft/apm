@@ -9,6 +9,8 @@ from click.testing import CliRunner
 
 from apm_cli.commands.cache import cache
 
+pytestmark = pytest.mark.component
+
 
 @pytest.fixture
 def runner() -> CliRunner:

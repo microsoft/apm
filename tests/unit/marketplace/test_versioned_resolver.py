@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.marketplace.errors import MarketplaceError
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -23,6 +24,8 @@ from apm_cli.marketplace.resolver import (
     resolve_marketplace_plugin,
     resolve_plugin_source,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -207,7 +210,7 @@ class TestResolveMarketplacePlugin:
                 side_effect=_fake_resolve,
             ),
             patch("apm_cli.marketplace.version_pins.check_ref_pin", return_value=None),
-            patch("apm_cli.marketplace.version_pins.record_ref_pin"),
+            patch("apm_cli.marketplace.version_pins.stage_ref_pin"),
             patch(
                 "apm_cli.marketplace.shadow_detector.detect_shadows",
                 return_value=[],
@@ -269,8 +272,8 @@ class TestCanonicalString:
 class TestWarningHandler:
     """Verify resolve_marketplace_plugin routes security warnings to handler."""
 
-    def test_immutability_warning_via_handler(self):
-        """Ref-swap warning goes through warning_handler, not stdlib."""
+    def test_ref_swap_is_refused_not_warned(self):
+        """A ref that contradicts the recorded pin raises; nothing is warned."""
         plugin = _make_plugin()
         manifest = _make_manifest(plugin)
         source = _make_source()
@@ -290,9 +293,9 @@ class TestWarningHandler:
                 "apm_cli.marketplace.version_pins.check_ref_pin",
                 return_value="old-ref-abc",  # pretend ref changed
             ),
-            patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
-            ),
+            pytest.raises(
+                MarketplaceError, match="ref swap attack; refusing to install"
+            ) as refusal,
         ):
             resolve_marketplace_plugin(
                 "my-plugin",
@@ -300,11 +303,9 @@ class TestWarningHandler:
                 warning_handler=captured.append,
             )
 
-        # Exactly one immutability warning
-        assert len(captured) == 1
-        assert "ref changed" in captured[0]
-        assert "ref swap attack" in captured[0]
-        assert "my-plugin" in captured[0]
+        assert "was 'old-ref-abc'" in str(refusal.value)
+        assert "my-plugin" in str(refusal.value)
+        assert captured == []
 
     def test_shadow_warning_via_handler(self):
         """Shadow detection warning goes through warning_handler."""
@@ -335,7 +336,7 @@ class TestWarningHandler:
                 return_value=None,
             ),
             patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
+                "apm_cli.marketplace.version_pins.stage_ref_pin",
             ),
         ):
             resolve_marketplace_plugin(
@@ -355,6 +356,8 @@ class TestWarningHandler:
         plugin = _make_plugin()
         manifest = _make_manifest(plugin)
         source = _make_source()
+        shadow = MagicMock()
+        shadow.marketplace_name = "evil-mkt"
 
         with (
             patch(
@@ -366,11 +369,12 @@ class TestWarningHandler:
                 return_value=manifest,
             ),
             patch(
-                "apm_cli.marketplace.version_pins.check_ref_pin",
-                return_value="old-ref",
+                "apm_cli.marketplace.shadow_detector.detect_shadows",
+                return_value=[shadow],
             ),
             patch(
-                "apm_cli.marketplace.version_pins.record_ref_pin",
+                "apm_cli.marketplace.version_pins.check_ref_pin",
+                return_value=None,
             ),
             caplog.at_level(logging.WARNING, logger="apm_cli.marketplace.resolver"),
         ):
@@ -382,4 +386,4 @@ class TestWarningHandler:
 
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) >= 1
-        assert "ref changed" in warnings[0].message
+        assert "evil-mkt" in warnings[0].message

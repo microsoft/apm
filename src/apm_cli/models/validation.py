@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from ..agent_plugins.errors import AgentPluginError
 from ..agent_plugins.loader import detect_agent_plugin
-from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
+from ..constants import APM_DIR, SKILL_MD_FILENAME
 
 if TYPE_CHECKING:
     from ..agent_plugins import AgentPlugin, AgentPluginDetection
@@ -300,8 +300,9 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
 
     Used by ``_validate_apm_package_with_yml`` to accept a dep-only
     ``apm.yml`` (no ``.apm/`` directory) as a valid curated aggregator
-    (#1094). Any non-empty ``apm`` or ``mcp`` list under ``dependencies``
-    OR ``devDependencies`` qualifies. Tolerant of malformed YAML /
+    (#1094). Any non-empty ``apm``, ``mcp`` or ``lsp`` list under
+    ``dependencies`` OR ``devDependencies`` qualifies, so an LSP-only
+    package is accepted from every source kind (#4214, #4257). Tolerant of malformed YAML /
     missing keys: returns False on any parse problem so callers fall
     back to the legacy "missing .apm/" diagnostic instead of silently
     accepting a malformed manifest.
@@ -318,13 +319,13 @@ def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:
     def _has_listed_deps(block: object) -> bool:
         if not isinstance(block, dict):
             return False
-        # Schema requires `apm` and `mcp` to be lists of strings or dicts
+        # Schema requires `apm`, `mcp` and `lsp` to be lists of strings or dicts
         # (see APMPackage._parse_dependency_dict). Non-list values, or
         # lists with no parseable entries, are malformed; treat them as
         # "no declared dependencies" so the caller falls through to the
         # legacy "missing .apm/" diagnostic instead of silently accepting
         # a malformed manifest.
-        for key in ("apm", "mcp"):
+        for key in ("apm", "mcp", "lsp"):
             value = block.get(key)
             if isinstance(value, list) and any(isinstance(entry, (str, dict)) for entry in value):
                 return True
@@ -341,6 +342,7 @@ def validate_apm_package(
     source_path: Path | None = None,
     agent_plugin_detection: AgentPluginDetection | None = None,
     read_only: bool = False,
+    create_config: bool | None = None,
 ) -> ValidationResult:
     """Validate that a directory contains a valid APM package or Claude Skill.
 
@@ -356,10 +358,15 @@ def validate_apm_package(
     Args:
         package_path: Path to the directory to validate
         read_only: Reject formats requiring normalization and avoid config creation.
+        create_config: Whether a missing user config may be created; defaults
+            to ``not read_only``.
 
     Returns:
         ValidationResult: Validation results with any errors/warnings
     """
+    from apm_cli.core.scope import manifest_file
+
+    config_writable = (not read_only) if create_config is None else create_config
     result = ValidationResult()
 
     # Check if directory exists
@@ -396,7 +403,7 @@ def validate_apm_package(
         # Two sub-cases of INVALID:
         # 1. apm.yml present but no .apm/ directory (or .apm is a file)
         # 2. Nothing recognizable at all
-        apm_yml_path = package_path / APM_YML_FILENAME
+        apm_yml_path = manifest_file(package_path)
         if apm_yml_path.exists():
             apm_path = package_path / APM_DIR
             if apm_path.exists() and not apm_path.is_dir():
@@ -432,7 +439,7 @@ def validate_apm_package(
             result,
             source_path=source_path,
             detection=native_detection,
-            create_config=not read_only,
+            create_config=config_writable,
         )
 
     # Handle Claude Skills (no apm.yml) - auto-generate minimal apm.yml
@@ -460,11 +467,11 @@ def validate_apm_package(
     # Handle Skill Bundles (nested skills/<name>/SKILL.md)
     if result.package_type == PackageType.SKILL_BUNDLE:
         return _validate_skill_bundle(
-            package_path, result, source_path=source_path, create_config=not read_only
+            package_path, result, source_path=source_path, create_config=config_writable
         )
 
     # Standard APM package or HYBRID validation (has apm.yml)
-    apm_yml_path = package_path / APM_YML_FILENAME
+    apm_yml_path = manifest_file(package_path)
 
     # HYBRID packages: if .apm/ exists, fall through to standard validation
     # (back-compat for packages that ship both .apm/ primitives AND SKILL.md).
@@ -475,7 +482,7 @@ def validate_apm_package(
             apm_yml_path,
             result,
             source_path=source_path,
-            create_config=not read_only,
+            create_config=config_writable,
         )
 
     return _validate_apm_package_with_yml(
@@ -483,7 +490,7 @@ def validate_apm_package(
         apm_yml_path,
         result,
         source_path=source_path,
-        create_config=not read_only,
+        create_config=config_writable,
     )
 
 
@@ -655,7 +662,9 @@ def _validate_skill_bundle(
     from .apm_package import APMPackage
 
     skills_dir = package_path / "skills"
-    apm_yml_path = package_path / APM_YML_FILENAME
+    from apm_cli.core.scope import manifest_file
+
+    apm_yml_path = manifest_file(package_path)
 
     # Enumerate nested skill dirs
     nested_dirs = [

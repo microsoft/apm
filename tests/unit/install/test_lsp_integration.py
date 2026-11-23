@@ -22,7 +22,10 @@ from apm_cli.install.lsp.integration import (
     run_lsp_integration,
     run_owned_lsp_integration,
 )
+from apm_cli.install.service import FrozenDisposition
+from apm_cli.integration.lsp_integrator import LspInstallRecord
 from apm_cli.models.dependency.lsp import LSPDependency
+from apm_cli.security.executables import AUTHORIZED_GATE_DISABLED, authorized_exec_map
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -299,6 +302,55 @@ class TestRunLspIntegration:
         assert "bundle:vendor/tool" in str(exc_info.value)
         assert "--force does not transfer ownership" in str(exc_info.value)
 
+    @pytest.mark.parametrize(
+        ("wrote", "options", "refused"),
+        [
+            (False, {}, True),
+            (True, {}, False),
+            # Uninstall reconciles survivors in memory and must finish its cleanup.
+            (False, {"persist": False}, False),
+            # An MCP write this command staged must stay recorded.
+            (False, {"refuse_unwritten_conflict": False}, False),
+        ],
+        ids=["nothing-written", "others-written", "uninstall", "mcp-written"],
+    )
+    @patch(_PATCH_TARGET)
+    def test_user_entry_conflict_refuses_only_an_install_that_wrote_nothing(
+        self, mock_integrator, tmp_path, wrote, options, refused
+    ):
+        """#4697: a conflict that wrote nothing refuses the commit; else it records (#4628)."""
+        from apm_cli.deps.lockfile_write_authority import commits_on_failure
+        from apm_cli.install.errors import LSPUserEntryConflictError
+
+        package = MagicMock()
+        package.get_lsp_dependencies.return_value = [_make_dep("mine")]
+        mock_integrator.resolve_target_runtimes.return_value = ["copilot"]
+        mock_integrator.get_server_names.return_value = {"mine"}
+        mock_integrator.collect_transitive.return_value = []
+        mock_integrator.install.side_effect = LSPUserEntryConflictError(
+            "LSP installation incomplete: mine (copilot)",
+            preserved={"copilot": {"mine"}},
+            wrote_servers=wrote,
+        )
+        modules = tmp_path / "apm_modules"
+        modules.mkdir()
+
+        with pytest.raises(LSPUserEntryConflictError) as exc_info:
+            run_lsp_integration(
+                apm_package=package,
+                apm_modules_path=modules,
+                lock_path=tmp_path / "apm.lock.yaml",
+                existing_lock=None,
+                project_root=tmp_path,
+                user_scope=False,
+                should_install=True,
+                logger=_mock_logger(),
+                **options,
+            )
+
+        assert commits_on_failure(exc_info.value) is not refused
+        assert mock_integrator.update_lockfile.called is not refused
+
     @patch(_PATCH_TARGET)
     def test_filters_unapproved_lsp_dependencies(self, mock_integrator, tmp_path):
         """An explicit executable gate blocks LSP servers until approved."""
@@ -370,6 +422,7 @@ class TestRunLspIntegration:
             fail_on_write_error=False,
             managed_target_servers={},
             force=False,
+            record=LspInstallRecord(locked_configs={}),
         )
 
     @patch(_PATCH_TARGET)
@@ -484,6 +537,7 @@ def test_mcp_only_service_install_does_not_reconcile_lsp(tmp_path) -> None:
             diagnostics=None,
             explicit_target=["claude"],
             target_decision=target_decision,
+            frozen_disposition=FrozenDisposition(replay=False),
         )
 
     assert run_lsp.call_args.kwargs["should_install"] is False
@@ -947,7 +1001,10 @@ class TestLspCapabilityPreflight:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
         with (
-            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            patch(
+                "apm_cli.install.template.effective_allow_map",
+                return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+            ),
             pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
         ):
             preflight_lsp_targets(self._ctx(tmp_path))
@@ -955,7 +1012,10 @@ class TestLspCapabilityPreflight:
     def test_capable_target_passes(self, tmp_path) -> None:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
-        with patch("apm_cli.install.template.effective_allow_map", return_value=None):
+        with patch(
+            "apm_cli.install.template.effective_allow_map",
+            return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+        ):
             preflight_lsp_targets(self._ctx(tmp_path, target="opencode"))
 
     def test_excluded_capable_target_fails_like_the_service_phase(self, tmp_path) -> None:
@@ -963,7 +1023,10 @@ class TestLspCapabilityPreflight:
         from apm_cli.install.lsp.integration import preflight_lsp_targets
 
         with (
-            patch("apm_cli.install.template.effective_allow_map", return_value=None),
+            patch(
+                "apm_cli.install.template.effective_allow_map",
+                return_value=authorized_exec_map(AUTHORIZED_GATE_DISABLED),
+            ),
             pytest.raises(RequiredIntegrationError, match="no effective target supports LSP"),
         ):
             preflight_lsp_targets(self._ctx(tmp_path, target="opencode", exclude="opencode"))
@@ -1020,6 +1083,7 @@ class TestLspCapabilityPreflight:
                 diagnostics=None,
                 explicit_target="cursor",
                 target_decision=EffectiveTargetDecision("cursor", "--target flag"),
+                frozen_disposition=FrozenDisposition(replay=False),
             )
 
         run_mcp.assert_not_called()

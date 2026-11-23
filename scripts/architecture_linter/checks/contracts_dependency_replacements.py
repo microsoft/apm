@@ -123,7 +123,7 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
         PLAN_INPUTS: (
             "plan = build_resolved_update_plan(ctx, lockfile)",
             "from apm_cli.install.plan import build_update_plan",
-            "from apm_cli.utils.content_hash import compute_package_hash",
+            "from apm_cli.install.source_helpers import package_digests, record_package_digests",
             "dependency.replacement is not None and dependency.is_local",
             "resolved_content_hashes=ctx.package_hashes",
         ),

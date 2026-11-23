@@ -22,6 +22,7 @@ from .schema import (
     ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
+    MarketplacePolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
@@ -72,6 +73,9 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
         registry_source=_merge_registry_source(parent.registry_source, child.registry_source),
+        marketplace=MarketplacePolicy(
+            allow=_intersect_allow(parent.marketplace.allow, child.marketplace.allow)
+        ),
         security=_merge_security(parent.security, child.security),
         bin_deploy=_merge_bin_deploy(parent.bin_deploy, child.bin_deploy),
         executables=_merge_executables(parent.executables, child.executables),
@@ -242,22 +246,31 @@ def _merge_compilation(parent: CompilationPolicy, child: CompilationPolicy) -> C
     )
 
 
+def _merge_content_types(parent: dict | None, child: dict | None) -> dict | None:
+    """Tighten-only merge of ``manifest.content_types``, by kind.
+
+    ``instruction`` and ``instructions`` agree (the parent's spelling is kept);
+    an absent allow stays absent (unrestricted), distinct from an explicit [].
+    """
+    from .content_types_check import content_kind
+
+    if parent is None and child is None:
+        return None
+    child_allow = _extract_ct_allow(child)
+    merged = _extract_ct_allow(parent)
+    if merged is None:
+        merged = child_allow
+    elif child_allow is not None:
+        child_kinds = {content_kind(item) for item in child_allow}
+        merged = tuple(item for item in merged if content_kind(item) in child_kinds)
+    return {"allow": list(merged)} if merged is not None else {}
+
+
 def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPolicy:
-    child_ct_allow = _extract_ct_allow(child.content_types)
-    parent_ct_allow = _extract_ct_allow(parent.content_types)
-    merged_ct_allow = _intersect_allow(parent_ct_allow, child_ct_allow)
-
-    # Preserve content_types structure only if at least one side defined it.
-    merged_content_types: dict | None = None
-    if parent.content_types is not None or child.content_types is not None:
-        merged_content_types = {
-            "allow": list(merged_ct_allow) if merged_ct_allow is not None else []
-        }
-
     return ManifestPolicy(
         required_fields=_union(parent.required_fields, child.required_fields),
         scripts=_escalate(_SCRIPTS_LEVELS, parent.scripts, child.scripts),
-        content_types=merged_content_types,
+        content_types=_merge_content_types(parent.content_types, child.content_types),
         require_explicit_includes=parent.require_explicit_includes
         or child.require_explicit_includes,
     )

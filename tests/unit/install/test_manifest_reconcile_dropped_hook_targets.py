@@ -19,8 +19,12 @@ test_hook_target_contraction_reconciliation.py`).
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.install.manifest_reconcile import reconcile_dropped_merge_hook_targets
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+pytestmark = pytest.mark.component
 
 _HOOK_INTEGRATOR_RECONCILE_PATH = (
     "apm_cli.integration.hook_integrator.HookIntegrator.reconcile_dropped_targets"

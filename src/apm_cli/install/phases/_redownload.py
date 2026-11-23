@@ -40,4 +40,5 @@ def _should_skip_redownload(locked_dep: Any, install_path: Path) -> bool:
         install_path,
         locked_dep.content_hash,
         getattr(locked_dep, "carried_licenses", ()) or (),
+        framed=getattr(locked_dep, "content_hash_framed", True),
     )

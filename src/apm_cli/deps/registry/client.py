@@ -30,6 +30,8 @@ from typing import Any
 
 import requests
 
+from ...utils.credential_rendering import redact_url_userinfo
+from ...utils.diagnostics import printable_ascii_text
 from ...utils.http_credentials import (
     REFUSED_HOP_LIMIT,
     REFUSED_METHOD_CHANGE,
@@ -315,7 +317,7 @@ class RegistryClient:
             ) from exc
         except requests.RequestException as exc:
             raise RegistryError(
-                f"transport error talking to registry: {exc}",
+                f"transport error talking to registry: {printable_ascii_text(str(exc))}",
                 url=url,
             ) from exc
 
@@ -473,6 +475,7 @@ def _format_error(status: int, problem: Mapping[str, Any], url: str) -> str:
     title = problem.get("title") if isinstance(problem, Mapping) else None
     detail = problem.get("detail") if isinstance(problem, Mapping) else None
     body = " - ".join(part for part in (title, detail) if part)
+    url = redact_url_userinfo(url)
     if body:
         return f"registry HTTP {status} from {url}: {body}"
     return f"registry HTTP {status} from {url}"

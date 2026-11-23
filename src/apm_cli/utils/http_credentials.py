@@ -37,6 +37,7 @@ MAX_REDIRECT_HOPS = 3
 # Refusal reasons carried by RedirectRefusedError.reason.
 REFUSED_OUTSIDE_ORIGIN = "outside-origin"
 REFUSED_OUTSIDE_BASE_PATH = "outside-base-path"
+REFUSED_OUTSIDE_QUERY = "outside-query"
 REFUSED_HTTPS_DOWNGRADE = "https-downgrade"
 REFUSED_USERINFO = "userinfo"
 REFUSED_UNSUPPORTED_LOCATION = "unsupported-location"
@@ -46,6 +47,7 @@ REFUSED_HOP_LIMIT = "hop-limit"
 _REFUSAL_TEXT: Mapping[str, str] = {
     REFUSED_OUTSIDE_ORIGIN: "the target is on another origin",
     REFUSED_OUTSIDE_BASE_PATH: "the target is outside the configured base path",
+    REFUSED_OUTSIDE_QUERY: "the target selects a different resource (query)",
     REFUSED_HTTPS_DOWNGRADE: "the target downgrades HTTPS to HTTP",
     REFUSED_USERINFO: "the target embeds credentials",
     REFUSED_UNSUPPORTED_LOCATION: "the target is not a valid HTTP(S) URL",
@@ -73,8 +75,33 @@ def strip_cross_origin_credential_headers(
         prepared_request.headers.pop(name, None)
 
 
+class _NoAmbientCredentials(requests.auth.AuthBase):
+    """Explicit no-op auth so ``requests`` never loads ambient netrc credentials.
+
+    ``Session.prepare_request`` consults ``.netrc`` only when no ``auth`` is
+    given. Passing this keeps the caller's credential header authoritative
+    while proxy and CA-bundle environment settings stay in effect.
+    """
+
+    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
+        return request
+
+
+_NO_AMBIENT_CREDENTIALS = _NoAmbientCredentials()
+
+
 class CredentialScopedSession(requests.Session):
-    """Requests session whose credential headers never cross origins."""
+    """Requests session whose credential headers never cross origins.
+
+    ``ambient_credentials=False`` also keeps ``requests`` from attaching
+    ``.netrc`` credentials, for clients that send only the credentials they
+    were given (the MCP registry client).
+    """
+
+    def __init__(self, *, ambient_credentials: bool = True) -> None:
+        super().__init__()
+        if not ambient_credentials:
+            self.auth = _NO_AMBIENT_CREDENTIALS
 
     def rebuild_auth(
         self,
@@ -83,6 +110,8 @@ class CredentialScopedSession(requests.Session):
     ) -> None:
         """Strip every credential header across origins, then apply defaults."""
         strip_cross_origin_credential_headers(self, prepared_request, response)
+        if self.auth is _NO_AMBIENT_CREDENTIALS:
+            return  # requests would re-read .netrc for the redirect target here.
         super().rebuild_auth(prepared_request, response)
 
 
@@ -105,21 +134,6 @@ class RedirectRefusedError(requests.RequestException):
         super().__init__(f"redirect from {origin} refused: {detail}", response=response)
         self.reason = reason
         self.origin = origin
-
-
-class _NoAmbientCredentials(requests.auth.AuthBase):
-    """Explicit no-op auth so ``requests`` never loads ambient netrc credentials.
-
-    ``Session.prepare_request`` consults ``.netrc`` only when no ``auth`` is
-    given. Passing this keeps the caller's credential header authoritative
-    while proxy and CA-bundle environment settings stay in effect.
-    """
-
-    def __call__(self, request: requests.PreparedRequest) -> requests.PreparedRequest:
-        return request
-
-
-_NO_AMBIENT_CREDENTIALS = _NoAmbientCredentials()
 
 
 def origin_root(url: str) -> str:
@@ -214,11 +228,18 @@ def origin_label(url: str) -> str:
     return f"{parts.scheme.lower()}://{parts.netloc.rpartition('@')[2].lower()}"
 
 
-def origin_bound_refusal(url: str, *, base_url: str) -> str | None:
+def _comparable_query(query: str) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(urllib.parse.parse_qsl(query, keep_blank_values=True)))
+
+
+def origin_bound_refusal(url: str, *, base_url: str, bind_query: bool = False) -> str | None:
     """Return why *url* falls outside *base_url*'s origin and path, else ``None``.
 
     Same origin means equal scheme, IDNA-lowercased host and effective port.
     The normalized path must equal the normalized base path or sit under it.
+    With *bind_query*, the decoded query parameters must also equal the base
+    URL's, so a credential bound to one catalog-selecting query is never sent
+    for another.
     """
     parts = urllib.parse.urlsplit(url)
     if parts.username is not None or parts.password is not None or "@" in parts.netloc:
@@ -238,6 +259,10 @@ def origin_bound_refusal(url: str, *, base_url: str) -> str | None:
     base_path = base_paths[1].rstrip("/")
     if not all(_path_within(path, base_path) for path in target_paths):
         return REFUSED_OUTSIDE_BASE_PATH
+    if bind_query and _comparable_query(parts.query) != _comparable_query(
+        urllib.parse.urlsplit(base_url).query
+    ):
+        return REFUSED_OUTSIDE_QUERY
     return None
 
 
@@ -269,6 +294,7 @@ def origin_bounded_request(
     max_hops: int = MAX_REDIRECT_HOPS,
     follow_cross_origin_without_credentials: bool = False,
     ambient_credentials: bool = True,
+    bind_query: bool = False,
     **kwargs: Any,
 ) -> requests.Response:
     """Send one request, following only redirects that stay inside *base_url*.
@@ -288,7 +314,11 @@ def origin_bounded_request(
 
     ``follow_cross_origin_without_credentials`` keeps a legacy anonymous
     follow: an out-of-bound HTTPS hop is followed with every credential header
-    removed instead of being refused.
+    removed instead of being refused; later hops stay anonymous.
+
+    ``bind_query`` also bounds every hop by *base_url*'s query (see
+    :func:`origin_bound_refusal`). The returned response's ``history`` lists
+    the redirect responses that were followed, oldest first.
     """
     for reserved in ("allow_redirects", "auth"):
         if reserved in kwargs:
@@ -298,7 +328,7 @@ def origin_bounded_request(
     method = method.upper()
     request_headers = dict(headers or {})
     origin = origin_label(base_url)
-    initial_refusal = origin_bound_refusal(url, base_url=base_url)
+    initial_refusal = origin_bound_refusal(url, base_url=base_url, bind_query=bind_query)
     if initial_refusal is not None:
         raise ValueError(f"request URL is outside {origin}: {_REFUSAL_TEXT[initial_refusal]}")
     if not ambient_credentials or _carries_credentials(request_headers):
@@ -307,6 +337,7 @@ def origin_bounded_request(
         kwargs["data"] = data
     current = url
     hops = 0
+    history: list[requests.Response] = []
     while True:
         response = session.request(
             method,
@@ -321,11 +352,12 @@ def origin_bounded_request(
             else None
         )
         if not location:
+            response.history = history
             return response
         target = urllib.parse.urljoin(current, location)
-        reason = origin_bound_refusal(target, base_url=base_url)
+        reason = origin_bound_refusal(target, base_url=base_url, bind_query=bind_query)
         if (
-            reason in (REFUSED_OUTSIDE_ORIGIN, REFUSED_OUTSIDE_BASE_PATH)
+            reason in (REFUSED_OUTSIDE_ORIGIN, REFUSED_OUTSIDE_BASE_PATH, REFUSED_OUTSIDE_QUERY)
             and follow_cross_origin_without_credentials
             and urllib.parse.urlsplit(target).scheme.lower() == "https"
         ):
@@ -343,6 +375,7 @@ def origin_bounded_request(
         if reason is not None:
             raise RedirectRefusedError(reason=reason, origin=origin, response=response)
         _close_quietly(response)
+        history.append(response)
         hops += 1
         current = target
 

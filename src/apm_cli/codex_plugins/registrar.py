@@ -24,6 +24,13 @@ from apm_cli.codex_plugins.client import (
     NativeUserConfig,
 )
 from apm_cli.codex_plugins.snapshot import NativeSnapshot, prepare_snapshot, repair_generation
+from apm_cli.core.plugin_manifest import is_safe_codex_plugin_name
+from apm_cli.core.remediation import (
+    CODEX_NATIVE_CACHE_DIFFERS,
+    CODEX_NATIVE_REGISTRATION_UNVERIFIED,
+    CODEX_PROVENANCE_REINSTALL,
+    CODEX_PROVENANCE_UNINSTALL,
+)
 from apm_cli.core.scope import InstallScope
 from apm_cli.deps.plugin_parser import _bounded_read_json
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -111,7 +118,7 @@ class _Record:
         if (
             not isinstance(data, dict)
             or not isinstance(data.get("name"), str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", data["name"]) is None
+            or not is_safe_codex_plugin_name(data["name"])
             or not isinstance(data.get("source_hash"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", data["source_hash"]) is None
             or not isinstance(data.get("config_path"), str)
@@ -191,11 +198,11 @@ def verify_codex_source_identity(
             )
         if record is not None and record.source_commit is None:
             raise CodexNativeError(
-                f"Codex native source provenance is missing for {dependency_key}. "
-                "Save its pinned declaration, then use "
-                f"'apm uninstall -g {dependency_key}' and "
-                "'apm install -g <saved-pinned-dependency> --target codex'; "
-                "native state was retained."
+                f"Codex native source provenance is missing for {dependency_key}; "
+                "native state was retained. "
+                + CODEX_PROVENANCE_UNINSTALL.bind(
+                    dependency=dependency_key, reinstall=CODEX_PROVENANCE_REINSTALL.clause()
+                ).sentence()
             )
     if (
         candidate is not None
@@ -206,10 +213,13 @@ def verify_codex_source_identity(
         and record.source_commit == source_commit
         and record.source_hash != source_hash
     ):
+        from apm_cli.core.cache_drift import package_cache_drift
+
         raise CodexNativeError(
-            f"Codex native cache differs from its admitted source for {dependency_key}. "
-            "Remove only this dependency's disposable apm_modules directory and run "
-            "'apm install -g --frozen --target codex'; native state was retained."
+            package_cache_drift(
+                f"Codex native package {dependency_key}",
+                "native state was retained. " + CODEX_NATIVE_CACHE_DIFFERS.sentence(),
+            )
         )
     return records
 
@@ -304,7 +314,10 @@ def _observed_root(
         or summary["source"].get("url") != record.snapshot.path.as_uri()
         or summary["source"].get("sha") != record.snapshot.content_commit
     ):
-        raise CodexNativeError("Codex did not load the owned source pin; rerun apm install.")
+        raise CodexNativeError(
+            "Codex did not load the owned source pin. "
+            + CODEX_NATIVE_REGISTRATION_UNVERIFIED.sentence()
+        )
     skills = detail.get("skills")
     native_mcp = detail.get("mcpServers")
     if (
@@ -354,7 +367,8 @@ def _observed_root(
         raise CodexNativeError("Codex returned source content instead of its installed copy.")
     if compute_native_bundle_hash(root) != deployment.source_hash:
         raise CodexNativeError(
-            "Codex installed bundle is incomplete or changed; rerun apm install."
+            "Codex installed bundle is incomplete or changed. "
+            + CODEX_NATIVE_REGISTRATION_UNVERIFIED.sentence()
         )
     return root
 
@@ -404,7 +418,10 @@ def _refresh(
         )
     manifest = roots[0] / ".agents/plugins/marketplace.json" if roots else record.marketplace_path
     if manifest is None:
-        raise CodexNativeError("Codex did not expose its installed marketplace; rerun apm install.")
+        raise CodexNativeError(
+            "Codex did not expose its installed marketplace. "
+            + CODEX_NATIVE_REGISTRATION_UNVERIFIED.sentence()
+        )
     detail = client.read_plugin(rpc, manifest, record.name)
     root = _observed_root(detail, deployment, record, marketplace)
     _preflight(client.read_config(rpc), marketplace, record.name, record)

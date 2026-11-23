@@ -15,6 +15,8 @@ from apm_cli.marketplace.migration import (
     load_marketplace_config,
 )
 
+pytestmark = pytest.mark.component
+
 
 def _write(p: Path, content: str) -> None:
     p.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
@@ -104,12 +106,16 @@ class TestLoadMarketplaceConfig:
         assert config.is_legacy is True
         assert warnings == [DEPRECATION_MESSAGE]
 
-    def test_no_config_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(MarketplaceYmlError, match="No marketplace config"):
-            load_marketplace_config(tmp_path)
-
-    def test_both_files_raises(self, tmp_path: Path) -> None:
-        _write(tmp_path / "apm.yml", _APM_WITH_BLOCK)
-        _write(tmp_path / "marketplace.yml", _LEGACY_BODY)
-        with pytest.raises(MarketplaceYmlError, match="Both apm.yml"):  # noqa: RUF043
+    @pytest.mark.parametrize(
+        ("files", "match"),
+        [
+            ((), "No marketplace config"),
+            ((("apm.yml", _APM_WITH_BLOCK), ("marketplace.yml", _LEGACY_BODY)), "Both apm.yml"),
+        ],
+        ids=["no-config", "both-files"],
+    )
+    def test_invalid_config_layout_raises(self, tmp_path: Path, files, match) -> None:
+        for name, body in files:
+            _write(tmp_path / name, body)
+        with pytest.raises(MarketplaceYmlError, match=match):
             load_marketplace_config(tmp_path)

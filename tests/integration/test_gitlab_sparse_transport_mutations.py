@@ -47,7 +47,7 @@ MUTATIONS: tuple[Mutation, ...] = (
         "M1-force-https",
         "_prepared_repo_url",
         "return requested_url",
-        'return self.build_repo_url(repo_ref, dep_ref=dep_ref, use_ssh=False, token="")',
+        "return self.build_repo_url(repo_ref, dep_ref=dep_ref, use_ssh=False)",
         f"{GIT_CONTRACT}::test_real_git_manifest_remote_bytes_and_single_fetch[main]",
         "manifest transport must reach the actual Git remote",
     ),
@@ -204,6 +204,11 @@ def _copy_candidate(destination: Path) -> None:
         "tests/unit/deps/__init__.py",
         "tests/integration/__init__.py",
         "tests/conftest.py",
+        # The root conftest registers the known-cell plugin (tests/lifecycle/known.py).
+        "tests/lifecycle/__init__.py",
+        "tests/lifecycle/known.py",
+        # Read by the root conftest's state-leak detector (tests/utils/state_leaks.py).
+        "tests/fixtures/test_state_leak_baseline.json",
         "tests/integration/conftest.py",
         UNIT_CONTRACT,
         GIT_CONTRACT,

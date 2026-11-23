@@ -12,7 +12,8 @@ from click.testing import CliRunner
 
 from apm_cli.cli import cli
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
-from apm_cli.deps.lockfile import LockFile
+from apm_cli.core.scope import InstallScope
+from apm_cli.deps.lockfile import FRAMED_CONTENT_HASH_VERSION, LockFile
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.utils.content_hash import compute_file_hash
 
@@ -173,7 +174,10 @@ def _record_bundle(project: Path, name: str) -> str:
     (project / bundled).write_text("bundled", encoding="utf-8")
     lockfile = LockFile.read(project / "apm.lock.yaml")
     DeploymentLedgerCodec.record_local_bundle_files(
-        lockfile, [bundled], {bundled: compute_file_hash(project / bundled)}
+        lockfile,
+        [bundled],
+        {bundled: compute_file_hash(project / bundled)},
+        scope=InstallScope.PROJECT,
     )
     lockfile.save(project / "apm.lock.yaml")
     return bundled
@@ -204,7 +208,8 @@ def _assert_replacement_intent_preserves_receipts(
         after = LockFile.read(lock_path)
         assert before is not None and after is not None
         assert after.replacements == declared
-        assert after.lockfile_version == "3"
+        # Local deployed-file hashes and no package hash: the current schema (RA-018).
+        assert after.lockfile_version == FRAMED_CONTENT_HASH_VERSION
         after.replacements = before.replacements
         after.lockfile_version = before.lockfile_version
         assert after.is_semantically_equivalent(before)

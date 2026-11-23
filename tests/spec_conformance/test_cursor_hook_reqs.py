@@ -20,6 +20,8 @@ import pytest
 
 from tests.spec_conformance._helpers import assert_spec_contains
 
+pytestmark = pytest.mark.component
+
 
 @pytest.mark.req("req-tg-016")
 def test_cursor_native_fail_closed_conversion_clause_persists_in_spec() -> None:

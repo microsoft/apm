@@ -1,0 +1,5 @@
+{
+  "name": "apm-hook-context",
+  "version": "1.0.0",
+  "description": "APM-owned fixture: hooks resolve bundled scripts through process.env.CLAUDE_PLUGIN_ROOT at runtime (#3191)."
+}

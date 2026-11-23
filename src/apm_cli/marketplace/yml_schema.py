@@ -39,6 +39,8 @@ from typing import Any, Mapping  # noqa: UP035
 
 import yaml
 
+from ..core.deprecations import deprecation_message
+from ..core.remediation import MARKETPLACE_CONFIG_MISSING
 from ..utils.path_security import (
     PathTraversalError,
     decode_url_path_segments,
@@ -839,10 +841,8 @@ def _parse_outputs(
     # Emit deprecation warning for list/string form
     names_str = ", ".join(outputs_list)
     map_lines = "\n".join(f"        {n}: {{}}" for n in outputs_list)
-    deprecation_msg = (
-        f"outputs: [{names_str}] is deprecated; use the map form:\n\n"
-        f"      outputs:\n{map_lines}\n\n"
-        f"    The list form will be removed in v0.15."
+    deprecation_msg = deprecation_message(
+        "marketplace-outputs-list", names=names_str, map_lines=map_lines
     )
     if warnings_sink is not None:
         warnings_sink.append(deprecation_msg)
@@ -1122,7 +1122,7 @@ def load_marketplace_from_apm_yml(apm_yml_path: Path) -> MarketplaceConfig:
     if raw_block is None:
         raise MarketplaceYmlError(
             f"'{apm_yml_path}' has no 'marketplace:' block. "
-            "Add one or run 'apm marketplace init' to scaffold it."
+            f"Add one or {MARKETPLACE_CONFIG_MISSING.clause()}."
         )
     if not isinstance(raw_block, dict):
         raise MarketplaceYmlError("'marketplace' in apm.yml must be a mapping")
