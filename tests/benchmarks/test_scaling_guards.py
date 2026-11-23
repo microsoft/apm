@@ -1096,8 +1096,8 @@ def test_bench_run_measured_reports_job_cpu_and_exit_code_on_windows(monkeypatch
     assert calls == [("popen", ["apm", "install"], {"cwd": "x"}), ("wait", proc, 42, 9.0)]
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX wait4 path")
-def test_bench_run_measured_counts_a_grandchild_on_posix(tmp_path: Path) -> None:
+def test_bench_run_measured_counts_a_grandchild(tmp_path: Path) -> None:
+    # wait4 on POSIX, the Job Object on Windows: the grandchild's CPU counts.
     burn = (
         "import time\nt = time.process_time()\n"
         "while time.process_time() - t < 0.3: pass\nprint('burned')"
@@ -1108,9 +1108,7 @@ def test_bench_run_measured_counts_a_grandchild_on_posix(tmp_path: Path) -> None
     log = tmp_path / "child.out"
 
     with log.open("w") as out:
-        code, cpu = journeys._run_measured(
-            [sys.executable, "-c", parent], 30.0, platform="linux", stdout=out
-        )
+        code, cpu = journeys._run_measured([sys.executable, "-c", parent], 30.0, stdout=out)
 
     assert log.read_text() == "burned\n"
     assert code == 5
