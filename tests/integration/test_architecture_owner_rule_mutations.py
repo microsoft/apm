@@ -1021,6 +1021,36 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "(_install_lb)(",
             id="bundle-entry-unjournaled",
         ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "            write_seam.unlink(path)  # journaled like the deploy (#5130)\n",
+            "            path.unlink()\n",
+            id="bundle-canvas-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(hook_file)  # journaled like the deploy (#5130)\n",
+            "                hook_file.unlink()\n",
+            id="bundle-hook-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "                write_seam.unlink(path)\n                removed.setdefault(",
+            "                path.unlink()\n                removed.setdefault(",
+            id="bundle-script-retire-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_pending.py",
+            "        write_seam.unlink(path, missing_ok=True)  # journaled like its write (#5130)\n",
+            "        path.unlink(missing_ok=True)\n",
+            id="bundle-pending-raw-unlink",
+        ),
+        pytest.param(
+            "src/apm_cli/install/local_bundle_canvas.py",
+            "def _retire(\n",
+            "def _drop(path: Path) -> None:\n    path.unlink()\n\n\ndef _retire(\n",
+            id="bundle-retire-new-helper-raw-unlink",
+        ),
     ],
 )
 def test_integrator_writes_cannot_bypass_the_deploy_write_seam(
