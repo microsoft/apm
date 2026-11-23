@@ -458,7 +458,11 @@ class _Unproven(Exception):
 
 
 def _validate_unit(
-    line: Any, store: Path, bases: _Bases, ledger: Mapping[str, str | None]
+    line: Any,
+    store: Path,
+    bases: _Bases,
+    ledger: Mapping[str, str | None],
+    written: Mapping[str, Any] | None = None,
 ) -> _Replay:
     """Check one manifest line against the store and the ledger, without applying it.
 
@@ -467,7 +471,10 @@ def _validate_unit(
     records exactly its files. APM's own metadata under APM home
     (``base: apm_home``) is limited to deployment receipts, which have
     journal-only integrity: confined to the receipts directory and restored
-    only when they re-hash as journaled. Raise ``_Unproven`` otherwise.
+    only when they re-hash as journaled. A shared config file the ledger never
+    claims (hook settings, the hook sidecar, an MCP config) is restored when
+    the config file records vouch for it (:func:`_shared_config_vouched`).
+    Raise ``_Unproven`` otherwise.
     """
     if not isinstance(line, dict) or line.get("kind") not in _KINDS:
         raise _Unproven(store, "journal manifest holds a malformed unit")
@@ -490,7 +497,11 @@ def _validate_unit(
         return _Replay(rel, path, kind, None, {}, ancestors)
     copy, expected = _journaled_copy(line, store)
     if not metadata:
-        _check_vouched(rel, kind, expected, ledger)
+        try:
+            _check_vouched(rel, kind, expected, ledger)
+        except _Unproven:
+            if not _shared_config_vouched(rel, path, kind, expected, written, ledger):
+                raise
     return _Replay(rel, path, kind, copy, expected, ancestors)
 
 
@@ -503,6 +514,30 @@ def _check_vouched(
         raise _Unproven(rel, "the deployment ledger does not record these bytes")
     if kind == "dir" and {k for k in ledger if k.startswith(f"{rel}/")} != set(keys.values()):
         raise _Unproven(rel, "the deployment ledger records other files under this directory")
+
+
+def _shared_config_vouched(
+    rel: str,
+    path: Path,
+    kind: str,
+    expected: Mapping[str, str],
+    written: Mapping[str, Any] | None,
+    ledger: Mapping[str, str | None],
+) -> bool:
+    """A file the ledger never claims, restorable from the config file records (#5009).
+
+    It still holds its journaled prior bytes (nothing to undo), or exactly the
+    bytes the interrupted install sealed and the records say APM wrote. An
+    edited file, a missing or tampered baseline, or a link never qualifies.
+    """
+    from apm_cli.integration.config_file_provenance import vouches_for_current_bytes
+
+    if kind != "file" or rel in ledger or path.is_symlink():
+        return False
+    current = _state(path)
+    if current == {"file": expected[""]}:
+        return True
+    return written is not None and current == written and vouches_for_current_bytes(path)
 
 
 def _check_receipt(rel: str, path: Path, kind: str) -> None:
@@ -701,7 +736,7 @@ def _validated(
     issues: list[tuple[str, str]] = []
     for index, line in enumerate(lines):
         try:
-            unit = _validate_unit(line, store, bases, ledger)
+            unit = _validate_unit(line, store, bases, ledger, seals.get(index))
         except _Unproven as exc:
             issues.append(exc.issue)
             continue

@@ -1,0 +1,17 @@
+{
+  "issue": 5009,
+  "fixed_in": "Unreleased",
+  "summary": "An install killed after it changed a shared config file (Claude hook settings, the hook sidecar, an MCP config file) left a journal the next install could not replay, because the deployment ledger never claims those files; replay now restores such a file when it still holds the interrupted install's sealed bytes and this machine's config file records say APM wrote them, and keeps and reports it otherwise.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_after_a_shared_config_change_is_restored_on_the_next_install",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_shared_config_the_records_do_not_vouch_for_is_kept_and_reported",
+    "tests/unit/install/test_deploy_snapshot.py::test_an_mcp_config_the_records_vouch_for_is_restored",
+    "tests/unit/install/test_deploy_snapshot.py::test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal"
+  ]
+}

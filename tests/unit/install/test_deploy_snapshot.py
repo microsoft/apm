@@ -390,7 +390,7 @@ def _killed_journal(apm_home: Path, project: Path, path: Path, *, seal: bool = T
 def test_shared_config_the_ledger_does_not_claim_keeps_the_journal(
     tmp_path: Path, apm_home: Path
 ) -> None:
-    """Shared settings are outside the ledger: kept and reported, never restored (#5009)."""
+    """Shared settings outside the ledger, with no config file record: kept and reported (#5009)."""
     from apm_cli.install.deploy_snapshot import JournalReplayError
 
     project = tmp_path / "project"
@@ -729,3 +729,96 @@ def test_a_legacy_lockfile_migrated_by_the_attempt_follows_its_outcome(
     kept, gone = (legacy, current) if outcome == "rollback" else (current, legacy)
     assert kept.read_bytes() == b"lockfile_version: '1'\n"
     assert not gone.exists()
+
+
+_USER_MCP = b'{\n  "mcpServers": {\n    "mine": {"command": "mine"}\n  }\n}\n'
+_APM_MCP = b'{\n  "mcpServers": {\n    "mine": {"command": "mine"},\n    "srv": {"command": "srv"}\n  }\n}\n'
+
+
+def _apm_killed_write(apm_home: Path, project: Path, path: Path) -> Path:
+    """Journal *path*, then let APM write it through its config file records and die."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration.config_file_provenance import recorded_config_write
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(path)
+    with recorded_config_write(path, manifest_root=project):
+        path.write_bytes(_APM_MCP)
+    journal.seal()
+    assert journal.store is not None
+    return journal.store
+
+
+def _user_mcp(project: Path) -> Path:
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(_USER_MCP)
+    return config
+
+
+def test_an_mcp_config_the_records_vouch_for_is_restored(tmp_path: Path, apm_home: Path) -> None:
+    """#5009: the killed install's recorded write to the user's .mcp.json is undone."""
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.restored == 1
+    assert config.read_bytes() == _USER_MCP
+    assert not store.exists()
+
+
+def test_a_tampered_seal_over_an_edited_mcp_config_keeps_the_journal(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A seal rewritten to match the user's later edit is not APM's write: kept."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    store = _apm_killed_write(apm_home, project, config)
+    edited = _APM_MCP.replace(b'"srv"', b'"edited"')
+    config.write_bytes(edited)
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    for line in lines:
+        if "sealed" in line:
+            line["state"] = {"file": compute_file_hash(config)}
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project)
+
+    assert kept.value.issues == [(".mcp.json", "the deployment ledger does not record these bytes")]
+    assert config.read_bytes() == edited
+
+
+@pytest.mark.parametrize("special", ["symlink", "fifo"])
+def test_a_shared_config_replaced_by_a_link_or_special_file_is_kept(
+    tmp_path: Path, apm_home: Path, special: str
+) -> None:
+    """Checklist paths: a link (whatever it points to) or a FIFO is never restored over."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    if special == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("needs FIFO support")
+    project = tmp_path / "project"
+    config = _user_mcp(project)
+    _apm_killed_write(apm_home, project, config)
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(_APM_MCP)
+    config.unlink()
+    if special == "symlink":
+        config.symlink_to(outside)
+    else:
+        os.mkfifo(config)
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project)
+
+    assert config.is_symlink() if special == "symlink" else not config.is_file()
+    assert outside.read_bytes() == _APM_MCP

@@ -332,6 +332,42 @@ def recorded_install_write(
     return recorded_config_write(path, manifest_root=installation_root(project_root, user_scope))
 
 
+def vouches_for_current_bytes(path: str | os.PathLike[str]) -> bool:
+    """Whether this machine's record says APM last wrote exactly the bytes *path* holds.
+
+    The baseline crash recovery checks before it restores a shared config file
+    an interrupted install changed (#5009). A link or other non-regular file,
+    a missing, unreadable or VCS-tracked record, or other bytes never vouch.
+    """
+    path = Path(path)
+    if not _regular(path):
+        return False
+    try:
+        store = _Store.load()
+        current = _regular_bytes(path)
+    except (OSError, _UnreadableStore):
+        return False
+    row = store.lookup(path)[1]
+    return (
+        current is not None
+        and _origin(row) is not None
+        and row.get("hash") == _digest(current)
+        and store.local()
+    )
+
+
+def forget_config_file(path: str | os.PathLike[str]) -> None:
+    """Forget the record of a file APM itself removed (for example its hook sidecar)."""
+    try:
+        store = _Store.load()
+        key, row = store.lookup(Path(path))
+        if row is not None:
+            store.files.pop(key, None)
+            store.save()
+    except (OSError, _UnreadableStore):
+        _log.debug("Could not forget the record of %s", path, exc_info=True)
+
+
 def delete_emptied_config(
     path: str | os.PathLike[str], *, root: str | os.PathLike[str] | None, empty: bool
 ) -> bool:
