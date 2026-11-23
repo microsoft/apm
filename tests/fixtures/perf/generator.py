@@ -15,10 +15,14 @@ SHAs on every machine.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import random
 import shutil
+import stat
 import subprocess
+import sys
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -102,6 +106,20 @@ _WORDS = [
     "write",
 ]
 _LANGUAGES = ("py", "ts", "go", "rs", "java", "md", "yml", "sh")
+# Dependency spec per host shape; every one is served by the offline mirror
+# (``tests/lifecycle/world/services.py`` HOST_ALIASES routes on owner + repo).
+HOST_SPECS = {
+    "github": "{owner}/{name}",
+    "ghe": "lifecycle.ghe.com/{owner}/{name}",
+    "gitlab": "gitlab.com/{owner}/group/{name}",
+    "ado": "dev.azure.com/{owner}/{owner}/_git/{name}",
+}
+
+
+def package_spec(recipe: TreeRecipe, name: str) -> str:
+    """``<host path>#<tag>`` of package *name*; the host is fixed per package."""
+    host = recipe.hosts[zlib.crc32(name.encode("ascii")) % len(recipe.hosts)]
+    return HOST_SPECS[host].format(owner=recipe.owner, name=name) + f"#{recipe.tag}"
 
 
 @dataclass(frozen=True)
@@ -119,7 +137,7 @@ class TreeFixture:
         return f"{self.recipe.owner}/{name}"
 
     def spec(self, name: str) -> str:
-        return f"{self.slug(name)}#{self.recipe.tag}"
+        return package_spec(self.recipe, name)
 
     @property
     def depth(self) -> int:
@@ -313,6 +331,28 @@ def plan_tree(recipe: TreeRecipe) -> tuple[list[list[str]], dict[str, list[str]]
     return levels, {name: sorted(children) for name, children in edges.items()}
 
 
+def remove_tree(path: Path) -> None:
+    """``shutil.rmtree(path, ignore_errors=True)`` that also deletes read-only files.
+
+    Git writes object files read-only, and on Windows a read-only file cannot
+    be deleted, so a plain ``ignore_errors`` rmtree silently leaves them behind.
+    """
+
+    def retry(func, target, _exc) -> None:
+        with contextlib.suppress(OSError):
+            # Never follow a link: only the entry itself is made writable.
+            if os.chmod in os.supports_follow_symlinks:
+                os.chmod(target, stat.S_IWRITE, follow_symlinks=False)
+            elif not os.path.islink(target):
+                os.chmod(target, stat.S_IWRITE)
+            func(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
 def write_lf(path: Path, text: str) -> None:
     """Write *text* as UTF-8 with LF newlines on every platform (byte-stable fixtures)."""
     path.write_bytes(text.encode("utf-8"))
@@ -340,13 +380,13 @@ def build_tree(recipe: TreeRecipe, root: Path) -> TreeFixture:
     for level in levels:
         for name in level:
             rng = _seeded(f"{recipe.seed}:{name}")
-            deps = tuple(f"{recipe.owner}/{child}#{recipe.tag}" for child in edges[name])
+            deps = tuple(package_spec(recipe, child) for child in edges[name])
             package = author_package(factory, name, ordinal, recipe.primitives, rng, deps)
             packages[name] = package.root
             ordinal += 1
     project = root / "project"
     project.mkdir(parents=True)
-    direct = [f"{recipe.owner}/{name}#{recipe.tag}" for name in levels[0]]
+    direct = [package_spec(recipe, name) for name in levels[0]]
     write_lf(
         project / "apm.yml", consumer_manifest(f"{recipe.name}-consumer", direct, recipe.targets)
     )
@@ -484,7 +524,7 @@ def publish_repositories(fixture: TreeFixture, directory: Path) -> dict[str, Pat
     every call, so a changed recipe never serves stale content.
     """
     root = directory / fixture.recipe.name
-    shutil.rmtree(root, ignore_errors=True)
+    remove_tree(root)
     root.mkdir(parents=True)
     served: dict[str, Path] = {}
     for name, tree in sorted(fixture.packages.items()):

@@ -22,6 +22,7 @@ from apm_cli.core.remediation import (
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...deps.lockfile import lockfile_parent_identity
 from ...deps.lockfile_generator import require_current_cli
 from ...deps.lockfile_write_authority import (
     LockfileWriter,
@@ -99,11 +100,15 @@ def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list)
 
 
 class _StillNeededRepair(NamedTuple):
-    """Orphan-owner repair for still-needed rows: parents, subtree depth and dev status."""
+    """Orphan-owner repair: parent, depth and dev status for every affected row.
+
+    ``roots`` are the still-needed rows whose own declaration goes.
+    """
 
     parents: dict
     depths: dict
     dev: dict
+    roots: frozenset = frozenset()
 
 
 _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
@@ -131,12 +136,53 @@ def _split_still_needed_packages(
         for package in packages_to_remove
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
+    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
-    parents = {
-        key: repair for key, repair in decision.repairs.items() if key in decision.rescued_roots
-    }
-    repair = _StillNeededRepair(parents, dict(decision.rescued_depths), dict(decision.rescued_dev))
+    repair = _StillNeededRepair(
+        dict(decision.rescued_parents),
+        dict(decision.rescued_depths),
+        dict(decision.rescued_dev),
+        frozenset(decision.rescued_roots),
+    )
     return removed, still_needed, repair
+
+
+def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
+    """Name a lock parent the way the user declared it (``./vendor/d``)."""
+    for dep in lockfile.get_package_dependencies():
+        if lockfile_parent_identity(dep, lockfile.replacements) == parent_identity:
+            if dep.source == "local" and dep.local_path:
+                # Portable: an absolute or home path prints as _local/<name>.
+                return _dependency_public_label(dep.local_path)
+            return dep.repo_url
+    return parent_identity or "another dependency"
+
+
+def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) -> None:
+    """Refuse before any write when a still-needed package is a local one (#4882).
+
+    Keeping a local package under its new parent changes its lock identity
+    (the anchored key), which uninstall cannot re-key yet, so it would leave
+    a lockfile ``apm install --frozen`` rejects. Remote packages keep the
+    declaration-only removal (#4749).
+    """
+    local = []
+    for package in still_needed:
+        key = _removed_lock_key(package, lockfile)
+        row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local":
+            parent = _locked_parent_label(lockfile, parents.get(key, (None,))[0])
+            local.append((_dependency_public_label(package), parent))
+    if not local:
+        return
+    for label, parent in local:
+        logger.error(
+            f"{label} stays: {parent} still needs it; apm.yml and apm.lock.yaml were not changed."
+        )
+    logger.progress(
+        "Uninstall the package that still needs it first, or keep the local declaration in apm.yml."
+    )
+    sys.exit(1)
 
 
 def _split_removals(
@@ -154,21 +200,25 @@ def _split_removals(
 
 
 def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
-    """Re-parent each still-needed row, then re-derive its subtree's depth and dev status."""
+    """Give every affected row the parent, depth and dev status install records."""
     updated = False
     # Dev status comes only from ``repair.dev``: a partial walk proves
     # production paths, never their absence.
-    for key, (parent, local_path, _dev_only) in repair.parents.items():
+    for key, (parent, local_path) in repair.parents.items():
         kept = lockfile.get_dependency(key)
         if kept is None:
             continue
-        kept.resolved_by = parent
-        if local_path is not None:
+        if kept.resolved_by != parent:
+            kept.resolved_by = parent
+            updated = True
+        if local_path is not None and kept.local_path != local_path:
             kept.local_path = local_path
-        if kept.replacement is not None:
-            # The removed declaration's own request goes; surviving parents' stay.
-            kept.replacement.drop_root_requests()
-        updated = True
+            updated = True
+    for key in repair.roots:
+        kept = lockfile.get_dependency(key)
+        # The removed declaration's own request goes; surviving parents' stay.
+        if kept is not None and kept.replacement is not None:
+            updated |= kept.replacement.drop_root_requests()
     for field_name, values in (("depth", repair.depths), ("is_dev", repair.dev)):
         for key, value in values.items():
             kept = lockfile.get_dependency(key)
@@ -1116,6 +1166,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         if not dry_run:
             _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
+        # A still-needed local dependency refuses before scripts run (#4882);
+        # the split repeats after them, since scripts may edit apm.yml.
+        _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
