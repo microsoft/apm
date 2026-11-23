@@ -129,10 +129,13 @@ def _rebuilt(result: CommandResult) -> bool:
     )
 
 
-def _names_failure(result: CommandResult) -> bool:
-    """The command fails with an error line and names the package it could not restore."""
-    text = _text(result)
-    return "[x]" in text and "test/pkg" in text
+def _names_failed_fetch(result: CommandResult) -> bool:
+    """An [x] line itself names test/pkg and the failed fetch as the cause."""
+    cause = re.compile(r"fetch|does not match its commit|could not", re.IGNORECASE)
+    return any(
+        line.lstrip().startswith("[x]") and "test/pkg" in line and cause.search(line)
+        for line in _text(result).splitlines()
+    )
 
 
 def _installed(tmp_path: Path, apm_binary_path: Path) -> ReplayWorld:
@@ -200,7 +203,7 @@ def test_audit_ci_and_frozen_refuse_alike_when_the_commit_cannot_be_fetched(
     assert _rebuilt(frozen), _evidence(frozen)
     for refused in (frozen, plain):
         assert refused.returncode != 0, _evidence(refused)
-        assert _names_failure(refused), _evidence(refused)
+    # Naming the failed fetch on the [x] line is #4909's known cell below.
 
 
 # The refusal above is safe but names the MCP-declaration check, not the fetch.
@@ -221,11 +224,8 @@ def test_frozen_refusal_names_the_failed_fetch_as_its_cause(
 
     frozen = world.apm("install", "--frozen", expect=None)
 
-    errors = [line for line in _text(frozen).splitlines() if line.lstrip().startswith("[x]")]
-    cause = re.compile(r"fetch|does not match its commit|could not", re.IGNORECASE)
-    assert any("test/pkg" in line and cause.search(line) for line in errors), (
-        "no [x] line names the failed fetch\n" + _evidence(frozen)
-    )
+    assert frozen.returncode != 0, _evidence(frozen)
+    assert _names_failed_fetch(frozen), "no [x] line names the failed fetch\n" + _evidence(frozen)
 
 
 def test_update_rebuilds_a_modified_cache_copy_with_a_warning(

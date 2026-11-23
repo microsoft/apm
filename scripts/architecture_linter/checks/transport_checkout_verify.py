@@ -40,6 +40,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
 _UNVERIFIED_READERS: dict[str, str] = {
     "_get_checkout": "GitCache.get_checkout",
     "_read_only_checkout": "GitCache._get_checkout",
+    "_create_checkout": "GitCache._get_checkout",
     "materialize_from_bare": "GitHubPackageDownloader._materialize_from_bare",
     "_materialize_from_bare": "GitHubPackageDownloader.download_subdirectory_package",
 }
