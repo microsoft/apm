@@ -231,7 +231,7 @@ def _text(path: Path, marker: str) -> str | None:
     return _IDENTITY_LINE.sub("", path.read_bytes().decode("utf-8").replace(marker, "<ROOT>"))
 
 
-def receipts(world: World) -> list[object]:
+def receipts(world: World, *, history: bool = True) -> list[object]:
     """Every deployment receipt of *world*, checkout binding removed, file names (path keys) dropped."""
     marker = str(world.root)
     docs = []
@@ -243,15 +243,21 @@ def receipts(world: World) -> list[object]:
             data = json.loads(path.read_text(encoding="utf-8"))
             for key in _RECEIPT_BINDING:
                 data.pop(key, None)
+            if not history:
+                data.pop("history", None)
             docs.append(without_identity(data, marker))
     return sorted(docs, key=lambda doc: json.dumps(doc, sort_keys=True))
 
 
-def comparable(world: World, exempt: tuple[str, ...] = ()) -> dict[str, object]:
+def comparable(
+    world: World, exempt: tuple[str, ...] = (), *, receipt_history: bool = False
+) -> dict[str, object]:
     """Deployed state comparable across two worlds: identity fields and paths normalized.
 
     The manifest and lockfile are compared both parsed (readable diffs) and as raw
     text (formatting, comments, key order); receipts by their substantive records.
+    Receipt ``history`` (hashes of earlier contents, #4428) depends on the world's past,
+    so only same-history comparisons (``receipt_history=True``) include it.
     """
     project_skip = (".git", "apm.lock.yaml", "apm.yml", *IDENTITY, *exempt)
     marker = str(world.root)
@@ -262,7 +268,7 @@ def comparable(world: World, exempt: tuple[str, ...] = ()) -> dict[str, object]:
         "lock": without_identity(_yaml(world.project / "apm.lock.yaml"), marker),
         "manifest_text": _text(world.project / "apm.yml", marker),
         "lock_text": _text(world.project / "apm.lock.yaml", marker),
-        "receipts": receipts(world),
+        "receipts": receipts(world, history=receipt_history),
     }
 
 

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-23
+
+### Highlights
+
+- `apm install` now enforces org policy `manifest.content_types.allow` on the primitive kinds each package ships. (#4838)
+- `apm install -g` fixes for user-root primitives, shared skill directories, context links, dropped Claude targets and `CLAUDE_CONFIG_DIR` hooks. (#4684, #4868, #4880, #4751, #4795)
+- Upgrade notes: content-type policy, native plugin `.gitattributes`, merged hook entries and kept MCP entries can now fail installs or `apm audit --ci`. (#4838, #4842, #4798, #4818)
+
+### Breaking changes and upgrade notes
+
+- `apm install` now enforces policy `manifest.content_types.allow` against each package's primitive kinds and refuses under `block`; widen the allow list or remove the package. (#4838)
+- `apm install` refuses native plugins when `.agents/plugins/.gitattributes` lets git convert their bytes; end that file with `* -text` or delete it. (#4842)
+- `apm audit --ci` fails, and `apm install` warns, on merged hook entries matching a denied or unapproved package's hook with no valid ownership evidence; remove entries you did not add. (#4798)
+- Without a lockfile, `apm install` retires undeclared local bundle MCP entries it can prove unchanged, and `apm audit --ci` fails on kept ones; remove or redeclare them. (closes #4801, #4818)
+
+### Changed
+
+- `apm install`, `apm update` and `apm lock` parse `apm.lock.yaml` once instead of twice when nothing changed. (closes #4742, #4835)
+
+### Fixed
+
+- `apm install -g` records files from user-root primitives (`~/.apm/agents`) in the user lockfile, so later installs deploy source edits. (closes #3772, #4684)
+- `apm install -g` retires a Claude plugin's `bin/`, plugin root and Claude registration after `claude` is dropped from `targets:`. (closes #4744, #4751)
+- `apm install -g` deploys scripted hooks under an absolute `CLAUDE_CONFIG_DIR` outside HOME instead of refusing them; paths leaving that root are still refused. (closes #4772, #4795)
+- The first `apm install -g` after upgrading updates an edited user-root skill when switching between targets sharing `~/.agents/skills` (Copilot, Codex). (closes #4813, #4868)
+- `apm audit --ci` no longer reports drift after a clean `apm install -g` of a user-root agent that links to a context file. (closes #4832, #4880)
+- `apm install --mcp` refuses a name that collides with your own `.mcp.json` entry before writing, leaving `apm.yml` and `.github/` unchanged. (#4803)
+- `apm uninstall` names the executable kinds it retires from a no-longer-allowed survivor, such as LSP servers or canvas extensions, instead of always saying hooks. (closes #4567, #4662)
+- When `apm uninstall` keeps a dependency another package needs, every lock entry it reaches, including virtual subdirectory packages, matches what `apm install` records. (#4811, #4848, #4870)
+- `apm install <bundle>`, `apm install --mcp` and `apm mcp install` also warn about kept MCP entries, and kept-entry warnings are accurate. (#4908)
+- `apm prune --dry-run` lists native plugins a real prune would retire, and `apm prune` exits 1 when it cannot check their approvals and policy. (#4845)
+- `apm pack` in a Claude project refuses, naming `apm install`, when a shipped dependency's installed copy is missing, unless that package excludes Claude in `targets:`. (closes #4850, #4824, #4858)
+- The policy docs no longer say user-scope org policy ships in 0.38; `apm install -g` still skips org policy until 0.39. (#4806)
+
 ## [0.38.0] - 2026-11-22
 
 ### Highlights

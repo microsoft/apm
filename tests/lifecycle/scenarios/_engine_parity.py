@@ -238,8 +238,8 @@ class Twin:
                 self.full, getattr(full, stream)
             ), f"{label}: {stream} differs from the full pipeline{evidence}"
         problems = diff(
-            comparable(self.fast, exempt),
-            comparable(self.full, exempt),
+            comparable(self.fast, exempt, receipt_history=True),
+            comparable(self.full, exempt, receipt_history=True),
             self.worlds,
             ("fast", "full"),
         )
