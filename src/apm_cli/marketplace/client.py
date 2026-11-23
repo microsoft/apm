@@ -26,6 +26,7 @@ trusting that TTL and never falls back to stale data (#3279).
 """
 
 import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
@@ -1256,7 +1257,10 @@ def _fetch_file(
     if kind in ("github", "gitlab", "git", "ado"):
         from .catalog_ref_pins import require_origin_pin
 
-        require_origin_pin(source)
+        bound = require_origin_pin(source)
+        if bound != (source.ref or ""):
+            # Fetch by the verified commit, never by an ambiguous short name.
+            source = dataclasses.replace(source, ref=bound)
 
     # Proxy-aware path for github/gitlab kinds: try registry proxy first, then
     # honour PROXY_REGISTRY_ONLY enforcement.

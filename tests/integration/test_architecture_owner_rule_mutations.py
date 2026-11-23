@@ -3194,8 +3194,8 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-catalog-origin-fetch-pin",
         rule_id="marketplace-integrations-catalog-origin",
         path="src/apm_cli/marketplace/client.py",
-        old="        require_origin_pin(source)",
-        new="        pass",
+        old="        bound = require_origin_pin(source)",
+        new='        bound = source.ref or ""',
         intent="A catalog is fetched at a ref the origin does not publish.",
     ),
     MutationCase(

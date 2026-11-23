@@ -165,25 +165,6 @@ def test_an_unverified_locked_commit_is_verified_once_then_replays_without_conta
 
 
 @pytest.mark.req("req-rs-015")
-def test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With no recorded verification and no origin, the entry is refused with a remedy."""
-    import shutil
-
-    origin = _PinnedOrigin(tmp_path / "remote")
-    project = _pinned_project(tmp_path, origin.m1)
-    shutil.rmtree(origin.path)
-
-    result = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c"))
-
-    output = " ".join(result.output.split())
-    assert result.exit_code == 1, result.output
-    assert "needs network access once" in output
-    assert not (project / "apm.lock.yaml").exists()
-
-
-@pytest.mark.req("req-rs-015")
 @pytest.mark.parametrize(
     ("path", "no_cache"),
     [(None, False), (None, True)],

@@ -368,3 +368,92 @@ class TestCachedBareTrust:
 
         assert (checkout / "m1.txt").is_file()
         assert "Discarding cached git repository" in caplog.text
+
+
+class TestVerdictStorageSafety:
+    def test_a_planted_link_at_a_verdict_path_is_replaced_never_followed(
+        self, tmp_path: Path, origin: _Origin
+    ) -> None:
+        from apm_cli.cache.commit_reachability import _marker, require_reachable_commit
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        root = tmp_path / "cache"
+        outside = tmp_path / "outside.txt"
+        outside.write_text("untouched\n", encoding="utf-8")
+        marker = _marker(root, cache_shard_key(origin.url), origin.m1)
+        marker.parent.mkdir(parents=True)
+        marker.symlink_to(outside)
+
+        require_reachable_commit(root, origin.url, cache_shard_key(origin.url), origin.m1)
+
+        assert outside.read_text(encoding="utf-8") == "untouched\n"
+        assert marker.is_file() and not marker.is_symlink()
+
+    def test_foreign_config_in_the_reachability_repository_is_discarded(
+        self, tmp_path: Path, origin: _Origin, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from apm_cli.cache.commit_reachability import require_reachable_commit
+        from apm_cli.cache.url_normalize import cache_shard_key
+
+        root = tmp_path / "cache"
+        shard = cache_shard_key(origin.url)
+        require_reachable_commit(root, origin.url, shard, origin.m1)
+        config = root / "reachability" / shard / "refs.git" / "config"
+        with config.open("a", encoding="utf-8") as handle:
+            handle.write("[core]\n\tsshCommand = false\n")
+        origin.git("checkout", "-qb", "side", origin.m1)
+        side = origin.commit("side")
+        origin.git("commit", "-q", "--allow-empty", "-m", "side tip")
+        origin.git("checkout", "-q", "main")
+        origin.git("push", "-q", str(origin.path), "side")
+
+        with caplog.at_level("WARNING"):
+            require_reachable_commit(root, origin.url, shard, side)
+
+        assert "Discarding cached git repository refs.git" in caplog.text
+        assert "sshCommand" not in config.read_text(encoding="utf-8")
+
+
+class _RefDownloader(_PlanDownloader):
+    """A downloader whose commits API answers nothing, so admission lists refs."""
+
+    def __init__(self, cache_root: Path, attempts: list[str], predicted: str) -> None:
+        super().__init__(cache_root, attempts)
+        self.git_env: dict[str, str] = {}
+        self._predicted = predicted
+
+    def _resolve_commit_sha_for_ref(self, _dep_ref, _ref: str) -> None:
+        return None
+
+    def _build_repo_url(self, *_args, **_kwargs) -> str:
+        return self._predicted
+
+    def _parse_artifactory_base_url(self) -> None:
+        return None
+
+
+class _RefDep(_Dep):
+    reference = "main"
+
+    @staticmethod
+    def is_azure_devops() -> bool:
+        return False
+
+    @staticmethod
+    def is_artifactory() -> bool:
+        return False
+
+
+def test_a_listed_tip_is_recorded_for_the_destination_that_answered(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    from apm_cli.cache.commit_reachability import admit_ref_commit
+
+    missing = (tmp_path / "missing.git").as_uri()
+    downloader = _RefDownloader(tmp_path / "cache", [missing, origin.url], predicted=missing)
+
+    assert admit_ref_commit(downloader, _RefDep(), "main") == (origin.m2, origin.m2)
+    [marker] = (tmp_path / "cache" / "reachability").rglob("verified/*")
+    recorded = marker.read_text(encoding="utf-8")
+    assert recorded.endswith(origin.url.removesuffix(".git").removesuffix("/"))
+    assert "missing" not in recorded

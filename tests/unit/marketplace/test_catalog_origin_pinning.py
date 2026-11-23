@@ -257,7 +257,8 @@ def test_a_real_branch_with_a_review_like_name_is_fetched(monkeypatch) -> None:
         auth_resolver=_AnonymousResolver(),
     )
 
-    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [["pull/7/head"]]
+    # Fetched by the verified branch's commit, never by the review-like name.
+    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [[_TIP]]
 
 
 @pytest.mark.parametrize("url", _URLS)
@@ -284,7 +285,7 @@ def test_a_branch_named_like_an_abbreviated_commit_is_fetched(monkeypatch) -> No
         auth_resolver=_AnonymousResolver(),
     )
 
-    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [["cafe1234"]]
+    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [[_TIP]]
 
 
 def test_registry_only_mode_refuses_a_pin_it_cannot_verify_without_contacting_the_origin(
@@ -323,3 +324,18 @@ def test_an_ado_catalog_pin_is_listed_through_the_ado_auth_chain(monkeypatch) ->
 
         require_origin_pin(source)
     assert chained == ["contoso/proj/_git/catalog"]
+
+
+def test_a_short_name_that_is_both_a_branch_and_a_tag_is_refused(monkeypatch) -> None:
+    _list_refs(
+        monkeypatch, (*_TIPS, ("refs/heads/pull/7/head", _TIP), ("refs/tags/pull/7/head", _STRAY))
+    )
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    with pytest.raises(MarketplaceFetchError, match="both a branch and a tag"):
+        client_mod._fetch_file(
+            _source("https://github.com/contoso/catalog", "pull/7/head"),
+            "marketplace.json",
+            auth_resolver=_AnonymousResolver(),
+        )
+    assert urls == []

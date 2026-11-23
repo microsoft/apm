@@ -135,7 +135,7 @@ def _is_ssh(source: MarketplaceSource) -> bool:
         return False
 
 
-def require_origin_pin(source: MarketplaceSource) -> None:
+def require_origin_pin(source: MarketplaceSource) -> str:
     """Refuse a catalog ref the origin does not publish, before any contents request.
 
     An empty ref reads the origin's default branch. A commit pin must be the
@@ -143,13 +143,18 @@ def require_origin_pin(source: MarketplaceSource) -> None:
     could also match must exist as an origin branch or tag; when the ref
     listing cannot be read, the pin is refused.
 
+    Returns the ref the contents request must use: the ref itself, or, for
+    a short name a review namespace or a commit abbreviation could also
+    match, the commit of the origin branch or tag it was verified as, so a
+    revision-style lookup can never resolve it elsewhere.
+
     Raises:
         MarketplaceFetchError: The ref is malformed, outside the origin's
             branches and tags, or cannot be verified.
     """
     ref = source.ref or ""
     if not ref:
-        return
+        return ref
     try:
         check_catalog_ref(ref)
     except ValueError as exc:
@@ -159,7 +164,7 @@ def require_origin_pin(source: MarketplaceSource) -> None:
     # a published branch or tag name, like a review-namespace short name.
     abbreviated = not commit_pin and bool(_ABBREVIATED.fullmatch(ref))
     if not commit_pin and not abbreviated and ref.split("/", 1)[0] not in REVIEW_NAMESPACES:
-        return
+        return ref
     from ..deps.egress_route import EgressSurface, is_refused
 
     if is_refused(EgressSurface.SOURCE_ENUMERATION):
@@ -184,14 +189,28 @@ def require_origin_pin(source: MarketplaceSource) -> None:
             f"Cannot verify catalog ref {ref!r} against the origin's branches and tags: {detail}",
             retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
-    published = (
-        ref.lower() in {sha.lower() for sha in tips.values()}
-        if commit_pin
-        else bool({f"refs/heads/{ref}", f"refs/tags/{ref}"} & set(tips))
-    )
+    if commit_pin:
+        published = ref.lower() in {sha.lower() for sha in tips.values()}
+        bound = ref
+    else:
+        named = set()
+        if f"refs/heads/{ref}" in tips:
+            named.add(tips[f"refs/heads/{ref}"].lower())
+        if f"refs/tags/{ref}" in tips:
+            # An annotated tag is bound to the commit it peels to.
+            named.add(tips.get(f"refs/tags/{ref}^{{}}", tips[f"refs/tags/{ref}"]).lower())
+        if len(named) > 1:
+            raise MarketplaceFetchError(
+                source.name,
+                f"Catalog ref {ref!r} names both a branch and a tag of the catalog origin. "
+                f"Use refs/heads/{ref} or refs/tags/{ref}.",
+            )
+        published = bool(named)
+        bound = next(iter(named), ref)
     if not published:
         raise MarketplaceFetchError(
             source.name,
             f"Catalog ref {ref!r} is not the tip of a branch or tag of the catalog origin. "
             "Pin a branch, a tag, or the commit one of them points to.",
         )
+    return bound

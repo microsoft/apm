@@ -110,8 +110,25 @@ def _stage() -> VerdictStage | None:
 
 
 def _write_marker(marker: Path, canonical: str) -> None:
+    """Write a verdict as a new regular file, never through a planted link.
+
+    A linked ``verified``, shard or ``reachability`` directory records
+    nothing; the marker itself is replaced atomically, so a link at its
+    path is replaced, never followed.
+    """
+    import tempfile
+
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(canonical, encoding="utf-8")
+    if any(part.is_symlink() for part in (marker.parent, *list(marker.parents)[1:3])):
+        return
+    fd, staged = tempfile.mkstemp(prefix=".verdict-", dir=marker.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(canonical)
+        os.replace(staged, marker)
+    except BaseException:
+        Path(staged).unlink(missing_ok=True)
+        raise
 
 
 def _record(marker: Path, canonical: str) -> None:
@@ -324,6 +341,17 @@ def _verdict_key(origin: str, contact: str, env) -> str | None:
     return None if effective is None else f"{normalize_repo_url(origin)}\n{effective}"
 
 
+def _record_observed_tip(downloader, dep_ref, sha: str, url: str, env) -> None:
+    """Record a tip read from *url* under *env*: the destination that answered."""
+    from .url_normalize import cache_shard_key
+
+    root, origin = _origin(downloader, dep_ref)
+    key = _verdict_key(origin, url, env)
+    if key is None or not _persists(downloader):
+        return
+    _record(_marker(root, cache_shard_key(origin), sha.lower()), key)
+
+
 def _record_tip(downloader, dep_ref, sha: str) -> None:
     from ..deps.transport_selection import initial_transport_scheme
     from .url_normalize import cache_shard_key
@@ -422,10 +450,15 @@ def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
             else:
                 _record_tip(downloader, dep_ref, sha)
             return sha.lower(), sha.lower()
-    found: list[str] = []
-    _at_origin(downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env)))
-    _record_tip(downloader, dep_ref, found[0])
-    return found[0], found[0]
+    found: list[tuple[str, str, dict]] = []
+    _at_origin(
+        downloader,
+        dep_ref,
+        lambda url, env: found.append((_exact_tip(url, ref, env), url, env)),
+    )
+    sha, url, env = found[0]
+    _record_observed_tip(downloader, dep_ref, sha, url, env)
+    return sha, sha
 
 
 def _exact_tip(url: str, ref: str, env) -> str:
@@ -575,20 +608,28 @@ def _reached_by_refs(
     Raises:
         RuntimeError: The fetch failed.
     """
+    from ..utils.file_ops import robust_rmtree
     from ..utils.git_env import get_git_executable, git_network_env, run_git_text
+    from .cached_repo import cached_repo_env, cached_repo_is_trusted, inert_git_args
     from .git_cache import _safe_git_args, _sanitize_url
     from .locking import shard_lock
 
     repo = Path(cache_root) / "reachability" / shard_key / "refs.git"
-    git = [get_git_executable(), *_safe_git_args(), "--git-dir", str(repo)]
+    git = [get_git_executable(), *_safe_git_args(), *inert_git_args(), "--git-dir", str(repo)]
     try:
         repo.parent.mkdir(parents=True, exist_ok=True)
         with shard_lock(repo):
+            # A persisted repository holds only Git state APM writes; any
+            # other configuration is discarded before Git reads it.
+            if repo.is_dir() and not cached_repo_is_trusted(
+                repo, bare=True, origin_ok=lambda _url: True
+            ):
+                robust_rmtree(repo)
             fresh = not repo.is_dir()
             if fresh:
                 repo.mkdir()
                 os.chmod(repo, 0o700)
-            child_env = git_network_env(url, env, git_dir=repo)
+            child_env = cached_repo_env(git_network_env(url, env, git_dir=repo), repo)
             if fresh:
                 run_git_text(
                     [*git, "init", "-q", "--bare"],
@@ -598,7 +639,14 @@ def _reached_by_refs(
                     check=True,
                 )
             run_git_text(
-                [*git, "fetch", "-q", "--filter=tree:0", "--prune", url, *_REACH_REFSPECS],
+                [*git, "config", "remote.origin.url", url],
+                capture_output=True,
+                env=child_env,
+                stdin=subprocess.DEVNULL,
+                check=True,
+            )
+            run_git_text(
+                [*git, "fetch", "-q", "--filter=tree:0", "--prune", "origin", *_REACH_REFSPECS],
                 capture_output=True,
                 timeout=600,
                 env=child_env,
