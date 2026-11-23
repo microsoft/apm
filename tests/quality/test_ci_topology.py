@@ -4504,6 +4504,7 @@ LIFECYCLE_SECURITY_PATHS = [
     "uv.lock",
     ".github/workflows/lifecycle-security.yml",
 ]
+LIFECYCLE_SECURITY_TIMEOUT_MINUTES = 25  # about 2x the measured 12-minute run
 LIFECYCLE_SECURITY_RUN_STEP = "Run the lifecycle security cells"
 LIFECYCLE_SECURITY_RECEIPTS_STEP = "Require a receipt from every security witness"
 
@@ -4524,6 +4525,9 @@ def _assert_lifecycle_security_placement(workflows: Mapping[str, WorkflowNode]) 
     job = workflow_job(workflow, LIFECYCLE_SECURITY_JOB)
     assert all(key not in job for key in ("if", "continue-on-error")), job
     assert job.get("runs-on") == "ubuntu-24.04", job.get("runs-on")
+    assert job.get("timeout-minutes") == LIFECYCLE_SECURITY_TIMEOUT_MINUTES, job.get(
+        "timeout-minutes"
+    )
     run = workflow_step(job, LIFECYCLE_SECURITY_RUN_STEP)
     assert all(key not in run for key in ("if", "continue-on-error")), run
     targets = _pytest_targets({"steps": [run]})

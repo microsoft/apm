@@ -42,7 +42,8 @@ jobs:
   lifecycle-security:
     name: Lifecycle Security (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Measured: about 12 minutes on 4 workers (878 cells, run 45268733186).
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
