@@ -262,6 +262,12 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Restore or remove the listed paths by hand, then run the command again.
   A shared config file this machine's records cannot confirm is not restored
   either: its copy is kept and reported for you to restore by hand.
+  A journal left by an earlier apm version, which did not record permissions,
+  is not replayed: the next install keeps it under
+  `~/.apm/install-snapshots/retained-*`, names that directory and exits 1; its
+  `journal.jsonl` lists the paths to restore or remove by hand. A
+  restored file never gets permissions wider than it has at replay time, and
+  a file that carries a POSIX ACL is kept and reported.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
