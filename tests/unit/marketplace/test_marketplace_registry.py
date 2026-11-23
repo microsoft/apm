@@ -291,3 +291,44 @@ class TestCatalogScopedRefPins:
 
         assert self._check("team", "v2", source) == "v1"
         assert "team/tool/1.0.0" not in json.loads(self.pins.read_text())
+
+    def test_an_alias_named_like_a_host_never_adopts_catalog_scoped_pins(self):
+        scoped = "github.com/a/catalog:marketplace.json#tool/1.0.0"
+        self._write({scoped: "v1", "github.com/tool/1.0.0": "v0"})
+        registry_mod.add_marketplace(
+            MarketplaceSource(name="github.com", url="https://github.com/b/catalog")
+        )
+
+        registry_mod.remove_marketplace("github.com")
+
+        pins = json.loads(self.pins.read_text())
+        assert pins[scoped] == "v1"
+        assert "github.com/tool/1.0.0" not in pins
+        assert pins["github.com/b/catalog:marketplace.json#tool/1.0.0"] == "v0"
+
+
+class TestCatalogPinIdentity:
+    """#4966: the pin scope names exactly one catalog."""
+
+    def test_catalog_paths_that_differ_only_in_case_are_different_catalogs(self):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+        def identity(path: str) -> str:
+            return catalog_pin_identity(
+                MarketplaceSource(name="t", url="https://git.example.com/Org/catalog", path=path)
+            )
+
+        assert identity("catalogs/A.json") != identity("catalogs/a.json")
+
+    def test_a_local_catalog_is_scoped_by_its_resolved_location_and_path(self, tmp_path):
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+        root = tmp_path / "catalogs"
+        root.mkdir()
+        (tmp_path / "link").symlink_to(root, target_is_directory=True)
+
+        def identity(location: Path, path: str) -> str:
+            return catalog_pin_identity(MarketplaceSource(name="t", url=str(location), path=path))
+
+        assert identity(root, "a.json") != identity(root, "b.json")
+        assert identity(root, "a.json") == identity(tmp_path / "link", "a.json")

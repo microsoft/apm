@@ -139,10 +139,14 @@ def catalog_pin_identity(source: MarketplaceSource) -> str:
 
     Equivalent spellings of one catalog (HTTPS or SSH, userinfo, default port,
     a trailing ``.git``, host case) share an identity, as in
-    :func:`same_marketplace_catalog`; a local catalog is identified by its path.
+    :func:`same_marketplace_catalog`. A local catalog is identified by its
+    resolved filesystem location and catalog path, and a hosted catalog file
+    by its URL, so neither can share pins with a Git-backed catalog.
     """
     if source.kind == "local":
-        return f"local:{source.local_path}"
+        return f"local:{os.path.realpath(source.local_path)}:{source.path}"
+    if source.kind == "url":
+        return f"url:{_origin_comparison_key(marketplace_origin(source))}"
     return f"{_origin_comparison_key(marketplace_origin(source))}:{source.path}"
 
 

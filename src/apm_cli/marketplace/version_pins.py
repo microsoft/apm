@@ -93,8 +93,11 @@ def _pin_key(marketplace_name: str, plugin_name: str, version: str = "", catalog
     ensures that legitimate version bumps (new ``version`` value) create
     separate pin entries and never trigger false-positive ref-swap warnings.
     """
-    base = f"{catalog}#{plugin_name}" if catalog else f"{marketplace_name}/{plugin_name}"
-    base = base.lower()
+    # A catalog identity is kept verbatim: its path case can name another catalog.
+    plugin = f"{plugin_name}/{version}" if version else plugin_name
+    if catalog:
+        return f"{catalog}#{plugin.lower()}"
+    base = f"{marketplace_name}/{plugin_name}".lower()
     if version:
         return f"{base}/{version}".lower()
     return base
@@ -238,12 +241,14 @@ def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) 
     """
     prefix = f"{alias.lower()}/"
     pins = load_ref_pins(pins_dir)
-    legacy = [key for key in pins if key.lower().startswith(prefix)]
+    # A catalog-scoped key always holds "#"; an alias (a hostname, say) can
+    # prefix one, but only alias-scoped keys are legacy.
+    legacy = [key for key in pins if "#" not in key and key.lower().startswith(prefix)]
     if not legacy:
         return
     for key in legacy:
         ref = pins.pop(key)
-        pins.setdefault(f"{catalog}#{key[len(prefix) :]}".lower(), ref)
+        pins.setdefault(f"{catalog}#{key[len(prefix) :].lower()}", ref)
     save_ref_pins(pins, pins_dir)
 
 
