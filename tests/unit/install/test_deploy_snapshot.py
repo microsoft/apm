@@ -1935,3 +1935,56 @@ def test_a_path_whose_extended_attributes_cannot_be_read_is_kept(
 
     assert outcome.kept == ((".mcp.json", "it carries a POSIX ACL"),)
     assert config.read_bytes() == b"killed\n"
+
+
+def _set_default_acl(directory: Path) -> None:
+    """Give *directory* a default POSIX ACL granting a named user read, or skip."""
+    import struct
+
+    undefined = 0xFFFFFFFF
+    entries = [(0x01, 7, undefined), (0x02, 4, 65534), (0x04, 0, undefined)]
+    entries += [(0x10, 4, undefined), (0x20, 0, undefined)]
+    data = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    try:
+        os.setxattr(directory, "system.posix_acl_default", data)
+    except OSError as exc:
+        pytest.skip(f"POSIX ACLs unavailable here: {exc}")
+
+
+@pytest.mark.skipif(not hasattr(os, "setxattr"), reason="Linux extended attributes")
+def test_a_restore_that_would_inherit_a_default_acl_is_not_published(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """The staged restore inherits its parent's default ACL: it is never published."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    _set_default_acl(project)
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project, lambda: ledger)
+
+    assert config.read_bytes() == b"killed\n"
+    assert "system.posix_acl_access" not in os.listxattr(config)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
+    """The staged file swapped for a link before its mode is applied: the link's target
+    keeps its mode and the restore fails (kept and reported)."""
+    from apm_cli.install.journal_modes import apply_entry_modes
+
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"x\n")
+    outside.chmod(0o400)
+    staged = tmp_path / "project" / ".apm-replay-staged"
+    staged.parent.mkdir()
+    staged.symlink_to(outside)
+
+    with pytest.raises(OSError):
+        apply_entry_modes(staged, 0o600)
+
+    assert outside.stat().st_mode & 0o7777 == 0o400
+    assert staged.is_symlink()
