@@ -480,7 +480,9 @@ def test_emptying_a_required_dev_dependencies_field_falls_back_to_the_admin(
     assert bool(check.remediations) is advised
 
 
-def test_the_selector_follows_the_manifest_default_host(tmp_path: Path, capsys) -> None:
+def test_the_selector_follows_the_manifest_default_host(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
     """#5007: under default_host gitlab.com a bare acme/evil-pkg is not the GitHub entry."""
     from click.testing import CliRunner
 
@@ -497,7 +499,8 @@ def test_the_selector_follows_the_manifest_default_host(tmp_path: Path, capsys) 
     check = _allowlist(root)
 
     assert [r.to_json()["command"] for r in check.remediations] == [f"apm uninstall {declared}"]
-    removed = CliRunner().invoke(cli, ["uninstall", declared], catch_exceptions=False, env={})
+    monkeypatch.chdir(root)
+    removed = CliRunner().invoke(cli, ["uninstall", declared], catch_exceptions=False)
     assert removed.exit_code == 0, removed.output
     assert yaml.safe_load((root / "apm.yml").read_text(encoding="utf-8"))["dependencies"] == {
         "apm": []
