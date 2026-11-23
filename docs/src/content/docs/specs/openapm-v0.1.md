@@ -2832,9 +2832,9 @@ non-update replays of that entry issue no network request for it.
 > is what permits reproducible and offline-capable resolution for
 > commit-pinned and branch-tracking entries not covered by the
 > semver-range equivalence of [req-rs-004](#req-rs-004). The one
-> reachability verification keeps a rewritten lockfile from pinning a
-> commit that only a pull request or fork advertises; once recorded,
-> replays are network-free again.
+> reachability verification keeps a replay from pinning a commit that
+> no branch or tag of its origin contains; once recorded, replays are
+> network-free again.
 
 #### 7.5.1 Mirror resolution
 

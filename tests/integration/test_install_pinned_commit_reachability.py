@@ -277,3 +277,49 @@ def test_a_locked_commit_is_verified_once_then_replays_without_contact(
     assert replay.exit_code == 0, replay.output
     assert listed == []
     assert _installed(project) != []
+
+
+def test_a_policy_denied_install_of_a_verified_commit_leaves_no_reachability_state(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project(tmp_path, origin.m1)
+    cache = tmp_path / "cache"
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    policy = tmp_path / "apm-policy.yml"
+    policy.write_text(
+        "name: unmanaged-deny\nversion: '1.0'\nenforcement: block\n"
+        "unmanaged_files:\n  action: deny\n",
+        encoding="utf-8",
+    )
+    hand_written = project / ".github" / "instructions" / "hand-written.instructions.md"
+    hand_written.parent.mkdir(parents=True)
+    hand_written.write_text("# hand written\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    with (
+        patch.dict(
+            os.environ,
+            {**origin.env(), "APM_CACHE_DIR": str(cache), "TMPDIR": str(scratch)},
+            clear=False,
+        ),
+        patch("tempfile.tempdir", None),
+        patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
+        patch(f"{_DOWNLOADER}._resolve_dep_token", return_value=None),
+        patch(f"{_DOWNLOADER}._resolve_dep_auth_ctx", return_value=None),
+        patch(
+            f"{_DOWNLOADER}._build_noninteractive_git_env",
+            autospec=True,
+            side_effect=lambda downloader, **_k: dict(downloader.git_env),
+        ),
+    ):
+        result = CliRunner().invoke(
+            cli, ["install", "--policy", str(policy), "--target", "copilot"]
+        )
+
+    output = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert "unmanaged_files.action: deny" in output
+    assert not (cache / "reachability").exists()
+    assert not list(scratch.glob("apm-reach-*"))
+    assert not (project / "apm.lock.yaml").exists()
