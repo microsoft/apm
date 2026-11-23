@@ -250,7 +250,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   install.` It restores only bytes that `apm.lock.yaml` records for the path,
   and never removes or replaces a file that changed after the interrupted
   install (for example one you wrote there): it keeps that file and names it
-  in a warning.
+  in a warning. A directory a killed removal left half-deleted is restored
+  whole, unless you changed it.
   If the kept copies do not match the lockfile, it restores nothing; if a file
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.

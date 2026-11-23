@@ -147,10 +147,20 @@ def _bound_record(
         return None
     # Entries without a hash are directories the package owns (a skill dir):
     # each must hold at least one recorded file.
+    holders = _recorded_parents(hashes)
     for directory in deployed - set(hashes):
-        if not any(rel.startswith(directory.rstrip("/") + "/") for rel in hashes):
+        if directory.rstrip("/") not in holders:
             return None
     return record
+
+
+def _recorded_parents(files: Iterable[str]) -> set[str]:
+    """Every directory that holds a recorded file, at any depth."""
+    parents: set[str] = set()
+    for rel in files:
+        parts = rel.split("/")
+        parents.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
+    return parents
 
 
 def _dest_key(rel: str) -> str:
@@ -282,10 +292,15 @@ def _source_is_live(root: Path, package: Any) -> bool:
             return True
         # A linked directory can change what a live render resolves.
         for name in [*dirs, *names]:
-            info = os.lstat(Path(directory) / name)
+            path = Path(directory) / name
+            info = os.lstat(path)
             if stat.S_ISDIR(info.st_mode):
                 continue
             if not stat.S_ISREG(info.st_mode) or info.st_mode & _EXEC_BITS:
+                return True
+            # Live primitive discovery parses every markdown file, deployed or
+            # not, and warns about one a text read cannot take as-is.
+            if name.lower().endswith(".md") and not _plain_text(path.read_bytes()):
                 return True
     return False
 
@@ -472,18 +487,30 @@ def record_policy(
 
     root = manifest_root(project_root, user_scope=config.user_scope)
     kept: list[Any] = []
+    # An answer a retry may change, which the records' probe discovered: the
+    # gate evaluates it first, as a live replay's first discovery.
+    loaned: list[Any] = []
 
     def fetch() -> Any:
-        # Share an answer only where the command would reuse it anyway; an
-        # outcome a retry may change is discovered again, as it would be live.
         if kept:
             return kept[0]
+        if loaned:
+            return loaned[0]
+        result = discover_trust_policy(root)
+        (kept if keep_policy_answer(result) else loaned).append(result)
+        return result
+
+    def gate_fetch() -> Any:
+        if kept:
+            return kept[0]
+        if loaned:
+            return loaned.pop()
         result = discover_trust_policy(root)
         if keep_policy_answer(result):
             kept.append(result)
         return result
 
-    return fetch, lambda: resolve_trust_policy(root, announce=False, fetch_result=fetch())
+    return fetch, lambda: resolve_trust_policy(root, announce=False, fetch_result=gate_fetch())
 
 
 class _MappingContext:
