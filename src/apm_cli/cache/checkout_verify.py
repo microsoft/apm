@@ -570,9 +570,11 @@ def _read_regular(rel: str, path: Path) -> tuple[bytes, os.stat_result]:
     except OSError as exc:  # replaced by a link since the lstat
         raise CheckoutVerificationError(f"{rel} is not a regular file") from exc
     with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        opened = os.fstat(handle.fileno())
+        swapped = os.name != "nt" and (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or swapped:
             raise CheckoutVerificationError(f"{rel} is not a regular file")
-        return handle.read(), info
+        return handle.read(), opened
 
 
 def require_verified_copy(
