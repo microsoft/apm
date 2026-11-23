@@ -128,6 +128,20 @@ def _maybe_rollback_manifest(
             )
 
 
+def _publish_deploy_evidence() -> None:
+    """Store the deployed bytes and package records this committed attempt staged."""
+    from apm_cli.cache.deploy_store import commit_staged
+
+    commit_staged()
+
+
+def _discard_deploy_evidence() -> None:
+    """Forget what an attempt that did not commit staged for the deploy store."""
+    from apm_cli.cache.deploy_store import discard_staged
+
+    discard_staged()
+
+
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
@@ -213,6 +227,7 @@ class InstallTransaction:
                         self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
+                    _publish_deploy_evidence()
                     self._ref_pins.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
@@ -252,6 +267,7 @@ class InstallTransaction:
                     # A preview whose staging already rolled back changed nothing.
                     return result
                 try:
+                    _discard_deploy_evidence()
                     self._settle_deploy_journal()
                     self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
@@ -401,6 +417,7 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
+                _discard_deploy_evidence()
                 self._ref_pins.discard()
                 try:
                     self._undo_deploys()
