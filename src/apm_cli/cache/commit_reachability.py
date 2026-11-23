@@ -15,6 +15,7 @@ record for one origin never admits the same commit from another.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import stat
@@ -419,21 +420,18 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
 
 
 def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
-    """Admit *ref*'s commit and return what to fetch: a fully qualified ref by its commit.
+    """Admit *ref*'s commit and return what to fetch: any named ref by its commit.
 
-    ``git clone --branch`` takes only a short name, which the origin's other
-    namespace could also hold, so ``refs/heads/<x>`` and ``refs/tags/<x>``
-    are fetched by the commit they resolve to exactly; so is a hex-like name
-    shorter than a full commit, which names a branch or tag first and else an
-    abbreviation, so that admission and the fetch judge the same commit.
+    A branch or tag can move after admission, and ``git clone --branch``
+    would fetch wherever it points then, so every declared ref other than a
+    full commit is fetched by the commit it was admitted at (#5138). That
+    also keeps ``refs/heads/<x>``, ``refs/tags/<x>`` and hex-like names
+    exact, so admission and the fetch judge the same commit.
 
     Raises:
         CommitNotReachableError: The commit is not admitted.
     """
-    by_commit = ref and (
-        ref.startswith(("refs/heads/", "refs/tags/"))
-        or (len(ref) not in (40, 64) and _COMMIT_RE.match(ref))
-    )
+    by_commit = bool(ref) and not (len(ref) in (40, 64) and _COMMIT_RE.match(ref))
     if not by_commit:
         admit_pinned_commit(downloader, dep_ref, ref)
         return ref
@@ -443,6 +441,62 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
         raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
     return commit.lower()
+
+
+class AdmittedCommitGoneError(CommitNotReachableError):
+    """A named ref's admitted commit can no longer be fetched from the origin."""
+
+
+def name_a_lost_admitted_commit(download):
+    """Make a download of a named ref whose admitted commit is gone fail by name (#5138).
+
+    A named ref is fetched by the commit it was admitted at, never by name.
+    When that fetch fails because the ref was rewritten and the commit is no
+    longer on the origin, the failure says so instead of a git error.
+    """
+
+    @functools.wraps(download)
+    def _download(downloader, repo_ref, *args, **kwargs):
+        try:
+            return download(downloader, repo_ref, *args, **kwargs)
+        except CommitNotReachableError:
+            raise
+        except Exception as exc:
+            lost = _lost_admitted_commit(downloader, repo_ref)
+            if lost is None:
+                raise
+            ref, admitted, now = lost
+            raise AdmittedCommitGoneError(
+                f"{ref!r} was admitted at commit {admitted[:12]}, which can no longer be "
+                f"fetched from the origin ({ref!r} now points to {now}). Run the install "
+                "again to admit its current commit, or 'apm update' when the lockfile "
+                "pins it."
+            ) from exc
+
+    return _download
+
+
+def _lost_admitted_commit(downloader, dep_ref) -> tuple[str, str, str] | None:
+    """``(ref, admitted, now)`` when *dep_ref* names a ref that moved off its admitted commit."""
+    ref = getattr(dep_ref, "reference", None)
+    if not ref or (len(ref) in (40, 64) and _COMMIT_RE.match(ref)):
+        return None
+    try:
+        if dep_ref.is_artifactory():
+            return None
+        admitted = (downloader.resolve_git_reference(dep_ref).resolved_commit or "").lower()
+        found: list[str] = []
+        try:
+            _at_origin(
+                downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
+            )
+        except _NoSuchRef:
+            found.append("")
+    except Exception:
+        return None
+    if len(admitted) not in (40, 64) or not found or found[0] == admitted:
+        return None
+    return ref, admitted, found[0][:12] or "no branch or tag"
 
 
 def admit_and_resolve(downloader, dep_ref):

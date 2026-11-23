@@ -121,6 +121,64 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
         )
 
 
+def fetch_commit_worktree(
+    execute_transport_plan: Callable[..., None],
+    repo_url_base: str,
+    target: Path,
+    *,
+    dep_ref: DependencyReference,
+    sha: str,
+    verbose_callback: Callable[[str], None] | None = None,
+) -> None:
+    """Check out commit *sha* at *target*, fetched by that commit, never by a name (#5138).
+
+    Shallow: ``git init``, ``git fetch --depth=1 --no-tags <url> <sha>`` and a
+    detached checkout. A server that refuses a want by commit falls back to a
+    full clone and a checkout of *sha*. Runs over the clone transport plan.
+    """
+    from ..utils.git_env import (
+        checkout_git_worktree,
+        clone_git_worktree,
+        get_git_executable,
+        git_network_env,
+        git_no_templates_args,
+        git_subprocess_env,
+    )
+
+    git_exe = get_git_executable()
+
+    def _action(url: str, env: dict[str, str], path: Path) -> None:
+        env = git_subprocess_env(env)
+        if path.exists():
+            _rmtree(path)
+        try:
+            init_env = git_network_env(url, env)
+            subprocess.run(
+                [git_exe, "init", "-q", *git_no_templates_args(), str(path)],
+                env=init_env,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, sha],
+                env=git_network_env(url, env, worktree=path),
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+        except subprocess.CalledProcessError:
+            if verbose_callback:
+                verbose_callback(
+                    f"Fetch by commit refused; cloning in full to check out {sha[:12]}"
+                )
+            if path.exists():
+                _rmtree(path)
+            clone_git_worktree(url, path, env=env, no_checkout=True)
+        checkout_git_worktree(path, sha, env=env)
+
+    execute_transport_plan(repo_url_base, target, dep_ref=dep_ref, clone_action=_action)
+
+
 def bare_clone_with_fallback(
     execute_transport_plan: Callable[..., None],
     repo_url_base: str,

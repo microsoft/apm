@@ -8,6 +8,7 @@ Real CLI against a local origin behind a GitLab-shaped URL (git
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ _REMOTE = "https://gitlab.com/acme/platform/pkg"
 # Only the transport credentials are replaced; the downloader runs as shipped.
 _DOWNLOADER = "apm_cli.deps.github_downloader.GitHubPackageDownloader"
 _UNREACHABLE = "not reachable from any branch or tag"
+_ADMISSION = "apm_cli.cache.commit_reachability"
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -332,3 +334,113 @@ def test_a_policy_denied_install_of_a_verified_commit_leaves_no_reachability_sta
     assert not (cache / "reachability").exists()
     assert not list(scratch.glob("apm-reach-*"))
     assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("path", "no_cache"),
+    [(None, False), (None, True), ("skills/tool", False), ("skills/tool", True)],
+    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache"],
+)
+def test_a_branch_that_moves_after_admission_installs_the_admitted_commit(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache
+) -> None:
+    """#5138: a named ref is fetched by the commit it was admitted at, never by name."""
+    # The verdict recorder is the hook between admission and fetch.
+    record_tip = importlib.import_module(_ADMISSION)._record_tip
+    work = tmp_path / "remote" / "work"
+    moved: list[str] = []
+
+    def _admit_then_move(*args, **kwargs):
+        record_tip(*args, **kwargs)
+        if not moved:
+            _package(work, "pkg", "m3")
+            _package(work / "skills" / "tool", "tool", "m3")
+            _git("add", "-A", cwd=work)
+            _git("commit", "-qm", "m3", cwd=work)
+            moved.append(_git("rev-parse", "HEAD", cwd=work))
+            _git("push", "-q", str(origin.path), "main", cwd=work)
+
+    project = _project(tmp_path, "main", path)
+    env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+    monkeypatch.setattr(f"{_ADMISSION}._record_tip", _admit_then_move)
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    assert result.exit_code == 0, result.output
+    assert moved, "the branch never moved after admission"
+    lock = (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    assert origin.m2 in lock and moved[0] not in lock
+    deployed = sorted((project / "apm_modules").rglob("*.instructions.md"))
+    assert deployed and all(p.read_text(encoding="utf-8") == "m2" for p in deployed)
+
+
+@pytest.mark.parametrize(
+    ("path", "no_cache"),
+    [(None, False), (None, True), ("skills/tool", False), ("skills/tool", True)],
+    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache"],
+)
+def test_an_admitted_commit_force_pushed_away_fails_closed(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache
+) -> None:
+    """#5138: if the admitted commit is gone, the install fails; it never fetches by name."""
+    # The verdict recorder is the hook between admission and fetch.
+    record_tip = importlib.import_module(_ADMISSION)._record_tip
+    work = tmp_path / "remote" / "work"
+    rewritten: list[str] = []
+
+    def _admit_then_force_push(*args, **kwargs):
+        record_tip(*args, **kwargs)
+        if not rewritten:
+            _git("reset", "-q", "--hard", origin.m1, cwd=work)
+            _package(work, "pkg", "r1")
+            _package(work / "skills" / "tool", "tool", "r1")
+            _git("add", "-A", cwd=work)
+            _git("commit", "-qm", "r1", cwd=work)
+            rewritten.append(_git("rev-parse", "HEAD", cwd=work))
+            _git("push", "-qf", str(origin.path), "main", cwd=work)
+            _git("reflog", "expire", "--expire=now", "--all", cwd=origin.path)
+            _git("gc", "-q", "--prune=now", cwd=origin.path)
+
+    project = _project(tmp_path, "main", path)
+    env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+    monkeypatch.setattr(f"{_ADMISSION}._record_tip", _admit_then_force_push)
+
+    result = _install(project, origin, monkeypatch, **env)
+
+    assert rewritten, "the branch was never rewritten after admission"
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert f"'main' was admitted at commit {origin.m2[:12]}" in output
+    assert "can no longer be fetched from the origin" in output
+    assert f"now points to {rewritten[0][:12]}" in output
+    assert _installed(project) == []
+    assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.parametrize("protocol", ["2", "0"], ids=["fetch-by-commit", "server-refuses-want"])
+def test_a_named_ref_is_checked_out_at_its_commit_even_when_a_want_by_commit_is_refused(
+    tmp_path: Path, origin: _Origin, protocol: str
+) -> None:
+    """#5138: the shallow fetch by commit, or the full-clone fallback, checks out that commit."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    notes: list[str] = []
+    target = tmp_path / "checkout"
+    env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.version"}
+    env["GIT_CONFIG_VALUE_0"] = protocol
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(origin.path.as_uri(), env, path)
+
+    fetch_commit_worktree(
+        _plan,
+        "acme/platform/pkg",
+        target,
+        dep_ref=None,
+        sha=origin.m1,
+        verbose_callback=notes.append,
+    )
+
+    assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m1"
+    assert _git("rev-parse", "HEAD", cwd=target) == origin.m1
+    assert bool(notes) is (protocol == "0")
