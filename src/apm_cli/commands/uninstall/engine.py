@@ -1848,6 +1848,7 @@ def gate_retired_hook_survivors(
     from ...install.exec_gate import gate_retirements
     from ...models.apm_package import APMPackage
     from ...native_plugins.uninstall import retire_disallowed_native_survivors
+    from ...security.exec_kinds import retired_kinds_warnings
     from .local_survivors import survivor_ships_hooks
 
     if lockfile is None:
@@ -1874,12 +1875,11 @@ def gate_retired_hook_survivors(
         for k, why in retirements.denied_packages.items()
         if k not in removed_keys and survivor_ships_hooks(lockfile, k, modules_dir)
     }
-    hooks = {k: why for k, why in retirements.hook_packages.items() if k not in removed_keys}
+    hooks = {k: v for k, v in retirements.hook_packages.items() if k not in removed_keys}
     for key, why in sorted(denied.items()):
         logger.warning(f"{key} is no longer allowed ({why}); removing its integrated files")
-    for key, why in sorted(hooks.items()):
-        if key not in denied:
-            logger.warning(f"{key} hooks are no longer allowed ({why}); removing them")
+    for line in retired_kinds_warnings(hooks, skip=denied):
+        logger.warning(line)
     native = retire_disallowed_native_survivors(lockfile, retirements, removed_keys, hooks, logger)
     return refreshed | set(denied) | set(hooks) | native, set(denied)
 

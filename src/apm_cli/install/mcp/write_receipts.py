@@ -12,11 +12,18 @@ and its identity, scope, installation identity), checked by
 Only actual writes are recorded; an entry that already matched is never
 recorded, so an identical entry the user wrote never becomes APM's.
 
+Records are keyed by (runtime, config file, native key), so each runtime
+profile (for example each ``COPILOT_HOME``) keeps its own record.
+
 When ``apm.lock.yaml`` is absent, install retires an entry this evidence
 proves APM wrote and no longer deploys (:func:`retire_undeclared_mcp_writes`).
 An entry it cannot prove (evidence unusable, or the entry changed since APM
-wrote it) is kept, reported, and marked kept; ``apm audit --ci`` reports it
-(:func:`kept_mcp_writes`) until the entry is removed or declared again.
+wrote it) is kept, reported, and marked kept; every later install announces it
+and ``apm audit --ci`` reports it (:func:`kept_mcp_writes`) until the entry is
+removed or declared again. Unusable evidence met there is noted next to the
+evidence file, so audit keeps reporting it once the lockfile is rewritten.
+Only the selected config is ever examined: a record of another profile's
+config waits until that profile is selected.
 """
 
 from __future__ import annotations
@@ -42,6 +49,11 @@ _VERSION = 1
 # (runtime, server name, fingerprint, requested info) of each entry the current install wrote.
 _Write = tuple[str, str, str | None, dict | None]
 _journal: ContextVar[list[_Write] | None] = ContextVar("apm_mcp_write_journal", default=None)
+
+
+def _ident(write: McpWrite) -> tuple[str, str, str]:
+    """Record identity: (runtime, config file, native key); the name when no key was located."""
+    return (write.runtime, write.config or "", write.key or write.name)
 
 
 class McpWriteEvidenceError(ValueError):
@@ -148,7 +160,7 @@ class McpWriteReceipts:
         self.project_root = project_root
         self.user_scope = user_scope
         self.path: Path = session.mcp_state_path
-        self.writes: dict[tuple[str, str], McpWrite] = {}
+        self.writes: dict[tuple[str, str, str], McpWrite] = {}
         self._existed = self.path.exists()
         self._dirty = False
         self._clients: dict[str, Any] = {}
@@ -176,7 +188,7 @@ class McpWriteReceipts:
                     raise TypeError("writes must be a list")
                 for row in data["writes"]:
                     write = McpWrite.from_row(row)
-                    store.writes[(write.runtime, write.name)] = write
+                    store.writes[_ident(write)] = write
             except (KeyError, TypeError, UnicodeError, ValueError) as exc:
                 raise McpWriteEvidenceError(
                     f"Invalid MCP write evidence at {store.path}: {exc}. The entries it lists "
@@ -233,10 +245,14 @@ class McpWriteReceipts:
             return None
         return mcp_native_hash(self._client(runtime).managed_server_config(native))
 
+    def _selected(self, write: McpWrite) -> bool:
+        """Whether *write* names the config this install selects (not another profile's)."""
+        return write.config is None or write.config == self._config(write.runtime)
+
     def _presence(self, write: McpWrite) -> bool | None:
         """Whether *write*'s entry is in its config; None when that cannot be established."""
         existing = self._existing(write.runtime)
-        if existing is None or write.key is None:
+        if existing is None or write.key is None or not self._selected(write):
             return None
         return write.key in existing
 
@@ -263,9 +279,8 @@ class McpWriteReceipts:
                 content_hash is not None and self._fingerprint(runtime, key) != content_hash
             ):
                 key = None
-            self.writes[(runtime, name)] = McpWrite(
-                runtime, name, self._config(runtime), key, content_hash
-            )
+            write = McpWrite(runtime, name, self._config(runtime), key, content_hash)
+            self.writes[_ident(write)] = write
             self._dirty = True
 
     def forget_absent(self) -> None:
@@ -285,12 +300,25 @@ class McpWriteReceipts:
 
     def mark_kept(self, write: McpWrite) -> None:
         if not write.kept:
-            self.writes[(write.runtime, write.name)] = replace(write, kept=True)
+            self.writes[_ident(write)] = replace(write, kept=True)
             self._dirty = True
 
     def forget(self, write: McpWrite) -> None:
-        if self.writes.pop((write.runtime, write.name), None) is not None:
+        if self.writes.pop(_ident(write), None) is not None:
             self._dirty = True
+
+    def included_runtimes(self, exclude: str | None) -> set[str]:
+        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
+
+        runtimes = sorted({write.runtime for write in self.writes.values()})
+        return set(filter_excluded_mcp_runtimes(runtimes, exclude))
+
+    def warn_kept(self, write: McpWrite, logger: Any) -> None:
+        logger.warning(
+            f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
+            "deploys it and cannot confirm the entry is the one it wrote. "
+            "Remove the entry if you no longer use it."
+        )
 
     def retire_undeclared(
         self,
@@ -306,13 +334,14 @@ class McpWriteReceipts:
         """
         from apm_cli.install.errors import RequiredIntegrationError
         from apm_cli.integration.mcp_integrator_install import _remove_native_entry
-        from apm_cli.integration.mcp_user_scope_runtimes import filter_excluded_mcp_runtimes
 
-        runtimes = sorted({write.runtime for write in self.writes.values()})
-        included = set(filter_excluded_mcp_runtimes(runtimes, exclude))
+        included = self.included_runtimes(exclude)
         removed: set[str] = set()
         for _, write in sorted(self.writes.items()):
             if write.name in declared or write.runtime not in included:
+                continue
+            if not self._selected(write):
+                # Another profile's config: decided only when that profile is selected.
                 continue
             if write.key is not None and write.key in self._declared_keys(
                 write.runtime, declared, declared_configs or {}
@@ -335,11 +364,7 @@ class McpWriteReceipts:
                     removed.add(write.name)
                     continue
             self.mark_kept(write)
-            logger.warning(
-                f"Kept MCP server '{write.name}' in {self.display(write)}: APM no longer "
-                "deploys it and cannot confirm the entry is the one it wrote. "
-                "Remove the entry if you no longer use it."
-            )
+            self.warn_kept(write, logger)
         self.save()
         return removed
 
@@ -355,11 +380,14 @@ class McpWriteReceipts:
         }
 
     def kept(self, managed: set[str]) -> list[tuple[McpWrite, str]]:
-        """Kept records of unmanaged servers whose entry is still present."""
+        """Kept records of unmanaged servers in the selected configs whose entry is still present."""
         return [
             (write, self.display(write))
             for _, write in sorted(self.writes.items())
-            if write.kept and write.name not in managed and self._presence(write) is not False
+            if write.kept
+            and write.name not in managed
+            and self._selected(write)
+            and self._presence(write) is not False
         ]
 
     def save(self) -> None:
@@ -396,6 +424,7 @@ def retire_undeclared_mcp_writes(
     user_scope: bool,
     exclude: str | None,
     logger: Any,
+    retire: bool = True,
 ) -> None:
     """Without a lockfile, retire the entries APM wrote for servers it no longer deploys.
 
@@ -403,14 +432,30 @@ def retire_undeclared_mcp_writes(
     still exactly what APM wrote. Any other recorded entry is kept, reported
     and marked kept for ``apm audit --ci``; an entry with no record (the
     user's own, even when identical to a declaration) is never considered.
+    Unusable evidence met here is noted for audit (:func:`unusable_mcp_evidence`).
+
+    With ``retire=False`` (a lockfile governs cleanup) nothing is removed:
+    kept entries and noted unusable evidence are announced again.
     """
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
-    except McpWriteEvidenceError as exc:
-        logger.warning(f"Kept every MCP entry APM no longer deploys: {exc}")
+    except (OSError, ValueError) as exc:
+        reason = unusable_mcp_evidence(project_root, user_scope=user_scope)
+        if reason is None:
+            _log.debug("No usable installation binding; every MCP entry is kept", exc_info=True)
+        elif retire:
+            _note_unusable(project_root, user_scope=user_scope, reason=reason)
+            if isinstance(exc, McpWriteEvidenceError):
+                logger.warning(f"Kept every MCP entry APM no longer deploys: {exc}")
+        elif _unusable_noted(project_root, user_scope=user_scope):
+            logger.warning(f"Kept every MCP entry APM no longer deploys: {reason}")
         return
-    except (OSError, ValueError):
-        _log.debug("No usable installation binding; every MCP entry is kept", exc_info=True)
+    _clear_unusable_note(project_root, user_scope=user_scope)
+    if not retire:
+        included = store.included_runtimes(exclude)
+        for write, _ in store.kept(set(declared)):
+            if write.runtime in included:
+                store.warn_kept(write, logger)
         return
     removed = store.retire_undeclared(
         set(declared), exclude=exclude, logger=logger, declared_configs=declared_configs
@@ -432,8 +477,16 @@ def forget_removed_mcp_writes(project_root: Path, *, user_scope: bool) -> None:
         _log.debug("MCP write evidence left unchanged after cleanup", exc_info=True)
 
 
-def unusable_mcp_evidence(project_root: Path, *, user_scope: bool) -> str | None:
-    """Read-only: why this installation's MCP write evidence exists but cannot be used."""
+def unusable_mcp_evidence(
+    project_root: Path, *, user_scope: bool, noted_only: bool = False
+) -> str | None:
+    """Read-only: why this installation's MCP write evidence exists but cannot be used.
+
+    With *noted_only*, only evidence an install without a lockfile already met
+    (and kept every entry for) is reported.
+    """
+    if noted_only and not _unusable_noted(project_root, user_scope=user_scope):
+        return None
     try:
         McpWriteReceipts.open(project_root, user_scope=user_scope)
     except McpWriteEvidenceError as exc:
@@ -444,6 +497,47 @@ def unusable_mcp_evidence(project_root: Path, *, user_scope: bool) -> str | None
         if path is not None and os.path.lexists(path):
             return f"Unusable MCP write evidence at {path}: {exc}"
     return None
+
+
+def _unusable_note_path(project_root: Path, *, user_scope: bool) -> Path | None:
+    path = _evidence_path(project_root, user_scope=user_scope)
+    return None if path is None else path.with_name(path.name + ".unusable")
+
+
+def _unusable_noted(project_root: Path, *, user_scope: bool) -> bool:
+    """Whether an install without a lockfile kept entries because this evidence was unusable."""
+    path = _unusable_note_path(project_root, user_scope=user_scope)
+    return path is not None and os.path.lexists(path)
+
+
+def _note_unusable(project_root: Path, *, user_scope: bool, reason: str) -> None:
+    """Note that unusable evidence kept every entry, so audit reports it with a lockfile too."""
+    from apm_cli.integration.write_seam import atomic_write_text
+    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
+
+    path = _unusable_note_path(project_root, user_scope=user_scope)
+    if path is None or os.path.lexists(path):
+        return
+    # The evidence owner's containment anchor (above APM_HOME): no linked component.
+    base = path.parent.parent.parent.parent
+    try:
+        ensure_path_within(path, base)
+        if has_symlink_component(base, path, raise_on_error=True) or not path.parent.is_dir():
+            return
+        atomic_write_text(path, reason + "\n", new_file_mode=0o600, create_only=True)
+    except (OSError, ValueError):
+        _log.debug("Could not note unusable MCP write evidence", exc_info=True)
+
+
+def _clear_unusable_note(project_root: Path, *, user_scope: bool) -> None:
+    """The evidence is usable (or removed) again: the note has nothing left to report."""
+    path = _unusable_note_path(project_root, user_scope=user_scope)
+    if path is None or not os.path.lexists(path):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        _log.debug("Could not clear the unusable MCP write evidence note", exc_info=True)
 
 
 def _evidence_path(project_root: Path, *, user_scope: bool) -> Path | None:
