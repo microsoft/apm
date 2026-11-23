@@ -688,6 +688,7 @@ install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
 install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
+install-deployment-server-name-rule
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
