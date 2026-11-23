@@ -4,6 +4,7 @@ import builtins
 import contextlib
 import sys
 import traceback
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -62,6 +63,13 @@ from .engine import (
     manifest_dependency_entries,
     project_shrunk_selections,
 )
+from .local_reanchor import (
+    _abort_unsaved_reanchor,
+    _plan_reanchor_or_exit,
+    _refuse_reanchor_refresh,
+    _refuse_unverifiable_local_survivors,
+    _rename_reanchored_receipts,
+)
 from .selection_shrink import (
     _shrink_surviving_selections,
     shrink_path_split,
@@ -88,6 +96,12 @@ def _uninstall_summary(
         kept = _count_noun(still_needed_count, "declaration")
         summary += f"; removed {kept} whose package another dependency still needs"
     return summary
+
+
+def _report_consented_deletions(logger: CommandLogger, claims: Iterable[str]) -> None:
+    """Name each file ``--trust-lockfile`` consent deleted, with its basis (req-lk-024)."""
+    for claim in claims:
+        logger.progress(f"Deleted {claim} (matched its apm.lock.yaml hash; --trust-lockfile)")
 
 
 def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list) -> list:
@@ -174,205 +188,12 @@ def _split_still_needed_packages(
     return removed, still_needed, repair
 
 
-def _refuse_unverifiable_local_survivors(
-    lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
-) -> list:
-    """Refuse a local removal a surviving local package still reaches while apm_modules/ is gone.
-
-    Without the installed graph the still-needed split cannot run, and dropping
-    a still-needed local row would break the next frozen install (#4889). The
-    survivors' local sources are read offline; only a reaching or unreadable
-    chain refuses.
-    """
-    from ...core.remediation import RESYNC_DEPLOYED
-    from .engine import _read_survivor_direct_refs
-
-    project_root = Path(apm_yml_path).parent
-    local = {}
-    for package in packages:
-        row = lockfile.get_dependency(_removed_lock_key(package, lockfile))
-        if row is not None and row.source == "local" and row.local_path:
-            raw = Path(row.local_path).expanduser()
-            with contextlib.suppress(OSError, RuntimeError):
-                directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
-                local[directory] = package
-    if not local:
-        return []
-    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
-    from ...deps.reachability import local_sources_reach
-
-    if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
-        return []
-    if dry_run:
-        # A preview writes nothing: it shows the package kept, as the real run would.
-        for package in () if quiet else local.values():
-            logger.warning(
-                f"Dry run: Would keep {_dependency_public_label(package)}: apm_modules/ is "
-                "missing, so APM cannot confirm that no other local package still needs it; "
-                "the uninstall itself refuses."
-            )
-        return list(local.values())
-    logger.error(
-        f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
-        "is missing, so APM cannot confirm whether another local package still needs it; "
-        f"apm.yml and apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
-    )
-    sys.exit(1)
-
-
-def _plan_reanchor_or_exit(
-    lockfile,
-    decision,
-    still_needed: list,
-    apm_yml_path,
-    logger,
-    *,
-    others: list = (),
-    shrinks=dict,
-):
-    """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
-    from ...core.deployment_reanchor import reanchor_receipt_problems
-    from ...core.scope import InstallScope
-    from ...deps.lockfile import get_lockfile_path
-    from .local_reanchor import (
-        LocalReanchorRefused,
-        plan_local_reanchor,
-        refreshed_local_sources,
-        snapshot_for_rollback,
-    )
-
-    project_root = apm_yml_path.parent
-    labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
-
-    def label(key: str) -> str:
-        return _dependency_public_label(labels.get(key, key))
-
-    try:
-        plan = plan_local_reanchor(lockfile, decision, project_root, frozenset(labels), label=label)
-        problems = reanchor_receipt_problems(
-            project_root, InstallScope.PROJECT, lockfile, plan.renames
-        )
-        if plan.renames and (shrunk := sorted(shrinks())):
-            raise LocalReanchorRefused(
-                f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
-                f"fewer skills or targets of {shrunk[0]}, which would remove deployed files"
-            )
-        if plan.renames and (
-            changed := refreshed_local_sources(lockfile, project_root / "apm_modules", project_root)
-        ):
-            raise LocalReanchorRefused(
-                f"{label(next(iter(plan.renames)))} stays, but the source of {changed[0]} "
-                "changed since it was installed, and refreshing its copy cannot be undone; "
-                "reinstall first"
-            )
-        if plan.renames and _native_owned(lockfile):
-            raise LocalReanchorRefused(
-                f"{label(next(iter(plan.renames)))} stays, but native plugin registrations are "
-                "reconciled separately, so it cannot be re-anchored in one transaction"
-            )
-        if plan.renames and others:
-            # Rollback restores apm.yml and the lock, never deleted content, so a
-            # re-anchor runs alone.
-            raise LocalReanchorRefused(
-                f"{label(next(iter(plan.renames)))} stays under the package that needs it, "
-                "so it is re-anchored on its own; uninstall "
-                f"{', '.join(_dependency_public_label(package) for package in others)} "
-                "in a separate command"
-            )
-        if problems:
-            raise LocalReanchorRefused(
-                f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "
-                f"{', '.join(problems[:3])}: the deployment receipt is missing or does not "
-                "match its owner"
-            )
-    except LocalReanchorRefused as exc:
-        logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
-        logger.progress(
-            "Uninstall the package that still needs it first, or keep the local "
-            "declaration in apm.yml."
-        )
-        sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
-
-
-def _native_owned(lockfile) -> bool:
-    from ...claude_plugins.registrar import native_ownership
-
-    return bool(native_ownership(lockfile))
-
-
-def _refuse_reanchor_refresh(repair, refreshed_keys, logger) -> None:
-    """Backstop: a re-anchor never runs with a survivor refresh that deletes files (#4889).
-
-    Only apm.yml is written at this point, so the rollback is complete.
-    """
-    plan = repair.reanchor
-    if not plan or not plan.renames or not refreshed_keys:
-        return
-    _roll_back_and_exit(
-        plan,
-        logger,
-        "A remaining package must be redeployed, which removes its deployed files, so the "
-        "still-needed local package was not re-anchored",
-    )
-
-
 def _cleanup_state_unless_reanchor_refreshes(lockfile, removed_keys, refreshed, repair, logger):
     """Snapshot the files cleanup may touch; a re-anchor refuses any survivor refresh first."""
     _refuse_reanchor_refresh(repair, refreshed, logger)
     if not lockfile:
         return set(), {}
     return _collect_deployed_cleanup_state(lockfile, removed_keys | refreshed)
-
-
-def _roll_back_and_exit(plan, logger, reason: str):
-    """Roll a re-anchor back, report the outcome (never silently partial) and exit 1."""
-    from ...core.remediation import RESYNC_DEPLOYED
-    from .local_reanchor import roll_back
-
-    if failures := roll_back(plan):
-        logger.error(
-            f"{reason}; these could not be restored: {', '.join(failures)}. Every deployed "
-            f"file is kept. {RESYNC_DEPLOYED.sentence()}"
-        )
-    else:
-        logger.error(f"{reason}; apm.yml and apm.lock.yaml were restored and every file is kept.")
-    sys.exit(1)
-
-
-def _abort_unsaved_reanchor(repair, logger) -> None:
-    """A re-anchor whose lock was not saved restores apm.yml and exits nonzero (#4889)."""
-    plan = repair.reanchor
-    if not plan or not plan.renames:
-        return
-    _roll_back_and_exit(
-        plan,
-        logger,
-        "The lockfile was not saved, so the re-anchored package was not kept under its new parent",
-    )
-
-
-def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
-    """After the lock commits, carry receipts to the re-anchored owners (#4889)."""
-    plan = repair.reanchor
-    if not plan or not plan.renames:
-        return
-    from ...core.deployment_reanchor import rename_receipt_owners
-    from ...deps.lockfile import LockFile
-
-    committed = LockFile.read(lockfile_path)
-    renamed = {new for old, new in plan.renames.items() if old != new}
-    if committed is None or not renamed <= committed.dependencies.keys():
-        return  # the lock was not committed; receipts still match it
-    try:
-        rename_receipt_owners(deploy_root, scope, committed, plan.renames)
-    except (OSError, ValueError) as exc:
-        # One transaction: without its receipts the re-anchor does not stand.
-        _roll_back_and_exit(
-            plan,
-            logger,
-            f"Deployment receipts could not be moved to the re-anchored package ({exc})",
-        )
 
 
 def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
@@ -526,8 +347,10 @@ def _report_uninstall_outcome(
     mcp_cleanup_error: Exception | None,
     lsp_cleanup_error: Exception | None,
     mcp_cleanup_fatal: bool,
+    consented_deletions: Iterable[str] = (),
 ) -> bool:
     """Render the final summary and return whether cleanup was incomplete."""
+    _report_consented_deletions(logger, consented_deletions)
     # Cleanup evidence warnings (#3701) name kept files before the outcome.
     logger.render_summary()
     integration_incomplete = not integration_cleanup.complete
@@ -881,7 +704,6 @@ def _gate_denied_package_keys(
     apm_package: Any, lockfile: Any, modules_dir: Any, deploy_root: Any, user_scope: bool
 ) -> dict[str, str]:
     """Survivors the org policy now denies, with why, from the gate retirement owner (#4446)."""
-    from pathlib import Path
 
     from ...install.exec_gate import gate_retirements
     from ...install.lsp.integration import has_recorded_lsp_state
@@ -944,13 +766,41 @@ def _cleanup_stale_lsp(
 
 
 def _abort_if_retained_target_cleanup_paths(
-    outcome: Any, lockfile: Any, lockfile_path: Any, logger: Any
+    outcome: Any,
+    lockfile: Any,
+    lockfile_path: Any,
+    logger: Any,
+    consent_kept=frozenset(),
+    evidence: Any = None,
 ) -> None:
     """Stop before ownership release when owned target files remain.
 
     Files already removed are dropped from the lockfile so it records exactly
     what is still on disk; apm.yml keeps the package for the retry (#3656).
+    Files ``--trust-lockfile`` kept for lack of evidence (at preflight or at
+    the deletion recheck), and the skill directories holding them, do not stop
+    the uninstall (#4295); its deletions are named first, before any exit.
     """
+    from ...integration.cleanup import _claim_key
+
+    if evidence is not None:
+        _report_consented_deletions(logger, evidence.take_consented_deletions())
+        consent_kept = consent_kept | evidence.kept_under_consent()
+    # One spelling per file, as consent records it (#4295).
+    consent_kept = {_claim_key(kept) for kept in consent_kept}
+    # Every ancestor directory of a kept file, built once: lookups stay O(1).
+    kept_dirs = {
+        "/".join(parts[:index])
+        for parts in (kept.split("/") for kept in consent_kept)
+        for index in range(1, len(parts))
+    }
+    # Only evidence-based retention is waived; a path cleanup failed on stays.
+    failed = {_claim_key(path) for path in getattr(outcome, "failed_paths", set())}
+    outcome.retained_paths -= {
+        path
+        for path in outcome.retained_paths
+        if (key := _claim_key(path)) not in failed and (key in consent_kept or key in kept_dirs)
+    }
     if not outcome.retained_paths:
         return
     # Name why each file was kept (#3701) before stopping.
@@ -1016,20 +866,24 @@ def _refuse_uninstall_without_evidence(
     *,
     user_scope: bool,
     shrunk=None,
-) -> None:
+    trust_lockfile: bool = False,
+    packages: tuple[str, ...] = (),
+) -> frozenset[str]:
     """Refuse before any change when a file uninstall would delete lacks evidence.
 
     A lockfile hash alone never authorizes deleting a deployed file
     (req-lk-024, #3701). Checked before package sources, apm.yml or
     apm.lock.yaml change, so a refusal leaves all of them as they were.
     Files a shrinking survivor selection (*shrunk*) retires count too (#4313).
+    With *trust_lockfile* (consent already given to *evidence*) nothing is
+    refused: the files still lacking evidence are returned and kept (#4295).
     """
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
     if not lockfile or (not cleanup_keys and not shrunk):
-        return
+        return frozenset()
     # Hash-tracked skill members count too: directory cleanup deletes them.
     selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
     survivors, survivor_hashes = _collect_deployed_cleanup_state(
@@ -1053,17 +907,25 @@ def _refuse_uninstall_without_evidence(
     candidates -= builtins.set(lockfile.local_deployed_files)
     candidates -= builtins.set(preserved_values or ())
     refused = evidence.refusals(sorted(candidates))
-    if not refused:
-        return
+    if not refused or trust_lockfile:
+        return frozenset(claim for claim, _ in refused)
     _cleanup_staged_local_refreshes(staged_refreshes, modules_dir)
     logger.render_summary()
     logger.error(
         "Uninstall refused: deleting these tracked files needs deployment evidence that "
         "APM wrote them. Nothing was removed; apm.yml and apm.lock.yaml were not changed."
     )
+    deletable = evidence.consent_preview(claim for claim, _ in refused)
     for claim, verdict in refused:
-        logger.error(f"  - {claim}: {refusal_reason(verdict)}")
-    for remedy in uninstall_evidence_remedies(user_scope=user_scope):
+        under_flag = (
+            "--trust-lockfile would delete it"
+            if claim in deletable
+            else "kept even with --trust-lockfile"
+        )
+        logger.error(f"  - {claim}: {refusal_reason(verdict)}; {under_flag}")
+    for remedy in uninstall_evidence_remedies(
+        user_scope=user_scope, trust_lockfile=bool(deletable), packages=packages
+    ):
         logger.error(remedy)
     sys.exit(1)
 
@@ -1079,11 +941,14 @@ def _uninstall_evidence_preflight(
     logger: CommandLogger,
     *,
     user_scope: bool,
+    trust_lockfile: bool = False,
+    packages: tuple[str, ...] = (),
 ):
     """Collect deletion evidence, then refuse before any change when it is missing.
 
     *removal* is ``(packages_to_remove, modules_dir, apm_yml_path)``; survivor
-    selections the uninstall shrinks retire files too (#4313).
+    selections the uninstall shrinks retire files too (#4313). Returns the
+    evidence and, under ``--trust-lockfile``, the files it keeps (#4295).
     """
     packages_to_remove, modules_dir, apm_yml_path = removal
     shrunk = project_shrunk_selections(lockfile, packages_to_remove, modules_dir, apm_yml_path)
@@ -1096,7 +961,9 @@ def _uninstall_evidence_preflight(
         user_scope=user_scope,
         shrunk=shrunk,
     )
-    _refuse_uninstall_without_evidence(
+    if trust_lockfile:
+        evidence.consent_to_lockfile_hashes()
+    consent_kept = _refuse_uninstall_without_evidence(
         evidence,
         lockfile,
         cleanup_keys,
@@ -1106,8 +973,10 @@ def _uninstall_evidence_preflight(
         logger,
         user_scope=user_scope,
         shrunk=shrunk,
+        trust_lockfile=trust_lockfile,
+        packages=packages,
     )
-    return evidence
+    return evidence, consent_kept
 
 
 def _report_package_removal_failure(
@@ -1306,6 +1175,14 @@ def _finish_selected_profile_uninstall(
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed removal information")
 @click.option(
+    "--trust-lockfile",
+    is_flag=True,
+    help=(
+        "When a file lacks deployment evidence (no receipt, source unreachable), "
+        "delete it only if its bytes match apm.lock.yaml; keep every other file"
+    ),
+)
+@click.option(
     "--global",
     "-g",
     "global_",
@@ -1316,7 +1193,7 @@ def _finish_selected_profile_uninstall(
 @click.pass_context
 @serialized_lifecycle
 @lockfile_writer(LockfileWriter.UNINSTALL)
-def uninstall(ctx, packages, dry_run, verbose, global_):
+def uninstall(ctx, packages, dry_run, verbose, global_, trust_lockfile):
     """Remove APM packages from apm.yml and apm_modules (like npm uninstall).
 
     This command removes packages from both the apm.yml dependencies list
@@ -1425,9 +1302,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         surviving_deps = list(current_deps)
         for declaration in manifest_declarations_of(current_deps, packages_to_remove):
             surviving_deps.remove(declaration)
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -1514,9 +1389,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         surviving_deps = _surviving_declarations(
             current_deps, [*packages_to_remove, *still_needed_packages]
         )
-        removed_keys = builtins.set()
-        for package in packages_to_remove:
-            removed_keys.add(_removed_lock_key(package, lockfile))
+        removed_keys = {_removed_lock_key(package, lockfile) for package in packages_to_remove}
         projected_orphans, _ = _project_transitive_orphans(
             lockfile,
             packages_to_remove,
@@ -1576,7 +1449,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Deletion evidence (#3701): receipts, or the locked render, which is
         # materialized here while the removed packages' sources still exist.
-        deletion_evidence = _uninstall_evidence_preflight(
+        deletion_evidence, consent_kept = _uninstall_evidence_preflight(
             lockfile,
             lockfile_path,
             deploy_root,
@@ -1586,6 +1459,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             ([*packages_to_remove, *still_needed_packages], modules_dir, apm_yml_path),
             logger,
             user_scope=scope is InstallScope.USER,
+            trust_lockfile=trust_lockfile,
+            packages=tuple(packages),
         )
 
         # Remove package content before releasing declarations or ownership.
@@ -1662,7 +1537,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 preserved_selected_values=profile_survivors,
             )
             _abort_if_retained_target_cleanup_paths(
-                cleanup_outcome, lockfile, lockfile_path, logger
+                cleanup_outcome, lockfile, lockfile_path, logger, consent_kept, deletion_evidence
             )
 
         profile_lock_updated = _retire_selected_profile_packages(
@@ -1779,6 +1654,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             evidence=deletion_evidence,
             executable_context=survivor_trust,
         )
+        _report_consented_deletions(logger, deletion_evidence.take_consented_deletions())
         cleaned = integration_cleanup.counts
         surviving_deployed_files = integration_cleanup.deployed_files
         lockfile_ready = True
@@ -1912,6 +1788,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             mcp_cleanup_error,
             lsp_cleanup_error,
             mcp_cleanup_fatal,
+            deletion_evidence.take_consented_deletions(),
         )
 
         # Fire post-uninstall lifecycle scripts

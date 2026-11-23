@@ -25,9 +25,13 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from .engine import _dependency_public_label, _removed_lock_key
 
 
 class LocalReanchorRefused(ValueError):
@@ -326,3 +330,199 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
         except (OSError, ValueError, TypeError):
             stale.append(key)
     return stale
+
+
+# -- uninstall command steps (#4889) ----------------------------------------
+
+
+def _refuse_unverifiable_local_survivors(
+    lockfile, packages: list, apm_yml_path, logger, *, dry_run: bool = False, quiet: bool = False
+) -> list:
+    """Refuse a local removal a surviving local package still reaches while apm_modules/ is gone.
+
+    Without the installed graph the still-needed split cannot run, and dropping
+    a still-needed local row would break the next frozen install (#4889). The
+    survivors' local sources are read offline; only a reaching or unreadable
+    chain refuses.
+    """
+    from ...core.remediation import RESYNC_DEPLOYED
+    from .engine import _read_survivor_direct_refs
+
+    project_root = Path(apm_yml_path).parent
+    local = {}
+    for package in packages:
+        row = lockfile.get_dependency(_removed_lock_key(package, lockfile))
+        if row is not None and row.source == "local" and row.local_path:
+            raw = Path(row.local_path).expanduser()
+            with contextlib.suppress(OSError, RuntimeError):
+                directory = raw.resolve() if raw.is_absolute() else (project_root / raw).resolve()
+                local[directory] = package
+    if not local:
+        return []
+    direct_refs, dev_refs = _read_survivor_direct_refs(apm_yml_path, packages)
+    from ...deps.reachability import local_sources_reach
+
+    if not local_sources_reach((*direct_refs, *dev_refs), project_root, set(local)):
+        return []
+    if dry_run:
+        # A preview writes nothing: it shows the package kept, as the real run would.
+        for package in () if quiet else local.values():
+            logger.warning(
+                f"Dry run: Would keep {_dependency_public_label(package)}: apm_modules/ is "
+                "missing, so APM cannot confirm that no other local package still needs it; "
+                "the uninstall itself refuses."
+            )
+        return list(local.values())
+    logger.error(
+        f"{_dependency_public_label(next(iter(local.values())))} was not removed: apm_modules/ "
+        "is missing, so APM cannot confirm whether another local package still needs it; "
+        f"apm.yml and apm.lock.yaml were not changed. {RESYNC_DEPLOYED.sentence()}"
+    )
+    sys.exit(1)
+
+
+def _plan_reanchor_or_exit(
+    lockfile,
+    decision,
+    still_needed: list,
+    apm_yml_path,
+    logger,
+    *,
+    others: list = (),
+    shrinks=dict,
+):
+    """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
+    from ...core.deployment_reanchor import reanchor_receipt_problems
+    from ...core.scope import InstallScope
+    from ...deps.lockfile import get_lockfile_path
+    from .local_reanchor import (
+        LocalReanchorRefused,
+        plan_local_reanchor,
+        refreshed_local_sources,
+        snapshot_for_rollback,
+    )
+
+    project_root = apm_yml_path.parent
+    labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
+
+    def label(key: str) -> str:
+        return _dependency_public_label(labels.get(key, key))
+
+    try:
+        plan = plan_local_reanchor(lockfile, decision, project_root, frozenset(labels), label=label)
+        problems = reanchor_receipt_problems(
+            project_root, InstallScope.PROJECT, lockfile, plan.renames
+        )
+        if plan.renames and (shrunk := sorted(shrinks())):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but the remaining packages select "
+                f"fewer skills or targets of {shrunk[0]}, which would remove deployed files"
+            )
+        if plan.renames and (
+            changed := refreshed_local_sources(lockfile, project_root / "apm_modules", project_root)
+        ):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but the source of {changed[0]} "
+                "changed since it was installed, and refreshing its copy cannot be undone; "
+                "reinstall first"
+            )
+        if plan.renames and _native_owned(lockfile):
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but native plugin registrations are "
+                "reconciled separately, so it cannot be re-anchored in one transaction"
+            )
+        if plan.renames and others:
+            # Rollback restores apm.yml and the lock, never deleted content, so a
+            # re-anchor runs alone.
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays under the package that needs it, "
+                "so it is re-anchored on its own; uninstall "
+                f"{', '.join(_dependency_public_label(package) for package in others)} "
+                "in a separate command"
+            )
+        if problems:
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "
+                f"{', '.join(problems[:3])}: the deployment receipt is missing or does not "
+                "match its owner"
+            )
+    except LocalReanchorRefused as exc:
+        logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
+        logger.progress(
+            "Uninstall the package that still needs it first, or keep the local "
+            "declaration in apm.yml."
+        )
+        sys.exit(1)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+
+
+def _native_owned(lockfile) -> bool:
+    from ...claude_plugins.registrar import native_ownership
+
+    return bool(native_ownership(lockfile))
+
+
+def _refuse_reanchor_refresh(repair, refreshed_keys, logger) -> None:
+    """Backstop: a re-anchor never runs with a survivor refresh that deletes files (#4889).
+
+    Only apm.yml is written at this point, so the rollback is complete.
+    """
+    plan = repair.reanchor
+    if not plan or not plan.renames or not refreshed_keys:
+        return
+    _roll_back_and_exit(
+        plan,
+        logger,
+        "A remaining package must be redeployed, which removes its deployed files, so the "
+        "still-needed local package was not re-anchored",
+    )
+
+
+def _roll_back_and_exit(plan, logger, reason: str):
+    """Roll a re-anchor back, report the outcome (never silently partial) and exit 1."""
+    from ...core.remediation import RESYNC_DEPLOYED
+    from .local_reanchor import roll_back
+
+    if failures := roll_back(plan):
+        logger.error(
+            f"{reason}; these could not be restored: {', '.join(failures)}. Every deployed "
+            f"file is kept. {RESYNC_DEPLOYED.sentence()}"
+        )
+    else:
+        logger.error(f"{reason}; apm.yml and apm.lock.yaml were restored and every file is kept.")
+    sys.exit(1)
+
+
+def _abort_unsaved_reanchor(repair, logger) -> None:
+    """A re-anchor whose lock was not saved restores apm.yml and exits nonzero (#4889)."""
+    plan = repair.reanchor
+    if not plan or not plan.renames:
+        return
+    _roll_back_and_exit(
+        plan,
+        logger,
+        "The lockfile was not saved, so the re-anchored package was not kept under its new parent",
+    )
+
+
+def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logger) -> None:
+    """After the lock commits, carry receipts to the re-anchored owners (#4889)."""
+    plan = repair.reanchor
+    if not plan or not plan.renames:
+        return
+    from ...core.deployment_reanchor import rename_receipt_owners
+    from ...deps.lockfile import LockFile
+
+    committed = LockFile.read(lockfile_path)
+    renamed = {new for old, new in plan.renames.items() if old != new}
+    if committed is None or not renamed <= committed.dependencies.keys():
+        return  # the lock was not committed; receipts still match it
+    try:
+        rename_receipt_owners(deploy_root, scope, committed, plan.renames)
+    except (OSError, ValueError) as exc:
+        # One transaction: without its receipts the re-anchor does not stand.
+        _roll_back_and_exit(
+            plan,
+            logger,
+            f"Deployment receipts could not be moved to the re-anchored package ({exc})",
+        )
