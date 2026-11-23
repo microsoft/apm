@@ -500,20 +500,22 @@ def _assert_link_resolves(world: ReplayWorld, where: str) -> None:
 def test_a_compiled_agents_md_link_into_the_moving_copy_keeps_resolving(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """#5097 F1: e's always-on instruction links docs/ref.md; compile writes it to AGENTS.md."""
+    """#5097 F1: the project's always-on instruction links e's docs in its copy; compile
+    writes the link into AGENTS.md, which is no recorded claim the re-anchor scans."""
 
     def instruction(project: Path) -> None:
-        rules = project / "vendor/e/.apm/instructions/e.instructions.md"
+        rules = project / ".apm/instructions/proj.instructions.md"
         rules.parent.mkdir(parents=True)
         rules.write_text(
-            '---\napplyTo: "**"\ndescription: e rules\n---\nSee [ref](../../docs/ref.md).\n',
+            f'---\napplyTo: "**"\ndescription: Project rules\n---\nSee [ref]({_LINK}).\n',
             encoding="utf-8",
         )
 
     world = _docs_world(tmp_path, apm_binary_path, instruction)
     world.apm("compile")
     agents = (world.project / "AGENTS.md").read_text(encoding="utf-8")
-    assert _LINK in agents, agents
+    assert f"]({_LINK})" in agents, agents
+    assert (world.project / _LINK).is_file()
 
     _assert_link_resolves(world, "AGENTS.md")
 
