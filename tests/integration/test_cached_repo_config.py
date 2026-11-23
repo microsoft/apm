@@ -559,3 +559,20 @@ def test_a_branch_name_with_a_quote_keeps_its_checkout(tmp_path: Path) -> None:
     assert '[branch "release\\"prod"]' in config
 
     require_trusted_cached_repo(clone, bare=False, origin_ok=lambda _url: True)
+
+
+def test_a_head_with_trailing_whitespace_is_read_as_git_reads_it(tmp_path: Path) -> None:
+    from apm_cli.cache.cached_repo import require_trusted_cached_repo
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    head = checkout / ".git" / "HEAD"
+    head.write_bytes(head.read_bytes().rstrip() + b"\r\n")
+
+    require_trusted_cached_repo(
+        checkout,
+        bare=False,
+        origin_ok=lambda _url: True,
+        alternates_root=tmp_path / "cache" / "git" / "db_v1",
+    )
+    assert head.read_bytes().endswith(b"\r\n")

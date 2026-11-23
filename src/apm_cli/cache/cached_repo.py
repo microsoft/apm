@@ -33,7 +33,8 @@ _BRANCH_MERGE = re.compile(r"refs/heads/(?!.*(?:\.\.|//|@\{))[^\x00-\x20\x7f~^:?
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
 _SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"((?:[^"\\\n]|\\["\\])*)")?\]')
 _SUBSECTION_ESCAPE = re.compile(r'\\(["\\])')
-_HEAD = re.compile(r"(?:ref: refs/[^\x00-\x20\x7f]+|[0-9a-f]{40}|[0-9a-f]{64})\n?")
+# Git trims trailing whitespace when it reads HEAD.
+_HEAD = re.compile(r"(?:ref:[ \t]*refs/[^\x00-\x20\x7f]+|[0-9a-f]{40}|[0-9a-f]{64})\s*")
 _READ_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_NOFOLLOW", 0)

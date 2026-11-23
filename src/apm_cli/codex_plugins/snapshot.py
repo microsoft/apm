@@ -83,11 +83,7 @@ def _git(root: Path, arguments: list[str], *, input_bytes: bytes | None = None) 
                 "-c",
                 "commit.gpgsign=false",
                 # Never let Git look past the snapshot for a repository.
-                *(
-                    ()
-                    if arguments[0] == "init"
-                    else (f"--git-dir={root / '.git'}", f"--work-tree={root}")
-                ),
+                *(() if arguments[0] == "init" else ("--git-dir=.git", "--work-tree=.")),
                 *arguments,
             ],
             cwd=root,
