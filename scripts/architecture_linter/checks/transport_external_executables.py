@@ -23,28 +23,93 @@ from scripts.architecture_linter.models import Rule, Violation
 _RULE_ID = "transport-platform-external-executable-owner"
 _OWNER = "src/apm_cli/utils/git_env.py"
 _LAUNCHERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
+_LAUNCH_MODULES = frozenset({"subprocess", "os", "asyncio"})
 
 
-def _literal_program(node: ast.Call) -> bool:
-    """Whether a subprocess launch names its program as a string literal."""
-    if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)):
+def _is_literal_argv(node: ast.AST | None) -> bool:
+    """Whether *node* is a list or tuple whose first element is a string literal."""
+    if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
         return False
-    elements = node.args[0].elts
-    return (
-        bool(elements)
-        and isinstance(elements[0], ast.Constant)
-        and isinstance(elements[0].value, str)
-    )
+    first = node.elts[0]
+    return isinstance(first, ast.Constant) and isinstance(first.value, str)
 
 
-def _is_subprocess_launch(node: ast.Call) -> bool:
+def _is_literal(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _launch_names(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], set[str]]:
+    """Return local spellings of subprocess launchers, the subprocess module and os."""
+    functions: set[str] = set()
+    subprocess_modules = {"subprocess"}
+    os_modules = {"os"}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess":
+                    subprocess_modules.add(alias.asname or alias.name)
+                elif alias.name == "os":
+                    os_modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            functions.update(
+                alias.asname or alias.name for alias in node.names if alias.name in _LAUNCHERS
+            )
+    return functions, subprocess_modules, os_modules
+
+
+def _program_arg(node: ast.Call, names: tuple[set[str], set[str], set[str]]) -> ast.AST | None:
+    """Return the argument naming the program if *node* launches one, else ``None``."""
+    functions, subprocess_modules, os_modules = names
     func = node.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr in _LAUNCHERS
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "subprocess"
-    )
+    first = node.args[0] if node.args else None
+    if isinstance(func, ast.Name):
+        return first if func.id in functions else None
+    if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+        return None
+    owner, attr = func.value.id, func.attr
+    if owner in subprocess_modules and attr in _LAUNCHERS:
+        return first
+    if owner == "asyncio" and attr == "create_subprocess_exec":
+        return first
+    if owner in os_modules and attr.startswith(("exec", "posix_spawn")):
+        return first
+    if owner in os_modules and attr.startswith("spawn"):
+        return node.args[1] if len(node.args) > 1 else None
+    return None
+
+
+def _bare_launch_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
+    """Lines launching a program by literal name, directly or through a local name."""
+    names = _launch_names(nodes)
+    literal_names = {
+        target.id
+        for node in nodes
+        if isinstance(node, ast.Assign) and _is_literal_argv(node.value)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    lines: list[int] = []
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        program = _program_arg(node, names)
+        launches = program is not None or any(
+            keyword.arg == "executable" for keyword in node.keywords
+        )
+        if not launches:
+            continue
+        bare = (
+            _is_literal_argv(program)
+            or _is_literal(program)
+            or (isinstance(program, ast.Name) and program.id in literal_names)
+            or any(
+                keyword.arg == "executable" and _is_literal(keyword.value)
+                for keyword in node.keywords
+            )
+        )
+        if bare:
+            lines.append(node.lineno)
+    return lines
 
 
 def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -65,7 +130,6 @@ def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation
     )
     for path in _src_python(provider):
         facts = provider.file_facts(path)
-        launches = False
         for call in facts.calls:
             if call.qualname == "shutil.which" and path != _OWNER:
                 findings.append(
@@ -76,27 +140,22 @@ def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation
                         line=call.line,
                     )
                 )
-            launches = launches or (
-                call.qualname.startswith("subprocess.")
-                and call.qualname.rsplit(".", 1)[-1] in _LAUNCHERS
-            )
-        if not launches:
+        if not any(
+            (fact.module or "").split(".")[0] in _LAUNCH_MODULES
+            or any(name.split(".")[0] in _LAUNCH_MODULES for name in fact.names)
+            for fact in facts.imports
+        ):
             continue
         index = provider.tree_index(path)
-        for node in index.nodes if index is not None else ():
-            if (
-                isinstance(node, ast.Call)
-                and _is_subprocess_launch(node)
-                and _literal_program(node)
-            ):
-                findings.append(
-                    violation(
-                        _RULE_ID,
-                        path,
-                        "Launch the path trusted_executable returns, never a bare program name",
-                        line=node.lineno,
-                    )
+        for line in _bare_launch_lines(tuple(index.nodes) if index is not None else ()):
+            findings.append(
+                violation(
+                    _RULE_ID,
+                    path,
+                    "Launch the path trusted_executable returns, never a bare program name",
+                    line=line,
                 )
+            )
     return tuple(findings)
 
 

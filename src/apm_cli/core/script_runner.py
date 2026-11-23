@@ -171,7 +171,9 @@ class ScriptRunner:
 
         try:
             # Set up GitHub token environment for all runtimes using centralized manager
-            env = setup_runtime_environment(os.environ.copy())
+            from apm_cli.utils.git_env import user_script_environment
+
+            env = setup_runtime_environment(user_script_environment(os.environ.copy()))
 
             # Show environment setup if relevant
             env_vars_set = []

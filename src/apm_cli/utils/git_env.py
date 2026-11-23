@@ -331,6 +331,42 @@ def _resolve_trusted_executable(name: str) -> str:
     raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
 
 
+_NO_CWD_SEARCH = "NoDefaultCurrentDirectoryInExePath"
+_UNSET = object()
+_user_no_cwd_search: object = _UNSET
+
+
+def disable_implicit_cwd_search() -> None:
+    """On Windows, stop bare program names resolving from the working directory.
+
+    Called once at CLI start, before any subprocess. The user's own value is
+    remembered so :func:`user_script_environment` can hand it back to scripts
+    the user wrote.
+    """
+    global _user_no_cwd_search
+    if sys.platform != "win32":
+        return
+    if _user_no_cwd_search is _UNSET:
+        _user_no_cwd_search = os.environ.get(_NO_CWD_SEARCH)
+    os.environ[_NO_CWD_SEARCH] = "1"
+
+
+def user_script_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* for a user-authored script, with the user's own cwd-search setting.
+
+    APM's helper launches keep the setting :func:`disable_implicit_cwd_search`
+    applied; scripts the user wrote (``apm run``, lifecycle and package
+    scripts) see the value the user started with, so a project-local tool they
+    call by name still resolves as before.
+    """
+    if _user_no_cwd_search is _UNSET:
+        return env
+    restored = {key: value for key, value in env.items() if key.upper() != _NO_CWD_SEARCH.upper()}
+    if isinstance(_user_no_cwd_search, str):
+        restored[_NO_CWD_SEARCH] = _user_no_cwd_search
+    return restored
+
+
 def trusted_executable(name: str) -> str | None:
     """Return the absolute path of helper *name*, or ``None`` if it is not installed.
 

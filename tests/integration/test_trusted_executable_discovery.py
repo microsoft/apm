@@ -432,3 +432,29 @@ def test_cli_start_disables_the_implicit_working_directory_search(tmp_path: Path
         check=False,
     )
     assert "SETTING=1" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("user_value", [None, "0"], ids=["unset", "user-set"])
+def test_user_scripts_keep_the_users_working_directory_search(
+    monkeypatch: pytest.MonkeyPatch, user_value: str | None
+) -> None:
+    """APM's helpers skip the working directory; scripts the user wrote get their own setting."""
+    from apm_cli.core.lifecycle_scripts import ScriptEntry
+    from apm_cli.core.script_executors import _build_script_env
+    from apm_cli.utils import git_env
+
+    name = "NoDefaultCurrentDirectoryInExePath"
+    monkeypatch.setattr(git_env, "_user_no_cwd_search", git_env._UNSET)
+    monkeypatch.setenv(name, "placeholder")
+    if user_value is None:
+        monkeypatch.delenv(name)
+    else:
+        monkeypatch.setenv(name, user_value)
+    with monkeypatch.context() as windows:
+        windows.setattr(git_env.sys, "platform", "win32")
+        git_env.disable_implicit_cwd_search()
+
+    assert os.environ[name] == "1"
+    env = _build_script_env(ScriptEntry(script_type="command", event="post-install", command="x"))
+    script_values = [value for key, value in env.items() if key.upper() == name.upper()]
+    assert script_values == ([] if user_value is None else [user_value])

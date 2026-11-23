@@ -731,10 +731,11 @@ def _route_sigterm_to_interrupt() -> None:
 
 def main():
     """Main entry point for the CLI."""
-    if sys.platform == "win32":
-        # A bare program name never resolves from the working directory, in
-        # this process or any child (Windows searches it before PATH).
-        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"  # noqa: SIM112
+    from apm_cli.utils.git_env import disable_implicit_cwd_search
+
+    # A bare program name never resolves from the working directory, in this
+    # process or any APM helper child (Windows searches it before PATH).
+    disable_implicit_cwd_search()
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     _route_sigterm_to_interrupt()

@@ -4333,6 +4333,36 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new='("git", "-C", str(project_root)',
         intent="The audit tracked-files probe launches a bare git program name.",
     ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            '        argv = ["git", *inert_git_args(), *args]\n'
+            "        return subprocess.run(\n            argv,"
+        ),
+        intent="The lock evidence probe launches a bare git name held in a local argv.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launch\n\n"
+            '        return launch(\n            ["git", *inert_git_args(), *args],'
+        ),
+        intent="The lock evidence probe launches a bare git name through an aliased import.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/codex_plugins/client.py",
+        old='                [executable, "--version"],',
+        new='                [executable, "--version"],\n                executable="codex",',
+        intent="The codex version probe overrides its resolved path with a literal executable.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS
