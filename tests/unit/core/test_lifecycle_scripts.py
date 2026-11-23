@@ -464,6 +464,47 @@ class TestBuildRunnerFromContext:
         ]
         assert len(notices) == 1, logger.lines
 
+    def test_unresolved_org_policy_warn_no_logger_emits_rich_notice(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """With no command logger (as ``apm lifecycle`` builds the runner) an
+        unavailable policy under fetch_failure_default=warn still prints a real
+        ``[!]`` notice once, and the scripts still run (#4913).
+
+        This is the exact scenario the issue reports: the runner is built with
+        ``logger=None`` and previously printed nothing at all.
+        """
+        from apm_cli.core import lifecycle_scripts
+        from apm_cli.policy.discovery import PolicyFetchResult
+
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+        # Unique root per test keeps the module-level dedup set isolated.
+        lifecycle_scripts._unresolved_warn_noted_roots.discard(str(tmp_path))
+        user_apm = _write_yaml(
+            tmp_path / "user" / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "bash": "echo user"}]}},
+        )
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"name": "p", "policy": {"fetch_failure_default": "warn"}},
+        )
+        failed = PolicyFetchResult(outcome="cache_miss_fetch_fail", error="offline")
+        with (
+            patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=failed),
+            patch("apm_cli.core.lifecycle_scripts._get_user_apm_yml", return_value=user_apm),
+        ):
+            # No logger: the runner is built exactly as ``apm lifecycle`` does.
+            runner = build_runner_from_context(project_root=str(tmp_path))
+            second = build_runner_from_context(project_root=str(tmp_path))
+        # Scripts still run: the warn posture is unchanged.
+        assert any(script.bash == "echo user" for script in runner._scripts)
+        assert any(script.bash == "echo user" for script in second._scripts)
+        # The real ``[!]`` warning symbol is rendered on the console, once.
+        out = " ".join(capsys.readouterr().out.split())
+        assert "[!]" in out, out
+        assert "org policy not applied to lifecycle scripts" in out, out
+        assert out.count("[!]") == 1, out
+
     def test_fetched_policy_warn_emits_no_notice(self, tmp_path: Path, monkeypatch) -> None:
         """A resolved policy under warn prints no new lifecycle notice (#4913)."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
