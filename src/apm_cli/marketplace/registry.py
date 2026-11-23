@@ -144,8 +144,10 @@ def _adopt_ref_pins(leaving: Sequence[MarketplaceSource]) -> None:
 
 def add_marketplace(source: MarketplaceSource) -> None:
     """Register a marketplace (replaces if same name exists)."""
-    with _marketplace_mutation():
-        _adopt_ref_pins([s for s in _load() if s.name.lower() == source.name.lower()])
+    # Legacy pins move to the catalog this name leaves; the pin file has its own writes.
+    _adopt_ref_pins(
+        [s for s in get_registered_marketplaces() if s.name.lower() == source.name.lower()]
+    )
     with _marketplace_mutation():
         sources = [s for s in _load() if s.name.lower() != source.name.lower()]
         sources.append(source)

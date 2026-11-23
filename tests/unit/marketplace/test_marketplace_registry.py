@@ -217,6 +217,15 @@ class TestCatalogScopedRefPins:
     def _write(self, pins: dict) -> None:
         self.pins.write_text(json.dumps(pins))
 
+    def _pinned(self) -> dict:
+        return json.loads(self.pins.read_text())
+
+    @staticmethod
+    def _key(source: MarketplaceSource) -> str:
+        from apm_cli.marketplace.source_identity import catalog_pin_identity
+
+        return f"{catalog_pin_identity(source)}#tool/1.0.0"
+
     @staticmethod
     def _check(alias: str, ref: str, source: MarketplaceSource):
         from apm_cli.marketplace.source_identity import catalog_pin_identity
@@ -230,6 +239,7 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(source)
 
         assert self._check("team", "v2", source) == "v1"
+        assert self._pinned() == {"team/tool/1.0.0": "v1"}
 
     def test_removing_an_alias_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1", "teams/tool/1.0.0": "v9"})
@@ -251,6 +261,8 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(other)
 
         assert self._check("team", "v2", other) is None
+        first = MarketplaceSource(name="team", owner="a", repo="catalog")
+        assert self._pinned() == {self._key(first): "v1"}
 
     def test_rebinding_an_alias_in_place_keeps_the_old_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1"})
@@ -262,6 +274,7 @@ class TestCatalogScopedRefPins:
 
         assert self._check("team", "v2", new) is None
         assert self._check("team", "v2", old) == "v1"
+        assert self._pinned() == {self._key(old): "v1"}
 
     @pytest.mark.parametrize(
         "spelling",
@@ -281,6 +294,7 @@ class TestCatalogScopedRefPins:
         registry_mod.add_marketplace(respelled)
 
         assert self._check("team", "v2", respelled) == "v1"
+        assert self._pinned() == {self._key(respelled): "v1"}
 
     def test_a_manifest_removal_keeps_its_catalog_pinned(self):
         self._write({"team/tool/1.0.0": "v1"})
@@ -310,25 +324,33 @@ class TestCatalogScopedRefPins:
 class TestCatalogPinIdentity:
     """#4966: the pin scope names exactly one catalog."""
 
-    def test_catalog_paths_that_differ_only_in_case_are_different_catalogs(self):
+    @staticmethod
+    def _record(pins_dir: Path, source: MarketplaceSource) -> dict:
         from apm_cli.marketplace.source_identity import catalog_pin_identity
+        from apm_cli.marketplace.version_pins import record_ref_pin
 
-        def identity(path: str) -> str:
-            return catalog_pin_identity(
-                MarketplaceSource(name="t", url="https://git.example.com/Org/catalog", path=path)
-            )
+        record_ref_pin(
+            "t", "tool", "v1", "1.0.0", str(pins_dir), catalog=catalog_pin_identity(source)
+        )
+        return json.loads((pins_dir / "version-pins.json").read_text())
 
-        assert identity("catalogs/A.json") != identity("catalogs/a.json")
+    def test_catalog_paths_that_differ_only_in_case_are_different_catalogs(self, tmp_path):
+        url = "https://git.example.com/Org/catalog"
+        self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/A.json"))
+        pins = self._record(tmp_path, MarketplaceSource(name="t", url=url, path="catalogs/a.json"))
+
+        assert len(pins) == 2
 
     def test_a_local_catalog_is_scoped_by_its_resolved_location_and_path(self, tmp_path):
-        from apm_cli.marketplace.source_identity import catalog_pin_identity
-
         root = tmp_path / "catalogs"
         root.mkdir()
         (tmp_path / "link").symlink_to(root, target_is_directory=True)
+        pins_dir = tmp_path / "pins"
 
-        def identity(location: Path, path: str) -> str:
-            return catalog_pin_identity(MarketplaceSource(name="t", url=str(location), path=path))
+        self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="a.json"))
+        self._record(
+            pins_dir, MarketplaceSource(name="t", url=str(tmp_path / "link"), path="a.json")
+        )
+        pins = self._record(pins_dir, MarketplaceSource(name="t", url=str(root), path="b.json"))
 
-        assert identity(root, "a.json") != identity(root, "b.json")
-        assert identity(root, "a.json") == identity(tmp_path / "link", "a.json")
+        assert len(pins) == 2
