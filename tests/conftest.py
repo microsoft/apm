@@ -270,8 +270,17 @@ def _restore_executable_caches():
         with contextlib.suppress(FileNotFoundError):
             git_env.get_git_executable()
     saved = (git_env._git_executable, git_env._gh_executable)
+    # An in-process CLI start disables the Windows working-directory program
+    # search for the process; undo it so later tests see the original env.
+    cwd_search = os.environ.get(git_env._NO_CWD_SEARCH)
+    user_cwd_search = git_env._user_no_cwd_search
     yield
     git_env._git_executable, git_env._gh_executable = saved
+    git_env._user_no_cwd_search = user_cwd_search
+    if cwd_search is None:
+        os.environ.pop(git_env._NO_CWD_SEARCH, None)
+    else:
+        os.environ[git_env._NO_CWD_SEARCH] = cwd_search
 
 
 @pytest.fixture(autouse=True)
