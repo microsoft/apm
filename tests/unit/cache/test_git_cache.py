@@ -11,6 +11,7 @@ import pytest
 
 from apm_cli.cache.git_cache import CachePruneError, GitCache
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.checkout_trust import trust_checkout_contents
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
@@ -184,6 +185,7 @@ class TestGitCacheResolveSha:
         assert result == expected_sha
 
 
+@trust_checkout_contents()
 class TestGitCacheGetCheckout:
     """Test the full cache hit/miss flow."""
 

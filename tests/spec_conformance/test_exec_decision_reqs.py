@@ -141,3 +141,45 @@ def test_gate_retirement_names_only_the_kinds_the_lock_recorded_as_deployed(
     retired = locked_hooks_retired(lockfile, tmp_path / "apm_modules", lambda: trust, pinned=set())
 
     assert retired == {"acme/tools": ("not approved", ("hooks",))}
+
+
+@pytest.mark.req("req-sc-009")
+@pytest.mark.parametrize(
+    ("deployed_files", "expected"),
+    [
+        pytest.param([".claude/hooks/session.json"], ("hooks",), id="claude-only-no-canvas"),
+        pytest.param(
+            [".github/hooks/session.json", ".github/extensions/pcanvas/extension.mjs"],
+            ("hooks", "canvas"),
+            id="copilot-canvas-deployed",
+        ),
+    ],
+)
+def test_gate_retirement_names_canvas_only_with_deployment_evidence(
+    tmp_path: Path, deployed_files, expected
+) -> None:
+    """#4816: canvas is named only when the lock records a deployed canvas file."""
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.exec_gate import locked_hooks_retired
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    package = tmp_path / "apm_modules" / PKG
+    hooks = package / ".apm" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "session.json").write_text(
+        '{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo"}]}]}}',
+        encoding="utf-8",
+    )
+    canvas = package / ".apm" / "extensions" / "pcanvas"
+    canvas.mkdir(parents=True)
+    (canvas / "extension.mjs").write_text("export default () => 'p';\n", encoding="utf-8")
+    dump_yaml({"name": "tools", "version": "1.0.0"}, package / "apm.yml")
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(repo_url=PKG, resolved_commit="a" * 40, deployed_files=deployed_files)
+    )
+    trust = build_exec_trust_context(policy=None, project_data={"executables": {"allow": {}}})
+
+    retired = locked_hooks_retired(lockfile, tmp_path / "apm_modules", lambda: trust, pinned=set())
+
+    assert retired == {PKG: ("not approved", expected)}

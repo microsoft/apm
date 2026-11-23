@@ -61,7 +61,7 @@ possible.
 | `extends`          | string or null      | `null`           | no       | Parent policy reference. See [Inheritance](#inheritance).                         |
 | `enforcement`      | enum                | `warn`           | no       | `off` / `warn` / `block`. See [Enforcement modes](#enforcement-modes).            |
 | `fetch_failure`    | enum                | `warn`           | no       | `warn` / `block`. Behavior when a remote policy cannot be fetched or parsed.      |
-| `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches.                                         |
+| `cache`            | object              | `{ttl: 3600}`    | no       | Cache settings for remote policy fetches. `ttl` is capped at 86400 (24 hours).    |
 | `dependencies`     | object              | see section      | no       | Rules over APM dependencies.                                                       |
 | `mcp`              | object              | see section      | no       | Rules over MCP servers (direct and transitive).                                   |
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |

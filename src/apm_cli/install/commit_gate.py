@@ -368,21 +368,43 @@ def judge_mcp_install_files(scope: Any, *, no_policy: bool, logger: Any, dry_run
     blocking real install refused a denied ``scripts:`` block at entry;
     ``warn`` warns on both verdicts and ``--dry-run`` previews them (#4957).
     """
-    from apm_cli.core.scope import get_apm_dir, get_deploy_root, get_manifest_path
+    from apm_cli.core.scope import (
+        get_apm_dir,
+        get_deploy_root,
+        get_manifest_path,
+        is_user_scope,
+        manifest_root,
+    )
     from apm_cli.deps.lockfile import LockFile, resolve_lockfile_path_for_read
     from apm_cli.policy.install_preflight import enforced_entry_policy
     from apm_cli.policy.policy_checks import _check_unmanaged_files
 
+    # scripts: is judged with the source manifest's policy; unmanaged files with
+    # the policy of the root the install writes to, as the MCP preflight reads it.
     manifest_path = get_manifest_path(scope)
-    policy = enforced_entry_policy(manifest_path.parent, no_policy=no_policy)
-    if policy is None:
-        return
-    checks = _entry_scripts_checks(policy, manifest_path, dry_run=dry_run)
-    if policy.unmanaged_files.effective_action == "deny":
+    files_root = manifest_root(get_deploy_root(scope), user_scope=is_user_scope(scope))
+    roots = {"scripts": manifest_path.parent, "files": files_root}
+    policies = {
+        root: enforced_entry_policy(root, no_policy=no_policy) for root in set(roots.values())
+    }
+    checks: dict[Path, list[Any]] = {root: [] for root in policies}
+    scripts_policy = policies[roots["scripts"]]
+    if scripts_policy is not None:
+        checks[roots["scripts"]].extend(
+            _entry_scripts_checks(scripts_policy, manifest_path, dry_run=dry_run)
+        )
+    files_policy = policies[roots["files"]]
+    if files_policy is not None and files_policy.unmanaged_files.effective_action == "deny":
         path = resolve_lockfile_path_for_read(get_apm_dir(scope), read_only=True)
         root, lockfile = get_deploy_root(scope), LockFile.read(path)
-        checks.append(_check_unmanaged_files(root, lockfile, policy.unmanaged_files))
-    _report_install_policy_checks(logger, policy, checks, dry_run=dry_run, source=None)
+        checks[roots["files"]].append(
+            _check_unmanaged_files(root, lockfile, files_policy.unmanaged_files)
+        )
+    for policy_root, found in checks.items():
+        if found:
+            _report_install_policy_checks(
+                logger, policies[policy_root], found, dry_run=dry_run, source=None
+            )
 
 
 def judge_bundle_manifest_scripts(
