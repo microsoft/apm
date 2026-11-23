@@ -5890,8 +5890,11 @@ def test_version_rendering_guard_rejects_dropped_lazy_delegation() -> None:
     path = "src/apm_cli/entrypoint.py"
     source = _source(path)
     old = (
-        "from apm_cli.cli import main as cli_main\n\n"
-        "    with verdict_record.recording(argv):\n        cli_main()"
+        "with verdict_record.recording(argv):\n"
+        "        # Imported inside the record: TLS startup reads its settings at import, so\n"
+        "        # the entry state precedes it and the reads are logged.\n"
+        "        from apm_cli.cli import main as cli_main\n\n"
+        "        cli_main()"
     )
     new = "import apm_cli.commands.install  # bypass"
     assert source.count(old) == 1
