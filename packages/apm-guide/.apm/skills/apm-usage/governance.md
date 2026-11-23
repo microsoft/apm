@@ -123,6 +123,11 @@ dependencies:
   `apm pack`, which refuses to ship a denied declared or locked package
   (`Pack blocked by org policy: <pkg>`, exit 1). Pack applies deny only:
   allow, require and pin rules do not apply to it.
+- `allow` judges `apm install <bundle>` by the packages its embedded
+  lockfile records only, never by the author-chosen `_local/<name>`. Under
+  an allow list, a bundle that records no packages is a violation (`the
+  bundle records no packages for dependencies.allow to match`):
+  `enforcement: block` refuses it before any write, `warn` only reports it.
 
 `dependencies.require` entries are exact and name ONE host: a hostless
 entry (`contoso/baseline`) names the default host only; write other hosts
@@ -511,7 +516,7 @@ These checks run without a policy file:
 - `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
 - `kept-mcp-entries` -- reported only when an install without `apm.lock.yaml` kept an MCP entry it could not confirm it wrote for a server it no longer deploys; remove the entry or declare the server again, then run `apm install`
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
-- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path (`apm install` keeps it and warns; it never deletes it)
+- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path, or on a merged hook config entry (`.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, ...) matching that package's hook that no other source owns (`apm install` keeps it and warns; it never deletes it)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 Marketplace object declarations must match one locked coordinate through

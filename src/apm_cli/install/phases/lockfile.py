@@ -212,6 +212,7 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._retire_undeclared_native_plugins(lockfile)
             self._attach_replacement_table(lockfile)
             # Restore local compatibility state first so the canonical ledger is
             # complete when MCP target rows are projected into it.
@@ -508,6 +509,25 @@ class LockfileBuilder:
         from apm_cli.native_plugins.carry import carry_unevaluated_native_plugins
 
         carry_unevaluated_native_plugins(self.ctx, lockfile, existing)
+
+    def _retire_undeclared_native_plugins(self, lockfile: LockFile) -> None:
+        """Drop native records once contraction retires every harness that loads them (#4744).
+
+        The target-contraction rule (``target_governance.target_retired``):
+        apm.yml declares targets, and neither they nor this run's targets name
+        claude. Applied to the merged lock, so a partial install retires
+        untouched plugins too; native registration then removes their roots
+        and Claude declarations. ``apm lock`` touches no deployed state, so it
+        keeps them.
+        """
+        from apm_cli.install.phases.targets import declared_target_profiles
+        from apm_cli.install.target_governance import retired_native_plugins
+
+        if self.ctx.lockfile_only:
+            return
+        declared = declared_target_profiles(self.ctx)
+        for key in retired_native_plugins(lockfile, self.ctx.targets or (), declared):
+            lockfile.dependencies[key].native_plugin = None
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Union the CLI ``--skill`` values into lockfile skill_bundle entries.

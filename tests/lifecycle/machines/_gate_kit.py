@@ -31,6 +31,7 @@ from hypothesis.stateful import RuleBasedStateMachine, precondition, rule
 
 from apm_cli.deps.lockfile import LockFile
 from tests.lifecycle import driver
+from tests.lifecycle.known import TRACKING
 from tests.lifecycle.oracles import (
     ExpectedCell,
     Observation,
@@ -123,6 +124,9 @@ class KnownCell:
     match: str
     scopes: tuple[str, ...] = SCOPES
     per_step: bool = True
+
+    def __post_init__(self) -> None:
+        assert TRACKING.fullmatch(self.tracking) and self.match, self
 
     @property
     def label(self) -> str:

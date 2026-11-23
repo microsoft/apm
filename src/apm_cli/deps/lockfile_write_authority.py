@@ -465,12 +465,13 @@ def flush_lockfile_writes() -> None:
 
 def _commit(scope: _WriteScope) -> None:
     from ..utils.atomic_io import atomic_write_text, umask_file_mode
-    from .lockfile import _same_document, ensure_lockfile_writable
+    from .lockfile import ensure_lockfile_writable
+    from .lockfile_document import same_document
 
     while scope.pending:
         key = next(iter(scope.pending))
         document = scope.pending[key]
-        if not isinstance(document, _Removed) and not _same_document(_disk_text(key), document):
+        if not isinstance(document, _Removed) and not same_document(_disk_text(key), document):
             ensure_lockfile_writable(key)
             try:
                 atomic_write_text(key, document, new_file_mode=umask_file_mode(key))
