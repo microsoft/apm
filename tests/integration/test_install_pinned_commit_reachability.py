@@ -219,3 +219,61 @@ def test_a_single_file_dependency_is_admitted_before_its_bytes_are_fetched(
         (project / "apm_modules").rglob("*.md")
     )
     assert not (project / "apm.lock.yaml").exists()
+
+
+def test_a_previewed_install_of_a_non_tip_commit_leaves_no_reachability_state(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project(tmp_path, origin.m1)
+    cache = tmp_path / "cache"
+
+    def _dry_run(project: Path) -> object:
+        monkeypatch.chdir(project)
+        with (
+            patch.dict(os.environ, {**origin.env(), "APM_CACHE_DIR": str(cache)}, clear=False),
+            patch("apm_cli.commands._helpers.check_for_updates", return_value=None),
+            patch(f"{_DOWNLOADER}._resolve_dep_token", return_value=None),
+            patch(f"{_DOWNLOADER}._resolve_dep_auth_ctx", return_value=None),
+            patch(
+                f"{_DOWNLOADER}._build_noninteractive_git_env",
+                autospec=True,
+                side_effect=lambda downloader, **_k: dict(downloader.git_env),
+            ),
+        ):
+            return CliRunner().invoke(
+                cli, ["install", "--dry-run", "--no-policy", "--target", "copilot"]
+            )
+
+    result = _dry_run(project)
+
+    assert result.exit_code == 0, result.output
+    assert not (cache / "reachability").exists()
+    assert not (project / "apm.lock.yaml").exists()
+
+
+def test_a_locked_commit_is_verified_once_then_replays_without_contact(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    project = _project(tmp_path, origin.m1)
+    cache = str(tmp_path / "cache")
+    listed: list[str] = []
+    real = sys.modules["apm_cli.utils.git_env"].git_remote_refs
+
+    def counting(url, *args, **kwargs):
+        listed.append(url)
+        return real(url, *args, **kwargs)
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", counting)
+    first = _install(project, origin, monkeypatch, APM_CACHE_DIR=cache)
+    assert first.exit_code == 0, first.output
+    assert len(listed) == 1
+    shutil.rmtree(project / "apm_modules")
+    listed.clear()
+
+    replay = _install(project, origin, monkeypatch, APM_CACHE_DIR=cache)
+
+    assert replay.exit_code == 0, replay.output
+    assert listed == []
+    assert _installed(project) != []

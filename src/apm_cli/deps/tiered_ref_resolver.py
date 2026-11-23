@@ -216,6 +216,9 @@ _ABBREVIATED_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,39}$")
 _UNSAFE_REF_RE = re.compile(r"\.\.|@\{|[\x00-\x20\x7f%~^:?*\[\\]")
 
 
+_VERSION_LIKE_RE = re.compile(r"^v?\d")
+
+
 def _exact_ref_queries(ref: str) -> tuple[str, ...]:
     """Commits-API names that match only an origin branch or tag named *ref*.
 
@@ -231,6 +234,9 @@ def _exact_ref_queries(ref: str) -> tuple[str, ...]:
         return ()
     if _ABBREVIATED_COMMIT_RE.match(ref):
         return (ref,)
+    if _VERSION_LIKE_RE.match(ref):
+        # A version-like name is usually a tag: ask that namespace first.
+        return (f"tags/{ref}", f"heads/{ref}")
     return (f"heads/{ref}", f"tags/{ref}")
 
 

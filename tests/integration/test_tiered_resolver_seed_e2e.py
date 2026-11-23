@@ -272,7 +272,8 @@ def test_update_mode_bypasses_stale_bare_cache():
     )
     assert result.resolved_commit != STALE_SHA
     # L1 was unavailable, so the authenticated L3 transport established truth.
-    assert fake_refs.commits_api_calls == 1
+    # L1 asks the branch and tag namespaces only, one query each.
+    assert fake_refs.commits_api_calls == 2
     assert fake_refs.legacy_clone_calls == 1
     assert resolver.stats["commits_api"] == 0
     assert resolver.stats["legacy_clone"] == 1

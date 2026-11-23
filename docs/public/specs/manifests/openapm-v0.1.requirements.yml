@@ -417,6 +417,7 @@ requirements:
     keyword: MUST
     section: "7.5"
     conformance_class: consumer
+    notes: "replay is network-free except one recorded reachability verification of an unverified commit; fails closed offline"
   - id: req-rs-016
     keyword: MUST
     section: "7.2"

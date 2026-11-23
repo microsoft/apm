@@ -51,6 +51,18 @@ from tests.integration.test_immutable_requirements_install import (
 from tests.integration.test_immutable_requirements_install import (
     test_install_checks_every_immutable_requirement as _run_immutable_install_contract,
 )
+from tests.integration.test_install_pinned_commit_reachability import (
+    _install as _install_pinned,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    _Origin as _PinnedOrigin,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    _project as _pinned_project,
+)
+from tests.integration.test_install_pinned_commit_reachability import (
+    test_a_locked_commit_is_verified_once_then_replays_without_contact as _run_verified_once,
+)
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -138,6 +150,34 @@ def test_locked_literal_equivalence_requires_no_remote_discovery(
 ) -> None:
     """Unchanged lock evidence survives a deleted remote tag."""
     _run_immutable_install_contract(tmp_path, monkeypatch, frozen, False, True, True, True)
+
+
+@pytest.mark.req("req-rs-015")
+def test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One recorded reachability verification; later replays make no origin request."""
+    _run_verified_once(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch)
+    assert (tmp_path / "app" / "apm.lock.yaml").is_file()
+
+
+@pytest.mark.req("req-rs-015")
+def test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no recorded verification and no origin, the entry is refused with a remedy."""
+    import shutil
+
+    origin = _PinnedOrigin(tmp_path / "remote")
+    project = _pinned_project(tmp_path, origin.m1)
+    shutil.rmtree(origin.path)
+
+    result = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c"))
+
+    output = " ".join(result.output.split())
+    assert result.exit_code == 1, result.output
+    assert "needs network access once" in output
+    assert not (project / "apm.lock.yaml").exists()
 
 
 @pytest.mark.req("req-rs-002")

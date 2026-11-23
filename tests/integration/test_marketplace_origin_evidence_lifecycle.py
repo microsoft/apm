@@ -148,7 +148,8 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     before_lock = lock_path.read_bytes()
     (_rebind, _install, update) = runner.run_sequence(
         (
-            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
+            # A deliberate rebind: replacing an alias's catalog needs --yes.
+            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main", "--yes"),
             ("install", *_INSTALL_FLAGS),
             ("update", "--yes", *_UPDATE_FLAGS),
         ),
@@ -167,7 +168,8 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     # Restoring the alias to the locked origin lets update proceed again.
     runner.run_sequence(
         (
-            ("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main"),
+            # Restoring the alias to its original catalog is a deliberate rebind.
+            ("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main", "--yes"),
             ("update", "--yes", *_UPDATE_FLAGS),
         ),
         expected_returncodes=(0, 0),
@@ -186,7 +188,8 @@ def test_git_catalog_origin_is_locked_and_a_rebound_alias_fails_update(
     dump_yaml(manifest, consumer.manifest_path)
     runner.run_sequence(
         (
-            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main"),
+            # A deliberate rebind: replacing an alias's catalog needs --yes.
+            ("marketplace", "add", _REMOTE_B, "--name", _ALIAS, "--ref", "main", "--yes"),
             ("install", *_INSTALL_FLAGS),
         ),
         expected_returncodes=(0, 0),

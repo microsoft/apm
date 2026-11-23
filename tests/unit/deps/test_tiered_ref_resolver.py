@@ -736,3 +736,21 @@ def test_a_non_ascii_name_is_queried_only_as_a_branch_or_tag() -> None:
 
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v\u00e9") == "d" * 40
     assert api.queries == ["heads/v\u00e9", "tags/v\u00e9"]
+
+
+def test_a_version_like_tag_is_found_without_a_failing_branch_query() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/v1.2.0"] = "e" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "v1.2.0") == "e" * 40
+    assert api.queries == ["tags/v1.2.0"]
+
+
+def test_a_branch_named_like_a_version_still_resolves() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/heads/2.x"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "2.x") == "9" * 40
+    assert api.queries == ["tags/2.x", "heads/2.x"]

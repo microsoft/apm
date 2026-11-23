@@ -2499,6 +2499,8 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable",
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[False]",
@@ -2509,8 +2511,10 @@
       "keyword": "MUST",
       "section": "7.5",
       "status": "active",
-      "test_count": 5,
+      "test_count": 7,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable",
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[False]",

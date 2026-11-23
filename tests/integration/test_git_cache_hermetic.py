@@ -338,7 +338,8 @@ class TestLsRemoteResolve:
 
         assert cache._ls_remote_resolve(remote.url, "main") == remote.main
         (argv, _env), *_rest = child.calls
-        assert argv[1:] == [*_safe_git_args(), "ls-remote", remote.url, "main"]
+        # The peeled pattern lists an annotated tag's commit.
+        assert argv[1:] == [*_safe_git_args(), "ls-remote", remote.url, "main", "main^{}"]
 
     def test_uses_explicit_env_when_provided(
         self, cache: GitCache, monkeypatch: pytest.MonkeyPatch
@@ -429,7 +430,10 @@ class TestEnsureBareRepo:
             result = cache._ensure_bare_repo("https://example.com/repo.git", shard_key, "a" * 40)
 
         assert result == bare_dir
-        mock_has_sha.assert_called_once_with(bare_dir, "a" * 40, env=None)
+        # The trust check also accepts the effective contact URL of this origin.
+        mock_has_sha.assert_called_once_with(
+            bare_dir, "a" * 40, env=None, url="https://example.com/repo.git"
+        )
         mock_fetch.assert_not_called()
 
     def test_existing_bare_repo_without_sha_fetches(self, cache: GitCache) -> None:
@@ -504,7 +508,8 @@ class TestEnsureBareRepo:
 
         assert result == winner
         assert _git_dir_has(winner, remote.main)
-        assert child.subcommands() == ["clone", "cat-file"], (
+        # The staged clone is probed for a tag-only commit before it lands.
+        assert child.subcommands() == ["clone", "cat-file", "cat-file"], (
             "a winner holding the sha is not fetched"
         )
 

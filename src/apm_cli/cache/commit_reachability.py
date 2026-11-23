@@ -19,6 +19,7 @@ import os
 import re
 import stat
 import subprocess
+import threading
 from pathlib import Path
 
 _COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
@@ -33,13 +34,99 @@ def _marker(cache_root: Path, shard_key: str, sha: str) -> Path:
     return Path(cache_root) / "reachability" / shard_key / "verified" / sha
 
 
-def _record(marker: Path, canonical: str) -> None:
+class VerdictStage:
+    """Verdicts and reachability fetches of one install attempt.
+
+    Nothing reaches the cache until the attempt commits: a refused or
+    previewed install leaves no reachability state behind.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[Path, str] = {}
+        self._lock = threading.Lock()
+        self._scratch: str | None = None
+
+    def add(self, marker: Path, canonical: str) -> None:
+        with self._lock:
+            self._pending[marker] = canonical
+
+    def holds(self, marker: Path, canonical: str) -> bool:
+        with self._lock:
+            return self._pending.get(marker) == canonical
+
+    def scratch_root(self) -> Path:
+        import tempfile
+
+        with self._lock:
+            if self._scratch is None:
+                self._scratch = tempfile.mkdtemp(prefix="apm-reach-")
+            return Path(self._scratch)
+
+    def commit(self) -> None:
+        """Write the staged verdicts (best effort: a missing one is re-checked)."""
+        with self._lock:
+            pending, self._pending = self._pending, {}
+        for marker, canonical in pending.items():
+            try:
+                _write_marker(marker, canonical)
+            except OSError:
+                continue
+        self._close()
+
+    def discard(self) -> None:
+        with self._lock:
+            self._pending = {}
+        self._close()
+
+    def _close(self) -> None:
+        global _active_stage
+        import shutil
+
+        with self._lock:
+            scratch, self._scratch = self._scratch, None
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+        with _stage_lock:
+            if _active_stage is self:
+                _active_stage = None
+
+
+_active_stage: VerdictStage | None = None
+_stage_lock = threading.Lock()
+
+
+def open_verdict_stage() -> VerdictStage:
+    """Open the stage that holds this install attempt's verdicts until it commits."""
+    global _active_stage
+    stage = VerdictStage()
+    with _stage_lock:
+        _active_stage = stage
+    return stage
+
+
+def _stage() -> VerdictStage | None:
+    with _stage_lock:
+        return _active_stage
+
+
+def _write_marker(marker: Path, canonical: str) -> None:
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(canonical, encoding="utf-8")
 
 
+def _record(marker: Path, canonical: str) -> None:
+    stage = _stage()
+    if stage is not None:
+        stage.add(marker, canonical)
+    else:
+        _write_marker(marker, canonical)
+
+
 def _recorded(marker: Path, canonical: str) -> bool:
     """Read a marker without following links; only a regular file counts."""
+    stage = _stage()
+    if stage is not None and stage.holds(marker, canonical):
+        return True
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(marker, flags)
@@ -164,17 +251,30 @@ def effective_contact(contact: str, env) -> str | None:
     extra git process per package.
     """
     merged = {**os.environ, **(env or {})}
-    config = tuple(
-        sorted(
-            (k, v)
-            for k, v in merged.items()
-            if k.startswith("GIT_CONFIG") or k in ("HOME", "XDG_CONFIG_HOME")
-        )
-    )
-    key = (contact, config, _config_files_state(merged))
+    key = (contact, _rewrite_config(merged), _config_files_state(merged))
     if key not in _CONTACTS:
         _CONTACTS[key] = _effective_contact(contact, env)
     return _CONTACTS[key]
+
+
+def _rewrite_config(env: dict[str, str]) -> tuple:
+    """Only what can rewrite a URL: config file locations and ``url.*`` entries.
+
+    Per-attempt credentials and headers never change the contacted URL, so a
+    run computes the contact once per origin.
+    """
+    files = tuple(
+        (k, env.get(k))
+        for k in (
+            *("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "HOME"),
+            *("XDG_CONFIG_HOME", "GIT_CONFIG_PARAMETERS"),
+        )
+    )
+    entries = []
+    for k, v in env.items():
+        if k.startswith("GIT_CONFIG_KEY_") and v.lower().startswith("url."):
+            entries.append((v, env.get("GIT_CONFIG_VALUE_" + k.removeprefix("GIT_CONFIG_KEY_"))))
+    return files + tuple(sorted(entries, key=str))
 
 
 def _config_files_state(env: dict[str, str]) -> tuple:
@@ -451,6 +551,10 @@ def _reached_in(
     env: dict[str, str] | None,
     persist: bool,
 ) -> bool:
+    stage = _stage()
+    if persist and stage is not None:
+        # An open install attempt fetches into its scratch, never the cache.
+        return _reached_by_refs(stage.scratch_root(), url, shard_key, sha, env)
     if persist:
         return _reached_by_refs(cache_root, url, shard_key, sha, env)
     import tempfile
