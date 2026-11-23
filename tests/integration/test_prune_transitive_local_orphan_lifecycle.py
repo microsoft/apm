@@ -18,6 +18,7 @@ needed by ``a``.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import unicodedata
 from pathlib import Path
@@ -366,3 +367,23 @@ def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
     assert _row_named(world, "f")[1]["resolved_by"] == "_local/z"
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
     _assert_frozen_then_no_frozen_converge(world)
+
+
+def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A source directory that cannot resolve keeps its row and is named, not a crash."""
+    world = _world(tmp_path, apm_binary_path)
+    source = world.project / "vendor" / "e"
+    shutil.rmtree(source)
+    try:
+        os.symlink(source, source, target_is_directory=True)
+    except OSError:
+        pytest.skip("this platform cannot create a self-referencing symlink")
+
+    pruned = _output(world.apm("prune"))
+
+    assert "Retained _local/e:" in pruned, pruned
+    assert "Traceback" not in pruned and "Failed to parse" not in pruned, pruned
+    assert "_local/e" in _rows(world)
+    assert "_local/d" not in _rows(world)
