@@ -268,6 +268,7 @@ def test_oversized_tar_header_is_refused_for_a_tar_gz_file(tmp_path: Path) -> No
     assert isinstance(error, ArchiveError), error
     assert "header exceeds" in str(error)
     assert peak < 32 * 1024 * 1024
+    assert not (tmp_path / "out").exists()
 
 
 def test_oversized_tar_header_is_refused_for_a_registry_tarball(tmp_path: Path) -> None:
@@ -283,6 +284,7 @@ def test_oversized_tar_header_is_refused_for_a_registry_tarball(tmp_path: Path) 
     assert isinstance(error, UnsafeTarballError), error
     assert "header exceeds" in str(error)
     assert peak < 32 * 1024 * 1024
+    assert not (tmp_path / "out").exists()
 
 
 def test_tar_header_just_under_the_limit_extracts(tmp_path: Path) -> None:
