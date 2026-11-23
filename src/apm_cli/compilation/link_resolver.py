@@ -320,7 +320,31 @@ class UnifiedLinkResolver:
         # Calculate relative path from target location to actual source file
         # The shared helper owns ../ handling and cross-drive refusal. Audit
         # replay renders in the live deployment coordinates install used (#4832).
-        return portable_link_relpath(actual_file, self._live_target_location(ctx))
+        return portable_link_relpath(
+            self._live_context_source(actual_file, ctx), self._live_target_location(ctx)
+        )
+
+    @staticmethod
+    def _live_context_source(actual_file: Path, ctx: LinkResolutionContext) -> Path:
+        """Map a replay-materialized context file to where install deployed it.
+
+        A dependency replay may read its package from scratch; its context
+        file projects through ``deployment_package_root`` like asset links,
+        other scratch paths map through the frame, and live or external
+        sources stay as they are. Only link text changes.
+        """
+        if ctx.deployment_frame is None:
+            return actual_file
+        if ctx.package_root is not None and ctx.deployment_package_root is not None:
+            try:
+                package_relative = actual_file.resolve().relative_to(ctx.package_root.resolve())
+                return ctx.deployment_package_root / package_relative
+            except (OSError, ValueError):
+                pass
+        replay_root, live_root = ctx.deployment_frame
+        if actual_file.is_relative_to(replay_root):
+            return live_root / actual_file.relative_to(replay_root)
+        return actual_file
 
     @staticmethod
     def _live_target_location(ctx: LinkResolutionContext) -> Path:
