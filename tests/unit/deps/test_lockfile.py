@@ -337,10 +337,6 @@ class TestLockFile:
         assert written["dependencies"] == []
         assert written["generated_at"] == next_write.isoformat()
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="#4742: the no-op check (_same_document) parses the on-disk lockfile again",
-    )
     def test_write_parses_legacy_lockfile_once(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io
 
@@ -365,6 +361,21 @@ class TestLockFile:
         # The no-op check also parses the new serialization; the file on disk
         # is parsed once.
         assert existing_parses == 1
+
+    def test_write_repairs_invalid_destination_too_deep_to_copy(self, tmp_path):
+        """The no-op snapshot never blocks repairing an invalid destination (#4742)."""
+        depth = 1200
+        lines = ["lockfile_version: '1'", "dependencies: {}", "x-chain:", "  k0: &a0 [leaf]"]
+        lines += [f"  k{index}: &a{index} [*a{index - 1}]" for index in range(1, depth)]
+        lines.append(f"  <<: {{deep: *a{depth - 1}}}")
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        assert LockFile().write(lock_path) is True
+
+        written = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        assert written["dependencies"] == []
+        assert "x-chain" not in written
 
     def test_write_reuses_preloaded_destination(self, tmp_path, monkeypatch):
         from apm_cli.utils import yaml_io
