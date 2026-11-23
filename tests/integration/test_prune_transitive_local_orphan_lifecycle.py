@@ -445,7 +445,7 @@ def test_prune_keeps_the_parent_of_a_survivor_reached_through_an_alias(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="a legacy row's new local_path changes its lock key; owner re-key tracked in #5126",
+    reason="#5126 a legacy row's new local_path changes its lock key (owner re-key)",
 )
 def test_prune_reparents_a_legacy_local_row_with_its_path(
     tmp_path: Path, apm_binary_path: Path
