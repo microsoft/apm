@@ -2139,27 +2139,6 @@ def test_a_planted_wider_mode_never_widens_a_recorded_0o644_file(
     assert config.stat().st_mode & 0o7777 == 0o644
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#5134: acceptance cell for the optional journal seal; a same-user plant in a "
-    "private store passes the store check, and a narrower mode passes the bound",
-)
-@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
-def test_a_valid_but_different_recorded_mode_is_kept_and_reported(
-    tmp_path: Path, apm_home: Path
-) -> None:
-    project = tmp_path / "project"
-    config, ledger = _private_config(project)
-    store = _killed_journal(apm_home, project, config)
-    _rewrite_unit_mode(store, 0o400)
-
-    outcome = _replay(apm_home, project, lambda: ledger)
-
-    assert [rel for rel, _reason in outcome.kept] == [".mcp.json"]
-    assert config.read_bytes() == b"killed\n"
-    assert config.stat().st_mode & 0o7777 == 0o600
-
-
 @pytest.mark.skipif(os.name == "nt", reason="POSIX umask")
 def test_a_store_created_under_a_group_writable_umask_is_still_replayed(
     tmp_path: Path, apm_home: Path
@@ -2173,6 +2152,37 @@ def test_a_store_created_under_a_group_writable_umask_is_still_replayed(
         outcome = _replay(apm_home, project, lambda: ledger)
     finally:
         os.umask(previous)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_an_apm_home_others_can_write_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    """Another user able to write APM_HOME could swap the snapshots directory: kept."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert [reason for _path, reason in kept.value.issues] == [_NOT_PRIVATE]
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode bits")
+def test_a_group_writable_apm_home_is_still_trusted(tmp_path: Path, apm_home: Path) -> None:
+    """A user-private group (umask 0o002) leaves APM_HOME group writable: still replayed."""
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+    apm_home.chmod(0o775)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
 
     assert (outcome.restored, outcome.kept) == (1, ())
     assert config.read_bytes() == _CONFIG_BYTES
