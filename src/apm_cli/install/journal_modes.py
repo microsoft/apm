@@ -86,8 +86,17 @@ def apply_entry_modes(staged: Path, mode: int | dict[str, int]) -> None:
 
 
 def apply_own_mode(path: Path, mode: int | dict[str, int]) -> None:
-    if isinstance(mode, dict):
-        os.chmod(path, mode[""])
+    """Give a restored directory its own recorded mode, never through a link."""
+    if not isinstance(mode, dict):
+        return
+    if not hasattr(os, "O_NOFOLLOW"):
+        os.chmod(path, mode[""])  # Windows: only the read-only flag
+        return
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fchmod(fd, mode[""])
+    finally:
+        os.close(fd)
 
 
 def with_recorded_mode(state: dict[str, Any], mode: int | dict[str, int]) -> dict[str, Any]:

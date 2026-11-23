@@ -1356,3 +1356,23 @@ def test_a_read_only_directory_is_restored_with_its_recorded_mode(
     assert (skill / "SKILL.md").read_bytes() == b"prior\n"
     assert skill.stat().st_mode & 0o7777 == 0o555
     skill.chmod(0o755)  # let pytest clean up
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_directory_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
+    """The restored directory swapped for a link before its own mode is applied: the
+    link's target keeps its mode and the restore fails (kept and reported)."""
+    from apm_cli.install.journal_modes import apply_own_mode
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside.chmod(0o700)
+    restored = tmp_path / "project" / "skill"
+    restored.parent.mkdir()
+    restored.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        apply_own_mode(restored, {"": 0o777})
+
+    assert outside.stat().st_mode & 0o7777 == 0o700
+    assert restored.is_symlink()
