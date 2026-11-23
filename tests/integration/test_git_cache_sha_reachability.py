@@ -390,6 +390,7 @@ class TestVerdictStorageSafety:
         assert outside.read_text(encoding="utf-8") == "untouched\n"
         assert marker.is_file() and not marker.is_symlink()
 
+    @pytest.mark.windows_compat
     @pytest.mark.parametrize("nofollow", [True, False], ids=["o-nofollow", "no-o-nofollow"])
     def test_a_linked_verdict_with_matching_contents_never_counts(
         self, tmp_path: Path, nofollow: bool, monkeypatch: pytest.MonkeyPatch
@@ -402,7 +403,10 @@ class TestVerdictStorageSafety:
         planted.write_text("verdict", encoding="utf-8")
         marker = tmp_path / "reachability" / "shard" / "verdict"
         marker.parent.mkdir(parents=True)
-        marker.symlink_to(planted)
+        try:
+            marker.symlink_to(planted)
+        except OSError:
+            pytest.skip("this account cannot create symbolic links, so none can be planted")
 
         assert not _recorded(marker, "verdict")
         assert planted.read_text(encoding="utf-8") == "verdict"
@@ -504,6 +508,42 @@ def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(
 
     with pytest.raises(CommitNotReachableError):
         admit_ref_commit(downloader, _RefDep(), ref)
+
+
+@trust_cached_repos()
+@pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
+def test_a_cached_bare_resolves_a_branch_name_only_as_that_branch(
+    tmp_path: Path, origin: _Origin, ref: str
+) -> None:
+    from apm_cli.cache.url_normalize import cache_shard_key
+
+    cache = _cache(tmp_path)
+    cache.get_checkout(origin.url, "main")
+    bare = cache._db_root / cache_shard_key(origin.url)
+    assert cache.bare_ref_sha(origin.url, ref) == origin.m2
+
+    def git(*args: str) -> None:
+        _REAL_RUN(["git", "--git-dir", str(bare), *args], check=True, capture_output=True)
+
+    git("update-ref", "-d", "refs/heads/main")
+    git("update-ref", "refs/tags/refs/heads/main", origin.m1)
+
+    assert cache.bare_ref_sha(origin.url, ref) is None
+
+
+@pytest.mark.parametrize("ref", ["side", "refs/heads/side"])
+def test_resolving_a_branch_name_never_answers_with_a_tag_in_another_namespace(
+    origin: _Origin, ref: str
+) -> None:
+    from apm_cli.utils.git_env import git_resolve_commit
+
+    origin.bare("update-ref", "refs/tags/refs/heads/side", origin.m1)
+    origin.bare("update-ref", "refs/tags/heads/side", origin.m1)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        git_resolve_commit(origin.path, ref, bare=True)
+    assert git_resolve_commit(origin.path, "main", bare=True) == origin.m2
+    assert git_resolve_commit(origin.path, origin.m1[:10], bare=True) == origin.m1
 
 
 class TestRefCacheLinks:

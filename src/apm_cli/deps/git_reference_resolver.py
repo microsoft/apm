@@ -419,6 +419,32 @@ class GitReferenceResolver:
 
     # -- resolve_commit_sha_for_ref ------------------------------------
 
+    def commits_api_available(self, dep_ref: DependencyReference) -> bool:
+        """Whether the cheap tier serves *dep_ref*: a commits API host over HTTPS.
+
+        Makes no request. The resolver tier reads branch and tag names from the
+        origin's ref listing only where it would otherwise ask the commits API,
+        so other hosts and SSH keep the clone-based resolution.
+        """
+        from .egress_route import EgressSurface, is_refused
+        from .host_backends import backend_for
+
+        host = self._host
+        try:
+            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
+                return False
+            if is_refused(EgressSurface.SOURCE_ENUMERATION):
+                return False
+            if initial_transport_scheme(dep_ref, host._protocol_pref) != "https":
+                return False
+            if len(repository_path_segments(dep_ref.repo_url)) < 2:
+                return False
+            fallback = dep_ref.host or default_host()
+            backend = backend_for(dep_ref, host.auth_resolver, fallback_host=fallback)
+            return backend.build_commits_api_url(dep_ref, "HEAD") is not None
+        except Exception:
+            return False
+
     def resolve_commit_sha_for_ref(self, dep_ref: DependencyReference, ref: str) -> str | None:
         """Resolve a Git ref to a 40-char SHA via the cheap GitHub commits API.
 

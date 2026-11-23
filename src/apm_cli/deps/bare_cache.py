@@ -259,20 +259,9 @@ def bare_clone_with_fallback(
             # would set resolved_commit to the abbreviation and lockfile
             # comparisons against `head.commit.hexsha` (always 40-char)
             # would never match. Copilot review finding (#1135).
-            full_sha_result = run_git_text(
-                [
-                    git_exe,
-                    "--git-dir",
-                    str(target),
-                    "rev-parse",
-                    "--verify",
-                    f"{ref}^{{commit}}",
-                ],
-                env=env,
-                check=True,
-                capture_output=True,
-            )
-            full_sha = full_sha_result.stdout.strip()
+            from ..utils.git_env import git_resolve_commit
+
+            full_sha = git_resolve_commit(target, ref, env=env, bare=True)
             subprocess.run(
                 [git_exe, "--git-dir", str(target), "update-ref", "HEAD", full_sha],
                 env=env,

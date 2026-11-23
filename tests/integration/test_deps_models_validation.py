@@ -756,7 +756,10 @@ class TestDownloadVirtualFilePackage:
         )
         file_content = b"# Review prompt\nSome content."
         with (
-            patch.object(dl, "_resolve_commit_sha_for_ref", return_value="abc123" + "0" * 34),
+            patch(
+                "apm_cli.cache.commit_reachability.admit_ref_commit",
+                return_value=("abc123" + "0" * 34,) * 2,
+            ),
             patch.object(dl, "download_raw_file", return_value=file_content),
         ):
             pkg_info = dl.download_virtual_file_package(dep, tmp_path / "out")

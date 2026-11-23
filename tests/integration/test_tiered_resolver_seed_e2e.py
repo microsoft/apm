@@ -38,7 +38,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_ref_resolver
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.models.dependency.types import GitReferenceType, ResolvedReference
+from apm_cli.models.dependency.types import GitReferenceType, RemoteRef, ResolvedReference
 
 REPO = "owner/repo"
 BRANCH = "main"
@@ -54,9 +54,10 @@ class _FakeLegacyRefs:
 
     Counts the two network entry points the tier stack can reach:
 
-    * ``resolve_commit_sha_for_ref`` -- the cheap commits API used by the L1
-      ``commits_api`` tier. Every call here is one GitHub commits-API round-trip
-      in production.
+    * ``list_remote_refs`` -- the exact ref listing the L1 ``commits_api`` tier
+      reads a branch or tag name from. Every call here is one origin round-trip
+      in production; ``resolve_commit_sha_for_ref`` (the commits API) only
+      expands an abbreviated commit and must stay silent for a branch.
     * ``resolve`` -- the shallow-clone legacy path used by the L3 tier.
 
     A warm, lockfile-seeded resolve must touch NEITHER.
@@ -64,11 +65,16 @@ class _FakeLegacyRefs:
 
     def __init__(self) -> None:
         self.commits_api_calls = 0
+        self.listing_calls = 0
         self.legacy_clone_calls = 0
 
     def resolve_commit_sha_for_ref(self, dep_ref, ref):
         self.commits_api_calls += 1
         return NETWORK_SHA
+
+    def list_remote_refs(self, dep_ref):
+        self.listing_calls += 1
+        return [RemoteRef(BRANCH, GitReferenceType.BRANCH, NETWORK_SHA)]
 
     def resolve(self, repo_ref):
         self.legacy_clone_calls += 1
@@ -157,6 +163,7 @@ def test_warm_seeded_resolve_makes_zero_commits_api_calls():
     assert result.resolved_commit == LOCK_SHA
     # No network was touched: neither commits API nor legacy clone fired.
     assert fake_refs.commits_api_calls == 0
+    assert fake_refs.listing_calls == 0
     assert fake_refs.legacy_clone_calls == 0
     # And the resolver's own diagnostics agree: L0 hit, commits-API tier silent.
     assert resolver.stats["commits_api"] == 0
@@ -175,7 +182,7 @@ def test_unseeded_resolve_would_hit_commits_api():
     result = downloader.resolve_git_reference(DependencyReference(repo_url=REPO, reference=BRANCH))
 
     assert result.resolved_commit == NETWORK_SHA
-    assert fake_refs.commits_api_calls == 1
+    assert (fake_refs.listing_calls, fake_refs.commits_api_calls) == (1, 0)
     assert resolver.stats["commits_api"] == 1
     assert resolver.stats["per_run_cache"] == 0
 
@@ -214,10 +221,15 @@ class _FakeUpdateModeRefs:
 
     def __init__(self) -> None:
         self.commits_api_calls = 0
+        self.listing_calls = 0
         self.legacy_clone_calls = 0
 
     def resolve_commit_sha_for_ref(self, dep_ref, ref):
         self.commits_api_calls += 1
+
+    def list_remote_refs(self, dep_ref):
+        self.listing_calls += 1
+        return []
 
     def resolve(self, repo_ref):
         self.legacy_clone_calls += 1
@@ -272,8 +284,8 @@ def test_update_mode_bypasses_stale_bare_cache():
     )
     assert result.resolved_commit != STALE_SHA
     # L1 was unavailable, so the authenticated L3 transport established truth.
-    # L1 asks the branch and tag namespaces only, one query each.
-    assert fake_refs.commits_api_calls == 2
+    # L1 reads one exact ref listing and never asks the commits API for a branch.
+    assert (fake_refs.listing_calls, fake_refs.commits_api_calls) == (1, 0)
     assert fake_refs.legacy_clone_calls == 1
     assert resolver.stats["commits_api"] == 0
     assert resolver.stats["legacy_clone"] == 1

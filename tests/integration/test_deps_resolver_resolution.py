@@ -362,7 +362,10 @@ class TestGitHubDownloaderDownloadVirtualFilePackage:
         target = tmp_path / "target"
 
         with (
-            patch.object(dl, "_resolve_commit_sha_for_ref", return_value="abc123" + "0" * 34),
+            patch(
+                "apm_cli.cache.commit_reachability.admit_ref_commit",
+                return_value=("abc123" + "0" * 34,) * 2,
+            ),
             patch.object(
                 dl,
                 "download_raw_file",
@@ -386,7 +389,10 @@ class TestGitHubDownloaderDownloadVirtualFilePackage:
         target = tmp_path / "target"
 
         with (
-            patch.object(dl, "_resolve_commit_sha_for_ref", return_value="b" * 40),
+            patch(
+                "apm_cli.cache.commit_reachability.admit_ref_commit",
+                return_value=("b" * 40,) * 2,
+            ),
             patch.object(dl, "download_raw_file", return_value=b"# Agent"),
         ):
             dl.download_virtual_file_package(dep, target)

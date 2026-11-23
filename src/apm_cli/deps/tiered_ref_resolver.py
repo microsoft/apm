@@ -309,6 +309,9 @@ class L1CommitsAPI:
             # name resolves from the exact ref listing; the API only expands an
             # abbreviated commit, which admission then checks like any pin.
             if not _ABBREVIATED_COMMIT_RE.match(ref):
+                available = getattr(resolver, "commits_api_available", None)
+                if available is not None and not available(dep_ref):
+                    return None
                 return _listed_exactly(resolver, dep_ref, ref)
             for query in _exact_ref_queries(ref):
                 sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
