@@ -100,7 +100,12 @@ def _hard_coded_kind_warnings(provider: FactsProvider, rule: str) -> list[Violat
     facts, failures = _facts_for(provider, _UNINSTALL, rule)
     if failures:
         return list(failures)
-    if any(_HARD_CODED_KIND_WARNING in line for line in getattr(facts, "lines", ())):
+    # Literal facts hold adjacent string literals already joined by the parser.
+    texts = (
+        *getattr(facts, "lines", ()),
+        *(literal.value_repr for literal in getattr(facts, "literals", ())),
+    )
+    if any(_HARD_CODED_KIND_WARNING in text for text in texts):
         message = f"hard-coded '{_HARD_CODED_KIND_WARNING}' warning; use retired_kinds_warnings"
         return [_summary(rule, _UNINSTALL, message)]
     return []

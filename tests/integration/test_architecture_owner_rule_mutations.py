@@ -4315,6 +4315,18 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning("p-mixed hooks are no longer "\n'
+            '                   "allowed; removing them")\n'
+        ),
+        intent="Uninstall splits a hard-coded kinds warning across adjacent literals (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/security/exec_kinds.py",
         old='f"{key} {exec_kinds_phrase(kinds)} are no longer allowed',
         new='f"{key} hooks are no longer allowed',
