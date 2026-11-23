@@ -195,8 +195,18 @@ def _vh_mac(root: str, key: bytes, lock_text: bytes):
     import hmac
     import os
 
-    mac = hmac.new(key, digestmod=hashlib.sha256)
-    mac.l5_tags = []  # type: ignore[attr-defined]  # research: which input changed
+    class _Mac:
+        def __init__(self) -> None:
+            self.inner = hmac.new(key, digestmod=hashlib.sha256)
+            self.l5_tags: list = []  # research: which input changed
+
+        def update(self, data: bytes) -> None:
+            self.inner.update(data)
+
+        def hexdigest(self) -> str:
+            return self.inner.hexdigest()
+
+    mac = _Mac()
 
     def put(tag: str, data: bytes) -> None:
         mac.update(len(tag).to_bytes(4, "little") + tag.encode())
