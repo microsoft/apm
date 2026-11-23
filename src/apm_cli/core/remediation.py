@@ -1325,6 +1325,12 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
 )
+NATIVE_MCP_ENTRY_EDITED = _entry(
+    "native-mcp-entry-edited",
+    "apm install",
+    "write each removed MCP entry again as APM recorded it",
+    before="undo your edit to each entry or remove the entry",
+)
 KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",
     "apm install",
