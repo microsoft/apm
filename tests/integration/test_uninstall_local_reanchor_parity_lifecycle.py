@@ -613,29 +613,32 @@ def _respelled_world(
     f_deps: tuple[str, ...] = (),
     prod_chain=False,
     other_f=False,
+    spellings: tuple[str, str] = ("F", "f"),
 ) -> ReplayWorld:
     """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f.
 
     *prod_chain* adds production p -> q -> ../F, which the walk reaches first
     although a's shallower dev edge wins F's spelling. *other_f* adds an
     unrelated direct ./other/F -> ../h, whose parent identity is also _local/F.
+    *spellings* replaces ``(F, f)``, the directory and the winning spelling.
     """
+    upper, lower = spellings
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
-    _skill_package(vendor / "F", "F", f_deps)
+    _skill_package(vendor / upper, "F", f_deps)
     if f_deps:
         _skill_package(vendor / "g", "g")
     if prod_chain:
-        _skill_package(vendor / "q", "q", ("../F",))
+        _skill_package(vendor / "q", "q", (f"../{upper}",))
         _skill_package(vendor / "p", "p", ("../q",))
     if other_f:
         shared = ("../../vendor/g",) if other_f == "shared" else ()
         _skill_package(world.project / "other/F", "o", ("../h", *shared))
         _skill_package(world.project / "other/h", "h")
     link_f(vendor)
-    _skill_package(vendor / "e", "e", ("../F",))
+    _skill_package(vendor / "e", "e", (f"../{upper}",))
     _skill_package(vendor / "d", "d", ("../e",))
-    _skill_package(vendor / "a", "a", ("../f",))
+    _skill_package(vendor / "a", "a", (f"../{lower}",))
     dump_yaml(
         {
             "name": "proj",
@@ -726,4 +729,22 @@ def test_two_packages_that_differ_only_by_case_stay_distinct(
 
     copies = {key.rsplit("/", 2)[-2] for key in _modules(world.project) if key.endswith("/apm.yml")}
     assert {"F", "f"} <= copies, sorted(copies)
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_an_nfd_descendant_spelling_reanchors_to_the_fresh_spelling(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """vendor/<NFD> links to vendor/<NFC>: a's NFD spelling wins, so the copy takes it."""
+    nfc, nfd = "caf\u00e9", "cafe\u0301"
+    world = _respelled_world(
+        tmp_path,
+        apm_binary_path,
+        lambda vendor: (vendor / nfd).symlink_to(vendor / nfc, target_is_directory=True),
+        spellings=(nfc, nfd),
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
     _assert_no_frozen_rewrites_nothing(world)

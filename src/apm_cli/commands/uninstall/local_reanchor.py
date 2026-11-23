@@ -177,8 +177,17 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
 
 
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
-    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem)."""
-    if declared is None or declared.casefold() != row.repo_url.casefold():
+    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
+
+    Spellings are first matched by NFC normalization, then case folding (the
+    order of ``utils.paths`` spelling keys); the filesystem then decides.
+    """
+    import unicodedata
+
+    def key(spelling: str) -> str:
+        return unicodedata.normalize("NFC", spelling).casefold()
+
+    if declared is None or key(declared) != key(row.repo_url):
         return False
     ref = row.to_dependency_ref()
     try:
