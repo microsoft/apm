@@ -100,13 +100,9 @@ What gets removed, in order:
    A requested direct dependency that another installed package still
    needs is removed from `apm.yml` only: it stays installed, its lockfile
    entry now names that package as its parent, and `apm install --frozen`
-   keeps passing. The output says which package still needs it. A local
-   (path) dependency also takes the lockfile identity it has under that
-   package, the same entry `apm install` records, and keeps its deployment
-   receipts. If the packages that need it cannot be read offline, or APM
-   cannot prove it wrote the package's files, uninstall refuses before any
-   change. Re-anchoring runs on its own: uninstall other packages in a
-   separate command.
+   keeps passing. The output says which package still needs it. For a
+   local (path) dependency, uninstall instead refuses before any change and
+   names the package that still needs it; uninstall that package first.
    Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.

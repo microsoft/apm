@@ -739,7 +739,6 @@ def check_target_file_contraction(provider: FactsProvider) -> tuple[Violation, .
 
 
 _DEPLOYMENT_LEDGER = "src/apm_cli/core/deployment_ledger.py"
-_DEPLOYMENT_REANCHOR = "src/apm_cli/core/deployment_reanchor.py"
 
 
 _OWNER_ATTRIBUTES = frozenset({"owners", "active_owner", "deployment_ledger"})
@@ -1486,12 +1485,6 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "integration_cleanup.materialization_session.bind_committed_claims(lockfile)",
         ),
     }
-    # A re-anchored owner keeps its receipts' hash history: same bytes, same writer (#4889).
-    requirements[_DEPLOYMENT_REANCHOR] = (
-        "class _ReanchorSession(DeploymentMaterializationSession):",
-        "or self._bindings.get(claim.locator.key) != expected",
-        "self._bindings[key] = [renamed.active_owner, self._claim_signature(value)]",
-    )
     for path, snippets in requirements.items():
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)

@@ -108,15 +108,6 @@ class ReachabilityResult:
             graph, direct declarations at 1, as install records it (#4833).
         graph_children: Every declaring edge the walk saw, parent key to
             child keys, for repairs that follow the graph, not the lock.
-        local_dirs: The anchored directory of every local node the walk
-            reached, by its lock key, so a re-anchored local row takes the
-            identity install records for it (#4889).
-        declaring_edges: Every parent key that declares a node, in the order
-            the walk saw the edges, with that edge's ``(parent identity,
-            local_path)`` (#4889).
-        local_edge_repos: The ``(repo_url, alias)`` each local edge resolves
-            to, by ``(child key, parent key)``; another spelling or alias
-            installs elsewhere.
     """
 
     reachable: frozenset[str]
@@ -128,13 +119,6 @@ class ReachabilityResult:
     parent_keys: dict[str, str] = field(default_factory=dict)
     depths: dict[str, int] = field(default_factory=dict)
     graph_children: dict[str, frozenset[str]] = field(default_factory=dict)
-    local_dirs: dict[str, Path] = field(default_factory=dict)
-    declaring_edges: dict[str, dict[str, tuple[str | None, str | None]]] = field(
-        default_factory=dict
-    )
-    local_edge_repos: dict[tuple[str, str | None], tuple[str, str | None]] = field(
-        default_factory=dict
-    )
 
 
 @dataclass(frozen=True)
@@ -172,10 +156,6 @@ class _ParentGraph:
             return
         self._parents.setdefault(key, {}).setdefault(parent_key, via)
         self._children.setdefault(parent_key, set()).add(key)
-
-    def edges(self) -> dict[str, dict[str, tuple[str | None, str | None]]]:
-        """Every non-root node's declaring parents, in the order the walk saw them."""
-        return {key: dict(parents) for key, parents in self._parents.items()}
 
     def solve(self, lock_keys, reachable_via: dict) -> tuple[dict, dict, dict]:
         """Return ``(depths, parent_keys, children)`` and fill *reachable_via*."""
@@ -269,85 +249,9 @@ def _build_local_dir_index(
                     resolved_cache=resolved_cache,
                 )
             ] = key
-        except (LocalResolutionError, OSError, RuntimeError) as exc:
-            # A symlink loop cannot be resolved either: the walk is incomplete.
+        except LocalResolutionError as exc:
             unverifiable.append((key, str(exc)))
     return index
-
-
-def _read_node(manifest_dir: Path, *, local: bool) -> APMPackage | None:
-    """Read one node's manifest as install does; ``None`` is a declared-nothing leaf.
-
-    A local Claude plugin is normalized; a directory without ``apm.yml`` that
-    is not a leaf format raises ``FileNotFoundError`` (unverifiable).
-    """
-    package = _normalized_local_plugin(manifest_dir) if local else None
-    if package is None:
-        if _is_manifestless_leaf(manifest_dir):
-            return None
-        package = APMPackage.from_apm_yml(manifest_file(manifest_dir), source_path=manifest_dir)
-    return package
-
-
-def _directory_identities(path: Path) -> set[tuple]:
-    """Identities two spellings of one directory share: inode, else a normalized path.
-
-    Case-insensitive and normalizing filesystems (macOS, Windows) give one
-    directory several spellings; the stat identity sees through them. The path
-    fallback keeps the Unicode spelling, since a filesystem that preserves both
-    NFC and NFD may hold two different directories.
-    """
-    import os
-
-    identities: set[tuple] = {("path", os.path.normcase(os.path.abspath(path)))}
-    try:
-        stat = path.stat()
-    except (OSError, RuntimeError):
-        return identities
-    identities.add(("inode", stat.st_dev, stat.st_ino))
-    return identities
-
-
-def local_sources_reach(
-    roots: Sequence[DependencyReference], project_root: Path, targets: set[Path]
-) -> bool:
-    """Whether the local edges of *roots*' own sources reach a directory in *targets*.
-
-    Offline and without ``apm_modules``: a remote package cannot declare the
-    consumer's local directories, so only local edges are followed. Each node
-    is read as the main walk reads it; an unverifiable node or unresolvable
-    path counts as reaching, because it cannot prove the target unused (#4889).
-    """
-    wanted = set().union(*(_directory_identities(target) for target in targets))
-    queue = [
-        (Path(project_root), ref.local_path) for ref in roots if ref.is_local and ref.local_path
-    ]
-    seen: set[Path] = set()
-    while queue:
-        anchor, local_path = queue.pop()
-        try:
-            directory = _join_local(anchor, local_path)
-        except (OSError, RuntimeError):
-            return True
-        if _directory_identities(directory) & wanted:
-            return True
-        if directory in seen:
-            continue
-        seen.add(directory)
-        if directory.is_file():
-            continue  # a standalone primitive file declares no dependencies
-        try:
-            package = _read_node(directory, local=True)
-        except (OSError, ValueError, RuntimeError):
-            return True
-        if package is None:
-            continue
-        queue.extend(
-            (directory, dep.local_path)
-            for dep in package.get_apm_dependencies()
-            if dep.is_local and dep.local_path
-        )
-    return False
 
 
 def _is_manifestless_leaf(package_dir: Path) -> bool:
@@ -469,8 +373,6 @@ def compute_forward_reachable_keys(
         (ref, project_root, None, True, (), None) for ref in dev_refs
     )
     edge_selections: dict[str, list[EdgeSelection]] = {}
-    local_dirs: dict[str, Path] = {}
-    local_edge_repos: dict[tuple[str, str | None], tuple[str, str | None]] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
@@ -495,12 +397,7 @@ def compute_forward_reachable_keys(
         if ref.is_local and ref.local_path:
             if ref.replacement is not None:
                 anchor = project_root
-            try:
-                real_dir = _join_local(anchor, ref.local_path) if anchor else None
-            except (OSError, RuntimeError) as exc:
-                # A symlink loop cannot be resolved: the subtree is unknown (#4889).
-                unverifiable.append((ref.get_unique_key(), str(exc)))
-                continue
+            real_dir = _join_local(anchor, ref.local_path) if anchor else None
             if real_dir is None:
                 continue
             if ref.replacement is None and parent_repo_url is not None:
@@ -517,9 +414,6 @@ def compute_forward_reachable_keys(
                 if ref.replacement is not None and ref.get_unique_key() in lockfile.dependencies
                 else local_dir_index.get(real_dir)
             )
-            if matched_key is None and ref.get_unique_key() in lockfile.dependencies:
-                # A surviving local node keeps its dev status like a remote one (#4889).
-                matched_key = ref.get_unique_key()
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
@@ -527,9 +421,6 @@ def compute_forward_reachable_keys(
                 matched_key or ref.get_unique_key(),
                 parent_key,
                 (parent_repo_url, None if ref.replacement is not None else ref.local_path),
-            )
-            local_edge_repos.setdefault(
-                (matched_key or ref.get_unique_key(), parent_key), (ref.repo_url, ref.alias)
             )
             if visit_key in visited:
                 continue
@@ -542,7 +433,6 @@ def compute_forward_reachable_keys(
             # A surviving local parent is not in the candidate directory
             # index; its own identity is still its lock key (#4823).
             node_key = matched_key or ref.get_unique_key()
-            local_dirs.setdefault(node_key, real_dir)
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
@@ -578,9 +468,13 @@ def compute_forward_reachable_keys(
             node_key = visit_key
 
         try:
-            package = _read_node(manifest_dir, local=ref.is_local)
+            package = _normalized_local_plugin(manifest_dir) if ref.is_local else None
             if package is None:
-                continue
+                if _is_manifestless_leaf(manifest_dir):
+                    continue
+                package = APMPackage.from_apm_yml(
+                    manifest_file(manifest_dir), source_path=manifest_dir
+                )
         except (FileNotFoundError, ValueError) as exc:
             # Missing or malformed manifest: this subtree's true children
             # are unknown. Do NOT treat it as childless -- record it and
@@ -630,9 +524,6 @@ def compute_forward_reachable_keys(
         parent_keys=parent_keys,
         depths=depths,
         graph_children=graph_children,
-        local_dirs=local_dirs,
-        declaring_edges=parent_graph.edges(),
-        local_edge_repos=local_edge_repos,
     )
 
 

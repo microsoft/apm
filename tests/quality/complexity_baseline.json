@@ -208,6 +208,7 @@
     "src/apm_cli/commands/uninstall/cli.py": {
       "uninstall": [
         "C901",
+        "PLR0912",
         "PLR0915"
       ]
     },
