@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -48,4 +48,5 @@ jobs:
       run: |
         if [ "$RUNNER_OS" = "Windows" ]; then a=Scripts/apm.exe; else a=bin/apm; fi
         cp ../mine/scripts/perf/l5_firstnoop.py scripts/perf/
-        uv run --frozen python scripts/perf/l5_firstnoop.py "$GITHUB_WORKSPACE/base/.venv/$a" "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/fn-diag" tree-10 2 diag
+        uv run --frozen python scripts/perf/l5_firstnoop.py "$GITHUB_WORKSPACE/base/.venv/$a" "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/fn-10" tree-10 5
+        uv run --frozen python scripts/perf/l5_firstnoop.py "$GITHUB_WORKSPACE/base/.venv/$a" "$GITHUB_WORKSPACE/new/.venv/$a" "$RUNNER_TEMP/fn-50" tree-50 3
