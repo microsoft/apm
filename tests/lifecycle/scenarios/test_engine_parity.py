@@ -36,7 +36,8 @@ import re
 import shutil
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,6 +57,7 @@ from tests.lifecycle.scenarios._deploy_diff import (
 )
 from tests.lifecycle.world import World
 from tests.lifecycle.world.clone import clone
+from tests.lifecycle.world.packages import MCP_SERVER
 from tests.lifecycle.world.scopes import use_policy, use_registry
 from tests.lifecycle.world.services import (
     ORG,
@@ -787,8 +789,27 @@ def _cache_stats(world: World) -> dict[str, str]:
         for path in [root, *sorted(root.rglob("*"))]:
             info = path.lstat()
             size = info.st_size if path.is_file() else "-"
-            stats[str(path)] = f"{size}:{info.st_mtime_ns}"
+            stats[str(path)] = f"{size}:{info.st_mtime_ns}:{oct(info.st_mode & 0o7777)}"
     return stats
+
+
+@contextmanager
+def _read_only_caches(world: World) -> Iterator[None]:
+    """Drop every write bit on the cache trees for the block, then restore the modes."""
+    roots = [r for r in {*(_cache_roots(world)), world.apm_home / "cache"} if r.exists()]
+    saved = {
+        path: path.lstat().st_mode & 0o7777
+        for root in roots
+        for path in [root, *root.rglob("*")]
+        if not path.is_symlink()
+    }
+    try:
+        for path, mode in saved.items():
+            path.chmod(mode & ~0o222)
+        yield
+    finally:
+        for path, mode in saved.items():
+            path.chmod(mode)
 
 
 def _assert_caches_untouched(before: dict[str, str], after: dict[str, str], label: str) -> None:
@@ -850,8 +871,10 @@ def test_decide_mode_hit_leaves_caches_untouched(twin: Twin, hit: str) -> None:
     _converge(twin, *keys)
     world = twin.fast
     change(world)
-    stats = _cache_stats(world)
-    result = _decide(world, ("install",))
+    with _read_only_caches(world):
+        stats = _cache_stats(world)
+        result = _decide(world, ("install",))
+        after = _cache_stats(world)
     decisions = _DECISION.findall(result.stderr)
     if not decisions:
         assert result.returncode == 0, result.stdout + result.stderr
@@ -859,7 +882,7 @@ def test_decide_mode_hit_leaves_caches_untouched(twin: Twin, hit: str) -> None:
     assert len(decisions) == 1, f"one decision per command, got {decisions}"
     _assert_decision(decisions[0], kind)
     assert result.returncode in (0, DECIDE_EXIT), result.stdout + result.stderr
-    _assert_caches_untouched(stats, _cache_stats(world), hit)
+    _assert_caches_untouched(stats, after, hit)
 
 
 # -- review-fix cells (must pass once the engine lands) -----------------------------
@@ -1011,17 +1034,64 @@ if _spec:
             return result
 
         setattr(_engine, _attr, _killing)
+
+# Crash inside service reconciliation, after its first durable write: count the
+# write seam's records while run_services runs and die before the Nth one.
+_svc = int(os.environ.get("APM_TEST_KILL_IN_SERVICES", "0"))
+if _svc:
+    try:
+        import apm_cli.install.fast_output as _output
+        import apm_cli.integration.write_seam as _seam
+    except Exception:
+        _output = _seam = None
+    if _output is not None and hasattr(_output, "run_services"):
+        _state = {"active": False, "writes": 0}
+        _run, _record = _output.run_services, _seam.record_before_write
+
+        def run_services(*args, **kwargs):
+            _state["active"] = True
+            try:
+                return _run(*args, **kwargs)
+            finally:
+                _state["active"] = False
+
+        def record_before_write(path, *args, **kwargs):
+            if _state["active"]:
+                _state["writes"] += 1
+                if _state["writes"] == _svc:
+                    os.kill(os.getpid(), signal.SIGKILL)
+            return _record(path, *args, **kwargs)
+
+        _output.run_services = run_services
+        _seam.record_before_write = record_before_write
 """
 _ENGINE_MODULE = "apm_cli.install.diff_apply"
 # point: module:attribute[|fallback]:call:before|after, hooks of the diff-apply owner.
 # _publish supersedes _commit_package; _render runs the services and receipt writes
 # inside the commit journal.
 KILL_POINTS = {
-    "after-first-package-published": f"{_ENGINE_MODULE}:_publish|_commit_package:1:after",
-    "after-first-file-linked": f"{_ENGINE_MODULE}:_write:1:after",
-    "inside-services-render": f"{_ENGINE_MODULE}:_render:1:before",
+    "after-first-package-published": {
+        "APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_publish|_commit_package:1:after"
+    },
+    "after-first-file-linked": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_write:1:after"},
+    "before-services-render": {"APM_TEST_KILL_AT": f"{_ENGINE_MODULE}:_render:1:before"},
+    # Before the 2nd service write: the 1st is durable, reconciliation unfinished.
+    "after-first-service-write": {"APM_TEST_KILL_IN_SERVICES": "2"},
 }
-_KILLED = (-signal.SIGKILL, 128 + signal.SIGKILL)
+
+
+def _mcp_configs(world: World) -> list[Path]:
+    """Project files that register the world's MCP server (service-owned configs)."""
+    return [
+        path
+        for path in sorted(world.project.rglob("*.json"))
+        if not path.relative_to(world.project).as_posix().startswith(("apm_modules/", ".git/"))
+        and MCP_SERVER in path.read_text(encoding="utf-8", errors="replace")
+    ]
+
+
+_SIGKILL = getattr(signal, "SIGKILL", 9)  # absent on Windows, where the module is skipped
+_KILLED = (-_SIGKILL, 128 + _SIGKILL)
 
 
 @pytest.mark.parametrize(
@@ -1035,9 +1105,14 @@ def test_kill_mid_commit_then_install_equals_the_full_world(twin: Twin, point: s
         pytest.skip("the kill hook loads only under the engine driver")
     _converge(twin, *BOTH)
     twin.each(_remove_deployed)  # warm-locked: the engine applies packages and files
+    services = point == "after-first-service-write"
+    if services:
+        configs = _mcp_configs(twin.fast)
+        assert configs, "the fixture must register an MCP server for services to rewrite"
+        twin.each(lambda w: [path.unlink() for path in _mcp_configs(w)])
     _install_hook(twin.fast, _KILL)
     why = "the apply is SIGKILLed mid-commit by design; the cell asserts the kill"
-    env = {FAST_ENV: "trace", "APM_TEST_KILL_AT": KILL_POINTS[point]}
+    env = {FAST_ENV: "trace", **KILL_POINTS[point]}
     killed = _run_outside_contract(twin.fast, ("install",), env, why)
     if killed.returncode not in _KILLED:
         assert killed.returncode == 0, killed.stdout + killed.stderr
@@ -1046,6 +1121,8 @@ def test_kill_mid_commit_then_install_equals_the_full_world(twin: Twin, point: s
     assert recovered.returncode == 0, recovered.stdout + recovered.stderr
     reference = twin.invoke(twin.full, ("install",))
     assert reference.returncode == 0, reference.stdout + reference.stderr
+    if services:
+        assert _mcp_configs(twin.full), "the full install must rewrite the service configs"
     staging = twin.fast.project / "apm_modules" / ".apm-resolution-staging"
     assert not staging.exists(), f"staging left behind: {sorted(staging.rglob('*'))}"
     problems = diff(
