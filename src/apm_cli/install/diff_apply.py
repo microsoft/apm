@@ -273,17 +273,15 @@ def _plan_files(
             path = _within(project_root, rel)
             if path.is_symlink():
                 raise Decline("symlinked deployed file")
-            current = None
             if path.exists():
                 data = path.read_bytes() if path.is_file() else b""
-                current = f"sha256:{canonical_digest(data)}" if path.is_file() else None
-                receipted = receipts.get(path.resolve().as_posix())
-                if current is None or current not in (digest, receipted):
-                    # Not what the lock records and not what APM last wrote: a user edit.
+                if not path.is_file() or f"sha256:{canonical_digest(data)}" != digest:
+                    # The full run keeps bytes that differ from the lock as a
+                    # local edit (it reports them), so only the full run decides.
                     raise Decline("edited deployed file")
-                if current == digest and receipted != digest:
+                if receipts.get(path.resolve().as_posix()) != digest:
                     raise Decline("deployed file without a receipt")
-            if current != digest:
+            else:
                 hexd, raw = records[owner]["files"][rel]
                 data = deploy.get(hexd, raw_sha256=raw)
                 if data is None:
@@ -415,15 +413,29 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
 
     result = run_baseline_checks(
         project_root,
-        fail_fast=True,
+        fail_fast=False,
         ci_mode=True,
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=content_integrity,
     )
-    failing = [c.name for c in result.checks if not c.passed or getattr(c, "warned", False)]
+    failing = [
+        c.name
+        for c in result.checks
+        if c.name not in _RENDERED_BY_THE_INSTALL_OWNER
+        and (not c.passed or getattr(c, "warned", False))
+    ]
     if failing:
         raise Decline(f"post-apply audit: {failing[0]}")
     return True
+
+
+# Audit checks the fast run hands to the install's own phase instead: the MCP
+# config view of ``apm audit`` deliberately ignores personal (user-scope)
+# approvals so CI and laptops agree, while ``apm install`` honors them. The
+# fast run's output runs the install's MCP phase itself
+# (fast_output.run_services), which reconciles, parks and reports exactly as
+# the full run does.
+_RENDERED_BY_THE_INSTALL_OWNER = frozenset({"config-consistency"})
 
 
 # Baseline checks that fail before APPLY only because of what APPLY is about to write.
@@ -451,9 +463,15 @@ def _audit_gate(project_root: Path, fetch: Any, *, writes: bool) -> bool:
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=False,
     )
-    failing = {c.name for c in result.checks if not c.passed or getattr(c, "warned", False)}
-    if failing - _FILLED_BY_APPLY or (failing and not writes):
-        raise Decline(f"audit: {sorted(failing - _FILLED_BY_APPLY or failing)[0]}")
+    failing = {
+        c.name
+        for c in result.checks
+        if c.name not in _RENDERED_BY_THE_INSTALL_OWNER
+        and (not c.passed or getattr(c, "warned", False))
+    }
+    tolerated = _FILLED_BY_APPLY if writes else frozenset()
+    if failing - tolerated:
+        raise Decline(f"audit: {sorted(failing - tolerated)[0]}")
     return bool(failing)
 
 

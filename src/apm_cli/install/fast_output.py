@@ -68,13 +68,16 @@ def render(
 
     logger = InstallLogger(verbose=False, dry_run=False, partial=False)
     logger.resolution_start(to_install_count=0, lockfile_count=0, update_count=0)
+    locked = [d for d in lock.get_all_dependencies() if d.get_unique_key() != "."]
+    for dep in locked:
+        if dep.get_unique_key() in fetched:
+            # The resolve phase's heartbeat for a package it materializes.
+            logger.resolving_heartbeat(dep.to_dependency_ref().get_display_name())
     policy_fetch = run_policy_gate(project_root, manifest, lock, logger)
     _announce_targets(project_root, manifest, logger)
-    for dep in lock.get_all_dependencies():
+    for dep in locked:
         key = dep.get_unique_key()
-        if key == ".":
-            continue
-        _package_header(dep, logger)
+        _package_header(dep, logger, cached=key not in fetched)
         body = (bodies or {}).get(key)
         if body is None:
             logger.tree_item("  |-- (files unchanged)")
@@ -110,7 +113,7 @@ def _announce_targets(project_root: Path, manifest: Any, logger: Any) -> None:
     logger.announce_targets(format_provenance(resolved))
 
 
-def _package_header(dep: Any, logger: Any) -> None:
+def _package_header(dep: Any, logger: Any, *, cached: bool = True) -> None:
     """The cached-source header ``install/sources.py`` prints for a locked package."""
     from apm_cli.utils.short_sha import format_short_sha
 
@@ -118,7 +121,7 @@ def _package_header(dep: Any, logger: Any) -> None:
     name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
     ref = dep.resolved_ref or dep_ref.reference or ""
     sha = format_short_sha(dep.resolved_commit) if dep.resolved_commit else ""
-    logger.download_complete(name, ref=ref, sha=sha, cached=True)
+    logger.download_complete(name, ref=ref, sha=sha, cached=cached)
 
 
 def run_policy_gate(project_root: Path, manifest: Any, lock: Any, logger: Any) -> Any:
