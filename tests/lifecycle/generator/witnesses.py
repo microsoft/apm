@@ -115,6 +115,10 @@ BIN_WITNESSES: Mapping[str, str] = {
             "test_an_edited_plugin_bin_is_restored_and_said",
         )
     },
+    "tests/lifecycle/scenarios/test_user_scope.py::"
+    "test_a_plugin_bin_deploys_under_home_once_trusted": "user",
+    "tests/lifecycle/scenarios/test_policy_pairs.py::"
+    "test_a_denied_plugin_with_bin_is_refused_at_user_scope": "user",
     **{
         "tests/lifecycle/scenarios/test_lock_states.py::"
         f"test_user_bin_plugin_under_a_drifted_lock[{lock}]": "user"
