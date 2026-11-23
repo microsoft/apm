@@ -273,13 +273,17 @@ def _plan_files(
             path = _within(project_root, rel)
             if path.is_symlink():
                 raise Decline("symlinked deployed file")
+            current = None
             if path.exists():
                 data = path.read_bytes() if path.is_file() else b""
-                if not path.is_file() or f"sha256:{canonical_digest(data)}" != digest:
+                current = f"sha256:{canonical_digest(data)}" if path.is_file() else None
+                receipted = receipts.get(path.resolve().as_posix())
+                if current is None or current not in (digest, receipted):
+                    # Not what the lock records and not what APM last wrote: a user edit.
                     raise Decline("edited deployed file")
-                if receipts.get(path.resolve().as_posix()) != digest:
+                if current == digest and receipted != digest:
                     raise Decline("deployed file without a receipt")
-            else:
+            if current != digest:
                 hexd, raw = records[owner]["files"][rel]
                 data = deploy.get(hexd, raw_sha256=raw)
                 if data is None:
@@ -322,6 +326,8 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     for key, dep in lock.dependencies.items():
         if key == "." or getattr(dep, "source", None) is not None:
             raise Decline("non-git source")
+        if getattr(dep, "discovered_via", None) or getattr(dep, "marketplace_plugin_name", None):
+            raise Decline("marketplace source")
         sha = getattr(dep, "resolved_commit", None)
         if not sha:
             raise Decline("unpinned dependency")
@@ -433,6 +439,11 @@ def try_apply(
             raise Decline("local content or LSP")
         if (project_root / ".apm").exists():
             raise Decline("root project primitives")
+        from apm_cli.core.experimental import is_enabled
+
+        if is_enabled("external_scanners"):
+            # The opt-in install-time audit phase scans every install.
+            raise Decline("install-time audit enabled")
         from apm_cli.install.fast_output import quiet
 
         with quiet():
