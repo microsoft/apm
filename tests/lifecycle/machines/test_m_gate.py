@@ -38,6 +38,13 @@ from tests.lifecycle.machines._gate_kit import (
     GateWorld,
 )
 from tests.lifecycle.machines._gate_matrix import GateMatrix, matrix_cells, replay_matrix
+from tests.lifecycle.machines._gate_plugin_bin import ROOT as PLUGIN_ROOT
+from tests.lifecycle.machines._gate_plugin_bin import (
+    GatePluginBin,
+    PluginBinBench,
+    plugin_bin_cells,
+    replay_plugin_bin,
+)
 from tests.lifecycle.machines._kit import Bench, WorldPool, earned_cells
 from tests.lifecycle.oracles import ExpectedCell, Observation, Operation, check_cross_cutting
 from tests.lifecycle.receipts import current_node
@@ -103,7 +110,7 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("install", "plain"),
     ("set_policy", "org-deny"),
     # A new approval under the org deny is refused, names the org layer (#4919), and
-    # still writes the grant (strict #4923).
+    # writes nothing (#4923).
     ("decide", "hook", "revoke"),
     ("decide", "hook", "approve"),
     ("install", "frozen"),
@@ -257,6 +264,19 @@ def test_gate_bin_spine_credits_user_scope_bin_cells(lifecycle_template, tmp_pat
     assert not (machine.bench.deploy_root / BIN_PATH).exists()
 
 
+def test_gate_plugin_bin_spine_credits_project_scope_prune_cells(
+    lifecycle_template, tmp_path: Path
+) -> None:
+    """A whole plugin's bin/ at project scope: prune retires the root at every gate level."""
+    world = WorldPool(lifecycle_template, tmp_path).fresh()
+    machine = GatePluginBin(PluginBinBench(world, "project"))
+    replay_plugin_bin(machine)
+    missing = plugin_bin_cells() - earned_cells(current_node(), "G1|")
+    assert not missing, f"plugin bin ids without an oracle receipt: {sorted(missing)}"
+    # The spine ends with the denied plugin retired: its root is gone.
+    assert not (machine.bench.deploy_root / PLUGIN_ROOT).exists()
+
+
 def test_gate_machine_kills_the_recorded_approval_mutant(tmp_path: Path) -> None:
     """Skipping the approval check in the gate owner must fail the machine."""
     mutant = (sys.executable, str(MUTANT_PATH))
@@ -300,23 +320,37 @@ def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
-def test_approving_a_denied_hook_under_an_org_deny_drops_only_its_own_deny(
+def test_approving_a_denied_hook_under_an_org_deny_writes_nothing(
     tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
 ) -> None:
-    """Review replay (#4923): approve removes the package's own deny before it saves
-    the grant; the known cell excuses exactly that change, nothing else."""
+    """Review replay (#4923): approve under the org deny keeps the package's own deny
+    and records no grant; the refusal comes before any write."""
     machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
     machine.declare("hook")
     machine.install("plain")
     machine.decide("hook", "deny")
     machine.set_policy("org-deny")
     world = machine.world
+    before = world.store()
     machine.decide("hook", "approve")
-    store = world.store()
-    path = str(world.packages["hook"])
-    assert any(k == path or k.startswith(path + "#") for k in store.get("allow") or {}), store
-    assert not any(k == path or k.startswith(path + "#") for k in store.get("deny") or {}), store
+    assert world.store() == before
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
+
+
+def test_frozen_refuses_a_declared_package_the_lock_lacks(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier: after a package is declared on a locked project, audit --ci
+    and install --frozen both refuse (install.md "Frozen mode"); the lock is untouched."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.declare("hook")
+    machine.update()
+    machine.declare("plugin")
+    world = machine.world
+    lock = (world.workspace / "apm.lock.yaml").read_text(encoding="utf-8")
+    machine.audit_ci(json_output=False)
+    assert (world.workspace / "apm.lock.yaml").read_text(encoding="utf-8") == lock
+    assert str(world.packages["plugin"]) not in lock
 
 
 @pytest.mark.parametrize("scope", SCOPES)

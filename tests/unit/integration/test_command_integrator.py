@@ -1733,6 +1733,279 @@ class TestCursorCommandPanelFindings:
         )
 
 
+class TestClaudeNativeCommandFrontmatter:
+    """Claude-target commands keep the frontmatter Claude Code documents (#3067)."""
+
+    _NATIVE_PROMPT = (
+        "---\n"
+        "description: d\n"
+        "disable-model-invocation: true\n"
+        "user-invocable: false\n"
+        "when_to_use: x\n"
+        "effort: low\n"
+        "disallowed-tools: [AskUserQuestion]\n"
+        "context: fork\n"
+        "agent: Explore\n"
+        "background: false\n"
+        "shell: powershell\n"
+        "---\n"
+        "Run it.\n"
+    )
+
+    @pytest.fixture
+    def temp_project(self):
+        temp_dir = tempfile.mkdtemp()
+        temp_path = Path(temp_dir)
+        (temp_path / ".claude").mkdir()
+        (temp_path / ".cursor").mkdir()
+        yield temp_path
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _install(self, project, prompts, target_name):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(project, prompts)
+        diag = DiagnosticCollector(verbose=True)
+        CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS[target_name],
+            pkg_info,
+            project,
+            diagnostics=diag,
+        )
+        by_category = diag.by_category()
+        self.infos = [i.message for i in by_category.get("info", [])]
+        warnings = [w.message for w in by_category.get("warning", [])]
+        # Dropped-key notices are verbose info (#4182); withheld hooks warn.
+        return warnings + self.infos
+
+    def test_claude_keeps_documented_command_keys(self, temp_project):
+        warnings = self._install(temp_project, {"p.prompt.md": self._NATIVE_PROMPT}, "claude")
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata == {
+            "description": "d",
+            "disable-model-invocation": True,
+            "user-invocable": False,
+            "when_to_use": "x",
+            "effort": "low",
+            "disallowed-tools": ["AskUserQuestion"],
+            "context": "fork",
+            "agent": "Explore",
+            "background": False,
+            "shell": "powershell",
+        }
+        assert not any("frontmatter keys not supported" in w for w in warnings), warnings
+
+    def test_claude_keeps_authored_arguments_without_input(self, temp_project):
+        self._install(
+            temp_project,
+            {"p.prompt.md": "---\ndescription: d\narguments: [issue, branch]\n---\n$issue\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata["arguments"] == ["issue", "branch"]
+
+    def test_claude_input_mapping_wins_over_authored_arguments(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {
+                "p.prompt.md": (
+                    "---\ndescription: d\ninput: [feature]\narguments: [other]\n---\n"
+                    "${input:feature}\n"
+                ),
+            },
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata["arguments"] == ["feature"]
+        assert any("were dropped: arguments" in w for w in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "input_block",
+        ["input: []", "input: '   '", "input: ['1bad']"],
+        ids=["empty", "whitespace", "rejected-only"],
+    )
+    def test_claude_authored_input_without_names_still_wins(self, temp_project, input_block):
+        notes = self._install(
+            temp_project,
+            {"p.prompt.md": f"---\ndescription: d\n{input_block}\narguments: [other]\n---\nRun.\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert "arguments" not in post.metadata
+        assert any("were dropped: arguments" in n for n in notes), notes
+
+    @pytest.mark.parametrize(
+        "arguments",
+        ["[issue, 7]", "7"],
+        ids=["mixed-list", "scalar"],
+    )
+    def test_claude_authored_arguments_not_reported_as_input_mapping(self, temp_project, arguments):
+        self._install(
+            temp_project,
+            {"p.prompt.md": f"---\ndescription: d\narguments: {arguments}\n---\nRun.\n"},
+            "claude",
+        )
+
+        assert (temp_project / ".claude" / "commands" / "p.md").is_file()
+        assert not any("Mapped input -> command arguments" in i for i in self.infos), self.infos
+
+    def test_claude_reinstall_adopts_rendered_native_command(self, temp_project):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        pkg_info = _make_package(temp_project, {"p.prompt.md": self._NATIVE_PROMPT})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+        deployed = temp_project / ".claude" / "commands" / "p.md"
+        before = deployed.read_bytes()
+
+        # Unmanaged file with the rendered bytes: the adopt check must render
+        # with the Claude-native keys, or it reports a user-file collision.
+        result = CommandIntegrator().integrate_commands_for_target(
+            claude, pkg_info, temp_project, managed_files=set()
+        )
+
+        assert result.files_adopted == 1, result
+        assert result.files_skipped == 0, result
+        assert deployed.read_bytes() == before
+
+    def test_claude_adopt_still_warns_withheld_hooks(self, temp_project):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        prompt = (
+            "---\ndescription: d\nhooks:\n  PreToolUse:\n"
+            "    - matcher: Bash\n      hooks:\n"
+            "        - type: command\n          command: ./check.sh\n"
+            "---\nRun.\n"
+        )
+        pkg_info = _make_package(temp_project, {"p.prompt.md": prompt})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            claude, pkg_info, temp_project, managed_files=set(), diagnostics=diag
+        )
+
+        assert result.files_adopted == 1, result
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("hooks withheld" in w for w in warnings), warnings
+
+    def test_claude_receipted_unchanged_warns_when_source_gains_hooks(
+        self, temp_project, monkeypatch
+    ):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(temp_project, {"p.prompt.md": "---\ndescription: d\n---\nRun.\n"})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+        deployed = temp_project / ".claude" / "commands" / "p.md"
+        before = deployed.read_bytes()
+
+        # Only hooks: change, so the render is byte-identical to the receipt.
+        source = temp_project / "apm_modules" / "test-pkg" / ".apm" / "prompts" / "p.prompt.md"
+        source.write_text(
+            "---\ndescription: d\nhooks:\n  Stop:\n    - hooks:\n"
+            "        - type: command\n          command: ./done.sh\n---\nRun.\n",
+            encoding="utf-8",
+        )
+        integrator = CommandIntegrator()
+        monkeypatch.setattr(integrator, "receipted_unchanged", lambda _path: True)
+        diag = DiagnosticCollector()
+        result = integrator.integrate_commands_for_target(
+            claude,
+            pkg_info,
+            temp_project,
+            managed_files={".claude/commands/p.md"},
+            diagnostics=diag,
+        )
+
+        assert result.files_integrated == 0, result
+        assert result.files_adopted == 0, result
+        assert deployed.read_bytes() == before
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("hooks withheld" in w for w in warnings), warnings
+
+    @pytest.mark.parametrize(
+        "bad",
+        [b"---\ndescription: [unclosed\n---\nRun.\n", b"---\ndescription: caf\xe9\n---\nRun.\n"],
+        ids=["malformed-yaml", "non-utf8"],
+    )
+    def test_claude_retained_malformed_command_reports_and_continues(self, temp_project, bad):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(
+            temp_project,
+            {"bad.prompt.md": "placeholder", "ok.prompt.md": "---\ndescription: d\n---\nRun.\n"},
+        )
+        (
+            temp_project / "apm_modules" / "test-pkg" / ".apm" / "prompts" / "bad.prompt.md"
+        ).write_bytes(bad)
+        commands = temp_project / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "bad.md").write_bytes(bad)
+
+        diag = DiagnosticCollector()
+        result = CommandIntegrator().integrate_commands_for_target(
+            KNOWN_TARGETS["claude"], pkg_info, temp_project, diagnostics=diag
+        )
+
+        assert (commands / "ok.md").is_file()
+        assert (commands / "bad.md").read_bytes() == bad
+        assert result.files_adopted == 1, result
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("bad.prompt.md" in w and "frontmatter" in w for w in warnings), warnings
+
+    def test_claude_still_drops_name_and_paths(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {"p.prompt.md": "---\ndescription: d\nname: other\npaths: ['*.py']\n---\nRun.\n"},
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert post.metadata == {"description": "d"}
+        assert any(
+            "not supported for claude commands" in w and "name, paths" in w for w in warnings
+        ), warnings
+
+    def test_claude_withholds_inline_hooks_with_explicit_warning(self, temp_project):
+        warnings = self._install(
+            temp_project,
+            {
+                "p.prompt.md": (
+                    "---\ndescription: d\nhooks:\n  PreToolUse:\n"
+                    "    - matcher: Bash\n      hooks:\n"
+                    "        - type: command\n          command: ./check.sh\n"
+                    "---\nRun.\n"
+                ),
+            },
+            "claude",
+        )
+
+        post = frontmatter.load(temp_project / ".claude" / "commands" / "p.md")
+        assert "hooks" not in post.metadata
+        assert any("hooks withheld" in w and "executable consent" in w for w in warnings), warnings
+        assert not any("frontmatter keys not supported" in w for w in warnings), warnings
+
+    def test_cursor_output_unchanged(self, temp_project):
+        warnings = self._install(temp_project, {"p.prompt.md": self._NATIVE_PROMPT}, "cursor")
+
+        post = frontmatter.load(temp_project / ".cursor" / "commands" / "p.md")
+        assert post.metadata == {"description": "d"}
+        assert any(
+            "not supported for cursor commands" in w and "disable-model-invocation" in w
+            for w in warnings
+        ), warnings
+
+
 class TestNonStringFrontmatterKeys:
     """A non-string frontmatter key skips that command only (#4922)."""
 

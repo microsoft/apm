@@ -146,7 +146,7 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     ("user", "mcp", "copilot"): JsonEntry(".copilot/mcp-config.json", "mcpServers", "{pkg}-mcp"),
     ("user", "lsp", "copilot"): JsonEntry(".copilot/lsp-config.json", "lspServers", "{pkg}-server"),
     ("user", "canvas", "copilot"): ".copilot/extensions/{pkg}/extension.mjs",
-    # bin/ of a Claude marketplace or native plugin deploys only at user scope (U-BIN).
+    # bin/ of a Claude marketplace or native plugin under HOME (user scope).
     ("user", "bin", "claude"): ".agents/plugins/{pkg}/bin/{pkg}",
 }
 # Surfaces a native Claude plugin never uses: its skills load from the plugin.
