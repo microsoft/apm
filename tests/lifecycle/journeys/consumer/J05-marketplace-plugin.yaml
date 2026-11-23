@@ -42,8 +42,9 @@ steps:
     key_lines:
       - "[+] github.com/anthropics/claude-plugins-official/plugins/commit-commands #main @<SHA8>"
       - "1 native plugin(s) deployed to .agents/plugins/ and declared in .claude/settings.json (Claude Code) and .github/copilot/settings.json (GitHub Copilot)."
-      # The one native-route notice (#4998); no other warning.
-      - '[!] [anthropics/claude-plugins-official/plugins/commit-commands] installed as a native plugin. Native plugins are reported not to load in git worktrees, in non-interactive claude -p runs (including claude-code-action) and in Copilot CLI 1.0.106. To deploy its skills loose instead, set skills: ["*"] on this dependency in apm.yml.'
+      # The one native-route notice (#4998). A commands-only plugin has no skill
+      # to select, so it carries no skills: ["*"] hint. The O1 golden forbids any other [!].
+      - '[!] [anthropics/claude-plugins-official/plugins/commit-commands] installed as a native plugin. Native plugins are reported not to load in git worktrees, in non-interactive claude -p runs (including claude-code-action) and in Copilot CLI 1.0.106.'
     forbidden_lines:
       - "#main #main"
       - bin/ executables skipped

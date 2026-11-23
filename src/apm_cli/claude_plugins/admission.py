@@ -75,11 +75,29 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+    # Admitted as an Agent Plugin (always native), not a Claude-format plugin.
+    agent_plugin: bool = False
 
 
 def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
-    """Whether a skills: selection would deploy *plugin* loose instead (project scope)."""
-    return not user_scope and (plugin.source_root / ".claude-plugin/plugin.json").is_file()
+    """Whether ``skills: ["*"]`` would deploy *plugin*'s skills loose instead.
+
+    Only a Claude-format plugin at project scope deploys loose under a skills:
+    selection (an Agent Plugin stays native; at user scope it parks), and only
+    a plugin with selectable skills: otherwise the selection matches nothing.
+    """
+    if user_scope or plugin.agent_plugin:
+        return False
+    from types import SimpleNamespace
+
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(
+            install_path=plugin.source_root, package_type=PackageType.MARKETPLACE_PLUGIN
+        )
+    )
+    return bool(available)
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:
