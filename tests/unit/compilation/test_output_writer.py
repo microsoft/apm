@@ -164,3 +164,23 @@ def test_refuses_linked_directory_when_root_spellings_differ(tmp_path: Path, lin
         )
 
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs privileges on Windows")
+def test_refuses_batch_when_missing_directory_and_dotdot_reach_a_linked_directory(
+    tmp_path: Path,
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".github").symlink_to(outside, target_is_directory=True)
+    regular = project / "AGENTS.md"
+    linked = project / "new" / ".." / ".github" / "custom.md"
+
+    with pytest.raises(OSError, match="Refusing deployment through a symlinked path component"):
+        CompiledOutputWriter(base_dir=project).write_many({regular: "# A\n", linked: "# B\n"})
+
+    assert not regular.exists()
+    assert not (project / "new").exists()
+    assert list(outside.iterdir()) == []
