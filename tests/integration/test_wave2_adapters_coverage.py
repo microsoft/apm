@@ -124,6 +124,7 @@ from apm_cli.utils.reflink import (
     clone_file,
     reflink_supported,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 
 # ===========================================================================
 # 1. adapters/client/base.py  -- pure helper functions
@@ -3079,6 +3080,7 @@ class TestMarketplaceClientFetchPaths:
         assert result is not None
         assert result["name"] == "file-market"
 
+    @trust_checkout_contents()
     def test_fetch_git_with_mocked_git_cache(self, tmp_path: Path) -> None:
         """_fetch_git calls GitCache and reads the marketplace file."""
         from apm_cli.marketplace.client import _fetch_git
