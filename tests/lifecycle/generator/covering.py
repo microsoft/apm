@@ -36,10 +36,9 @@ from tests.lifecycle.generator.rules import (
     RULE_CELL_REFUSALS,
     SCENARIO_REFUSALS,
     UNINSTALL_MCP_REFUSALS,
-    u_bin_applies,
 )
 from tests.lifecycle.generator.space import Entry
-from tests.lifecycle.generator.witnesses import implied
+from tests.lifecycle.generator.witnesses import credits_bin, implied
 from tests.lifecycle.world.packages import GIT_PUBLISHED, INERT_COMMAND
 from tests.lifecycle.world.services import REGISTRY_SERVER
 
@@ -431,14 +430,14 @@ def simulate(plan: Plan, steps: Sequence[Step], targets: Sequence[str]) -> list[
 
 
 def _creditable(cells: set[str], step: Step, obligations: Mapping[str, Entry]) -> set[str]:
-    # A row's loose bin/ never deploys at project scope; only a whole plugin's
-    # bin/ does, so the M-GATE plugin bin spine witnesses those cells (U-BIN).
+    # A row's p-exec loose bin/ never deploys at project scope, so a row credits no
+    # bin cell at all; bin-deploying witnesses do (witnesses.BIN_WITNESSES, #4981).
     return {
         cell
         for cell in cells
         if cell in obligations
         and (obligations[cell].strength != "e2e-evidence" or step.unchanged)
-        and not u_bin_applies(parse_cell(cell)[1])
+        and credits_bin("", parse_cell(cell)[1])
     }
 
 

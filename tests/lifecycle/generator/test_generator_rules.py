@@ -46,7 +46,7 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import build_space, raw_cells
-from tests.lifecycle.generator.witnesses import credits, machine_cells
+from tests.lifecycle.generator.witnesses import BIN_WITNESSES, credits, credits_bin, machine_cells
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -691,3 +691,22 @@ def test_a_whole_plugin_keeps_project_bin_cells_and_witnesses_prune() -> None:
     for key in cells:
         entry = data["obligations"][key]
         assert entry["status"] == "required" and entry["witness"].endswith(spine), (key, entry)
+
+
+# -- bin cells need a witness that deploys bin/ at the cell's scope (#4981) ------
+
+
+def test_bin_cells_are_credited_only_by_a_witness_that_deploys_bin() -> None:
+    """A row acting on p-exec at project scope never deploys its loose bin/, so its
+    receipt proves nothing about a bin cell; only a bin-deploying witness credits one."""
+    data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
+    wrong = sorted(
+        key
+        for key, entry in data["obligations"].items()
+        if "witness" in entry and not credits_bin(entry["witness"], parse_cell(key)[1])
+    )
+    assert wrong == [], f"{len(wrong)} bin cells credited without a deployed bin/: {wrong[:5]}"
+    root = Path(__file__).parents[3]
+    for node in BIN_WITNESSES:
+        path, name = node.split("::")
+        assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
