@@ -121,3 +121,43 @@ def test_a_symlinked_hooks_dir_under_the_claude_config_root_is_refused(
 
     assert result.returncode != 0, describe(result)
     assert _files(outside) == set(), describe(result)
+
+
+def _hook_package(scene: HarnessScene) -> str:
+    """Declare a local hook package in the user manifest; return its reference."""
+    package = scene.isolated.root / "pkgs" / "hookpkg"
+    (package / ".apm" / "hooks").mkdir(parents=True)
+    (package / "apm.yml").write_text("name: hookpkg\nversion: 1.0.0\n", encoding="utf-8")
+    (package / ".apm" / "hooks" / "guard.json").write_text(_hook("echo guard"), encoding="utf-8")
+    (scene.isolated.config_root / "apm.yml").write_text(
+        f"name: user-profile\nversion: 1.0.0\ndependencies:\n  apm:\n  - {package.as_posix()}\n",
+        encoding="utf-8",
+    )
+    return package.as_posix()
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["default-root", "outside-home"])
+@pytest.mark.parametrize("preexisting", [False, True], ids=["apm-created", "user-file"])
+def test_retiring_the_last_hook_deletes_only_the_settings_file_apm_created(
+    scene: HarnessScene, external: bool, preexisting: bool
+) -> None:
+    """Retiring the last hook deletes settings.json APM created; a user's file is kept (#4945)."""
+    root = _claude_root(scene, external=external)
+    settings = root / "settings.json"
+    if preexisting:
+        settings.write_text(json.dumps({"theme": "dark"}, indent=2) + "\n", encoding="utf-8")
+    package = _hook_package(scene)
+    installed = _install(scene)
+    assert installed.returncode == 0, describe(installed)
+    assert "PreToolUse" in json.loads(settings.read_text(encoding="utf-8"))["hooks"]
+
+    cwd = scene.isolated.work_root / "cwd"
+    retired = scene.runner.run(("uninstall", "-g", package), cwd=cwd, env=scene.env)
+
+    assert retired.returncode == 0, describe(retired)
+    for stream in (retired.stdout, retired.stderr):
+        assert stream.isascii(), describe(retired)
+    if preexisting:
+        assert json.loads(settings.read_text(encoding="utf-8")) == {"theme": "dark"}
+    else:
+        assert not settings.exists(), settings.read_text(encoding="utf-8")
