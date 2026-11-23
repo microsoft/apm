@@ -148,18 +148,24 @@ _NO_HIT_ENV = (
     "APM_POLICY_DISABLE",
 )
 
-# Target roots whose listing is a verdict input (unmanaged files, D3).
+# Project target roots: every file in them (listing and bytes) is a verdict input,
+# which covers unmanaged files (D3) and the merged configs kept there (D4). The
+# coverage cell in tests/unit/install/test_verdict_record.py fails when a target
+# root (integration/targets.KNOWN_TARGETS) or an MCP adapter's config path is not
+# covered here, in _PROJECT_SURFACES or in _USER_SURFACES.
 _GOVERNED_DIRS = (
-    ".github",
-    ".claude",
-    ".cursor",
     ".agents",
+    ".claude",
     ".codex",
+    ".cursor",
     ".gemini",
-    ".opencode",
-    ".windsurf",
+    ".github",
+    ".grok",
     ".kiro",
+    ".opencode",
     ".vscode",
+    ".windsurf",
+    "agent-data",
 )
 # Merged surfaces APM writes entries into (D4), project then user.
 _PROJECT_SURFACES = (
@@ -172,8 +178,15 @@ _PROJECT_SURFACES = (
     ".git/config",
     ".gitignore",
     "apm.yml",
+    "opencode.json",
 )
-_USER_SURFACES = (".claude.json", ".codex/config.toml")
+_USER_SURFACES = (
+    ".claude.json",
+    ".codex/config.toml",
+    ".codeium/windsurf/mcp_config.json",
+    ".config/github-copilot/intellij/mcp.json",
+    ".hermes/config.yaml",
+)
 
 _VERIFIED_NOOP: list[bool] = []
 # Same values as install/noop_diff.disabled() (APM_INSTALL_FAST_PATH kill switch).
@@ -348,6 +361,14 @@ def _inputs(digest: _Digest, root: Path, argv: list[str], lock_text: bytes) -> N
             listing = [*sorted(filenames), "/", *dirnames]
             rel = Path(directory).relative_to(root).as_posix()
             digest.put(f"listing:{rel}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
+            for name in sorted(filenames):
+                path = Path(directory) / name
+                if path.is_symlink():
+                    digest.put(
+                        f"link:{rel}/{name}", os.readlink(path).encode("utf-8", "surrogateescape")
+                    )
+                else:
+                    digest.file(f"governed:{rel}/{name}", path)
 
 
 # A record expires within a day, and within the code-capped policy TTL of its

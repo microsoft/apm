@@ -330,3 +330,42 @@ def test_change_only_lines_are_shown_and_never_in_the_no_op_view(project: Path, 
     assert verdict_record.replay(["install"]) is True
     replayed = capsys.readouterr().out
     assert "All servers up to date" in replayed and "Configured 1 server" not in replayed
+
+
+def _covered(path: Path, project: Path, home: Path) -> bool:
+    if path.is_relative_to(project):
+        rel = path.relative_to(project).as_posix()
+        return (
+            rel.split("/")[0] in verdict_record._GOVERNED_DIRS
+            or rel in verdict_record._PROJECT_SURFACES
+        )
+    if path.is_relative_to(home):
+        return path.relative_to(home).as_posix() in verdict_record._USER_SURFACES
+    return False
+
+
+def test_every_target_root_and_mcp_config_path_is_a_verdict_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coverage (W3d R4): owners name the surfaces; the record must read each of them."""
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    project, home = tmp_path / "project", tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    roots = {
+        profile.root_dir
+        for profile in KNOWN_TARGETS.values()
+        if profile.root_dir.startswith(".") or profile.root_dir == "agent-data"
+    }
+    assert sorted(roots - set(verdict_record._GOVERNED_DIRS)) == []
+    uncovered = []
+    for runtime in sorted(ClientFactory.supported_clients()):
+        adapter = ClientFactory.create_client(runtime, project_root=project, user_scope=False)
+        path = Path(os.path.expanduser(str(adapter.get_config_path()))).resolve()
+        if not _covered(path, project.resolve(), home.resolve()):
+            uncovered.append(f"{runtime}: {path}")
+    assert uncovered == []
