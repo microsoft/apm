@@ -23,7 +23,9 @@ files (through ``keeps_edited_output``). The guard is closed-world:
   A short-circuited test, an ignored result or a new unguarded writer fails;
   only the listed non-executable writes (merged settings and sidecar, cleanup),
   each by operation and destination, are exempt; a gate must ask about the
-  path the write replaces (itself, its resolved form or a member it iterates).
+  path the write replaces (itself, its resolved form or the judged member slot),
+  bound by the binding that reaches the write; a write deferred in a lambda
+  is never gated.
 """
 
 from __future__ import annotations
@@ -109,6 +111,8 @@ _SOURCE_FIRST = frozenset({"copy2", "copyfile", "copytree", "move", "rename"})
 _ARG_RECEIVERS = frozenset({"write_seam", "shutil", "os", "self", "integrator"})
 # A resolved destination derived from the gated path stays the gated path.
 _PATH_RESOLVERS = frozenset({"ensure_path_within"})
+# Gates over a collection of (source, destination, rel) members: the slot they judge.
+_GATE_MEMBER_SLOT = {"_keeps_edited_bundle": 1}
 # The only writers that may skip the owner: leaves for direct callers or for
 # an in-module caller that asked the owner first. Every other writer asks.
 _LEAF_WRITERS = frozenset(
@@ -247,40 +251,75 @@ def _destination(call: ast.Call) -> str | None:
     return None
 
 
-def _gate_destination(test: ast.AST) -> str | None:
+def _gate_call(test: ast.AST) -> ast.Call | None:
     call = test.operand if isinstance(test, ast.UnaryOp) else test
-    return ast.unparse(call.args[0]) if isinstance(call, ast.Call) and call.args else None
+    return call if isinstance(call, ast.Call) else None
 
 
-def _same_target(index, function: ast.AST, gated: str, destination: str | None) -> bool:
-    """*destination* is the gated path, its resolved form, or a member it iterates."""
-    if destination is None:
+def _rebound(index, function: ast.AST, name: str, after: int, before: int) -> bool:
+    """*name* is bound again on a line strictly between *after* and *before*."""
+    return any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Store)
+        and node.id == name
+        and after < node.lineno < before
+        for node in index.walk(function)
+    )
+
+
+def _same_target(index, function: ast.AST, gate: ast.AST, write: ast.Call) -> bool:
+    """The write replaces the gated path, its resolved form, or the gated member slot.
+
+    The binding that reaches the write must be the gated one: neither the
+    destination nor the gated path is rebound between the gate and the write.
+    """
+    call = _gate_call(gate)
+    destination = _destination(write)
+    if call is None or destination is None or not call.args:
         return False
+    gated = ast.unparse(call.args[0])
+    first, line = gate.lineno, write.lineno
     if destination == gated:
-        return True
-    for node in index.walk(function):
-        if (
-            isinstance(node, ast.Assign)
-            and any(ast.unparse(target) == destination for target in node.targets)
-            and isinstance(node.value, ast.Call)
-            and _call_name(node.value) in _PATH_RESOLVERS
-            and node.value.args
-            and ast.unparse(node.value.args[0]) == gated
-        ):
-            return True
-        if isinstance(node, ast.For) and ast.unparse(node.iter) == gated:
-            names = [elt for elt in ast.walk(node.target) if isinstance(elt, ast.Name)]
-            if any(name.id == destination for name in names):
-                return True
-    return False
+        return not _rebound(index, function, destination, first, line)
+    resolvers = [
+        node
+        for node in index.walk(function)
+        if isinstance(node, ast.Assign)
+        and node.lineno < line
+        and any(ast.unparse(target) == destination for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and _call_name(node.value) in _PATH_RESOLVERS
+        and node.value.args
+        and ast.unparse(node.value.args[0]) == gated
+    ]
+    if resolvers:
+        nearest = max(resolvers, key=lambda node: node.lineno).lineno
+        return not _rebound(index, function, destination, nearest, line) and not _rebound(
+            index, function, gated, min(nearest, first), line
+        )
+    slot = _GATE_MEMBER_SLOT.get(_call_name(call))
+    loop = index.parent(write)
+    while loop is not None and loop is not function and not isinstance(loop, ast.For):
+        loop = index.parent(loop)
+    return (
+        slot is not None
+        and isinstance(loop, ast.For)
+        and ast.unparse(loop.iter) == gated
+        and isinstance(loop.target, ast.Tuple)
+        and len(loop.target.elts) > slot
+        and ast.unparse(loop.target.elts[slot]) == destination
+        and not _rebound(index, function, destination, loop.lineno, line)
+        and not _rebound(index, function, gated, first, line)
+    )
 
 
 def _gated(index, write: ast.Call) -> bool:
     """*write* runs only when the gate for its own destination let it through."""
-    destination = _destination(write)
     child, parent = write, index.parent(write)
     gates: list[ast.AST] = []
     while parent is not None:
+        if isinstance(parent, ast.Lambda):
+            return False  # a deferred write runs outside the gate's decision
         if isinstance(parent, ast.If) and child in parent.body and _gate_test(parent.test) is False:
             gates.append(parent.test)
         for field in ("body", "orelse", "finalbody"):
@@ -294,11 +333,7 @@ def _gated(index, write: ast.Call) -> bool:
                     and _leaves(stmt.body)
                 )
         if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return any(
-                _same_target(index, parent, gated, destination)
-                for gate in gates
-                if (gated := _gate_destination(gate)) is not None
-            )
+            return any(_same_target(index, parent, gate, write) for gate in gates)
         child, parent = parent, index.parent(parent)
     return False
 

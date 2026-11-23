@@ -1839,6 +1839,27 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "        write_seam.copy2(json_path, target_dir / 'run.sh')\n",
             id="executable-copy-in-exempt-function",
         ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        write_seam.copy2(source_file, checked)\n",
+            "        checked = source_file\n        write_seam.copy2(source_file, checked)\n",
+            id="destination-rebound-after-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            write_seam.copyfile(dest, src)\n",
+            id="canvas-writes-the-unjudged-slot",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                atomic_write_text(target_path, rendered, new_file_mode=0o600)\n",
+            "                deferred = lambda: atomic_write_text(  # noqa: E731\n"
+            "                    target_path, rendered, new_file_mode=0o600\n"
+            "                )\n"
+            "                deferred()\n",
+            id="write-deferred-in-a-lambda",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
