@@ -12,6 +12,7 @@ GRAPH=direct-also-transitive | cross-root diamond | replaced edge
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -247,7 +248,13 @@ def test_a_retained_descendant_with_a_stale_copy_refuses(
     refused = world.apm("uninstall", "./vendor/e", expect=1)
 
     output = " ".join((refused.stdout + refused.stderr).split())
-    assert "differs from its apm_modules copy" in output, output
+    # #5058: the stale copy is named, with the fix, before any write.
+    assert re.search(r"differs from its apm_modules copy _local/(\S+/)?f,", output), output
+    assert (
+        "Run 'apm install --no-frozen' to recopy the edited local source into apm_modules, "
+        "then retry the uninstall." in output
+    ), output
+    assert "Uninstall the package that still needs it first" not in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
 
 

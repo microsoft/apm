@@ -125,6 +125,17 @@ def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
     return tuple(prefixes)
 
 
+def parked_kept_values_after_writes(ctx: InstallContext) -> frozenset[str]:
+    """Parked kept values no package wrote in this install (#5108).
+
+    A path another package wrote takes that writer's claim and new hash, so
+    the parked package's previous claim on it is not kept.
+    """
+    kept = getattr(ctx, "parked_native_kept_values", frozenset())
+    written = {path for paths in ctx.package_deployed_files.values() for path in paths}
+    return frozenset(kept - written)
+
+
 def keep_loose_for_parked_native(
     plan: PackageDeploymentPlan,
     ctx: InstallContext | None,
@@ -420,6 +431,8 @@ def carry_kept_loose_into_replay(
             continue  # a claim outside its root is never carried; drift reports it
         if has_symlink_component(live_root, live_root / relative) or not live_file.is_file():
             continue
+        if replayed.exists() or replayed.is_symlink():
+            continue  # another package rendered this path; its copy stands (#5108)
         replayed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(live_file, replayed)
 
