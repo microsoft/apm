@@ -34,6 +34,8 @@ MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
 UPDATE = "src/apm_cli/commands/update.py"
 # Pack renders Claude rules routed to AGENTS.md only from attested copies (#4005).
 ROUTED_RULES = "src/apm_cli/integration/instruction_integrator.py"
+# The locked fast path proves present and staged package copies before any write (#4893).
+FAST_APPLY = "src/apm_cli/install/diff_apply.py"
 
 # (path, function, callee, purpose): each consumer asks the verdict owner.
 _ROUTES = (
@@ -48,11 +50,12 @@ _ROUTES = (
     (REPLAY, "_materialize_install_path", "locked_content_mismatch", "check scratch downloads"),
     (AUDIT_REPLAY, "_live_copies_stale", "locked_content_mismatch", "check warm audit copies"),
     (UPDATE, "_locked_copy_contradicts_lock", "locked_content_mismatch", "re-check no-op copies"),
+    (FAST_APPLY, "_stage_package", "locked_content_mismatch", "prove staged fast-path copies"),
 )
 # Closed world: who may call each half of the verdict.
 _ALLOWED_CALLERS = {
     "locked_content_mismatch(": frozenset(
-        {OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD, MCP_VIEW, UPDATE, ROUTED_RULES}
+        {OWNER, SOURCES, REPLAY, AUDIT_REPLAY, DOWNLOAD, MCP_VIEW, UPDATE, ROUTED_RULES, FAST_APPLY}
     ),
     "matches_fresh_legacy_plugin_hash(": frozenset({OWNER, LEGACY}),
 }

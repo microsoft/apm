@@ -8,6 +8,7 @@ from pathlib import Path
 from apm_cli.codex_plugins.client import CodexNativeError
 from apm_cli.core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS, is_safe_codex_plugin_name
 from apm_cli.deps.plugin_parser import _bounded_read_json
+from apm_cli.models.dependency.server_names import is_reserved_server_name
 from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 
 CODEX_COMPAT_MANIFEST = Path(PLUGIN_ECOSYSTEM_PATHS["codex"])
@@ -50,6 +51,12 @@ def _mcp_names(root: Path, declaration: object) -> tuple[str, ...]:
         raise CodexNativeError(
             "Codex MCP declaration is outside the qualified native shape. "
             "Use an MCP server object or a package-relative JSON file with mcpServers."
+        )
+    reserved = next((name for name in servers if is_reserved_server_name(name)), None)
+    if reserved is not None:
+        raise CodexNativeError(
+            f"Codex MCP server name '{reserved}' is a reserved object key "
+            "(__proto__, constructor, prototype). Ask the publisher to rename the server."
         )
     return tuple(sorted(servers))
 

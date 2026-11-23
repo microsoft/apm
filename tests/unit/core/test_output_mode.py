@@ -30,6 +30,8 @@ def test_machine_output_keeps_update_notice_off_stdout(args: list[str]) -> None:
         patch("apm_cli.commands._helpers.is_self_update_enabled", return_value=True),
         patch("apm_cli.commands._helpers.get_version", return_value="1.0.0"),
         patch("apm_cli.commands._helpers.check_for_updates", return_value="2.0.0"),
+        # The daily check is due, so the notice runs (update_notice declines otherwise).
+        patch("apm_cli.utils.version_checker.should_check_for_updates", return_value=True),
         patch(
             "apm_cli.commands.policy.discover_policy_with_chain",
             return_value=PolicyFetchResult(outcome="absent"),
@@ -54,6 +56,8 @@ def test_failing_machine_output_keeps_update_notice_off_stdout() -> None:
         patch("apm_cli.commands._helpers.is_self_update_enabled", return_value=True),
         patch("apm_cli.commands._helpers.get_version", return_value="1.0.0"),
         patch("apm_cli.commands._helpers.check_for_updates", return_value="2.0.0"),
+        # The daily check is due, so the notice runs (update_notice declines otherwise).
+        patch("apm_cli.utils.version_checker.should_check_for_updates", return_value=True),
         CliRunner().isolated_filesystem(),
     ):
         result = CliRunner().invoke(cli, ["audit", "--ci", "--no-policy", "--format=json"])

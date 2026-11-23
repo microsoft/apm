@@ -7,7 +7,7 @@ import os
 import tempfile
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -19,8 +19,54 @@ from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
+    from apm_cli.cache.deploy_store import StagedEvidence
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
     from apm_cli.install.deploy_snapshot import DeployJournal
+
+
+class ApplyRestoreIncomplete(Exception):
+    """A failed fast apply could not put every path back; the full run must not start."""
+
+    def __init__(self, issues: list[tuple[Path, str]]) -> None:
+        self.issues = issues
+        super().__init__(
+            "Some deployed files could not be restored. Close programs using them, "
+            "then copy them back from the retained pre-install copies before retrying."
+        )
+
+
+@contextlib.contextmanager
+def journaled_apply() -> Iterator[DeployJournal]:
+    """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
+
+    The caller records each path it creates; every path written at the
+    integrator write seam inside the block is recorded, with its expected
+    bytes and its post-write seal, too. If the block raises, every recorded
+    path is restored before the exception propagates; a restore that leaves
+    any path behind raises :class:`ApplyRestoreIncomplete`. Call it under the
+    lifecycle lock, after the install entry replayed any journal a killed
+    install left (#4863).
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+
+    store_parent = get_apm_home() / "install-snapshots"
+    journal = DeployJournal(store_parent)
+
+    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(seam, journal.after_write)
+    try:
+        yield journal
+    except BaseException as exc:
+        write_seam.stop_listening(seam)
+        if issues := journal.restore():
+            raise ApplyRestoreIncomplete(issues) from exc
+        raise
+    write_seam.stop_listening(seam)
+    journal.discard()
 
 
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
@@ -236,9 +282,13 @@ class InstallTransaction:
     ) -> None:
         """Capture the manifest and create one resolution staging session.
 
-        *recover_deploys* is ``False`` for a lock-only run (``apm lock``),
-        which never changes deployed files, not even to replay a journal.
+        *recover_deploys* is ``False`` for a lock-only run (``apm lock``) or a
+        dry run, which never change deployed files, not even to replay a journal.
         """
+        from apm_cli.cache.deploy_store import process_umask
+
+        # Read the umask now, before the pipeline starts any worker thread.
+        process_umask()
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
@@ -271,6 +321,7 @@ class InstallTransaction:
         self.committed = False
         self._completed = False
         self._rolled_back = False
+        self._deploy_evidence: StagedEvidence = ([], [])
 
     @property
     def resolution(self) -> ResolutionStagingSession:
@@ -306,6 +357,7 @@ class InstallTransaction:
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
+                    self._publish_deploy_evidence()
                 if (
                     self._validation is not None
                     and self._validation.has_failures
@@ -320,6 +372,37 @@ class InstallTransaction:
             finally:
                 if self.committed:
                     self._release_workspace_lock()
+
+    def hold_deploy_evidence(self) -> None:
+        """Take what the pipeline staged for the deploy store into this attempt.
+
+        Called when the pipeline returns, before any post-install script runs:
+        a script resets the invocation memos the evidence was staged in.
+        """
+        from apm_cli.cache.deploy_store import take_staged
+
+        files, records = take_staged()
+        with self._lock:
+            self._deploy_evidence[0].extend(files)
+            self._deploy_evidence[1].extend(records)
+
+    def _publish_deploy_evidence(self) -> None:
+        """Store the deployed bytes and package records this committed attempt staged.
+
+        The store is a best-effort cache: failing to fill it never fails an install.
+        """
+        from apm_cli.cache.deploy_store import commit_staged
+
+        taken, self._deploy_evidence = self._deploy_evidence, ([], [])
+        with contextlib.suppress(Exception):
+            commit_staged(taken)
+
+    def _discard_deploy_evidence(self) -> None:
+        """Forget what an attempt that did not commit staged for the deploy store."""
+        from apm_cli.cache.deploy_store import discard_staged
+
+        self._deploy_evidence = ([], [])
+        discard_staged()
 
     def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
         """Report cleanup paths that require safe manual recovery."""
@@ -341,6 +424,7 @@ class InstallTransaction:
                     # A preview whose staging already rolled back changed nothing.
                     return result
                 try:
+                    self._discard_deploy_evidence()
                     self._settle_deploy_journal()
                     self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
@@ -369,6 +453,7 @@ class InstallTransaction:
         the pipeline: the journal is then kept until this install commits and
         a refusal there rolls back every journaled path (#4638).
         """
+        from apm_cli.cache.deploy_store import discard_staged
         from apm_cli.core.scope import get_apm_home
         from apm_cli.install.deploy_snapshot import DeployJournal
         from apm_cli.integration import write_seam
@@ -376,6 +461,8 @@ class InstallTransaction:
         with self._lock:
             if self._deploy_journal is not None or self.committed or self._rolled_back:
                 return
+            # Deploy-store evidence counts only from this attempt's integrate phase on.
+            discard_staged()
             if ctx is not None:
                 from apm_cli.install.service import InstallService
 
@@ -546,6 +633,7 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
+                self._discard_deploy_evidence()
                 self._ref_pins.discard()
                 try:
                     self._undo_deploys()
@@ -632,8 +720,8 @@ def transactional_pipeline(
                 apm_modules_dir=modules_dir,
                 validation=None,
                 logger=kwargs.get("logger"),
-                # apm lock never touches deployed files (#4863).
-                recover_deploys=not kwargs.get("lockfile_only", False),
+                # apm lock and a dry run never touch deployed files (#4863).
+                recover_deploys=not (kwargs.get("lockfile_only") or kwargs.get("dry_run")),
             )
             kwargs["transaction"] = transaction
         try:
