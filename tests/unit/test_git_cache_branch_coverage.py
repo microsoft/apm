@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.utils.cached_repo_trust import trust_cached_repos
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -170,6 +172,7 @@ class TestLsRemoteResolve:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
 class TestBareHasSha:
     def test_returns_true_when_commit_present(self, cache, tmp_path):
         bare_dir = tmp_path / "bare.git"
@@ -266,6 +269,7 @@ class TestFetchIntoBare:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
 class TestFetchIntoBareLoced:
     def test_fetches_by_sha(self, cache, tmp_path):
         bare_dir = tmp_path / "bare.git"

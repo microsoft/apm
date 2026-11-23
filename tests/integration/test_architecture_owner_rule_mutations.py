@@ -3596,6 +3596,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="GitCache reintroduces its own traversal and outcome authority.",
     ),
     MutationCase(
+        guard_id="transport-platform-cached-repo-git",
+        rule_id="transport-platform-cached-repo-git",
+        path="src/apm_cli/cache/git_cache.py",
+        old="subprocess_env = cached_repo_env(git_network_env(url, env, git_dir=bare_dir))",
+        new="subprocess_env = git_network_env(url, env, git_dir=bare_dir)",
+        intent="A fetch into a cached bare runs Git with an environment the owner did not fence.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",

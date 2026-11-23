@@ -1,0 +1,246 @@
+"""Git runs on repositories APM keeps between runs.
+
+A persisted repository (a cache bare, a cache checkout, a native snapshot)
+can be replaced on disk between runs, and Git always reads a repository's
+own config. So before any Git run there, :func:`cached_repo_is_trusted`
+parses that config without executing anything and accepts it only when every
+key is one APM itself writes, with a value APM would write. Includes, side
+config files (``commondir``, ``info/attributes``), active hooks and object
+alternates that leave the cache are refused too. A refused repository is
+discarded by its caller and rebuilt; it is never used.
+
+Every such Git run also takes :func:`inert_git_args` and
+:func:`cached_repo_env`: no hooks, no fsmonitor, no terminal prompt, a
+fixed askpass, and no ``ext``/``fd`` transports.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import stat
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+_log = logging.getLogger(__name__)
+
+_BOOL = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
+_REFSPEC = re.compile(r"\+?refs/[A-Za-z0-9_./*-]+:refs/[A-Za-z0-9_./*-]+")
+_BRANCH_MERGE = re.compile(r"refs/heads/[A-Za-z0-9_./-]+")
+_APM_VALUE = re.compile(r"[a-z0-9-]+")
+_SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"([^"\\\n]*)")?\]')
+_KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
+_ALLOWED_PROTOCOLS = "file:git:http:https:ssh"
+
+OriginCheck = Callable[[str], bool]
+
+
+def _bool(value: str) -> bool:
+    return value.lower() in _BOOL
+
+
+# (section, subsection or None, key) -> value predicate. Subsections are
+# case-sensitive; "*" stands for any subsection (branch names only).
+_CONFIG_RULES: dict[tuple[str, str | None, str], Callable[[str], bool]] = {
+    ("core", None, "repositoryformatversion"): lambda v: v in {"0", "1"},
+    ("core", None, "filemode"): _bool,
+    ("core", None, "bare"): _bool,
+    ("core", None, "logallrefupdates"): _bool,
+    ("core", None, "ignorecase"): _bool,
+    ("core", None, "precomposeunicode"): _bool,
+    ("core", None, "symlinks"): _bool,
+    ("core", None, "longpaths"): _bool,
+    ("core", None, "autocrlf"): lambda v: v.lower() == "false",
+    ("core", None, "eol"): lambda v: v.lower() == "lf",
+    ("core", None, "sparsecheckout"): _bool,
+    ("core", None, "sparsecheckoutcone"): _bool,
+    ("index", None, "sparse"): _bool,
+    ("extensions", None, "worktreeconfig"): _bool,
+    ("extensions", None, "partialclone"): lambda v: v == "origin",
+    ("extensions", None, "objectformat"): lambda v: v.lower() in {"sha1", "sha256"},
+    ("apm", None, "linkmaterialization"): _APM_VALUE.fullmatch,
+    ("apm", None, "sparsematerialization"): _APM_VALUE.fullmatch,
+    ("remote", "origin", "fetch"): _REFSPEC.fullmatch,
+    ("remote", "origin", "tagopt"): lambda v: v == "--no-tags",
+    ("remote", "origin", "promisor"): _bool,
+    ("remote", "origin", "partialclonefilter"): lambda v: v in {"blob:none", "tree:0"},
+    ("branch", "*", "remote"): lambda v: v == "origin",
+    ("branch", "*", "merge"): _BRANCH_MERGE.fullmatch,
+}
+_WORKTREE_KEYS = frozenset(
+    {
+        ("core", None, "sparsecheckout"),
+        ("core", None, "sparsecheckoutcone"),
+        ("index", None, "sparse"),
+    }
+)
+
+
+class UntrustedCachedRepoError(RuntimeError):
+    """A persisted repository holds state APM never writes."""
+
+
+def _value(raw: str) -> str:
+    """Parse a Git config value: quotes and the escapes Git writes; no continuations."""
+    out: list[str] = []
+    quoted = False
+    pending_space = ""
+    chars = iter(raw)
+    for char in chars:
+        if char == '"':
+            quoted = not quoted
+            continue
+        if char == "\\":
+            escaped = next(chars, "")
+            mapped = {"\\": "\\", '"': '"', "n": "\n", "t": "\t", "b": "\b"}.get(escaped)
+            if mapped is None:
+                raise UntrustedCachedRepoError("unsupported escape in config value")
+            out.append(pending_space + mapped)
+            pending_space = ""
+            continue
+        if not quoted and char in "#;":
+            break
+        if not quoted and char in " \t":
+            pending_space += char
+            continue
+        out.append(pending_space + char)
+        pending_space = ""
+    if quoted:
+        raise UntrustedCachedRepoError("unterminated quote in config value")
+    return "".join(out)
+
+
+def _config_entries(path: Path) -> Iterator[tuple[str, str | None, str, str]]:
+    """Yield ``(section, subsection, key, value)``; refuse anything unusual."""
+    text = path.read_bytes().decode("utf-8")
+    section: tuple[str, str | None] | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("["):
+            match = _SECTION.fullmatch(line)
+            if match is None:
+                raise UntrustedCachedRepoError(f"unsupported config section {line!r}")
+            section = (match.group(1).lower(), match.group(2))
+            continue
+        match = _KEY.fullmatch(line)
+        if match is None or section is None:
+            raise UntrustedCachedRepoError("unsupported config line")
+        rest = match.group(2)
+        if rest is not None and rest.rstrip().endswith("\\"):
+            raise UntrustedCachedRepoError("config line continuation")
+        value = "true" if rest is None else _value(rest.strip())
+        yield section[0], section[1], match.group(1).lower(), value
+
+
+def _check_config(path: Path, *, origin_ok: OriginCheck, worktree: bool) -> None:
+    for section, subsection, key, value in _config_entries(path):
+        if section == "remote" and subsection == "origin" and key == "url" and not worktree:
+            if not origin_ok(value):
+                raise UntrustedCachedRepoError("remote.origin.url does not name this repository")
+            continue
+        rule_key = (section, "*" if section == "branch" and subsection else subsection, key)
+        rule = _CONFIG_RULES.get(rule_key)
+        if rule is None or (worktree and rule_key not in _WORKTREE_KEYS) or not rule(value):
+            shown = f"{section}.{subsection}.{key}" if subsection else f"{section}.{key}"
+            raise UntrustedCachedRepoError(f"config key {shown} is not one APM writes")
+
+
+def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
+    objects = git_dir / "objects" / "info"
+    if (objects / "http-alternates").exists():
+        raise UntrustedCachedRepoError("http-alternates present")
+    alternates = objects / "alternates"
+    if not alternates.exists():
+        return
+    if alternates_root is None:
+        raise UntrustedCachedRepoError("object alternates present")
+    root = alternates_root.resolve()
+    for line in alternates.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        target = (git_dir / "objects" / line.strip()).resolve()
+        if target != root and root not in target.parents:
+            raise UntrustedCachedRepoError("object alternates leave the cache")
+
+
+def _check_hooks(git_dir: Path) -> None:
+    hooks = git_dir / "hooks"
+    if not hooks.exists():
+        return
+    if hooks.is_symlink() or not hooks.is_dir():
+        raise UntrustedCachedRepoError("hooks is not a directory")
+    for entry in hooks.iterdir():
+        if not entry.name.endswith(".sample"):
+            raise UntrustedCachedRepoError("active hook present")
+
+
+def require_trusted_cached_repo(
+    repo: Path,
+    *,
+    bare: bool,
+    origin_ok: OriginCheck,
+    alternates_root: Path | None = None,
+) -> None:
+    """Raise :class:`UntrustedCachedRepoError` unless *repo* holds only APM-written Git state.
+
+    *origin_ok* decides whether ``remote.origin.url`` names the repository
+    this cache entry is keyed by; *alternates_root* is the only directory
+    object alternates may point into (``None``: no alternates allowed).
+    Nothing is executed; the config is parsed in-process.
+    """
+    git_dir = repo if bare else repo / ".git"
+    try:
+        info = os.lstat(git_dir)
+        if not stat.S_ISDIR(info.st_mode) or (not bare and os.path.islink(repo)):
+            raise UntrustedCachedRepoError("git directory is not a plain directory")
+        for name in ("commondir", "info/attributes"):
+            if (git_dir / name).exists():
+                raise UntrustedCachedRepoError(f"{name} present")
+        _check_config(git_dir / "config", origin_ok=origin_ok, worktree=False)
+        worktree_config = git_dir / "config.worktree"
+        if worktree_config.exists():
+            _check_config(worktree_config, origin_ok=origin_ok, worktree=True)
+        _check_alternates(git_dir, alternates_root)
+        _check_hooks(git_dir)
+    except UntrustedCachedRepoError:
+        raise
+    except (OSError, UnicodeError) as error:
+        raise UntrustedCachedRepoError(f"unreadable git state: {error}") from error
+
+
+def cached_repo_is_trusted(
+    repo: Path,
+    *,
+    bare: bool,
+    origin_ok: OriginCheck,
+    alternates_root: Path | None = None,
+) -> bool:
+    """Whether :func:`require_trusted_cached_repo` accepts *repo*."""
+    try:
+        require_trusted_cached_repo(
+            repo, bare=bare, origin_ok=origin_ok, alternates_root=alternates_root
+        )
+    except UntrustedCachedRepoError as error:
+        _log.warning("[!] Discarding cached git repository %s: %s", repo.name, error)
+        return False
+    return True
+
+
+def inert_git_args() -> list[str]:
+    """``-c`` args for every Git run in a persisted repository: nothing executes."""
+    from ..utils.git_env import git_no_hooks_args
+
+    return [*git_no_hooks_args(), "-c", "core.fsmonitor=false"]
+
+
+def cached_repo_env(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* fenced for a persisted repository: no prompts, fixed askpass, safe transports."""
+    fenced = dict(env)
+    fenced["GIT_TERMINAL_PROMPT"] = "0"
+    if fenced.get("GIT_ASKPASS") not in {"", "echo"}:
+        fenced["GIT_ASKPASS"] = "echo"
+    fenced["GIT_ALLOW_PROTOCOL"] = _ALLOWED_PROTOCOLS
+    return fenced

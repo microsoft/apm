@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from apm_cli.cache.git_cache import GitCache, _safe_git_args
+from tests.utils.cached_repo_trust import trust_cached_repos
 
 pytestmark = pytest.mark.component
 
@@ -139,6 +140,7 @@ class TestCloneHardening:
             assert "--no-recurse-submodules" in argv, argv
 
 
+@trust_cached_repos()
 class TestFetchHardening:
     @patch("subprocess.run")
     def test_fetch_into_bare_carries_safe_args(self, mock_run: MagicMock, tmp_path: Path) -> None:
