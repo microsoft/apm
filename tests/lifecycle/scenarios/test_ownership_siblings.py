@@ -323,6 +323,119 @@ def test_frozen_refuses_a_dropped_claude_native_plugin(lifecycle_world) -> None:
     scenario.finish()
 
 
+_NATIVE = "p-native-claude"
+# Harness -> the project settings file that enables a whole-deployed plugin (#4559).
+_NATIVE_SETTINGS = {"claude": ".claude/settings.json", "copilot": ".github/copilot/settings.json"}
+_USER_PLUGIN = "user-own@user-marketplace"
+# TGT -> (declared targets before the install, after it).
+_NATIVE_NARROWINGS = {
+    "single-narrowed": (("copilot",), ("claude",)),
+    "multi-narrowed": (("copilot", "claude"), ("copilot",)),
+}
+
+
+def _native_unit(tgt: str) -> dict[str, str]:
+    return {"OP": "install", "TGT": tgt, "SRC": "native-plugin", "PRIM": "skill"}
+
+
+def _settings(scenario: Scenario, harness: str) -> dict:
+    path = scenario.deploy_root / _NATIVE_SETTINGS[harness]
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+@pytest.mark.parametrize("tgt", sorted(_NATIVE_NARROWINGS))
+def test_a_narrowed_target_retires_a_whole_plugins_enable_entry(lifecycle_world, tgt) -> None:
+    """#4874: narrowing targets drops the dropped harness's APM enable entry and its
+    marketplace; the remaining harness keeps the plugin and the user's own entries stay."""
+    before, after = _NATIVE_NARROWINGS[tgt]
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(lifecycle_world, (_NATIVE,), targets=before, policy="allow")
+    scenario.run(f"install {_NATIVE}")
+    scenario.run(f"approve {_NATIVE}")
+    scenario.run("install")
+    for harness in _NATIVE_SETTINGS:
+        document = _settings(scenario, harness)
+        mine = [on for key, on in document.get("enabledPlugins", {}).items() if _NATIVE in key]
+        assert mine == ([True] if harness in before else []), (harness, document)
+        document.setdefault("enabledPlugins", {})[_USER_PLUGIN] = True
+        path = scenario.deploy_root / _NATIVE_SETTINGS[harness]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="ascii")
+
+    scenario.set_targets(*after)
+    step = scenario.run("install", credit=[_native_unit(tgt)])
+    assert (scenario.deploy_root / f".agents/plugins/{_NATIVE}").is_dir(), step.output
+    for harness in _NATIVE_SETTINGS:
+        document = _settings(scenario, harness)
+        enabled = document.get("enabledPlugins", {})
+        assert enabled.get(_USER_PLUGIN) is True, f"{harness} lost the user's entry: {enabled}"
+        mine = {key: on for key, on in enabled.items() if key.split("@")[0] == _NATIVE}
+        if harness in after:
+            assert list(mine.values()) == [True], f"{harness}: {enabled}\n{step.output}"
+            continue
+        # A Copilot false is APM's suppression of a Claude-only plugin (registrar._suppression).
+        assert True not in mine.values(), f"dropped {harness} still enables: {enabled}"
+        markets = document.get("extraKnownMarketplaces", {})
+        assert not [name for name in markets if name.startswith("apm-p-")], (harness, markets)
+    scenario.finish()
+
+
+def _deployed_native(world, targets: tuple[str, ...]) -> Scenario:
+    use_policy(world, "allow")
+    scenario = Scenario(world, (_NATIVE,), targets=targets, policy="allow")
+    scenario.run(f"install {_NATIVE}")
+    scenario.run(f"approve {_NATIVE}")
+    scenario.run("install")
+    return scenario
+
+
+def test_a_users_enable_in_an_undeclared_harness_is_kept(lifecycle_world) -> None:
+    """#4874 control: the user enables APM's plugin in Claude, which APM never declared
+    it to; an install keeps that entry and its marketplace byte for byte."""
+    scenario = _deployed_native(lifecycle_world, ("copilot",))
+    copilot = _settings(scenario, "copilot")
+    (key,) = [key for key in copilot["enabledPlugins"] if key.startswith(f"{_NATIVE}@")]
+    market = key.split("@")[1]
+    mine = {
+        "enabledPlugins": {key: True},
+        "extraKnownMarketplaces": {market: copilot["extraKnownMarketplaces"][market]},
+    }
+    scenario.user_write(_NATIVE_SETTINGS["claude"], json.dumps(mine, indent=2) + "\n")
+    step = scenario.run("install")
+    assert_changes(step.changed, (), label="install beside the user's enable")
+    lock = scenario.lock()
+    (row,) = [dep for dep in lock.dependencies.values() if dep.native_plugin is not None]
+    assert row.native_declared == ["copilot"], row.native_declared
+    scenario.finish()
+
+
+def test_frozen_refuses_a_narrowed_native_harness(lifecycle_world) -> None:
+    """#4874: --frozen refuses retiring a dropped harness's enable entry and writes nothing."""
+    scenario = _deployed_native(lifecycle_world, ("copilot", "claude"))
+    scenario.set_targets("copilot")
+    step = scenario.run("install --frozen", exit=1)
+    assert "no longer declares target(s) claude" in step.output, step.output
+    assert _NATIVE_SETTINGS["claude"] in step.output, step.output
+    assert_changes(step.changed, (), label="frozen refusal")
+    scenario.run("install")
+    assert not _settings(scenario, "claude").get("enabledPlugins")
+    scenario.finish()
+
+
+def test_frozen_replays_a_native_harness_its_target_flag_still_names(lifecycle_world) -> None:
+    """#4874 control: apm.yml declares copilot and a --target run also declared the plugin
+    to claude; repeating that run with --frozen keeps Claude's entry and changes nothing."""
+    scenario = _deployed_native(lifecycle_world, ("copilot",))
+    scenario.source_moved()  # The model has no --target override; this run widens.
+    scenario.run("install --target claude,copilot")
+    enabled = _settings(scenario, "claude").get("enabledPlugins", {})
+    assert [on for key, on in enabled.items() if key.startswith(f"{_NATIVE}@")] == [True]
+    step = scenario.run("install --frozen --target claude,copilot", exit=0)
+    assert_changes(step.changed, (), label="frozen replay")
+    assert _settings(scenario, "claude").get("enabledPlugins") == enabled
+    scenario.finish()
+
+
 def test_mcp_only_package_removal_keeps_unmanaged_and_sibling(lifecycle_world) -> None:
     factory = LocalPackageFactory(lifecycle_world.root / "owned")
     server = {
@@ -796,7 +909,9 @@ def test_an_edited_hook_outlives_a_closed_gate_announced_and_detected(
         keep={"project": (_HOOK,)},
         says=[rf"Kept user-edited file {re.escape(_HOOK)}"],
     )
-    mcp = json.loads((lifecycle_world.project / ".mcp.json").read_text(encoding="utf-8"))
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    config = lifecycle_world.project / ".mcp.json"
+    mcp = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
     assert "p-exec-mcp" not in mcp.get("mcpServers", {}), mcp
     audit = scenario.run("audit --ci", read_only=True, exit=1)
     assert re.search(rf"orphaned.*{re.escape(_HOOK)}", " ".join(audit.output.split())), audit.output
@@ -1818,6 +1933,12 @@ CREDITS = credits(
                 deployed
             )
             for deployed in _DEPLOYED_STATES
+        },
+        **{
+            f"test_a_narrowed_target_retires_a_whole_plugins_enable_entry[{tgt}]": [
+                _native_unit(tgt)
+            ]
+            for tgt in _NATIVE_NARROWINGS
         },
     },
 )

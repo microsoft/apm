@@ -656,7 +656,10 @@ def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
         MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
     )
     config = tmp_path / ".mcp.json"
-    config.write_text(json.dumps({"mcpServers": {"managed": native}}), encoding="utf-8")
+    user_entry = {"command": "user-server"}
+    config.write_text(
+        json.dumps({"mcpServers": {"managed": native, "mine": user_entry}}), encoding="utf-8"
+    )
     MCPIntegrator.remove_stale(
         {"managed"},
         runtime=runtime,
@@ -665,6 +668,7 @@ def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
     )
     servers = json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
     assert ("managed" in servers) is (runtime is None)
+    assert servers["mine"] == user_entry
 
 
 def test_native_comparison_covers_json_adapters_and_skips_opt_outs(tmp_path):

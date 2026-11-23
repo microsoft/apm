@@ -729,12 +729,13 @@ def _dropped_target_of(
 
 
 def dropped_target_files(
-    project_root: Path, lockfile: LockFile, *, user_scope: bool = False
+    project_root: Path,
+    lockfile: LockFile,
+    *,
+    user_scope: bool = False,
+    run_targets: Iterable[TargetProfile] = (),
 ) -> dict[str, str]:
-    """Map each lock-recorded file of a target apm.yml no longer declares to that target.
-
-    Empty when the manifest declares no targets (auto-detect keeps every row).
-    """
+    """``{path: target}`` of lock state for targets apm.yml dropped; {} without ``targets:``."""
     declared = declared_target_profiles(project_root, user_scope=user_scope)
     if declared is None:
         return {}
@@ -749,11 +750,9 @@ def dropped_target_files(
     dropped.update(dict(governance.retired_native_plugins(lockfile, (), declared).values()))
     # A target apm.yml declared when the lock was written and no longer does is dropped; one
     # only an explicit --target deployed is precedence (#4517); an older lock counts every one.
-    if lockfile.manifest_targets:
-        dropped = {
-            path: name for path, name in dropped.items() if name in lockfile.manifest_targets
-        }
-    return dropped
+    if recorded_targets := lockfile.manifest_targets:
+        dropped = {path: name for path, name in dropped.items() if name in recorded_targets}
+    return {**dropped, **governance.retired_native_declarations(lockfile, run_targets, declared)}
 
 
 def reconcile_target_deployed_files(

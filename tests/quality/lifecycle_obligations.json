@@ -13966,7 +13966,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|LOCK=consistent|NET=online": {
    "family": "pair",
@@ -13998,7 +13998,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|LOCK=consistent|TGT=multi-unchanged": {
    "family": "pair",
@@ -14022,7 +14022,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[bundle-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|LOCK=consistent|TGT=single-unchanged": {
    "family": "pair",
@@ -25216,7 +25216,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-unchanged]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|SRC=native-plugin|LOCK=newer-generator": {
    "family": "pair",
@@ -25385,10 +25385,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4874",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -25413,10 +25412,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4874",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [
@@ -25892,7 +25890,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|TGT=multi-narrowed|NET=online": {
    "family": "pair",
@@ -26116,7 +26114,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|TGT=single-narrowed|NET=online": {
    "family": "pair",
