@@ -214,7 +214,7 @@ class CodexClientAdapter(MCPClientAdapter):
         config_path = Path(self.get_config_path())
         if self._config_is_linked():
             raise OSError(_SYMLINKED_MCP_CONFIG.format(path=config_path))
-        from .base import journal_config_write, journal_config_written
+        from .config_journal import journal_config_write, journal_config_written
 
         journal_config_write(config_path, serialized)
         config_path.parent.mkdir(parents=True, exist_ok=True)

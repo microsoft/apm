@@ -15,6 +15,7 @@ from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import umask_file_mode
 from ...utils.json_config import json_config_text, write_json_config
 from ...utils.path_security import has_symlink_component, user_config_crosses_link
+from .config_journal import journal_config_write, journal_config_written
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -286,29 +287,6 @@ def warn_unreadable_config_once(logger, config_path: Path, exc: Exception) -> No
         return
     _UNREADABLE_CONFIGS_WARNED.add(key)
     logger.warning("Could not read %s: %s", config_path, exc)
-
-
-def journal_config_write(config_path: Path, text: str) -> None:
-    """Record an MCP config file before APM writes it (#4594).
-
-    The install transaction journals it at the deploy write seam, so a failed
-    install restores the file. Outside an install this records nothing.
-    """
-    from ...integration.write_seam import record_before_mkdir, record_before_write
-    from ...utils.content_hash import content_hash_of_bytes
-
-    record_before_mkdir(config_path.parent)
-    # *text* is what APM is about to write: replay keeps any other bytes (#4863).
-    record_before_write(
-        config_path, follow=True, expected=content_hash_of_bytes(text.encode("utf-8"))
-    )
-
-
-def journal_config_written(config_path: Path) -> None:
-    """Report that APM finished writing an MCP config file, so the journal seals it (#4863)."""
-    from ...integration.write_seam import record_after_write
-
-    record_after_write(config_path, follow=True)
 
 
 def _warn_symlinked_mcp_config(config_path: Path) -> None:

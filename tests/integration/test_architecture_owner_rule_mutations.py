@@ -887,9 +887,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:\n',
-            '                with open(json_path, "w", encoding="utf-8") as f:\n',
-            id="raw-open-for-write",
+            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            id="raw-write-text",
         ),
         pytest.param(
             "src/apm_cli/integration/cleanup.py",

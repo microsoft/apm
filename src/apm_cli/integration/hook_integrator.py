@@ -2082,9 +2082,7 @@ class HookIntegrator(BaseIntegrator):
                 stats["files_removed"] += 1
             elif modified:
                 with provenance.recorded_config_write(json_path):
-                    with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2)
-                        f.write("\n")
+                    write_seam.write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if kept:
                 write_hook_sidecar(sidecar_path, kept)

@@ -266,7 +266,7 @@ class IntelliJClientAdapter(CopilotClientAdapter):
     def _write_config(self, path: Path, config: dict) -> None:
         try:
             self._validate_owned_config_path(path)
-            from .base import journal_config_write, journal_config_written
+            from .config_journal import journal_config_write, journal_config_written
 
             journal_config_write(
                 path, json_config_text(path, config, default_trailing_newline=True)

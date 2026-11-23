@@ -156,10 +156,12 @@ def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
     record_after_write(path)
 
 
-def write_text(path: Path, data: str, *, encoding: str = "utf-8") -> None:
-    """``Path.write_text`` through the seam."""
+def write_text(
+    path: Path, data: str, *, encoding: str = "utf-8", newline: str | None = None
+) -> None:
+    """``Path.write_text`` through the seam (``newline=""`` keeps *data*'s line endings)."""
     record_before_write(path, follow=True, expected=_text_hash(data, encoding))
-    path.write_text(data, encoding=encoding)
+    path.write_text(data, encoding=encoding, newline=newline)
     record_after_write(path, follow=True)
 
 
@@ -206,6 +208,13 @@ def rename(source: Path, destination: Path) -> None:
     os.rename(source, destination)
     record_after_write(source)
     record_after_write(destination)
+
+
+def chmod(path: Path, mode: int) -> None:
+    """``os.chmod`` through the seam: the mode is part of what the journal seals (#4863)."""
+    record_before_write(path, expected=_file_hash(path))
+    os.chmod(path, mode)
+    record_after_write(path)
 
 
 def unlink(path: Path, *, missing_ok: bool = False) -> None:

@@ -221,7 +221,7 @@ class HermesClientAdapter(CopilotClientAdapter):
             for name, cfg in config_updates.items():
                 servers[name] = self._to_hermes_format(cfg, enabled=enabled)
             data[self.mcp_servers_key] = servers
-            from .base import journal_config_write, journal_config_written
+            from .config_journal import journal_config_write, journal_config_written
 
             text = yaml_to_str(data)
             journal_config_write(path, text)
