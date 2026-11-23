@@ -848,9 +848,8 @@ def integrate_local_bundle(
     enforce_agent_plugin_deployment_boundary(bundle_info=bundle_info)
 
     import hashlib
-    import shutil
 
-    from apm_cli.utils.atomic_io import write_text_lf
+    from apm_cli.integration import write_seam
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -1113,11 +1112,12 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             if not dry_run:
-                dest.parent.mkdir(parents=True, exist_ok=True)
+                # Through the write seam: the install journals each write (#5046).
+                write_seam.mkdir(dest.parent, parents=True, exist_ok=True)
                 if normalized_text is None:
-                    shutil.copy2(src, dest, follow_symlinks=False)
+                    write_seam.copy2(src, dest)
                 else:
-                    write_text_lf(dest, normalized_text)
+                    write_seam.write_text_lf(dest, normalized_text)
             # Staged instructions are compile input, never deployment claims (#3705).
             claims = staged_files if _staged else deployed_files
             claims.append(record)
