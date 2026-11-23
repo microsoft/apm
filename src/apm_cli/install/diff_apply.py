@@ -486,9 +486,10 @@ def _commit(
         with held_output() as held, journaled_apply() as journal:
             # The services phase may rewrite the lock outside the write seam.
             journal.record(get_lockfile_path(project_root))
+            # A killed run's inactive staging roots go silently, as at the full
+            # run's commit; a cleanup that fails is reported there, so it decides.
             if staging.remove_abandoned_roots():
-                # A killed run's leftovers the full run reports: it decides.
-                raise Decline("abandoned staging")
+                raise Decline("abandoned staging cleanup failed")
             scratch = staging.prepare_replacement(modules / _SCRATCH)
             scratch.mkdir()
             replacements = []

@@ -84,8 +84,8 @@ def test_a_failed_restore_stops_and_never_runs_the_full_pipeline(
 ) -> None:
     """The real engine and entry: an incomplete restore exits 1 and names each path.
 
-    Only a clean restore falls back; the full pipeline announces itself with
-    its "Installing dependencies" header, which the failed restore never prints.
+    Only a clean restore falls back: a spy on the full install command's
+    callback counts one call there and none here.
     """
     from apm_cli.install.transaction import ApplyRestoreIncomplete
 
@@ -111,14 +111,24 @@ def test_a_failed_restore_stops_and_never_runs_the_full_pipeline(
         return real_probe(path)
 
     monkeypatch.setattr(authority, "has_staged_lockfile", failing_once)
+    # Spy on the full install command the fast entry falls back to: count, then run it.
+    command = importlib.import_module("apm_cli.commands.install").install
+    real_callback = command.callback
+    full_runs: list[dict] = []
+
+    def counting_callback(*args, **kwargs):
+        full_runs.append(kwargs)
+        return real_callback(*args, **kwargs)
+
+    monkeypatch.setattr(command, "callback", counting_callback)
 
     code, output = _run(["install"], capsys)
 
     if restored:
         assert code == 0
-        assert "Installing dependencies from apm.yml" in output
+        assert len(full_runs) == 1, "a clean restore falls back to the full pipeline once"
     else:
         assert code == 1
-        assert "Installing dependencies from apm.yml" not in output
+        assert full_runs == [], "the full pipeline never runs on a partly restored tree"
         assert "could not be restored" in output
         assert f"Deploy restore path {stuck}: in use" in output
