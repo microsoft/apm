@@ -990,9 +990,27 @@ def _discard_dirs(paths, modules_dir: Path) -> list[str]:
     return left
 
 
+def _fresh_swaps(moved: tuple) -> list[tuple[Path, Path]]:
+    """``(aside, stage)`` of each fresh-copy swap in a move journal (#5102).
+
+    A swap is exactly two journal entries in a row: the old copy moved to its
+    aside path, then the staged copy moved into place. A package whose own
+    name merely looks like a staging path is a plain move and never matches.
+    """
+    from itertools import pairwise
+
+    swaps = []
+    for (current, aside, _), (stage, _target, _created) in pairwise(moved):
+        if aside == current.with_name(f"{_ASIDE}{current.name}") and stage == current.with_name(
+            f"{_FRESH}{current.name}"
+        ):
+            swaps.append((aside, stage))
+    return swaps
+
+
 def discard_set_aside_copies(moved: tuple, modules_dir, logger) -> None:
     """After the lock commits, remove the stale copies a re-anchor set aside (#5102)."""
-    aside = [target for _current, target, _created in moved if target.name.startswith(_ASIDE)]
+    aside = [aside for aside, _stage in _fresh_swaps(moved)]
     if left := _discard_dirs(aside, Path(modules_dir)):
         logger.warning(f"Could not remove the replaced copy {', '.join(left)}; delete it manually.")
 
@@ -1039,5 +1057,5 @@ def _restore_reanchored_dirs(moved: tuple, modules_dir) -> list[str]:
     if not moved:
         return []
     unrestored = restore_materializations(moved, modules_dir)
-    staged = [current for current, _target, _created in moved if current.name.startswith(_FRESH)]
+    staged = [stage for _aside, stage in _fresh_swaps(moved)]
     return unrestored + _discard_dirs(staged, Path(modules_dir))

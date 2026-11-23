@@ -511,3 +511,28 @@ def test_a_failed_cleanup_still_moves_earlier_directories_back(tmp_path: Path) -
 
     assert (modules / "_local" / "a" / "apm.yml").is_file()
     assert not (modules / "_local" / "h1").exists()
+
+
+@pytest.mark.parametrize("name", [".apm-reanchor-fresh-e", ".apm-reanchor-aside-e"])
+def test_a_package_named_like_a_staging_path_survives_rollback_and_commit(
+    tmp_path: Path, name: str
+) -> None:
+    """#5102: only a staged swap's own paths are discarded, never a package by its name."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import (
+        _restore_reanchored_dirs,
+        discard_set_aside_copies,
+    )
+
+    modules = tmp_path / "apm_modules"
+    package = _package(modules, name)
+    before = _tree(modules)
+    target = modules / "_local" / "h1" / name
+
+    moved = move_materializations(((package, target),), modules)
+    discard_set_aside_copies(moved, modules, SimpleNamespace(warning=print))
+    assert (target / "apm.yml").is_file()
+
+    assert _restore_reanchored_dirs(moved, modules) == []
+    assert _tree(modules) == before
