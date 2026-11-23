@@ -39,7 +39,7 @@ VerbatimMapping = Callable[[Path, Any], Mapping[str, Path] | None]
 
 
 def records_enabled() -> bool:
-    return os.environ.get(RECORDS_SWITCH, "").strip() != "0"
+    return False  # BENCH BASE ONLY (never merge): serving off
 
 
 def _integrator_mapping(_install_path: Path, context: Any) -> Mapping[str, Path] | None:
