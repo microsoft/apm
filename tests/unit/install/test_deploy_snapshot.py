@@ -1197,3 +1197,118 @@ def test_a_legacy_lockfile_migrated_by_the_attempt_follows_its_outcome(
     kept, gone = (legacy, current) if outcome == "rollback" else (current, legacy)
     assert kept.read_bytes() == b"lockfile_version: '1'\n"
     assert not gone.exists()
+
+
+class _Killed(BaseException):
+    """A kill: no handler between the write and the process exit runs."""
+
+
+def _partial_skill(project: Path, rel: str = ".kiro/skills/s") -> tuple[Path, dict[str, str]]:
+    """A deployed skill directory of two files and the ledger rows that vouch for it."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    skill = project / rel
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"skill\n")
+    (skill / "reference.md").write_bytes(b"reference\n")
+    return skill, {f"{rel}/{p.name}": compute_file_hash(p) for p in skill.iterdir()}
+
+
+def _kill_partway_through_rmtree(
+    monkeypatch: pytest.MonkeyPatch, apm_home: Path, project: Path, remove
+) -> None:
+    """Run *remove* with the journal listening; its rmtree removes one file, then dies."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def partial(path, *_args, **_kwargs):
+        (Path(path) / "SKILL.md").unlink()
+        raise _Killed
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        with monkeypatch.context() as patch, pytest.raises(_Killed):
+            patch.setattr(shutil, "rmtree", partial)
+            remove()
+    finally:
+        write_seam.stop_listening(record)
+
+
+def test_a_kill_partway_through_an_rmtree_rolls_the_directory_back(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5087: a partial directory a journaled rmtree left is APM's: replay rolls it back."""
+    project = tmp_path / "project"
+    skill, ledger = _partial_skill(project)
+    prior = _tree(skill)
+    _kill_partway_through_rmtree(monkeypatch, apm_home, project, lambda: write_seam.rmtree(skill))
+    assert sorted(p.name for p in skill.iterdir()) == ["reference.md"]
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept, outcome.retained) == (1, (), ())
+    assert _tree(skill) == prior
+    assert not (apm_home / "install-snapshots").exists()
+
+
+def test_a_kill_partway_through_a_skill_path_migration_rolls_it_back(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5087: a legacy skill directory a killed migration left partial is rolled back."""
+    from apm_cli.install.skill_path_migration import MigrationPlan, execute_migration
+
+    project = tmp_path / "project"
+    legacy, ledger = _partial_skill(project, ".github/skills/s/assets")
+    prior = _tree(legacy)
+    plan = MigrationPlan(".github/skills/s/assets", ".agents/skills/s/assets", "pkg")
+
+    class _Authorized:
+        @staticmethod
+        def authorizes(*_args, **_kwargs) -> bool:
+            return True
+
+    _kill_partway_through_rmtree(
+        monkeypatch,
+        apm_home,
+        project,
+        lambda: execute_migration([plan], object(), project, evidence=_Authorized()),
+    )
+    assert sorted(p.name for p in legacy.iterdir()) == ["reference.md"]
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept, outcome.retained) == (1, (), ())
+    assert _tree(legacy) == prior
+    assert not (apm_home / "install-snapshots").exists()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda skill: (skill / "reference.md").write_bytes(b"my edit\n"),
+        lambda skill: (skill / "mine.md").write_bytes(b"mine\n"),
+    ],
+    ids=["edited", "added"],
+)
+def test_a_partial_directory_a_user_changed_after_the_kill_is_kept(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, change
+) -> None:
+    """#5087: replay finishes only what APM left; a user's change keeps the directory."""
+    project = tmp_path / "project"
+    skill, ledger = _partial_skill(project)
+    _kill_partway_through_rmtree(monkeypatch, apm_home, project, lambda: write_seam.rmtree(skill))
+    change(skill)
+    changed = _tree(skill)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
+    assert _tree(skill) == changed
+    assert not (skill / "SKILL.md").exists()
+    assert [store.name.split("-")[0] for store in outcome.retained] == ["retained"]
