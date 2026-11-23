@@ -15,6 +15,7 @@ Public API::
 """
 
 import copy
+import threading
 from io import StringIO
 from pathlib import Path
 from typing import Any, NoReturn
@@ -427,6 +428,12 @@ def copy_plain_tree(node: Any) -> Any:
     return copy.deepcopy(node)
 
 
+def machine_yaml_admits(text: str) -> bool:
+    """Whether *text* is within the machine-YAML budget: the one admission gate
+    shared by ``load_machine_yaml_str`` and anything that seeds its parse."""
+    return len(text) <= _MAX_MACHINE_YAML_CHARS
+
+
 def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     """``load_yaml_str`` for APM-written documents (``apm.lock.yaml``), parsed by libyaml.
 
@@ -434,7 +441,7 @@ def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     and parsing run in C (pure Python when libyaml is absent). Called only by
     ``deps/lockfile_container.parse_lockfile_text`` (guarded).
     """
-    if len(text) > _MAX_MACHINE_YAML_CHARS:
+    if not machine_yaml_admits(text):
         raise yaml.YAMLError(
             f"YAML document of {len(text)} characters exceeds the {_MAX_MACHINE_YAML_CHARS} "
             "character budget"
@@ -442,7 +449,26 @@ def load_machine_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text, _BoundedCSafeLoader)
 
 
+_TOP_LEVEL_LIMIT = 4
+_top_level_values: dict[tuple[str, str], list[str | None] | None] = {}
+_top_level_lock = threading.Lock()
+
+
 def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
+    """Memoized :func:`_top_level_scalar_values`: a pure function of *text*."""
+    with _top_level_lock:
+        if (text, key) in _top_level_values:
+            values = _top_level_values[(text, key)]
+            return None if values is None else list(values)
+    values = _top_level_scalar_values(text, key)
+    with _top_level_lock:
+        _top_level_values[(text, key)] = values
+        while len(_top_level_values) > _TOP_LEVEL_LIMIT:
+            _top_level_values.pop(next(iter(_top_level_values)))
+    return None if values is None else list(values)
+
+
+def _top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
     """Return every top-level *key* occurrence's scalar text, in document order.
 
     Works on the composed node graph (no object construction, so no merge-key

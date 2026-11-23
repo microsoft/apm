@@ -76,6 +76,58 @@ def parse_lockfile_text(yaml_str: str) -> object:
         return yaml_io.load_machine_yaml_str(yaml_str)
 
 
+_NOT_PLAIN = object()
+_PLAIN_SCALARS = (str, int, bool, type(None))
+
+
+def _plain_copy(value: object) -> object:
+    """A private copy of *value* when it holds only what a safe dump round-trips.
+
+    Exact ``dict`` (``str`` keys), ``list``, ``str``, ``int``, ``bool`` and
+    ``None``; anything else (floats, subclasses, tuples) is ``_NOT_PLAIN``.
+    """
+    kind = type(value)
+    if kind in _PLAIN_SCALARS:
+        return value
+    if kind is list:
+        items = [_plain_copy(item) for item in value]
+        return _NOT_PLAIN if any(item is _NOT_PLAIN for item in items) else items
+    if kind is dict:
+        copied = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                return _NOT_PLAIN
+            item = _plain_copy(item)
+            if item is _NOT_PLAIN:
+                return _NOT_PLAIN
+            copied[key] = item
+        return copied
+    return _NOT_PLAIN
+
+
+def remember_lockfile_text(yaml_str: str, document: object) -> None:
+    """Record *document* as the parse of *yaml_str*, the text dumped from it.
+
+    ``LockFile.write`` serializes plain built-ins with the safe dumper, which
+    loads back to an equal document in the same key order, so a later read of
+    the text it staged or wrote needs no YAML parse. A document holding any
+    other type is not recorded and its text is parsed on first read.
+    """
+    from ..utils import yaml_io
+
+    if not yaml_io.machine_yaml_admits(yaml_str):
+        return  # a read must refuse it exactly as a fresh parse would
+    plain = _plain_copy(document)
+    if plain is _NOT_PLAIN:
+        return
+    key = parse_key(yaml_str)
+    with _parsed_texts_lock:
+        _parsed_texts[key] = plain
+        _parsed_texts.move_to_end(key)
+        while len(_parsed_texts) > _PARSED_TEXT_LIMIT:
+            _parsed_texts.popitem(last=False)
+
+
 def validate_lockfile_container(data: object) -> dict[str, Any]:
     """Validate version and top-level container shapes before construction."""
     from .lockfile import LockfileFormatError, require_supported_lockfile_version

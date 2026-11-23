@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from types import CodeType
 
 import pytest
@@ -182,3 +184,200 @@ class TestLockFileReadCost:
             chain = lock._extensions["x-chain"]
             assert next(iter(chain)) == "deep"
             assert chain["k0"] == ["leaf"]
+
+
+def _rich_lock(tag: str) -> LockFile:
+    """A lockfile whose strings stress the dumper: quoting, folding, unicode."""
+    lock = LockFile()
+    lock.add_dependency(
+        LockedDependency(
+            repo_url=f"owner/rich-{tag}",
+            resolved_commit="b" * 40,
+            deployed_files=[".github/r.md", ".github/x y.md"],
+            deployed_file_hashes={".github/r.md": "sha256:" + "d" * 64},
+        )
+    )
+    lock.mcp_configs = {
+        "kb": {
+            "name": "kb",
+            "registry": False,
+            "transport": "stdio",
+            "args": ["yes", "null", "0123", "a: b", "#c", " lead", "x\ny", "caf\u00e9"],
+            "lookalikes": [
+                "true",
+                "False",
+                "on",
+                "~",
+                "",
+                "1.5",
+                "1e3",
+                ".inf",
+                "0x1f",
+                "0o17",
+                "2026-01-01",
+                "2026-01-01T00:00:00Z",
+                "12:30",
+                "-",
+                "'q'",
+                '"d"',
+                "[x]",
+                "{y}",
+            ],
+            "count": 3,
+            "enabled": True,
+            "missing": None,
+            "env": {"LONG": "word " * 40},
+        }
+    }
+    return lock
+
+
+def _yaml_frames(action: Callable[[], object]) -> int:
+    """Count Python frames inside the ``yaml`` package while *action* runs.
+
+    Loader-agnostic: the pure-Python and libyaml loaders both construct
+    through ``yaml/constructor.py``, so any parse shows up here.
+    """
+    package = str(Path(yaml.__file__).parent)
+    calls = 0
+
+    def profiler(frame, event, _arg):
+        nonlocal calls
+        if event == "call" and frame.f_code.co_filename.startswith(package):
+            calls += 1
+
+    previous = sys.getprofile()
+    sys.setprofile(profiler)
+    try:
+        action()
+    finally:
+        sys.setprofile(previous)
+    return calls
+
+
+class TestLockFileWrittenTextIsNotReparsed:
+    """A command that writes the lockfile reads its own bytes back without parsing them."""
+
+    @pytest.mark.parametrize("staged", [True, False], ids=["staged", "on-disk"])
+    def test_read_after_write_needs_no_parse(self, tmp_path, staged):
+        from apm_cli.deps.lockfile_write_authority import LockfileWriter, lockfile_write_scope
+
+        path = tmp_path / "apm.lock.yaml"
+        lock = _rich_lock(uuid.uuid4().hex)
+        reads: list[LockFile | None] = []
+
+        if staged:
+            with lockfile_write_scope(LockfileWriter.INSTALL):
+                lock.write(path)
+                parses = _yaml_frames(lambda: reads.append(LockFile.read(path)))
+        else:
+            lock.write(path)
+            parses = _yaml_frames(lambda: reads.append(LockFile.read(path)))
+
+        assert parses == 0
+        assert reads[0] is not None
+        assert reads[0].to_yaml() == path.read_text(encoding="utf-8")
+
+    def test_recorded_document_equals_a_fresh_parse_in_key_order(self, tmp_path):
+        from apm_cli.deps.lockfile_container import parse_lockfile_text
+
+        path = tmp_path / "apm.lock.yaml"
+        _rich_lock(uuid.uuid4().hex).write(path)
+        text = path.read_text(encoding="utf-8")
+
+        recorded = parse_lockfile_text(text)
+        fresh = yaml_io.load_machine_yaml_str(text)
+
+        assert recorded == fresh
+        assert json.dumps(recorded) == json.dumps(fresh)
+
+    def test_a_document_with_a_float_is_parsed_not_recorded(self):
+        from apm_cli.deps.lockfile_container import parse_lockfile_text, remember_lockfile_text
+
+        text = f"lockfile_version: '1'\nx-{uuid.uuid4().hex}: 1.5\n"
+        remember_lockfile_text(text, {"lockfile_version": "1", "wrong": 1.5})
+
+        assert parse_lockfile_text(text) == yaml.safe_load(text)
+
+    def test_generator_gate_composes_each_text_once(self, tmp_path):
+        from apm_cli.deps.lockfile_generator import assert_writable
+
+        path = tmp_path / "apm.lock.yaml"
+        _rich_lock(uuid.uuid4().hex).write(path)
+
+        composes = _count_calls(
+            yaml_io._top_level_scalar_values.__code__,
+            lambda: [assert_writable(path) for _ in range(3)],
+        )
+
+        assert composes == 1
+
+
+_ADVERSARIAL_SCALARS = [
+    "yes",
+    "on",
+    "off",
+    "null",
+    "~",
+    "1e3",
+    "0o17",
+    "0x1F",
+    "2026-01-01",
+    "12:30",
+    "",
+    " lead",
+    "trail ",
+    "a: b",
+    "- x",
+    "#c",
+    "'q'",
+    '"dq"',
+    "\t",
+    "multi\nline",
+    "caf\u00e9",
+    "&anchor",
+    "*alias",
+    "!tag",
+    2**70,
+    -1,
+    0,
+    True,
+    False,
+    None,
+]
+
+
+class TestRecordedParseAdmission:
+    """QL rebase conditions: one admission gate and exact round-trip equality."""
+
+    def test_a_dumped_document_loads_back_exactly(self):
+        from apm_cli.deps.lockfile_container import _plain_copy
+
+        document = {
+            "lockfile_version": "1",
+            "scalars": list(_ADVERSARIAL_SCALARS),
+            "keys": {str(value): value for value in _ADVERSARIAL_SCALARS},
+        }
+        text = yaml_io.yaml_to_str(document)
+
+        loaded = yaml_io.load_machine_yaml_str(text)
+
+        assert _plain_copy(document) == loaded
+        assert json.dumps(_plain_copy(document)) == json.dumps(loaded)
+
+    def test_an_over_budget_text_is_not_seeded_and_reads_refuse_it(self):
+        from apm_cli.deps.lockfile_container import (
+            _parsed_texts,
+            parse_key,
+            parse_lockfile_text,
+            remember_lockfile_text,
+        )
+
+        text = "lockfile_version: '1'\n#" + "x" * yaml_io._MAX_MACHINE_YAML_CHARS + "\n"
+
+        remember_lockfile_text(text, {"lockfile_version": "1"})
+
+        assert not yaml_io.machine_yaml_admits(text)
+        assert parse_key(text) not in _parsed_texts
+        with pytest.raises(yaml.YAMLError, match="character budget"):
+            parse_lockfile_text(text)
