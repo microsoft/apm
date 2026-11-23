@@ -631,7 +631,12 @@ class GateMachine(RuleBasedStateMachine):
             # stale executables decision (#4053).
             retired = _frozen_after_tightening(self, Operation(name), before, after, result)
             missing_lock = before.lock is None and bool(self.declared)
-            refused = missing_lock or retired or _stale_decision(self, before)
+            # --frozen also refuses a declared direct dependency the lock has no row for
+            # (reference/cli/install.md, "Frozen mode"; enforced since #4912).
+            unlocked = before.lock is not None and any(
+                not _lock_has(before.lock, str(self.world.packages[kind])) for kind in self.declared
+            )
+            refused = missing_lock or unlocked or retired or _stale_decision(self, before)
             expected = 1 if mode == "frozen" and refused else 0
             if result.returncode != expected:
                 return [f"{name} exited {result.returncode}, expected {expected}"]
@@ -890,6 +895,10 @@ class _ExpectedWithoutReference:
 
 def _declared_paths(manifest: dict) -> list[str]:
     return list((manifest.get("dependencies") or {}).get("apm") or [])
+
+
+def _lock_has(lock: LockFile, path: str) -> bool:
+    return any(dependency.local_path == path for dependency in lock.get_package_dependencies())
 
 
 def _store_grants(store: dict, path: str) -> bool:
