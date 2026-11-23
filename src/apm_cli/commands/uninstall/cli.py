@@ -741,27 +741,29 @@ def _abort_if_retained_target_cleanup_paths(
     what is still on disk; apm.yml keeps the package for the retry (#3656).
     Files ``--trust-lockfile`` kept for lack of evidence (at preflight or at
     the deletion recheck), and the skill directories holding them, do not stop
-    the uninstall (#4295); its deletions are named first, before any exit.
+    the uninstall (#4295); its deletions are named first, before any exit. A
+    path cleanup failed on or its safety gates rejected always stops it (#4815).
     """
     from ...integration.cleanup import _claim_key
 
     if evidence is not None:
         _report_consented_deletions(logger, evidence.take_consented_deletions())
         consent_kept = consent_kept | evidence.kept_under_consent()
+    rejected = getattr(outcome, "rejected_paths", {})
+    # Only evidence-based retention is waived; a failed or rejected path stays.
+    blocking = {_claim_key(path) for path in (*getattr(outcome, "failed_paths", ()), *rejected)}
     # One spelling per file, as consent records it (#4295).
-    consent_kept = {_claim_key(kept) for kept in consent_kept}
+    consent_kept = {_claim_key(kept) for kept in consent_kept} - blocking
     # Every ancestor directory of a kept file, built once: lookups stay O(1).
     kept_dirs = {
         "/".join(parts[:index])
         for parts in (kept.split("/") for kept in consent_kept)
         for index in range(1, len(parts))
     }
-    # Only evidence-based retention is waived; a path cleanup failed on stays.
-    failed = {_claim_key(path) for path in getattr(outcome, "failed_paths", set())}
     outcome.retained_paths -= {
         path
         for path in outcome.retained_paths
-        if (key := _claim_key(path)) not in failed and (key in consent_kept or key in kept_dirs)
+        if (key := _claim_key(path)) not in blocking and (key in consent_kept or key in kept_dirs)
     }
     if not outcome.retained_paths:
         return
@@ -779,7 +781,8 @@ def _abort_if_retained_target_cleanup_paths(
         f"package and {lock_state}. Package directories may already have been removed."
     )
     for path in sorted(outcome.retained_paths):
-        logger.error(f"  - {path}")
+        reason = rejected.get(path)
+        logger.error(f"  - {path}: refused, {reason}" if reason else f"  - {path}")
     logger.error("Resolve or remove the listed files, then retry uninstall.")
     sys.exit(1)
 
