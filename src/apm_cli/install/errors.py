@@ -31,7 +31,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.core.command_logger import InstallLogger
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.policy.models import CIAuditResult
+    from apm_cli.security.trust import McpAdmission
 
 
 class DirectDependencyError(RuntimeError):
@@ -259,3 +261,32 @@ class PolicyViolationError(RuntimeError):
         super().__init__(message)
         self.audit_result = audit_result
         self.policy_source = policy_source
+
+
+def policy_transitive_refusals(view: CurrentMcpConfigView) -> list[str]:
+    """Transitive servers the trust owner withheld under org ``mcp.trust_transitive``."""
+    from apm_cli.security.trust import REASON_POLICY_TRANSITIVE
+
+    return sorted(
+        name
+        for name, evidence in view.omissions.items()
+        if isinstance(evidence, dict) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+    )
+
+
+def refuse_policy_transitive(view: CurrentMcpConfigView, admission: McpAdmission) -> None:
+    """Fail the install when an org policy that blocks refuses transitive servers.
+
+    Under ``mcp.trust_transitive: false`` the trust owner parks every
+    transitive server ``mcp.allow`` does not list; with ``enforcement: block``
+    the install stops before any write, as the direct mcp-allowlist check does.
+    """
+    refused = policy_transitive_refusals(view)
+    policy = admission.org_policy()
+    if not refused or getattr(policy, "enforcement", None) != "block":
+        return
+    raise PolicyViolationError(
+        "Install blocked by org policy: mcp.trust_transitive is false and mcp.allow does "
+        f"not list transitive MCP server(s) {', '.join(refused)}. Ask the policy owner to "
+        "add them to mcp.allow or set mcp.trust_transitive: true."
+    )

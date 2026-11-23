@@ -177,6 +177,20 @@ def owns_codex_dependency(
     return dependency_key in keys
 
 
+def deployed_codex_roots(modules_dir: Path) -> dict[str, Path | None] | None:
+    """Dependency key -> the root Codex loads, for each journal-owned registration.
+
+    ``None`` when the journal is missing. A ``None`` root marks a registration
+    with no recorded root, such as a first registration interrupted after Codex
+    accepted it but before the journal recorded its root; its state is uncertain.
+    Raises ``ValueError`` (or ``OSError``) when the journal cannot be read.
+    """
+    path = ledger_path_for(modules_dir)
+    if not path.is_file():
+        return None
+    return {key: record.installed_root for key, record in _read_records(path).items()}
+
+
 def verify_codex_source_identity(
     modules_dir: Path,
     *,

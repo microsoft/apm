@@ -19,6 +19,7 @@ from apm_cli.models.apm_package import (
     GitReferenceType,
     ResolvedReference,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
 
@@ -28,7 +29,7 @@ def _mock_git_object_links():
     """Mocked clones carry no Git objects; real-git tests cover link materialization."""
     with (
         patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
-        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_cached_links"),
     ):
         yield
 
@@ -287,6 +288,7 @@ class TestDownloadVirtualFilePackageErrors:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloadSubdirectoryPackageErrors:
     def test_raises_if_not_virtual(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
@@ -447,11 +449,12 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
             patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.utils.file_ops.robust_copytree"),
             patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch("apm_cli.deps.github_downloader.require_verified_copy"),  # nothing is copied
         ):
             pkg_info = downloader.download_subdirectory_package(dep, tmp_path / "out")
         # ws2 path — resolved_commit comes from _materialize_from_bare, not Repo()
@@ -625,6 +628,7 @@ class TestTrySparseCheckout:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloadPackage:
     def test_invalid_string_ref_raises_value_error(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
@@ -1012,6 +1016,7 @@ class TestArtifactoryStubs:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestPersistentGitCacheInDownloadPackage:
     def test_cache_hit_returns_package_without_clone(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
@@ -1044,6 +1049,7 @@ class TestPersistentGitCacheInDownloadPackage:
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.file_ops.robust_copytree"),
             patch("apm_cli.utils.file_ops.robust_copy2"),
+            patch("apm_cli.deps.github_downloader.require_verified_copy"),  # nothing is copied
             patch.object(downloader, "_git_env_dict", return_value={}),
         ):
             result = downloader.download_package(dep, tmp_path / "out")

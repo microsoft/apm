@@ -40,6 +40,7 @@ _VERIFIER_NEEDLES = (
     "def _cached_policy_matches(serialized: str, meta: dict) -> bool:",
     "hmac.compare_digest(recorded, _policy_fingerprint(serialized))",
     "return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(",
+    'if _verify_hash_pin(raw, expected_hash, "cache") is not None:',
 )
 
 

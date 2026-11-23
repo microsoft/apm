@@ -134,8 +134,7 @@ _SURFACES: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
         (".claude/settings.json", "p-native-claude-bin"),
     ),
     ("p-canvas", "project"): ((".github/extensions/p-canvas/extension.mjs", "p-canvas"),),
-    # Copilot has no user-scope canvas surface (integration/targets.py "copilot").
-    ("p-canvas", "user"): (),
+    ("p-canvas", "user"): ((".copilot/extensions/p-canvas/extension.mjs", "p-canvas"),),
 }
 _TARGETS = {
     "p-native-claude": "claude",
@@ -912,6 +911,11 @@ _POLICY_EXIT = {
     "cached_stale": 1,
     "deny-all-deps": 1,
     "allow-list": 1,
+    "scripts-deny": 0,
+    "unmanaged-deny": 0,
+    "unmanaged-deny-dirs": 0,
+    "max-depth-1": 0,
+    "max-depth-2": 0,
 }
 _POLICY_ANNOUNCE = {
     "deny-pkg": "denied by pattern",
