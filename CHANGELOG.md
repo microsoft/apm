@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` now enforces policy `manifest.content_types.allow` against each package's primitive kinds and refuses under `block`; widen the allow list or remove the package. (#4838)
 - `apm install` refuses native plugins when `.agents/plugins/.gitattributes` lets git convert their bytes; end that file with `* -text` or delete it. (#4842)
-- `apm audit --ci` fails, and `apm install` warns, on merged hook entries matching a denied or unapproved package's hook; remove entries you did not add. (#4798)
-- Without a lockfile, `apm install` retires local bundle MCP entries and `apm audit --ci` fails on kept ones; remove or redeclare them, then rerun install. (closes #4801, #4818)
+- `apm audit --ci` fails, and `apm install` warns, on merged hook entries matching a denied or unapproved package's hook with no valid ownership evidence; remove entries you did not add. (#4798)
+- Without a lockfile, `apm install` retires undeclared local bundle MCP entries it can prove unchanged, and `apm audit --ci` fails on kept ones; remove or redeclare them. (closes #4801, #4818)
 
 ### Changed
 
