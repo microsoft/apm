@@ -2,8 +2,9 @@
 """End-to-end journey benchmarks of the real ``apm`` CLI on the perf fixtures.
 
 Runs the installed CLI as a subprocess (``--apm``, else ``APM_BINARY_PATH``,
-else ``.venv/bin/apm``, else ``apm`` on PATH) through critical user journeys
-on the seeded fixtures of ``tests/fixtures/perf`` and writes JSON plus
+else ``.venv/bin/apm`` or ``.venv/Scripts/apm.exe``, else ``apm`` on PATH)
+through critical user journeys on the seeded fixtures of ``tests/fixtures/perf``
+and writes JSON plus
 markdown: wall p50/p90, requests, round trips and connects per command, the
 1-min load of every sample, the git SHA and the CLI version.
 

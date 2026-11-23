@@ -116,10 +116,12 @@ def serve_offline(
         repositories.update(published)
     isolated, env = isolated_environment(directory / "env", base_env)
     if sys.platform == "win32":
-        # Git for Windows' schannel backend cannot check revocation for the
-        # mirror's local CA (no CRL or OCSP endpoint) and refuses the connection.
+        # Git for Windows' default schannel backend refuses the mirror's local CA
+        # (no CRL or OCSP endpoint: "revocation status is unknown"). APM carries
+        # only http.sslBackend/sslCAInfo/sslCAPath from this config into its
+        # isolated git env, so pick OpenSSL, which trusts GIT_SSL_CAINFO as on Linux.
         with open(env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
-            config.write("[http]\n\tschannelCheckRevoke = false\n")
+            config.write("[http]\n\tsslBackend = openssl\n")
     (directory / "services").mkdir(parents=True, exist_ok=True)
     services = WorldServices(repositories).start(directory / "services")
     try:
