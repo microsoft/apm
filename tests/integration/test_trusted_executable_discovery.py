@@ -623,3 +623,33 @@ def test_apm_script_path_with_no_directory_outside_the_project_is_refused(tmp_pa
 
     assert env is None
     assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_apm_script_path_drops_a_directory_linking_into_the_project(tmp_path: Path) -> None:
+    """A PATH directory whose helper links into the project never serves an APM script."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    marker = _plant_project_binary(project, "probe")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "probe").symlink_to(project / "probe")
+    original = os.getcwd()
+    os.chdir(project)
+    try:
+        try:
+            env = trusted_path_environment({"PATH": str(tools)})
+        except FileNotFoundError:
+            env = None
+        if env is not None:
+            subprocess.run(
+                ("/bin/sh", "-c", "probe"), cwd=tmp_path, env=env, capture_output=True, check=False
+            )
+    finally:
+        os.chdir(original)
+
+    assert env is None or str(tools) not in env["PATH"].split(os.pathsep)
+    assert not marker.exists()
