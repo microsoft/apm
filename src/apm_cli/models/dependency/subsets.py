@@ -216,8 +216,12 @@ def _declared_skill_names(skill_subset: Iterable[object] | None) -> set[str]:
 
 
 def skill_subset_selects_all(skill_subset: Iterable[object] | None) -> bool:
-    """Return whether *skill_subset* is the select-every-skill token ``["*"]``."""
-    return _declared_skill_names(skill_subset) == {SKILL_SELECT_ALL}
+    """Return whether *skill_subset* selects every skill.
+
+    One declaration may only say ``["*"]``; a merged selection that includes
+    it (another declaration or ``--skill`` named skills) still selects all.
+    """
+    return SKILL_SELECT_ALL in _declared_skill_names(skill_subset)
 
 
 def has_skill_selection(skill_subset: Iterable[object] | None) -> bool:

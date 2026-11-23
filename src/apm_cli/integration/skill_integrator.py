@@ -1092,7 +1092,9 @@ class SkillIntegrator(BaseIntegrator):
         if any(skills is None for skills in selected):
             return name_filter
         paired = skill_subset_filter_tokens({name for skills in selected for name in skills})
-        paired = frozenset(paired or ())
+        if paired is None:
+            return name_filter  # a paired skills: ["*"] selects every skill
+        paired = frozenset(paired)
         return paired if name_filter is None else frozenset(name_filter) & paired
 
     def _promote_sub_skills_standalone(

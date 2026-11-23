@@ -90,6 +90,18 @@ class TestDependencyReferenceSkillSubset:
         assert ref.skill_subset == ["*"]
         assert skill_subset_filter_tokens(ref.skill_subset) is None
 
+    def test_merged_selection_with_star_selects_every_skill(self):
+        # Two declarations, ["*"] and ["alpha"], merge into one union.
+        assert skill_subset_filter_tokens(("*", "alpha")) is None
+
+    def test_select_all_pairing_keeps_every_skill_beside_a_named_one(self):
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+        from apm_cli.models.dependency.subsets import merge_edge_pairings
+
+        pairing = merge_edge_pairings([(["*"], ["claude"]), (["alpha"], ["copilot"])])
+        assert SkillIntegrator._paired_name_filter(None, pairing, ("claude",)) is None
+        assert SkillIntegrator._paired_name_filter(None, pairing, ("copilot",)) == {"alpha"}
+
     @pytest.mark.parametrize("skills", [["*", "alpha"], ["alpha", "*"], ["*", "*", "beta"]])
     def test_parse_skills_star_mixed_with_names_raises(self, skills: list[str]) -> None:
         with pytest.raises(ValueError, match=r"'\*' selects every skill and cannot be combined"):

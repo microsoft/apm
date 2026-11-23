@@ -151,5 +151,5 @@ def test_star_mixed_with_names_is_refused_before_any_write(
     output = " ".join((result.stdout + result.stderr).split())
     assert "'*' selects every skill and cannot be combined with skill names" in output
     assert world.snap() == before
-    assert not (world.project / "apm.lock.yaml").exists()
-    assert not (world.project / "apm_modules").exists()
+    # Nothing at all was written: apm.yml is still the project's only entry.
+    assert sorted(path.name for path in world.project.iterdir()) == ["apm.yml"]

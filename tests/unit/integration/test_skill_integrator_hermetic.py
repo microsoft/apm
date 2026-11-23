@@ -1090,9 +1090,7 @@ class TestPromoteSubSkillsStandaloneSubsetNoMatch:
         assert "'skills:' in apm.yml" in warning_msg
         mock_warn.assert_not_called()
 
-    def test_star_selection_on_a_package_without_skills_errors(
-        self, tmp_path: Path, capfd
-    ) -> None:
+    def test_star_selection_on_a_package_without_skills_errors(self, tmp_path: Path, capfd) -> None:
         """``skills: ["*"]`` keeps the named no-match error when nothing is available."""
         pkg_dir = tmp_path / "instr-pkg"
         pkg_dir.mkdir()
