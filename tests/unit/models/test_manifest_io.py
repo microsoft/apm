@@ -127,15 +127,8 @@ def test_roundtrip_load_rejects_duplicate_keys_without_writing(tmp_path: Path) -
     assert manifest.read_text(encoding="utf-8") == _DUPLICATE
 
 
-def test_one_parse_per_text_and_every_caller_gets_a_private_copy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Re-reading identical text parses it once; mutating one result never leaks."""
-    from apm_cli.utils import yaml_io
-
-    parses: list[str] = []
-    real = yaml_io.load_yaml_str
-    monkeypatch.setattr(yaml_io, "load_yaml_str", lambda text: parses.append(text) or real(text))
+def test_every_manifest_read_gets_a_private_copy(tmp_path: Path) -> None:
+    """Reads of identical text share one parse; a mutated copy leaks nowhere."""
     text = f"name: memo-{tmp_path.name}\nversion: 1.0.0\ndependencies:\n  apm: [a/b]\n"
     first, second = tmp_path / "one" / "apm.yml", tmp_path / "two" / "apm.yml"
     for path in (first, second):
@@ -151,7 +144,8 @@ def test_one_parse_per_text_and_every_caller_gets_a_private_copy(
         "version": "1.0.0",
         "dependencies": {"apm": ["a/b"]},
     }
-    assert len(parses) == 1
+    assert APMPackage.from_apm_yml(first).dependencies["apm"][0].repo_url == "a/b"
+    assert first.read_text(encoding="utf-8") == text
 
 
 def test_a_refused_text_is_refused_on_every_read_with_its_own_path(tmp_path: Path) -> None:

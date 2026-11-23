@@ -20,7 +20,7 @@ import yaml
 from apm_cli.deps import lockfile_container
 from apm_cli.utils import yaml_io
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-read-only-lockfile-path")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-read-only-lockfile-path")]
 
 ROOT = Path(__file__).resolve().parents[3]
 _LOADERS = (yaml_io.load_yaml_str, yaml_io.load_machine_yaml_str)
@@ -71,10 +71,24 @@ def test_an_alias_bomb_is_refused_before_any_object_is_built(monkeypatch) -> Non
     assert built == [], "the expansion guard must run on the composed graph first"
 
 
-def test_an_oversized_document_is_refused(monkeypatch) -> None:
-    monkeypatch.setattr(yaml_io, "_MAX_MACHINE_YAML_CHARS", 64)
+def test_an_oversized_document_is_refused() -> None:
+    oversized = "k: " + "v" * yaml_io._MAX_MACHINE_YAML_CHARS + "\n"
     with pytest.raises(yaml.YAMLError, match="character budget"):
-        yaml_io.load_machine_yaml_str("k: " + "v" * 100 + "\n")
+        yaml_io.load_machine_yaml_str(oversized)
+
+
+def test_the_composer_is_python_not_libyaml() -> None:
+    """CParser's recursive C composer is never reached (QL car A condition 1)."""
+    composer = yaml.composer.Composer
+    loader = yaml_io._BoundedCSafeLoader
+    for name in ("get_single_node", "compose_document", "compose_node", "check_node", "get_node"):
+        assert getattr(loader, name) is getattr(composer, name), name
+
+
+def test_every_lockfile_read_uses_the_memo_key_owner() -> None:
+    """Seeding and reading the parse memo share one key (and so one loader)."""
+    text = "lockfile_version: '1'\ndependencies: []\n"
+    assert lockfile_container.parse_key(text) == (yaml_io.load_machine_yaml_str, text)
 
 
 _LOCKFILES = sorted((ROOT / "tests" / "fixtures").rglob("*.lock.yaml"))

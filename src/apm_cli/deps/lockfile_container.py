@@ -20,14 +20,26 @@ _parsed_texts: OrderedDict[tuple[object, str], object] = OrderedDict()
 _parsed_texts_lock = threading.Lock()
 
 
-def parse_lockfile_text(yaml_str: str) -> object:
-    """Return a private copy of the bounded YAML parse of *yaml_str*.
+def parse_key(yaml_str: str) -> tuple[object, str]:
+    """The memo key of *yaml_str*: its loader and exact text.
 
-    Raises whatever ``load_yaml_str`` raises; failed parses are not memoized.
+    The one place the key is built, so anything that seeds the memo reads
+    back with the loader ``parse_lockfile_text`` uses (a substituted loader
+    never reads another loader's parse).
     """
     from ..utils import yaml_io
 
-    key = (yaml_io.load_machine_yaml_str, yaml_str)
+    return (yaml_io.load_machine_yaml_str, yaml_str)
+
+
+def parse_lockfile_text(yaml_str: str) -> object:
+    """Return a private copy of the bounded YAML parse of *yaml_str*.
+
+    Raises whatever ``load_machine_yaml_str`` raises; failed parses are not memoized.
+    """
+    from ..utils import yaml_io
+
+    key = parse_key(yaml_str)
     with _parsed_texts_lock:
         parsed = _parsed_texts.get(key, _parsed_texts)
         if parsed is not _parsed_texts:
