@@ -1,0 +1,6 @@
+# Test impact analysis S0 probe (#4508). Not the project's coverage config.
+[run]
+source_pkgs = apm_cli
+parallel = true
+patch = subprocess
+dynamic_context = test_function
