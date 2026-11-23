@@ -57,7 +57,7 @@ def journaled_apply() -> Iterator[DeployJournal]:
     def seam(path: Path, contents: bool, expected: str | None = None) -> None:
         journal.record(path, contents=contents, expected=expected)
 
-    write_seam.listen(seam)  # NEGATIVE CONTROL (#5063): no post-write seal; restored next.
+    write_seam.listen(seam, journal.after_write)
     try:
         yield journal
     except BaseException as exc:

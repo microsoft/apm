@@ -666,37 +666,27 @@ def test_an_abandoned_journal_declines_and_the_full_run_recovers_it(
     assert not store.exists()
 
 
-def test_a_fast_apply_config_write_is_sealed_with_its_expected_hash(
+def test_a_fast_apply_config_write_is_sealed_at_the_write_seam(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The fast apply's journal sees each seam write's exact bytes, then its post-write seal."""
-    from apm_cli.install.deploy_snapshot import DeployJournal
+    """The fast apply journals each seam write and listens for its post-write seal.
+
+    Its journal is in memory (no deploy root): it records and seals at the
+    seam like an install's, but persists nothing for replay (#4982).
+    """
     from apm_cli.install.transaction import journaled_apply
     from apm_cli.integration import write_seam
-    from apm_cli.utils.content_hash import exact_hash_of_bytes
 
     monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
-    events: list[tuple[str, Path, str | None]] = []
-    record, seal = DeployJournal.record, DeployJournal.after_write
-
-    def observed_record(self, path, *, contents=True, expected=None):
-        events.append(("record", Path(path), expected))
-        return record(self, path, contents=contents, expected=expected)
-
-    def observed_seal(self, path):
-        events.append(("sealed", Path(path), None))
-        return seal(self, path)
-
-    monkeypatch.setattr(DeployJournal, "record", observed_record)
-    monkeypatch.setattr(DeployJournal, "after_write", observed_seal)
     config = tmp_path / "project" / ".gitignore"
     config.parent.mkdir()
 
-    with journaled_apply():
+    with journaled_apply() as journal:
+        sealed_by = write_seam._after
         write_seam.write_text(config, "apm_modules/\n")
+        recorded = [unit.path for unit in journal.units]
 
-    written = exact_hash_of_bytes(config.read_bytes())
-    assert [e for e in events if e[1] == config] == [
-        ("record", config, written),
-        ("sealed", config, None),
-    ]
+    assert sealed_by == journal.after_write
+    assert recorded == [config]
+    assert config.read_text(encoding="utf-8") == "apm_modules/\n"
+    assert write_seam._after is None, "the seam stops listening once the apply settles"
