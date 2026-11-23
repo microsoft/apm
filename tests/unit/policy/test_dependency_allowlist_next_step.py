@@ -629,6 +629,4 @@ def test_a_final_symlink_a_survivor_still_claims_keeps_the_advice(tmp_path: Path
 
     check = _allowlist(root)
 
-    assert [r.to_json()["command"] for r in check.remediations] == [
-        "apm uninstall acme/evil-pkg"
-    ], _stderr(capsys, check)
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg' to remove")

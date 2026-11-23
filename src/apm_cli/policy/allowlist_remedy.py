@@ -368,7 +368,10 @@ def _uninstall_clears(
     if transitive.rescued_roots or not denied_keys - set(roots) <= transitive.removed_keys:
         return False
     cleanup_keys = set(_refs_by_key(removed)) | set(transitive.removed_keys)
-    if linked := _final_symlinks(cleanup_keys, project):
+    linked = _final_symlinks(cleanup_keys, project)
+    if linked is None:
+        return False
+    if linked:
         raise AdviceWithheld(f"{linked[0]} is a symbolic link, which uninstall does not remove")
     return (
         _lockfile_writable(project)
@@ -390,7 +393,7 @@ def _deployment_paths_validate(cleanup_keys: set[str], project: AllowlistProject
     )
 
 
-def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[str]:
+def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[str] | None:
     """Files the uninstall would delete that are final symlinks (#5008).
 
     Target cleanup keeps such a path, out of the project
@@ -401,11 +404,14 @@ def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[s
     from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
 
     root = project.project_root
-    return [
-        path
-        for path in uninstall_deletion_candidates(project.lock, cleanup_keys)
-        if "://" not in path and (root / path).is_symlink()
-    ]
+    try:
+        return [
+            path
+            for path in uninstall_deletion_candidates(project.lock, cleanup_keys)
+            if "://" not in path and (root / path).is_symlink()
+        ]
+    except OSError:
+        return None  # an unreadable claim proves nothing: the advice is admin-only
 
 
 def _deletions_have_evidence(
