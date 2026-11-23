@@ -92,7 +92,20 @@ _REL = ".github/prompts/a.prompt.md"
 
 
 @pytest.mark.parametrize(
-    "rel", [".git/hooks/pre-commit", ".github/.GIT/config", ".vscode/settings.json", "notes.md"]
+    "rel",
+    [
+        ".git/hooks/pre-commit",
+        ".github/.GIT/config",
+        ".github/.git./config",
+        ".github/.git /config",
+        ".github/GIT~1/config",
+        ".github/workflows/ci.yml",
+        ".github/Actions/setup/action.yml",
+        ".github/workflows./ci.yml",
+        ".github/workflows /ci.yml",
+        ".vscode/settings.json",
+        "notes.md",
+    ],
 )
 def test_a_lock_path_outside_the_target_roots_declines_before_any_write(
     tmp_path: Path, rel: str
@@ -113,6 +126,7 @@ def test_a_lock_path_under_a_target_root_is_planned(tmp_path: Path) -> None:
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
     plan = diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
     assert [(path, data) for path, data, _d, _o in plan] == [(tmp_path / _REL, b"x")]
+    assert not any(tmp_path.iterdir()), "planning writes nothing"
 
 
 def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> None:
