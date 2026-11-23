@@ -648,3 +648,80 @@ def test_a_final_symlink_a_survivor_still_claims_keeps_the_advice(tmp_path: Path
     check = _allowlist(root)
 
     assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg' to remove")
+
+
+def _uninstall_exit_code(root: Path, monkeypatch) -> int:
+    """Run the advised ``apm uninstall`` for real, so the advice is checked against it."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    monkeypatch.chdir(root)
+    return CliRunner().invoke(cli, ["uninstall", "acme/evil-pkg"]).exit_code
+
+
+@pytest.mark.parametrize(
+    ("deployed", "dangling", "exit_code"),
+    [
+        (".github/instructions/evil.instructions.md", True, 0),
+        (".github/hooks/evil.json", False, 1),
+    ],
+    ids=["dangling-in-project-link-keeps-advice", "hook-link-withholds-advice"],
+)
+def test_the_advice_follows_whether_uninstall_removes_a_final_symlink(
+    tmp_path: Path, capsys, monkeypatch, deployed: str, dangling: bool, exit_code: int
+) -> None:
+    """#5035: cleanup counts a dangling in-project link as gone, but keeps a live hook link."""
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+        targets=["copilot"],
+    )
+    if dangling:
+        (root / deployed).parent.mkdir(parents=True)
+        (root / deployed).symlink_to(root / "docs" / "missing.md")
+    else:
+        _symlinked_claim(root, deployed, tmp_path / "outside.json")
+
+    check = _allowlist(root)
+
+    advised = [r.to_json()["command"] for r in check.remediations]
+    assert advised == (["apm uninstall acme/evil-pkg"] if exit_code == 0 else [])
+    if exit_code:
+        assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+    assert _uninstall_exit_code(root, monkeypatch) == exit_code
+
+
+def test_a_final_symlink_a_survivor_shrink_retires_withholds_the_advice_and_names_it(
+    tmp_path: Path, capsys
+) -> None:
+    """#5035: a link at a path a shrinking survivor selection retires is checked too."""
+    skills = [".agents/skills/alpha", ".agents/skills/beta"]
+    files = [f"{skill}/SKILL.md" for skill in skills]
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        skill_subset=["alpha", "beta"],
+        deployed_files=[*skills, *files],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "skills": ["beta"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "skills": ["alpha"]}],
+        },
+    )
+    (root / skills[0]).mkdir(parents=True)
+    (root / files[0]).write_text("# alpha\n", encoding="utf-8")
+    _symlinked_claim(root, files[1], tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{files[1]} is a symbolic link" in _stderr(capsys, check)[2]

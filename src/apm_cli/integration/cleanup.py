@@ -1770,3 +1770,18 @@ def remove_synced_files(
     )
     diagnostics.render_summary()
     return result
+
+
+def final_link_handled(rel_path: str, project_root: Path) -> bool:
+    """Whether stale cleanup finishes a final-symlink claim instead of keeping it (#5035).
+
+    The read-only twin of :func:`remove_stale_deployed_files`' first gates: a
+    dangling link the strict path gate accepts counts as already gone. Any
+    other final link is rejected or kept, so the uninstall stops.
+    """
+    from .base_integrator import BaseIntegrator
+
+    return (
+        BaseIntegrator.validate_deploy_path(rel_path, project_root)
+        and not (project_root / rel_path).exists()
+    )
