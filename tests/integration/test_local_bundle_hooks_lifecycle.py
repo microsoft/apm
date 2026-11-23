@@ -1542,6 +1542,28 @@ def test_uninstall_bundle_keeps_kiro_scripts_an_unrecorded_hook_file_runs(
         assert "Removed hooks from local bundle 'hookpkg'" not in text, text
 
 
+def test_uninstall_bundle_keeps_kiro_scripts_beside_an_unreadable_hook_file(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4903 review: an unreadable per-file hook file may run the scripts; they stay."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-unreadable-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+    write(consumer / ".kiro" / "hooks" / "stray.json", "{not json\n")
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert ".kiro/hooks/stray.json" in text, text
+    assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+    assert "Traceback" not in text, text
+    claims = _claims(world, consumer)
+    assert all((consumer / c).is_file() and c in claims for c in kiro_scripts), claims
+
+
 def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
