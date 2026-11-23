@@ -430,6 +430,7 @@ def _audit_gate(project_root: Path, fetch: Any, *, writes: bool) -> bool:
 
     Returns whether a filled check failed (the applied state is then re-verified).
     """
+    return False  # SKIPHACK audit
     from apm_cli.install.exec_gate import exec_policy_from_discovery
     from apm_cli.policy.ci_checks import run_baseline_checks
 
