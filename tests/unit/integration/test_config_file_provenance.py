@@ -28,6 +28,7 @@ from apm_cli.integration.config_file_provenance import (
     config_file_origin,
     delete_emptied_config,
     recorded_config_write,
+    vouches_for_current_bytes,
 )
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-LAW-ownership.preserve_unowned")]
@@ -758,3 +759,16 @@ def test_a_users_config_on_a_unc_path_is_never_deleted(tmp_path, apm_home) -> No
     assert config_file_origin(config) is Origin.PREEXISTING
     assert _apm_empties(config, root=config.parent) is False
     assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_malformed_record_file_keeps_the_file_and_vouches_for_nothing(tmp_path, apm_home) -> None:
+    """An unreadable directory record file fails closed like an unreadable store."""
+    config = tmp_path / "project" / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY)
+    held = config.read_bytes()
+    _holding(apm_home, config).write_text("{", encoding="utf-8")
+
+    assert _apm_empties(config, root=tmp_path / "project") is False
+    assert config.read_bytes() == held
+    assert vouches_for_current_bytes(config, b"") is False
+    assert config_file_origin(config) is None
