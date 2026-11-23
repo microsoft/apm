@@ -20,11 +20,9 @@ import json
 import pytest
 
 from tests.lifecycle.scenarios._kit import (
-    Known,
     Scenario,
     assert_changes,
     credits,
-    known_defect,
     mcp_server_problems,
 )
 from tests.lifecycle.scenarios._sources import SOURCES, from_source
@@ -193,10 +191,6 @@ def test_a_target_change_at_user_scope_redeploys_under_home(lifecycle_world, cha
 
 
 _CHANGED = ("single-narrowed", "single-widened", "multi-narrowed", "multi-widened")
-# #4744: dropping claude from targets: leaves the plugin bin deployed.
-_BIN_ISSUE = "#4744"
-_BIN_MATCH = r"^a dropped claude target left the plugin bin"
-_BIN_KNOWN = {"multi-narrowed": Known(_BIN_ISSUE, _BIN_MATCH)}
 
 
 def _bin_credit(change: str) -> dict[str, str]:
@@ -219,12 +213,9 @@ def test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared(
     scenario.set_targets(*after)
     step = scenario.run("install --trust-bin", credit=[_bin_credit(change)])
     assert step.result.returncode == 0, step.output
+    # Dropping claude retires the plugin bin (#4744, fixed by #4751).
     deployed = (lifecycle_world.home / _PLUGIN_BIN).is_file()
-    if change in _BIN_KNOWN:
-        with known_defect(_BIN_ISSUE, _BIN_MATCH):
-            assert not deployed, f"a dropped claude target left the plugin bin\n{step.output}"
-    else:
-        assert deployed == ("claude" in after), step.output
+    assert deployed == ("claude" in after), step.output
     scenario.finish()
 
 
@@ -344,9 +335,5 @@ CREDITS = credits(
             ]
             for deployed in ("edited", "present-provenance-unknown", "unowned")
         },
-    },
-    known={
-        f"test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[{change}]": known
-        for change, known in _BIN_KNOWN.items()
     },
 )

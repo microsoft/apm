@@ -134,6 +134,9 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
     # each entry with its dependency or local bundle (hook_ownership.py).
     ("project", "hook", "claude"): MergedHooks(".claude/settings.json"),
+    # The root half of a whole Claude plugin (#3921); NATIVE_DECLARATIONS is the other.
+    ("project", "native", "copilot"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
+    ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("user", "skill", "copilot"): ".agents/skills/{pkg}/SKILL.md",
     ("user", "skill", "claude"): ".claude/skills/{pkg}/SKILL.md",
     ("user", "hook", "copilot"): ".copilot/hooks/{pkg}-*.json",
@@ -188,10 +191,31 @@ class Known:
 # The observation still looks for them, so a loose deploy fails the model.
 _CLAUDE_NATIVE = frozenset({"p-native-claude", "p-native-claude-bin"})
 _WHOLE_PLUGIN_TARGETS = frozenset({"claude", "copilot"})
+# There each such plugin is one gated native cell (#4808) of two halves: its root
+# (the SURFACE_GLOBS entry) and the target's enabledPlugins declaration of it.
+# Either half observes the cell, so a denied plugin left active fails I4; an
+# install that succeeds must leave every allowed native cell whole.
+NATIVE_DECLARATIONS: Mapping[str, str] = {
+    "claude": ".claude/settings.json",
+    "copilot": ".github/copilot/settings.json",
+}
+# The enable key is ``<plugin>@<marketplace>``; APM's project-scope marketplace
+# name carries this prefix (native_plugins/scopes.py), a user's own does not.
+_APM_PROJECT_MARKETPLACE = "apm-p-"
+
+
+def whole_plugin(scope: str, package: str, target: str) -> bool:
+    """True when *package* installs whole for *target* at *scope* (#3921)."""
+    return (
+        scope == "project"
+        and package.split(":")[0] in _CLAUDE_NATIVE
+        and target in _WHOLE_PLUGIN_TARGETS
+    )
 
 
 def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
-    """``expected_deployed`` with the #3921 project-scope native projection applied.
+    """``expected_deployed`` with the #3921 project-scope native projection applied:
+    a plugin installed whole keeps only its native cell.
 
     Other targets still get APM's loose copy (#4559). Gemini deploys skills to the
     cross-tool .agents/skills root copilot also reads, so with such a target current
@@ -201,18 +225,28 @@ def projected_cells(model: ModelState, kinds: Mapping[str, frozenset[str]]):
     loose_roots = {
         (cell[0], _skill_root(cell[2]))
         for cell in cells
-        if cell[1] == "skill" and cell[2] not in _WHOLE_PLUGIN_TARGETS
+        if cell[1] == "skill" and not whole_plugin(model.scope, cell[0], cell[2])
     }
     return frozenset(
         cell
         for cell in cells
-        if not (
-            model.scope == "project"
-            and cell[0].split(":")[0] in _CLAUDE_NATIVE
-            and cell[2] in _WHOLE_PLUGIN_TARGETS
-            and not (cell[1] == "skill" and (cell[0], _skill_root(cell[2])) in loose_roots)
-        )
+        if cell[1] == "native"
+        or not whole_plugin(model.scope, cell[0], cell[2])
+        or (cell[1] == "skill" and (cell[0], _skill_root(cell[2])) in loose_roots)
     )
+
+
+def native_declaration(root: Path, target: str, plugin: str) -> str | None:
+    """The settings file under *root* in which *target* enables *plugin*, or None."""
+    relative = NATIVE_DECLARATIONS[target]
+    path = root / relative
+    if not path.is_file():
+        return None
+    enabled = json.loads(path.read_text(encoding="utf-8")).get("enabledPlugins") or {}
+    owned = f"{plugin}@{_APM_PROJECT_MARKETPLACE}"
+    if any(key.startswith(owned) and value for key, value in enabled.items()):
+        return relative
+    return None
 
 
 @dataclass
@@ -487,7 +521,6 @@ class Scenario:
 
     def deployed(self) -> tuple[frozenset[str], frozenset[str], dict[str, frozenset[str]]]:
         """(``pkg/kind/target`` cells found, package-owned paths, each cell's paths)."""
-        root = self.deploy_root
         deployed: set[str] = set()
         managed: set[str] = set()
         cell_paths: dict[str, frozenset[str]] = {}
@@ -495,20 +528,32 @@ class Scenario:
         for package, kinds in self.kinds.items():
             for kind in kinds:
                 for target in self.model.targets:
-                    surface = SURFACE_GLOBS.get((self.scope, kind, target))
-                    if surface is None or not self._observable(package, kind, target):
-                        continue
-                    # A shared file names its entry; only an own file is a managed path.
-                    shared = isinstance(surface, (JsonEntry, MergedHooks))
-                    hits = self._hits(package, surface, users)
-                    if hits:
+                    found, owned = self._surface_hits(package, kind, target, users)
+                    if found:
                         cell = f"{package}/{kind}/{target}"
                         deployed.add(cell)
-                        found = frozenset(path.relative_to(root).as_posix() for path in hits)
                         cell_paths[cell] = found
-                        if not shared:
-                            managed.update(found)
+                        managed.update(owned)
         return frozenset(deployed), frozenset(managed), cell_paths
+
+    def _surface_hits(
+        self, package: str, kind: str, target: str, users: frozenset[str]
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """(paths found for one cell, those the package owns whole)."""
+        surface = SURFACE_GLOBS.get((self.scope, kind, target))
+        native = kind == "native"
+        if surface is None or (native and not whole_plugin(self.scope, package, target)):
+            return frozenset(), frozenset()
+        if not self._observable(package, kind, target):
+            return frozenset(), frozenset()
+        root = self.deploy_root
+        found = frozenset(
+            path.relative_to(root).as_posix() for path in self._hits(package, surface, users)
+        )
+        # A shared file names its entry; only an own file is a managed path.
+        owned = frozenset() if isinstance(surface, (JsonEntry, MergedHooks)) else found
+        declaration = native_declaration(root, target, package.split(":")[0]) if native else None
+        return (found | {declaration} if declaration else found), owned
 
     def _observable(self, package: str, kind: str, target: str) -> bool:
         """Whether *package*'s *kind* for *target* lands on its SURFACE_GLOBS path.
@@ -582,6 +627,28 @@ class Scenario:
                         found.add(f"{package}/{kind}/{target}")
         return frozenset(found)
 
+    def native_gaps(self, observation: Observation, *, trust_bin: bool = True) -> list[str]:
+        """Allowed native cells not deployed whole: a root without its declaration,
+        or neither (#4808).
+
+        A declaration file that holds declared user bytes is the user's (I1-X2
+        forbids APM to change it), so its cell needs only the root. Without
+        *trust_bin* a plugin that ships bin/ is parked whole (claude_plugins/
+        admission.py), so its cell is not required.
+        """
+        gaps = []
+        for cell in sorted(self.expected_cells()):
+            package, kind, target = cell.split("/")
+            if kind != "native" or not (trust_bin or "bin" not in self.kinds[package]):
+                continue
+            found = observation.cell_paths.get(cell, frozenset())
+            wanted = {SURFACE_GLOBS[(self.scope, kind, target)].format(pkg=package.split(":")[0])}
+            if NATIVE_DECLARATIONS[target] not in self.user_bytes:
+                wanted.add(NATIVE_DECLARATIONS[target])
+            if not wanted <= found:
+                gaps.append(f"{cell}: found {sorted(found)}, wanted {sorted(wanted)}")
+        return gaps
+
     def _user_files(self) -> frozenset[str]:
         """I1-X2: declared user writes the lock does not record: the user's files.
 
@@ -633,6 +700,7 @@ class Scenario:
             for cell in projected_cells(self.model, self.kinds)
             if (self.scope, cell[1], cell[2]) in SURFACE_GLOBS
             and self._observable(cell[0], cell[1], cell[2])
+            and (cell[1] != "native" or whole_plugin(self.scope, cell[0], cell[2]))
         )
 
     def assert_deployed(self, *, unproven_kept: bool = False) -> None:
@@ -703,6 +771,9 @@ class Scenario:
         self._check_exit(args, result, allowed_exit, exit_cell)
         check_cross_cutting(before, after, result, model, op)
         self._advance(op, args, requested, result)
+        if self._reconciled(op, result) and not (known or exit_cell):
+            gaps = self.native_gaps(after, trust_bin="--trust-bin" in args)
+            assert not gaps, f"{' '.join(args)}: allowed native plugins not whole: {gaps}"
         step = Step(" ".join(args), result, before, after)
         self.steps.append(step)
         if not (known or exit_cell):
@@ -733,6 +804,13 @@ class Scenario:
         assert not missing, f"strict expected failures that no longer fail: {missing}"
 
     # -- internals ---------------------------------------------------------------
+
+    @staticmethod
+    def _reconciled(op: Operation, result: CommandResult) -> bool:
+        """A successful install or update that wrote what the model allows."""
+        return (
+            result.returncode == 0 and op.command in _RECONCILING and "DRYRUN" not in op.modifiers
+        )
 
     def _check_exit(
         self,

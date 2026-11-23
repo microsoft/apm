@@ -20110,9 +20110,8 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4744",
    "witness": "tests/lifecycle/scenarios/test_user_scope.py::test_a_target_change_keeps_a_plugin_bin_only_while_claude_is_declared[multi-narrowed]"
   },
   "pair|PRIM=bin|TGT=multi-unchanged": {

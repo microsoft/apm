@@ -124,6 +124,27 @@ class DeclaredSelections:
     unverifiable: tuple[tuple[str, str], ...]
 
 
+class _NearestParents:
+    """Record each node's parent by the install resolver's nearest-parent rule.
+
+    Like the resolver, the nearest declaring parent wins and equal depths go
+    to the lowest parent key, whatever each path's dev status: the walk
+    drains production before dev, so a shorter or lower-keyed dev edge
+    still replaces an earlier production one. A repaired ``resolved_by``
+    then matches what a fresh install records (#4804).
+    """
+
+    def __init__(self, reachable_via: dict[str, tuple[str, str | None]]):
+        self._reachable_via = reachable_via
+        self._ranks: dict[str, tuple[int, str]] = {}
+
+    def offer(self, key: str, rank: tuple[int, str], via: tuple[str, str | None]) -> None:
+        current = self._ranks.get(key)
+        if current is None or rank < current:
+            self._ranks[key] = rank
+            self._reachable_via[key] = via
+
+
 _WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
 
 
@@ -298,6 +319,7 @@ def compute_forward_reachable_keys(
     reachable: set[str] = set()
     dev_only: set[str] = set()
     reachable_via: dict[str, tuple[str, str | None]] = {}
+    parent_ranks = _NearestParents(reachable_via)
     visited: set[str] = set()  # resolved local dirs (as str) or remote unique keys
     # Each queue entry also carries the repo_url of the node whose manifest
     # edge introduced it (None for the seed direct_refs, which have no
@@ -353,6 +375,12 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            if matched_key is not None and parent_repo_url is not None:
+                parent_ranks.offer(
+                    matched_key,
+                    (len(chain), parent_repo_url),
+                    (parent_repo_url, None if ref.replacement is not None else ref.local_path),
+                )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -360,11 +388,6 @@ def compute_forward_reachable_keys(
                 reachable.add(matched_key)
                 if is_dev:
                     dev_only.add(matched_key)
-                if parent_repo_url is not None:
-                    reachable_via.setdefault(
-                        matched_key,
-                        (parent_repo_url, None if ref.replacement is not None else ref.local_path),
-                    )
             manifest_dir = real_dir
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
@@ -387,6 +410,12 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(visit_key, []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            if visit_key in lockfile.dependencies and parent_repo_url is not None:
+                # Remote deps don't use anchored local_path -- only
+                # resolved_by needs repairing for these.
+                parent_ranks.offer(
+                    visit_key, (len(chain), parent_repo_url), (parent_repo_url, None)
+                )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -394,10 +423,6 @@ def compute_forward_reachable_keys(
                 reachable.add(visit_key)
                 if is_dev:
                     dev_only.add(visit_key)
-                if parent_repo_url is not None:
-                    # Remote deps don't use anchored local_path -- only
-                    # resolved_by needs repairing for these.
-                    reachable_via.setdefault(visit_key, (parent_repo_url, None))
             manifest_dir = install_path
 
         try:
