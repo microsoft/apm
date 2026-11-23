@@ -13,6 +13,7 @@ Covers missing lines/branches identified in coverage-unit.json:
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -342,7 +343,9 @@ class TestDisplayMarketplacePlugin:
             patch(
                 "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
                 autospec=True,
-                return_value=("org/repo#v2.0", MagicMock()),
+                return_value=SimpleNamespace(
+                    canonical="org/repo#v2.0", cross_repo_misconfig_risk=None
+                ),
             ),
         ):
             _display_marketplace_plugin("my-plugin", "mymarket", logger)

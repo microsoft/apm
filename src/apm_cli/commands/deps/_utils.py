@@ -304,7 +304,7 @@ def _get_detailed_package_info(package_path: Path, *, for_json: bool = False) ->
         identity = _tolerant_identity(package_path, manifest_file(package_path))
         if identity is not None:
             if for_json:
-                data = load_yaml(package_path / APM_YML_FILENAME)
+                data = load_yaml(manifest_file(package_path))
                 _, workflow_count = _count_package_files(package_path)
                 primitives = _count_primitives(package_path)
                 return {

@@ -1263,7 +1263,7 @@ def test_json_metadata_sanitization(
     ("command", "headline"),
     [
         (["marketplace", "list"], "Registered Marketplaces"),
-        (["marketplace", "browse", "acme"], "Plugins in 'acme'"),
+        (["marketplace", "browse", "acme"], "plugin(s) in 'acme'"),
         (["search", "query@acme"], "Search Results:"),
         (["marketplace", "search", "query@acme"], "Search Results:"),
     ],

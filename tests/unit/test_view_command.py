@@ -7,6 +7,7 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -74,14 +75,16 @@ def test_view_json_marketplace_details() -> None:
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
             autospec=True,
-            return_value=("org/review#v2.0.0", None),
+            return_value=SimpleNamespace(
+                canonical="org/review#v2.0.0", cross_repo_misconfig_risk=None
+            ),
         ) as resolve,
     ):
         text = CliRunner().invoke(cli, ["view", "review@tools"])
         explicit_text = CliRunner().invoke(cli, ["view", "review@tools", "-f", "text"])
         result = CliRunner().invoke(cli, ["view", "review@tools", "--format", "json"])
 
-    resolve.assert_called_with("review", "tools")
+    resolve.assert_called_with("review", "tools", enforce_ref_pins=False)
     assert text.exit_code == explicit_text.exit_code == 0
     assert text.stdout == explicit_text.stdout
     assert "Plugin: review" in text.stdout
@@ -348,7 +351,7 @@ def test_view_json_sanitizes_marketplace_strings(structured_source: bool) -> Non
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
             autospec=True,
-            return_value=(url, None),
+            return_value=SimpleNamespace(canonical=url, cross_repo_misconfig_risk=None),
         ),
     ):
         result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
@@ -454,7 +457,7 @@ def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.Mon
         patch(
             "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
             autospec=True,
-            return_value=(cache_source, None),
+            return_value=SimpleNamespace(canonical=cache_source, cross_repo_misconfig_risk=None),
         ),
     ):
         result = CliRunner().invoke(cli, ["view", "review@tools", "-f", "json"])
