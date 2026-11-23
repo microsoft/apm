@@ -66,9 +66,9 @@ def config_file_key(path: str | os.PathLike[str]) -> str:
 
 def installation_root(project_root: Path, user_scope: bool) -> Path:
     """The root holding an installation's manifest and lockfile (``$APM_HOME`` at user scope)."""
-    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.core.scope import manifest_root
 
-    return get_apm_dir(InstallScope.USER) if user_scope else project_root
+    return manifest_root(project_root, user_scope=user_scope)
 
 
 @contextmanager
