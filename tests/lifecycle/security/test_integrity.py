@@ -493,8 +493,25 @@ def _converges(world: World, *remedy: list[str]) -> None:
         assert result.returncode == 0, f"{args} after {remedy}: {result.stdout}{result.stderr}"
 
 
-def _cache_clean_converges(world: World) -> None:
-    _converges(world, ["cache", "clean", "--yes"])
+# A tampered package cache is rebuilt from a fresh fetch of the locked commit
+# (verified against it, then against the lock's content hash), with a warning.
+_HEALED = r"failed verification against its commit; rebuilding it from a fresh fetch"
+
+
+def _copies_hold_no(name: str, edit: str) -> Callable[[World], None]:
+    """Every materialized copy of *name* again holds the locked bytes, not *edit*."""
+
+    def check(world: World) -> None:
+        copies = _package_copies(world, name)
+        assert copies, f"no materialized copy of {name}"
+        edited = [str(path) for path in copies if edit in path.read_text(encoding="utf-8")]
+        assert not edited, f"copies still hold the tampered bytes: {edited}"
+
+    return check
+
+
+_SKILL_HEALED = _copies_hold_no("SKILL.md", "Copy edit.")
+_HOOK_HEALED = _copies_hold_no("session.json", "echo changed")
 
 
 def _lock_restore_converges(world: World) -> None:
@@ -525,18 +542,22 @@ GIT_CONTENT_HASH = ArtifactSlice(
         "upstream-or-proxy": Tamper(_move_skill_upstream),
     },
     cells={
-        # I3: the replay reads the same locked source as install --frozen and refuses.
-        ("audit-ci", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        # The replay reads the locked source; the deployed files and copies are untouched.
+        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=(*_SKILL_STATE, "apm_modules")),
         # I3: audit --ci must agree with install --frozen, which refuses this lock.
         ("audit-ci", "lock-edited"): Expect(1, unchanged=_SKILL_STATE),
         ("audit-ci", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("frozen", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("frozen", "disk-or-cache"): Expect(
+            0, (_CONTENT_MISMATCH, _HEALED), unchanged=_SKILL_STATE, check=_SKILL_HEALED
+        ),
         ("frozen", "lock-edited"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
         # Entries without a content hash are accepted (security.md defaults).
         ("frozen", "missing-hash"): Expect(0, unchanged=_SKILL_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_SKILL_STATE),
-        ("install", "disk-or-cache"): Expect(1, (_CONTENT_MISMATCH,), unchanged=_SKILL_STATE),
+        ("install", "disk-or-cache"): Expect(
+            0, (_CONTENT_MISMATCH, _HEALED), unchanged=_SKILL_STATE, check=_SKILL_HEALED
+        ),
         ("install", "lock-edited"): Expect(
             1,
             (_CONTENT_MISMATCH,),
@@ -552,13 +573,11 @@ GIT_CONTENT_HASH = ArtifactSlice(
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "missing-hash"): Expect(0, absent=(SKILL, LOCK)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(0, absent=(SKILL, LOCK)),
-        # Same commit: a copy or a lock that contradicts the other fails closed, as
-        # install, --frozen and audit --ci do (I3); each remedy converges (rule B).
+        # Same commit: a tampered cache is rebuilt from the locked commit, as install
+        # and --frozen do; a lock that contradicts the copy fails closed and its
+        # remedy converges (rule B).
         ("update", "disk-or-cache"): Expect(
-            1,
-            (_CONTENT_MISMATCH, r"apm cache clean --yes"),
-            unchanged=_SKILL_STATE,
-            check=_cache_clean_converges,
+            0, (_HEALED,), unchanged=_SKILL_STATE, check=_SKILL_HEALED
         ),
         ("update", "lock-edited"): Expect(
             1,
@@ -621,28 +640,31 @@ APPROVAL_PINS = ArtifactSlice(
         "upstream-or-proxy": Tamper(_move_hook_upstream),
     },
     cells={
-        # I3: the replay reads the same locked source as install --frozen and refuses.
-        ("audit-ci", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
+        # The replay reads the locked source; the deployed files and copies are untouched.
+        ("audit-ci", "disk-or-cache"): Expect(0, unchanged=(*_HOOK_STATE, "apm_modules")),
         ("audit-ci", "lock-edited"): Expect(
             1, (r"orphaned: \.github/hooks/p-exec-session\.json",), unchanged=_HOOK_STATE
         ),
         ("audit-ci", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("frozen", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
+        # The rebuilt copy is checked against the approval pin again.
+        ("frozen", "disk-or-cache"): Expect(
+            0, (_EXEC_MISMATCH, _HEALED), unchanged=_HOOK_STATE, check=_HOOK_HEALED
+        ),
         # I3: frozen must agree with audit --ci (exit 1) and keep lock and disk in step.
         ("frozen", "lock-edited"): Expect(1, unchanged=_HOOK_STATE),
         ("frozen", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
-        ("install", "disk-or-cache"): Expect(1, (_EXEC_MISMATCH,), unchanged=_HOOK_STATE),
+        ("install", "disk-or-cache"): Expect(
+            0, (_EXEC_MISMATCH, _HEALED), unchanged=_HOOK_STATE, check=_HOOK_HEALED
+        ),
         # I4: the item no longer matches its pin, so install retires it.
         ("install", "lock-edited"): Expect(0, (_PARKED,), absent=(HOOK,)),
         ("install", "upstream-or-proxy"): Expect(0, unchanged=_HOOK_STATE),
         ("uninstall-prune", "disk-or-cache"): Expect(0, absent=(HOOK, LOCK)),
         ("uninstall-prune", "lock-edited"): Expect(0, absent=(HOOK, LOCK)),
         ("uninstall-prune", "upstream-or-proxy"): Expect(0, absent=(HOOK, LOCK)),
-        # Same commit: the changed copy fails closed (update.md).
+        # Same commit: the tampered cache is rebuilt from the locked commit.
         ("update", "disk-or-cache"): Expect(
-            1,
-            (_EXEC_MISMATCH,),
-            unchanged=_HOOK_STATE,
+            0, (_HEALED,), unchanged=_HOOK_STATE, check=_HOOK_HEALED
         ),
         ("update", "lock-edited"): Expect(
             0, (r"parked pending approval",), absent=(HOOK,), present=(LOCK,)
