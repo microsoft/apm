@@ -23,7 +23,7 @@ from apm_cli.utils.path_security import (
     validate_path_segments,
 )
 from apm_cli.utils.paths import portable_relpath
-from apm_cli.utils.yaml_io import load_frontmatter
+from apm_cli.utils.yaml_io import load_frontmatter, load_yaml_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.cleanup import DeploymentEvidence
@@ -74,6 +74,39 @@ _PRESERVED_COMMAND_KEYS_DISPLAY = frozenset(
 def _is_valid_input_name(name: str) -> bool:
     """Return True if *name* is a safe argument identifier."""
     return bool(_INPUT_NAME_RE.match(name))
+
+
+def _key_label(key: Any) -> str:
+    """Name a frontmatter key in a diagnostic without letting the rendering fail."""
+    try:
+        text = repr(key)
+    except ValueError:  # e.g. an int beyond Python's digit limit
+        return f"<{type(key).__name__}>"
+    return text if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
+def _load_command_source(source: Path) -> frontmatter.Post:
+    """Load a prompt for command transform; a non-string key fails this file only (#4922).
+
+    python-frontmatter passes the parsed keys to ``Post(**metadata)``, so a key
+    such as ``1:`` raises ``TypeError``. It is re-raised as the per-file YAML
+    failure the batch already skips, naming the offending key(s).
+    """
+    try:
+        return load_frontmatter(source)
+    except TypeError as exc:
+        # search, not match: the opening fence may follow a BOM.
+        text = source.read_text(encoding="utf-8")
+        block = re.search(r"---[ \t]*\r?\n(.*?)\r?\n---", text, re.DOTALL)
+        data = load_yaml_str(block.group(1)) if block else None
+        keys = [
+            _key_label(key)
+            for key in (data if isinstance(data, dict) else {})
+            if not isinstance(key, str)
+        ]
+        raise yaml.YAMLError(
+            f"non-string frontmatter key(s): {', '.join(keys) or 'unknown'}"
+        ) from exc
 
 
 def _extract_input_names(
@@ -211,7 +244,7 @@ class CommandIntegrator(BaseIntegrator):
         """
         warnings: list[str] = []
 
-        post = load_frontmatter(source)
+        post = _load_command_source(source)
 
         # Extract command name from filename
         filename = source.name
@@ -269,7 +302,7 @@ class CommandIntegrator(BaseIntegrator):
         # Compute keys present in source frontmatter but not preserved by
         # the shared command transformer.  Surfaced by integrate_command()
         # via diagnostics so users see the lossy transform at install time.
-        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS)
+        dropped_keys = sorted(set(post.metadata.keys()) - _PRESERVED_COMMAND_KEYS, key=str)
 
         return (command_name, new_post, warnings, dropped_keys)
 
