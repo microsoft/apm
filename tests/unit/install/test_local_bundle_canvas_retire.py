@@ -100,8 +100,6 @@ def test_recording_the_canvas_classifies_an_unrecorded_hook_record_file(
 ) -> None:
     """Recording a bundle's canvas is an install write: a hook record file the config
     file records never saw is classified as the user's, not left unrecorded."""
-    import json
-
     home = tmp_path / "apm-home"
     monkeypatch.setenv("APM_HOME", str(home))
     project = tmp_path / "p"
@@ -114,7 +112,7 @@ def test_recording_the_canvas_classifies_an_unrecorded_hook_record_file(
 
     record_bundle_canvas(project, _TARGETS, "first", None, [row])
 
-    store = home / "deployment-receipts" / "config-files" / "records.json"
-    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
-    origins = {entry["path"]: entry["origin"] for entry in rows}
-    assert origins.get(sidecar.resolve().as_posix()) == "preexisting"
+    from apm_cli.integration.config_file_provenance import Origin, config_file_origin
+
+    assert config_file_origin(sidecar) is Origin.PREEXISTING
+    assert sidecar.read_text(encoding="utf-8") != ""
