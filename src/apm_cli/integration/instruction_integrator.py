@@ -56,6 +56,26 @@ class _PreparedInstruction:
     body: str
 
 
+def _scannable_frontmatter(value):
+    """Return *value* with every mapping key as text, for one sorted JSON scan.
+
+    YAML admits non-string keys (``{1: numeric, note: text}``) that JSON
+    cannot sort or serialize. Keys that render alike are kept as separate
+    entries so no decoded value escapes the scan.
+    """
+    if isinstance(value, dict):
+        entries: dict[str, object] = {}
+        for key, item in value.items():
+            name = str(key)
+            while name in entries:
+                name += "'"
+            entries[name] = _scannable_frontmatter(item)
+        return entries
+    if isinstance(value, list | tuple):
+        return [_scannable_frontmatter(item) for item in value]
+    return value
+
+
 class InstructionIntegrator(BaseIntegrator):
     """Handles integration of APM package instructions.
 
@@ -199,7 +219,9 @@ class InstructionIntegrator(BaseIntegrator):
         """
         from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
 
-        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        decoded_metadata = json.dumps(
+            _scannable_frontmatter(metadata), ensure_ascii=False, sort_keys=True, default=str
+        )
         verdict = SecurityGate.scan_text(
             decoded_metadata,
             f"{label}#decoded-frontmatter",
