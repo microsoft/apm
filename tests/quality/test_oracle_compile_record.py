@@ -31,6 +31,11 @@ def _observe(project: Path, home: Path) -> oracles.Observation:
     )
 
 
+def _written(tmp_path: Path, record: str) -> Path:
+    """The home file the step left behind, which I5 judges."""
+    return tmp_path / "home" / record
+
+
 def _i5(tmp_path: Path, args: tuple[str, ...], record: str) -> list[str]:
     """I5 messages after *args* wrote the home file *record*."""
     project, home = tmp_path / "project", tmp_path / "home"
@@ -49,7 +54,10 @@ def _i5(tmp_path: Path, args: tuple[str, ...], record: str) -> list[str]:
 def test_a_compile_may_write_its_own_roots_record(tmp_path: Path) -> None:
     record = oracles.compile_home_record(tmp_path / "project")
 
-    assert _i5(tmp_path, ("compile",), record) == []
+    messages = _i5(tmp_path, ("compile",), record)
+
+    assert _written(tmp_path, record).exists(), record
+    assert messages == [], messages
 
 
 def test_a_dry_run_compile_may_not_write_the_record(tmp_path: Path) -> None:
@@ -57,6 +65,7 @@ def test_a_dry_run_compile_may_not_write_the_record(tmp_path: Path) -> None:
 
     messages = _i5(tmp_path, ("compile", "--dry-run"), record)
 
+    assert _written(tmp_path, record).exists(), record
     assert any(m.startswith("compile wrote home:") and record in m for m in messages), messages
 
 
@@ -65,6 +74,7 @@ def test_a_compile_may_not_write_another_roots_record(tmp_path: Path) -> None:
 
     messages = _i5(tmp_path, ("compile",), record)
 
+    assert _written(tmp_path, record).exists(), record
     assert len(messages) == 1 and messages[0].startswith("compile wrote home:"), messages
     assert record in messages[0] and "/compiled-agents-md'" not in messages[0], messages
 
@@ -74,5 +84,6 @@ def test_no_other_command_may_write_the_record(tmp_path: Path) -> None:
 
     messages = _i5(tmp_path, ("install",), record)
 
+    assert _written(tmp_path, record).exists(), record
     assert len(messages) == 1 and messages[0].startswith("install wrote home:"), messages
     assert record in messages[0], messages
