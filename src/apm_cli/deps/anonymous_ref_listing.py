@@ -16,9 +16,11 @@ classification and output are unchanged. No credential is ever sent.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
+import socket
 import ssl
 import threading
 import time
@@ -62,7 +64,7 @@ _FALLBACK_ENV = (
 )
 
 _session_lock = threading.Lock()
-_session = None
+_sessions: dict[str, object] = {}
 _config_cache: dict[tuple, tuple[dict[str, str], dict[str, str]] | None] = {}
 
 
@@ -189,7 +191,7 @@ def _proxy(env: Mapping[str, str]) -> str | None:
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
 
 
-def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str | bool:
+def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:
     """The CA file git would trust (GIT_SSL_CAINFO > http.sslCAInfo > SSL_CERT_FILE)."""
     backend = config.get(_BACKEND_KEY, "").lower()
     if backend not in ("", "openssl"):
@@ -202,26 +204,57 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str | bool:
     return _system_ca()
 
 
-def _system_ca() -> str | bool:
+def _system_ca() -> str:
     """The platform OpenSSL CA store git's libcurl uses; certifi only when absent."""
     paths = ssl.get_default_verify_paths()
     if paths.cafile and os.path.isfile(paths.cafile):
         return paths.cafile
     if paths.capath and os.path.isdir(paths.capath):
         return paths.capath
-    return True
+    import certifi
+
+    return certifi.where()
 
 
-def _session_for_refs():
-    global _session
+def _git_trust_context(ca: str) -> ssl.SSLContext:
+    """A stdlib TLS context trusting only *ca*, git's selected trust.
+
+    Built from the stdlib class APM captured before installing OS or
+    additive trust, so neither the OS store nor ``APM_EXTRA_CA_BUNDLE``
+    widens what this request accepts beyond what git would.
+    """
+    from apm_cli.core.tls_trust import _STDLIB_SSL_CONTEXT
+
+    context = _STDLIB_SSL_CONTEXT(ssl.PROTOCOL_TLS_CLIENT)
+    if os.path.isdir(ca):
+        context.load_verify_locations(capath=ca)
+    else:
+        context.load_verify_locations(cafile=ca)
+    return context
+
+
+def _session_for_refs(ca: str):
+    """One pooled session per CA, whose direct and proxied TLS use only *ca*."""
     with _session_lock:
-        if _session is None:
+        session = _sessions.get(ca)
+        if session is None:
             import http.cookiejar
 
             from requests.adapters import HTTPAdapter
 
             from apm_cli.utils.http_credentials import CredentialScopedSession
             from apm_cli.version import get_version
+
+            context = _git_trust_context(ca)
+
+            class _GitTrustAdapter(HTTPAdapter):
+                def init_poolmanager(self, *args, **kwargs):
+                    kwargs["ssl_context"] = context
+                    return super().init_poolmanager(*args, **kwargs)
+
+                def proxy_manager_for(self, proxy, **proxy_kwargs):
+                    proxy_kwargs["ssl_context"] = context
+                    return super().proxy_manager_for(proxy, **proxy_kwargs)
 
             session = CredentialScopedSession(ambient_credentials=False)
             session.trust_env = False
@@ -235,9 +268,9 @@ def _session_for_refs():
                     "Pragma": "no-cache",
                 }
             )
-            session.mount("https://", HTTPAdapter(pool_connections=4, pool_maxsize=16))
-            _session = session
-        return _session
+            session.mount("https://", _GitTrustAdapter(pool_connections=4, pool_maxsize=16))
+            _sessions[ca] = session
+        return session
 
 
 def _read_body(response, deadline: float) -> bytes:
@@ -353,6 +386,69 @@ def parse_advertisement(data: bytes, prefixes: tuple[str, ...]) -> str:
     return "".join(lines)
 
 
+def _fetch(refs_url: str, proxy: str | None, ca: str, holder: dict) -> bytes:
+    from apm_cli.utils.http_credentials import origin_bounded_request
+
+    deadline = time.monotonic() + _DEADLINE_SECONDS
+    # max_hops=0: any redirect raises RedirectRefusedError and falls back.
+    with origin_bounded_request(
+        _session_for_refs(ca),
+        "GET",
+        refs_url,
+        base_url=refs_url,
+        max_hops=0,
+        ambient_credentials=False,
+        proxies={"https": proxy} if proxy else {},
+        verify=ca,
+        timeout=_TIMEOUT,
+        stream=True,
+    ) as response:
+        holder["response"] = response
+        if response.status_code != 200:
+            raise _Fallback(f"HTTP {response.status_code}")
+        content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
+        if content_type != _ADVERTISEMENT_TYPE:
+            raise _Fallback("not a ref advertisement")
+        return _read_body(response, deadline)
+
+
+def _abort(response) -> None:
+    """Best effort: unblock a read stuck past the budget by shutting its socket."""
+    sock = getattr(getattr(getattr(response, "raw", None), "connection", None), "sock", None)
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+
+
+def _fetch_within_deadline(refs_url: str, proxy: str | None, ca: str) -> bytes:
+    """The advertisement body, or ``_Fallback`` on any error or past the budget.
+
+    The fetch runs on a worker joined with the budget, so no phase (connect,
+    headers, chunk framing, body) can hold the caller past it. Any error,
+    requests' or urllib3's, means "run git".
+    """
+    holder: dict = {}
+
+    def run() -> None:
+        try:
+            holder["data"] = _fetch(refs_url, proxy, ca, holder)
+        except Exception as exc:
+            holder["error"] = exc
+
+    worker = threading.Thread(target=run, name="apm-anonymous-refs", daemon=True)
+    worker.start()
+    worker.join(_DEADLINE_SECONDS)
+    if worker.is_alive():
+        _abort(holder.get("response"))
+        raise _Fallback("advertisement exceeds the time budget")
+    error = holder.get("error")
+    if isinstance(error, _Fallback):
+        raise error
+    if error is not None:
+        raise _Fallback(type(error).__name__)
+    return holder["data"]
+
+
 def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, str]) -> str | None:
     """``git ls-remote --tags [--heads] <url>`` stdout for an anonymous attempt, or ``None``.
 
@@ -374,34 +470,8 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         proxy = _proxy(child_env)
         verify = _verify(child_env, config)
         prefixes = ("refs/tags/", "refs/heads/") if include_heads else ("refs/tags/",)
-        import requests
-
-        from apm_cli.utils.http_credentials import origin_bounded_request
-
         refs_url = f"https://{_GITHUB_HOST}{path}/info/refs?service=git-upload-pack"
-        deadline = time.monotonic() + _DEADLINE_SECONDS
-        try:
-            # max_hops=0: any redirect raises RedirectRefusedError and falls back.
-            with origin_bounded_request(
-                _session_for_refs(),
-                "GET",
-                refs_url,
-                base_url=refs_url,
-                max_hops=0,
-                ambient_credentials=False,
-                proxies={"https": proxy} if proxy else {},
-                verify=verify,
-                timeout=_TIMEOUT,
-                stream=True,
-            ) as response:
-                if response.status_code != 200:
-                    raise _Fallback(f"HTTP {response.status_code}")
-                content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
-                if content_type != _ADVERTISEMENT_TYPE:
-                    raise _Fallback("not a ref advertisement")
-                data = _read_body(response, deadline)
-        except (requests.RequestException, ValueError) as exc:
-            raise _Fallback(type(exc).__name__) from None
+        data = _fetch_within_deadline(refs_url, proxy, verify)
         return parse_advertisement(data, prefixes)
     except _Fallback as reason:
         _log.debug("anonymous ref listing falls back to git: %s", reason)

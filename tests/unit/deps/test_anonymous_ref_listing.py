@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
+import urllib3
 
 from apm_cli.deps import anonymous_ref_listing as arl
+from apm_cli.utils import http_credentials
 
 pytestmark = [
     pytest.mark.component,
@@ -351,3 +355,82 @@ def test_a_body_without_single_reads_falls_back():
 
     with pytest.raises(arl._Fallback):
         arl._read_body(response, deadline=1e9)
+
+
+def _eligible(monkeypatch, ca: str = "/ca.pem") -> None:
+    monkeypatch.setattr(arl, "_effective_config", lambda _env: ({}, {}))
+    monkeypatch.setattr(arl, "_system_ca", lambda: ca)
+
+
+def test_a_fetch_stuck_past_the_budget_falls_back(monkeypatch):
+    _eligible(monkeypatch)
+    release = threading.Event()
+    monkeypatch.setattr(arl, "_DEADLINE_SECONDS", 0.05)
+    monkeypatch.setattr(arl, "_fetch", lambda *_args: release.wait(5) or b"")
+    started = time.monotonic()
+    try:
+        listed = arl.list_refs_anonymously(
+            "https://github.com/owner/repo", include_heads=False, env={}
+        )
+    finally:
+        release.set()
+
+    assert listed is None
+    assert time.monotonic() - started < 2.0
+
+
+class _FailingRaw:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def read1(self, _amt: int, decode_content: bool) -> bytes:
+        raise self.error
+
+
+class _Response:
+    status_code = 200
+
+    def __init__(self, raw) -> None:
+        self.raw = raw
+        self.headers = {"Content-Type": "application/x-git-upload-pack-advertisement"}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        return None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        urllib3.exceptions.ReadTimeoutError(None, "/info/refs", "read timed out"),
+        urllib3.exceptions.ProtocolError("Connection broken: IncompleteRead"),
+    ],
+    ids=["body-timeout", "truncated-transfer"],
+)
+def test_transport_errors_while_reading_fall_back(monkeypatch, error):
+    _eligible(monkeypatch)
+    monkeypatch.setattr(arl, "_session_for_refs", lambda _ca: object())
+    monkeypatch.setattr(
+        http_credentials,
+        "origin_bounded_request",
+        lambda *_args, **_kwargs: _Response(_FailingRaw(error)),
+    )
+
+    listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=True, env={})
+
+    assert listed is None
+
+
+def test_trust_context_holds_only_gits_ca():
+    import certifi
+
+    from apm_cli.core import tls_trust
+
+    context = arl._git_trust_context(certifi.where())
+
+    assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
+    assert context.verify_mode == arl.ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.cert_store_stats()["x509_ca"] > 0
