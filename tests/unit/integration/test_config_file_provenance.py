@@ -946,3 +946,26 @@ def test_a_record_file_of_another_generation_is_never_deleted(tmp_path, apm_home
 
     assert old_file.is_file()
     assert config_file_origin(old) is None
+
+
+def test_a_busy_apm_home_names_the_other_apm_and_leaves_the_users_file(
+    tmp_path, apm_home, monkeypatch
+) -> None:
+    """Another apm holding APM_HOME's lock: the write is refused with that reason, not a
+    request to remove the records."""
+    import filelock
+
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own file
+
+    def busy(self, *args, **kwargs):
+        raise filelock.Timeout(self.lock_file)
+
+    monkeypatch.setattr(filelock.FileLock, "acquire", busy)
+    with pytest.raises(OSError, match="another apm") as refused:
+        _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+
+    assert "remove the config file records" not in str(refused.value)
+    assert config.read_text(encoding="utf-8") == _SKELETON
