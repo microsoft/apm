@@ -1,7 +1,7 @@
 {
   "issue": 4921,
   "fixed_in": "Unreleased",
-  "summary": "apm audit reads the module-type package.json that hook bundle deploy writes beside a JavaScript hook, and a nested copy of the same metadata, as Node module metadata rather than a hook definition, so a JavaScript hook no longer fails audit with missing native hook container at project or user scope. An edited package.json or any other JSON file under the hooks directory is still reported.",
+  "summary": "apm audit recognizes the module-type package.json that hook bundle deploy wrote beside a JavaScript hook, and nested copies it deployed, as Node module metadata rather than a hook definition, so a JavaScript hook no longer fails audit with missing native hook container at project or user scope. Recognition requires a lock-recorded, unedited file on a target whose bundle deploys it; edited, unrecorded or other JSON files are still reported.",
   "failure_modes": [
     "outcome"
   ],
@@ -10,6 +10,7 @@
   ],
   "regression_tests": [
     "tests/integration/test_hook_js_sidecar_lifecycle_contract.py::test_required_claude_hook_keeps_nested_module_metadata",
-    "tests/integration/test_hook_js_sidecar_lifecycle_contract.py::test_required_global_claude_js_hook_passes_audit"
+    "tests/integration/test_hook_js_sidecar_lifecycle_contract.py::test_required_global_claude_js_hook_passes_audit",
+    "tests/unit/integration/test_hook_module_metadata.py::test_only_recorded_unedited_module_metadata_on_eligible_targets_is_recognized"
   ]
 }

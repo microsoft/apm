@@ -56,19 +56,19 @@ CURSOR_CONFIG_TOP_LEVEL_KEYS = frozenset({"version", "hooks"})
 NODE_MODULE_TYPES: tuple[str, ...] = ("commonjs", "module")
 
 
+def node_module_type(value: object) -> str:
+    """Return the Node module type *value* declares, defaulting to CommonJS."""
+    return value if isinstance(value, str) and value in NODE_MODULE_TYPES else NODE_MODULE_TYPES[0]
+
+
 def hook_module_type_metadata(module_type: str) -> dict[str, str]:
     """Return the package.json document that sets a hook bundle's Node module type."""
-    return {"type": module_type}
+    return {"type": node_module_type(module_type)}
 
 
-def is_hook_module_type_metadata(path: Path, document: object) -> bool:
-    """Return True for hook-bundle Node module metadata, which defines no hooks.
-
-    Hook bundle deploy writes this ``package.json`` beside JavaScript hooks and
-    deploys nested copies with the scripts they govern (#2950, #4921). Any
-    other content, including an edited ``package.json``, stays a hook candidate.
-    """
-    return path.name == "package.json" and any(
+def is_hook_module_type_metadata(document: object) -> bool:
+    """Return True when *document* holds only a Node module type, so defines no hooks."""
+    return any(
         document == hook_module_type_metadata(module_type) for module_type in NODE_MODULE_TYPES
     )
 

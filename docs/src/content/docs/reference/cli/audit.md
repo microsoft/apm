@@ -304,8 +304,9 @@ Command strings, referenced scripts, unrelated settings, ownership sidecars,
 transcripts, history and caches are excluded from prompt scanning; hooks are
 never executed. A recorded script remains non-prompt. A hook bundle's
 `package.json` holding only `{"type": "commonjs"}` or `{"type": "module"}` is
-Node module metadata, not a hook definition; any other `.json` file under a
-hooks directory is still read as one. Recognized unreadable,
+Node module metadata, not a hook definition, while it still matches the hash
+`apm install` recorded for it; an edited or unrecorded `package.json`, or any
+other `.json` file under a hooks directory, is still read as one. Recognized unreadable,
 malformed or unsupported content produces **incomplete coverage and exit 1**,
 not a malicious-content finding or a clean result. This also applies with
 `--no-drift` and `--no-policy`.

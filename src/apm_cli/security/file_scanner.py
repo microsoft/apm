@@ -24,12 +24,9 @@ from typing import Literal
 
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..integration.base_integrator import BaseIntegrator
+from ..integration.hook_bundle import is_deployed_hook_module_metadata
 from ..integration.hook_integrator import native_hook_config
-from ..integration.hook_native_formats import (
-    HookContentEntry,
-    inspect_native_hooks,
-    is_hook_module_type_metadata,
-)
+from ..integration.hook_native_formats import HookContentEntry, inspect_native_hooks
 from ..integration.targets import TargetProfile
 from ..security.content_scanner import ContentScanner, ScanFinding, pointer_location
 from .primitive_discovery import (
@@ -171,15 +168,23 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     return result
 
 
-def _content_entries(path: Path, surface: PrimitiveSurface) -> tuple[HookContentEntry, ...]:
-    """Extract documented prompt-bearing content, not arbitrary string values."""
+def _content_entries(
+    path: Path, surface: PrimitiveSurface, recorded_hash: str | None = None
+) -> tuple[HookContentEntry, ...]:
+    """Extract documented prompt-bearing content, not arbitrary string values.
+
+    *recorded_hash* is the lockfile hash of *path*, if recorded; it lets the
+    hook bundle owner recognize the module metadata it deployed.
+    """
     if surface.kind == "executable":
         return (HookContentEntry(""),)
     text = path.read_text(encoding="utf-8")
     if surface.kind == "hooks":
         config = native_hook_config(surface.target)
         document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
-        if is_hook_module_type_metadata(path, document):
+        if is_deployed_hook_module_metadata(
+            path, document, target_name=surface.target, recorded_hash=recorded_hash
+        ):
             return (HookContentEntry(""),)
         return inspect_native_hooks(
             document,
@@ -210,6 +215,7 @@ def _scan_primitive(
     *,
     tracked: bool,
     cache: dict[PrimitiveSurface, FileScanResult] | None = None,
+    recorded_hash: str | None = None,
 ) -> FileScanResult:
     """Check one recognized surface and retain non-applicability/coverage evidence."""
     key = replace(
@@ -239,7 +245,7 @@ def _scan_primitive(
                     for entry in cached.inventory
                 ),
             )
-        entries = _content_entries(path, surface)
+        entries = _content_entries(path, surface, recorded_hash)
     except (OSError, UnicodeError, ValueError) as exc:
         entries = (
             HookContentEntry("", error=f"cannot interpret primitive ({type(exc).__name__})"),
@@ -381,6 +387,7 @@ def _scan_claimed_files(
     *,
     user_scope: bool = False,
     cache: dict[PrimitiveSurface, FileScanResult] | None = None,
+    recorded_hashes: dict[str, str] | None = None,
 ) -> FileScanResult:
     """Scan one canonical deployment-claim projection."""
     from ..integration.targets import KNOWN_TARGETS
@@ -526,6 +533,7 @@ def _scan_claimed_files(
                 _label(abs_path, surface, project_root),
                 tracked=True,
                 cache=cache,
+                recorded_hash=(recorded_hashes or {}).get(rel_path),
             )
         )
 
@@ -623,7 +631,13 @@ def scan_project_result(
     claims = DeploymentLedgerCodec.legacy_deployed_file_claims(lock) if lock else {}
     cache: dict[PrimitiveSurface, FileScanResult] = {}
     result = _scan_claimed_files(
-        deploy_root, claims, package_filter, scoped, user_scope=user_scope, cache=cache
+        deploy_root,
+        claims,
+        package_filter,
+        scoped,
+        user_scope=user_scope,
+        cache=cache,
+        recorded_hashes=DeploymentLedgerCodec.deployed_file_hashes(lock) if lock else {},
     )
     if include_deployed_trees:
         result = result.merged(

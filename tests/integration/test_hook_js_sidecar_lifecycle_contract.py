@@ -996,20 +996,28 @@ def test_required_claude_hook_keeps_nested_module_metadata(
         LifecycleStateSnapshot.capture(consumer.root, targets=("claude",), config_paths=paths),
     )
 
-    # Control: an edited sidecar and an unrelated JSON file stay reported.
+    # Control: a type-only edit of the sidecar, an unrecorded package.json with
+    # valid metadata and an unrelated JSON file all stay reported, with and
+    # without drift.
     extra = _NESTED_CLAUDE_METADATA.parent / "extra.json"
-    consumer.root.joinpath(*extra.parts).write_text('{"type": "module"}\n', encoding="utf-8")
+    unrecorded = _NESTED_CLAUDE_METADATA.parent / "other" / "package.json"
+    module_metadata = json.dumps({"type": "module"}, indent=2, sort_keys=True) + "\n"
+    consumer.root.joinpath(*extra.parts).write_text('{"note": "unrelated"}\n', encoding="utf-8")
+    consumer.root.joinpath(*unrecorded.parts).parent.mkdir()
+    consumer.root.joinpath(*unrecorded.parts).write_text(module_metadata, encoding="utf-8")
     consumer.root.joinpath(*_NESTED_CLAUDE_SIDECAR.parts).write_text(
-        '{"name": "edited", "type": "commonjs"}\n', encoding="utf-8"
+        module_metadata, encoding="utf-8"
     )
-    audit = _run_audit(
-        scenario, consumer.root, ("audit", "--ci"), environment, "nested-module-audit-control"
-    )
-    assert audit.returncode == 1, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
-    assert _missing_container_paths(audit) == {
-        extra.as_posix(),
-        _NESTED_CLAUDE_SIDECAR.as_posix(),
-    }
+    for args in (("audit", "--ci"), ("audit", "--no-drift")):
+        audit = _run_audit(
+            scenario, consumer.root, args, environment, "nested-module-control-" + args[-1][2:]
+        )
+        assert audit.returncode == 1, f"stdout={audit.stdout!r}\nstderr={audit.stderr!r}"
+        assert _missing_container_paths(audit) == {
+            extra.as_posix(),
+            unrecorded.as_posix(),
+            _NESTED_CLAUDE_SIDECAR.as_posix(),
+        }
 
 
 def _run_audit(
