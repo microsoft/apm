@@ -910,26 +910,27 @@ def _retain_alias_anchors(
     reasons: dict[str, str],
     anchored: dict[str, str],
 ) -> None:
-    """Keep the parent chain of a survivor reached only through an alias, and its children.
+    """Keep the parent chain of a survivor prune cannot re-parent, and its children.
 
-    The chain is walked from its root-declared top so every package it still
-    declares stays; a chain whose top is not root-declared keeps all pending
-    rows (fail closed).
+    Each chain is walked from its root-declared top so every package it still
+    declares stays; when any chain's top is not root-declared, every pending
+    row is kept (fail closed).
     """
-    anchors = _alias_anchors(lockfile, candidates - retained, retained, walk)
+    from apm_cli.deps.lockfile import lockfile_parent_identity
+
+    anchors = _alias_anchors(lockfile, candidates - retained, walk)
     if not anchors:
         return
     anchored.update(anchors)
     retained |= set(anchors)
-    tops = [
-        lockfile.dependencies[key]
-        for key in anchors
-        if lockfile.dependencies[key].resolved_by is None
-    ]
-    if not tops:
+    rows = [lockfile.dependencies[key] for key in anchors]
+    anchor_ids = {lockfile_parent_identity(row, lockfile.replacements) for row in rows}
+    ends = [row for row in rows if row.resolved_by not in anchor_ids]
+    tops = [row for row in ends if row.resolved_by is None]
+    if len(tops) < len(ends):
         pending = candidates - retained
         retained |= pending
-        reasons.update(dict.fromkeys(pending, "an alias anchor has no root-declared top"))
+        reasons.update(dict.fromkeys(pending, "an anchored package has no root-declared top"))
         return
     _retain_reached_from(
         lockfile,
@@ -950,14 +951,14 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
     spell the survivor by its own identity (an alias would re-key it).
     """
     if not nearest:
-        return None
+        return f"{repo_url} still resolves through it, and apm.yml now declares {repo_url}"
     parent = min(nearest)
     if parent not in lockfile.dependencies:
         return (
             f"{repo_url} still resolves through it, and the package that now declares "
             f"{repo_url} is not in apm.lock.yaml"
         )
-    declared = walk.local_edge_repos.get((key, nearest[0]), (None, None))[0]
+    declared = walk.local_edge_repos.get((key, parent), (None, None))[0]
     if declared in (None, repo_url):
         return None
     return (
@@ -966,11 +967,12 @@ def _anchor_reason(lockfile, walk, key, repo_url, nearest) -> str | None:
     )
 
 
-def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
-    """Removed rows prune keeps because a survivor would change identity (#4989).
+def _alias_anchors(lockfile, removed_keys, walk) -> dict[str, str]:
+    """Removed rows prune keeps because a survivor cannot be re-parented (#4989).
 
     When the surviving edge spells a local survivor under another identity (a
-    symlink alias), install would re-record and relocate it; prune does not
+    symlink alias), comes from a package with no lock row, or apm.yml now
+    declares the survivor itself, install would re-record it; prune does not
     re-key packages, so it keeps the survivor's recorded parent chain instead.
     """
     from apm_cli.deps.lockfile import lockfile_parent_identity
@@ -983,7 +985,7 @@ def _alias_anchors(lockfile, removed_keys, retained, walk) -> dict[str, str]:
         if key in lockfile.dependencies
     }
     anchors: dict[str, str] = {}
-    for key in sorted(retained):
+    for key in sorted(set(lockfile.dependencies) - set(removed_keys)):
         row = lockfile.dependencies.get(key)
         if row is None or row.source != "local" or row.replacement is not None:
             continue
