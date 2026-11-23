@@ -1082,6 +1082,7 @@ class BaseIntegrator:
             # Resolve to absolute and validate containment against cowork root.
             try:
                 from apm_cli.integration.copilot_cowork_paths import (
+                    cowork_locator,
                     from_lockfile_path,
                     resolve_copilot_cowork_skills_dir,
                 )
@@ -1089,8 +1090,13 @@ class BaseIntegrator:
                 cowork_root = resolve_copilot_cowork_skills_dir()
                 if cowork_root is None:
                     return False
-                # from_lockfile_path internally calls ensure_path_within.
-                from_lockfile_path(rel_path, cowork_root)
+                if allow_final_symlink:
+                    # Contain the parent, refuse linked ancestors, never follow
+                    # the final link: the project gate's rule for cowork:// (#5022).
+                    cowork_locator(rel_path, cowork_root, reject_linked_ancestors=True)
+                else:
+                    # from_lockfile_path internally calls ensure_path_within.
+                    from_lockfile_path(rel_path, cowork_root)
                 return True
             except Exception:
                 return False
