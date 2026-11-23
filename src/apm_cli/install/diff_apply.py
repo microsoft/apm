@@ -413,10 +413,15 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
 
     result = run_baseline_checks(
         project_root,
-        fail_fast=False,
+        fail_fast=True,
         ci_mode=True,
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=content_integrity,
+        # The audit's MCP view ignores personal (user-scope) approvals so CI and
+        # laptops agree; install honors them. The fast run's output runs the
+        # install's own MCP phase (fast_output.run_services), which reconciles,
+        # parks, records and reports exactly as the full run does.
+        mcp_config_consistency=False,
     )
     failing = [
         c.name
@@ -462,6 +467,7 @@ def _audit_gate(project_root: Path, fetch: Any, *, writes: bool) -> bool:
         ci_mode=True,
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=False,
+        mcp_config_consistency=False,
     )
     failing = {
         c.name
