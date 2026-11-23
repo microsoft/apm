@@ -452,7 +452,7 @@ def test_the_merged_mcp_check_collects_silently_and_enforces_once(
     user_scope = scope is InstallScope.USER
     # Copilot loads "c" natively and Claude loads "x": the active runtime decides.
     servers = {"c": _server("c", {"copilot"}), "x": _server("x", {"claude"})}
-    current_view = SimpleNamespace(brought_in_by={"x": "acme/p"}) if view else None
+    current_view = SimpleNamespace(brought_in_by={"x": "acme/p"}, omissions={}) if view else None
     prepared.return_value = SimpleNamespace(
         dependencies=list(servers.values()), current_view=current_view
     )

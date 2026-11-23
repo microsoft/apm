@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 import requests
 
+from ..cache.cached_repo import validate_cached_links
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -42,7 +43,6 @@ from ..utils.git_sparse import (
     apply_sparse_cone,
     materialize_tracked_symlinks,
     sparse_checkout_active,
-    validate_materialized_symlinks,
 )
 from ..utils.github_host import (
     default_host,
@@ -1650,12 +1650,7 @@ class GitHubPackageDownloader:
 
             if not source_subdir.is_dir():
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
-            validate_materialized_symlinks(
-                "git",
-                temp_clone_path,
-                [subdir_path],
-                env=self._git_env_dict(),
-            )
+            validate_cached_links(temp_clone_path, [subdir_path], self._git_env_dict())
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
@@ -1913,7 +1908,7 @@ class GitHubPackageDownloader:
                 )
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
-                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
+                validate_cached_links(_cached, None, self._git_env_dict())
                 from ..utils.file_ops import robust_copy2, robust_copytree
 
                 for item in _cached.iterdir():

@@ -5,13 +5,12 @@ from __future__ import annotations
 import os
 import sys
 import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src"))
 
-from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.tiered_ref_resolver import (
     L2BareRevParse,
@@ -55,7 +54,7 @@ def _dep(repo: str = "owner/repo", ref: str = "main") -> DependencyReference:
 
 def test_l2_returns_none_when_bare_dir_missing(tmp_path):
     fake_cache = types.SimpleNamespace(
-        _db_root=tmp_path / "nonexistent", read_resolved_ref=lambda *_: (False, None)
+        read_resolved_ref=lambda *_: (False, None), bare_ref_sha=lambda _url, _ref: None
     )
     tier = L2BareRevParse(git_cache=fake_cache)
     assert tier.try_resolve(_dep(), "main") is None
@@ -72,19 +71,17 @@ def test_l2_returns_none_when_bare_dir_missing(tmp_path):
         ),
     ],
 )
-def test_l2_rev_parse_uses_git_cache_repository_identity(tmp_path, dependency):
-    bare = tmp_path / cache_shard_key(dependency.to_github_url())
-    bare.mkdir(parents=True)
+def test_l2_rev_parse_uses_git_cache_repository_identity(dependency):
+    lookup = MagicMock(return_value=SHA_A)
     fake_cache = types.SimpleNamespace(
-        _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+        read_resolved_ref=lambda *_: (False, None), bare_ref_sha=lookup
     )
     tier = L2BareRevParse(git_cache=fake_cache)
 
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as rp:
-        result = tier.try_resolve(dependency, "main")
+    result = tier.try_resolve(dependency, "main")
 
     assert result == SHA_A
-    rp.assert_called_once_with(bare, "main")
+    lookup.assert_called_once_with(dependency.to_github_url(), "main")
 
 
 # ---------------------------------------------------------------------------
@@ -121,9 +118,10 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
 
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
+    stale_l2 = MagicMock(return_value=SHA_A)
+    git_cache = types.SimpleNamespace(
+        read_resolved_ref=lambda *_: (False, None), bare_ref_sha=stale_l2
+    )
     downloader = MagicMock()
     fake_refs = MagicMock()
     fake_refs.resolve_commit_sha_for_ref.return_value = None
@@ -142,8 +140,7 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
     )
     assert isinstance(resolver, TieredRefResolver)
 
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
-        result = resolver.resolve(_dep(repo="owner/repo", ref="main"))
+    result = resolver.resolve(_dep(repo="owner/repo", ref="main"))
 
     assert result.resolved_commit == SHA_B
     stale_l2.assert_not_called()
@@ -156,9 +153,10 @@ def test_stale_bare_bypassed_on_update(monkeypatch, tmp_path):
 def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeypatch, tmp_path):
     """Explicit compatibility policy retains legacy bare-cache behavior."""
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
-    git_cache = types.SimpleNamespace(_db_root=tmp_path, read_resolved_ref=lambda *_: (False, None))
+    cached_l2 = MagicMock(return_value=SHA_A)
+    git_cache = types.SimpleNamespace(
+        read_resolved_ref=lambda *_: (False, None), bare_ref_sha=cached_l2
+    )
     downloader = MagicMock()
     fake_refs = MagicMock()
     fake_refs.resolve_commit_sha_for_ref.return_value = None
@@ -170,11 +168,10 @@ def test_compatibility_policy_uses_l2_when_api_unavailable_without_clone(monkeyp
     )
     assert isinstance(resolver, TieredRefResolver)
 
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as cached_l2:
-        result = resolver.resolve(_dep())
+    result = resolver.resolve(_dep())
 
     assert result.resolved_commit == SHA_A
-    cached_l2.assert_called_once_with(bare, "main")
+    cached_l2.assert_called_once_with(_dep().to_github_url(), "main")
     fake_refs.resolve_commit_sha_for_ref.assert_called_once()
     fake_refs.resolve.assert_not_called()
     assert resolver.stats["bare_rev_parse"] == 1
@@ -190,8 +187,7 @@ def test_install_lock_presence_cannot_authorize_unseeded_bare_refs(
 
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
     dep = _dep()
-    bare = tmp_path / cache_shard_key(dep.to_github_url())
-    bare.mkdir(parents=True)
+    stale_l2 = MagicMock(return_value=SHA_A)
     locked_ref = _dep(repo="other/package") if lock_shape == "unrelated" else _dep()
     if lock_shape == "sibling":
         locked_ref = DependencyReference(
@@ -224,15 +220,14 @@ def test_install_lock_presence_cannot_authorize_unseeded_bare_refs(
     resolver = build_tiered_ref_resolver(
         downloader=downloader,
         git_cache=types.SimpleNamespace(
-            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+            read_resolved_ref=lambda *_: (False, None), bare_ref_sha=stale_l2
         ),
         freshness_policy=ref_freshness_policy_for_install(context),
     )
     assert resolver is not None
     context.ref_resolver = resolver
     seed_ref_resolver_from_lockfile(context)
-    with patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2:
-        result = resolver.resolve(dep)
+    result = resolver.resolve(dep)
     assert result.resolved_commit == (SHA_A if lock_shape == "matching" else SHA_B)
     stale_l2.assert_not_called()
     if lock_shape == "matching":
@@ -254,8 +249,7 @@ def test_install_lock_presence_cannot_authorize_unseeded_bare_refs(
 def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_path, policy):
     """Freshness-required resolution never substitutes a stale L2 answer."""
     monkeypatch.setenv("APM_TIERED_RESOLVER", "1")
-    bare = tmp_path / cache_shard_key(_dep().to_github_url())
-    bare.mkdir(parents=True)
+    stale_l2 = MagicMock(return_value=SHA_A)
     downloader = MagicMock()
     fake_refs = MagicMock()
     fake_refs.resolve_commit_sha_for_ref.return_value = None
@@ -264,16 +258,13 @@ def test_current_policy_fails_closed_when_remote_tiers_fail(monkeypatch, tmp_pat
     resolver = build_tiered_ref_resolver(
         downloader=downloader,
         git_cache=types.SimpleNamespace(
-            _db_root=tmp_path, read_resolved_ref=lambda *_: (False, None)
+            read_resolved_ref=lambda *_: (False, None), bare_ref_sha=stale_l2
         ),
         freshness_policy=policy,
     )
     assert isinstance(resolver, TieredRefResolver)
 
-    with (
-        patch.object(L2BareRevParse, "_rev_parse", return_value=SHA_A) as stale_l2,
-        pytest.raises(RuntimeError, match="remote unavailable"),
-    ):
+    with pytest.raises(RuntimeError, match="remote unavailable"):
         resolver.resolve(_dep())
 
     stale_l2.assert_not_called()

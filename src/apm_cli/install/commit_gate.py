@@ -224,6 +224,7 @@ def _prepare_merged_mcp(
         no_policy=ctx.no_policy,
         claude_native_keys=frozenset(ctx.claude_native_keys) | native_keys,
         prospective_lock=prospective,
+        dry_run=bool(ctx.dry_run),
     )
 
 
@@ -234,6 +235,15 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
     user_scope = is_user_scope(ctx.scope)
     prepared = _prepare_merged_mcp(ctx, prospective)
     view = prepared.current_view
+    if ctx.dry_run and view is not None and ctx.logger is not None:
+        from apm_cli.install.errors import policy_transitive_refusals
+
+        # The real install stops here (refuse_policy_transitive); preview it.
+        for name in policy_transitive_refusals(view):
+            ctx.logger.warning(
+                f"Would be blocked by policy: {name} -- transitive server not in "
+                "mcp.allow (mcp.trust_transitive: false)"
+            )
     ctx.preview_mcp_dependencies = tuple(prepared.dependencies)
     enforce_mcp_policy(
         list(prepared.dependencies),
