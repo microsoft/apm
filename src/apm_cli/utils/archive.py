@@ -8,6 +8,7 @@ path-traversal, and decompression-bomb guards.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import io
 import os
 import re
@@ -16,7 +17,7 @@ import tarfile
 import unicodedata
 import uuid
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PureWindowsPath
 from typing import IO, TypeVar
 from urllib.parse import urlparse
@@ -34,6 +35,8 @@ MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024
 SUPPORTED_ARCHIVE_FORMATS = frozenset({"zip", "tar.gz"})
 
 _MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED
+# Tar headers, padding and pax records the uncompressed cap does not count.
+_TAR_HEADER_ALLOWANCE = 16 * 1024 * 1024
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -45,6 +48,88 @@ _ErrorT = TypeVar("_ErrorT", bound=Exception)
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
+
+
+class _TarStreamLimit(tarfile.ReadError):
+    """The decompressed tar stream would pass the uncompressed cap plus headers."""
+
+
+class _BoundedStream:
+    """A decompressed tar stream that refuses to read or seek past *limit*.
+
+    ``tarfile`` reads a pax header and a GNU long-name or long-link block into
+    memory at the size the header declares, before any member reaches the
+    extraction limits. A read that would pass the limit is refused before
+    anything is read, so memory stays bounded.
+    """
+
+    def __init__(self, stream: IO[bytes], max_uncompressed: int) -> None:
+        self._stream = stream
+        self._cap = max_uncompressed
+        self._limit = max_uncompressed + _TAR_HEADER_ALLOWANCE
+
+    def _refuse(self) -> None:
+        raise _TarStreamLimit(
+            f"Archive uncompressed size exceeds size limit: {self._cap // (1024 * 1024)} MB"
+        )
+
+    def read(self, size: int | None = -1) -> bytes:
+        remaining = self._limit - self._stream.tell()
+        if size is None or size < 0:
+            size = remaining + 1
+        elif size > remaining:
+            self._refuse()
+        data = self._stream.read(size)
+        if self._stream.tell() > self._limit:
+            self._refuse()
+        return data
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET and offset > self._limit:
+            self._refuse()
+        if whence == io.SEEK_CUR and self._stream.tell() + offset > self._limit:
+            self._refuse()
+        return self._stream.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._stream.tell()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+
+@contextlib.contextmanager
+def open_tar_gz(
+    *,
+    path: Path | None = None,
+    fileobj: IO[bytes] | None = None,
+    max_uncompressed: int | None = None,
+    error_type: type[_ErrorT] = ArchiveError,
+) -> Iterator[tarfile.TarFile]:
+    """Open a gzip-compressed tar for reading through the bounded stream."""
+    cap = _MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
+    with contextlib.ExitStack() as stack:
+        raw = stack.enter_context(open(path, "rb")) if path is not None else fileobj
+        compressed = stack.enter_context(gzip.GzipFile(fileobj=raw, mode="rb"))
+        stream = _BoundedStream(compressed, cap)
+        try:
+            tar = stack.enter_context(tarfile.open(fileobj=stream, mode="r:"))
+        except _TarStreamLimit as exc:
+            raise error_type(str(exc)) from exc
+        except OSError as exc:
+            raise tarfile.ReadError("not a gzip file") from exc
+        yield tar
+
+
+def _bounded_members(tar: tarfile.TarFile, error_type: type[_ErrorT]) -> Iterator[tarfile.TarInfo]:
+    """Iterate *tar*, mapping a refused stream read to *error_type*."""
+    try:
+        yield from tar
+    except _TarStreamLimit as exc:
+        _raise(error_type, str(exc))
 
 
 def validate_archive_format(archive_format: str) -> None:
@@ -322,14 +407,17 @@ def safe_extract_tar(
     plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
     # Advancing a compressed tar to the next header decompresses the current
     # member's data, so the declared sizes are capped before each advance.
-    for count, member in enumerate(tar, start=1):
+    for count, member in enumerate(_bounded_members(tar, error_type), start=1):
         if count > entry_limit:
             _raise(error_type, f"Archive has more than {entry_limit} entries (limit {entry_limit})")
         if member.issym() or member.islnk():
             _raise(error_type, f"Symlinks and hard links are not supported: {member.name!r}")
         if not (member.isdir() or member.isreg()):
             _raise(error_type, f"Refusing to extract special file: {member.name!r}")
-        declared_total += max(member.size, 0)
+        # A negative size would move the next header read backward, forever.
+        if member.size < 0:
+            _raise(error_type, f"Refusing to extract entry with a negative size: {member.name!r}")
+        declared_total += member.size
         if declared_total > size_limit:
             _raise(
                 error_type,
@@ -382,6 +470,10 @@ def safe_extract_zip(
             _raise(error_type, f"Refusing to extract symlink: {info.filename}")
         if file_type not in _ZIP_ALLOWED_FILE_TYPES:
             _raise(error_type, f"Refusing to extract special file: {info.filename!r}")
+        # zipfile cuts a name at its first NUL; judge the name the archive stores.
+        stored = info.orig_filename
+        if "\x00" in stored:
+            _raise(error_type, f"Refusing to extract entry with a null byte: {stored!r}")
         member_name = info.filename
         if member_name_transform is not None:
             member_name = member_name_transform(member_name)
@@ -435,7 +527,7 @@ def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
 def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        with open_tar_gz(fileobj=io.BytesIO(data)) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
@@ -444,7 +536,7 @@ def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
 def _extract_tar_gz_file(path: Path, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive file into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(path, mode="r:gz") as archive:
+        with open_tar_gz(path=path) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc

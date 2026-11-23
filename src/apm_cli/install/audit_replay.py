@@ -77,9 +77,11 @@ class CiAuditMaterialization:
 
 def _git_tracked_files(project_root: Path) -> frozenset[str] | None:
     """Return tracked repository paths, or ``None`` outside a git worktree."""
+    from apm_cli.utils.git_env import get_git_executable
+
     try:
         completed = subprocess.run(
-            ("git", "-C", str(project_root), "ls-files", "-z", "--full-name"),
+            (get_git_executable(), "-C", str(project_root), "ls-files", "-z", "--full-name"),
             capture_output=True,
             check=False,
         )

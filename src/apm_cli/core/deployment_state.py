@@ -321,6 +321,18 @@ class DeploymentReconciler:
             proofs = successful.get(key)
             if proofs is None:
                 proofs = self._superseding_generic_proofs(prior, successful_by_value)
+            if self._departing_only(proofs, intent):
+                # A departing owner's proof neither establishes nor erases
+                # ownership: keep the row's remaining owners, else drop it, and
+                # the per-key pass must not process those proofs again (#4703).
+                superseded_success_keys.update(proof.locator.key for proof in proofs or ())
+                preserved = self._filter_absent_owners(prior, intent)
+                if preserved is None:
+                    removed.append(prior.locator)
+                else:
+                    next_records[key] = preserved
+                    retained.append(prior.locator)
+                continue
             if proofs:
                 next_record = self._record_from_proofs(proofs, intent)
                 if next_record is None:
@@ -533,6 +545,20 @@ class DeploymentReconciler:
             ):
                 proven.add(value)
         return frozenset(proven)
+
+    @staticmethod
+    def _departing_only(
+        proofs: list[MaterializationResult] | None, intent: DeploymentIntent
+    ) -> bool:
+        """Whether every current proof comes from an owner this run removes (#4703).
+
+        An ownerless proof is not departing: it still reaches the ownership error.
+        """
+        if not proofs or intent.desired_owners is None:
+            return False
+        if not all(proof.owners for proof in proofs):
+            return False
+        return not any(owner in intent.desired_owners for proof in proofs for owner in proof.owners)
 
     def _record_from_proofs(
         self,
