@@ -285,7 +285,7 @@ class _Store:
             grouped = self._grouped()
         for shard in sorted(self.loaded | set(grouped)):
             self._save_shard(shard, sorted(grouped.get(shard, ())))
-        if self.indexed and not self._shard_files():
+        if self.indexed and not grouped and not self._shard_files():
             self._drop_index()  # like the other receipts: no records, no file
 
     def _grouped(self) -> dict[str, list[str]]:
@@ -533,9 +533,9 @@ def vouches_for_current_bytes(path: str | os.PathLike[str], prior: bytes) -> boo
     try:
         store = _Store.load()
         current = _regular_bytes(path)
+        key, row = store.lookup(path)
     except (OSError, _UnreadableStore):
         return False
-    key, row = store.lookup(path)
     return (
         current is not None
         and _origin(row) is not None
@@ -577,10 +577,10 @@ def delete_emptied_config(
         return False
     try:
         store = _Store.load()
+        key, row = store.lookup(path)
     except _UnreadableStore:
         _log.debug("Unreadable config file records; keeping %s", path, exc_info=True)
         return False
-    key, row = store.lookup(path)
     origin = _origin(row)
     if row is not None and origin is None:
         return False  # a record APM cannot read proves nothing either way
