@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import errno
 import io
 import os
 import posixpath
@@ -134,6 +135,7 @@ class DeploymentEvidence:
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
         self._spellings: SpellingAliasIndex | None = None
+        self._receipt_spellings: SpellingAliasIndex | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
 
@@ -377,12 +379,22 @@ class DeploymentEvidence:
         A user-scope lock may spell a file relative to the deploy root or as
         an absolute path under it; both name one file and share one key.
         """
+        from .copilot_cowork_paths import COWORK_URI_SCHEME
+
         key = _claim_key(path)
-        if "://" in key or not Path(key).is_absolute():
+        if key.startswith(COWORK_URI_SCHEME):
+            # A Cowork root inside the deploy root names the same files twice.
+            physical = self._physical(key)
+            if physical is None:
+                return key
+            candidate = physical
+        elif "://" in key or not Path(key).is_absolute():
             return key
+        else:
+            candidate = Path(key)
         for root in self._roots:
             try:
-                return _claim_key(Path(key).relative_to(root).as_posix())
+                return _claim_key(candidate.relative_to(root).as_posix())
             except ValueError:
                 continue
         return key
@@ -434,6 +446,16 @@ class DeploymentEvidence:
         owners = self._owners_of(claim) if pooled else self._default_owners_of(claim)
         roots = (self._render_root(owner) for owner in owners)
         return [root for root in roots if root is not None]
+
+    def _has_receipt(self, physical: Path) -> bool:
+        """Whether a receipt names *physical* under any spelling of it (#4295)."""
+        key = physical.resolve().as_posix()
+        if key in self._receipts:
+            return True
+        if self._receipt_spellings is None:
+            self._receipt_spellings = SpellingAliasIndex(self._receipts)
+        # Receipt keys are absolute, so the join root is ignored.
+        return bool(self._receipt_spellings.aliases(key, Path("/")))
 
     def _receipt_match(self, physical: Path) -> bool | None:
         from apm_cli.utils.content_hash import compute_file_hash
@@ -522,9 +544,7 @@ class DeploymentEvidence:
         try:
             if physical.is_symlink() or not physical.is_file():
                 return False
-            if self._receipt_match(physical) is not None or self._rendered_roots(
-                claim, pooled=True
-            ):
+            if self._has_receipt(physical) or self._rendered_roots(claim, pooled=True):
                 return False
             return compute_file_hash(physical) in recorded
         except OSError:
@@ -1013,17 +1033,15 @@ def _safe_remove_skill_directory(
         return
 
     if evidence.lockfile_consent:
-        # Consent decides per file (#4295): each member is rechecked right before
-        # its unlink, and only a directory left holding no file is removed.
-        if not _remove_proven_members(
-            skill_dir, proven, evidence, result, diagnostics, dep_key
-        ) or any(
-            child.is_symlink()
-            or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
-            for child in skill_dir.rglob("*")
-        ):
-            result.skipped_unmanaged.append(rel_path)
-            return
+        _remove_consented_skill_directory(
+            skill_dir,
+            rel_path,
+            proven,
+            (evidence, result, diagnostics),
+            dep_key=dep_key,
+            failed_path_retained=failed_path_retained,
+        )
+        return
 
     # All remaining files are APM-tracked with matching hashes -- safe
     # to remove the entire directory tree.
@@ -1035,6 +1053,74 @@ def _safe_remove_skill_directory(
     except OSError as exc:
         result.failed.append(rel_path)
         _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+
+
+def _remove_consented_skill_directory(
+    skill_dir: Path,
+    rel_path: str,
+    proven: list[tuple[str, Path]],
+    context: tuple[DeploymentEvidence, CleanupResult, object],
+    *,
+    dep_key: str,
+    failed_path_retained: bool,
+) -> None:
+    """Consent decides per file (#4295).
+
+    Each member is rechecked right before its unlink, and only a directory
+    left holding no file is removed, bottom-up and never recursively, so a
+    file that appears after the scan keeps its directory.
+    """
+    evidence, result, diagnostics = context
+    if not _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key) or any(
+        child.is_symlink()
+        or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
+        for child in skill_dir.rglob("*")
+    ):
+        result.skipped_unmanaged.append(rel_path)
+        return
+    try:
+        emptied = _remove_emptied_tree(skill_dir)
+    except OSError as exc:
+        result.failed.append(rel_path)
+        _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+        return
+    if not emptied:
+        result.skipped_unmanaged.append(rel_path)
+        return
+    result.deleted.append(rel_path)
+    result.deleted_targets.append(skill_dir)
+    result.deleted_directories.append(rel_path)
+
+
+def _remove_emptied_tree(root: Path) -> bool:
+    """Remove *root* bottom-up, deleting only bytecode caches and empty directories.
+
+    Returns False, leaving the rest in place, at the first entry that is a
+    symlink, another file, or a directory that is no longer empty.
+    """
+    for current, directories, files in os.walk(root, topdown=False):
+        base = Path(current)
+        for name in files:
+            path = base / name
+            if path.is_symlink() or not is_python_bytecode_cache_path(path.relative_to(root)):
+                return False
+            write_seam.unlink(path)
+        for name in directories:
+            if not _remove_empty_directory(base / name):
+                return False
+    return _remove_empty_directory(root)
+
+
+def _remove_empty_directory(path: Path) -> bool:
+    if path.is_symlink():
+        return False
+    try:
+        write_seam.rmdir(path)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            return False
+        raise
+    return True
 
 
 def _remove_proven_members(
