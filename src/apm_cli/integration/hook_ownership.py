@@ -662,13 +662,19 @@ def write_per_file_bundle_record(
         write_seam.unlink(sidecar_path)
 
 
-def hook_file_emptied(json_path: Path, data: dict, defaults: dict[str, Any]) -> bool:
+def hook_file_emptied(
+    json_path: Path, data: dict, defaults: dict[str, Any], root: Path | None
+) -> bool:
     """Whether a cleaned hook file holds only its target's injected defaults (#4852).
 
-    Such a file is deleted, as a fresh deploy never writes it. A file reached
-    through a symlinked target directory or file is never deleted; the cleanup
-    rewrites it in place instead.
+    Such a file is deleted, as a fresh deploy never writes it. Without a
+    containment *root* (project or home), or when any component below it is a
+    symlink, the file is never deleted; the cleanup rewrites it in place.
+    A default matches only with the same type (``true`` is not ``1``).
     """
-    if has_symlink_component(json_path.parent.parent, json_path):
+    if root is None or has_symlink_component(root, json_path):
         return False
-    return all(defaults.get(key, ...) == value for key, value in data.items())
+    return all(
+        key in defaults and type(defaults[key]) is type(value) and defaults[key] == value
+        for key, value in data.items()
+    )

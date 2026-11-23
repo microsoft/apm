@@ -1466,6 +1466,17 @@ class TestCursorIntegration:
 
         assert not hooks_path.exists()
 
+    def test_sync_keeps_cursor_hooks_with_a_non_default_version_type(self, temp_project):
+        """``version: true`` is not Cursor's injected ``version: 1``: the file stays."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"version": True, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(hooks_path.read_text()) == {"version": True}
+
     def test_cursor_version_emitted_on_fresh_install(self, temp_project):
         """Fresh .cursor/hooks.json must contain top-level "version": 1."""
         pkg_info = self._setup_hookify_package(temp_project)
@@ -1700,6 +1711,25 @@ class TestSyncIntegration:
         integrator.sync_integration(None, temp_project)
 
         assert not settings_path.exists()
+
+    def test_cleanup_never_deletes_below_a_symlinked_ancestor(self, tmp_path):
+        """A nested hook file under a symlinked ancestor of the root is rewritten, not deleted."""
+        outside = tmp_path / "outside"
+        (outside / "windsurf").mkdir(parents=True)
+        hooks_path = outside / "windsurf" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        root = tmp_path / "home"
+        root.mkdir()
+        (root / ".codeium").symlink_to(outside, target_is_directory=True)
+        stats = {"files_removed": 0, "errors": 0}
+
+        HookIntegrator._clean_apm_entries_from_json(
+            root / ".codeium" / "windsurf" / "hooks.json", stats, root=root
+        )
+
+        assert json.loads(hooks_path.read_text()) == {}
 
     def test_sync_never_deletes_through_a_symlinked_target_dir(self, temp_project, tmp_path):
         """An emptied settings.json behind a symlinked .claude is rewritten, not deleted."""

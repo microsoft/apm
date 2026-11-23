@@ -1754,6 +1754,7 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                 dry_run=dry_run,
                 defaults=config.top_level_defaults,
+                root=project_root,
             )
             if existed and not dry_run and not json_path.exists():
                 stats["deleted_paths"].append(portable_relpath(json_path, project_root))
@@ -1773,6 +1774,7 @@ class HookIntegrator(BaseIntegrator):
         sidecar_path: Path,
         dry_run: bool = False,
         defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove one package owner while preserving user and sibling entries."""
         if not json_path.exists() and not sidecar_path.exists():
@@ -1838,7 +1840,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                if hook_file_emptied(json_path, data, defaults or {}):
+                if hook_file_emptied(json_path, data, defaults or {}, root):
                     write_seam.unlink(json_path)  # a fresh deploy writes no file
                 else:
                     write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
@@ -1929,6 +1931,7 @@ class HookIntegrator(BaseIntegrator):
                     container=config.event_container_key,
                     sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
                     defaults=config.top_level_defaults,
+                    root=project_root,
                 )
 
         return stats
@@ -2046,6 +2049,7 @@ class HookIntegrator(BaseIntegrator):
         container: str = "hooks",
         sidecar_path: Path | None = None,
         defaults: dict[str, Any] | None = None,
+        root: Path | None = None,
     ) -> None:
         """Remove externally-owned entries from a native hooks JSON file.
 
@@ -2078,7 +2082,7 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified and hook_file_emptied(json_path, data, defaults or {}):
+            if modified and hook_file_emptied(json_path, data, defaults or {}, root):
                 write_seam.unlink(json_path)  # a fresh deploy writes no file
                 stats["files_removed"] += 1
             elif modified:
