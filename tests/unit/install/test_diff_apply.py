@@ -450,14 +450,16 @@ def test_a_lost_create_race_keeps_the_file_that_won(
     ours = project / ".github" / "prompts" / "a.prompt.md"
     theirs = project / ".github" / "prompts" / "b.prompt.md"
     session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
-    real_link = os.link
 
     def racing_link(source, target):
         if Path(target) == theirs:
             theirs.write_text("someone else\n", encoding="utf-8")
         return real_link(source, target)
 
-    monkeypatch.setattr("os.link", racing_link)
+    # The no-replace primitive: a rename on Windows, a hard link elsewhere.
+    racing_name = "rename" if os.name == "nt" else "link"
+    real_link = getattr(os, racing_name)
+    monkeypatch.setattr(f"os.{racing_name}", racing_link)
     files = [
         (ours, b"x\n", _digest(b"x\n"), "o/p"),
         (theirs, b"y\n", _digest(b"y\n"), "o/p"),

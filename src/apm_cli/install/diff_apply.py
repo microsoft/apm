@@ -464,6 +464,38 @@ def _refuse_unsilent_executables(lock: Any) -> None:
         raise Decline("executables decision")
 
 
+def _refuse_target_policy(project_root: Path, fetch: Any) -> None:
+    """The install judges its effective targets (auto-detect included) against the
+    org compilation-target policy (install/phases/policy_target_check.py); audit
+    judges only declared ones. Any finding, blocking or not, takes the full run.
+    """
+    policy = getattr(fetch, "policy", None)
+    if policy is None:
+        return
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.core.target_detection import resolve_effective_target_decision
+    from apm_cli.install.phases.policy_target_check import TARGET_CHECK_IDS
+    from apm_cli.models.apm_package import APMPackage, package_target_selection
+    from apm_cli.policy.policy_checks import run_dependency_policy_checks
+
+    manifest = APMPackage.from_apm_yml(manifest_file(project_root))
+    decision = resolve_effective_target_decision(
+        project_root, explicit_target=None, manifest_target=package_target_selection(manifest)
+    )
+    if decision.canonical_targets is None:
+        return
+    result = run_dependency_policy_checks(
+        [],
+        policy=policy,
+        effective_target=decision.canonical_targets,
+        effective_target_source=decision.source,
+        fetch_outcome=getattr(fetch, "outcome", None),
+        fail_fast=False,
+    )
+    if any(c.name in TARGET_CHECK_IDS and not c.passed for c in result.checks):
+        raise Decline("target policy")
+
+
 def _refuse_lifecycle_scripts(project_root: Path) -> None:
     """Lifecycle scripts (policy, user or project) run only inside the full install."""
     from apm_cli.core.lifecycle_scripts import discover_scripts
@@ -639,6 +671,8 @@ def try_apply(
             admits, fetch = noop_diff._policy_admits(project_root)
         if not admits:
             raise Decline("policy")
+        with quiet():
+            _refuse_target_policy(project_root, fetch)
         if not noop_diff.sources_scan_clean(project_root, lock):
             raise Decline("security scan findings")
         from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
