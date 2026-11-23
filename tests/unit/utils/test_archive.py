@@ -337,6 +337,30 @@ def test_many_small_global_headers_are_refused_within_the_bound(tmp_path: Path) 
     assert not (tmp_path / "out").exists()
 
 
+class _MembersOnly:
+    """A tar stand-in that yields given members; a member reads as empty."""
+
+    def __init__(self, members: list[tarfile.TarInfo]) -> None:
+        self._members = members
+
+    def __iter__(self):
+        return iter(self._members)
+
+    def extractfile(self, _member: tarfile.TarInfo) -> io.BytesIO:
+        return io.BytesIO(b"")
+
+
+def test_negative_member_size_is_refused_before_the_next_advance(tmp_path: Path) -> None:
+    member = tarfile.TarInfo("a.md")
+    member.size = -1
+
+    with pytest.raises(ArchiveError, match="negative size"):
+        archive_mod.safe_extract_tar(
+            _MembersOnly([member]), tmp_path / "out", error_type=ArchiveError
+        )
+    assert not (tmp_path / "out").exists()
+
+
 def test_large_pax_header_within_the_caps_extracts(tmp_path: Path) -> None:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.PAX_FORMAT) as tf:
