@@ -176,43 +176,6 @@ def _with_allowlist_next_step(
     return [advised if check is failed else check for check in checks]
 
 
-def _allowlist_project(
-    project_root: Path,
-    manifest: APMPackage,
-    effective: Sequence[DependencyReference],
-    lock: LockFile | None,
-    raw_yml: dict | None,
-    policy: DependencyPolicy,
-) -> AllowlistProject:
-    """Collect the project state the allow-list next step is proven against.
-
-    The proof reads the live ``apm_modules/`` the suggested uninstall acts on,
-    never audit's scratch replay. *effective* is the ``replace:`` projection of
-    the production declarations, in declaration order.
-    """
-    from .allowlist_remedy import AllowlistProject
-
-    def _entries(section: str) -> tuple[object, ...]:
-        block = (raw_yml or {}).get(section)
-        entries = block.get("apm") if isinstance(block, dict) else None
-        return tuple(entries) if isinstance(entries, list) else ()
-
-    declared = manifest.get_apm_dependencies()
-    return AllowlistProject(
-        project_root=project_root,
-        modules_dir=project_root / "apm_modules",
-        lock=lock,
-        production=_entries("dependencies"),
-        development=_entries("devDependencies"),
-        policy=policy,
-        effective=(
-            {dep.get_unique_key(): ref for dep, ref in zip(declared, effective, strict=True)}
-            if len(declared) == len(effective)
-            else {}
-        ),
-    )
-
-
 def _required_policy_index(
     deps: list[DependencyReference],
     dep_names: set[str] | DependencyPolicyIndex | None,
@@ -2026,13 +1989,13 @@ def run_policy_checks(
     )
     checks = dep_result.checks
     if policy.enforcement == "block":
+        from .allowlist_remedy import allowlist_project
+
         # Under warn the audit reports the violation without a next step.
         checks = _with_allowlist_next_step(
             checks,
             source_deps,
-            _allowlist_project(
-                project_root, manifest, apm_deps, lock, raw_yml, policy.dependencies
-            ),
+            allowlist_project(project_root, manifest, apm_deps, lock, raw_yml, policy),
             policy_source,
         )
     result.checks.extend(checks)

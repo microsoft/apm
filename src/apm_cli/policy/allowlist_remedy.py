@@ -39,9 +39,9 @@ from ..core.scope import manifest_file
 
 if TYPE_CHECKING:
     from ..deps.lockfile import LockFile
-    from ..models.apm_package import DependencyReference
+    from ..models.apm_package import APMPackage, DependencyReference
     from ..models.dependency.selection import ManifestSelectionIndex
-    from .schema import DependencyPolicy
+    from .schema import ApmPolicy, DependencyPolicy
 
 # One shell word every supported shell passes through unchanged.
 _SHELL_SAFE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/@:+-]*")
@@ -60,6 +60,49 @@ class AllowlistProject:
     # Unique key of each production declaration -> its replace:-effective ref,
     # the reference the required-packages check judges.
     effective: Mapping[str, DependencyReference]
+    # Manifest fields the policy requires, and the keys of apm.yml's
+    # devDependencies block (uninstall drops ``apm`` once it is empty).
+    required_fields: frozenset[str] = frozenset()
+    dev_section_keys: frozenset[str] = frozenset()
+
+
+def allowlist_project(
+    project_root: Path,
+    manifest: APMPackage,
+    effective: Sequence[DependencyReference],
+    lock: LockFile | None,
+    raw_yml: dict | None,
+    policy: ApmPolicy,
+) -> AllowlistProject:
+    """Collect the project state the allow-list next step is proven against.
+
+    The proof reads the live ``apm_modules/`` the suggested uninstall acts on,
+    never audit's scratch replay. *effective* is the ``replace:`` projection of
+    the production declarations, in declaration order.
+    """
+
+    def _entries(section: str) -> tuple[object, ...]:
+        block = (raw_yml or {}).get(section)
+        entries = block.get("apm") if isinstance(block, dict) else None
+        return tuple(entries) if isinstance(entries, list) else ()
+
+    declared = manifest.get_apm_dependencies()
+    dev_block = (raw_yml or {}).get("devDependencies")
+    return AllowlistProject(
+        project_root=project_root,
+        modules_dir=project_root / "apm_modules",
+        lock=lock,
+        production=_entries("dependencies"),
+        development=_entries("devDependencies"),
+        policy=policy.dependencies,
+        effective=(
+            {dep.get_unique_key(): ref for dep, ref in zip(declared, effective, strict=True)}
+            if len(declared) == len(effective)
+            else {}
+        ),
+        required_fields=frozenset(policy.manifest.required_fields),
+        dev_section_keys=frozenset(dev_block) if isinstance(dev_block, dict) else frozenset(),
+    )
 
 
 def uninstall_selectors(
@@ -81,7 +124,11 @@ def uninstall_selectors(
         return []
     selection = ManifestSelectionIndex([*project.production, *project.development], project.lock)
     selectors = [_selector(key, declared[key], selection) for key in roots]
-    if not all(selectors) or _removes_required(roots, declared, project):
+    if (
+        not all(selectors)
+        or _removes_required(roots, declared, project)
+        or _empties_required_dev_dependencies(roots, project)
+    ):
         return []
     denied_keys = {dep.get_unique_key() for dep in denied}
     if not _uninstall_clears(denied_keys, [declared[key] for key in roots], project):
@@ -147,6 +194,29 @@ def _removes_required(
         removed.find_name(required.split("#", 1)[0]) is not None
         for required in policy.effective_require
     )
+
+
+def _empties_required_dev_dependencies(roots: Sequence[str], project: AllowlistProject) -> bool:
+    """Whether removing *roots* leaves a policy-required ``devDependencies`` empty.
+
+    Uninstall drops ``devDependencies.apm`` once its last entry goes, so the
+    block is empty unless it holds another key; ``dependencies`` keeps
+    ``apm: []`` and stays non-empty.
+    """
+    if "devDependencies" not in project.required_fields or not project.development:
+        return False
+    if project.dev_section_keys - {"apm"}:
+        return False
+    from ..models.dependency.selection import parse_dependency_entry
+
+    removed = set(roots)
+    for entry in project.development:
+        try:
+            if parse_dependency_entry(entry).get_unique_key() not in removed:
+                return False
+        except (ValueError, TypeError, AttributeError, KeyError):
+            return False
+    return True
 
 
 def _uninstall_clears(

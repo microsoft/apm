@@ -20,7 +20,7 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.apm_package import clear_apm_yml_cache
 from apm_cli.policy.models import CheckResult, CIAuditResult
 from apm_cli.policy.policy_checks import run_policy_checks
-from apm_cli.policy.schema import ApmPolicy, DependencyPolicy
+from apm_cli.policy.schema import ApmPolicy, DependencyPolicy, ManifestPolicy
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-remediation-advice")]
 
@@ -79,11 +79,16 @@ def _project(
 
 
 def _allowlist(
-    root: Path, *, require: tuple[str, ...] = (), modules_root: Path | None = None
+    root: Path,
+    *,
+    require: tuple[str, ...] = (),
+    modules_root: Path | None = None,
+    required_fields: tuple[str, ...] = (),
 ) -> CheckResult:
     policy = ApmPolicy(
         enforcement="block",
         dependencies=DependencyPolicy(allow=["github.com/contoso/**"], require=list(require)),
+        manifest=ManifestPolicy(required_fields=required_fields),
     )
     result = run_policy_checks(
         root, policy, fail_fast=False, modules_root=modules_root, policy_source=_SOURCE
@@ -446,3 +451,30 @@ def test_a_rescued_removal_root_falls_back_to_the_admin(
         "    Ask your org admin to allow it (policy source: org:contoso/.github)."
     )
     assert check.remediations == ()
+
+
+@pytest.mark.parametrize(
+    ("dev_section", "advised"),
+    [
+        pytest.param({"apm": ["acme/evil-pkg"]}, False, id="uninstall-empties-required-dev"),
+        pytest.param(
+            {"apm": ["acme/evil-pkg"], "mcp": ["contoso/server"]},
+            True,
+            id="another-dev-key-keeps-it-non-empty",
+        ),
+    ],
+)
+def test_emptying_a_required_dev_dependencies_field_falls_back_to_the_admin(
+    tmp_path: Path, capsys, dev_section, advised
+) -> None:
+    root = _project(
+        tmp_path,
+        ["contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep")],
+        devDependencies=dev_section,
+    )
+
+    check = _allowlist(root, required_fields=("devDependencies",))
+
+    assert _stderr(capsys, check)[2].startswith("    Run 'apm uninstall acme/evil-pkg'") is advised
+    assert bool(check.remediations) is advised
