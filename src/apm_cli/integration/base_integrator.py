@@ -1048,14 +1048,15 @@ class BaseIntegrator:
         Set *allow_final_symlink* only when unlinking the final path itself.
 
         Checks:
-        1. No path-traversal components (``..``)
+        1. No path-traversal components (``..``) and no ``.`` segment:
+           only canonical paths are admitted
         2. Starts with an allowed integration prefix
         3. Resolves within *project_root*, a configured absolute target root,
            or the cowork root for ``cowork://`` paths
         """
         from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-        if ".." in rel_path:
+        if ".." in rel_path or "." in rel_path.replace("\\", "/").split("/"):
             return False
 
         candidate = Path(rel_path)
