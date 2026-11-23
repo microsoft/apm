@@ -902,11 +902,26 @@ def test_approve_hints_are_one_shell_word_per_package_and_keep_the_scope() -> No
             id="nested-bin-is-not-the-withheld-bin",
         ),
         pytest.param(("bin",), [".agents/skills/p/bin/tool"], ("bin",), id="agents-skill-bin"),
-        pytest.param(("lsp", "canvas"), [], ("lsp", "canvas"), id="declared-order"),
+        pytest.param(
+            ("lsp", "canvas"),
+            [".github/extensions/c/extension.mjs"],
+            ("lsp", "canvas"),
+            id="declared-order",
+        ),
+        pytest.param(("hooks", "canvas"), [], ("hooks",), id="canvas-not-deployed"),
+        pytest.param(
+            ("canvas",), [".copilot/extensions/c/extension.mjs"], ("canvas",), id="canvas-user"
+        ),
+        pytest.param(
+            ("hooks", "canvas"),
+            [".github/extensions"],
+            ("hooks",),
+            id="extensions-root-alone-is-not-canvas-evidence",
+        ),
     ],
 )
 def test_rebuild_retired_kinds_needs_deployment_evidence(deployed, deployed_files, expected):
-    """#4567: only kinds the rebuild removes, bin/ only when a bin file was deployed."""
+    """#4567/#4816: only kinds the rebuild removes; bin/ and canvas need a deployed file."""
     withheld = set(deployed)
     assert exec_kinds.rebuild_retired_kinds(deployed, withheld, deployed_files) == expected
 

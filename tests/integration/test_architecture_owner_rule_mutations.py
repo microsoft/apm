@@ -3637,6 +3637,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A fetch into a cached bare runs Git without the owner's trust check.",
     ),
     MutationCase(
+        guard_id="transport-platform-checkout-verified",
+        rule_id="transport-platform-checkout-verified",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
+        new="if True:",
+        intent="A cached checkout is returned without verifying it against its commit.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",
@@ -4308,6 +4316,53 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
         new="",
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="    for line in retired_kinds_warnings(hooks, skip=denied):\n        logger.warning(line)\n",
+        new="    for line in sorted(hooks):\n        logger.warning(line)\n",
+        intent="Uninstall bypasses the kinds owner when it warns about retired kinds (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning(f"{key} hooks are no longer allowed; removing them")\n'
+        ),
+        intent="Uninstall adds a hard-coded hooks label beside the owner's warning (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning("p-mixed hooks are no longer "\n'
+            '                   "allowed; removing them")\n'
+        ),
+        intent="Uninstall splits a hard-coded kinds warning across adjacent literals (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/security/exec_kinds.py",
+        old='f"{key} {exec_kinds_phrase(kinds)} are no longer allowed',
+        new='f"{key} hooks are no longer allowed',
+        intent="The retirement warning hard-codes 'hooks' instead of install's kind labels.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/install/plan_admission.py",
+        old="    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)\n",
+        new="    return tuple(sorted(retired))\n",
+        intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
 )
 

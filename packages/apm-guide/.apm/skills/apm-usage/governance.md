@@ -40,7 +40,7 @@ enforcement: block                       # off | warn | block
 fetch_failure: warn                      # warn | block; org-side knob (see 9.5)
 
 cache:
-  ttl: 3600                             # policy cache in seconds
+  ttl: 3600                             # policy cache in seconds (max 86400)
 
 dependencies:
   allow: null                           # allowed patterns (null = no opinion; [] = allow nothing)
@@ -620,16 +620,19 @@ relax an ancestor that requires an explicit `includes:` list.
 
 ### 4. What gets enforced
 
-- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth, require_pinned_constraint
+- **Dependencies:** allow, deny, require (presence + optional version pin), max_depth (resolution stops at the limit; the resolved graph is judged, not the old lockfile), require_pinned_constraint
 - **Registry source:** require, allow_non_registry
 - **MCP:** allow, deny, transport.allow, self_defined (`trust_transitive` is parsed but not enforced)
 - **Compilation:** target.allow / target.enforce (target-aware). `target:`, `targets:`, and CSV forms are one declaration; aliases resolve before comparison (`vscode`/`agents` are `copilot`); `all` in `allow` allows everything. Install judges its effective selection; audit judges the targets `apm.yml` declares.
-- **Manifest:** require_explicit_includes
+- **Manifest:** require_explicit_includes, scripts (`deny` refuses a `scripts:` block in the installed manifest before any fetch or write, `--mcp` and local bundles included)
+- **Unmanaged files:** `action: deny` refuses an install that would leave a governed file no lockfile row claims (`--mcp` and local bundles before any write); deployed files and the lockfile are restored (an install killed before the restore leaves them unrecorded)
 - **Integrity:** security.integrity.require_hashes
 
-`manifest.required_fields`, `manifest.scripts`, `compilation.strategy`,
-`compilation.source_attribution` and `unmanaged_files` are checked only by
-`apm audit --ci`; `manifest.content_types` is not enforced.
+Each install refusal names the policy field and the fix; under
+`enforcement: warn` it is a warning. `manifest.required_fields`,
+`compilation.strategy` and `compilation.source_attribution` are checked only
+by `apm audit --ci`; `manifest.content_types` is not enforced. `apm run` does
+not consult `manifest.scripts`.
 
 ### 5. When enforcement runs
 

@@ -16,6 +16,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
     clear_apm_yml_cache,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 from tests.utils.git_link_fixture import git
 
 pytestmark = [
@@ -72,6 +73,7 @@ def _resolved_main() -> ResolvedReference:
     )
 
 
+@trust_checkout_contents()
 def test_generic_anonymous_https_clone_url_keeps_git_suffix_end_to_end(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
