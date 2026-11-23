@@ -177,10 +177,11 @@ def _bypasses_proxy(no_proxy: str) -> bool:
 
 def _proxy(env: Mapping[str, str]) -> str | None:
     """The proxy libcurl would use for an https github.com URL, or ``None``."""
-    proxy = env.get("https_proxy") or env.get("HTTPS_PROXY")
+    # libcurl reads the lowercase name first; set-but-empty means "none".
+    proxy = env["https_proxy"] if "https_proxy" in env else env.get("HTTPS_PROXY")
     if not proxy:
         return None
-    no_proxy = env.get("no_proxy") or env.get("NO_PROXY") or ""
+    no_proxy = (env["no_proxy"] if "no_proxy" in env else env.get("NO_PROXY")) or ""
     if no_proxy and _bypasses_proxy(no_proxy):
         return None
     parsed = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")

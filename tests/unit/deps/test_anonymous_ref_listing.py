@@ -179,6 +179,7 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
     assert arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://q:2"}) == "http://p:1"
     assert arl._proxy({"HTTPS_PROXY": "http://q:2"}) == "http://q:2"
     assert arl._proxy({"HTTP_PROXY": "http://q:2"}) is None
+    assert arl._proxy({"https_proxy": "", "HTTPS_PROXY": "http://q:2"}) is None
     assert arl._proxy({"HTTPS_PROXY": "http://q:2", "NO_PROXY": ".github.com"}) is None
     assert arl._proxy({"HTTPS_PROXY": "http://q:2", "no_proxy": "*"}) is None
     with pytest.raises(arl._Fallback):
@@ -478,3 +479,32 @@ def test_a_worker_ending_without_a_result_falls_back(monkeypatch):
 
     with pytest.raises(arl._Fallback, match="without a result"):
         arl._fetch_within_deadline("https://github.com/o/r/info/refs", None, ca)
+
+
+def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkeypatch):
+    """Red if the context were built from APM's injected ssl.SSLContext."""
+    import sys
+
+    import certifi
+
+    from apm_cli.core import tls_trust
+
+    bundle = certifi.contents()
+    first = bundle[: bundle.index("-----END CERTIFICATE-----") + len("-----END CERTIFICATE-----")]
+    git_ca = tmp_path / "git-ca.pem"
+    git_ca.write_text(first + "\n", encoding="ascii")
+    monkeypatch.setattr(tls_trust, "_LAST_TLS_STATUS", tls_trust._LAST_TLS_STATUS)
+    monkeypatch.setattr(tls_trust, "_LAST_TLS_SELECTION", tls_trust._LAST_TLS_SELECTION)
+    monkeypatch.setitem(sys.modules, "truststore", None)
+    state = tls_trust._capture_tls_publication_state()
+    try:
+        tls_trust.configure_tls_trust(env={"APM_EXTRA_CA_BUNDLE": certifi.where()})
+        injected = arl.ssl.SSLContext(arl.ssl.PROTOCOL_TLS_CLIENT)
+        injected.load_verify_locations(cafile=str(git_ca))
+
+        context = arl._git_trust_context(str(git_ca))
+    finally:
+        tls_trust._restore_tls_publication_state(state)
+
+    assert len(injected.get_ca_certs()) > 1
+    assert len(context.get_ca_certs()) == 1
