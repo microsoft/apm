@@ -129,10 +129,14 @@ def _maybe_rollback_manifest(
 
 
 def _publish_deploy_evidence() -> None:
-    """Store the deployed bytes and package records this committed attempt staged."""
+    """Store the deployed bytes and package records this committed attempt staged.
+
+    The store is a best-effort cache: failing to fill it never fails an install.
+    """
     from apm_cli.cache.deploy_store import commit_staged
 
-    commit_staged()
+    with contextlib.suppress(Exception):
+        commit_staged()
 
 
 def _discard_deploy_evidence() -> None:
@@ -227,11 +231,11 @@ class InstallTransaction:
                         self._settle_deploy_journal()
                     cleanup_issues = self._resolution.commit() or []
                     self.committed = True
-                    _publish_deploy_evidence()
                     self._ref_pins.commit()
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
+                    _publish_deploy_evidence()
                 if (
                     self._validation is not None
                     and self._validation.has_failures
