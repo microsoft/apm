@@ -1,0 +1,19 @@
+{
+  "issue": 4861,
+  "fixed_in": "Unreleased",
+  "summary": "Kept MCP entries from lockless write evidence were reported inaccurately: apm install <bundle>, apm install --mcp NAME and apm mcp install NAME did not announce them, a stale key-less record kept producing notices after its entry was retired, a server redeclared on the same native key was still announced as kept, and unusable evidence other than a parse error was not announced on a lockless install. Reporting only; nothing is removed differently.",
+  "failure_modes": [
+    "outcome",
+    "observation"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_mcp_kept_entry_announcement_lifecycle.py::test_adding_an_mcp_server_announces_the_kept_entry",
+    "tests/integration/test_mcp_kept_entry_announcement_lifecycle.py::test_a_local_bundle_install_announces_the_kept_entry",
+    "tests/unit/install/test_mcp_write_receipts.py::test_a_located_rewrite_supersedes_the_key_less_record",
+    "tests/unit/install/test_mcp_write_receipts.py::test_announce_only_skips_a_server_redeclared_on_the_same_native_key",
+    "tests/unit/install/test_mcp_write_receipts.py::test_symlinked_evidence_is_reported_on_a_lockless_install"
+  ]
+}

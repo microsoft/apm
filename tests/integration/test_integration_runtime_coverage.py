@@ -240,6 +240,7 @@ class TestIntegrateKiroHooksFlow:
         integrator._rewrite_hooks_data.return_value = ({}, [])
         integrator.check_collision.return_value = False
         integrator.try_adopt_identical.return_value = False
+        integrator.keeps_edited_output.return_value = False
         return integrator
 
     def test_returns_empty_when_kiro_dir_missing(self, tmp_path: Path) -> None:

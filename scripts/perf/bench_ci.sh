@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Perf bench on CI runners: agents only do I/O (seconds), runners do the work.
 #
-#   scripts/perf/bench_ci.sh request BASE_SHA NEW_SHA [JOURNEYS] [FIXTURES] [PAIRS] [RTT] [OS]
+#   scripts/perf/bench_ci.sh request BASE_SHA NEW_SHA [JOURNEYS] [FIXTURES] [PAIRS] [RTT] [OS] [PROFILE]
 #       -> pushes perf-bench/<new8>-<epoch>-<rand6> with bench-request.env; prints the branch.
 #   scripts/perf/bench_ci.sh fetch BRANCH
 #       -> waits for that branch's Perf bench run and prints its summary table.
 #
 # Defaults: the 4 North Star journeys on tree-10, 3 pairs per runner, RTT 30 ms,
-# 3 runners (9 interleaved pairs per side), OS linux (or macos, windows).
-# Wall time is never reported.
+# 3 runners (9 interleaved pairs per side), OS linux (or macos, windows), PROFILE 0
+# (1 adds cProfile top lists from the new side). RTT may be a list (0,30,100).
+# Wall is modeled-RTT wall only.
 # The harness (workflow + tests/benchmarks) comes from HARNESS_REF.
 # Cloud agents: use `gh workflow run perf-bench.yml --ref <harness branch> -f ...`;
 # a push request from a trailer-signed commit stops at action_required.
@@ -23,7 +24,7 @@ die() { echo "[x] $*" >&2; exit 1; }
 request() {
   local base="${1:?BASE_SHA}" new="${2:?NEW_SHA}"
   local journeys="${3:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
-  local fixtures="${4:-tree-10}" pairs="${5:-3}" rtt="${6:-30}" os="${7:-linux}"
+  local fixtures="${4:-tree-10}" pairs="${5:-3}" rtt="${6:-30}" os="${7:-linux}" profile="${8:-0}"
   [[ "$base" =~ ^[0-9a-f]{7,40}$ && "$new" =~ ^[0-9a-f]{7,40}$ ]] || die "SHAs must be hex"
   # A random suffix: two sessions benching one SHA in the same second must not collide.
   local rand; rand="$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')"
@@ -33,8 +34,8 @@ request() {
   git -C "$tmp" init --quiet
   git -C "$tmp" fetch --quiet --depth 1 "$URL" "$HARNESS_REF"
   git -C "$tmp" checkout --quiet FETCH_HEAD
-  printf 'BASE=%s\nNEW=%s\nFIXTURES=%s\nJOURNEYS=%s\nRTT=%s\nPAIRS=%s\nOS=%s\n' \
-    "$base" "$new" "$fixtures" "$journeys" "$rtt" "$pairs" "$os" > "$tmp/bench-request.env"
+  printf 'BASE=%s\nNEW=%s\nFIXTURES=%s\nJOURNEYS=%s\nRTT=%s\nPAIRS=%s\nOS=%s\nPROFILE=%s\n' \
+    "$base" "$new" "$fixtures" "$journeys" "$rtt" "$pairs" "$os" "$profile" > "$tmp/bench-request.env"
   git -C "$tmp" add bench-request.env
   git -C "$tmp" -c user.name="perf-bench" -c user.email="perf-bench@users.noreply.github.com" \
     commit --quiet -m "perf-bench: ${base:0:8} -> ${new:0:8}"
