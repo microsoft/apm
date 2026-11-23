@@ -1044,6 +1044,24 @@ def _finish_selected_profile_uninstall(
     )
 
 
+def _select_packages_or_exit(packages, current_deps, lockfile, *, logger, auth_resolver, dry_run):
+    """Return the declared packages *packages* select; exit 1 before any change otherwise."""
+    packages_to_remove, packages_not_found = _validate_uninstall_packages(
+        packages, current_deps, logger, lockfile, auth_resolver=auth_resolver, dry_run=dry_run
+    )
+    if packages_not_found:
+        logger.error(
+            f"Uninstall aborted: {_count_noun(len(packages_not_found), 'requested package')} "
+            "could not be selected. Resolve the errors above and retry; "
+            "no changes were made."
+        )
+        sys.exit(1)
+    if not packages_to_remove:
+        logger.error("No packages were selected; no changes were made.")
+        sys.exit(1)
+    return packages_to_remove
+
+
 @click.command(
     help="Remove packages using manifest entries or direct locked keys from 'apm deps list'",
     short_help="Remove packages by manifest entry or locked key",
@@ -1168,19 +1186,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Lazy: only construct the resolver when we will actually call the registry.
         auth_resolver = None if dry_run else AuthResolver()
-        packages_to_remove, packages_not_found = _validate_uninstall_packages(
-            packages, current_deps, logger, lockfile, auth_resolver=auth_resolver, dry_run=dry_run
+        packages_to_remove = _select_packages_or_exit(
+            packages,
+            current_deps,
+            lockfile,
+            logger=logger,
+            auth_resolver=auth_resolver,
+            dry_run=dry_run,
         )
-        if packages_not_found:
-            logger.error(
-                f"Uninstall aborted: {_count_noun(len(packages_not_found), 'requested package')} "
-                "could not be selected. Resolve the errors above and retry; "
-                "no changes were made."
-            )
-            sys.exit(1)
-        if not packages_to_remove:
-            logger.error("No packages were selected; no changes were made.")
-            sys.exit(1)
         selected_package_labels = tuple(
             _dependency_lifecycle_label(package) for package in packages_to_remove
         )
