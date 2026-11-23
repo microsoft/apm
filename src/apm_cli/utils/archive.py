@@ -8,6 +8,7 @@ path-traversal, and decompression-bomb guards.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import io
 import os
 import shutil
@@ -32,8 +33,8 @@ MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024
 SUPPORTED_ARCHIVE_FORMATS = frozenset({"zip", "tar.gz"})
 
 _MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED
-# A pax or GNU long-name/long-link header is read whole at its declared size.
-_MAX_TAR_HEADER_BYTES = 1024 * 1024
+# Tar headers, padding and pax records the uncompressed cap does not count.
+_TAR_HEADER_ALLOWANCE = 16 * 1024 * 1024
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -47,53 +48,83 @@ class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
 
 
-class _OversizedTarHeader(tarfile.ReadError):
-    """A tar metadata header declares more bytes than extraction will read."""
+class _TarStreamLimit(tarfile.ReadError):
+    """The decompressed tar stream would pass the uncompressed cap plus headers."""
 
 
-class _BoundedTarInfo(tarfile.TarInfo):
-    """``TarInfo`` that refuses an oversized metadata header before reading it.
+class _BoundedStream:
+    """A decompressed tar stream that refuses to read or seek past *limit*.
 
     ``tarfile`` reads a pax header and a GNU long-name or long-link block into
     memory at the size the header declares, before any member reaches the
-    extraction limits.
+    extraction limits. A read that would pass the limit is refused before
+    anything is read, so memory stays bounded.
     """
 
-    def _refuse_oversized_header(self) -> None:
-        if self.size > _MAX_TAR_HEADER_BYTES:
-            raise _OversizedTarHeader(
-                f"Archive tar header exceeds size limit: {self.size} bytes > "
-                f"{_MAX_TAR_HEADER_BYTES} bytes"
-            )
+    def __init__(self, stream: IO[bytes], limit: int) -> None:
+        self._stream = stream
+        self._limit = limit
 
-    def _proc_pax(self, tar_file):
-        self._refuse_oversized_header()
-        return super()._proc_pax(tar_file)
+    def _refuse(self) -> None:
+        raise _TarStreamLimit(
+            "Archive uncompressed size exceeds size limit: "
+            f"{_MAX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+        )
 
-    def _proc_gnulong(self, tar_file):
-        self._refuse_oversized_header()
-        return super()._proc_gnulong(tar_file)
+    def read(self, size: int | None = -1) -> bytes:
+        remaining = self._limit - self._stream.tell()
+        if size is None or size < 0:
+            size = remaining + 1
+        elif size > remaining:
+            self._refuse()
+        data = self._stream.read(size)
+        if self._stream.tell() > self._limit:
+            self._refuse()
+        return data
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET and offset > self._limit:
+            self._refuse()
+        if whence == io.SEEK_CUR and self._stream.tell() + offset > self._limit:
+            self._refuse()
+        return self._stream.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._stream.tell()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
 
 
+@contextlib.contextmanager
 def open_tar_gz(
     *,
     path: Path | None = None,
     fileobj: IO[bytes] | None = None,
     error_type: type[_ErrorT] = ArchiveError,
-) -> tarfile.TarFile:
-    """Open a gzip-compressed tar for reading with bounded metadata headers."""
-    try:
-        return tarfile.open(name=path, fileobj=fileobj, mode="r:gz", tarinfo=_BoundedTarInfo)
-    except _OversizedTarHeader as exc:
-        raise error_type(str(exc)) from exc
+) -> Iterator[tarfile.TarFile]:
+    """Open a gzip-compressed tar for reading through the bounded stream."""
+    with contextlib.ExitStack() as stack:
+        raw = stack.enter_context(open(path, "rb")) if path is not None else fileobj
+        compressed = stack.enter_context(gzip.GzipFile(fileobj=raw, mode="rb"))
+        stream = _BoundedStream(compressed, _MAX_UNCOMPRESSED_BYTES + _TAR_HEADER_ALLOWANCE)
+        try:
+            tar = stack.enter_context(tarfile.open(fileobj=stream, mode="r:"))
+        except _TarStreamLimit as exc:
+            raise error_type(str(exc)) from exc
+        except OSError as exc:
+            raise tarfile.ReadError("not a gzip file") from exc
+        yield tar
 
 
 def _bounded_members(tar: tarfile.TarFile, error_type: type[_ErrorT]) -> Iterator[tarfile.TarInfo]:
-    """Iterate *tar*, refusing an oversized metadata header before it is read."""
-    tar.tarinfo = _BoundedTarInfo
+    """Iterate *tar*, mapping a refused stream read to *error_type*."""
     try:
         yield from tar
-    except _OversizedTarHeader as exc:
+    except _TarStreamLimit as exc:
         _raise(error_type, str(exc))
 
 

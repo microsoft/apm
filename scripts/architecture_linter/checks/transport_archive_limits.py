@@ -5,7 +5,8 @@
 cap, an uncompressed-size cap, and refusal of links, special files, absolute
 or traversing paths and duplicate or conflicting entries. ``read_zip_member``
 is the single in-memory member reader under the same cap. ``open_tar_gz``
-opens every tar read with size-bounded pax and GNU long-name headers.
+reads every tar through a decompressed stream bounded by the cap plus a
+header allowance, so pax and GNU long-name headers cannot pass it.
 
 Closed world, keyed on call shape rather than variable names:
 
@@ -97,13 +98,18 @@ def _check_archive_extraction_limits(provider: FactsProvider) -> tuple[Violation
             _OWNER,
             (
                 ("re", r"^def open_tar_gz\(", 1, "eq"),
-                ("sub", "tarinfo=_BoundedTarInfo", 1, "eq"),
-                ("sub", "tar.tarinfo = _BoundedTarInfo", 1, "eq"),
+                (
+                    "sub",
+                    "_BoundedStream(compressed, _MAX_UNCOMPRESSED_BYTES + _TAR_HEADER_ALLOWANCE)",
+                    1,
+                    "eq",
+                ),
+                ("sub", 'tarfile.open(fileobj=stream, mode="r:")', 1, "eq"),
                 ("sub", "_bounded_members(tar, error_type)", 1, "eq"),
                 ("sub", "tarfile.open(path", 0, "eq"),
-                ("sub", "tarfile.open(fileobj", 0, "eq"),
+                ("sub", 'mode="r:gz"', 0, "eq"),
             ),
-            "tar archives are read only through open_tar_gz, whose headers are size-bounded",
+            "tar archives are read only through open_tar_gz, whose decompression is bounded",
         )
     )
     findings.extend(
