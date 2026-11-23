@@ -54,6 +54,7 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_without_apm_modules_a_replaced_survivor_refuses",
     "tests/unit/test_uninstall_local_reanchor_rollback.py::test_a_failed_postcommit_binding_rolls_the_reanchor_back",
     "tests/unit/test_uninstall_local_reanchor_rollback.py::test_any_failed_receipt_rename_rolls_the_reanchor_back",
-    "tests/unit/test_uninstall_local_reanchor_refusals.py::test_a_local_row_without_a_path_is_unverified_offline"
+    "tests/unit/test_uninstall_local_reanchor_refusals.py::test_a_local_row_without_a_path_is_unverified_offline",
+    "tests/unit/test_uninstall_local_reanchor_rollback.py::test_an_unreadable_committed_lock_rolls_the_reanchor_back"
   ]
 }
