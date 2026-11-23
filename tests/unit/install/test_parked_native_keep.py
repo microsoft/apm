@@ -19,7 +19,7 @@ from apm_cli.claude_plugins.admission import ClaudeNativePlugin
 from apm_cli.install.deployment_plan import PackageDeploymentPlan, carry_kept_loose_into_replay
 from apm_cli.integration.targets import KNOWN_TARGETS
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I4")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I4")]
 
 _PRIOR = (
     ".agents/skills/demo",

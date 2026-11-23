@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
+# Primitive kinds whose loose files run nothing; a parked plan may keep them.
+_INERT_PRIMITIVES = ("skills", "instructions", "agents", "commands", "prompts")
+
+
 @dataclass(frozen=True)
 class PackageDeploymentPlan:
     """Authorized package selection shared by batch preflight and deployment."""
@@ -59,13 +63,19 @@ class PackageDeploymentPlan:
         native = self.claude_native
         if self.codex_native is not None or native is None or not native.parked:
             return ()
-        harnesses = [t for t in self.target_selection.targets if t.name in native.harnesses]
-        if not harnesses:
-            return ()
-        from apm_cli.integration.targets import get_integration_prefixes
-
-        prefixes = get_integration_prefixes(targets=harnesses, user_scope=user_scope)
-        return tuple(value for value in prior_values if value.startswith(prefixes))
+        prefixes: list[str] = []
+        for target in self.target_selection.targets:
+            if target.name not in native.harnesses:
+                continue
+            root = target.prefix
+            for kind in _INERT_PRIMITIVES:
+                mapping = target.primitives.get(kind)
+                if mapping is not None:
+                    base = f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else root
+                    prefixes.append(f"{base}{mapping.subdir}/")
+        # Only inert primitive files: hooks, merged settings, bin/, MCP and LSP
+        # entries stay on the cleanup path a trust or policy verdict decides.
+        return tuple(value for value in prior_values if value.startswith(tuple(prefixes)))
 
 
 def keep_loose_for_parked_native(
@@ -335,7 +345,10 @@ def carry_kept_loose_into_replay(
     plan = result.get("deployment_plan")
     if not isinstance(plan, PackageDeploymentPlan):
         return
+    hashed = getattr(lock_dep, "deployed_file_hashes", None) or {}
     for value in plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope):
+        if value not in hashed:
+            continue  # only bytes the lock binds by hash stand in for the replay
         live = deploy_root / value
         if live.is_symlink() or not live.is_file():
             continue

@@ -626,7 +626,9 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    integrators.skill.serve_natively(frozenset(native_target_names))
+    getattr(integrators.skill, "serve_natively", lambda _harnesses: None)(
+        frozenset(native_target_names)
+    )
     with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,

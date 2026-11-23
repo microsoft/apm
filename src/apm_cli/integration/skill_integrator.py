@@ -1606,6 +1606,7 @@ class SkillIntegrator(BaseIntegrator):
         never become a package's ownership proof.
         """
         enforce_agent_plugin_deployment_boundary(package_info)
+        # Consume the package's native harnesses so they never reach another package.
         self._skill_native_harnesses = self._pending_native_harnesses
         self._pending_native_harnesses = frozenset()
         from apm_cli.core.scope import InstallScope, get_apm_dir
