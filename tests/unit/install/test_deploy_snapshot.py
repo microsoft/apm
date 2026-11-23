@@ -1663,3 +1663,22 @@ def test_an_entry_the_path_cannot_reach_now_is_kept_not_a_crash(
 
     assert [rel for rel, _reason in outcome.kept] == [".kiro/skills/s"]
     assert (skill / "ref").read_bytes() == b"now a file\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows read-only flag")
+def test_on_windows_only_clearing_a_read_only_flag_is_wider(tmp_path: Path, apm_home: Path) -> None:
+    """Windows reports coarse modes (0o666 or 0o444 for a file): a restore is refused only
+    when it would clear a read-only flag the path has now, so a removed file restores."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(config)
+    config.unlink()
+    journal.after_write(config)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert (outcome.restored, outcome.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES

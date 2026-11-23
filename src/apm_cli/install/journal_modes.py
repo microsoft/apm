@@ -70,7 +70,12 @@ def _ceiling(path: Path, directory: bool) -> int | None:
 
 
 def _within(bits: int, ceiling: int | None) -> bool:
-    return ceiling is not None and not bits & ~ceiling
+    if ceiling is None:
+        return False
+    if os.name == "nt":
+        # Windows modes only carry the read-only flag: widening is clearing it.
+        return not (bits & stat.S_IWRITE and not ceiling & stat.S_IWRITE)
+    return not bits & ~ceiling
 
 
 def never_wider(path: Path, copy: Path, kind: str, mode: int | dict[str, int]) -> bool:
