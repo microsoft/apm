@@ -1101,3 +1101,125 @@ def test_uninstall_user_bundle_with_a_home_rooted_claude_config(
     claims = load_yaml(lock_path).get("local_deployed_files") or []
     assert not [p for p in claims if p.endswith("/x.sh")], claims
     assert not (home / "hooks" / "hookpkg").exists()
+
+
+# The pending record is locked while uninstall drops the bundle's hooks entry:
+# the OS refuses that one update (rewrite or delete); every other write runs.
+_LOCKED_PENDING_RECORD = """
+import errno
+import os
+from pathlib import Path
+
+from apm_cli.cli import cli
+
+_RECORD = ".local-bundle-pending.json"
+_write_text, _unlink = Path.write_text, Path.unlink
+
+
+def _locked(path):
+    return os.environ.get("APM_TEST_LOCK_PENDING_RECORD") == "1" and path.name == _RECORD
+
+
+def write_text(self, data, *args, **kwargs):
+    if _locked(self) and '"hooks"' not in data:
+        raise PermissionError(errno.EACCES, "injected locked pending record", str(self))
+    return _write_text(self, data, *args, **kwargs)
+
+
+def unlink(self, *args, **kwargs):
+    if _locked(self):
+        raise PermissionError(errno.EACCES, "injected locked pending record", str(self))
+    return _unlink(self, *args, **kwargs)
+
+
+Path.write_text = write_text
+Path.unlink = unlink
+cli()
+"""
+
+
+def _source_apm(world: MarketplacePackWorld, cwd: Path, *args: str, expect: int):
+    """Run the source CLI with the pending record locked (an OS boundary fault)."""
+    import sys
+
+    from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
+
+    env = dict(world.env)
+    env["APM_TEST_LOCK_PENDING_RECORD"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [p for p in (env.get("PYTHONPATH"), *(str(Path(x).resolve()) for x in sys.path if x)) if p]
+    )
+    runner = ApmLifecycleRunner((sys.executable, "-c", _LOCKED_PENDING_RECORD))
+    result = runner.run(args, scenario_id="locked-pending", cwd=cwd, env=env)
+    assert result.returncode == expect, (result.stdout, result.stderr)
+    return result
+
+
+def _pending_types(project: Path) -> dict[str, list[str]]:
+    record = project / "apm_modules" / ".local-bundle-pending.json"
+    if not record.is_file():
+        return {}
+    bundles = json.loads(record.read_text(encoding="utf-8"))["bundles"]
+    return {slug: entry["exec_types"] for slug, entry in bundles.items()}
+
+
+def test_uninstall_bundle_finishes_a_pending_record_update_that_failed(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4987: a retry after a failed pending-record update clears the stale hooks entry.
+
+    The hooks, scripts and claims are removed, then the pending-record update
+    fails (the file is locked). Once access is fixed, a retry finishes that
+    update and changes no other file.
+    """
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "locked-pending-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    assert "hooks" in _pending_types(consumer)["hookpkg"]
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert _bundle_hook_claims(world, consumer) == [script]
+
+    failed = _source_apm(world, consumer, "uninstall", "hookpkg", expect=1)
+    text = " ".join(output(failed).split())
+    assert "Traceback" not in failed.stderr, failed.stderr
+    assert "apm_modules/.local-bundle-pending.json" in text, text
+    assert "run 'apm uninstall hookpkg' again" in text, text
+    assert _hook_entries(consumer) == {}
+    assert _bundle_hook_claims(world, consumer) == []
+    assert "hooks" in _pending_types(consumer)["hookpkg"], "the stale entry is the fault's"
+
+    before = tree_bytes(consumer)
+    retried = world.apm(consumer, "uninstall", "hookpkg")
+    assert "Removed hooks from local bundle 'hookpkg'" in output(retried), output(retried)
+    after = tree_bytes(consumer)
+    changed = {p for p in before.keys() | after.keys() if before.get(p) != after.get(p)}
+    assert changed == {"apm_modules/.local-bundle-pending.json"}, changed
+    assert "hooks" not in _pending_types(consumer).get("hookpkg", [])
+    world.apm(consumer, "audit", "--ci")
+    pending = output(world.apm(consumer, "approve", "--pending"))
+    assert "All packages with executables are approved." in pending, pending
+    again = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+    assert "Local bundle 'hookpkg' has no hooks deployed" in again, again
+    assert tree_bytes(consumer) == after
+
+
+def test_uninstall_refuses_a_bundle_whose_hooks_are_only_parked(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4987 control: a parked-only bundle (no failed cleanup) is still refused as today."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, _key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("parked-only-consumer", targets=("claude",))
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest["executables"] = {}
+    dump_yaml(manifest, consumer / "apm.yml")
+    parked = output(world.apm(consumer, "install", str(bundle)))
+    assert "Skipped 2 bundle hook file(s) from hookpkg" in parked, parked
+    assert "hooks" in _pending_types(consumer)["hookpkg"]
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", "hookpkg", expect=1))
+
+    assert "Local bundle 'hookpkg' has no hooks deployed" in refused, refused
+    assert tree_bytes(consumer) == before
