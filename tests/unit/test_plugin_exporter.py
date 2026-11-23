@@ -1213,6 +1213,30 @@ class TestExportPluginBundle:
         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
             return export_plugin_bundle(project, tmp_path / "build").bundle_path
 
+    @pytest.mark.parametrize(
+        "deployed",
+        [
+            [".grok/rules/py.instructions.md"],
+            [".grok/rules/py.instructions.md", ".github/instructions/py.instructions.md"],
+        ],
+    )
+    def test_grok_instructions_pack_as_the_apm_rendering(self, tmp_path, deployed):
+        """#3686: Grok Build copies instructions under their source name, not as .md."""
+        project = _setup_plugin_project(tmp_path)
+        for rel in deployed:
+            (project / rel).parent.mkdir(parents=True, exist_ok=True)
+            (project / rel).write_text('---\napplyTo: "**/*.py"\n---\n# py\n', encoding="utf-8")
+        _write_lockfile(
+            project, [LockedDependency(repo_url="acme/dep", depth=1, deployed_files=deployed)]
+        )
+        with patch("apm_cli.bundle.plugin_exporter._rich_warning") as warning:
+            bundle = export_plugin_bundle(project, tmp_path / "build").bundle_path
+
+        assert [p.name for p in (bundle / "instructions").iterdir()] == ["py.instructions.md"]
+        pack = yaml.safe_load((bundle / "apm.lock.yaml").read_text())["pack"]
+        assert pack["renderings"] == {"instructions/py.instructions.md": ".instructions.md"}
+        assert not any("collision" in str(call) for call in warning.call_args_list)
+
     @pytest.mark.parametrize("claude_first", [True, False])
     def test_dotted_instruction_stems_keep_each_apm_rendering(self, tmp_path, claude_first):
         """#3686: py and py.instructions both ship their APM (applyTo) rendering."""

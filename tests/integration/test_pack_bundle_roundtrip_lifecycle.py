@@ -262,6 +262,42 @@ def test_multi_target_pack_ships_one_rendering_per_primitive(
     assert (copilot / ".github" / "agents" / "rv.agent.md").is_file()
 
 
+@pytest.mark.parametrize("targets", [("grok-build",), ("grok-build", "copilot")])
+def test_grok_instructions_round_trip_under_their_source_name(
+    tmp_path: Path, apm_binary_path: Path, targets: tuple[str, ...]
+) -> None:
+    """#3686: Grok Build copies instructions verbatim, so they pack and install as such."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    package = world.isolated.package_root / "rulepkg"
+    write(package / "apm.yml", "name: rulepkg\nversion: 1.0.0\ndescription: r\n")
+    write(package / ".apm" / "instructions" / "py.instructions.md", _SCOPED_RULE)
+    _, commit = world.publish("rulepkg", package)
+    producer = world.consumer(
+        "grok-producer",
+        targets=targets,
+        deps=({"git": remote_url("rulepkg"), "ref": commit.sha},),
+    )
+    (producer / ".grok").mkdir(exist_ok=True)
+    world.apm(producer, "install", "--no-policy")
+    assert (producer / ".grok" / "rules" / "py.instructions.md").read_text() == _SCOPED_RULE
+
+    packed = output(world.apm(producer, "pack", "--format", "plugin", "-o", str(tmp_path / "out")))
+    assert "collision" not in packed, packed
+    bundle = tmp_path / "out" / "grok-producer-0.1.0"
+    assert [p.name for p in (bundle / "instructions").iterdir()] == ["py.instructions.md"]
+
+    for consumer_targets, deployed in (
+        (("copilot",), (".github", "instructions", "py.instructions.md")),
+        (("grok-build",), (".grok", "rules", "py.instructions.md")),
+    ):
+        consumer = world.consumer(f"{consumer_targets[0]}-consumer", targets=consumer_targets)
+        (consumer / ".grok").mkdir(exist_ok=True)
+        world.apm(consumer, "install", str(bundle), "--no-policy")
+        assert consumer.joinpath(*deployed).read_text() == _SCOPED_RULE
+        assert not list(consumer.rglob("*.instructions.instructions.md"))
+        world.apm(consumer, "audit", "--ci", "--no-policy")
+
+
 def test_share_hint_in_a_bare_directory_leaves_an_auditable_project(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

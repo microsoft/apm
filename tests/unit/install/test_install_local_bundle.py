@@ -1475,6 +1475,16 @@ class TestLocalBundlePathRouting:
                 },
             ),
             ("codex", {"agents/rv.agent.md"}),
+            # Grok Build copies instructions verbatim under their source name.
+            (
+                "grok-build",
+                {
+                    "agents/rv.agent.md",
+                    "agents/rv.toml",
+                    "instructions/py.md",
+                    "instructions/py.mdc",
+                },
+            ),
         ],
     )
     def test_duplicated_bundle_keeps_the_target_own_rendering(
@@ -1508,6 +1518,33 @@ class TestLocalBundlePathRouting:
             ).keys()
             == superseded
         )
+
+    @pytest.mark.parametrize(
+        ("target_name", "deployed"),
+        [("grok-build", "rules/py.instructions.md"), ("claude", "rules/py.md")],
+    )
+    def test_packed_instruction_lowers_to_the_target_deployed_name(
+        self, target_name: str, deployed: str
+    ) -> None:
+        """#3686: a bundle installs an instruction under the name a source install gives it."""
+        from apm_cli.install.local_bundle_paths import (
+            bundle_deploy_relative_path,
+            known_bundle_deploy_prefixes,
+            target_bundle_deploy_prefixes,
+        )
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        target = KNOWN_TARGETS[target_name]
+        lowered = bundle_deploy_relative_path(
+            "instructions/py.instructions.md",
+            target_bundle_deploy_prefixes(target),
+            known_bundle_deploy_prefixes(),
+            target=target,
+            hooks_approved=True,
+            canvas_approved=True,
+            rendering_extension=".instructions.md",
+        )
+        assert lowered == deployed
 
     @pytest.mark.parametrize(
         ("target_name", "rel", "rule_format"),

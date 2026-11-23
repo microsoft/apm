@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 def _identity(name: str) -> str:
@@ -80,6 +81,19 @@ PLUGIN_RENDERING_PREFERENCE: dict[str, tuple[str, ...]] = {
     "instructions": (".instructions.md", ".md", ".mdc"),
 }
 
+# A target without a rule transform (Copilot, Grok Build) copies an APM
+# instruction verbatim under its source name (InstructionIntegrator), so its
+# files carry the APM suffix whatever extension its mapping declares.
+_APM_INSTRUCTION_SUFFIX = ".instructions.md"
+
+
+def deployed_file_extension(primitive_kind: str, mapping: Any) -> str | None:
+    """Return the extension a target's deployed *primitive_kind* files carry."""
+    if primitive_kind == "instructions" and not mapping.output_compare:
+        return _APM_INSTRUCTION_SUFFIX
+    return mapping.extension
+
+
 # Formats a Claude plugin loads as-is: preferred over another target's
 # rendering with the same extension (a Kiro prompt drops its frontmatter).
 PLUGIN_NATIVE_FORMATS = frozenset({"claude_agent", "claude_command"})
@@ -141,15 +155,12 @@ def _deployed_rendering(deployed_rel: str) -> tuple[str, str, str, str] | None:
         for kind, mapping in profile.primitives.items():
             root = mapping.deploy_root or profile.root_dir
             prefix = f"{root.strip('/')}/{mapping.subdir}/"
-            if kind not in heads or not mapping.subdir or not mapping.extension:
+            extension = deployed_file_extension(kind, mapping)
+            if kind not in heads or not mapping.subdir or not extension:
                 continue
-            stem = deployed_rel[len(prefix) : -len(mapping.extension)]
-            if (
-                deployed_rel.startswith(prefix)
-                and deployed_rel.endswith(mapping.extension)
-                and stem
-            ):
-                return heads[kind], mapping.extension, mapping.format_id, stem
+            stem = deployed_rel[len(prefix) : -len(extension)]
+            if deployed_rel.startswith(prefix) and deployed_rel.endswith(extension) and stem:
+                return heads[kind], extension, mapping.format_id, stem
     return None
 
 

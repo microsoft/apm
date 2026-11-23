@@ -343,11 +343,18 @@ def _lower_to_target(
         if head == "instructions" and target.compile_family:
             return rel_path
         return None
-    _head, _primitive_kind, spec, mapping = route
+    _head, primitive_kind, spec, mapping = route
     if _is_unsupported_route(rel_path, mapping):
         return None
+    from ..bundle.plugin_layout import deployed_file_extension
+
     parts = rel_path.split("/", 1)[1].split("/")
-    parts[-1] = _retarget_basename(parts[-1], mapping, spec.apm_basename_fn, rendering_extension)
+    parts[-1] = _retarget_basename(
+        parts[-1],
+        deployed_file_extension(primitive_kind, mapping),
+        spec.apm_basename_fn,
+        rendering_extension,
+    )
     lowered_tail = "/".join(parts)
     if not mapping.subdir:
         return lowered_tail
@@ -375,17 +382,16 @@ def _plugin_layout_route(
 
 def _retarget_basename(
     name: str,
-    mapping: Any,
+    extension: str | None,
     apm_basename_fn: Callable[[str], str],
     rendering_extension: str | None = None,
 ) -> str:
-    """Retarget a plugin-native file basename through a PrimitiveMapping.
+    """Retarget a plugin-native file basename to a target's deployed *extension*.
 
     A known *rendering_extension* is stripped exactly, so a Claude agent named
     ``rv.agent.md`` keeps its ``rv.agent`` stem instead of colliding with
     ``rv.md``; otherwise the longest primitive suffix is stripped.
     """
-    extension = mapping.extension
     if not extension or extension.startswith("/"):
         return name
     if not extension.startswith("."):
@@ -449,7 +455,11 @@ def superseded_bundle_renderings(
     extension is kept, then the rendering a plugin bundle prefers. Returns
     ``{skipped: kept}``; callers name every skipped path.
     """
-    from ..bundle.plugin_layout import PLUGIN_RENDERING_PREFERENCE, primitive_file_suffix
+    from ..bundle.plugin_layout import (
+        PLUGIN_RENDERING_PREFERENCE,
+        deployed_file_extension,
+        primitive_file_suffix,
+    )
 
     groups: dict[str, list[tuple[bool, int, str]]] = {}
     for rel in sorted(rel_paths):
@@ -464,7 +474,8 @@ def superseded_bundle_renderings(
             continue
         suffix = known or primitive_file_suffix(deploy_rel)
         rank = preference.index(suffix) if suffix in preference else len(preference)
-        groups.setdefault(lowered, []).append((suffix != route[3].extension, rank, rel))
+        own = deployed_file_extension(route[1], route[3])
+        groups.setdefault(lowered, []).append((suffix != own, rank, rel))
     superseded: dict[str, str] = {}
     for members in groups.values():
         kept = min(members)[2]
