@@ -327,14 +327,14 @@ def _write(path: Path, data: bytes, scratch: Path, created: list[_Created] | Non
     while parent != parent.parent and not os.path.lexists(parent):
         made.append(parent)
         parent = parent.parent
+    from apm_cli.cache.deploy_store import plain_file_mode
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    mask = os.umask(0)
-    os.umask(mask)
     # The scratch file goes with the staging root the commit or rollback removes.
     fd, temp = tempfile.mkstemp(dir=scratch)
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
-    os.chmod(temp, 0o666 & ~mask)
+    os.chmod(temp, plain_file_mode())
     try:
         if os.name == "nt":
             os.rename(temp, path)

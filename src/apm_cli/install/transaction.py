@@ -155,6 +155,10 @@ class InstallTransaction:
         acquire_lock: bool = True,
     ) -> None:
         """Capture the manifest and create one resolution staging session."""
+        from apm_cli.cache.deploy_store import plain_file_mode
+
+        # Read the umask now, before the pipeline starts any worker thread.
+        plain_file_mode()
         self.manifest_path = manifest_path
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation

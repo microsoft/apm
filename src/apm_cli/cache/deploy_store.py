@@ -31,6 +31,7 @@ empties it; an empty store only means the next command does the full work.
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -38,7 +39,6 @@ import re
 import stat
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 from ..core.invocation_memo import invocation_memo
@@ -365,11 +365,14 @@ class DeployStore:
         return clean_cache_buckets((self._root,))
 
 
-_UMASK_LOCK = threading.Lock()
-
-
+@functools.cache
 def plain_file_mode() -> int:
-    """The permission bits a plain new file gets in this process (``0o666 & ~umask``)."""
+    """The permission bits a plain new file gets in this process (``0o666 & ~umask``).
+
+    Read once per process: Linux reports the umask in ``/proc``; elsewhere the
+    only way is a process-wide ``os.umask`` swap, so it happens once, primed by
+    the install transaction before any worker thread exists.
+    """
     if sys.platform.startswith("linux"):
         try:
             with open("/proc/self/status", encoding="ascii") as status:
@@ -378,9 +381,8 @@ def plain_file_mode() -> int:
                         return 0o666 & ~int(line.split()[1], 8)
         except (OSError, ValueError):
             pass
-    with _UMASK_LOCK:
-        mask = os.umask(0o022)
-        os.umask(mask)
+    mask = os.umask(0o022)
+    os.umask(mask)
     return 0o666 & ~mask
 
 
