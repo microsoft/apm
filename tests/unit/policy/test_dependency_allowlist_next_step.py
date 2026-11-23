@@ -555,3 +555,50 @@ def test_a_final_symlink_uninstall_would_keep_withholds_the_advice_and_names_it(
         assert [r.to_json()["command"] for r in check.remediations] == [
             "apm uninstall acme/evil-pkg"
         ], line
+
+
+def _symlinked_claim(root: Path, deployed: str, link_to: Path) -> None:
+    target = root / deployed
+    target.parent.mkdir(parents=True, exist_ok=True)
+    link_to.parent.mkdir(parents=True, exist_ok=True)
+    link_to.write_text("# rules\n", encoding="utf-8")
+    target.symlink_to(link_to)
+
+
+def test_a_final_symlink_inside_the_project_also_withholds_the_advice(
+    tmp_path: Path, capsys
+) -> None:
+    """#5008: cleanup keeps an in-project link it holds no evidence for, so no uninstall."""
+    deployed = ".github/instructions/evil.instructions.md"
+    root = _project(
+        tmp_path,
+        ["acme/evil-pkg"],
+        [LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed])],
+    )
+    _symlinked_claim(root, deployed, root / "docs" / "rules.md")
+
+    check = _allowlist(root)
+
+    assert check.remediations == ()
+    assert f"{deployed} is a symbolic link" in _stderr(capsys, check)[2]
+
+
+def test_a_final_symlink_a_survivor_still_claims_keeps_the_advice(tmp_path: Path, capsys) -> None:
+    """#5008: a path a surviving dependency also claims is kept, not deleted."""
+    deployed = ".github/instructions/shared.instructions.md"
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [
+            LockedDependency(repo_url="acme/evil-pkg", depth=1, deployed_files=[deployed]),
+            LockedDependency(repo_url="contoso/keep", depth=1, deployed_files=[deployed]),
+        ],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.md")
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == [
+        "apm uninstall acme/evil-pkg"
+    ], _stderr(capsys, check)

@@ -390,25 +390,21 @@ def _deployment_paths_validate(cleanup_keys: set[str], project: AllowlistProject
 
 
 def _final_symlinks(cleanup_keys: set[str], project: AllowlistProject) -> list[str]:
-    """Recorded paths that are final symlinks target cleanup refuses to remove (#5008).
+    """Files the uninstall would delete that are final symlinks (#5008).
 
-    Uninstall's target cleanup validates each path with
-    ``allow_final_symlink=False``, so it keeps such a path and stops.
+    Target cleanup keeps such a path, out of the project
+    (``allow_final_symlink=False`` containment) or in it (a link carries no
+    receipt or render evidence), so the uninstall would stop. A path a
+    surviving dependency still claims is kept anyway and does not count.
     """
-    from ..core.deployment_ledger import DeploymentLedgerCodec
-    from ..integration.base_integrator import BaseIntegrator
+    from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
 
     root = project.project_root
-    paths = DeploymentLedgerCodec.cleanup_snapshot(project.lock, cleanup_keys).paths
-    return sorted(
+    return [
         path
-        for path in paths
-        if "://" not in path
-        and (root / path).is_symlink()
-        and not BaseIntegrator.validate_deploy_path(
-            path, root, user_scope=False, allow_final_symlink=False
-        )
-    )
+        for path in uninstall_deletion_candidates(project.lock, cleanup_keys)
+        if "://" not in path and (root / path).is_symlink()
+    ]
 
 
 def _deletions_have_evidence(
