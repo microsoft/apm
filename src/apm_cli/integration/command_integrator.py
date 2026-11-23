@@ -372,7 +372,7 @@ class CommandIntegrator(BaseIntegrator):
             # ValueError covers UnicodeDecodeError on a non-UTF-8 source.
             diagnostics.warn(
                 message=(
-                    f"Kept command {source.name} unchanged: unreadable, malformed "
+                    f"Command {source.name} left unchanged: unreadable, malformed "
                     f"or over-budget frontmatter ({exc})."
                 ),
                 package=pkg_name,
