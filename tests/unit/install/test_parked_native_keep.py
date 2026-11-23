@@ -33,6 +33,8 @@ _PRIOR = (
     ".claude/settings.json",
     ".claude/apm-hooks.json",
     ".claude/bin/tool",
+    ".claude/skills/demo/bin/tool",
+    ".claude/skills/demo/.claude-plugin/plugin.json",
 )
 _INERT = (
     ".claude/skills/demo",
@@ -120,3 +122,20 @@ def test_replay_never_carries_a_kept_claim_outside_its_roots(tmp_path: Path) -> 
     assert sorted(p.relative_to(scratch).as_posix() for p in scratch.rglob("*") if p.is_file()) == [
         ".claude/skills/demo/SKILL.md"
     ]
+
+
+def test_replay_never_carries_a_kept_value_through_a_symlinked_parent(tmp_path: Path) -> None:
+    live, scratch = tmp_path / "live", tmp_path / "scratch"
+    (live / "elsewhere/skills/demo").mkdir(parents=True)
+    (live / "elsewhere/skills/demo/SKILL.md").write_text("edited", encoding="ascii")
+    (live / ".claude").symlink_to(live / "elsewhere", target_is_directory=True)
+    lock_dep = SimpleNamespace(
+        deployed_files=[".claude/skills/demo/SKILL.md"],
+        deployed_file_hashes={".claude/skills/demo/SKILL.md": "sha256:a"},
+    )
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, live, scratch, True)
+
+    # Never stand in for the replay: drift then reports the linked copy.
+    assert not (scratch / ".claude/skills/demo/SKILL.md").exists()

@@ -11,6 +11,7 @@ from apm_cli.core.scope import is_user_scope
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
+    has_symlink_component,
     validate_path_segments,
 )
 
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
 
 # Primitive kinds whose loose files run nothing; a parked plan may keep them.
 _INERT_PRIMITIVES = ("skills", "instructions", "agents", "commands", "prompts")
+# Plugin binaries and their activation descriptor deploy inside a skill dir;
+# they are executable members, never kept as inert files.
+_EXECUTABLE_SEGMENTS = frozenset({"bin", ".claude-plugin"})
 
 
 @dataclass(frozen=True)
@@ -76,7 +80,13 @@ class PackageDeploymentPlan:
         prefixes = tuple(
             p for p in kept if not any(p.startswith(o) or o.startswith(p) for o in loose)
         )
-        return tuple(value for value in prior_values if prefixes and value.startswith(prefixes))
+        return tuple(
+            value
+            for value in prior_values
+            if prefixes
+            and value.startswith(prefixes)
+            and _EXECUTABLE_SEGMENTS.isdisjoint(value.split("/"))
+        )
 
 
 def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
@@ -370,7 +380,7 @@ def carry_kept_loose_into_replay(
             replayed = ensure_path_within(scratch_root / value, scratch_root)
         except PathTraversalError:
             continue  # a claim outside its root is never carried; drift reports it
-        if (deploy_root / value).is_symlink() or not live.is_file():
+        if has_symlink_component(deploy_root, deploy_root / value) or not live.is_file():
             continue
         replayed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(live, replayed)
