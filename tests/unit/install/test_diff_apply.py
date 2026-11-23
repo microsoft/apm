@@ -332,17 +332,29 @@ def test_only_this_workspace_s_abandoned_journal_declines_the_fast_path(
     other.mkdir()
     _locked_project(project)
     root = project if owner == "this-workspace" else other
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+
+    def decide() -> tuple[bool, list[str]]:
+        applied = diff_apply.try_apply({}, ["install"], project, frozen_disposition=disposition)
+        trace = [line for line in capsys.readouterr().err.splitlines() if "fast path" in line]
+        return applied, trace
+
+    without_journal = decide()
+    assert not any("interrupted install journal" in line for line in without_journal[1])
     killed = root / "killed.md"
     journal = DeployJournal(tmp_path / "home" / "install-snapshots", root=root)
     journal.record(killed)
     killed.write_bytes(b"half\n")
     journal.after_write(killed)
-    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
 
-    diff_apply.try_apply({}, ["install"], project, frozen_disposition=disposition)
+    with_journal = decide()
 
-    declined = "full run (interrupted install journal)" in capsys.readouterr().err
-    assert declined is (owner == "this-workspace")
+    if owner == "this-workspace":
+        assert with_journal[0] is False
+        assert any("full run (interrupted install journal)" in line for line in with_journal[1])
+    else:
+        # The same decision, and the same trace, as with no journal at all.
+        assert with_journal == without_journal
     assert journal.store is not None and journal.store.is_dir()
     assert killed.read_bytes() == b"half\n"
 
