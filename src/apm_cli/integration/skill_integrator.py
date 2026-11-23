@@ -26,6 +26,7 @@ from apm_cli.integration.skill_adoption import (
     skill_tree_baselines,
     tree_equals_install_output,
 )
+from apm_cli.integration.skill_bundle_routes import promoted_skill_name
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
 )
@@ -204,12 +205,6 @@ def normalize_skill_name(name: str) -> str:
     """
     # Use to_hyphen_case which already handles most normalization
     return to_hyphen_case(name)
-
-
-def promoted_skill_name(raw_name: str) -> str:
-    """The directory name a promoted sub-skill deploys under."""
-    is_valid, _ = validate_skill_name(raw_name)
-    return raw_name if is_valid else normalize_skill_name(raw_name)
 
 
 def copy_skill_to_target(
