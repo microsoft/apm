@@ -191,6 +191,8 @@ class RuntimeManager:
                 # Wire OS-trust child shim so the setup subprocess (and any
                 # Python runtime it spawns) verifies HTTPS against the OS store.
                 env = build_child_tls_env(env)
+                # APM authored this script: what it calls resolves outside the project.
+                env = git_env.trusted_path_environment(env)
 
                 result = subprocess.run(
                     cmd,

@@ -134,22 +134,25 @@ def test_an_entry_whose_ownership_cannot_be_read_fails_the_audit_closed(
     """Ownership APM cannot read never excuses an entry: ``audit --ci`` fails naming why."""
     world = lifecycle_world
     deployed = _withheld_after_deploy(world)
+    external = Path(world.root) / "external-settings.json"
     if unreadable == "non-string-marker":
         _put_back(world, _marked(deployed, {"not": "a marker"}))
         reason = "invalid ownership metadata"
     else:
         if os.name == "nt":
             pytest.skip("creating a symlink needs privileges on Windows")
-        external = Path(world.root) / "external-settings.json"
         external.write_bytes(json.dumps(deployed).encode("ascii"))
         settings = world.project / _SETTINGS
         settings.unlink(missing_ok=True)
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.symlink_to(external)
         reason = "reached through a symlink"
+    # The symlink target lies outside both captured roots: compare its bytes too.
+    target = external.read_bytes() if external.exists() else None
 
     audit = _audit_unchanged(world)
     text = _text(audit)
+    assert (external.read_bytes() if external.exists() else None) == target, text
     assert audit.returncode == 1, text
     assert "hook-approval-pins" in text, text
     assert "its hook paths cannot be checked" in text, text

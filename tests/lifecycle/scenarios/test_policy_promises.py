@@ -21,7 +21,6 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
-from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import use_policy, use_registry
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
@@ -535,14 +534,6 @@ def test_self_defined_allow_installs_an_inline_server(lifecycle_world) -> None:
     assert _configured(lifecycle_world, "p-inline"), _text(result)
 
 
-_SILENT_WARN = KnownFailure(
-    "#5070",
-    "install reports no policy finding for a self-defined MCP server under warn",
-    r"no policy warning names the self-defined server",
-)
-
-
-@_SILENT_WARN.mark()
 def test_self_defined_warn_installs_an_inline_server_and_says_so(lifecycle_world) -> None:
     """mcp.self_defined: warn -- the inline server is written and the warning names it."""
     _self_defined(lifecycle_world, "warn")
@@ -551,7 +542,8 @@ def test_self_defined_warn_installs_an_inline_server_and_says_so(lifecycle_world
     assert _configured(lifecycle_world, "p-inline"), _text(result)
     # The policy finding itself, not the "(self-defined, stdio)" progress label.
     text = _text(result)
-    warned = "Policy warning" in text or "self-defined MCP server(s) (warn)" in text
+    # Install reports warn findings in its summary: "[!] 1 policy warning" (#5070).
+    warned = "policy warning" in text.lower()
     assert warned and "p-inline" in text, f"no policy warning names the self-defined server: {text}"
 
 
@@ -641,6 +633,8 @@ def test_require_resolution_decides_a_pinned_required_package_mismatch(
         assert audit.returncode == 1, _text(audit)
         assert "version mismatch" in _text(audit), _text(audit)
     else:
+        # The audit ran require_resolution and accepted the project's ref.
+        assert audit.returncode == 0, _text(audit)
         assert "version mismatch" not in _text(audit), _text(audit)
 
 
@@ -878,3 +872,41 @@ def test_registry_only_policy_refuses_a_non_registry_package(lifecycle_world) ->
     assert "non-registry source not permitted" in output, output
     assert manifest.read_bytes() == before
     assert not (lifecycle_world.project / ".agents/skills/t-local").exists(), output
+
+
+# -- mcp.self_defined: warn reports at install (#5070) -------------------------------
+
+
+def _self_defined_warnings(result) -> list[tuple[str, str]]:
+    """(header, row) for each summary row naming the inline server."""
+    lines = [line.strip() for line in (result.stdout + result.stderr).splitlines()]
+    return [
+        (lines[i - 1] if i else "", line)
+        for i, line in enumerate(lines)
+        if "p-inline" in line and "self-defined server" in line
+    ]
+
+
+_WARNED = [("[!] 1 policy warning", "+- [p-inline] self-defined server")]
+
+
+@pytest.mark.parametrize("level", ["warn", "allow"])
+def test_install_mcp_reports_a_self_defined_server_only_under_warn(lifecycle_world, level) -> None:
+    """--mcp writes the inline server; only mcp.self_defined: warn names it in a [!] line."""
+    _self_defined(lifecycle_world, level)
+    result = driver.run(lifecycle_world, list(_INLINE))
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+    expected = _WARNED if level == "warn" else []
+    assert _self_defined_warnings(result) == expected, _text(result)
+
+
+def test_install_reports_a_declared_self_defined_server_under_warn(lifecycle_world) -> None:
+    """A plain install of an apm.yml declaring an inline server names it under warn."""
+    _self_defined(lifecycle_world, "allow")
+    assert driver.run(lifecycle_world, list(_INLINE)).returncode == 0
+    _self_defined(lifecycle_world, "warn")
+    result = driver.run(lifecycle_world, ["install"])
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+    assert _self_defined_warnings(result) == _WARNED, _text(result)

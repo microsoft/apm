@@ -198,6 +198,21 @@ class ReplacementBinding:
         """Prune removed dependency requests without changing chosen ownership."""
         return self._retain(lambda parent: parent is None or parent in parent_keys)
 
+    def retain_parents_or_root(self, parent_keys: set[str]) -> bool:
+        """Prune removed requests; anchor at the root when no parent survives (#4851).
+
+        A file claim uninstall could not remove outlives every removed parent;
+        one root request (the first recorded edge's selection) keeps its
+        evidence valid until the next run retires the claim.
+        """
+        if any(
+            request.parent is None or request.parent in parent_keys for request in self.requests
+        ):
+            return self.retain_parents(parent_keys)
+        first = next(iter(self.requests))
+        self.requests = {replace(first, parent=None): None}
+        return True
+
     def drop_root_requests(self) -> bool:
         """Forget the project's own requests once its declaration is gone (#4749).
 
