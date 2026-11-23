@@ -707,3 +707,54 @@ def test_an_interrupted_migration_leaves_the_old_store_whole(tmp_path, apm_home,
     assert users.read_text(encoding="utf-8") == _SKELETON
     assert _apm_empties(apms, root=tmp_path / "apms") is True
     assert not apms.exists()
+
+
+# -- a Windows UNC key survives a reload (#5016 review) ---------------------------------
+
+_UNC_KEY = "//server/share/project/.mcp.json"
+
+
+def test_a_unc_record_survives_another_projects_save(tmp_path, apm_home) -> None:
+    """A record keyed by a UNC path (how a share's file is keyed on Windows) is valid:
+    it is kept when another project's write saves the store, never dropped as malformed."""
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    row = {"path": _UNC_KEY, "origin": "preexisting", "hash": "sha256:" + "0" * 64}
+    store.write_text(json.dumps({"version": 1, "files": [row]}), encoding="utf-8")
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)
+
+    rows = [
+        stored
+        for path in store.parent.glob("*.json")
+        for stored in json.loads(path.read_text(encoding="utf-8")).get("files", [])
+    ]
+    assert row in rows, rows
+
+
+def _unc(path: Path) -> Path | None:
+    """*path* through this machine's administrative share, when one is reachable."""
+    drive = path.drive.rstrip(":")
+    if not drive:
+        return None
+    unc = Path(f"\\\\localhost\\{drive}$") / path.relative_to(path.anchor)
+    try:
+        return unc if unc.exists() else None
+    except OSError:
+        return None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows UNC paths")
+def test_a_users_config_on_a_unc_path_is_never_deleted(tmp_path, apm_home) -> None:
+    project = _unc(tmp_path)
+    if project is None:
+        pytest.skip("no administrative share on this machine")
+    config = project / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=config.parent)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=config.parent) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON

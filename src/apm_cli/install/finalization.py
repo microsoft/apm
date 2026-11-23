@@ -13,13 +13,23 @@ if TYPE_CHECKING:
 def close_install_contexts(
     root_redirect: AbstractContextManager[Any],
     transaction: AbstractContextManager[Any] | None,
+    created_root: Any = None,
+    result: Any = None,
 ) -> None:
-    """Restore the working directory and always close the transaction."""
+    """Restore the working directory and always close the transaction.
+
+    A failed install then discards the ``--root`` directories it created
+    and left empty (*created_root*, a
+    :class:`~apm_cli.install.root_redirect.CreatedRoot`) (#4957).
+    """
+    failed = sys.exc_info()[0] is not None or getattr(result, "exit_code", 0) != 0
     try:
         root_redirect.__exit__(None, None, None)
     finally:
         if transaction is not None:
             transaction.__exit__(*sys.exc_info())
+        if failed and created_root is not None:
+            created_root.discard()
 
 
 def close_pipeline_attempt(ctx: InstallContext) -> None:
