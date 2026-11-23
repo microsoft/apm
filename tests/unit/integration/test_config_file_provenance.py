@@ -359,3 +359,17 @@ def test_a_scratch_render_records_nothing(tmp_path, apm_home) -> None:
     assert config.is_file()
     assert not (apm_home / "deployment-receipts" / "config-files").exists()
     assert config_file_origin(config) is None
+
+
+def test_a_converged_write_leaves_the_record_store_untouched(tmp_path, apm_home) -> None:
+    """I2: a repeat install that changes no config bytes rewrites no record."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    before = (store.stat().st_ino, store.read_bytes())
+
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+
+    assert (store.stat().st_ino, store.read_bytes()) == before
+    assert config_file_origin(config) is Origin.CREATED

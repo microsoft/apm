@@ -188,10 +188,12 @@ class _Store:
             "installations": sorted(self.installations),
             "files": dict(sorted(live.items())),
         }
-        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
         # Machine-local evidence, not a user-editable config.
-        text = json.dumps(data, indent=2)  # architecture-authority-exempt: evidence
-        atomic_write_text(self.path, text + "\n", new_file_mode=0o600)
+        text = json.dumps(data, indent=2) + "\n"  # architecture-authority-exempt: evidence
+        if _regular(self.path) and self.path.read_text(encoding="utf-8") == text:
+            return  # a converged install rewrites nothing (I2)
+        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
+        atomic_write_text(self.path, text, new_file_mode=0o600)
 
 
 def _origin(row: dict[str, Any] | None) -> Origin | None:
@@ -241,13 +243,21 @@ def _unrecorded_origin(store: _Store, manifest_root: Path, before: bytes) -> Ori
 
 
 def _note(path: Path, before: bytes | None, after: bytes, manifest_root: Path | None) -> None:
+    if before == after:
+        return  # nothing written: a converged install records nothing (I2)
     store = _Store.load()
     key, row = store.lookup(path)
     recorded = _origin(row)
     if before is None:
         origin = Origin.CREATED
-    elif recorded is Origin.CREATED and row.get("hash") != _digest(before):
-        # Not the bytes APM last wrote: the file was replaced since, not APM's.
+    elif (
+        recorded is Origin.CREATED
+        and row.get("hash") != _digest(before)
+        and not _holds_entries(before)
+    ):
+        # A bare skeleton where APM's file was: replaced since (for example the user
+        # recreated it after a rollback), so not APM's. A file still holding entries
+        # was only touched by another APM writer; deletion re-checks the bytes.
         origin = Origin.PREEXISTING
     elif recorded is not None:
         origin = recorded
