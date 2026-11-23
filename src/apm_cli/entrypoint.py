@@ -196,10 +196,12 @@ def _vh_mac(root: str, key: bytes, lock_text: bytes):
     import os
 
     mac = hmac.new(key, digestmod=hashlib.sha256)
+    mac.l5_tags = []  # type: ignore[attr-defined]  # research: which input changed
 
     def put(tag: str, data: bytes) -> None:
         mac.update(len(tag).to_bytes(4, "little") + tag.encode())
         mac.update(len(data).to_bytes(8, "little") + data)
+        mac.l5_tags.append([tag, hashlib.sha256(data).hexdigest()[:12]])
 
     def take(path: str) -> None:
         try:
@@ -329,10 +331,14 @@ def _vh_hit() -> bool:
             lock_text = handle.read()
         with open(record_path, encoding="ascii") as handle:
             record = json.load(handle)
-        mac = _vh_mac(root, key, lock_text).hexdigest()
+        live = _vh_mac(root, key, lock_text)
+        mac = live.hexdigest()
         if not hmac.compare_digest(mac, str(record.get("mac", ""))):
             if trace:
-                sys.stderr.write("[i] verdict digest: miss (inputs changed)\n")
+                old = {t: h for t, h in record.get("tags", [])}
+                new = {t: h for t, h in live.l5_tags}
+                changed = sorted(t for t in set(old) | set(new) if old.get(t) != new.get(t))
+                sys.stderr.write(f"[i] verdict digest: miss (inputs changed) {changed[:8]}\n")
             return False
         lock = yaml.load(lock_text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
         if not _vh_rehash(root, lock):
@@ -364,14 +370,15 @@ def _vh_write(stdout_text: str) -> None:
             return
         with open(os.path.join(root, "apm.lock.yaml"), "rb") as handle:
             lock_text = handle.read()
-        mac = _vh_mac(root, key, lock_text).hexdigest()
+        live = _vh_mac(root, key, lock_text)
+        mac = live.hexdigest()
         templated = re.sub(r"in \d+\.\d+s\.", "in @@ELAPSED@@s.", stdout_text)
         path = _vh_record_path(root)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="ascii", errors="replace") as handle:
-            json.dump({"mac": mac, "stdout": templated}, handle)
+            json.dump({"mac": mac, "stdout": templated, "tags": live.l5_tags}, handle)
         os.replace(tmp, path)
     except OSError:
         return
