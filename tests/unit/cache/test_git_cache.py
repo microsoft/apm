@@ -3,7 +3,6 @@
 import errno
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -94,27 +93,15 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     bare = cache._db_root / cache_shard_key(url)
     # Pushes can start background auto-maintenance in the origin; skip its
     # transient lock and temp files so the snapshot copy cannot race them.
-    # An APM-shaped cache bare: a bare clone whose origin names the dependency URL.
-    subprocess.run(
-        [
-            "git",
-            "clone",
-            "-q",
-            "--bare",
-            "--no-tags",
-            "--template=",
-            str(repository.origin),
-            str(bare),
-        ],
-        check=True,
-        capture_output=True,
-        env=isolated.subprocess_env(),
+    # An APM-shaped cache bare: the fixture's bare objects under the config APM writes.
+    shutil.copytree(
+        repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
     )
-    subprocess.run(
-        ["git", "--git-dir", str(bare), "config", "remote.origin.url", url],
-        check=True,
-        capture_output=True,
-        env=isolated.subprocess_env(),
+    shutil.rmtree(bare / "hooks", ignore_errors=True)
+    (bare / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n"
+        f'[remote "origin"]\n\turl = {url}\n\ttagopt = --no-tags\n',
+        encoding="utf-8",
     )
     payload.write_text("current\n", encoding="ascii")
     current_commit = repositories.commit(repository, message="Current observation")
