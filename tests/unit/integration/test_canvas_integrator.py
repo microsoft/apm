@@ -666,3 +666,23 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
 
     assert result["canvases"] == 1
     assert (project_root / ".github" / "extensions" / "widget" / "extension.mjs").is_file()
+
+
+def test_an_unchanged_legacy_member_brings_no_new_content(tmp_path: Path) -> None:
+    """#4626 review: a pre-0.37 lock hash, not the edited disk bytes, is the deployed baseline."""
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    source = tmp_path / "src.mjs"
+    source.write_text("export default 1;\n", encoding="utf-8")
+    deployed = tmp_path / "extension.mjs"
+    deployed.write_text("export default 1;\n// mine\n", encoding="utf-8")
+    integrator = CanvasIntegrator()
+    session = SimpleNamespace(
+        receipted_hash=lambda _path, _targets: None,
+        legacy_recorded_hash=lambda _claim: compute_file_hash(source),
+    )
+    integrator._overwrite_gate = SimpleNamespace(session=session, targets=())
+
+    assert integrator._brings_new_content(deployed, source, "extension.mjs") is False
+    session.legacy_recorded_hash = lambda _claim: None
+    assert integrator._brings_new_content(deployed, source, "extension.mjs") is True

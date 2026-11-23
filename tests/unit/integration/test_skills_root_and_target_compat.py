@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apm_cli.install.deployed_paths import skill_summary_paths
+from apm_cli.install.deployed_paths import skill_dir_entry, skill_summary_paths
 from apm_cli.install.target_filter import (
     explicit_target_failure,
     package_allows_target,
@@ -227,3 +227,37 @@ class TestAllTargetsFilteredOut:
 
         assert message is not None
         assert "The grok-bot target accepts packages that declare agent-skills" in message
+
+
+def test_unresolvable_unselected_receipt_target_skips_skill_dir_adoption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#4813: a relative COPILOT_HOME must not abort a Codex-only install."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setenv("COPILOT_HOME", "relative/copilot")
+    codex = KNOWN_TARGETS["codex"].for_scope(user_scope=True)
+    physical = tmp_path / ".agents" / "skills" / "research" / "SKILL.md"
+
+    assert skill_dir_entry(physical, tmp_path, "copilot", [codex]) == ()
+
+
+@pytest.mark.parametrize(
+    ("selected", "relative"),
+    [
+        ("claude", ".agents/skills/research/SKILL.md"),
+        ("codex", ".copilot/agents/research.agent.md"),
+        ("codex", ".agents/skills/SKILL.md"),
+    ],
+    ids=["other-skills-root", "non-skill-member", "skills-root-file"],
+)
+def test_copilot_receipt_adopts_no_skill_dir_outside_a_shared_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: str, relative: str
+) -> None:
+    """#4813: adoption requires a skill member under the selected target's own root."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    for variable in ("CODEX_HOME", "COPILOT_HOME", "CLAUDE_CONFIG_DIR"):
+        monkeypatch.delenv(variable, raising=False)
+    target = KNOWN_TARGETS[selected].for_scope(user_scope=True)
+
+    assert skill_dir_entry(tmp_path / relative, tmp_path, "copilot", [target]) == ()
