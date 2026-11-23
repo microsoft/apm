@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from apm_cli.utils.content_hash import compute_file_hash
 from tests.integration._mcp_chain_kit import Chain
 from tests.lifecycle import driver
 from tests.utils.apm_lifecycle_runner import CommandResult
@@ -43,7 +44,7 @@ pytestmark = [
 
 _KILL_HOOK = Path(__file__).with_name("_deploy_kill")
 _KILLED_EXIT = 137
-_JOURNAL = "journal.json"
+_JOURNAL = "journal.jsonl"
 _HAND_WRITTEN = ".kiro/hand-written.md"
 _HIDDEN_DESCRIPTION = "agent \\u202e helper"
 _UNMANAGED_POLICY = (
@@ -216,32 +217,44 @@ def test_the_next_install_replays_a_journal_killed_before_a_gate_refusal(
     assert _tree_state(chain.project) == before
 
 
-def _journal(store: Path) -> dict:
-    return json.loads((store / _JOURNAL).read_text(encoding="utf-8"))
+def _journal(store: Path) -> list[dict]:
+    """The manifest lines: a header, then one line per journaled path."""
+    text = (store / _JOURNAL).read_text(encoding="utf-8")
+    return [json.loads(line) for line in text.splitlines()]
 
 
-def _write_journal(store: Path, journal: dict) -> None:
-    (store / _JOURNAL).write_text(json.dumps(journal), encoding="utf-8")
+def _write_journal(store: Path, lines: list[dict]) -> None:
+    text = "".join(json.dumps(line) + "\n" for line in lines)
+    (store / _JOURNAL).write_text(text, encoding="utf-8")
 
 
-def _unit(journal: dict, suffix: str) -> dict:
-    found = [unit for unit in journal["units"] if unit["path"].endswith(suffix)]
-    assert len(found) == 1, journal["units"]
+def _unit(lines: list[dict], suffix: str) -> dict:
+    found = [line for line in lines[1:] if line["path"].endswith(suffix)]
+    assert len(found) == 1, lines
     return found[0]
 
 
-def _assert_kept_and_reported(chain: Chain, gate: _Gate, store: Path, named: str) -> CommandResult:
-    """The install stops, names *named*, keeps the journal and applies none of it."""
+def _assert_kept_and_reported(
+    chain: Chain, gate: _Gate, store: Path, named: str, *, applied: bool = False
+) -> CommandResult:
+    """The install stops, names *named* and keeps the journal.
+
+    A journal replay cannot prove is not applied at all; a path that fails
+    while a proven journal is applied leaves the other paths restored.
+    """
     leftover = _tree_state(chain.project)
     result = chain.run("install", *gate.args)
 
     assert result.returncode == 1, _evidence(result)
     assert named in _text(result), _evidence(result)
     assert _text(result).isascii(), _evidence(result)
-    assert _tree_state(chain.project) == leftover, _evidence(result)
+    if not applied:
+        assert _tree_state(chain.project) == leftover, _evidence(result)
     kept = [s for s in _stores(chain) if s.name.endswith(store.name.removeprefix("deploy-"))]
     assert len(kept) == 1, _stores(chain)
+    assert kept[0].name.startswith("retained-"), kept
     assert (kept[0] / _JOURNAL).is_file(), sorted(kept[0].iterdir())
+    # The kept journal is not replayed again: the next install proceeds.
     return result
 
 
@@ -253,14 +266,17 @@ def test_an_unrestorable_path_keeps_the_journal_and_names_the_path(
 ) -> None:
     chain, _before = _killed_world(tmp_path, apm_binary_path, _SCAN)
     store = _abandoned(chain)
-    agent = _unit(_journal(store), "pkg-agent.agent.md")
+    journal = _journal(store)
+    agent = _unit(journal, "pkg-agent.md")
+    extra = _unit(journal, "extra-agent.md")
     # Its parent is now a regular file, so the prior bytes cannot be put back.
     parent = (chain.project / agent["path"]).parent
     shutil.rmtree(parent)
     parent.write_text("not a directory\n", encoding="utf-8")
     _SCAN.cure(chain)
 
-    _assert_kept_and_reported(chain, _SCAN, store, agent["path"])
+    _assert_kept_and_reported(chain, _SCAN, store, agent["path"], applied=True)
+    assert not (chain.project / extra["path"]).exists()
 
 
 def test_a_malformed_journal_is_kept_and_reported_not_applied(
@@ -283,9 +299,7 @@ def test_a_journal_path_escaping_its_root_is_kept_and_reported_not_applied(
     outside.write_text("# outside the deploy root\n", encoding="utf-8")
     journal = _journal(store)
     escaping = "../outside.md"
-    journal["units"].append(
-        {"path": escaping, "kind": "absent", "copy": None, "sha256": None, "link": None}
-    )
+    journal.append({"base": "root", "path": escaping, "kind": "absent", "copy": None})
     _write_journal(store, journal)
     _SCAN.cure(chain)
 
@@ -299,12 +313,12 @@ def test_journal_bytes_the_ledger_does_not_vouch_for_are_kept_not_restored(
     chain, _before = _killed_world(tmp_path, apm_binary_path, _SCAN)
     store = _abandoned(chain)
     journal = _journal(store)
-    agent = _unit(journal, "pkg-agent.agent.md")
+    agent = _unit(journal, "pkg-agent.md")
     # A self-consistent journal: the copy re-hashes to its recorded hash, but
     # the ledger recorded other bytes for this path.
     forged = b"# forged prior bytes\n"
     (store / agent["copy"]).write_bytes(forged)
-    agent["sha256"] = hashlib.sha256(forged).hexdigest()
+    agent["hash"] = compute_file_hash(store / agent["copy"])
     _write_journal(store, journal)
     _SCAN.cure(chain)
 

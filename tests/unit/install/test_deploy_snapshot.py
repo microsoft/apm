@@ -66,7 +66,8 @@ def test_only_the_paths_an_install_writes_are_copied(tmp_path: Path, apm_home: P
     write_seam.write_text_lf(agents / "touched.md", "v3\n")
 
     [store] = (apm_home / "install-snapshots").iterdir()
-    assert [p.read_bytes() for p in store.iterdir()] == [b"v1\n"]
+    copies = [p.read_bytes() for p in store.iterdir() if p.name != "journal.jsonl"]
+    assert copies == [b"v1\n"]
     transaction.rollback()
     assert (agents / "touched.md").read_bytes() == b"v1\n"
     assert not (apm_home / "install-snapshots").exists()
@@ -154,20 +155,60 @@ class _no_error:
         return False
 
 
-def test_the_next_install_reaps_abandoned_journals(tmp_path: Path, apm_home: Path) -> None:
-    store_parent = apm_home / "install-snapshots"
-    abandoned = store_parent / "deploy-killed"
-    retained = store_parent / "retained-needed"
-    for store in (abandoned, retained):
-        store.mkdir(parents=True)
-        (store / "0").write_bytes(b"prior\n")
-    transaction = _transaction(tmp_path / "project", acquire_lock=True)
+def test_the_next_install_replays_only_its_own_abandoned_journals(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """#4863: a killed install's journal is replayed for its root; others stay."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
 
-    transaction.journal_deploy_writes()
+    store_parent = apm_home / "install-snapshots"
+    project, other = tmp_path / "project", tmp_path / "other"
+    for root in (project, other):
+        root.mkdir()
+    created, foreign = project / ".kiro" / "a.md", other / "b.md"
+    for root, path in ((project, created), (other, foreign)):
+        journal = DeployJournal(store_parent, root=root)
+        journal.record(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"deployed by a killed install\n")
+    retained = store_parent / "retained-needed"
+    retained.mkdir()
+    (retained / "0").write_bytes(b"prior\n")
+    transaction = _transaction(project, acquire_lock=True)
+
     transaction.rollback()
 
-    assert not abandoned.exists()
+    assert not created.exists() and not created.parent.exists()
+    assert foreign.read_bytes() == b"deployed by a killed install\n"
+    assert sorted(p.name.split("-")[0] for p in store_parent.iterdir()) == ["deploy", "retained"]
     assert (retained / "0").read_bytes() == b"prior\n"
+
+
+def test_receipts_under_apm_home_replay_without_a_ledger_row(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """APM-home metadata restores when it re-hashes as journaled; root paths need the ledger."""
+    from apm_cli.install.deploy_snapshot import (
+        DeployJournal,
+        JournalReplayError,
+        replay_abandoned_journals,
+    )
+
+    project = tmp_path / "project"
+    receipt, deployed = apm_home / "deployment-receipts" / "r.json", project / "a.md"
+    for path in (receipt, deployed):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    for path in (receipt, deployed):
+        journal.record(path)
+        path.write_bytes(b"killed\n")
+
+    with pytest.raises(JournalReplayError, match="kept") as kept:
+        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+
+    assert kept.value.issues == [("a.md", "the deployment ledger does not record these bytes")]
+    assert receipt.read_bytes() == deployed.read_bytes() == b"killed\n"
 
 
 def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: Path) -> None:
@@ -193,7 +234,7 @@ def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: 
 def test_a_marked_store_survives_the_reaper_when_its_rename_fails(
     tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+    from apm_cli.install.deploy_snapshot import DeployJournal, replay_abandoned_journals
 
     target = tmp_path / "a.md"
     target.write_bytes(b"prior\n")
@@ -206,7 +247,7 @@ def test_a_marked_store_survives_the_reaper_when_its_rename_fails(
     monkeypatch.setattr(Path, "rename", refuse)
     retained = journal._retain()
     monkeypatch.undo()
-    reap_abandoned_journals(apm_home / "install-snapshots")
+    replay_abandoned_journals(apm_home / "install-snapshots", tmp_path, dict)
 
     assert retained.name.startswith("deploy-")
     assert (retained / "0").read_bytes() == b"prior\n"

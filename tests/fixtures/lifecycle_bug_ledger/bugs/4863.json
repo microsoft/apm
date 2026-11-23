@@ -1,0 +1,20 @@
+{
+  "issue": 4863,
+  "fixed_in": "Unreleased",
+  "summary": "An install killed between deploy and a gate refusal's restore left deployed files no lockfile row claimed, and the next install deleted the journal; the next install now replays it under the lifecycle lock, restoring only bytes the deployment ledger vouches for and keeping and reporting any journal it cannot prove.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_the_next_install_replays_a_journal_killed_before_a_gate_refusal",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_an_unrestorable_path_keeps_the_journal_and_names_the_path",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_malformed_journal_is_kept_and_reported_not_applied",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_journal_path_escaping_its_root_is_kept_and_reported_not_applied",
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_journal_bytes_the_ledger_does_not_vouch_for_are_kept_not_restored",
+    "tests/integration/test_lockfile_commit_point_lifecycle.py::test_the_next_install_replays_a_killed_installs_deploy_snapshot",
+    "tests/unit/install/test_deploy_snapshot.py::test_the_next_install_replays_only_its_own_abandoned_journals"
+  ]
+}

@@ -83,6 +83,32 @@ def _maybe_rollback_manifest(
             )
 
 
+def _deploy_root_of(apm_modules_dir: Path) -> Path:
+    """The deploy root of the workspace whose ``apm_modules`` is *apm_modules_dir*."""
+    from apm_cli.core.scope import get_workspace_deploy_root
+
+    return get_workspace_deploy_root(Path(os.path.abspath(apm_modules_dir)).parent)
+
+
+def _ledger_hashes(apm_dir: Path) -> dict[str, str | None]:
+    """Each deployed path the lockfile in *apm_dir* claims, mapped to its recorded hash."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    try:
+        lockfile = LockFile.read(get_lockfile_path(apm_dir))
+    except Exception:
+        # An unreadable lockfile vouches for nothing: replay keeps the journal.
+        return {}
+    if lockfile is None:
+        return {}
+    ledger: dict[str, str | None] = dict.fromkeys(
+        DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)
+    )
+    ledger.update(DeploymentLedgerCodec.deployed_file_hashes(lockfile))
+    return ledger
+
+
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
@@ -123,6 +149,9 @@ class InstallTransaction:
         try:
             self._manifest_existed = manifest_path.exists()
             self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
+            if self._workspace_lock is not None:
+                # Under the lifecycle lock, before this attempt changes anything.
+                self._replay_abandoned_deploys()
             self._resolution = ResolutionStagingSession(apm_modules_dir)
             # Marketplace ref pins resolved by this attempt; written on commit only.
             self._ref_pins = open_ref_pin_stage()
@@ -225,6 +254,50 @@ class InstallTransaction:
             return result
         return self.commit(result)
 
+    def _replay_abandoned_deploys(self) -> None:
+        """Replay the deploy journal a killed install left for this deploy root (#4863).
+
+        A journal that cannot be proven against the deployment ledger, or a
+        path that cannot be restored, keeps the journal, names each path and
+        stops this install.
+        """
+        from apm_cli.core.scope import get_apm_home
+        from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
+
+        store_parent = get_apm_home() / "install-snapshots"
+        if not any(store_parent.glob("deploy-*")):
+            return
+        try:
+            restored = replay_abandoned_journals(
+                store_parent,
+                _deploy_root_of(self.apm_modules_dir),
+                lambda: _ledger_hashes(self.apm_modules_dir.parent),
+            )
+        except JournalReplayError as exc:
+            logger = self._logger
+            if logger is not None:
+                if exc.applied:
+                    logger.error(
+                        "An interrupted install left deployed files that could not all be restored:"
+                    )
+                else:
+                    logger.error(
+                        "An interrupted install left a deploy journal that cannot be replayed "
+                        "safely; nothing was restored:"
+                    )
+                for path, reason in exc.issues:
+                    logger.error(f"  {path}: {reason}")
+                logger.error(
+                    f"The journal is kept at {exc.store}. Restore or remove the listed paths "
+                    "by hand, then run the command again."
+                )
+            raise InstallFailureAlreadyRendered(str(exc)) from None
+        if restored and self._logger is not None:
+            self._logger.progress(
+                f"Restored {restored} deployed path(s) left by an interrupted install."
+            )
+
     def journal_deploy_writes(self, ctx: Any = None) -> None:
         """Record, at the integrator write seam, the prior state of every path written from now on.
 
@@ -233,7 +306,7 @@ class InstallTransaction:
         a refusal there rolls back every journaled path (#4638).
         """
         from apm_cli.core.scope import get_apm_home
-        from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+        from apm_cli.install.deploy_snapshot import DeployJournal
         from apm_cli.integration import write_seam
 
         with self._lock:
@@ -245,10 +318,9 @@ class InstallTransaction:
                 frozen = InstallService.frozen_disposition(ctx).withhold_lockfile_writes
                 self._journal_held_until_commit = frozen
             store_parent = get_apm_home() / "install-snapshots"
-            if self._workspace_lock is not None:
-                # Under the lifecycle lock no other install owns a journal here.
-                reap_abandoned_journals(store_parent)
-            self._deploy_journal = DeployJournal(store_parent)
+            # The pipeline's write root; replay matches it to the workspace root.
+            root = getattr(ctx, "project_root", None) or _deploy_root_of(self.apm_modules_dir)
+            self._deploy_journal = DeployJournal(store_parent, root=root)
             write_seam.listen(self._record_deploy_write)
 
     def _record_deploy_write(self, path: Path, contents: bool) -> None:
