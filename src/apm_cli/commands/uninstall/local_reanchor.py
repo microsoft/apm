@@ -817,6 +817,9 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
 
 # A path-like token: anything between whitespace, brackets, quotes and separators.
 _PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
+# A whole Markdown link destination: ``<...>`` may hold spaces; a bare one may
+# hold punctuation such as commas, so neither is split like prose.
+_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|([^\s()<>]+))")
 
 
 def _moving_dirs(moves) -> tuple[str, ...]:
@@ -831,7 +834,8 @@ def _moving_dirs(moves) -> tuple[str, ...]:
 def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bool:
     """Whether a path token in *data* names a moving copy once normalized (#5133).
 
-    Each token resolves against the file's directory and the project root:
+    Whole Markdown link destinations are checked first, then prose tokens. Each
+    token resolves against the file's directory and the project root:
     ``.`` and ``..`` segments are folded, and the result is compared both as
     written and through symlinks, so ``_local/./e`` or a link through a
     symlinked apm_modules root counts as the copy itself.
@@ -841,7 +845,9 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
         candidate = os.path.normcase(candidate)
         return any(candidate == d or candidate.startswith(d + os.sep) for d in dirs)
 
-    for token in _PATH_TOKEN.findall(data.decode("utf-8", "replace")):
+    text = data.decode("utf-8", "replace")
+    destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
+    for token in (*destinations, *_PATH_TOKEN.findall(text)):
         path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
         # A binary asset can hold a NUL, which no filesystem path accepts.
         if "/" not in path or "://" in path or "\x00" in path:
