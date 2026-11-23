@@ -170,7 +170,7 @@ Then follow the **[Quickstart](https://microsoft.github.io/apm/quickstart/)**: a
 Teach your coding agent to use APM with the [official guide](https://github.com/microsoft/apm/tree/main/packages/apm-guide) (an expert agent plus the `apm-usage` skill):
 
 ```bash
-apm install microsoft/apm/packages/apm-guide#v0.38.0
+apm install microsoft/apm/packages/apm-guide#v0.38.1
 ```
 
 ## Community

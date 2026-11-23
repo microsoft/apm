@@ -11,6 +11,19 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+
+def records_mcp_target_servers(lock: Any) -> bool:
+    """Whether *lock* writes ``mcp_target_servers``.
+
+    A non-empty map is always written. An explicit empty map is written only
+    beside MCP servers, where it differs from a legacy-absent one; with no
+    server left it is omitted, as a fresh deploy omits it (#4852).
+    """
+    return bool(lock.mcp_target_servers) or (
+        lock._mcp_target_servers_present and bool(lock.mcp_servers)
+    )
+
+
 # One install reads the same lockfile text many times (about 19 call sites).
 # The bounded YAML parse is a pure function of that text, so its result is
 # memoized by exact content; every caller still gets a private copy and still

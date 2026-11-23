@@ -95,10 +95,18 @@ def run(ctx: InstallContext) -> None:
     }
     # Members this run skipped keep their prior rows and hashes (#4230).
     _kept = kept_prior_values(ctx, _prior_files)
+    # A kept edited local output never hashes the edit (#4873), as for dependencies,
+    # and a kept path the project did not already claim gains no local claim.
+    _retained = getattr(ctx, "package_cleanup_retained", {}).get(".", {})
+    _claimed = set(_prior_files)
     _current_files = sorted(
-        path for path in ctx.local_deployed_files if path not in _dependency_claimed
+        path
+        for path in ctx.local_deployed_files
+        if path not in _dependency_claimed and (path not in _retained or path in _claimed)
     )
-    _current_hashes = _hash_deployed(_current_files, ctx.project_root)
+    _current_hashes = _hash_deployed(
+        (path for path in _current_files if path not in _retained), ctx.project_root
+    )
     _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
@@ -133,6 +141,7 @@ def run(ctx: InstallContext) -> None:
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
+        cleanup_retained_hashes=_retained,
         current_run_trusted=not _local_had_errors,
         retained_values=frozenset(_kept),
         include_ledger=True,
