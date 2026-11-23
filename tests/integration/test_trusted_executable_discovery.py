@@ -625,6 +625,33 @@ def test_apm_script_path_with_no_directory_outside_the_project_is_refused(tmp_pa
     assert not marker.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX home-relative PATH entries")
+def test_apm_script_path_expands_a_home_relative_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``~`` PATH entry reaches the script as the directory that passed the check."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    shadow = project / "~" / "bin"
+    shadow.mkdir(parents=True)
+    marker = _plant_project_binary(shadow, "probe")
+    home = tmp_path / "home"
+    (home / "bin").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(project)
+
+    env = trusted_path_environment({"PATH": "~/bin"})
+    subprocess.run(
+        ("/bin/sh", "-c", "probe"), cwd=project, env=env, capture_output=True, check=False
+    )
+
+    assert env["PATH"].split(os.pathsep) == [str(home / "bin")]
+    assert not marker.exists()
+
+
 def test_apm_script_env_without_path_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
