@@ -342,3 +342,67 @@ def test_a_retained_local_claim_keeps_naming_its_source_directory(
     assert row.resolved_by is None
     resolved = resolve_local_dep_dir(row, lock, project)
     assert resolved == (project / "packages" / "sibling").resolve()
+
+
+def _local_row(local_path: str, name: str, parent: str | None, files: list[str]):
+    from apm_cli.deps.lockfile import LockedDependency
+
+    return LockedDependency(
+        repo_url=f"_local/{name}",
+        source="local",
+        local_path=local_path,
+        resolved_by=parent,
+        depth=1 if parent is None else 2,
+        deployed_files=files,
+    )
+
+
+def test_two_retained_legacy_local_generations_stay_a_valid_graph(tmp_path: Path) -> None:
+    from apm_cli.commands.uninstall.lockfile_state import retain_failed_claims
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+
+    for name in ("a", "b", "c"):
+        (tmp_path / "packages" / name).mkdir(parents=True)
+    removed = {
+        "./packages/a": _local_row("./packages/a", "a", None, []),
+        "../b": _local_row("../b", "b", "./packages/a", [".github/hooks/b.json"]),
+        "../c": _local_row("../c", "c", "../b", [".github/hooks/c.json"]),
+    }
+    lock = LockFile(replacements=[])
+
+    retain_failed_claims(
+        lock, removed, [".github/hooks/b.json", ".github/hooks/c.json"], {}, tmp_path
+    )
+
+    lock.write(tmp_path / "apm.lock.yaml")
+    restored = LockFile.from_yaml((tmp_path / "apm.lock.yaml").read_text(encoding="utf-8"))
+    assert set(restored.dependencies) == {"./packages/b", "../c"}
+    assert restored.dependencies["../c"].resolved_by == "./packages/b"
+    resolved = resolve_local_dep_dir(restored.dependencies["../c"], restored, tmp_path)
+    assert resolved == (tmp_path / "packages" / "c").resolve()
+
+
+def test_a_retained_claim_with_a_survivors_identity_joins_that_survivor(tmp_path: Path) -> None:
+    from apm_cli.commands.uninstall.lockfile_state import retain_failed_claims
+    from apm_cli.deps.lockfile import LockFile
+
+    for name in ("parent", "sibling"):
+        (tmp_path / "packages" / name).mkdir(parents=True)
+    lock = LockFile()
+    lock.add_dependency(_local_row("./packages/sibling", "sibling", None, [".x/kept.md"]))
+    removed = {
+        "./packages/parent": _local_row("./packages/parent", "parent", None, []),
+        "../sibling": _local_row(
+            "../sibling", "sibling", "_local/parent", [".github/hooks/s.json"]
+        ),
+    }
+
+    retain_failed_claims(lock, removed, [".github/hooks/s.json"], {}, tmp_path)
+
+    lock.write(tmp_path / "apm.lock.yaml")
+    restored = LockFile.from_yaml((tmp_path / "apm.lock.yaml").read_text(encoding="utf-8"))
+    (row,) = restored.dependencies.values()
+    assert row.depth == 1
+    assert row.resolved_by is None
+    assert set(row.deployed_files) == {".x/kept.md", ".github/hooks/s.json"}

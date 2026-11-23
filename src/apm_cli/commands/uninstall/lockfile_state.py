@@ -115,22 +115,36 @@ def retain_failed_claims(
     present = set(lockfile.dependencies) | set(claims)
     # Each claim's local source is read while every removed parent is still visible.
     sources = _claim_local_sources(lockfile, removed_rows, claims, present, project_root)
+    renamed = {}
+    for key in claims:
+        _anchor_claim_row(removed_rows[key], present, sources.get(key))
+        # A legacy local row keyed by its local_path takes its re-spelled key.
+        renamed[key] = removed_rows[key].get_unique_key()
+    final = set(lockfile.dependencies) | set(renamed.values())
+    for key in claims:
+        row = removed_rows[key]
+        row.resolved_by = renamed.get(row.resolved_by, row.resolved_by)
+        row.declaring_parent = renamed.get(row.declaring_parent, row.declaring_parent)
+        _anchor_claim_row(row, final)
     updates: dict[str, tuple[list[str], dict[str, str]]] = {}
     for key, kept in claims.items():
-        row = removed_rows[key]
+        row, owner = removed_rows[key], renamed[key]
         hashes = {}
         for path in kept:
             content_hash = removed_hashes.get(path) or row.deployed_file_hashes.get(path)
             if content_hash:
                 hashes[path] = content_hash
+        if owner in updates or owner in lockfile.dependencies:
+            # Same identity as a row the lock keeps: its files join that row.
+            files, known = updates.get(owner) or (
+                lockfile.dependencies[owner].deployed_files,
+                lockfile.dependencies[owner].deployed_file_hashes,
+            )
+            updates[owner] = ([*dict.fromkeys([*files, *kept])], {**hashes, **known})
+            continue
         row.native_plugin = None
-        _anchor_claim_row(row, present, sources.get(key))
-        # A legacy local row keyed by its local_path takes its re-spelled key.
-        rekeyed = row.get_unique_key()
-        if rekeyed not in lockfile.dependencies:
-            key = rekeyed
-        lockfile.dependencies[key] = row
-        updates[key] = (kept, hashes)
+        lockfile.dependencies[owner] = row
+        updates[owner] = (kept, hashes)
     DeploymentLedgerCodec.replace_legacy_owners(lockfile, updates)
     return bool(updates)
 
