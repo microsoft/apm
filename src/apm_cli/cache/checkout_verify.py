@@ -552,6 +552,29 @@ def _check_bytes(manifest: _Manifest, rel: str, data: bytes, info: os.stat_resul
     _check_mode(rel, info, want[1])
 
 
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def _read_regular(rel: str, path: Path) -> tuple[bytes, os.stat_result]:
+    """Read *path* only as a regular file: never through a link, a pipe or a device."""
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode):
+        raise CheckoutVerificationError(f"{rel} is not a regular file")
+    try:
+        fd = os.open(path, _READ_FLAGS)
+    except OSError as exc:  # replaced by a link since the lstat
+        raise CheckoutVerificationError(f"{rel} is not a regular file") from exc
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise CheckoutVerificationError(f"{rel} is not a regular file")
+        return handle.read(), info
+
+
 def require_verified_copy(
     dest: Path,
     repo: Path,
@@ -569,7 +592,7 @@ def require_verified_copy(
     copied: set[str] = set()
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)
-        _check_bytes(manifest, source, path.read_bytes(), os.lstat(path))
+        _check_bytes(manifest, source, *_read_regular(source, path))
         copied.add(source)
     under = f"{prefix}/" if prefix else ""
     missing = sorted(rel for rel in manifest.files if rel.startswith(under) and rel not in copied)
@@ -582,9 +605,7 @@ def read_verified_file(
 ) -> bytes:
     """Return the bytes of *rel* in checkout *repo*, checked against its verified record."""
     manifest = _manifest(repo, sha or Path(repo).parent.name, None, env)
-    path = Path(repo) / rel
-    info = os.lstat(path)
-    data = path.read_bytes()
+    data, info = _read_regular(rel, Path(repo) / rel)
     _check_bytes(manifest, rel.strip("/"), data, info)
     return data
 

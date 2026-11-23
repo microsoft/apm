@@ -423,3 +423,38 @@ def test_a_link_swapped_in_after_verification_is_copied_as_a_link_and_refused(
     assert (target / "pkg").is_symlink()
     with pytest.raises(CheckoutVerificationError):
         require_verified_copy(target, repo, sha)
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("special", ["fifo", "device-link"])
+def test_a_special_file_in_a_copy_is_refused_without_reading_it(
+    tmp_path: Path, special: str
+) -> None:
+    import threading
+
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    target = tmp_path / "target"
+    shutil.copytree(repo, target, ignore=shutil.ignore_patterns(".git"))
+    agents = target / "pkg" / "AGENTS.md"
+    agents.unlink()
+    if special == "fifo":
+        os.mkfifo(agents)
+    else:
+        agents.symlink_to("/dev/zero")
+
+    outcome: list[BaseException | None] = []
+
+    def check() -> None:
+        try:
+            require_verified_copy(target, repo, sha)
+            outcome.append(None)
+        except CheckoutVerificationError as exc:
+            outcome.append(exc)
+
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "the check read through a special file"
+    assert outcome and "is not a regular file" in str(outcome[0])
+    assert stat.S_ISFIFO(agents.lstat().st_mode) or agents.is_symlink()  # left as it was
