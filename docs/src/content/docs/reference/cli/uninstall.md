@@ -104,7 +104,8 @@ What gets removed, in order:
    package, the same entry `apm install` records, and keeps its deployment
    receipts. If the packages that need it cannot be read offline, or APM
    cannot prove it wrote the package's files, uninstall refuses before any
-   change.
+   change. Re-anchoring runs on its own: uninstall other packages in a
+   separate command.
    Now-empty `apm_modules/` parent directories are cleaned at this step.
 2. Target-scoped files owned only by the removed packages, while lockfile
    ownership is still available for safe cleanup.

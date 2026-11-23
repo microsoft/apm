@@ -29,6 +29,7 @@
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_failed_receipt_rename_rolls_the_uninstall_back",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_keeps_the_first_declaring_edge",
     "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_ranks_an_equal_depth_diamond_by_the_new_keys",
-    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_an_alias_spelling_that_installs_elsewhere"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_reanchor_refuses_an_alias_spelling_that_installs_elsewhere",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_reanchor_mixed_with_another_removal_refuses"
   ]
 }

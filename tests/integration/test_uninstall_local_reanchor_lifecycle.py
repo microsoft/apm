@@ -360,6 +360,7 @@ def test_reanchor_keeps_case_and_decomposed_unicode_spellings(
     _assert_reanchored_like_a_full_install(world)
 
 
+@pytest.mark.windows_compat
 def test_reanchor_with_a_case_variant_parent_spelling(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
@@ -465,3 +466,28 @@ def test_reanchor_refuses_an_alias_spelling_that_installs_elsewhere(
     world.apm("install")
 
     _assert_refused_before_any_write(world, "declares it as _local/e-link")
+
+
+def test_a_reanchor_mixed_with_another_removal_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a re-anchor rolls back only apm.yml and the lock, so it never runs with a deletion."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "r", "r")
+    _skill_package(vendor / "d", "d", ("../e",))
+    _manifest(world, ["./vendor/e", "./vendor/r"], ["./vendor/d"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    before, receipts = tree_digest(world.project), _receipts(world)
+
+    refused = world.apm("uninstall", "./vendor/e", "./vendor/r", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "uninstall ./vendor/r in a separate command" in output, output
+    assert tree_digest(world.project) == before
+    assert _receipts(world) == receipts
+    world.apm("uninstall", "./vendor/r")
+    world.apm("uninstall", "./vendor/e")
+    _assert_reanchored_like_a_full_install(world)

@@ -138,8 +138,10 @@ def _split_still_needed_packages(
     ]
     if user_scope:
         _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
-    reanchor = _plan_reanchor_or_exit(lockfile, decision, still_needed, apm_yml_path, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
+    reanchor = _plan_reanchor_or_exit(
+        lockfile, decision, still_needed, apm_yml_path, logger, others=removed
+    )
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
         dict(decision.rescued_depths),
@@ -150,7 +152,9 @@ def _split_still_needed_packages(
     return removed, still_needed, repair
 
 
-def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, apm_yml_path, logger):
+def _plan_reanchor_or_exit(
+    lockfile, decision, still_needed: list, apm_yml_path, logger, *, others: list = ()
+):
     """Plan re-anchoring of still-needed local packages; refuse before any write (#4889)."""
     from ...core.deployment_reanchor import reanchor_receipt_problems
     from ...core.scope import InstallScope
@@ -168,6 +172,15 @@ def _plan_reanchor_or_exit(lockfile, decision, still_needed: list, apm_yml_path,
         problems = reanchor_receipt_problems(
             project_root, InstallScope.PROJECT, lockfile, plan.renames
         )
+        if plan.renames and others:
+            # Rollback restores apm.yml and the lock, never deleted content, so a
+            # re-anchor runs alone.
+            raise LocalReanchorRefused(
+                f"{label(next(iter(plan.renames)))} stays under the package that needs it, "
+                "so it is re-anchored on its own; uninstall "
+                f"{', '.join(_dependency_public_label(package) for package in others)} "
+                "in a separate command"
+            )
         if problems:
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "

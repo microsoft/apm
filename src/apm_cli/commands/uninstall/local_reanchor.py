@@ -39,7 +39,8 @@ class LocalReanchorPlan:
     """Old lock key -> new key, plus the identity fields every re-keyed row takes."""
 
     renames: dict[str, str] = field(default_factory=dict)
-    identities: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+    # (local_path, declaring_parent, anchored_local_path, repo_url) per old key.
+    identities: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
     # Descendant local rows: (declaring parent key, local_path) of the first edge.
     declaring_parents: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     # Nearest parent identity of every re-parented row, ranked by the new keys.
@@ -60,13 +61,15 @@ def _nearest_parents(walk, key: str) -> list[str]:
     ]
 
 
-def _root_identities(lockfile, walk, local_roots, label) -> dict[str, tuple[str, str, Any]]:
-    """``(local_path, declaring parent key, anchored dir)`` of each re-anchored root.
+def _root_identities(
+    lockfile, walk, local_roots, label, modules_dir: Path
+) -> dict[str, tuple[str, str, Any, str]]:
+    """``(local_path, declaring parent key, anchored dir, repo_url)`` of each root.
 
     Install keeps the first shallowest declaring edge on the node it creates,
     so that edge, not the nearest-parent tie rule, names the local identity.
     """
-    identities: dict[str, tuple[str, str, Any]] = {}
+    identities: dict[str, tuple[str, str, Any, str]] = {}
     for key in local_roots:
         nearest = _nearest_parents(walk, key)
         real_dir = walk.local_dirs.get(key)
@@ -76,14 +79,28 @@ def _root_identities(lockfile, walk, local_roots, label) -> dict[str, tuple[str,
                 f"{label(key)} stays, but its new declaring parent could not be determined"
             )
         declared = walk.local_edge_repos.get((key, nearest[0]))
-        if declared != lockfile.get_dependency(key).repo_url:
+        row = lockfile.get_dependency(key)
+        if declared != row.repo_url and not _same_install_dir(row, declared, modules_dir):
             # An alias spelling (a symlink) installs as another package directory.
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but the package that still needs it declares it as "
                 f"{declared or 'another package'}, which installs elsewhere"
             )
-        identities[key] = (via[1], nearest[0], real_dir)
+        identities[key] = (via[1], nearest[0], real_dir, declared)
     return identities
+
+
+def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
+    """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem)."""
+    if declared is None or declared.casefold() != row.repo_url.casefold():
+        return False
+    ref = row.to_dependency_ref()
+    try:
+        current = ref.get_install_path(modules_dir)
+        spelled = replace(ref, repo_url=declared).get_install_path(modules_dir)
+        return current.exists() and spelled.exists() and current.samefile(spelled)
+    except (OSError, ValueError):
+        return False
 
 
 def plan_local_reanchor(
@@ -113,16 +130,21 @@ def plan_local_reanchor(
             f"all be read offline{detail}; re-anchoring it never fetches"
         )
     # The identity install records, from the one owner of local node identity.
+    modules_dir = Path(project_root) / "apm_modules"
     nodes = {
         key: transitive_local_identity(
-            replace(lockfile.get_dependency(key).to_dependency_ref(), local_path=local_path),
+            replace(
+                lockfile.get_dependency(key).to_dependency_ref(),
+                local_path=local_path,
+                repo_url=repo_url,
+            ),
             declaring_parent=parent_key,
             anchored=real_dir,
             root=project_root,
             root_local_dirs={},
         )
-        for key, (local_path, parent_key, real_dir) in _root_identities(
-            lockfile, walk, local_roots, label
+        for key, (local_path, parent_key, real_dir, repo_url) in _root_identities(
+            lockfile, walk, local_roots, label, modules_dir
         ).items()
     }
     renames = {key: node.get_unique_key() for key, node in nodes.items()}
@@ -140,6 +162,7 @@ def plan_local_reanchor(
             node.local_path,
             renames.get(node.declaring_parent, node.declaring_parent),
             node.anchored_local_path,
+            node.repo_url,
         )
         for key, node in nodes.items()
     }
@@ -203,13 +226,14 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
     if not plan:
         return False
     renames = {old: new for old, new in plan.renames.items() if old != new}
-    for key, (local_path, parent_key, anchored) in plan.identities.items():
+    for key, (local_path, parent_key, anchored, repo_url) in plan.identities.items():
         row = lockfile.dependencies[key]
         row.local_path, row.declaring_parent, row.anchored_local_path = (
             local_path,
             parent_key,
             anchored,
         )
+        row.repo_url = repo_url
     for key, (parent_key, local_path) in plan.declaring_parents.items():
         row = lockfile.dependencies[key]
         row.declaring_parent = parent_key
@@ -239,7 +263,10 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
     return replace(
         plan,
         snapshot=tuple(
-            (path, path.read_text(encoding="utf-8")) for path in paths if path.is_file()
+            # Decoded bytes, not read_text(): a CRLF file restores byte for byte.
+            (path, path.read_bytes().decode("utf-8"))
+            for path in paths
+            if path.is_file()
         ),
     )
 
