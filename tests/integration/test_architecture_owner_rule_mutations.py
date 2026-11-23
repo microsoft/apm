@@ -140,9 +140,15 @@ def test_archive_member_reads_cannot_bypass_the_limits_owner(
         ),
         pytest.param(
             "src/apm_cli/install/drift.py",
-            "and _project_has_root_primitives(project_root)",
-            'and (project_root / ".apm").is_dir()',
+            "else _project_has_root_primitives(project_root)",
+            'else (project_root / ".apm").is_dir()',
             id="replay-root-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "_root_holds_only_hook_primitives(self_source_root)",
+            "_project_has_root_primitives(self_source_root)",
+            id="replay-user-root-predicate",
         ),
         pytest.param(
             "src/apm_cli/deps/lockfile.py",
