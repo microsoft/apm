@@ -118,7 +118,7 @@ jobs:
         run: |
           python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh-scratch" \
             --scope project --env headless-wt-shared-known --env headless-wt-named-known \
-            --env headless-wt-local-named
+            --env headless-wt-local-named --env headless-wt-local-named-known
           python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh-scratch" \
             --scope project --register-known-marketplace \
             --env normal --env worktree --env headless --env headless-wt-branch

@@ -63,6 +63,7 @@ DIAG_ENVS = (
     "headless-wt-shared-known",
     "headless-wt-named-known",
     "headless-wt-local-named",
+    "headless-wt-local-named-known",
 )
 _AUTH_BLOCKERS = ("could not be validated", "rate limit exceeded", "No authentication")
 TOOL_PROMPT = (
@@ -577,9 +578,12 @@ class Cell:
         registry = self.home / ".claude" / "plugins" / "known_marketplaces.json"
         data: dict = {}
         pairs: tuple = ((main_name, self.project), (wt_name, self.worktree))
-        if self.env == "headless-wt-local-named":
+        if self.env.startswith("headless-wt-local-named"):
             self.local_named()
             pairs = ()
+            if self.env.endswith("-known"):
+                shared = self.marketplace()
+                pairs = ((f"{shared}-c0", self.project), (f"{shared}-c1", self.worktree))
         for name, root in pairs:
             location = str(root / ".agents" / "plugins")
             data[name] = {
