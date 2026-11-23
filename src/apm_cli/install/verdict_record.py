@@ -1059,17 +1059,20 @@ def _noop_form(argv: list[str], services_text: str, lock: Any) -> str | None:
     real = sys.stdout
     sys.stdout = capture  # type: ignore[assignment]
     _ACTIVE.append(capture)
+    from apm_cli.policy._remote import reuse_remote_reads
+
     try:
-        fast_output.render(
-            root,
-            lock,
-            manifest,
-            started=_time.perf_counter(),
-            bodies=None,
-            installed=0,
-            frozen_disposition=disposition,
-            services_text=services_text,
-        )
+        with reuse_remote_reads():
+            fast_output.render(
+                root,
+                lock,
+                manifest,
+                started=_time.perf_counter(),
+                bodies=None,
+                installed=0,
+                frozen_disposition=disposition,
+                services_text=services_text,
+            )
     finally:
         _ACTIVE.remove(capture)
         sys.stdout = real
