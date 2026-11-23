@@ -4972,6 +4972,38 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The lock evidence probe launches git through an attribute alias a subclass inherits.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launcher\n\n"
+            '        def _probe(launcher=launcher(["git"])):\n'
+            "            launcher = None\n"
+            "            return launcher\n\n"
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe launches git in a definition header its body rebinds.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        class _Runner:\n"
+            "            def __init__(self):\n"
+            "                self.run = subprocess.run\n\n"
+            "        class _Labels:\n"
+            "            def __init__(self):\n"
+            "                self.run = lambda labels: labels\n\n"
+            "            def names(self):\n"
+            '                return self.run(["git"])\n\n'
+            "        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],"
+        ),
+        intent="The lock evidence probe calls an attribute spelled like a launcher alias in another class.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -7876,14 +7908,6 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
     "new",
     [
         pytest.param(
-            "        def _probe():\n"
-            "            launcher = subprocess.run\n"
-            "            return launcher\n\n"
-            "        launcher = str\n"
-            '        launcher(["git"])\n',
-            id="rebinding-in-another-scope",
-        ),
-        pytest.param(
             '        registry.partial(subprocess.run, ["git"])\n',
             id="unrelated-partial-method",
         ),
@@ -7892,17 +7916,6 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
             "        probe.spawn = asyncio.create_subprocess_exec\n"
             '        probe.spawn(get_git_executable(), "--version")\n',
             id="exec-alias-spelled-spawn",
-        ),
-        pytest.param(
-            "        class _Runner:\n"
-            "            def __init__(self):\n"
-            "                self.run = subprocess.run\n\n"
-            "        class _Labels:\n"
-            "            def __init__(self):\n"
-            "                self.run = lambda labels: labels\n\n"
-            "            def names(self):\n"
-            '                return self.run(["git"])\n',
-            id="attribute-alias-in-an-unrelated-class",
         ),
     ],
 )
