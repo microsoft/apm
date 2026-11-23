@@ -1042,7 +1042,7 @@ def test_user_scope_replay_reads_the_route_from_apm_home(monkeypatch, tmp_path):
     """install -g reads $APM_HOME/apm.yml, so the replay's route does too (#4995)."""
     from apm_cli.install.audit_target_roots import replay_route_manifest
     from apm_cli.models.dependency.reference import DependencyReference
-    from apm_cli.native_plugins.route import effective_native_route
+    from apm_cli.native_plugins.route import NativeRouteDriftError, effective_native_route
 
     home = tmp_path / "home"
     home.mkdir()
@@ -1058,3 +1058,6 @@ def test_user_scope_replay_reads_the_route_from_apm_home(monkeypatch, tmp_path):
     manifest = replay_route_manifest(config, LockFile(), [])
 
     assert effective_native_route(DependencyReference.parse("acme/plugin"), manifest) is False
+    # Only $APM_HOME's native_plugins: false makes a locked native record drift.
+    with pytest.raises(NativeRouteDriftError, match="acme/plugin is locked on the native"):
+        replay_route_manifest(config, _native_lock("acme/plugin"), [])
