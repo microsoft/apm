@@ -926,26 +926,21 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
 
 def has_abandoned_journals(store_parent: Path, root: Any = None, workspace: Any = None) -> bool:
     """Whether a killed install left a journal the next full install of *root* must handle."""
-    ours = None if root is None else _identity(root, workspace)  # else any workspace's (#5064)
     with contextlib.suppress(OSError):
         return any(
             store.is_dir()
             and not os.path.lexists(store / _RETAINED_MARKER)
-            and (ours is None or _replays_for(store, ours))
+            and (root is None or _replays_for(store, root, workspace))  # else any (#5064)
             for store in store_parent.glob(f"{_STORE_PREFIX}*")
         )
     return False
 
 
-def _identity(root: Path, workspace: Path | None) -> tuple[str, str]:
-    root = Path(os.path.abspath(root))
-    return os.path.realpath(root), os.path.realpath(workspace or root)
-
-
-def _replays_for(store: Path, identity: tuple[str, str]) -> bool:
-    """Replay for *identity* handles *store*: no manifest, an unreadable identity, or its own."""
+def _replays_for(store: Path, root: Path, workspace: Path | None) -> bool:
+    """Replay for *root* handles *store*: no manifest, an unreadable identity, or its own."""
     named = _store_identity(store) if os.path.lexists(store / _MANIFEST) else None
-    return named is None or named == identity
+    root = Path(os.path.abspath(root))
+    return named is None or named == (os.path.realpath(root), os.path.realpath(workspace or root))
 
 
 def replay_abandoned_journals(
@@ -974,7 +969,6 @@ def replay_abandoned_journals(
     replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
-    identity = _identity(root, workspace)
     bases = _Bases(root, Path(os.path.abspath(receipts)))
     ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
@@ -989,7 +983,7 @@ def replay_abandoned_journals(
             # nothing replay can prove: reclaim it, as every install did before.
             shutil.rmtree(store, ignore_errors=True)
             continue
-        if not _replays_for(store, identity):
+        if not _replays_for(store, root, workspace):
             continue
         outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored
