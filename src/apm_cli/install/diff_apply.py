@@ -405,7 +405,14 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=content_integrity,
     )
-    return result.passed and not any(getattr(c, "warned", False) for c in result.checks)
+    failed = next((c for c in result.checks if not c.passed or getattr(c, "warned", False)), None)
+    if failed is not None:
+        _AUDIT_FAILURE[:] = [str(getattr(failed, "name", "check"))]
+    return failed is None and result.passed
+
+
+# The audit check that failed last (named in the decline trace).
+_AUDIT_FAILURE: list[str] = []
 
 
 def try_apply(
@@ -486,7 +493,7 @@ def try_apply(
                 and noop_diff._policy_checks_pass(project_root, fetch)
             )
         if not verified:
-            raise Decline("post-apply audit")
+            raise Decline(f"post-apply audit: {_AUDIT_FAILURE[-1] if _AUDIT_FAILURE else 'copies'}")
         by_owner: dict[str, dict[Path, str]] = {}
         for path, _data, digest, owner in files:
             by_owner.setdefault(owner, {})[path] = digest
