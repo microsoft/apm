@@ -708,6 +708,33 @@ class TestKeptEntryReviewThree:
         assert record.held_claims == {"opencode": {"pyright"}}
         assert record.kept_edits == {"pyright": "blocked"}
 
+    def test_a_held_target_with_an_unchanged_sibling_is_not_rewritten(self, tmp_path):
+        stdio = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install(stdio, project_root=tmp_path, target_runtimes=targets)
+        self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        opencode = tmp_path / "opencode.json"
+        # Compact JSON: holding with an unchanged sibling must not reformat it.
+        opencode.write_text(json.dumps(json.loads(opencode.read_text())), encoding="utf-8")
+        before = opencode.read_bytes()
+
+        LSPIntegrator.install(
+            [
+                _make_dep("pyright", transport="socket", extension_to_language=None),
+                _make_dep("ruff", command="r-v1"),
+            ],
+            project_root=tmp_path,
+            target_runtimes=targets,
+            managed_target_servers={
+                "copilot": {"pyright", "ruff"},
+                "opencode": {"pyright", "ruff"},
+            },
+            record=LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(stdio)),
+            diagnostics=MagicMock(),
+        )
+
+        assert opencode.read_bytes() == before
+
     def test_a_held_target_that_cannot_be_prepared_fails_the_install(self, tmp_path):
         stdio = [_make_dep("pyright", command="p-v1")]
         targets = ["copilot", "opencode"]

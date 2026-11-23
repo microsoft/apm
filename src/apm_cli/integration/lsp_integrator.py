@@ -169,7 +169,7 @@ class _PreparedTargetConfig:
     """Validated target config ready for one atomic file write."""
 
     path: Path
-    # None leaves the file as it is: a target that only joined a hold (#4871).
+    # None leaves the file as it is: a target that joined a hold and changes no server (#4871).
     content: str | None
     changed: builtins.set
     created_servers_key: bool = False
@@ -989,7 +989,7 @@ class LSPIntegrator:
                     rebuilt,
                     kept={**rebuilt.kept, **own_kept},
                     joined=tuple(sorted(joined)),
-                    content=rebuilt.content if prepared is not None or rebuilt.changed else None,
+                    content=rebuilt.content if rebuilt.changed or not joined else None,
                 )
             if prepared is not None:
                 held.append((runtime, spec, prepared))
