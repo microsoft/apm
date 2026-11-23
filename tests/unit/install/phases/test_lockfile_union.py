@@ -1645,3 +1645,25 @@ class TestLockModeDefersDiskDeletion:
         # `apm lock` must leave it on disk and keep its row.
         assert (tmp_path / dropped_file).exists()
         assert dropped_file in new.get_dependency(key).deployed_files
+
+
+def test_a_retired_native_root_is_named_after_a_harness_the_lock_declared() -> None:
+    """#4744: a project plugin loads in claude and copilot; with only copilot recorded in
+    manifest_targets, its retired root is attributed to copilot so #4517 precedence keeps it."""
+    from apm_cli.install.target_governance import retired_native_plugins
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.native_plugins.record import NativePluginRecord
+    from apm_cli.native_plugins.scopes import PROJECT_MARKETPLACE_PATH
+
+    lock = LockFile()
+    lock.manifest_targets = ["copilot"]
+    dep = LockedDependency(repo_url="acme/plugin", package_type="marketplace_plugin")
+    dep.native_plugin = NativePluginRecord(
+        "plugin", "sha256:" + "0" * 64, "apm", PROJECT_MARKETPLACE_PATH
+    )
+    lock.add_dependency(dep)
+    codex = KNOWN_TARGETS["codex"]
+
+    retired = retired_native_plugins(lock, (), [codex])
+
+    assert retired == {dep.get_unique_key(): (dep.native_plugin.root, "copilot")}

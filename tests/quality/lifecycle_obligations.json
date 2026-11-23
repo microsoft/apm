@@ -13100,7 +13100,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|LOCK=absent|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -15852,7 +15852,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|OP=install|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -20831,7 +20831,7 @@
    "lane": "T-6a",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_an_apm_written_entry_no_longer_deployed_is_retired_without_the_lockfile"
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten[edited]"
   },
   "pair|SCOPE=project|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -21158,8 +21158,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_each_copilot_home_profile_keeps_its_own_evidence"
   },
   "pair|SCOPE=user|MCPOWN=legacy-receipt": {
    "family": "pair",
@@ -21652,9 +21653,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4759",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_users_mcp_entry_blocks_a_server_of_the_same_name[inline-mcp]"
   },
   "pair|SRC=inline-mcp|DRYRUN=on": {

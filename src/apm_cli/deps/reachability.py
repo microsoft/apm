@@ -101,6 +101,9 @@ class ReachabilityResult:
             before the visited dedup (as the install resolver records them),
             keyed by lockfile key when one matches. Feed it to
             :func:`apm_cli.models.dependency.subsets.merge_edge_selections`.
+        parent_keys: For each key in ``reachable_via``, the exact lock key of
+            that parent. Sibling virtual packages share one ``repo_url``,
+            so only this key tells them apart (#4823).
     """
 
     reachable: frozenset[str]
@@ -109,6 +112,7 @@ class ReachabilityResult:
     reachable_via: dict[str, tuple[str, str | None]] = field(default_factory=dict)
     dev_only: frozenset[str] = frozenset()
     edge_selections: dict[str, tuple[EdgeSelection, ...]] = field(default_factory=dict)
+    parent_keys: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -124,7 +128,33 @@ class DeclaredSelections:
     unverifiable: tuple[tuple[str, str], ...]
 
 
-_WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...]]
+class _NearestParents:
+    """Record each node's parent by the install resolver's nearest-parent rule.
+
+    Like the resolver, the nearest declaring parent wins and equal depths go
+    to the lowest parent key, whatever each path's dev status: the walk
+    drains production before dev, so a shorter or lower-keyed dev edge
+    still replaces an earlier production one. A repaired ``resolved_by``
+    then matches what a fresh install records (#4804).
+    """
+
+    def __init__(self, reachable_via: dict[str, tuple[str, str | None]]):
+        self._reachable_via = reachable_via
+        self._ranks: dict[str, tuple[int, str]] = {}
+        self.parent_keys: dict[str, str] = {}
+
+    def offer(self, key: str, depth: int, parent_key: str, via: tuple[str, str | None]) -> None:
+        """Rank an edge by depth, then the parent's exact lock key (#4823)."""
+        rank = (depth, parent_key)
+        current = self._ranks.get(key)
+        if current is None or rank < current:
+            self._ranks[key] = rank
+            self._reachable_via[key] = via
+            self.parent_keys[key] = parent_key
+
+
+# (ref, anchor, parent repo identity, is_dev, chain, parent's exact lock key)
+_WalkItem = tuple["DependencyReference", Path | None, str | None, bool, tuple[str, ...], str | None]
 
 
 def locked_marketplace_form(
@@ -298,6 +328,7 @@ def compute_forward_reachable_keys(
     reachable: set[str] = set()
     dev_only: set[str] = set()
     reachable_via: dict[str, tuple[str, str | None]] = {}
+    parent_ranks = _NearestParents(reachable_via)
     visited: set[str] = set()  # resolved local dirs (as str) or remote unique keys
     # Each queue entry also carries the repo_url of the node whose manifest
     # edge introduced it (None for the seed direct_refs, which have no
@@ -306,8 +337,12 @@ def compute_forward_reachable_keys(
     # repair (see ReachabilityResult.reachable_via).
     # Production paths drain before any dev path starts, so ``visited``
     # gives a key the production flag whenever any production path exists.
-    queue: deque[_WalkItem] = deque((ref, project_root, None, False, ()) for ref in direct_refs)
-    dev_queue: deque[_WalkItem] = deque((ref, project_root, None, True, ()) for ref in dev_refs)
+    queue: deque[_WalkItem] = deque(
+        (ref, project_root, None, False, (), None) for ref in direct_refs
+    )
+    dev_queue: deque[_WalkItem] = deque(
+        (ref, project_root, None, True, (), None) for ref in dev_refs
+    )
     edge_selections: dict[str, list[EdgeSelection]] = {}
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
@@ -315,7 +350,7 @@ def compute_forward_reachable_keys(
     root_local_dirs = collect_root_local_dirs((*direct_refs, *dev_refs), project_root)
 
     while queue or dev_queue:
-        ref, anchor, parent_repo_url, is_dev, chain = (queue or dev_queue).popleft()
+        ref, anchor, parent_repo_url, is_dev, chain, parent_key = (queue or dev_queue).popleft()
         if ref.is_marketplace:
             ref = locked_marketplace_form(ref, lockfile, marketplace_index)
         try:
@@ -353,6 +388,13 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(matched_key or ref.get_unique_key(), []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            if matched_key is not None and parent_repo_url is not None:
+                parent_ranks.offer(
+                    matched_key,
+                    len(chain),
+                    parent_key or parent_repo_url,
+                    (parent_repo_url, None if ref.replacement is not None else ref.local_path),
+                )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -360,12 +402,10 @@ def compute_forward_reachable_keys(
                 reachable.add(matched_key)
                 if is_dev:
                     dev_only.add(matched_key)
-                if parent_repo_url is not None:
-                    reachable_via.setdefault(
-                        matched_key,
-                        (parent_repo_url, None if ref.replacement is not None else ref.local_path),
-                    )
             manifest_dir = real_dir
+            # A surviving local parent is not in the candidate directory
+            # index; its own identity is still its lock key (#4823).
+            node_key = matched_key or ref.get_unique_key()
         else:
             locked = lockfile.dependencies.get(ref.get_unique_key())
             # Several edges may alias one node; it is materialized where the
@@ -387,6 +427,12 @@ def compute_forward_reachable_keys(
             edge_selections.setdefault(visit_key, []).append(
                 EdgeSelection.from_dependency(ref, chain)
             )
+            if visit_key in lockfile.dependencies and parent_repo_url is not None:
+                # Remote deps don't use anchored local_path -- only
+                # resolved_by needs repairing for these.
+                parent_ranks.offer(
+                    visit_key, len(chain), parent_key or parent_repo_url, (parent_repo_url, None)
+                )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -394,11 +440,8 @@ def compute_forward_reachable_keys(
                 reachable.add(visit_key)
                 if is_dev:
                     dev_only.add(visit_key)
-                if parent_repo_url is not None:
-                    # Remote deps don't use anchored local_path -- only
-                    # resolved_by needs repairing for these.
-                    reachable_via.setdefault(visit_key, (parent_repo_url, None))
             manifest_dir = install_path
+            node_key = visit_key
 
         try:
             package = _normalized_local_plugin(manifest_dir) if ref.is_local else None
@@ -442,6 +485,7 @@ def compute_forward_reachable_keys(
                     lockfile_parent_identity(ref, lockfile.replacements),
                     is_dev,
                     child_chain,
+                    node_key,
                 )
             )
 
@@ -452,6 +496,7 @@ def compute_forward_reachable_keys(
         reachable_via=reachable_via,
         dev_only=frozenset(dev_only),
         edge_selections={key: tuple(edges) for key, edges in edge_selections.items()},
+        parent_keys=parent_ranks.parent_keys,
     )
 
 

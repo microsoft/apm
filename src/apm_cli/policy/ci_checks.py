@@ -851,8 +851,9 @@ def _kept_mcp_entries(
     kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
     details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
     # Without a lockfile, unusable evidence keeps every entry it lists, so it is
-    # reported; with one, the lockfile governs cleanup and the record is unused.
-    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope) if lockless else None
+    # reported; with one, only evidence an earlier lockless install met (and
+    # kept every entry for) is still reported.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope, noted_only=not lockless)
     if unusable is not None:
         details.append(unusable)
     if not details:
@@ -1489,6 +1490,55 @@ def _check_local_bundle_hooks(
     )
 
 
+class _PolicyRouteBlocks(Exception):
+    """The audit's policy-outcome route blocks on its one discovery."""
+
+
+def _audit_trust_provider(
+    project_root: Path,
+    manifest: APMPackage,
+    user_scope: bool,
+    policy_fetch: Callable[[], Any] | None,
+    fallback: Callable[[], Any],
+) -> Callable[[], Any]:
+    """The executables trust context judged on the audit's own policy discovery.
+
+    *policy_fetch* is the one discovery ``apm audit --ci`` routes its policy
+    outcome from; it is classified exactly as that route classifies it, so a
+    deferral here always coincides with the route failing the audit (#4821).
+    Without it (no audit-level discovery) *fallback* resolves the context.
+    """
+    resolved: list[Any] = []
+
+    def provide() -> Any:
+        if resolved:
+            return resolved[0]
+        if policy_fetch is None:
+            resolved.append(fallback())
+            return resolved[0]
+        from ..core.scope import scope_manifest_path
+        from ..install.exec_gate import trust_context_for_policy
+        from .outcome_routing import classify_discovery_outcome
+        from .project_config import read_project_fetch_failure_default
+
+        route = classify_discovery_outcome(
+            policy_fetch(),
+            fetch_failure_default=read_project_fetch_failure_default(project_root),
+        )
+        if route.blocks:
+            raise _PolicyRouteBlocks(route.outcome)
+        resolved.append(
+            trust_context_for_policy(
+                scope_manifest_path(project_root, user_scope=user_scope),
+                route.policy,
+                getattr(manifest, "allow_executables", None),
+            )
+        )
+        return resolved[0]
+
+    return provide
+
+
 def _check_hook_approval_pins(
     project_root: Path,
     deployment_root: Path,
@@ -1499,6 +1549,7 @@ def _check_hook_approval_pins(
     no_policy: bool,
     prepared_replay: PreparedCiAuditReplay | None,
     targets: Sequence[TargetProfile] = (),
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CheckResult:
     """Fail when a locked hook file's pinned approval no longer admits it (#4188).
 
@@ -1513,6 +1564,7 @@ def _check_hook_approval_pins(
     from ..install.errors import PolicyViolationError
     from ..install.exec_gate import locked_hook_pin_mismatches
     from ..install.withheld_hooks import locked_withheld_hook_files
+    from ..install.withheld_merged_hooks import ENTRY_REASON
     from ..security.executables import resolve_project_exec_allow_map
 
     modules_root = (
@@ -1534,15 +1586,34 @@ def _check_hook_approval_pins(
 
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
+    except PolicyViolationError as exc:
+        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    try:
         withheld = locked_withheld_hook_files(
-            lock, modules_root, trust_ctx, deployment_root, targets
+            lock,
+            modules_root,
+            _audit_trust_provider(project_root, manifest, user_scope, policy_fetch, trust_ctx),
+            deployment_root,
+            targets,
+            user_scope=user_scope,
         )
+    except _PolicyRouteBlocks:
+        # The audit's own policy route blocks on this same discovery and fails,
+        # reporting the cause once; this check does not repeat it (#4821).
+        withheld = []
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
     if withheld:
-        files = [row for row in withheld if row[0]]
+        entries = [row for row in withheld if row[0] and ENTRY_REASON in row[2]]
+        files = [row for row in withheld if row[0] and ENTRY_REASON not in row[2]]
         unchecked = [row for row in withheld if not row[0]]
         message = []
+        if entries:
+            message.append(
+                f"{len(entries)} merged hook entr(ies) match the hooks of a package the "
+                "executables gate withholds, and no ownership record attributes them -- "
+                f"{remediation.WITHHELD_HOOK_ENTRY_UNRECORDED.clause()}"
+            )
         if files:
             message.append(
                 f"{len(files)} file(s) sit at the hook path of a package whose hooks the "
@@ -1558,7 +1629,8 @@ def _check_hook_approval_pins(
             name="hook-approval-pins",
             passed=False,
             message="; ".join(message),
-            details=[
+            details=[f"{path}: hook entry of {key} ({reason})" for path, key, reason in entries]
+            + [
                 f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
                 for path, key, reason in files
             ]
@@ -1592,6 +1664,7 @@ def run_baseline_checks(
     replay_error_owner: str | None = None,
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
     content_integrity: bool = True,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
@@ -1606,6 +1679,8 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     *replay_error_owner* names the later check that reports *prepared_replay_error*
     in full (``drift``); without it the first check that needs the replay does.
+    *policy_fetch* is the one org policy discovery ``apm audit --ci`` routes
+    its policy outcome from, so checks that judge trust use the same result.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..constants import APM_MODULES_DIR
@@ -1782,6 +1857,7 @@ def run_baseline_checks(
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
                 targets=resolved_targets,
+                policy_fetch=policy_fetch,
             )
         )
         or _run(

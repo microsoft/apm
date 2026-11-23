@@ -782,6 +782,7 @@ mutation_writes.copilot_cli_mcp_paths
 mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
+mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope

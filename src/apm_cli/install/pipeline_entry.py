@@ -16,9 +16,12 @@ import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.models.dependency.reference import DependencyReference
+
+if TYPE_CHECKING:
+    from apm_cli.models.results import InstallResult
 
 
 @dataclass(frozen=True)
@@ -185,6 +188,46 @@ def install_pipeline_options(
         trust_bin=ctx.trust_bin,
         transaction=ctx.transaction,
         lsp_preflight=lsp_preflight,
+    )
+
+
+def preview_install(ctx: Any, *, run_gates: bool) -> InstallResult:
+    """Stop ``--dry-run`` after the decisions an install makes before writing.
+
+    The preview reuses this pipeline's resolution, policy gate and commit
+    gate, so it reaches the install's own verdicts; the transaction rolls
+    back the resolution staging.
+    """
+    from apm_cli.models.results import InstallDisposition, InstallResult
+
+    from .commit_gate import check_before_deploy
+    from .phases import policy_gate as _policy_gate_phase
+    from .pipeline import _run_phase
+
+    ctx.preview_errors.extend(message for _, message in ctx.transitive_failures)
+    if run_gates:
+        ctx.direct_mcp_deps = ctx.apm_package.get_all_mcp_dependencies()
+        _run_phase("policy_gate", _policy_gate_phase, ctx)
+        check_before_deploy(ctx)
+    graph = ctx.dependency_graph
+    return InstallResult(
+        disposition=InstallDisposition.DRY_RUN,
+        target_decision=ctx.target_decision,
+        preview=PipelinePreview(
+            dependencies=tuple(ctx.deps_to_install),
+            resolved_dependencies=(
+                tuple(graph.flattened_dependencies.get_installation_list())
+                if graph is not None
+                else tuple(ctx.deps_to_install)
+            ),
+            mcp_dependencies=ctx.preview_mcp_dependencies,
+            errors=tuple(ctx.preview_errors),
+            declaration_errors=tuple(ctx.preview_declaration_errors),
+            resolved_marketplace_plugins=frozenset(
+                (row.get("discovered_via"), row.get("marketplace_plugin_name"))
+                for row in (ctx.marketplace_provenance or {}).values()
+            ),
+        ),
     )
 
 
