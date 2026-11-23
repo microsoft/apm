@@ -82,3 +82,21 @@ def test_a_still_declared_package_keeps_its_shared_server(
 
     assert uninstall.exit_code == 0, uninstall.output
     assert "shared-srv" in _servers(project)
+
+
+def test_a_user_added_server_survives_the_stale_row_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _install_two_sharing_one_server(tmp_path, monkeypatch)
+    config_path = project / ".mcp.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["mcpServers"]["user-srv"] = {"type": "stdio", "command": "mine", "args": []}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    _manifest(project, "../b")
+    clear_apm_yml_cache()
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "../b"])
+
+    assert uninstall.exit_code == 0, uninstall.output
+    servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
+    assert servers == {"user-srv": {"type": "stdio", "command": "mine", "args": []}}
