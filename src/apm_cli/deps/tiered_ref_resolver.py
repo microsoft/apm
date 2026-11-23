@@ -47,7 +47,6 @@ import re
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..models.apm_package import (
@@ -55,7 +54,6 @@ from ..models.apm_package import (
     GitReferenceType,
     ResolvedReference,
 )
-from ..utils.git_env import run_git_text
 from ..utils.github_host import default_host
 
 if TYPE_CHECKING:
@@ -296,58 +294,11 @@ class L2BareRevParse:
         if recorded:
             return sha
 
+        # Only the git cache opens its bares (trust-checked, run inertly).
         try:
-            from ..cache.url_normalize import cache_shard_key
+            return self._git_cache.bare_ref_sha(dep_ref.to_github_url(), ref)
         except Exception:
             return None
-
-        try:
-            shard_key = cache_shard_key(dep_ref.to_github_url())
-        except Exception:
-            return None
-
-        # Reach into GitCache's bare DB dir. We avoid calling
-        # GitCache.get_checkout() (which would trigger a fresh clone +
-        # ls-remote if missing). Bare path layout is stable per
-        # cache/git_cache.py:226.
-        try:
-            bare_dir = self._git_cache._db_root / shard_key
-        except Exception:
-            return None
-
-        if not bare_dir.is_dir():
-            return None
-
-        return self._rev_parse(bare_dir, ref)
-
-    @staticmethod
-    def _rev_parse(bare_dir: Path, ref: str) -> str | None:
-        import subprocess
-
-        from ..utils.git_env import get_git_executable, git_subprocess_env
-
-        git_exe = get_git_executable()
-        env = git_subprocess_env()
-
-        # Try refs/heads/REF, refs/tags/REF, then REF (covers branch,
-        # tag, and SHA prefix). All against the existing bare; no
-        # network. ``--verify`` ensures we only accept an exact match.
-        candidates = (f"refs/heads/{ref}", f"refs/tags/{ref}", ref)
-        for candidate in candidates:
-            try:
-                result = run_git_text(
-                    [git_exe, "--git-dir", str(bare_dir), "rev-parse", "--verify", candidate],
-                    capture_output=True,
-                    timeout=5,
-                    env=env,
-                )
-            except (subprocess.TimeoutExpired, OSError):
-                continue
-            if result.returncode == 0:
-                sha = (result.stdout or "").strip().lower()
-                if _SHA_RE.match(sha):
-                    return sha
-        return None
 
 
 # ---------------------------------------------------------------------------
