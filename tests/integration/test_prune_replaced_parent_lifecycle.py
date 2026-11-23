@@ -1,10 +1,10 @@
-"""Prune of a replaced package's parent completes or changes nothing (#5140).
+"""Prune refuses to remove a replaced package's only parent, changing nothing (#5140).
 
 PROMISE: P-INV-I7 -- a failed command preserves state. ``apm prune`` that
 removes the only parent of a package a root ``replace`` entry redirects must
-either finish with a lockfile whose replacement graph is whole, or refuse with
-``apm_modules``, ``apm.lock.yaml`` and the deployed files byte-identical; it never deletes package
-directories and then fails the lockfile write (source: #5140 scope record).
+refuse, exit 1 and name the cause, with ``apm_modules``, ``apm.lock.yaml`` and the
+deployed files byte-identical; it never deletes package directories and then
+fails the lockfile write (source: #5140 scope record).
 CELL: OP=prune SRC=local+replace PRIM=skill SCOPE=project LOCK=consistent
 GRAPH=replaced-transitive-of-pruned-parent
 
@@ -76,7 +76,7 @@ def _modules(project: Path) -> dict[str, bytes | None]:
     }
 
 
-def test_pruning_a_replaced_packages_parent_completes_or_changes_nothing(
+def test_pruning_a_replaced_packages_parent_refuses_with_nothing_changed(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = ReplayWorld.create(tmp_path, apm_binary_path)
@@ -96,18 +96,10 @@ def test_pruning_a_replaced_packages_parent_completes_or_changes_nothing(
     result = world.apm("prune", expect=None)
 
     evidence = f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
-    if result.returncode != 0:
-        # A refusal says so, and changes nothing.
-        assert "Nothing was changed" in result.stdout + result.stderr, evidence
-        assert _modules(world.project) == modules, evidence
-        assert lock_bytes(world.project) == lock, evidence
-        assert tree_digest(world.project) == tree, evidence
-        return
-    # A completed prune leaves a lockfile whose replacement graph is whole.
-    pruned = LockFile.read(world.project / "apm.lock.yaml")
-    assert pruned is not None, evidence
-    keys = set(pruned.dependencies)
-    for key, dep in pruned.dependencies.items():
-        missing = [parent for parent in dep.parent_keys if parent and parent not in keys]
-        assert missing == [], f"{key} keeps absent parents {missing}\n{evidence}"
-    world.audit_clean()
+    # The lockfile owner rejects the graph, so prune refuses before it deletes anything.
+    assert result.returncode == 1, evidence
+    assert "Nothing was changed" in result.stdout + result.stderr, evidence
+    assert "test/r" in result.stdout + result.stderr, evidence
+    assert _modules(world.project) == modules, evidence
+    assert lock_bytes(world.project) == lock, evidence
+    assert tree_digest(world.project) == tree, evidence
