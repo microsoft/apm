@@ -857,7 +857,7 @@ def reconcile_target_deployed_files(
             diagnostics=diagnostics,
             evidence=evidence,
             prior_ledger=dependency_ledger,
-            on_cleanup=partial(surface_target_cleanup, logger, dep_key),
+            on_cleanup=SelectedCleanupOutcome.observer(selected_outcome, logger, dep_key),
             desired_owners=desired_owners,
             generic_governed_values=(
                 frozenset(prior_files) if selected_owner_removal else frozenset()
