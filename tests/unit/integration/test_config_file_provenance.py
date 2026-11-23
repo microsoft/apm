@@ -433,6 +433,11 @@ def test_a_users_file_is_not_written_when_its_record_cannot_be_saved(tmp_path, a
     assert config.read_text(encoding="utf-8") == _SKELETON
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows collapses '..' before following links: the write and its key both "
+    "name the file beside the link",
+)
 def test_dotdot_after_a_linked_directory_names_the_file_the_write_reaches(
     tmp_path, apm_home
 ) -> None:
