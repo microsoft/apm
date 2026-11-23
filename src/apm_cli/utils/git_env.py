@@ -1874,7 +1874,7 @@ def git_long_paths_args() -> list[str]:
 
 # PERF FALSIFICATION HACK (F4): one smart-HTTP v0 ref advertisement over a pooled
 # keep-alive connection instead of a git ls-remote child (TLS + 2 requests). NEVER SHIP.
-_HACK_PARITY = False
+_HACK_PARITY = True
 _hack_session = None
 
 
