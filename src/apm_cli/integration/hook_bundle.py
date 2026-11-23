@@ -6,17 +6,59 @@ import os
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.install.deployed_paths import deployed_path_entry
 from apm_cli.integration import write_seam
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.hook_native_formats import (
+    hook_module_type_metadata,
+    is_hook_module_type_metadata,
+    node_module_type,
+)
+from apm_cli.utils.content_hash import content_hash_of_bytes
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 _HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
+# Targets whose hook loader scans the deployed bundle for JSON descriptors, so
+# the bundle deploys no JSON assets and no module-type package.json.
+_JSON_EXCLUDING_HOOK_TARGETS = frozenset({"copilot"})
 _log = logging.getLogger(__name__)
+
+
+def hook_bundle_deploys_json(target_name: str) -> bool:
+    """Return True when *target_name*'s hook bundle deploys JSON and module metadata."""
+    return target_name not in _JSON_EXCLUDING_HOOK_TARGETS
+
+
+def is_deployed_hook_module_metadata(
+    path: PurePath,
+    text: str,
+    *,
+    target_name: str,
+    recorded_hash: str | None,
+) -> bool:
+    """Return True for module metadata this bundle deploy wrote, still unedited (#4921).
+
+    Hook bundle deploy writes a module-type ``package.json`` beside JavaScript
+    hooks and deploys nested copies with their scripts (#2950). Neither defines
+    hooks. Only a ``package.json`` whose *text* holds just a Node module type,
+    on a target whose bundle deploys it, and still hashes to the value recorded
+    at deploy, qualifies; anything else stays a hook candidate.
+    """
+    if (
+        path.name != "package.json"
+        or recorded_hash is None
+        or not hook_bundle_deploys_json(target_name)
+        or content_hash_of_bytes(text.encode("utf-8")) != recorded_hash
+    ):
+        return False
+    try:
+        return is_hook_module_type_metadata(json.loads(text))
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -73,11 +115,11 @@ def _hook_module_type(package_path: Path, hook_source_root: Path) -> str:
             try:
                 data = json.loads(package_json.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                return "commonjs"
+                return node_module_type(None)
             package_type = data.get("type") if isinstance(data, dict) else None
-            return package_type if package_type in {"commonjs", "module"} else "commonjs"
+            return node_module_type(package_type)
         if current in (package_path, current.parent):
-            return "commonjs"
+            return node_module_type(None)
         current = current.parent
 
 
@@ -337,7 +379,9 @@ def copy_deployed_hook_bundle(
         if target_rel in copy_plan:
             # An enclosing root already deploys this directory's own metadata.
             continue
-        content = json.dumps({"type": module_type}, indent=2, sort_keys=True) + "\n"
+        content = (
+            json.dumps(hook_module_type_metadata(module_type), indent=2, sort_keys=True) + "\n"
+        )
         if target_file.exists() and _same_text(target_file, content):
             target_paths.append(target_file)
             continue
