@@ -12,8 +12,12 @@ An O(n^2) algorithm would give ~100x.  Each guard's threshold is set to
 flake while quadratic regressions are still caught.
 """
 
+import argparse
+import json
 import os
 import statistics
+import subprocess
+import sys
 import tempfile  # noqa: F401
 import time
 from dataclasses import dataclass, field  # noqa: F401
@@ -30,6 +34,7 @@ from apm_cli.models.dependency.replacement import (
     ReplacementRule,
     parse_replace_block,
 )
+from tests.benchmarks import ci_bench, journeys
 
 pytestmark = pytest.mark.component
 
@@ -980,3 +985,81 @@ class TestRewriteHooksDataScaling:
             f"super-linear regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
         )
+
+
+# ---------------------------------------------------------------------------
+# CI bench tooling (tests/benchmarks/ci_bench.py, journeys.py): the Perf bench
+# workflow never runs pytest, so its report and runner contracts live here.
+# ---------------------------------------------------------------------------
+
+
+def _write_bench_record(
+    root: Path, shard: int, side: str, pair: int, cpu: float, error: str = ""
+) -> None:
+    directory = root / f"perf-bench-shard-{shard}" / f"{side}-{pair:02d}"
+    directory.mkdir(parents=True)
+    record = {
+        "fixture": "tree-10",
+        "journey": "install-noop",
+        "rtt_ms": 30.0,
+        "cpu_p50_s": cpu,
+        "traffic": {"requests": 4 if side == "base" else 0},
+        "spawns": {"git": 8} if side == "base" else {},
+        "modules": 900,
+        "error": error,
+    }
+    (directory / "journeys-abc.json").write_text(json.dumps({"results": [record]}))
+
+
+def _bench_report(root: Path, shards: int, pairs: int, result: Path | None = None) -> int:
+    args = argparse.Namespace(
+        root=str(root),
+        json=str(result) if result else None,
+        base="a",
+        new="b",
+        shards=str(shards),
+        pairs=str(pairs),
+    )
+    return ci_bench.report(args)
+
+
+def test_bench_paired_ratio_cancels_a_slower_runner(tmp_path: Path, capsys) -> None:
+    # Runner 2 is twice as slow on both sides; new is exactly half of base everywhere.
+    for shard, scale in ((1, 1.0), (2, 2.0)):
+        for pair in range(2):
+            _write_bench_record(tmp_path, shard, "base", pair, 3.0 * scale)
+            _write_bench_record(tmp_path, shard, "new", pair, 1.5 * scale)
+    result = tmp_path / "result.json"
+
+    assert _bench_report(tmp_path, shards=2, pairs=2, result=result) == 0
+    (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
+    assert "| 0.500 | 4->0 | 8->0 | 4/4 | 0/0 |" in capsys.readouterr().out
+    assert row["paired_new_over_base"] == 0.5
+
+
+def test_bench_report_fails_on_a_failed_sample(tmp_path: Path, capsys) -> None:
+    _write_bench_record(tmp_path, 1, "base", 0, 3.0)
+    _write_bench_record(tmp_path, 1, "new", 0, 1.0, error="install failed")
+
+    assert _bench_report(tmp_path, shards=1, pairs=1) == 1
+    assert "| - | 4->0 | 8->0 | 1/0 | 0/1 |" in capsys.readouterr().out
+
+
+def test_bench_report_fails_when_a_shard_is_missing(tmp_path: Path, capsys) -> None:
+    # Two runners x one pair were requested; only runner 1 uploaded.
+    _write_bench_record(tmp_path, 1, "base", 0, 3.0)
+    _write_bench_record(tmp_path, 1, "new", 0, 1.5)
+
+    assert _bench_report(tmp_path, shards=2, pairs=1) == 1
+    assert "| 1/1 | 0/0 |" in capsys.readouterr().out
+
+
+def test_bench_timed_run_kills_a_hung_command(tmp_path: Path) -> None:
+    marker = tmp_path / "still-running"
+    script = f"import time, pathlib; time.sleep(30); pathlib.Path({str(marker)!r}).touch()"
+    proc = subprocess.Popen([sys.executable, "-c", script])
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        journeys._wait4_with_deadline(proc, 0.2)
+    assert proc.poll() is not None
+    assert not marker.exists()
