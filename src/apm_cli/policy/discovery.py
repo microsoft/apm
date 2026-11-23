@@ -32,12 +32,13 @@ from . import _gitlab
 from ._cache_verify import (
     _cache_only_policy_result,
     _cached_policy_verified,
-    cached_document,
-    capped_ttl,
-    store_raw_leaf,
     _stale_fallback_or_error,
     _unverifiable_cache_pin,
     _unverified_pinned_cache,
+    cached_document,
+    capped_ttl,
+    load_cache_meta,
+    store_raw_leaf,
 )
 from ._policy_http import policy_get
 from ._remote import (  # noqa: F401  -- re-exported for callers/tests
@@ -373,10 +374,9 @@ def _discover_one_with_chain(
         _resolve_and_persist_chain(
             fetch_result,
             project_root,
-            no_cache=no_cache,
+            no_cache=no_cache or expected_hash is not None,  # pinned: parents never from cache
             cache_only=cache_only,
         )
-
     return fetch_result
 
 
@@ -1950,9 +1950,9 @@ def _read_cache_entry(
         return None
 
     try:
-        meta = json.loads(meta_file.read_text(encoding="utf-8"))
-
-        # Schema version check -- auto-invalidate on format change
+        meta = load_cache_meta(meta_file)
+        if meta is None:
+            return None
         if meta.get("schema_version") != CACHE_SCHEMA_VERSION:
             meta_file.unlink(missing_ok=True)
             return None

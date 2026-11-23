@@ -557,7 +557,7 @@ def _gitlab_content_result(
 
     actual_hash = _compute_hash_normalized(content, expected_hash)
     if policy.extends is None:
-        _cache_gitlab_leaf_policy(repo_ref, policy, project_root, actual_hash, warnings)
+        _cache_gitlab_leaf_policy(repo_ref, policy, project_root, actual_hash, warnings, content)
     return _gitlab_fresh_policy_result(
         policy,
         source_label=source_label,
@@ -573,8 +573,9 @@ def _cache_gitlab_leaf_policy(
     project_root: Path,
     actual_hash: str,
     warnings: list[str],
+    content: str | bytes | None = None,
 ) -> None:
-    """Persist an unextended GitLab leaf through the canonical cache writer."""
+    """Persist an unextended GitLab leaf (and its fetched bytes) through the cache writer."""
     from .discovery import _write_cache
 
     _write_cache(
@@ -585,6 +586,7 @@ def _cache_gitlab_leaf_policy(
             "chain_refs": [repo_ref],
             "raw_bytes_hash": actual_hash,
             "warnings": warnings,
+            "raw_content": content,
         },
     )
 

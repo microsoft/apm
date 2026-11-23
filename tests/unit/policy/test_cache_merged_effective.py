@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import sys
 import tempfile
+import threading
 import time
 import unittest
 from dataclasses import fields, is_dataclass
@@ -26,6 +29,7 @@ import pytest
 
 from apm_cli.install.errors import PolicyViolationError
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.policy._cache_verify import MAX_CACHE_FILE_BYTES, MAX_FRESH_TTL
 from apm_cli.policy.discovery import (
     CACHE_SCHEMA_VERSION,
     DEFAULT_CACHE_TTL,
@@ -1245,15 +1249,13 @@ def test_extends_only_leaf_resolves_strict_parent(tmp_path: Path) -> None:
 def test_altered_cached_policy_document_is_ignored(tmp_path: Path) -> None:
     """#4218: a cached document that no longer matches its record is never applied."""
     repo_ref = "contoso/.github"
-    pin = "sha256:" + "a" * 64
-    _write_cache(repo_ref, ApmPolicy(name="org"), tmp_path, raw_bytes_hash=pin)
-    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is not None
+    _write_cache(repo_ref, ApmPolicy(name="org"), tmp_path)
+    assert _read_cache_entry(repo_ref, tmp_path) is not None
 
     document = _get_cache_dir(tmp_path) / f"{_cache_key(repo_ref)}.yml"
     altered = document.read_text(encoding="utf-8") + "dependencies:\n  deny: [contoso/pkg-a]\n"
     document.write_text(altered, encoding="utf-8")
 
-    assert _read_cache_entry(repo_ref, tmp_path, expected_hash=pin) is None
     assert _read_cache_entry(repo_ref, tmp_path) is None
     assert document.read_text(encoding="utf-8") == altered
 
@@ -1314,9 +1316,7 @@ def test_pinned_bytes_that_do_not_hash_to_the_pin_are_fetched_again(
     assert policy_file.exists()
 
 
-def test_a_composed_entry_drops_leaf_bytes_and_is_fetched_again_when_pinned(
-    tmp_path: Path,
-) -> None:
+def test_a_composed_write_drops_leaf_bytes(tmp_path: Path) -> None:
     policy_file, _meta_file = _pinned_entry(tmp_path)
     merged, _warnings = load_policy(_LEAF)
     _write_cache(_REF, merged, tmp_path, chain_refs=["parent/.github", _REF])
@@ -1325,9 +1325,18 @@ def test_a_composed_entry_drops_leaf_bytes_and_is_fetched_again_when_pinned(
     assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
 
 
-def test_a_cached_policy_cannot_keep_itself_fresh_past_the_cap(tmp_path: Path) -> None:
-    from apm_cli.policy._cache_verify import MAX_FRESH_TTL
+def test_a_pinned_entry_composed_from_a_chain_is_fetched_again(tmp_path: Path) -> None:
+    policy_file, meta_file = _pinned_entry(tmp_path)
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    meta["chain_refs"] = ["parent/.github", _REF]
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    assert meta["raw_bytes_hash"] == _pin(_LEAF)
+    assert policy_file.with_suffix(".raw").read_text(encoding="utf-8") == _LEAF
 
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_a_cached_policy_cannot_keep_itself_fresh_past_the_cap(tmp_path: Path) -> None:
     policy, _warnings = load_policy(_LEAF + f"cache:\n  ttl: {MAX_FRESH_TTL * 6}\n")
     _setup_cache(_REF, tmp_path, policy, cached_at=time.time() - MAX_FRESH_TTL - 60)
 
@@ -1336,3 +1345,86 @@ def test_a_cached_policy_cannot_keep_itself_fresh_past_the_cap(tmp_path: Path) -
     assert entry is not None and entry.stale
     assert entry.policy.cache.ttl == MAX_FRESH_TTL * 6
     assert (_get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml").exists()
+
+
+def test_a_pinned_leaf_never_takes_its_parents_from_the_cache(tmp_path: Path) -> None:
+    leaf_url = "https://policy.example.com/leaf.yml"
+    parent_url = "https://policy.example.com/parent.yml"
+    leaf_yaml = (POLICY_FIXTURES / "leaf.yml").read_text(encoding="utf-8")
+    parent_yaml = (POLICY_FIXTURES / "parent.yml").read_text(encoding="utf-8")
+    # A cache entry for the parent that says less than the parent does.
+    _write_cache(parent_url, ApmPolicy(name="url-parent"), tmp_path)
+    assert _read_cache_entry(parent_url, tmp_path) is not None
+    responses = {
+        leaf_url: TestURLChainCache._response(leaf_yaml),
+        parent_url: TestURLChainCache._response(parent_yaml),
+    }
+
+    with patch(
+        "apm_cli.policy.discovery.policy_get",
+        side_effect=lambda url, **_kwargs: responses[url],
+    ):
+        result = discover_policy_with_chain(
+            tmp_path, policy_override=leaf_url, expected_hash=_pin(leaf_yaml)
+        )
+
+    assert result.policy is not None
+    assert "parent/blocked-one" in result.policy.dependencies.deny
+    assert (_get_cache_dir(tmp_path) / f"{_cache_key(parent_url)}.yml").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX pipes and links")
+@pytest.mark.parametrize("kind", ["fifo", "symlink", "oversize"])
+@pytest.mark.parametrize("target", ["raw", "meta.json"])
+def test_cache_files_that_are_not_bounded_regular_files_are_fetched_again(
+    tmp_path: Path, kind: str, target: str
+) -> None:
+    policy_file, _meta_file = _pinned_entry(tmp_path)
+    path = policy_file.with_suffix(f".{target}")
+    if kind == "oversize":
+        path.write_bytes(path.read_bytes() + b" " * (MAX_CACHE_FILE_BYTES + 1))
+    else:
+        saved = tmp_path / f"saved.{target}"
+        saved.write_bytes(path.read_bytes())
+        path.unlink()
+        if kind == "fifo":
+            os.mkfifo(path)
+        else:
+            path.symlink_to(saved)
+    outcome: list[object] = []
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+        ),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=20)
+
+    assert not worker.is_alive(), f"the cache read blocked on a {kind} {target}"
+    assert outcome == [None]
+    assert path.exists() or path.is_symlink()
+
+
+def test_a_pinned_leaf_that_extends_another_is_fetched_again(tmp_path: Path) -> None:
+    leaf = "name: org\nversion: '1.0'\nextends: parent/.github\n"
+    policy, _warnings = load_policy(leaf)
+    _write_cache(_REF, policy, tmp_path, raw_bytes_hash=_pin(leaf), raw_content=leaf)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == leaf
+
+    assert _read_cache_entry(_REF, tmp_path, expected_hash=_pin(leaf)) is None
+
+
+def test_a_gitlab_leaf_keeps_its_fetched_bytes_for_pinned_reads(tmp_path: Path) -> None:
+    from apm_cli.policy._gitlab import _cache_gitlab_leaf_policy
+
+    policy, warnings = load_policy(_LEAF)
+    _cache_gitlab_leaf_policy(_REF, policy, tmp_path, _pin(_LEAF), warnings, _LEAF)
+
+    entry = _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert (_get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw").read_text(
+        encoding="utf-8"
+    ) == _LEAF

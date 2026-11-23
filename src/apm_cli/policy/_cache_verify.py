@@ -8,6 +8,9 @@ Split out of ``policy/discovery.py`` (file-length guardrail); discovery's
 from __future__ import annotations
 
 import hmac
+import json
+import os
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,7 +54,11 @@ def _cached_policy_verified(
     if serialized is None:
         return False
     if expected_hash is not None:  # ``cached_document`` re-hashed the leaf bytes
-        return _cached_pin_matches(raw_bytes_hash, expected_hash)
+        from .parser import load_policy
+
+        # A leaf that extends others needs its parents resolved: fetch again.
+        leaf, _warnings = load_policy(serialized)
+        return _cached_pin_matches(raw_bytes_hash, expected_hash) and leaf.extends is None
     return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(
         serialized, meta
     )
@@ -59,6 +66,40 @@ def _cached_policy_verified(
 
 # A cached document never keeps itself fresh for longer than this.
 MAX_FRESH_TTL = 24 * 3600
+# Cache files larger than this are not read; the policy is fetched again.
+MAX_CACHE_FILE_BYTES = 1 << 20
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def read_cache_file(path: Path) -> bytes | None:
+    """The bytes of a regular cache file of bounded size, else ``None`` (never a link or pipe)."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, _READ_FLAGS)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CACHE_FILE_BYTES:
+            return None
+        data = handle.read(MAX_CACHE_FILE_BYTES + 1)
+    return data if len(data) <= MAX_CACHE_FILE_BYTES else None
+
+
+def load_cache_meta(meta_file: Path) -> dict | None:
+    """A cache entry's metadata, or ``None`` when it cannot be read as a JSON object."""
+    data = read_cache_file(meta_file)
+    try:
+        meta = json.loads(data.decode("utf-8")) if data is not None else None
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
 
 
 def capped_ttl(ttl: int) -> int:
@@ -95,7 +136,8 @@ def cached_document(policy_file: Path, meta: dict, expected_hash: str | None) ->
     no single leaf to verify, so it is fetched again.
     """
     if expected_hash is None:
-        return policy_file.read_text(encoding="utf-8")
+        document = read_cache_file(policy_file)
+        return document.decode("utf-8") if document is not None else None
     from .discovery import _verify_hash_pin
 
     chain = meta.get("chain_refs")
@@ -104,9 +146,8 @@ def cached_document(policy_file: Path, meta: dict, expected_hash: str | None) ->
         return None
     if not _cached_pin_matches(recorded, expected_hash):
         return None
-    try:
-        raw = _raw_leaf_path(policy_file).read_bytes()
-    except OSError:
+    raw = read_cache_file(_raw_leaf_path(policy_file))
+    if raw is None:
         return None
     if _verify_hash_pin(raw, expected_hash, "cache") is not None:
         return None
