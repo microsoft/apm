@@ -547,9 +547,14 @@ def _script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozense
     )
 
 
+def _folds(path: str) -> bool:
+    """Whether *path* compares case-insensitively (Windows, or a drive path)."""
+    return os.name == "nt" or bool(_DRIVE.match(path))
+
+
 def _normalized(path: str) -> str:
     normal = posixpath.normpath(path)
-    return normal.casefold() if _DRIVE.match(normal) else normal
+    return normal.casefold() if _folds(normal) else normal
 
 
 def _words(command: str) -> list[str] | None:
@@ -572,56 +577,71 @@ def _runs_script(
     ``${CLAUDE_PROJECT_DIR}`` and ``$HOME`` anchors are resolved first. A
     path word runs the script when it normalizes to it (``/./``, ``..``): an
     absolute one (``/``, ``C:/``) as written, a relative one from any of
-    *bases* (the project root, the hook's target root) or a ``cd <dir>`` in
-    the command. A bare file name (``./x.sh``), a word with another
-    expansion, or a relative word under a working directory that cannot be
-    determined counts when its name matches (fail closed); so does any
-    command that cannot be parsed.
+    *bases* (the project root, the hook's target root) or a ``cd <dir>``
+    before it, nested shells included. A bare file name (``./x.sh``), a word
+    with another expansion, a command substitution, or a relative word under
+    a working directory that cannot be determined counts when its name
+    matches (fail closed); so does any command that cannot be parsed.
     """
-    names, paths = refs
     home = Path.home().as_posix()
 
     def anchor(match: re.Match) -> str:
         name = next(group for group in match.groups() if group)
-        return project_root.as_posix() if name == "CLAUDE_PROJECT_DIR" else home
+        return home if name == "HOME" else project_root.as_posix()
 
     text = _ANCHOR_VARIABLES.sub(anchor, command)
+    roots = frozenset(_normalized(base.as_posix()) for base in bases)
+    return _scan_words(text, refs, roots, True)
+
+
+def _names_word(word: str, names: frozenset) -> bool:
+    name = word.rstrip("/").rsplit("/", 1)[-1]
+    if _folds(word):
+        return name.casefold() in {candidate.casefold() for candidate in names}
+    return name in names
+
+
+def _scan_words(
+    text: str, refs: tuple[frozenset, frozenset], roots: frozenset, certain: bool
+) -> bool:
+    """:func:`_runs_script` over one shell string, from *roots* (#5106)."""
+    names, paths = refs
+    if ("$(" in text or "`" in text) and any(_names_word(word, names) for word in text.split()):
+        return True  # a command substitution may build the script path
     words = _words(text)
     if words is None:
-        return any(name in text for name in names)
-    roots = {_normalized(base.as_posix()) for base in bases}
-    certain = True
+        return any(name.casefold() in text.casefold() for name in names)
+    tracked = set(roots)
     for index, word in enumerate(words):
         if word == "cd":
-            rest = [w for w in words[index + 1 :] if w not in ("--",) and not w.startswith("-")]
+            rest = [w for w in words[index + 1 :] if w != "--" and not w.startswith("-")]
             target = rest[0] if rest else None
             if target is None or target in ";&|()<>" or "$" in target or target.startswith("~"):
                 certain = False
-                continue
-            if target.startswith("/") or _DRIVE.match(target):
-                roots = {_normalized(target)}
-            else:
-                roots |= {_normalized(posixpath.join(root, target)) for root in roots}
-            if len(roots) > _MAX_ROOTS:
-                certain = False
+            elif certain:
+                # A cd in a subshell need not hold afterwards: roots only grow.
+                if target.startswith("/") or _DRIVE.match(target):
+                    tracked.add(_normalized(target))
+                else:
+                    tracked |= {_normalized(posixpath.join(root, target)) for root in tracked}
+                if len(tracked) > _MAX_ROOTS:
+                    certain = False
             continue
-        if any(space in word for space in " \t\n") and _runs_script(
-            word, refs, bases, project_root
+        if any(space in word for space in " \t\n") and _scan_words(
+            word, refs, frozenset(tracked), certain
         ):
             return True
-        if word.rstrip("/").rsplit("/", 1)[-1] not in names:
+        if not _names_word(word, names):
             continue
         if word.startswith("/") or _DRIVE.match(word):
-            if "$" not in word and _normalized(word) in paths:
+            if "$" in word or _normalized(word) in paths:
                 return True
-            if "$" not in word:
-                continue
-            return True
+            continue
         if not certain or "$" in word or word.startswith("~"):
             return True
         if "/" not in word.removeprefix("./"):
             return True
-        if any(_normalized(f"{root}/{word}") in paths for root in roots):
+        if any(_normalized(f"{root}/{word}") in paths for root in tracked):
             return True
     return False
 

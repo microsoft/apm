@@ -95,7 +95,12 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/x.sh"', False),
         ('cd "$HOME" && sh /opt/tools/x.sh', False),
         ("cd . && " * 20 + "true", False),
+        (" && ".join(f"cd d{index}" for index in range(12)) + " && true", False),
         ("./tools/lint.sh", False),
+        ("sh $(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("(cd / && true); sh .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
+        ("cd .claude/hooks/hookpkg/hooks && sh -c 'sh scripts/./x.sh'", True),
     ],
     ids=[
         "project-dir-anchor",
@@ -106,7 +111,12 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "sibling-package",
         "same-name-absolute",
         "many-cd",
+        "distinct-cd",
         "unrelated",
+        "unquoted-substitution",
+        "backtick-substitution",
+        "subshell-cd",
+        "nested-inherits-cd",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
@@ -129,3 +139,6 @@ def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> 
     drive = "C:/project"
     refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
     assert _runs_script(f"{drive}/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (), Path("/"))
+    assert _runs_script(
+        f"sh {drive}/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (), Path("/")
+    )
