@@ -61,6 +61,7 @@ from tests.lifecycle.world.services import (
     policy_documents,
     policy_org,
 )
+from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
 pytestmark = [
     pytest.mark.e2e,
@@ -714,27 +715,47 @@ DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, .
 }
 
 
+# The decide seam's exit on a decline: distinct and non-zero, so it can never pass for
+# a successful install (VP ruling; apm_cli.install.fast_entry.DECIDE_EXIT).
+DECIDE_EXIT = 3
+
+
+def _decide(world: World, argv: tuple[str, ...]):
+    """Run *argv* in decide mode through the driver's entry point.
+
+    The decide seam is a test-only exit, outside every command's user exit contract,
+    so it bypasses the driver's I8 output hook; this cell asserts the exit, ASCII and
+    the empty stdout itself.
+    """
+    args = driver.command_args(argv, scope="project")
+    runner = ApmLifecycleRunner(driver.driver_command(), timeout_seconds=driver.TIMEOUT_SECONDS)
+    env = {**world.env, FAST_ENV: "decide"}
+    cwd = driver.command_cwd(world, "project")
+    return runner.run(args, cwd=cwd, env=env, scenario_id="lifecycle-decide")
+
+
 @pytest.mark.parametrize(
     "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DECLINES)]
 )
 def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
     """Hand-off invariant: with ``APM_INSTALL_FAST_PATH=decide`` the engine decides and,
-    on a decline, exits before the full pipeline; not one byte may have moved by then.
+    on a decline, exits ``DECIDE_EXIT`` before the full pipeline; not one byte may
+    have moved by then.
     """
     keys, change, argv = DECLINES[trigger]
     _converge(twin, *keys)
     world = twin.fast
     change(world)
     before = comparable(world)
-    world.env[FAST_ENV] = "decide"
-    try:
-        result = driver.run(world, argv)
-    finally:
-        world.env.pop(FAST_ENV, None)
+    result = _decide(world, argv)
     if "Installing dependencies" in result.stdout:
         raise MissingDecision("expected a decide decision, got the full pipeline")
     decisions = _DECISION.findall(result.stderr)
+    assert len(decisions) <= 1, f"one decision per command, got {decisions}"
     _assert_decision(decisions[0] if decisions else "", FULL)
-    assert result.returncode == 0, result.stdout + result.stderr
+    evidence = result.stdout + result.stderr
+    assert result.returncode == DECIDE_EXIT, f"exit {result.returncode}, expected {DECIDE_EXIT}"
+    assert not result.stdout.strip(), f"a decline printed pipeline output: {evidence}"
+    assert evidence.isascii(), "I6: decide output is not ASCII"
     problems = diff(before, comparable(world), (world, world), ("before", "after"))
     assert not problems, f"{trigger}: the declined fast path wrote\n" + "\n".join(problems)
