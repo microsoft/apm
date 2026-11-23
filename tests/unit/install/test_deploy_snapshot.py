@@ -211,6 +211,96 @@ def test_receipts_under_apm_home_replay_without_a_ledger_row(
     assert receipt.read_bytes() == deployed.read_bytes() == b"killed\n"
 
 
+def _journaled_receipt(apm_home: Path, project: Path) -> tuple[Path, Path]:
+    """A killed install's journal holding one receipt it rewrote; return (receipt, store)."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    receipt = apm_home / "deployment-receipts" / "r.json"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_bytes(b"prior\n")
+    project.mkdir(exist_ok=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(receipt)
+    receipt.write_bytes(b"killed\n")
+    assert journal.store is not None
+    return receipt, journal.store
+
+
+def _retarget(store: Path, path: str) -> None:
+    """Point the journal's one unit at *path* (relative to APM home)."""
+    import json
+
+    manifest = store / "journal.jsonl"
+    header, unit = (json.loads(line) for line in manifest.read_text().splitlines())
+    unit["path"] = path
+    manifest.write_text(f"{json.dumps(header)}\n{json.dumps(unit)}\n", encoding="utf-8")
+
+
+def test_a_receipt_is_restored_from_its_journal_copy(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import replay_abandoned_journals
+
+    project = tmp_path / "project"
+    receipt, _store = _journaled_receipt(apm_home, project)
+
+    assert replay_abandoned_journals(apm_home / "install-snapshots", project, dict) == 1
+    assert receipt.read_bytes() == b"prior\n"
+
+
+def test_a_receipt_whose_copy_does_not_match_its_hash_is_not_restored(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
+
+    project = tmp_path / "project"
+    receipt, store = _journaled_receipt(apm_home, project)
+    (store / "0").write_bytes(b"forged\n")
+
+    with pytest.raises(JournalReplayError) as kept:
+        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+
+    assert kept.value.issues == [
+        ("deployment-receipts/r.json", "journal copy does not match its recorded hash")
+    ]
+    assert receipt.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize(
+    "escape", ["dotdot", "symlinked-dir", "outside-receipts", "symlinked-receipt"]
+)
+def test_a_receipt_path_leaving_the_receipts_directory_is_refused(
+    tmp_path: Path, apm_home: Path, escape: str
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError, replay_abandoned_journals
+
+    project = tmp_path / "project"
+    receipt, store = _journaled_receipt(apm_home, project)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "r.json"
+    victim.write_bytes(b"not apm's\n")
+    config = apm_home / "config.json"
+    config.write_bytes(b"user config\n")
+    path = {
+        "dotdot": "deployment-receipts/../../outside/r.json",
+        "symlinked-dir": "deployment-receipts/linked/r.json",
+        "outside-receipts": "config.json",
+        "symlinked-receipt": "deployment-receipts/link.json",
+    }[escape]
+    (apm_home / "deployment-receipts" / "linked").symlink_to(outside, target_is_directory=True)
+    (apm_home / "deployment-receipts" / "link.json").symlink_to(victim)
+    _retarget(store, path)
+
+    with pytest.raises(JournalReplayError) as kept:
+        replay_abandoned_journals(apm_home / "install-snapshots", project, dict)
+
+    assert [p for p, _reason in kept.value.issues] == [path]
+    assert not kept.value.applied
+    assert victim.read_bytes() == b"not apm's\n"
+    assert config.read_bytes() == b"user config\n"
+    assert receipt.read_bytes() == b"killed\n"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) -> None:
     from apm_cli.install.deploy_snapshot import DeployJournal, replay_abandoned_journals
