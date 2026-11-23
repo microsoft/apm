@@ -5276,6 +5276,14 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         new="def _filesystem_containment(path: Path, root: Path) -> bool | None:",
         intent="The path_security owner stops defining filesystem-aware containment.",
     ),
+    MutationCase(
+        guard_id="install-deployment-local-bundle-hook-trust",
+        rule_id="install-deployment-local-bundle-hook-trust",
+        path="src/apm_cli/install/services.py",
+        old="        record_bundle_canvas(\n            project_root, targets",
+        new="        write_canvas_record(\n            project_root, targets",
+        intent="A local-bundle install records its canvas through another call than the owner.",
+    ),
 )
 
 EXECUTABLE_MUTATIONS = MUTATIONS + USER_ROOT_ROUTING_MUTATIONS
