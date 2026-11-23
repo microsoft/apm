@@ -148,6 +148,8 @@ def test_install_retires_the_hooks_in_a_declared_target_it_skips(
     world.apm("install", "--target", "claude")
 
     assert _residue(world, ".gemini", "h.sh") == []
+    gemini = world.project / ".gemini" / "settings.json"
+    assert not gemini.exists() or "h.sh" not in gemini.read_text(encoding="utf-8")
 
 
 def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
@@ -166,6 +168,8 @@ def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
     world.apm("install", "--target", "claude")
 
     assert _residue(world, ".gemini", "h.sh") == []
+    gemini = world.project / ".gemini" / "settings.json"
+    assert not gemini.exists() or "h.sh" not in gemini.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
