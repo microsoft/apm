@@ -16,6 +16,7 @@ audit reports them first.
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -487,30 +488,103 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
-def _remove_unedited(
-    project_root: Path, rows: Collection[str], recorded: dict[str, str], prefixes: Collection[str]
-) -> set[str]:
-    """Remove deployed files under *prefixes* whose bytes still match the lock; edits are kept.
+def _configs_still_running(project_root: Path, targets: Any, scripts: Collection[str]) -> set[str]:
+    """Return merged hook configs whose remaining entries still run one of *scripts*.
 
-    Returns the rows whose file could not be removed; their claims must stay.
+    Retirement removes only the entries the bundle deployed; an entry the user
+    edited (another matcher) stays registered and keeps running its script.
+    """
+    import json
+
+    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+
+    def strings(node: Any) -> list[str]:
+        if isinstance(node, str):
+            return [node.replace("\\", "/")]
+        if isinstance(node, dict):
+            return [text for item in node.values() for text in strings(item)]
+        if isinstance(node, list):
+            return [text for item in node for text in strings(item)]
+        return []
+
+    found: set[str] = set()
+    for target in targets or ():
+        config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
+        if config is None:
+            continue
+        target_root = project_root / target.root_dir
+        json_path = target_root / config.config_filename
+        try:
+            texts = strings(json.loads(json_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        for value in scripts:
+            spelled = Path(value) if Path(value).is_absolute() else project_root / value
+            if not spelled.is_relative_to(target_root):
+                continue
+            tail = spelled.relative_to(target_root).as_posix()
+            if any(tail in text for text in texts):
+                found.add(_record_value(json_path, project_root))
+    return found
+
+
+def _script_path(project_root: Path, value: str, targets: Any) -> tuple[Path, Path] | None:
+    """Return ``(path, root)`` for a bundle script row, or ``None`` when it is refused.
+
+    A Claude root relocated outside the deploy root (``CLAUDE_CONFIG_DIR``)
+    records absolute rows; they resolve under that target's hook cleanup root,
+    as install contained them, and nowhere else.
+    """
+    from apm_cli.integration.hook_bundle import hook_cleanup_root
+
+    for target in targets or ():
+        if not (callable(getattr(target, "supports", None)) and target.supports("hooks")):
+            continue
+        prefix = _hooks_dir_prefix(target.root_dir)
+        if not Path(prefix).is_absolute() or not value.startswith(prefix):
+            continue
+        root = hook_cleanup_root(target, project_root)
+        if root is None or root == project_root:
+            return None
+        path = contained_bundle_path(root, value, (_hooks_dir_prefix("."),))
+        return (path, root) if path is not None else None
+    prefixes = _hooks_prefixes(targets)
+    path = contained_bundle_path(project_root, value, prefixes)
+    return (path, project_root) if path is not None else None
+
+
+def _remove_unedited(
+    project_root: Path, rows: Collection[str], recorded: dict[str, str], targets: Any
+) -> set[str]:
+    """Remove deployed hook scripts whose bytes still match the lock; edits are kept.
+
+    Returns the rows whose file could not be removed, including a present file
+    whose path is refused; their claims must stay.
     """
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import compute_file_hash
 
-    removed: list[Path] = []
+    removed: dict[Path, list[Path]] = {}
     failed: set[str] = set()
     for value in rows:
-        path = contained_bundle_path(project_root, value, prefixes)
-        if path is None or not path.is_file():
+        found = _script_path(project_root, value, targets)
+        if found is None:
+            spelled = Path(value) if Path(value).is_absolute() else project_root / value
+            if os.path.lexists(spelled):
+                failed.add(value)
+            continue
+        path, root = found
+        if not path.is_file():
             continue
         try:
             digest = recorded.get(value)
             if digest is None or digest == compute_file_hash(path):
                 path.unlink()
-                removed.append(path)
+                removed.setdefault(root, []).append(path)
         except OSError:
             failed.add(value)
-    BaseIntegrator.cleanup_empty_parents(removed, project_root)
+    for root, paths in removed.items():
+        BaseIntegrator.cleanup_empty_parents(paths, root)
     return failed
 
 
@@ -559,6 +633,7 @@ def retire_bundle_hooks(
     item = UnadmittedBundleHooks(slug, reason or "", configs)
     kept, unwritten = _retire_per_file(project_root, targets, item)
     kept = {_relative_value(value, project_root) for value in kept}
+    kept |= _configs_still_running(project_root, targets, scripts)
     undeleted: set[str] = set()
     if kept or unwritten:
         # A retained hook config still points at the scripts: they and every
@@ -566,7 +641,7 @@ def retire_bundle_hooks(
         rows -= scripts
     else:
         recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
-        undeleted = _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
+        undeleted = _remove_unedited(project_root, scripts, recorded, targets)
         rows -= undeleted
     rows -= {value for value in rows if _relative_value(value, project_root) in kept}
     if rows and lock_dir is not None:
