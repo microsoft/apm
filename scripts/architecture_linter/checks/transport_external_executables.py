@@ -142,6 +142,25 @@ def _bare_launch_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
     return lines
 
 
+def _may_launch(facts: object) -> bool:
+    """Cheap fact prefilter: only files that can launch or look up a program get a tree scan.
+
+    Call facts keep the written spelling, so any call whose final attribute is
+    a launcher or ``which`` qualifies whatever its module alias; a ``from``
+    import of a launch module covers bare-name calls.
+    """
+    for call in getattr(facts, "calls", ()):
+        attr = call.qualname.rpartition(".")[2]
+        if attr in _LAUNCHERS or attr in {"which", "create_subprocess_exec"}:
+            return True
+        if attr.startswith(("exec", "spawn", "posix_spawn")):
+            return True
+    return any(
+        fact.module is not None and fact.module.split(".")[0] in _LAUNCH_MODULES
+        for fact in getattr(facts, "imports", ())
+    )
+
+
 def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation, ...]:
     """Every helper lookup and launch resolves through trusted_executable."""
     inventory = frozenset(provider.inventory)
@@ -160,11 +179,7 @@ def _check_external_executable_owner(provider: FactsProvider) -> tuple[Violation
     )
     for path in _src_python(provider):
         facts = provider.file_facts(path)
-        if not any(
-            (fact.module or "").split(".")[0] in _LAUNCH_MODULES
-            or any(name.split(".")[0] in _LAUNCH_MODULES for name in fact.names)
-            for fact in facts.imports
-        ):
+        if not _may_launch(facts):
             continue
         index = provider.tree_index(path)
         nodes = tuple(index.nodes) if index is not None else ()
