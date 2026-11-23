@@ -1,0 +1,49 @@
+name: L5 costmap
+on:
+  push:
+    branches: ['perf-costmap/**']
+permissions:
+  contents: read
+jobs:
+  costmap:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: '3.12'
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Install CLI under test
+      run: |
+        set -euo pipefail
+        sha=$(cat harness/scripts/perf/l5_costmap_sha)
+        git -C harness fetch --quiet --no-tags origin "$sha"
+        git -C harness worktree add --quiet --detach ../new FETCH_HEAD
+        (cd new && uv sync --frozen --no-editable --quiet)
+    - name: Install harness
+      working-directory: harness
+      run: uv sync --frozen --extra dev --quiet
+    - name: Cost map
+      working-directory: harness
+      env:
+        L5_COSTMAP_OUT: ${{ runner.temp }}/costmap.json
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then py="$GITHUB_WORKSPACE/new/.venv/Scripts/python.exe"; else py="$GITHUB_WORKSPACE/new/.venv/bin/python"; fi
+        uv run --frozen python scripts/perf/l5_costmap.py "$py" "$RUNNER_TEMP/l5" "$(cat scripts/perf/l5_costmap_fixtures)" install-noop,install-locked-warm,install-frozen-warm 5
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      if: always()
+      with:
+        name: costmap-${{ matrix.os }}
+        path: ${{ runner.temp }}/costmap.json
