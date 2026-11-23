@@ -488,6 +488,7 @@
       "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; 'apm uninstall <bundle>' selects a bundle in commands/uninstall/local_bundle.py and retires its deployed hooks through retire_bundle_hooks (#3700); consumers: commands/install.py, commands/update.py, commands/prune.py, commands/uninstall/local_bundle.py, policy/ci_checks.py",
       "selectors": [
         "src/apm_cli/install/local_bundle_hook_trust.py",
+        "src/apm_cli/install/hook_script_refs.py",
         "src/apm_cli/install/local_bundle_canvas.py",
         "src/apm_cli/commands/uninstall/local_bundle.py"
       ],

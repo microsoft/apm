@@ -101,6 +101,8 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
         ("(cd / && true); sh .claude/hooks/hookpkg/hooks/scripts/./x.sh", True),
         ("cd .claude/hooks/hookpkg/hooks && sh -c 'sh scripts/./x.sh'", True),
+        ("sh $(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
+        ("sh `pwd`/.claude/hooks/hookpkg/hooks/scripts/./x.sh; true", True),
     ],
     ids=[
         "project-dir-anchor",
@@ -117,28 +119,30 @@ _SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
         "backtick-substitution",
         "subshell-cd",
         "nested-inherits-cd",
+        "substitution-then-separator",
+        "backtick-then-separator",
     ],
 )
 def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
     """#5106: a hook command runs a bundle script exactly when it may name it."""
-    from apm_cli.install.local_bundle_hook_trust import _runs_script, _script_refs
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
 
     root = Path("/project")
-    refs = _script_refs(root, [_SCRIPT])
+    refs = script_refs(root, [_SCRIPT])
 
-    assert _runs_script(command, refs, (root, root / ".claude"), root) is runs
+    assert runs_script(command, refs, (root, root / ".claude"), root) is runs
 
 
 def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> None:
-    from apm_cli.install.local_bundle_hook_trust import _runs_script, _script_refs
+    from apm_cli.install.hook_script_refs import runs_script, script_refs
 
     spaced = Path("/tmp/my project")
-    assert _runs_script(
-        f'sh "{spaced.as_posix()}/{_SCRIPT}"', _script_refs(spaced, [_SCRIPT]), (spaced,), spaced
+    assert runs_script(
+        f'sh "{spaced.as_posix()}/{_SCRIPT}"', script_refs(spaced, [_SCRIPT]), (spaced,), spaced
     )
     drive = "C:/project"
     refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
-    assert _runs_script(f"{drive}/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (), Path("/"))
-    assert _runs_script(
+    assert runs_script(f"{drive}/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (), Path("/"))
+    assert runs_script(
         f"sh {drive}/.claude/hooks/hookpkg/hooks/scripts/./X.SH", refs, (), Path("/")
     )
