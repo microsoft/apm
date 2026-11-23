@@ -986,3 +986,20 @@ def test_a_reanchor_ranks_shared_skill_writers_as_install_orders_them(
 
     assert (world.project / _SHARED_SKILL).read_bytes() == deployed
     _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_reanchor_refuses_a_shared_file_whose_owner_declares_no_rule(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 R3: only a rule the primitive's owner declares is trusted; an agent refuses."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "z", "z", ("../e",))
+    for name in ("e", "z"):
+        write(vendor / name / ".apm/agents/shared.agent.md", "---\ndescription: a\n---\n# A\n")
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    _assert_refused_before_any_write(world, ".claude/agents/shared.md", "would change its writer")
