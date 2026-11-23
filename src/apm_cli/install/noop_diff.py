@@ -172,6 +172,9 @@ def sources_scan_clean(project_root: Path, lock: Any) -> bool:
     install and prints its warnings even when nothing is redeployed. Scanning
     every file of each copy (a superset) with the same scanner keeps that
     verdict and output: any finding, of any severity, takes the full pipeline.
+    A symlinked file or directory in a copy is a finding too: package hashes
+    exclude symlinks and the source-plan owner skips them with a warning, so
+    only the full pipeline may judge that state.
     """
     import os
 
@@ -185,6 +188,8 @@ def sources_scan_clean(project_root: Path, lock: Any) -> bool:
         root = dep.to_dependency_ref().get_install_path(modules)
         for directory, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d != ".git"]
+            if any(os.path.islink(os.path.join(directory, n)) for n in (*dirnames, *filenames)):
+                return False
             for name in filenames:
                 if ContentScanner.scan_file(Path(directory) / name):
                     return False
