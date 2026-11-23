@@ -1597,6 +1597,21 @@ def git_remote_refs(
     git_args: Sequence[str] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git ls-remote`` with the canonical validated child environment."""
+    pooled = _hack_pooled_ls_remote(remote_url, patterns, options, git_args)
+    if pooled is not None:
+        if _HACK_PARITY:
+            child_env = git_network_env(remote_url, env)
+            real = run_git_text(
+                [get_git_executable(), *git_args, "ls-remote", *options, remote_url, *patterns],
+                capture_output=True,
+                timeout=timeout,
+                env=child_env,
+                stdin=subprocess.DEVNULL,
+                check=False,
+            )
+            if real.returncode == 0 and real.stdout != pooled.stdout:
+                raise RuntimeError(f"PERF PARITY MISMATCH for {remote_url}")
+        return pooled
     child_env = git_network_env(remote_url, env)
     # auth-delegated: callers resolve credential and bearer policy before this executor.
     git_executable = get_git_executable()
@@ -1855,3 +1870,55 @@ def git_long_paths_args() -> list[str]:
     if os.name == "nt":
         return ["-c", "core.longpaths=true"]
     return []
+
+
+# PERF FALSIFICATION HACK (F4): one smart-HTTP v0 ref advertisement over a pooled
+# keep-alive connection instead of a git ls-remote child (TLS + 2 requests). NEVER SHIP.
+_HACK_PARITY = False
+_hack_session = None
+
+
+def _hack_pooled_ls_remote(remote_url, patterns, options, git_args):
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    global _hack_session
+    if patterns or git_args or not remote_url.startswith("https://") or "@" in remote_url:
+        return None
+    wanted = tuple(o for o in options if o in ("--tags", "--heads"))
+    if not wanted or len(wanted) != len(options):
+        return None
+    if _hack_session is None:
+        _hack_session = requests.Session()
+        _hack_session.mount("https://", HTTPAdapter(pool_connections=8, pool_maxsize=16))
+    url = remote_url.rstrip("/")
+    try:
+        response = _hack_session.get(
+            url + "/info/refs",
+            params={"service": "git-upload-pack"},
+            headers={"User-Agent": "git/2.43.0"},
+            timeout=30,
+        )
+    except requests.RequestException:
+        return None
+    if response.status_code != 200:
+        return None
+    data = response.content
+    prefixes = tuple(
+        {"--tags": "refs/tags/", "--heads": "refs/heads/"}[o] for o in wanted
+    )
+    lines = []
+    pos = 0
+    while pos + 4 <= len(data):
+        size = int(data[pos : pos + 4], 16)
+        if size == 0:
+            pos += 4
+            continue
+        payload = data[pos + 4 : pos + size].split(b"\0", 1)[0].rstrip(b"\n")
+        pos += size
+        if payload.startswith(b"#"):
+            continue
+        sha, _, ref = payload.decode("utf-8", "replace").partition(" ")
+        if ref.startswith(prefixes):
+            lines.append(f"{sha}\t{ref}\n")
+    return subprocess.CompletedProcess(["git", "ls-remote"], 0, "".join(lines), "")
