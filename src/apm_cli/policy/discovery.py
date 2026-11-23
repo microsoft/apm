@@ -16,7 +16,7 @@ from urllib.parse import urlparse, urlsplit, urlunsplit
 import requests
 import yaml
 
-from ..cache.paths import get_cache_root
+from ..cache.paths import cache_writes_allowed, get_cache_root
 from ..core.auth_chain import AdoAuthChainExhaustedError
 from ..core.invocation_memo import memoized_per_invocation
 from ..utils.file_ops import robust_replace
@@ -50,6 +50,7 @@ from ._remote import (  # noqa: F401  -- re-exported for callers/tests
     _remote_url_parts,
 )
 from .explicit_source import compose_explicit_policy
+from .outcome_routing import keep_policy_answer
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -62,12 +63,9 @@ from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Policy repo discovery: cascading candidate repos per host profile
-# ---------------------------------------------------------------------------
-
-# Candidate repo names in precedence order (first valid policy wins).
-# Host profiles select which candidates are valid for a given git host.
+# -- Policy repo discovery: cascading candidate repos per host profile ----------
+# Candidate repo names in precedence order (first valid policy wins); host
+# profiles select which candidates are valid for a given git host.
 _DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 
 # Azure DevOps project and repository names cannot begin with ``_``.
@@ -257,6 +255,7 @@ def policy_disabled_by_env() -> bool:
     return os.environ.get("APM_POLICY_DISABLE", "").strip() == "1"
 
 
+@memoized_per_invocation("policy-chain", keep=keep_policy_answer)
 def discover_policy_with_chain(
     project_root: Path,
     *,
@@ -288,12 +287,10 @@ def discover_policy_with_chain(
 
     Notes
     -----
-    The escape hatch (``--no-policy`` flag, ``APM_POLICY_DISABLE=1``
-    env var) is enforced by the **callers** (the install pipeline gate
-    and the preflight helpers in ``install_preflight``) **before** this
-    function is invoked, so neither needs a ``no_policy`` parameter
-    here.  The env-var check below remains as a defence-in-depth so
-    third-party callers cannot accidentally bypass the disable switch.
+    The escape hatch (``--no-policy``, ``APM_POLICY_DISABLE=1``) is enforced by
+    the **callers** (the pipeline gate and ``install_preflight``) **before** this
+    function is invoked, so neither needs a ``no_policy`` parameter here. The
+    env-var check below stays as defence-in-depth for third-party callers.
 
     Returns
     -------
@@ -1954,7 +1951,8 @@ def _read_cache_entry(
         if meta is None:
             return None
         if meta.get("schema_version") != CACHE_SCHEMA_VERSION:
-            meta_file.unlink(missing_ok=True)
+            if cache_writes_allowed():
+                meta_file.unlink(missing_ok=True)
             return None
 
         cached_at = meta.get("cached_at", 0)
@@ -2047,9 +2045,10 @@ def _write_cache(
     ``raw_content`` is the fetched leaf document (only for unextended
     leaves); a pinned read verifies and parses it instead (#827).
     """
+    if not cache_writes_allowed():
+        return
     cache_dir = _get_cache_dir(project_root)
     cache_dir.mkdir(parents=True, exist_ok=True)
-
     key = _cache_key(repo_ref)
     policy_file = cache_dir / f"{key}.yml"
     meta_file = cache_dir / f"{key}.meta.json"

@@ -850,6 +850,7 @@ transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
+transport-platform-deploy-store-verified-reads
 transport-platform-egress-route-policy
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
