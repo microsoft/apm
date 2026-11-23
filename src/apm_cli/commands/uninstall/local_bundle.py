@@ -112,10 +112,12 @@ def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: 
     package_id, key = identity
     identities = _identities(bundle_scope)
     matches = sorted(slug for slug, keys in identities.items() if key in keys)
-    # Installed while the executables gate admitted everything: no content
-    # identity was recorded, so any such copy could be this bundle under an alias.
+    # Any hooks installed while the executables gate admitted everything recorded
+    # no content identity, so such a copy could be this bundle under an alias.
     keyless = sorted(
-        slug for slug, keys in identities.items() if not keys - {None} and slug not in matches
+        slug
+        for slug, keys in identities.items()
+        if (None in keys or not keys) and slug not in matches
     )
     name = Path(package).name
     if not matches and keyless and keyless != [package_id]:

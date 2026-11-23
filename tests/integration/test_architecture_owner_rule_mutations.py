@@ -1331,6 +1331,18 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         ),
         (
             "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/install/local_bundle_hook_trust.py",
+            "        hook_scripts_parent(target.name, target.root_dir)\n",
+            '        f"{target.root_dir}/hooks/"\n',
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
+            "src/apm_cli/integration/hook_integrator.py",
+            "        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name\n",
+            '        scripts_base = f"{root_dir or default_root}/hooks/{package_name}"\n',
+        ),
+        (
+            "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hooks.py",
             "def _retire_bundle_hooks(",
             'def _marker(slug):\n    return "local-bundle::" + slug\n\n\ndef _retire_bundle_hooks(',
