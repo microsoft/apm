@@ -134,3 +134,36 @@ def test_a_live_package_rendering_onto_a_served_file_replays_all_live(
     assert _replay_counts(world, records=True) == ("0", "2")
     assert _replay_counts(world, records=False) == ("0", "2")
     _same_verdict(world)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        b"---\ndescription: Odd\n---\nBare\rreturn.\n",
+        b"---\ndescription: Odd\n---\nNot \xff utf-8.\n",
+    ],
+    ids=["bare-cr", "not-utf8"],
+)
+def test_an_adopted_prompt_a_text_read_changes_gives_the_live_verdict(
+    tmp_path: Path, apm_binary_path: Path, prompt: bytes
+) -> None:
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+
+    def package(root: Path, name: str) -> None:
+        _verbatim_package(root, name)
+        (root / ".apm/prompts/odd.prompt.md").write_bytes(prompt)
+
+    dep = world.publish("odd", package)
+    # The deployed prompt already holds the source bytes, so install adopts it unchanged.
+    existing = world.project / ".github" / "prompts" / "odd.prompt.md"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_bytes(prompt)
+    write(
+        world.project / "apm.yml",
+        f"name: proj\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n    - {dep}\n",
+    )
+    world.apm("install", expect=None)
+
+    served, live = _same_verdict(world, "--ci", "--no-fail-fast")
+    assert served.returncode == live.returncode
+    _same_verdict(world)

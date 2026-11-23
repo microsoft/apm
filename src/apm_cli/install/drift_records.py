@@ -179,7 +179,7 @@ def _verbatim(
     served: dict[str, bytes] = {}
     for rel, source in planned.items():
         data = _plain_bytes(Path(source), root)
-        if data is None or _may_rewrite_links(data):
+        if data is None or not _plain_text(data) or _may_rewrite_links(data):
             return None
         canonical, raw = record["files"][rel][:2]
         # Raw bytes the install recorded, and the lock-bound canonical digest.
@@ -187,6 +187,21 @@ def _verbatim(
             return None
         served[rel] = data
     return served
+
+
+def _plain_text(data: bytes) -> bool:
+    """UTF-8 without carriage returns: a live text read returns exactly these bytes.
+
+    A live render reads its source as strict UTF-8 text with universal
+    newlines, so a CR or undecodable byte would read differently (or fail).
+    """
+    if b"\r" in data:
+        return False
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 def _may_rewrite_links(data: bytes) -> bool:
@@ -197,7 +212,7 @@ def _may_rewrite_links(data: bytes) -> bool:
     """
     from apm_cli.compilation.link_resolver import UnifiedLinkResolver, is_external_url
 
-    text = data.decode("utf-8", errors="replace")
+    text = data.decode("utf-8")
     return any(
         not is_external_url(match.group(2))
         for match in UnifiedLinkResolver.LINK_PATTERN.finditer(text)

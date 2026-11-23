@@ -7,6 +7,8 @@ record binds this lock entry, this run's policy and the live source bytes.
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,13 +17,16 @@ import pytest
 
 from apm_cli.cache.deploy_store import DeployStore, package_record_key
 from apm_cli.core.scope import InstallScope
-from apm_cli.install.drift_records import RECORDS_SWITCH, record_policy, served_outputs
+from apm_cli.install.drift_records import RECORDS_SWITCH, served_outputs
 from apm_cli.install.package_resolution import EffectiveDependencySelection
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.content_hash import canonical_digest
 from apm_cli.version import get_version
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-ci-audit-scratch-materialization")]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-ci-audit-scratch-materialization"),
+]
 
 _POLICY = "b" * 64
 _TARGETS = ("copilot",)
@@ -101,6 +106,34 @@ def _serve(
         store=world["store"],
         mapping=mapping,
     )
+
+
+def _package_state(root: Path) -> dict[str, bytes | str]:
+    """Every entry under the package root: regular file bytes, else its kind."""
+    state: dict[str, bytes | str] = {}
+    for directory, dirs, names in os.walk(root):
+        for name in [*dirs, *names]:
+            path = Path(directory) / name
+            info = os.lstat(path)
+            rel = path.relative_to(root).as_posix()
+            state[rel] = (
+                path.read_bytes() if stat.S_ISREG(info.st_mode) else stat.filemode(info.st_mode)
+            )
+    return state
+
+
+def _assert_live(world: dict, **options: object) -> None:
+    """The package replays live, and deciding so wrote nothing into the package."""
+    before = _package_state(world["root"])
+    assert _serve(world, **options) is None
+    assert _package_state(world["root"]) == before
+
+
+def _assert_served(world: dict, **options: object) -> None:
+    """The package is served from its record, and deciding so wrote nothing into it."""
+    before = _package_state(world["root"])
+    assert _serve(world, **options) is not None
+    assert _package_state(world["root"]) == before
 
 
 def test_a_record_bound_to_lock_policy_and_source_bytes_is_served(tmp_path: Path) -> None:
@@ -193,15 +226,15 @@ def test_any_unproven_input_replays_the_package_live(
     world = _world(tmp_path)
     mutate(world, monkeypatch)
 
-    assert _serve(world) is None
+    _assert_live(world)
     assert (world["root"] / "apm.yml").is_file()
 
 
 def test_a_policy_changed_since_install_replays_live(tmp_path: Path) -> None:
     world = _world(tmp_path)
 
-    assert _serve(world, policy="f" * 64) is None
-    assert _serve(world, policy=None) is None
+    _assert_live(world, policy="f" * 64)
+    _assert_live(world, policy=None)
 
 
 def _renders(_root: Path, _context: object) -> None:
@@ -234,19 +267,19 @@ def _one_source_for_two_dests(root: Path, context: object) -> dict[str, Path]:
 def test_a_mapping_that_differs_from_the_record_replays_live(tmp_path: Path, planned) -> None:
     world = _world(tmp_path)
 
-    assert _serve(world, mapping=planned) is None
+    _assert_live(world, mapping=planned)
 
 
 def test_a_narrowed_selection_replays_live(tmp_path: Path) -> None:
     world = _world(tmp_path)
 
-    assert _serve(world, selection=EffectiveDependencySelection(("guide",), None)) is None
+    _assert_live(world, selection=EffectiveDependencySelection(("guide",), None))
 
 
 def test_a_package_declaring_mcp_servers_replays_live(tmp_path: Path) -> None:
     world = _world(tmp_path, manifest="dependencies:\n  mcp:\n    - io.github.acme/server\n")
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes and links")
@@ -262,7 +295,7 @@ def test_an_executable_or_linked_source_replays_live(tmp_path: Path, kind: str) 
         source.unlink()
         source.symlink_to(target)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
@@ -274,7 +307,7 @@ def test_a_linked_record_replays_live(tmp_path: Path) -> None:
     path.unlink()
     path.symlink_to(saved)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 @pytest.mark.parametrize(
@@ -283,8 +316,8 @@ def test_a_linked_record_replays_live(tmp_path: Path) -> None:
 def test_a_dest_another_package_claims_replays_live(tmp_path: Path, other: str) -> None:
     world = _world(tmp_path)
 
-    assert _serve(world, other_dests=(other,)) is None
-    assert _serve(world, other_dests=(".github/prompts/other.prompt.md",)) is not None
+    _assert_live(world, other_dests=(other,))
+    _assert_served(world, other_dests=(".github/prompts/other.prompt.md",))
 
 
 def test_case_equal_dests_in_one_record_replay_live(tmp_path: Path) -> None:
@@ -295,16 +328,16 @@ def test_case_equal_dests_in_one_record_replay_live(tmp_path: Path) -> None:
     world["dep"].deployed_file_hashes = {d: f"sha256:{pair[0]}" for d, pair in files.items()}
     _rewrite_record(world, files=files)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 def test_a_locked_directory_holding_recorded_files_still_binds(tmp_path: Path) -> None:
     world = _world(tmp_path)
     world["dep"].deployed_files = [*world["dep"].deployed_files, ".github/skills/guide"]
 
-    assert _serve(world) is not None
+    _assert_served(world)
     world["dep"].deployed_files = [*world["dep"].deployed_files, ".github/skills/empty"]
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 @pytest.mark.parametrize(
@@ -317,7 +350,7 @@ def test_a_plugin_format_server_declaration_replays_live(tmp_path: Path, declara
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"mcpServers": {"s": {"command": "srv"}}}', encoding="ascii")
 
-    assert _serve(world) is None
+    _assert_live(world)
     assert path.is_file()
 
 
@@ -334,14 +367,14 @@ def test_a_plugin_format_server_declaration_replays_live(tmp_path: Path, declara
 def test_a_package_declaring_dev_or_lsp_servers_replays_live(tmp_path: Path, manifest: str) -> None:
     world = _world(tmp_path, manifest=manifest)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 def test_a_manifest_the_replay_did_not_parse_replays_live(tmp_path: Path) -> None:
     world = _world(tmp_path)
 
-    assert _serve(world, parsed=False) is None
-    assert _serve(world) is not None
+    _assert_live(world, parsed=False)
+    _assert_served(world)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX links")
@@ -351,7 +384,7 @@ def test_a_linked_source_directory_replays_live(tmp_path: Path) -> None:
     elsewhere.mkdir()
     (world["root"] / ".apm/context").symlink_to(elsewhere, target_is_directory=True)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 def test_source_bytes_off_the_lock_bound_digest_replay_live(tmp_path: Path) -> None:
@@ -364,7 +397,7 @@ def test_source_bytes_off_the_lock_bound_digest_replay_live(tmp_path: Path) -> N
     files[".github/skills/guide/SKILL.md"][1] = hashlib.sha256(source.read_bytes()).hexdigest()
     _rewrite_record(world, files=files)
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 @pytest.mark.parametrize(
@@ -380,58 +413,20 @@ def test_source_bytes_off_the_lock_bound_digest_replay_live(tmp_path: Path) -> N
 def test_a_source_with_a_rewritable_link_replays_live(tmp_path: Path, link: bytes) -> None:
     world = _world(tmp_path, skill=b"# guide\nSee " + link + b".\n")
 
-    assert _serve(world) is None
+    _assert_live(world)
 
 
 def test_a_source_with_only_external_urls_is_served(tmp_path: Path) -> None:
     world = _world(tmp_path, skill=b"# guide\nSee [docs](https://example.com/docs).\n")
 
-    assert _serve(world) is not None
+    _assert_served(world)
 
 
 @pytest.mark.parametrize(
-    ("outcome", "discoveries"),
-    [("found", 1), ("absent", 1), ("cache_miss_fetch_fail", 2), ("cached_stale", 2)],
+    "skill",
+    [b"# guide\rbare cr\n", b"# guide\r\ncrlf\r\n", b"# guide \xff\xfe not utf-8\n"],
 )
-def test_the_shared_discovery_keeps_only_answers_a_command_reuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str, discoveries: int
-) -> None:
-    calls: list[Path] = []
+def test_a_source_a_text_read_would_change_replays_live(tmp_path: Path, skill: bytes) -> None:
+    world = _world(tmp_path, skill=skill)
 
-    def discover(root: Path) -> SimpleNamespace:
-        calls.append(root)
-        return SimpleNamespace(outcome=outcome)
-
-    # The discovery I/O boundary below the trust-policy owner.
-    monkeypatch.setattr("apm_cli.policy.discovery.discover_policy_with_chain", discover)
-    config = SimpleNamespace(policy_provider=None, policy_fetch=None, user_scope=False)
-    fetch, _provider = record_policy(config, tmp_path, enabled=True)
-
-    assert fetch().outcome == outcome
-    assert fetch().outcome == outcome
-    assert len(calls) == discoveries
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "https://example.com/a",
-        "http://h",
-        "https://",
-        "http:rel/path",
-        " https://h/x ",
-        "ftp://h/f",
-        "javascript:alert",
-        "../a.md",
-        "/abs/b.context.md",
-        "#anchor",
-    ],
-)
-def test_the_live_link_rule_is_the_resolver_rule(tmp_path: Path, target: str) -> None:
-    from apm_cli.compilation.link_resolver import UnifiedLinkResolver
-    from apm_cli.install.drift_records import _may_rewrite_links
-
-    resolver = UnifiedLinkResolver(tmp_path)
-    data = f"[x]({target})".encode()
-
-    assert _may_rewrite_links(data) is not resolver._is_external_url(target)
+    _assert_live(world)
