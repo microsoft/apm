@@ -73,6 +73,10 @@ PARTIAL_CONFORMANCE = {
     "req-lk-018": (
         "default frozen in CI when a lockfile exists; without a lockfile, resolve normally"
     ),
+    "req-rs-015": (
+        "an entry whose dependency reference names a registry proxy host is exempt from the "
+        "reachability verification even without a consumer proxy configuration; tracked in #5021"
+    ),
 }
 
 

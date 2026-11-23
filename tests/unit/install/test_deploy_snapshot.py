@@ -820,6 +820,30 @@ def test_a_journal_without_a_manifest_is_reclaimed(tmp_path: Path, apm_home: Pat
     assert not store.parent.exists()
 
 
+@pytest.mark.parametrize(
+    ("store", "counts"),
+    [("own", True), ("another-workspace", False), ("unreadable", True), ("no-manifest", True)],
+)
+def test_an_abandoned_journal_counts_only_where_replay_would_handle_it(
+    tmp_path: Path, apm_home: Path, store: str, counts: bool
+) -> None:
+    """The fast path asks the replay owner's question: would this install replay it? (#5064)"""
+    from apm_cli.install.deploy_snapshot import has_abandoned_journals
+
+    project, other = tmp_path / "project", tmp_path / "other"
+    root = other if store == "another-workspace" else project
+    kept = _killed_journal(apm_home, root, root / "a.md")
+    if store == "unreadable":
+        (kept / "journal.jsonl").write_text("not json\n", encoding="utf-8")
+    if store == "no-manifest":
+        (kept / "journal.jsonl").unlink()
+
+    assert has_abandoned_journals(kept.parent, project, workspace=project) is counts
+    assert has_abandoned_journals(kept.parent)
+    assert kept.is_dir(), "asking never touches the journal"
+    assert (root / "a.md").read_bytes() == b"killed\n"
+
+
 def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
     import json
 

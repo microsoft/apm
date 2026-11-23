@@ -125,17 +125,17 @@ class TestLsRemoteResolve:
             result = cache._ls_remote_resolve("https://example.com/r.git", "v1.0")
         assert result == sha
 
-    def test_falls_back_to_first_sha_in_output(self, cache):
+    def test_unmatched_ref_refuses_instead_of_taking_the_first_sha(self, cache):
         sha = "a1b2c3d4e5" + "0" * 30
-        # ref doesn't match but a SHA is present -- fall back
+        # The ref names no origin branch or tag: no first-SHA fallback.
         proc = self._make_proc(stdout=f"{sha}\trefs/heads/other\n")
         with (
             patch("subprocess.run", return_value=proc),
             patch("apm_cli.utils.git_env.get_git_executable", return_value="git", create=True),
             patch("apm_cli.utils.git_env.git_subprocess_env", return_value={}, create=True),
+            pytest.raises(RuntimeError, match="not a branch or tag of the origin"),
         ):
-            result = cache._ls_remote_resolve("https://example.com/r.git", "nonexistent-ref")
-        assert result == sha.lower()
+            cache._ls_remote_resolve("https://example.com/r.git", "nonexistent-ref")
 
     def test_no_sha_raises_runtime_error(self, cache):
         proc = self._make_proc(stdout="")
