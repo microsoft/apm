@@ -3,7 +3,6 @@
 import builtins
 import contextlib
 import os
-import stat
 import sys
 import traceback
 from collections.abc import Iterable
@@ -664,28 +663,17 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
     """Return whether *relative* is provably gone under *deploy_root* (#4851).
 
     Absence counts only through real directories: a symlinked or
-    non-directory parent, or one that cannot be inspected, leaves the file's
-    fate unknown, so its claim stays. Where the platform supports it, each
-    parent is opened as a no-follow directory handle and the next lookup goes
-    through that handle, so a parent swapped for a symlink mid-walk cannot
-    redirect it.
+    non-directory parent, one that cannot be inspected, or a ``.``/``..``
+    part leaves the file's fate unknown, so its claim stays. Each parent is
+    opened as a no-follow directory handle and the next lookup goes through
+    that handle, so a parent swapped for a symlink mid-walk cannot redirect
+    it. Without such handles (Windows, where a junction lstats as a
+    directory) nothing is proven: the claim stays.
     """
     parts = PurePosixPath(str(relative).replace("\\", "/")).parts
-    if _HANDLE_WALK:
-        return _absence_proven_by_handle(deploy_root, parts)
-    current = deploy_root
-    try:
-        for part in parts[:-1]:
-            current = current / part
-            mode = os.lstat(current).st_mode
-            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-                return False
-        os.lstat(current / parts[-1])
-    except FileNotFoundError:
-        return True
-    except OSError:
+    if not _HANDLE_WALK or not parts or any(part in ("/", ".", "..") for part in parts):
         return False
-    return False
+    return _absence_proven_by_handle(deploy_root, parts)
 
 
 def _absence_proven_by_handle(deploy_root: Path, parts: tuple[str, ...]) -> bool:

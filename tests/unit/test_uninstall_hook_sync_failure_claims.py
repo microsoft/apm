@@ -502,3 +502,27 @@ def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
     assert swapped
     assert not proven
     assert (tmp_path / ".github" / "hooks-moved" / "h.json").is_file()
+
+
+def test_without_no_follow_handles_absence_is_never_proven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed where a junction lstats as a directory: the claim stays (#4851)."""
+    import apm_cli.commands.uninstall.cli as uninstall_cli
+
+    (tmp_path / ".github" / "hooks").mkdir(parents=True)
+    monkeypatch.setattr(uninstall_cli, "_HANDLE_WALK", False)
+
+    assert not uninstall_cli._absence_proven(tmp_path, ".github/hooks/h.json")
+
+
+@pytest.mark.parametrize("relative", ["../outside/h.json", ".github/../outside/h.json"])
+def test_a_dot_dot_part_is_never_proven_absent(tmp_path: Path, relative: str) -> None:
+    from apm_cli.commands.uninstall.cli import _absence_proven
+
+    root = tmp_path / "root"
+    (root / ".github").mkdir(parents=True)
+    (tmp_path / "outside").mkdir()
+    (root / "outside").mkdir()
+
+    assert not _absence_proven(root, relative)
