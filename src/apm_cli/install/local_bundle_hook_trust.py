@@ -488,15 +488,23 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
-def _configs_still_running(project_root: Path, targets: Any, scripts: Collection[str]) -> set[str]:
-    """Return merged hook configs whose remaining entries still run one of *scripts*.
+def _configs_still_running(
+    project_root: Path, targets: Any, slug: str, scripts: Collection[str]
+) -> set[str]:
+    """Return merged hook configs with an entry *slug* no longer owns that runs its scripts.
 
-    Retirement removes only the entries the bundle deployed; an entry the user
-    edited (another matcher) stays registered and keeps running its script.
+    Read before retirement removes anything: an entry the user edited (another
+    matcher) lost the bundle's ownership marker, so retirement would leave it
+    registered while discarding the ownership that keeps the bundle visible to
+    trust checks. Only the target's hook event container counts; permissions
+    or environment values naming a script do not run it.
     """
-    import json
-
-    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_ownership import (
+        LocalBundleMarkers,
+        read_hook_object,
+        reinject_apm_source_from_sidecar,
+    )
 
     def strings(node: Any) -> list[str]:
         if isinstance(node, str):
@@ -507,24 +515,39 @@ def _configs_still_running(project_root: Path, targets: Any, scripts: Collection
             return [text for item in node for text in strings(item)]
         return []
 
+    markers = LocalBundleMarkers(slug)
     found: set[str] = set()
     for target in targets or ():
         config = _MERGE_HOOK_TARGETS.get(getattr(target, "name", None))
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        json_path = target_root / config.config_filename
-        try:
-            texts = strings(json.loads(json_path.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
-            continue
+        tails = []
         for value in scripts:
             spelled = Path(value) if Path(value).is_absolute() else project_root / value
-            if not spelled.is_relative_to(target_root):
-                continue
-            tail = spelled.relative_to(target_root).as_posix()
-            if any(tail in text for text in texts):
-                found.add(_record_value(json_path, project_root))
+            if spelled.is_relative_to(target_root):
+                tails.append(spelled.relative_to(target_root).as_posix())
+        json_path = target_root / config.config_filename
+        if not tails or not json_path.is_file():
+            continue
+        try:
+            hooks = read_hook_object(json_path).get(config.event_container_key)
+            sidecar = read_hook_object(json_path.parent / _APM_HOOKS_SIDECAR)
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(hooks, dict):
+            continue
+        if sidecar:
+            reinject_apm_source_from_sidecar(hooks, sidecar)
+        foreign = [
+            entry
+            for entries in hooks.values()
+            if isinstance(entries, list)
+            for entry in entries
+            if not (isinstance(entry, dict) and entry.get("_apm_source") in markers)
+        ]
+        if any(tail in text for text in strings(foreign) for tail in tails):
+            found.add(_record_value(json_path, project_root))
     return found
 
 
@@ -623,6 +646,10 @@ def retire_bundle_hooks(
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
+    still_running = _configs_still_running(project_root, targets, slug, scripts)
+    if still_running:
+        # Nothing is retired: the bundle keeps the ownership trust checks read.
+        return BundleHookRetirement(True, tuple(sorted(still_running)))
     failed = retire_merged_bundle_entries(project_root, targets, slug)
     if failed:
         return BundleHookRetirement(True, tuple(failed))
@@ -633,7 +660,6 @@ def retire_bundle_hooks(
     item = UnadmittedBundleHooks(slug, reason or "", configs)
     kept, unwritten = _retire_per_file(project_root, targets, item)
     kept = {_relative_value(value, project_root) for value in kept}
-    kept |= _configs_still_running(project_root, targets, scripts)
     undeleted: set[str] = set()
     if kept or unwritten:
         # A retained hook config still points at the scripts: they and every
