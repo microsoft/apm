@@ -173,4 +173,3 @@ def test_the_same_path_is_dot() -> None:
     assert paths.relative_posix(PurePosixPath("/w/a"), PurePosixPath("/w/a")) == "."
     same = paths.relative_to(PureWindowsPath("C:\\A"), PureWindowsPath("c:\\a"))
     assert same == PureWindowsPath(".")
-
