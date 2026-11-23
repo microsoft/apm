@@ -28,15 +28,32 @@ _ENGINE = "src/apm_cli/commands/uninstall/engine.py"
 _SHRINK = "src/apm_cli/commands/uninstall/selection_shrink.py"
 _REMEDY = "src/apm_cli/policy/allowlist_remedy.py"
 _SURVIVORS = "src/apm_cli/commands/uninstall/local_survivors.py"
+_CLEANUP = "src/apm_cli/integration/cleanup.py"
+_HOOKS = "src/apm_cli/integration/hook_integrator.py"
 _REFUSAL_OWNER = "uninstall_evidence_refusals"
 # DeploymentEvidence.refusals is defined in cleanup.py and asked only by the owner.
-_REFUSAL_CALLERS = frozenset({"src/apm_cli/integration/cleanup.py", _SHRINK})
+_REFUSAL_CALLERS = frozenset({_CLEANUP, _SHRINK})
 _ROUTES = (
     (_SHRINK, _REFUSAL_OWNER, "uninstall_deletion_candidates"),
     (_SHRINK, "uninstall_deletion_candidates", "shrink_path_split"),
     (_CLI, "_refuse_uninstall_without_evidence", _REFUSAL_OWNER),
     (_REMEDY, "_deletions_have_evidence", _REFUSAL_OWNER),
     (_REMEDY, "_deletions_have_evidence", "project_shrunk_selections"),
+    # The advice's final-symlink check asks stale cleanup's own decisions (#5035).
+    (_REMEDY, "_final_symlinks", "uninstall_deletion_candidates"),
+    (_REMEDY, "_final_symlinks", "project_shrunk_selections"),
+    (_REMEDY, "_final_symlinks", "final_link_handled"),
+    (_REMEDY, "_final_symlinks", "hook_sync_unlinks"),
+    (_REMEDY, "_final_symlinks", "cleanup_snapshot"),
+    (_CLEANUP, "hook_sync_unlinks", "managed_hook_prefixes"),
+    (_CLEANUP, "hook_sync_unlinks", "_stale_gate_passes"),
+    (_CLEANUP, "hook_sync_unlinks", "_managed_link_unlinkable"),
+    (_CLEANUP, "remove_stale_deployed_files", "_managed_link_unlinkable"),
+    (_HOOKS, "sync_integration", "managed_hook_prefixes"),
+    (_CLEANUP, "final_link_handled", "_stale_gate_passes"),
+    (_CLEANUP, "final_link_handled", "_stale_target_absent"),
+    (_CLEANUP, "remove_stale_deployed_files", "_stale_gate_passes"),
+    (_CLEANUP, "remove_stale_deployed_files", "_stale_target_absent"),
     (_REMEDY, "_uninstall_policy_resolves", "resolve_trust_policy"),
     (_CLI, "_preflight_uninstall_writes", "_refuse_unvalidated_paths"),
     (_CLI, "_preflight_uninstall_writes", "resolve_project_exec_allow_map"),

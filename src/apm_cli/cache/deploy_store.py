@@ -447,12 +447,19 @@ def _valid_record(obj: object) -> dict | None:
             return None
     if body is not None and not _printable_body(body):
         return None
-    return {
+    record = {
         "v": _RECORD_VERSION,
         "files": {rel: list(pair) for rel, pair in files.items()},
         "ascii_only": ascii_only,
         "body": list(body) if body is not None else None,
     }
+    # The effective-policy fingerprint the install gate used (drift replay binds to it).
+    policy = obj.get("policy")
+    if policy is not None:
+        if not (isinstance(policy, str) and _KEY_RE.fullmatch(policy)):
+            return None
+        record["policy"] = policy
+    return record
 
 
 def record_matches(record: dict | None, lock_hashes: dict[str, str]) -> bool:
