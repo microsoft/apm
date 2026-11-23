@@ -944,6 +944,7 @@ def _safe_remove_skill_directory(
     dep_key: str,
     failed_path_retained: bool,
     protected: Callable[[str], bool] = lambda _rel: False,
+    final_link_safe: Callable[[str], bool] = lambda _rel: False,
 ) -> None:
     """Attempt safe removal of an APM-deployed skill directory.
 
@@ -1026,7 +1027,9 @@ def _safe_remove_skill_directory(
 
     if blocking and evidence.lockfile_consent:
         # Consent decides per file (#4295): proven members go, the rest stay named.
-        _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key)
+        _remove_proven_members(
+            skill_dir, proven, evidence, result, diagnostics, dep_key, final_link_safe
+        )
     if blocking:
         # Show up to 5 blocking paths so the user knows which files
         # prevented cleanup (reviewer feedback on PR #1767).
@@ -1057,7 +1060,9 @@ def _safe_remove_skill_directory(
 
     if shared:
         # The survivor's members stay; this owner's proven members go one by one.
-        if _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key):
+        if _remove_proven_members(
+            skill_dir, proven, evidence, result, diagnostics, dep_key, final_link_safe
+        ):
             result.released.append(rel_path)
         else:
             result.skipped_unmanaged.append(rel_path)
@@ -1071,6 +1076,7 @@ def _safe_remove_skill_directory(
             (evidence, result, diagnostics),
             dep_key=dep_key,
             failed_path_retained=failed_path_retained,
+            final_link_safe=final_link_safe,
         )
         return
 
@@ -1094,6 +1100,7 @@ def _remove_consented_skill_directory(
     *,
     dep_key: str,
     failed_path_retained: bool,
+    final_link_safe: Callable[[str], bool] = lambda _rel: False,
 ) -> None:
     """Consent decides per file (#4295).
 
@@ -1102,7 +1109,9 @@ def _remove_consented_skill_directory(
     file that appears after the scan keeps its directory.
     """
     evidence, result, diagnostics = context
-    if not _remove_proven_members(skill_dir, proven, evidence, result, diagnostics, dep_key) or any(
+    if not _remove_proven_members(
+        skill_dir, proven, evidence, result, diagnostics, dep_key, final_link_safe
+    ) or any(
         child.is_symlink()
         or (child.is_file() and not is_python_bytecode_cache_path(child.relative_to(skill_dir)))
         for child in skill_dir.rglob("*")
@@ -1195,6 +1204,7 @@ def _remove_proven_members(
     result: CleanupResult,
     diagnostics,
     dep_key: str,
+    final_link_safe: Callable[[str], bool] = lambda _rel: False,
 ) -> bool:
     """Remove each proven member of a skill directory that must itself stay.
 
@@ -1207,10 +1217,12 @@ def _remove_proven_members(
     complete = True
     for member_rel, member in proven:
         if not _member_still_safe(skill_dir, member):
-            if _member_parents_safe(skill_dir, member) and evidence.consent_kept_link(
-                member_rel, member
+            if (
+                _member_parents_safe(skill_dir, member)
+                and final_link_safe(member_rel)
+                and evidence.consent_kept_link(member_rel, member)
             ):
-                # A final link whose ancestors are safe is consent retention (#4815).
+                # A final link whose every ancestor is safe is consent retention (#4815).
                 _keep_consent_link(result, diagnostics, member_rel, dep_key)
                 complete = False
                 continue
@@ -1449,6 +1461,16 @@ def remove_stale_deployed_files(
     live_index = SpellingAliasIndex(live_paths)
     live_set = frozenset(path.replace("\\", "/").rstrip("/") for path in live_paths)
 
+    def final_link_safe(rel_path: str) -> bool:
+        # The canonical gate, root to parent, with only the final entry a link (#4815).
+        return BaseIntegrator.validate_deploy_path(
+            rel_path,
+            project_root,
+            targets=targets,
+            user_scope=user_scope,
+            allow_final_symlink=True,
+        )
+
     def protected(rel_path: str) -> bool:
         # A survivor's claim may spell the same file differently on this filesystem.
         return rel_path in live_set or live_index.alias(rel_path, project_root) is not None
@@ -1642,6 +1664,7 @@ def remove_stale_deployed_files(
             dep_key,
             failed_path_retained,
             protected,
+            final_link_safe,
         )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).

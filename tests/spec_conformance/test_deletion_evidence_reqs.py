@@ -913,9 +913,7 @@ def test_consent_rejects_a_member_link_under_a_symlinked_skills_root(tmp_path: P
     """A final link is consent retention only when every ancestor up to the root is safe (#4815)."""
     skill = ".agents/skills/alpha"
     member = f"{skill}/notes.md"
-    hashes, evidence = _skill_world(
-        tmp_path, {f"{skill}/SKILL.md": "skill\n", member: "notes\n"}
-    )
+    hashes, evidence = _skill_world(tmp_path, {f"{skill}/SKILL.md": "skill\n", member: "notes\n"})
     (tmp_path / f"{skill}/SKILL.md").write_text("my edit\n", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()
