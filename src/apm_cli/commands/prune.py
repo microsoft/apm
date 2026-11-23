@@ -438,6 +438,7 @@ def prune(ctx, dry_run):
 
             for dep_key in pruned_keys:
                 lockfile.dependencies.pop(dep_key, None)
+            _reparent_survivors(lockfile, decision)
             lockfile.retire_local_staging([*removed_packages, *absent_staging])
             DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
             if pruned_keys and (lockfile.mcp_servers or lockfile.mcp_target_servers):
@@ -543,6 +544,24 @@ def prune(ctx, dry_run):
         sys.exit(1)
     finally:
         _retire_native_registration(registration_token)
+
+
+def _reparent_survivors(lockfile, decision) -> None:
+    """Record each survivor whose parent was pruned under the parent install records (#4989)."""
+    if not decision.rescued_parents or decision.reachability is None:
+        return
+    from .uninstall.local_reanchor import LocalReanchorPlan, apply_local_reanchor, reparent_rows
+
+    declaring, resolved = reparent_rows(lockfile, decision.reachability, decision.rescued_parents)
+    apply_local_reanchor(
+        lockfile, LocalReanchorPlan(declaring_parents=declaring, resolved_by=resolved)
+    )
+    for key, parent in resolved.items():
+        if key in lockfile.dependencies and parent is not None:
+            lockfile.dependencies[key].resolved_by = parent
+    for key, depth in decision.rescued_depths.items():
+        if key in lockfile.dependencies:
+            lockfile.dependencies[key].depth = depth
 
 
 def _native_ownership(lockfile, lockfile_path):

@@ -174,9 +174,26 @@ def plan_local_reanchor(
         )
         for key, node in nodes.items()
     }
+    declaring_parents, resolved_by = reparent_rows(
+        lockfile, walk, decision.rescued_parents, renames, skip=frozenset(nodes)
+    )
+    return LocalReanchorPlan(renames, identities, declaring_parents, resolved_by)
+
+
+def reparent_rows(
+    lockfile, walk, keys, renames: dict[str, str] | None = None, *, skip=frozenset()
+) -> tuple[dict[str, tuple[str, str | None]], dict[str, str | None]]:
+    """The parent install records for each of *keys*, from a complete walk.
+
+    Returns ``(declaring_parents, resolved_by)`` for :class:`LocalReanchorPlan`:
+    a local row takes the first shallowest declaring edge, and every row the
+    nearest parent, ties to the lowest key as install ranks them (#4833).
+    ``apm prune`` re-parents a survivor whose recorded parent it removes (#4989).
+    """
+    renames = renames or {}
     declaring_parents: dict[str, tuple[str, str | None]] = {}
     resolved_by: dict[str, str | None] = {}
-    for key in decision.rescued_parents:
+    for key in keys:
         nearest = _nearest_parents(walk, key)
         if not nearest:
             continue
@@ -184,10 +201,10 @@ def plan_local_reanchor(
         # The nearest-parent tie goes to the lowest key, as install ranks the new keys.
         resolved_by[key] = edges[min(nearest, key=lambda parent: renames.get(parent, parent))][0]
         row = lockfile.get_dependency(key)
-        if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
+        if row is not None and row.source == "local" and key not in skip and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
-    return LocalReanchorPlan(renames, identities, declaring_parents, resolved_by)
+    return declaring_parents, resolved_by
 
 
 def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool]) -> bool:

@@ -478,6 +478,7 @@ def _decide_installed_paths(
 
     declared = [entry for entry in intended if not isinstance(entry, str)]
     unverified: dict[str, str] = {}
+    walks: list = []
     retained = (
         retained_lock_keys(
             lockfile,
@@ -485,6 +486,7 @@ def _decide_installed_paths(
             reachability.apm_modules_dir,
             list(reachability.direct_refs),
             unverified=unverified,
+            walks=walks,
         )
         if lockfile is not None
         else frozenset()
@@ -526,6 +528,8 @@ def _decide_installed_paths(
     removed_keys = set(stale_keys)
     for keys in path_keys.values():
         removed_keys.update(keys)
+    walk = walks[0] if walks and walks[0].complete else None
+    reparented = _reparented_survivors(lockfile, removed_keys, retained, walk)
     return OrphanRemovalDecision(
         operation=operation,
         candidate_keys=frozenset(removed_keys),
@@ -536,6 +540,35 @@ def _decide_installed_paths(
         stale_keys=stale_keys,
         expected_paths=frozenset(expected),
         unverified_keys=MappingProxyType(dict(sorted(unverified.items()))),
+        rescued_parents=MappingProxyType(
+            {key: walk.reachable_via[key] for key in reparented} if walk else {}
+        ),
+        rescued_depths=MappingProxyType(
+            {key: walk.depths[key] for key in reparented if key in walk.depths} if walk else {}
+        ),
+        reachability=walk,
+    )
+
+
+def _reparented_survivors(lockfile, removed_keys, retained, walk) -> list[str]:
+    """Retained rows recorded under a parent this prune removes (#4989).
+
+    They take the parent a fresh install records, from the complete walk;
+    without one they keep their rows unchanged.
+    """
+    if walk is None or lockfile is None or not removed_keys:
+        return []
+    gone = {
+        lockfile_parent_identity(lockfile.dependencies[key], lockfile.replacements)
+        for key in removed_keys
+        if key in lockfile.dependencies
+    }
+    return sorted(
+        key
+        for key in retained
+        if key in lockfile.dependencies
+        and key in walk.reachable_via
+        and lockfile.dependencies[key].resolved_by in gone
     )
 
 

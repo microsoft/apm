@@ -694,6 +694,7 @@ def retained_lock_keys(
     declared_refs: list[DependencyReference],
     *,
     unverified: dict[str, str] | None = None,
+    walks: list[ReachabilityResult] | None = None,
 ) -> frozenset[str]:
     """Return the lock keys a project still needs beyond its declarations.
 
@@ -708,6 +709,7 @@ def retained_lock_keys(
     An incomplete walk, or a local entry whose directory cannot be resolved,
     fails closed and retains every such entry; each one kept only for that
     reason is named in *unverified* with the reason, for the caller to report.
+    The walk, when one ran, is appended to *walks* for parent repairs.
     """
     declared = {ref.get_unique_key() for ref in declared_refs}
     retained: set[str] = set()
@@ -740,6 +742,8 @@ def retained_lock_keys(
         walk = compute_forward_reachable_keys(
             lockfile, project_root, apm_modules_dir, declared_refs, frozenset(candidates)
         )
+        if walks is not None:
+            walks.append(walk)
         if walk.complete:
             retained |= candidates & walk.reachable
         else:
