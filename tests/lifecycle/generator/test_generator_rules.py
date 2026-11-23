@@ -50,6 +50,7 @@ from tests.lifecycle.generator.rules import (
 from tests.lifecycle.generator.space import Entry, build_space, raw_cells
 from tests.lifecycle.generator.witnesses import (
     BIN_WITNESSES,
+    FORM_SOURCES,
     SOURCE_SPINE,
     SOURCE_SPINE_UNOBSERVED,
     credits,
@@ -892,7 +893,9 @@ def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() ->
 # -- a witness credits only the primitives it exercises (#4981, generalized) -----
 
 
-def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive() -> None:
+def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive(
+    tmp_path: Path,
+) -> None:
     """A receipt proves a primitive only when its witness deploys it (or its gate decides
     it) at the cell's scope: a row acting on p-exec at project scope never deploys its
     loose bin/, and the source spine never observed a registry or local bundle
@@ -913,9 +916,20 @@ def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive() -
     for op, src, prim in SOURCE_SPINE_UNOBSERVED:
         key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
         assert data["obligations"][key]["status"] == "baseline", data["obligations"][key]
-
-
-def test_credits_dimension_refuses_what_the_witness_cannot_exercise() -> None:
+    # A projected pair keeps no unexercised step among its credits (it names no OP).
+    unexercised = {
+        f"T3|{op}|{form}|{prim}"
+        for form, src in FORM_SOURCES.items()
+        for op, unobserved_src, prim in SOURCE_SPINE_UNOBSERVED
+        if src == unobserved_src
+    }
+    projected = sorted(
+        key
+        for key, entry in data["obligations"].items()
+        if unexercised & set(entry.get("credited_by") or ())
+    )
+    assert projected == [], f"credited by an unexercised source step: {projected[:5]}"
+    # Negative controls: the static rule refuses what a witness cannot exercise.
     project_bin = {"OP": "install", "PRIM": "bin", "SCOPE": "project"}
     assert not credits_dimension("tests/x.py::test_row", project_bin)
     assert credits_bin("tests/x.py::test_row", {"PRIM": "skill"})
@@ -925,11 +939,7 @@ def test_credits_dimension_refuses_what_the_witness_cannot_exercise() -> None:
     assert "other-file" in deployable_prims("project")
     assert "other-file" not in deployable_prims("user")
     assert not credits_dimension("tests/x.py::test_row", {"PRIM": "other-file", "SCOPE": "user"})
-
-
-def test_an_admitted_primitive_must_be_deployed_after_a_resolving_step(tmp_path: Path) -> None:
-    """Runtime half of the witness rule: a gate-matrix install whose gate admits the
-    primitive credits it only when that primitive is deployed afterwards."""
+    # The runtime half: an admitted gate-matrix install must leave its primitive deployed.
     from tests.lifecycle.oracles import Observation, dimension_problems
 
     def observed(*deployed: str) -> Observation:

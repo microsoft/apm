@@ -381,6 +381,9 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
+        # The whole step, not only the projected id: an unexercised step credits no pair.
+        if not credits_dimension(cell.witness, cell.assignment):
+            continue
         for key in credits(cell):
             if key in obligations and credits_dimension(cell.witness, parse_cell(key)[1]):
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
