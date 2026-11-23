@@ -130,6 +130,7 @@ class HookTargetReconcileStats(TypedDict):
     errors: int
     failed_targets: list[str]
     failed_paths: list[str]
+    deleted_paths: list[str]  # emptied hook files deleted (#4852)
 
 
 @dataclass(frozen=True)
@@ -1740,6 +1741,7 @@ class HookIntegrator(BaseIntegrator):
             "errors": 0,
             "failed_targets": [],
             "failed_paths": [],
+            "deleted_paths": [],
         }
         for target in excluded_targets:
             config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1747,7 +1749,7 @@ class HookIntegrator(BaseIntegrator):
                 continue
             target_dir = project_root / target.root_dir
             json_path = target_dir / config.config_filename
-            errors_before = stats["errors"]
+            errors_before, existed = stats["errors"], json_path.exists()
             self._clean_apm_source_from_json(
                 json_path,
                 source_markers,
@@ -1757,6 +1759,8 @@ class HookIntegrator(BaseIntegrator):
                 dry_run=dry_run,
                 defaults=config.top_level_defaults,
             )
+            if existed and not dry_run and not json_path.exists():
+                stats["deleted_paths"].append(portable_relpath(json_path, project_root))
             if stats["errors"] != errors_before:
                 stats["failed_targets"].append(target.name)
                 for path in (json_path, json_path.parent / _APM_HOOKS_SIDECAR):

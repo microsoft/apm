@@ -205,6 +205,12 @@ class CommandLogger:
             lambda noun: f"stale deployed {noun} for {_dependency_label(dep_key)}",
         )
 
+    def hook_config_cleanup(self, dep_key: str, paths: Sequence[str]) -> int:
+        """Name each hook config file deleted once its last APM hook left (#4852)."""
+        return self._removed_paths(
+            paths, lambda noun: f"emptied hook config {noun} for {_dependency_label(dep_key)}"
+        )
+
     @staticmethod
     def _removed_paths(paths: Sequence[str], describe: Callable[[str], str]) -> int:
         """Render one cleanup header whose count matches the paths listed under it."""
