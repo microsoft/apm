@@ -19,7 +19,7 @@ For the workflow (where to put the file, how to roll it out), see [Govern with a
 - **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
 - **What the lockfile records and verifies** -- which artifacts the lockfile records, and what the install-time audit pass checks over them once written.
 
-`apm install` enforces the dependency and MCP source rules, `dependencies.max_depth`, `manifest.scripts` and `unmanaged_files.action: deny` during install, the same way for a dependency install, `--mcp` and a local bundle (`enforcement: warn` warns, `--dry-run` previews each verdict without writing); `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
+`apm install` enforces the dependency and MCP source rules, `dependencies.max_depth`, `manifest.scripts` and `unmanaged_files.action: deny` during install; `manifest.scripts` and `unmanaged_files` are judged the same way for a dependency install, `--mcp` and a local bundle (`enforcement: warn` warns, `--dry-run` previews each verdict without writing); `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
 
 ## What apm-policy.yml does NOT govern
 
