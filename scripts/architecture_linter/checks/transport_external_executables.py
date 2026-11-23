@@ -141,15 +141,22 @@ class _Aliases:
         self._attributes: dict[tuple[int, str], frozenset[int]] = {}
         self._classes: dict[int, int] = {}
         self._declared: dict[tuple[int, str], int] = {}
+        nonlocals: list[tuple[ast.AST | None, str]] = []
         for node in nodes:
-            if isinstance(node, (ast.Global, ast.Nonlocal)):
-                self._declare(node)
+            if isinstance(node, ast.Global):
+                scope = self._anchor(node)
+                for name in node.names:
+                    self._declared[(id(scope) if scope is not None else 0, name)] = 0
+            elif isinstance(node, ast.Nonlocal):
+                nonlocals.extend((self._anchor(node), name) for name in node.names)
         assignments: list[tuple[ast.AST, list[ast.expr], ast.expr]] = []
         for node in nodes:
             self._bind(node)
             if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 assignments.append((node, targets, node.value))
+        for scope, name in nonlocals:
+            self._route_nonlocal(scope, name)
         # Aliases may chain through each other in any order: resolve to a fixpoint.
         changed = True
         while changed:
@@ -169,15 +176,21 @@ class _Aliases:
             scope = self._anchor(scope)
         return scope
 
-    def _declare(self, node: ast.Global | ast.Nonlocal) -> None:
-        """Route a declared name's bindings to the module or the enclosing function."""
-        scope = self._anchor(node)
-        target = 0
-        if isinstance(node, ast.Nonlocal):
-            outer = self._enclosing_function(scope)
-            target = id(outer) if outer is not None else 0
-        for name in node.names:
-            self._declared[(id(scope) if scope is not None else 0, name)] = target
+    def _route_nonlocal(self, scope: ast.AST | None, name: str) -> None:
+        """Send a ``nonlocal`` name to the nearest enclosing function that binds it.
+
+        Declarations arrive outermost first, so a middle function's own
+        ``nonlocal`` has already moved its binding outward.
+        """
+        outer = self._enclosing_function(scope)
+        while outer is not None and (id(outer), name) not in self._names:
+            outer = self._enclosing_function(outer)
+        key = (id(scope) if scope is not None else 0, name)
+        target = id(outer) if outer is not None else 0
+        self._declared[key] = target
+        moved = self._names.pop(key, None)
+        if moved is not None:
+            self._names[(target, name)] = self._names.get((target, name), _NONE) | moved
 
     def _owning_class(self, node: ast.AST) -> int:
         """Return the id of the nearest class enclosing *node*, or 0 at module level."""
