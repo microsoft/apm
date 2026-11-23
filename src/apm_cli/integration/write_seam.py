@@ -26,10 +26,15 @@ from typing import IO, Any
 
 from apm_cli.utils import atomic_io
 
-# (path, contents): contents=False records only an absent path (mkdir).
-Recorder = Callable[[Path, bool], None]
+# (path, contents, expected): contents=False records only an absent path
+# (mkdir); expected is the content hash the write will leave there, or
+# "absent" / "dir", or None when the writer cannot know it (#4863).
+Recorder = Callable[[Path, bool, "str | None"], None]
+_ABSENT, _DIR = "absent", "dir"
 
 _recorder: Recorder | None = None
+# Notified after each write completes: the journal seals what APM wrote (#4863).
+_after: Callable[[Path], None] | None = None
 _planning = False
 _guard = threading.Lock()
 
@@ -55,19 +60,22 @@ def planning() -> Iterator[None]:
             _planning = False
 
 
-def listen(recorder: Recorder) -> None:
-    """Route every deploy write through *recorder* (only InstallTransaction listens)."""
-    global _recorder
+def listen(recorder: Recorder, after: Callable[[Path], None] | None = None) -> None:
+    """Route every deploy write through *recorder*, and each finished one through *after*.
+
+    Only InstallTransaction listens.
+    """
+    global _recorder, _after
     with _guard:
-        _recorder = recorder
+        _recorder, _after = recorder, after
 
 
 def stop_listening(recorder: Recorder) -> None:
     """Stop routing deploy writes to *recorder* if it is still the listener."""
-    global _recorder
+    global _recorder, _after
     with _guard:
         if _recorder == recorder:
-            _recorder = None
+            _recorder, _after = None, None
 
 
 @contextmanager
@@ -77,18 +85,20 @@ def private_scratch() -> Iterator[None]:
     The locked render that proves deployment evidence replays packages into
     such a tree, also while install plans its writes (#4381).
     """
-    global _recorder, _planning
+    global _recorder, _after, _planning
     with _guard:
-        saved = (_recorder, _planning)
-        _recorder, _planning = None, False
+        saved = (_recorder, _after, _planning)
+        _recorder, _after, _planning = None, None, False
     try:
         yield
     finally:
         with _guard:
-            _recorder, _planning = saved
+            _recorder, _after, _planning = saved
 
 
-def record_before_write(path: str | os.PathLike[str], *, follow: bool = False) -> None:
+def record_before_write(
+    path: str | os.PathLike[str], *, follow: bool = False, expected: str | None = None
+) -> None:
     """Record *path* before it is created, replaced or removed.
 
     *follow* marks a writer that writes through a symlink (an append or an
@@ -99,16 +109,28 @@ def record_before_write(path: str | os.PathLike[str], *, follow: bool = False) -
         raise PlannedWriteError(f"Install planned a write to {path} before its preflight passed")
     recorder = _recorder
     if recorder is not None:
-        recorder(Path(path), True)
+        recorder(Path(path), True, expected)
         if follow and os.path.islink(path):
-            recorder(Path(os.path.realpath(path)), True)
+            recorder(Path(os.path.realpath(path)), True, expected)
+
+
+def record_after_write(path: str | os.PathLike[str], *, follow: bool = False) -> None:
+    """Report that the write to *path* finished, so the journal seals its bytes (#4863).
+
+    *follow* reports a symlink's destination too, as :func:`record_before_write` does.
+    """
+    after = _after
+    if after is not None:
+        after(Path(path))
+        if follow and os.path.islink(path):
+            after(Path(os.path.realpath(path)))
 
 
 def record_before_mkdir(path: str | os.PathLike[str]) -> None:
     """Record *path* before it is created as a directory; an existing one is kept as is."""
     recorder = _recorder
     if recorder is not None:
-        recorder(Path(path), False)
+        recorder(Path(path), False, _DIR)
 
 
 def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: int = 0o777) -> None:
@@ -117,72 +139,143 @@ def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: in
         return
     record_before_mkdir(path)
     path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
+    record_after_write(path)
 
 
 def write_text_lf(path: Path, data: str) -> None:
     """:func:`apm_cli.utils.atomic_io.write_text_lf` through the seam."""
-    record_before_write(path)
+    record_before_write(path, expected=_text_hash(data, lf=True))
     atomic_io.write_text_lf(path, data)
+    record_after_write(path)
 
 
 def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
     """:func:`apm_cli.utils.atomic_io.atomic_write_text` through the seam."""
-    record_before_write(path)
+    lf = kwargs.get("normalize_line_endings", True)
+    record_before_write(path, expected=_text_hash(data, lf=lf))
     atomic_io.atomic_write_text(path, data, **kwargs)
+    record_after_write(path)
 
 
-def write_text(path: Path, data: str, *, encoding: str = "utf-8") -> None:
-    """``Path.write_text`` through the seam."""
-    record_before_write(path, follow=True)
-    path.write_text(data, encoding=encoding)
+def write_text(
+    path: Path, data: str, *, encoding: str = "utf-8", newline: str | None = None
+) -> None:
+    """``Path.write_text`` through the seam (``newline=""`` keeps *data*'s line endings)."""
+    expected = _text_hash(data, encoding=encoding, newline=newline)
+    record_before_write(path, follow=True, expected=expected)
+    path.write_text(data, encoding=encoding, newline=newline)
+    record_after_write(path, follow=True)
 
 
 def write_json_config(path: Path, data: Any, **kwargs: Any) -> bool:
     """:func:`apm_cli.utils.json_config.write_json_config` through the seam."""
+    from apm_cli.utils.json_config import json_config_text
     from apm_cli.utils.json_config import write_json_config as _write
 
-    record_before_write(path)
-    return _write(path, data, **kwargs)
+    text = json_config_text(
+        path, data, default_trailing_newline=kwargs.get("default_trailing_newline", True)
+    )
+    record_before_write(path, expected=_text_hash(text))
+    written = _write(path, data, **kwargs)
+    record_after_write(path)
+    return written
 
 
 def open_for_write(path: Path, mode: str = "w", **kwargs: Any) -> IO[Any]:
     """``open(path, mode)`` for writing, through the seam."""
     record_before_write(path, follow=True)
-    return open(path, mode, **kwargs)
+    return _SealOnClose(open(path, mode, **kwargs), path)
 
 
 def copy2(source: Path, destination: Path) -> Path:
     """``shutil.copy2`` through the seam, replacing the destination atomically (#4691)."""
-    record_before_write(destination, follow=True)
-    return atomic_io.atomic_copy(source, destination, metadata=True)
+    record_before_write(destination, follow=True, expected=_file_hash(source))
+    copied = atomic_io.atomic_copy(source, destination, metadata=True)
+    record_after_write(destination, follow=True)
+    return copied
 
 
 def copyfile(source: Path, destination: Path) -> Path:
     """``shutil.copyfile`` through the seam, replacing the destination atomically (#4691)."""
-    record_before_write(destination, follow=True)
-    return atomic_io.atomic_copy(source, destination, metadata=False)
+    record_before_write(destination, follow=True, expected=_file_hash(source))
+    copied = atomic_io.atomic_copy(source, destination, metadata=False)
+    record_after_write(destination, follow=True)
+    return copied
 
 
 def rename(source: Path, destination: Path) -> None:
     """``os.rename`` through the seam: both paths change."""
-    record_before_write(source)
-    record_before_write(destination)
+    record_before_write(source, expected=_ABSENT)
+    record_before_write(destination, expected=_file_hash(source))
     os.rename(source, destination)
+    record_after_write(source)
+    record_after_write(destination)
+
+
+def chmod(path: Path, mode: int) -> None:
+    """``os.chmod`` through the seam: the mode is part of what the journal seals (#4863)."""
+    record_before_write(path, expected=_file_hash(path))
+    os.chmod(path, mode)
+    record_after_write(path)
 
 
 def unlink(path: Path, *, missing_ok: bool = False) -> None:
     """``Path.unlink`` through the seam."""
-    record_before_write(path)
+    record_before_write(path, expected=_ABSENT)
     path.unlink(missing_ok=missing_ok)
+    record_after_write(path)
 
 
 def rmdir(path: Path) -> None:
     """``Path.rmdir`` through the seam."""
-    record_before_write(path)
+    record_before_write(path, expected=_ABSENT)
     path.rmdir()
+    record_after_write(path)
 
 
 def rmtree(path: Path, **kwargs: Any) -> None:
     """``shutil.rmtree`` through the seam."""
-    record_before_write(path)
+    record_before_write(path, expected=_ABSENT)
     shutil.rmtree(path, **kwargs)
+    record_after_write(path)
+
+
+def _text_hash(data: str, **kwargs: Any) -> str:
+    from apm_cli.utils.content_hash import text_write_hash
+
+    return text_write_hash(data, **kwargs)
+
+
+def _file_hash(source: Path) -> str:
+    """What a copy or move of *source* leaves: its content hash, a directory, or nothing."""
+    from apm_cli.utils.content_hash import compute_exact_file_hash
+
+    if os.path.isdir(source) and not os.path.islink(source):
+        return _DIR
+    try:
+        return compute_exact_file_hash(source) if os.path.isfile(source) else _ABSENT
+    except OSError:
+        return _ABSENT
+
+
+class _SealOnClose:
+    """A file opened through the seam: closing it reports the finished write."""
+
+    def __init__(self, handle: IO[Any], path: Path) -> None:
+        self._handle = handle
+        self._path = path
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handle, name)
+
+    def __enter__(self) -> _SealOnClose:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        closed = self._handle.closed
+        self._handle.close()
+        if not closed:
+            record_after_write(self._path, follow=True)

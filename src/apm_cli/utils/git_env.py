@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -294,6 +295,39 @@ def _executable_exclusion_root() -> Path:
     return cwd
 
 
+def _within(path: Path, root: Path) -> bool:
+    """Whether *path* is *root* or lies under it, under the file system's case rules.
+
+    ``normcase`` folds case where the platform does (Windows). Elsewhere a
+    case-insensitive volume (default macOS) gives one directory several
+    spellings, so the ancestor spelled like *root* up to case and Unicode form
+    is asked whether it is the same directory; if that can't be checked, it
+    counts as the same.
+    """
+    if path == root or path.is_relative_to(root):
+        return True
+    folded, base = os.path.normcase(path), os.path.normcase(root)
+    if folded == base or folded.startswith(os.path.join(base, "")):
+        return True
+    spelled = _caseless(root)
+    for ancestor in (path, *path.parents):
+        if _caseless(ancestor) == spelled:
+            try:
+                return os.path.samefile(ancestor, root)
+            except OSError:
+                return True
+    return False
+
+
+def _caseless(path: Path) -> str:
+    """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
+
+    Decomposing first and recomposing after matches Unicode canonical caseless
+    matching: folding can undo a composition the input had.
+    """
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
+
+
 def _resolve_trusted_executable(name: str) -> str:
     """Resolve an executable from PATH directories outside the project."""
     exclusion_root = _executable_exclusion_root()
@@ -302,7 +336,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
-            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+            if _within(directory, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -323,7 +357,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         resolved = Path(candidate).resolve()
         try:
-            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+            if _within(resolved, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -365,6 +399,73 @@ def user_script_environment(env: dict[str, str]) -> dict[str, str]:
     if isinstance(_user_no_cwd_search, str):
         restored[_NO_CWD_SEARCH] = _user_no_cwd_search
     return restored
+
+
+def _links_into(directory: Path, root: Path) -> bool:
+    """Whether *directory* may hold a symlink whose resolved target lies inside *root*.
+
+    A directory that cannot be listed may still be searched by the shell, so it
+    counts as linking in: unchecked links never serve an APM-authored script.
+    """
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return True
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+        try:
+            target = entry.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if _within(target, root):
+            return True
+    return False
+
+
+def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
+    """Return *env* with PATH limited to directories outside the project.
+
+    For scripts APM itself authors and launches (runtime setup, self-update):
+    the programs they call by name resolve the way :func:`trusted_executable`
+    resolves APM's own helpers. ``.``, empty, relative and unresolvable entries
+    and every entry inside the project are dropped, as is any directory holding
+    a link whose target lies inside the project (the target check
+    :func:`trusted_executable` applies). Each kept entry is the resolved
+    directory that passed the check. User-authored scripts never use this.
+    Raises ``FileNotFoundError`` when no entry remains, rather than launching
+    with an empty PATH.
+    """
+    exclusion_root = _executable_exclusion_root()
+    result = dict(env)
+    # A missing PATH counts as empty: the child shell's built-in default search
+    # path has not passed the project check, so the refusal below applies.
+    keys = [key for key in env if key.upper() == "PATH"] or ["PATH"]
+    for key in keys:
+        kept = []
+        for entry in env.get(key, "").split(os.pathsep):
+            expanded = Path(entry).expanduser() if entry else None
+            if expanded is None or not expanded.is_absolute():
+                continue
+            try:
+                directory = expanded.resolve(strict=True)
+                if _within(directory, exclusion_root):
+                    continue
+                if _links_into(directory, exclusion_root):
+                    continue
+            except (OSError, RuntimeError, ValueError):
+                continue
+            # Hand on the directory that passed the check: a ``~`` or a link in
+            # the written spelling would be read again when the shell searches.
+            kept.append(str(directory))
+        if not kept:
+            # An empty PATH makes POSIX shells search the working directory.
+            raise FileNotFoundError(
+                "No PATH directory outside the project remains for APM's setup scripts. "
+                "Add the directory holding your installed tools to PATH and retry."
+            )
+        result[key] = os.pathsep.join(kept)
+    return result
 
 
 def trusted_executable(name: str) -> str | None:

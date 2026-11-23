@@ -131,7 +131,11 @@ from apm_cli.install.services import (
     _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 from apm_cli.install.summary import render_post_install_summary as _post_install_summary
-from apm_cli.install.transaction import InstallTransaction
+from apm_cli.install.transaction import (
+    InstallTransaction,
+    journaled_local_bundle,
+    replay_before_install_entry,
+)
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -1262,6 +1266,10 @@ def install(  # noqa: PLR0913
             dry_run=dry_run,
             logger=logger,
         )
+        # Every entry, before it writes: replay what a killed install left (#4863).
+        replay_before_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT, dry_run=dry_run, logger=logger
+        )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
@@ -1297,7 +1305,7 @@ def install(  # noqa: PLR0913
                         )
                     ),
                 )
-                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(_install_lb)(
+                lockfile_writer(LockfileWriter.INSTALL_BUNDLE)(journaled_local_bundle(_install_lb))(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
                     target=target,

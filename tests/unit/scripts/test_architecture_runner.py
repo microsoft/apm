@@ -737,6 +737,7 @@ install-deployment-target-file-contraction
 install-deployment-trust-fingerprint
 install-deployment-trust-policy-outcome
 install-deployment-local-bundle-hook-trust
+install-deployment-uninstall-absence-proof
 install-deployment-uninstall-preflight
 install-deployment-local-bundle-hook-retirement
 install-deployment-uninstall-reachability
@@ -875,6 +876,7 @@ transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
+transport-platform-rmtree-callback-no-follow-chmod
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation

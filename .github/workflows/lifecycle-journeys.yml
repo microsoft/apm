@@ -198,6 +198,46 @@ jobs:
           uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q \
             tests/quality/test_promise_obligations.py::test_merged_receipts_hold_the_ratchet
 
+  # The install engine parity suite (#5002) on Windows: the PR Lifecycle Smoke
+  # shards and lifecycle-full run it on Linux only. Cells that inject faults
+  # through sitecustomize or SIGKILL skip themselves on Windows.
+  engine-parity-windows:
+    name: Engine Parity (Windows)
+    needs: resolve-ref
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-ref.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install frozen development dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run the engine parity suite
+        env:
+          APM_E2E_TESTS: "1"
+        run: |
+          uv run --frozen --extra dev python -m pytest -p no:cacheprovider -q --strict-markers \
+            -n 2 --durations=20 -m "not live" \
+            tests/lifecycle/scenarios/test_engine_parity.py \
+            tests/lifecycle/scenarios/test_engine_parity_doubts.py \
+            tests/lifecycle/scenarios/test_engine_parity_invariants.py
+
   # PR integration shards keep only the per-group sample of the linter session
   # cache's byte-equality guard; the full owner-mutation replay (~15 min) runs
   # here, nightly and on every release-candidate dispatch.
@@ -235,7 +275,7 @@ jobs:
 
   signal:
     name: Lifecycle Journeys Nightly Signal
-    needs: [journeys, lifecycle-full, architecture-cache-full-matrix]
+    needs: [journeys, lifecycle-full, engine-parity-windows, architecture-cache-full-matrix]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -245,7 +285,7 @@ jobs:
       - name: Open, update or close the tracking issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RESULT: ${{ needs.journeys.result != 'success' && needs.journeys.result || needs.lifecycle-full.result != 'success' && needs.lifecycle-full.result || needs.architecture-cache-full-matrix.result }}
+          RESULT: ${{ needs.journeys.result != 'success' && needs.journeys.result || needs.lifecycle-full.result != 'success' && needs.lifecycle-full.result || needs.engine-parity-windows.result != 'success' && needs.engine-parity-windows.result || needs.architecture-cache-full-matrix.result }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

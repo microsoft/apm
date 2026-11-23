@@ -118,3 +118,30 @@ def test_every_declaration_of_one_directory_is_previewed_as_kept(
     output = " ".join((captured.out + captured.err).split())
     assert kept == ["./vendor/e", "./vendor/./e"]
     assert "Would keep ./vendor/e:" in output and "Would keep ./vendor/./e:" in output, output
+
+
+def test_the_survivor_read_drives_the_offline_reach_check(tmp_path: Path) -> None:
+    """The survivors read from apm.yml decide the refusal: a reaches e, so e is kept."""
+    from apm_cli.commands.uninstall.cli import _refuse_unverifiable_local_survivors
+
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        "name: proj\nversion: 1.0.0\ndependencies:\n  apm:\n    - ./vendor/e\n    - ./vendor/a\n",
+        encoding="utf-8",
+    )
+    for name, deps in (("e", ""), ("a", "dependencies:\n  apm:\n    - ../e\n")):
+        (tmp_path / "vendor" / name).mkdir(parents=True)
+        (tmp_path / "vendor" / name / "apm.yml").write_text(
+            f"name: {name}\nversion: 1.0.0\n{deps}", encoding="utf-8"
+        )
+    lockfile = MagicMock()
+    lockfile.get_dependency.return_value = SimpleNamespace(source="local", local_path="./vendor/e")
+    lockfile.replacements = None
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _refuse_unverifiable_local_survivors(lockfile, ["./vendor/e"], manifest, logger)
+
+    assert exc.value.code == 1
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "apm_modules/ is missing" in message, message

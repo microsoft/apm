@@ -655,6 +655,7 @@ def _missing_recorded_skill_subset_paths(
 
     from ..install.outcome import missing_requested_components
     from ..integration.skill_integrator import SkillIntegrator
+    from ..models.dependency.subsets import skill_subset_selects_all
     from ..models.validation import PackageType
 
     try:
@@ -668,6 +669,9 @@ def _missing_recorded_skill_subset_paths(
         available = frozenset()
     if available is None:
         available = frozenset()
+    if skill_subset_selects_all(subset):
+        # ``skills: ["*"]`` needs only one skill to be present.
+        return () if available else tuple(subset)
     return missing_requested_components(requested=subset, available=available)
 
 
@@ -1333,6 +1337,7 @@ def _check_drift(
     verbose: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -1375,6 +1380,7 @@ def _check_drift(
             cache_only=cache_only,
             user_scope=user_scope,
             policy_provider=policy_provider,
+            policy_fetch=policy_fetch,
         )
 
         try:

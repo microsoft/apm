@@ -24,7 +24,7 @@ from apm_cli.deps.plugin_parser import (
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
 from apm_cli.models.dependency.server_names import is_reserved_server_name
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import has_skill_selection
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.native_plugins.scopes import CLAUDE, COPILOT, plugin_harnesses, record_harnesses
 from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
@@ -34,6 +34,25 @@ from apm_cli.utils.path_security import PathTraversalError, has_symlink_componen
 
 class ClaudeNativePluginError(RuntimeError):
     """Native registration cannot safely honor the requested package."""
+
+
+# The one install-summary notice for a dependency installed through the native
+# plugin route (#4998). Extend this owner, never add a second notice.
+NATIVE_ROUTE_NOTICE = (
+    "installed as a native plugin. Native plugins are reported not to load in "
+    "git worktrees, in non-interactive claude -p runs (including "
+    "claude-code-action) and in Copilot CLI 1.0.106."
+)
+# Only a Claude-format plugin at project scope deploys loose under a skills:
+# selection; at user scope it parks, and an Agent Plugin stays native.
+_LOOSE_ROUTE_HINT = (
+    ' To deploy its skills loose instead, set skills: ["*"] on this dependency in apm.yml.'
+)
+
+
+def native_route_notice(*, loose_route: bool) -> str:
+    """The native-route notice, with the loose-route hint where that route exists."""
+    return NATIVE_ROUTE_NOTICE + _LOOSE_ROUTE_HINT if loose_route else NATIVE_ROUTE_NOTICE
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +76,29 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+    # Admitted as an Agent Plugin (always native), not a Claude-format plugin.
+    agent_plugin: bool = False
+
+
+def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
+    """Whether ``skills: ["*"]`` would deploy *plugin*'s skills loose instead.
+
+    Only a Claude-format plugin at project scope deploys loose under a skills:
+    selection (an Agent Plugin stays native; at user scope it parks), and only
+    a plugin with selectable skills: otherwise the selection matches nothing.
+    """
+    if user_scope or plugin.agent_plugin:
+        return False
+    from types import SimpleNamespace
+
+    from apm_cli.integration.skill_integrator import SkillIntegrator
+
+    available = SkillIntegrator.available_skill_names(
+        SimpleNamespace(
+            install_path=plugin.source_root, package_type=PackageType.MARKETPLACE_PLUGIN
+        )
+    )
+    return bool(available)
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:
@@ -377,7 +419,7 @@ def _intact_source(
             "it has no .claude-plugin/plugin.json, so Claude cannot load it intact",
             f"Ask the publisher to add .claude-plugin/plugin.json, {_EXCLUDE_CLAUDE}",
         )
-    if skill_subset_filter_tokens(skill_subset) is not None:
+    if has_skill_selection(skill_subset):
         return _Ineligible(
             "Claude loads whole plugins, so its skills: selection cannot be honored",
             f"Remove the skills: selection to install the complete plugin, {_EXCLUDE_CLAUDE}",
@@ -512,8 +554,7 @@ def plan_native_claude_plugin(
     if (package_type is not PackageType.MARKETPLACE_PLUGIN and not normalized_virtual) or (
         not user_scope
         and (
-            not (root / ".claude-plugin/plugin.json").is_file()
-            or skill_subset_filter_tokens(skill_subset) is not None
+            not (root / ".claude-plugin/plugin.json").is_file() or has_skill_selection(skill_subset)
         )
     ):
         return None

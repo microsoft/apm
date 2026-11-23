@@ -32,7 +32,7 @@ from __future__ import annotations
 import atexit
 import tempfile
 import tracemalloc
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import copytree, rmtree
 from typing import TYPE_CHECKING, Any
@@ -55,6 +55,8 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
+from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
+from apm_cli.install.drift_records import ReplayRecords, replay_all_live
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
 )
@@ -119,6 +121,10 @@ class ReplayConfig:
     user_scope: bool = False
     # Returns the audit's already-fetched org policy for the replayed gate.
     policy_provider: Callable[[], Any] | None = None
+    # Returns the discovery result *policy_provider* routes (records bind to it, #4940).
+    policy_fetch: Callable[[], Any] | None = None
+    # Serve packages proven by their render record (#4940); False replays all live.
+    records: bool = True
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
 
@@ -521,6 +527,9 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
+    ``config.records`` lets packages proven by their render record be served
+    (``install/drift_records.py``); ``False`` replays every package live.
+
     The scratch directory is registered for atexit cleanup so callers do
     not need to manage its lifetime.
 
@@ -590,29 +599,15 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    registries: dict[str, str] | None = None
-    downloader = None
-    registry_resolver = None
-    declared_transports: DeclaredTransportIndex | None = None
-    if not config.cache_only:
-        from apm_cli.cache.git_cache import attach_persistent_git_cache
-        from apm_cli.core.auth import AuthResolver
-        from apm_cli.deps.github_downloader import GitHubPackageDownloader
-        from apm_cli.deps.registry.resolver import RegistryPackageResolver
-        from apm_cli.install.replay_transport import DeclaredTransportIndex
-        from apm_cli.models.apm_package import APMPackage
+    from apm_cli.install.replay_transport import replay_sources
 
-        downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+    downloader, registry_resolver, registries, declared_transports = replay_sources(
+        config.cache_only, project_root, apm_modules_dir
+    )
+    if downloader is not None:
+        from apm_cli.cache.git_cache import attach_persistent_git_cache
+
         attach_persistent_git_cache(downloader, read_only=True)
-        declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
-        if (apm_yml := manifest_file(project_root)).exists():
-            manifest = APMPackage.from_apm_yml(apm_yml)
-            declared_transports.record(
-                [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
-            )
-            registries = getattr(manifest, "registries", None) or {}
-            if registries:
-                registry_resolver = RegistryPackageResolver(registries)
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
@@ -649,6 +644,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     replayed_count = 0
     from apm_cli.install.exec_gate import ReplayExecAllowMap
 
+    served = ReplayRecords.for_replay(
+        config, project_root, lock, targets, integrators, scratch_root, enabled=config.records
+    )
+    # The records' discovery and the executables gate share one policy fetch.
+    config = served.config
     gated_allow_map = ReplayExecAllowMap(
         project_root, config.policy_provider, user_scope=config.user_scope
     )
@@ -710,6 +710,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     # Replay deploys the locked selection, as uninstall does (#3760).
                     selection = effective_dependency_selection(package_info.dependency_ref)
+                    if served.serve(lock_dep, install_path, package_info, selection):
+                        continue
                     # Withhold what the install gate withheld (#3924) or would
                     # now withhold after a deny no install reconciled (#3958).
                     replay_allow = gated_allow_map.for_dependency(lock_dep, package_info)
@@ -744,6 +746,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
+                    carry_kept_loose_into_replay(
+                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                    )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,
@@ -783,7 +788,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
             except RuntimeError:
                 pass
 
-    logger.replay_complete(replayed_count)
+    if not served.finish(logger, replayed_count):
+        # A live package rendered onto a served destination: replay all live.
+        return replay_all_live(replace(config, records=False), logger, scratch_root, run_replay)
     return scratch_root
 
 
