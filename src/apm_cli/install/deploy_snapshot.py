@@ -42,6 +42,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
+from apm_cli.install.journal_modes import (
+    apply_mode,
+    recorded_mode,
+    stage_private,
+    verified_mode,
+)
 from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
@@ -181,6 +187,8 @@ class DeployJournal:
         }
         # The unit line also opens the first write: what it will leave there.
         line["expected"] = expected
+        if unit.copy is not None:
+            line["mode"] = recorded_mode(unit.copy, unit.kind)  # never the copy's later bits
         if unit.kind == "file" and unit.copy is not None:
             line["hash"] = compute_file_hash(unit.copy)
         if unit.kind == "dir" and unit.copy is not None:
@@ -439,6 +447,8 @@ class _Replay:
     events: Mapping[str, Any] = field(default_factory=dict)
     # The state replay puts back: the journaled copy's, or nothing.
     prior: dict[str, Any] = field(default_factory=lambda: dict(_ABSENT))
+    # The verified recorded mode replay gives the restored path (#5111).
+    mode: int | dict[str, int] | None = None
 
 
 def _read_manifest(store: Path) -> tuple[dict[str, Any], list[Any]]:
@@ -607,7 +617,11 @@ def _validate_unit(
     copy, expected = _journaled_copy(line, store)
     if not metadata:
         _check_vouched(rel, kind, expected, ledger)
-    return _Replay(rel, path, kind, copy, expected, ancestors, prior=_state(copy))
+    mode = verified_mode(line.get("mode"), kind, copy)
+    if mode is None:
+        raise _Unproven(rel, "the journal does not record a verifiable mode")
+    prior = {**_state(copy), "mode": mode} if kind == "file" else _state(copy)
+    return _Replay(rel, path, kind, copy, expected, ancestors, prior=prior, mode=mode)
 
 
 def _check_vouched(
@@ -705,15 +719,11 @@ def _apply(unit: _Replay) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
     try:
-        if unit.kind == "file":
-            staged.write_bytes(_read_no_follow(unit.copy))
-            shutil.copystat(unit.copy, staged, follow_symlinks=False)
-            written = {"": compute_file_hash(staged)}
-        else:
-            shutil.copytree(unit.copy, staged, symlinks=True)
-            written = _tree_hashes(staged)
-        if written != unit.expected:
+        stage_private(unit.copy, staged, unit.kind, _read_no_follow)
+        written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
+        if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
+        apply_mode(staged, unit.mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
