@@ -429,6 +429,10 @@ def test_cleanup_on_a_doubt_prunes_like_the_full_pipeline(twin: Twin) -> None:
 # -- W4's change table: change -> install, fast == full -----------------------------
 
 
+# The full pipeline's exit code after each change (0 unless listed).
+CHANGE_EXIT: dict[str, int] = {"symlinked-destination": 1}  # refuses to write through it
+
+
 @pytest.mark.parametrize(
     "change", [pytest.param(c, marks=NEEDS_ANY.marks) for c in sorted(CHANGES)]
 )
@@ -439,6 +443,10 @@ def test_install_after_a_change_matches_the_full_pipeline(twin: Twin, change: st
     twin.each(spec.apply)
     outside = {w.root: digest(w.root / "outside-skill", (), w) for w in twin.worlds}
     decision = twin.run("install")
+    code = CHANGE_EXIT.get(change, 0)
+    assert twin.codes[-1] == code, (
+        f"{change}: exit {twin.codes[-1]}, expected {code}{twin.evidence}"
+    )
     for world in twin.worlds:
         after = digest(world.root / "outside-skill", (), world)
         assert after == outside[world.root], "install wrote through a symlinked destination"
@@ -482,6 +490,10 @@ def _empty_store(world: World) -> None:
 def _tamper_store(world: World) -> None:
     """Corrupt every deploy-store entry, then remove the deployed tree."""
     _remove_deployed(world)
+    _tamper_store_entries(world)
+
+
+def _tamper_store_entries(world: World) -> None:
     entries = [
         entry
         for root in _cache_roots(world)
@@ -621,16 +633,26 @@ def test_trust_change_after_a_noop_hit_declines(twin: Twin, trust: str) -> None:
         assert _snapshot(world) == pinned[world.root], (
             "the trust change touched apm.yml or the lock"
         )
-    _assert_decision(twin.run("install"), FULL)
+    _assert_decision(twin.ok("install"), FULL)
 
 
 # -- S4: FRESH install (no lockfile) on a warm machine ------------------------------
 
 
 def _fresh_checkout(world: World) -> None:
-    """A fresh clone of the project on a machine whose cache is warm: no lock, no deployed tree."""
+    """A fresh clone of the project on a machine whose cache is warm.
+
+    No lock, no deployed tree and no checkout ownership evidence (the
+    installation identity and its receipts); the machine cache stays warm.
+    """
     _remove_deployed(world)
     (world.project / "apm.lock.yaml").unlink()
+    shutil.rmtree(world.project / ".apm-local", ignore_errors=True)
+    for folder in {
+        world.home / ".apm" / "deployment-receipts",
+        world.apm_home / "deployment-receipts",
+    }:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 @NEEDS_FRESH
@@ -648,8 +670,8 @@ def _fresh_store_miss(world: World) -> None:
 
 
 def _fresh_tampered_store(world: World) -> None:
-    _tamper_store(world)
-    (world.project / "apm.lock.yaml").unlink()
+    _fresh_checkout(world)
+    _tamper_store_entries(world)
 
 
 def _fresh_under_stricter_policy(world: World) -> None:
@@ -682,3 +704,37 @@ def test_fresh_marketplace_install_declines_to_the_full_pipeline(twin: Twin) -> 
     _marketplace_source(twin)
     twin.each(_fresh_checkout)
     _assert_decision(twin.ok("install"), FULL)
+
+
+# -- invariant: a declined fast path writes nothing before the full run ------------
+
+DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...]]] = {
+    **{f"lock-{t}": (BOTH, change, argv) for t, (change, argv, _) in DOUBTS.items()},
+    **{f"fresh-{d}": (keys, change, ("install",)) for d, (keys, change) in FRESH_DOUBTS.items()},
+}
+
+
+@pytest.mark.parametrize(
+    "trigger", [pytest.param(t, marks=NEEDS_ANY.marks) for t in sorted(DECLINES)]
+)
+def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
+    """Hand-off invariant: with ``APM_INSTALL_FAST_PATH=decide`` the engine decides and,
+    on a decline, exits before the full pipeline; not one byte may have moved by then.
+    """
+    keys, change, argv = DECLINES[trigger]
+    _converge(twin, *keys)
+    world = twin.fast
+    change(world)
+    before = comparable(world)
+    world.env[FAST_ENV] = "decide"
+    try:
+        result = driver.run(world, argv)
+    finally:
+        world.env.pop(FAST_ENV, None)
+    if "Installing dependencies" in result.stdout:
+        raise MissingDecision("expected a decide decision, got the full pipeline")
+    decisions = _DECISION.findall(result.stderr)
+    _assert_decision(decisions[0] if decisions else "", FULL)
+    assert result.returncode == 0, result.stdout + result.stderr
+    problems = diff(before, comparable(world), (world, world), ("before", "after"))
+    assert not problems, f"{trigger}: the declined fast path wrote\n" + "\n".join(problems)

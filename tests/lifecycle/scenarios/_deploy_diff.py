@@ -227,7 +227,8 @@ def _text(path: Path, marker: str) -> str | None:
     """Raw file text (bytes order, comments, formatting), only identity lines and paths normalized."""
     if not path.is_file():
         return None
-    return _IDENTITY_LINE.sub("", path.read_text(encoding="utf-8").replace(marker, "<ROOT>"))
+    # Decode bytes: read_text would translate CRLF and hide a line-ending change.
+    return _IDENTITY_LINE.sub("", path.read_bytes().decode("utf-8").replace(marker, "<ROOT>"))
 
 
 def receipts(world: World) -> list[object]:
@@ -238,7 +239,7 @@ def receipts(world: World) -> list[object]:
         world.home / ".apm" / "deployment-receipts",
         world.apm_home / "deployment-receipts",
     }:
-        for path in sorted(folder.glob("*.json")) if folder.is_dir() else ():
+        for path in sorted(folder.rglob("*.json")) if folder.is_dir() else ():  # incl. mcp/
             data = json.loads(path.read_text(encoding="utf-8"))
             for key in _RECEIPT_BINDING:
                 data.pop(key, None)
