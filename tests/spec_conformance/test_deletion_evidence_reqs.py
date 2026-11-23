@@ -609,6 +609,84 @@ def test_consent_checks_the_enclosing_directory_owner_too(tmp_path: Path) -> Non
 
 
 @pytest.mark.req("req-lk-024")
+@pytest.mark.parametrize("consent", [False, True])
+def test_an_enclosing_owner_render_never_overrides_the_files_own_offline_owner(
+    tmp_path: Path, consent: bool
+) -> None:
+    """Without the flag the verdict reads the file's own owner, as before #4295.
+
+    Consent only widens the check for renders that would block it, so an
+    enclosing directory owner's matching render never authorizes the delete.
+    """
+    root = tmp_path / "project"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    (render / _PATH).parent.mkdir(parents=True)
+    (render / _PATH).write_bytes(path.read_bytes())
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: render if owner == "owner/pkg" else None,
+        owners={_PATH: ("offline/pkg",), _PATH.rpartition("/")[0]: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    if consent:
+        evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_reads_an_absolute_spelling_under_the_root_as_one_file(tmp_path: Path) -> None:
+    """A conflicting hash recorded under the absolute user-scope spelling blocks consent."""
+    root = tmp_path / "home"
+    path = _deployed(root)
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=_no_render,
+        kept=(),
+        recorded_hashes={
+            _PATH: frozenset({compute_file_hash(path)}),
+            str(root / _PATH): frozenset({_OTHER}),
+        },
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_finds_an_owner_recorded_under_an_absolute_spelling(tmp_path: Path) -> None:
+    """An owner render lacking the file keeps it, whichever spelling names the owner."""
+    root = tmp_path / "home"
+    path = _deployed(root)
+    render = tmp_path / "render"
+    render.mkdir()
+    evidence = DeploymentEvidence(
+        deploy_root=root,
+        receipts={},
+        render=lambda owner: None if owner is None else render,
+        owners={str(root / _PATH): ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={_PATH: frozenset({compute_file_hash(path)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    result, _messages = _cleanup(root, evidence, path)
+
+    assert path.exists() and result.deleted == []
+    assert evidence.consented_deletions() == []
+
+
+@pytest.mark.req("req-lk-024")
 def test_consent_reads_dot_segment_spellings_as_one_file(tmp_path: Path) -> None:
     """A conflicting hash recorded under a ``./`` alias still blocks consent."""
     root = tmp_path / "project"
