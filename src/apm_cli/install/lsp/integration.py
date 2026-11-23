@@ -847,7 +847,9 @@ def run_lsp_integration(  # noqa: PLR0913
         for target_runtime in target_runtimes or []:
             new_targets.setdefault(target_runtime, set()).update(
                 LSPIntegrator.expressible_server_names(lsp_deps, target_runtime)
-                - kept.get(target_runtime, set())
+                - kept.get(target_runtime, set()),
+                # A target held at the locked render keeps its claim (#4871).
+                record.held_claims.get(target_runtime, set()),
             )
         if old_lsp_targets_present:
             _clean_target_differences(
