@@ -1632,7 +1632,7 @@ def remove_stale_deployed_files(
         # Unlinking a managed final symlink removes no file content, so it
         # keeps its own rule (callers opt in via allow_final_symlink).
         if allow_final_symlink and stale_target.is_symlink():
-            if recorded_hashes.get(stale_path.replace("\\", "/")):
+            if not _managed_link_unlinkable(recorded_hashes.get(stale_path.replace("\\", "/"))):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (
@@ -1788,6 +1788,46 @@ def _stale_gate_passes(
 def _stale_target_absent(stale_target: Path, *, allow_final_symlink: bool) -> bool:
     """Whether stale cleanup counts a gated path as already gone."""
     return not stale_target.exists() and not (allow_final_symlink and stale_target.is_symlink())
+
+
+def _managed_link_unlinkable(recorded_hash: str | None) -> bool:
+    """Whether a gated managed final symlink is unlinked: only one that replaced no hashed file."""
+    return not recorded_hash
+
+
+def managed_hook_prefixes(targets=None) -> tuple[str, ...]:
+    """Deployed-path prefixes whose files uninstall's hook sync removes (#5035)."""
+    from .targets import KNOWN_TARGETS
+
+    return tuple(
+        dict.fromkeys(
+            f"{(t.primitives['hooks'].deploy_root or t.root_dir)}/hooks/".replace("\\", "/")
+            for t in (*KNOWN_TARGETS.values(), *(targets or ()))
+            if t.supports("hooks")
+        )
+    )
+
+
+def hook_sync_unlinks(rel_path: str, project_root: Path, *, recorded_hash: str | None) -> bool:
+    """Whether uninstall's hook sync removes a managed hook final symlink (#5035).
+
+    Read-only, through the same prefix, gate and link decisions the hook sync
+    applies with ``allow_final_symlink=True``.
+    """
+    from .targets import KNOWN_TARGETS
+
+    return (
+        rel_path.replace("\\", "/").startswith(managed_hook_prefixes())
+        and _stale_gate_passes(
+            rel_path,
+            project_root,
+            targets=list(KNOWN_TARGETS.values()),
+            user_scope=False,
+            allow_final_symlink=True,
+        )
+        and (project_root / rel_path).is_symlink()
+        and _managed_link_unlinkable(recorded_hash)
+    )
 
 
 def final_link_handled(

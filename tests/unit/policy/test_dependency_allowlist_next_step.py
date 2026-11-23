@@ -744,3 +744,39 @@ def test_a_looping_final_symlink_falls_back_to_the_admin(tmp_path: Path, capsys)
     assert _stderr(capsys, check)[2] == (
         "    Ask your org admin to allow it (policy source: org:contoso/.github)."
     )
+
+
+def test_a_hook_link_a_survivor_target_shrink_retires_keeps_the_advice(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """#5035: the hook sync unlinks an unhashed hook link a shrinking survivor retires."""
+    deployed = ".github/hooks/bundle.json"
+    bundle = LockedDependency(
+        repo_url="contoso/bundle",
+        depth=2,
+        resolved_by="acme/evil-pkg",
+        target_subset=["claude", "copilot"],
+        deployed_files=[deployed],
+    )
+    (tmp_path / "proj").mkdir()
+    root = _project(
+        tmp_path / "proj",
+        ["acme/evil-pkg", "contoso/keep"],
+        [_locked("acme/evil-pkg"), _locked("contoso/keep"), bundle],
+        {
+            "acme/evil-pkg": [{"git": "contoso/bundle", "targets": ["copilot"]}],
+            "contoso/keep": [{"git": "contoso/bundle", "targets": ["claude"]}],
+        },
+        targets=["copilot", "claude"],
+    )
+    _symlinked_claim(root, deployed, tmp_path / "outside.json")
+    for survivor in ("contoso/keep", "contoso/bundle"):
+        rules = root / "apm_modules" / survivor / ".apm/instructions/x.instructions.md"
+        rules.parent.mkdir(parents=True)
+        rules.write_text("---\napplyTo: '**'\n---\n# x\n", encoding="utf-8")
+
+    check = _allowlist(root)
+
+    assert [r.to_json()["command"] for r in check.remediations] == ["apm uninstall acme/evil-pkg"]
+    assert _uninstall_exit_code(root, monkeypatch) == 0
+    assert not (root / deployed).is_symlink()

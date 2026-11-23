@@ -407,23 +407,34 @@ def _final_symlinks(
     receipt or render evidence), so the uninstall would stop. Paths a
     shrinking survivor selection retires count too. A path a surviving
     dependency still claims is kept anyway and does not count, nor does a
-    dangling in-project link, which cleanup counts as already gone.
+    dangling in-project link, which cleanup counts as already gone, nor a
+    retired-only hook link the hook sync unlinks.
     """
     from ..commands.uninstall.engine import project_shrunk_selections
     from ..commands.uninstall.selection_shrink import uninstall_deletion_candidates
-    from ..integration.cleanup import final_link_handled
+    from ..integration.cleanup import final_link_handled, hook_sync_unlinks
 
     root = project.project_root
+    lock = project.lock
+    hashes = {
+        path.replace("\\", "/"): content_hash
+        for dependency in lock.dependencies.values()
+        for path, content_hash in (dependency.deployed_file_hashes or {}).items()
+    }
     try:
-        shrunk = project_shrunk_selections(
-            project.lock, removed, project.modules_dir, manifest_file(root)
-        )
+        shrunk = project_shrunk_selections(lock, removed, project.modules_dir, manifest_file(root))
+        # Removed owners' files go through stale cleanup; retired-only ones through the syncs.
+        removed_paths = set(uninstall_deletion_candidates(lock, cleanup_keys))
         return [
             path
-            for path in uninstall_deletion_candidates(project.lock, cleanup_keys, shrunk=shrunk)
+            for path in uninstall_deletion_candidates(lock, cleanup_keys, shrunk=shrunk)
             if "://" not in path
             and (root / path).is_symlink()
             and not final_link_handled(path, root)
+            and (
+                path in removed_paths
+                or not hook_sync_unlinks(path, root, recorded_hash=hashes.get(path))
+            )
         ]
     except (OSError, ValueError, RuntimeError):
         # An unreadable or looping link proves nothing: the advice is admin-only.

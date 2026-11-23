@@ -29,6 +29,7 @@ _SHRINK = "src/apm_cli/commands/uninstall/selection_shrink.py"
 _REMEDY = "src/apm_cli/policy/allowlist_remedy.py"
 _SURVIVORS = "src/apm_cli/commands/uninstall/local_survivors.py"
 _CLEANUP = "src/apm_cli/integration/cleanup.py"
+_HOOKS = "src/apm_cli/integration/hook_integrator.py"
 _REFUSAL_OWNER = "uninstall_evidence_refusals"
 # DeploymentEvidence.refusals is defined in cleanup.py and asked only by the owner.
 _REFUSAL_CALLERS = frozenset({_CLEANUP, _SHRINK})
@@ -42,6 +43,12 @@ _ROUTES = (
     (_REMEDY, "_final_symlinks", "uninstall_deletion_candidates"),
     (_REMEDY, "_final_symlinks", "project_shrunk_selections"),
     (_REMEDY, "_final_symlinks", "final_link_handled"),
+    (_REMEDY, "_final_symlinks", "hook_sync_unlinks"),
+    (_CLEANUP, "hook_sync_unlinks", "managed_hook_prefixes"),
+    (_CLEANUP, "hook_sync_unlinks", "_stale_gate_passes"),
+    (_CLEANUP, "hook_sync_unlinks", "_managed_link_unlinkable"),
+    (_CLEANUP, "remove_stale_deployed_files", "_managed_link_unlinkable"),
+    (_HOOKS, "sync_integration", "managed_hook_prefixes"),
     (_CLEANUP, "final_link_handled", "_stale_gate_passes"),
     (_CLEANUP, "final_link_handled", "_stale_target_absent"),
     (_CLEANUP, "remove_stale_deployed_files", "_stale_gate_passes"),
