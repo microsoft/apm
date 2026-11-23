@@ -956,3 +956,32 @@ def test_a_reanchor_without_a_receipt_for_a_carried_shared_skill_refuses(
     receipt.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
     _assert_refused_before_any_write(world, "cannot prove it wrote", _SHARED_SKILL)
+
+
+def test_a_reanchor_ranks_shared_skill_writers_as_install_orders_them(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048: install orders by lock key, which here disagrees with repo_url order.
+
+    After the re-anchor ``local:vendor/e`` and ``local:vendor/a/x`` share depth
+    2; by key e installs last and writes ``shared``, by repo_url x would.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "a" / "x", "x")
+    _skill_package(vendor / "z", "z", ("../e", "../a/x"))
+    for root in (vendor / "e", vendor / "a" / "x"):
+        write(
+            root / ".apm/skills/shared/SKILL.md",
+            "---\nname: shared\ndescription: Shared skill\n---\n# E\n",
+        )
+    _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    deployed = (world.project / _SHARED_SKILL).read_bytes()
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    _assert_reanchored_like_a_full_install(world)

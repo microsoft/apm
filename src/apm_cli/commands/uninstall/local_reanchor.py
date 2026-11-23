@@ -54,6 +54,8 @@ class LocalReanchorPlan:
     moves: tuple[tuple[Path, Path], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
+    # Deployed path -> the writer a fresh install records once re-ranked (#5048).
+    writers: dict[str, str] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -433,7 +435,7 @@ def _rekey_requests(
     return True
 
 
-def _rename_ledger_owners(lockfile, renames: dict[str, str]) -> None:
+def _rename_ledger_owners(lockfile, renames: dict[str, str], writers=None) -> None:
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.deployment_state import DeploymentLedger
 
@@ -442,6 +444,8 @@ def _rename_ledger_owners(lockfile, renames: dict[str, str]) -> None:
     for key, record in ledger.records.items():
         owners = tuple(renames.get(owner, owner) for owner in record.owners)
         active = renames.get(record.active_owner, record.active_owner)
+        if writer := (writers or {}).get(DeploymentLedgerCodec.legacy_value(record.locator)):
+            owners, active = (writer,), writer  # the writer a fresh install records (#5048)
         records[key] = (
             replace(record, owners=owners, active_owner=active)
             if owners != record.owners or active != record.active_owner
@@ -475,7 +479,7 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
         if key in lockfile.dependencies and parent is not None:
             lockfile.dependencies[key].resolved_by = parent
     if renames:
-        _rename_ledger_owners(lockfile, renames)
+        _rename_ledger_owners(lockfile, renames, plan.writers)
         rows = list(lockfile.dependencies.items())
         lockfile.dependencies.clear()
         for key, row in rows:
@@ -645,6 +649,7 @@ def _plan_reanchor_or_exit(
         refreshed_local_sources,
         snapshot_for_rollback,
     )
+    from .local_reanchor_writers import carried_writers
 
     project_root = apm_yml_path.parent
     labels = {_removed_lock_key(package, lockfile): package for package in still_needed}
@@ -689,6 +694,12 @@ def _plan_reanchor_or_exit(
                 f"{', '.join(_dependency_public_label(package) for package in others)} "
                 "in a separate command"
             )
+        if plan.renames:
+            # Last: it replays the lock offline, so cheaper refusals go first (#5048).
+            writers = carried_writers(
+                lockfile, plan, project_root, label, dict(decision.rescued_depths)
+            )
+            plan = replace(plan, writers=writers)
         if problems:
             raise LocalReanchorRefused(
                 f"{label(next(iter(plan.renames)))} stays, but APM cannot prove it wrote "

@@ -519,8 +519,17 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
+def run_replay(
+    config: ReplayConfig,
+    logger: CheckLogger,
+    *,
+    on_package: Callable[[str, list[str], Path], None] | None = None,
+) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
+
+    *on_package* receives each replayed package's key, deployed paths and the
+    scratch root right after it renders, so a caller can attribute and read
+    each package's own output before a later package overwrites it (#5048).
 
     The scratch directory is registered for atexit cleanup so callers do
     not need to manage its lifetime.
@@ -748,6 +757,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     carry_kept_loose_into_replay(
                         result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
                     )
+                    if on_package is not None:
+                        on_package(dep_key, list(result.get("deployed_files") or ()), scratch_root)
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,
