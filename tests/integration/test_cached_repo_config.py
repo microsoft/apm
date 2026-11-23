@@ -431,3 +431,104 @@ def test_ref_lookup_never_reads_an_untrusted_bare(tmp_path: Path, server_url: st
 
     assert cache.bare_ref_sha(url, "main") is None
     assert not marker.exists()
+
+
+@_POSIX_ONLY
+def test_an_alternate_is_checked_exactly_as_git_reads_it(tmp_path: Path) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError, require_trusted_cached_repo
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    db_root = tmp_path / "cache" / "git" / "db_v1"
+    inside = db_root / "entry" / "objects"
+    inside.mkdir(parents=True)
+    outside = tmp_path / "outside-objects"
+    outside.mkdir()
+    (db_root / "entry" / "objects ").symlink_to(outside, target_is_directory=True)
+    (checkout / ".git" / "objects" / "info" / "alternates").write_text(
+        f"{inside} \n", encoding="ascii"
+    )
+
+    with pytest.raises(UntrustedCachedRepoError, match="leave the cache"):
+        require_trusted_cached_repo(
+            checkout, bare=False, origin_ok=lambda _url: True, alternates_root=db_root
+        )
+    assert (db_root / "entry" / "objects ").resolve() == outside.resolve()
+
+
+@_POSIX_ONLY
+def test_a_snapshot_without_a_valid_head_never_reaches_the_enclosing_project(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.codex_plugins.client import CodexNativeError
+    from apm_cli.codex_plugins.snapshot import NativeSnapshot, repair_generation
+
+    project = tmp_path / "project"
+    _git("init", "-q", "-b", "main", "--template=", str(project))
+    (project / "work.txt").write_text("one\n", encoding="ascii")
+    _git("-C", str(project), "add", "-A")
+    _git("-C", str(project), "-c", "user.email=t@e", "-c", "user.name=T", "commit", "-qm", "one")
+    before = _git("-C", str(project), "rev-parse", "HEAD")
+    (project / "work.txt").write_text("staged\n", encoding="ascii")
+    _git("-C", str(project), "add", "-A")
+    snapshot = project / "apm_modules" / "snapshot"
+    _git("init", "-q", "-b", "main", "--template=", str(snapshot))
+    (snapshot / ".git" / "HEAD").unlink()  # only the allow-listed config is left that matters
+
+    with pytest.raises(CodexNativeError):
+        repair_generation(NativeSnapshot(snapshot, before, before))
+
+    assert _git("-C", str(project), "rev-parse", "HEAD") == before
+    assert _git("-C", str(project), "diff", "--cached", "--name-only") == "work.txt"
+
+
+@_POSIX_ONLY
+@pytest.mark.parametrize("name", ["config", "objects/info/alternates"])
+def test_a_pipe_in_place_of_git_state_is_refused_without_blocking(
+    tmp_path: Path, name: str
+) -> None:
+    from apm_cli.cache.cached_repo import UntrustedCachedRepoError, require_trusted_cached_repo
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    target = checkout / ".git" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    os.mkfifo(target)
+    outcome: list[BaseException | None] = []
+
+    def check() -> None:
+        try:
+            require_trusted_cached_repo(
+                checkout,
+                bare=False,
+                origin_ok=lambda _url: True,
+                alternates_root=tmp_path / "cache" / "git" / "db_v1",
+            )
+            outcome.append(None)
+        except UntrustedCachedRepoError as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), f"validation blocked on a pipe at {name}"
+    assert outcome and isinstance(outcome[0], UntrustedCachedRepoError)
+    assert target.is_fifo() if hasattr(target, "is_fifo") else target.exists()
+
+
+def test_a_branch_name_with_a_quote_keeps_its_checkout(tmp_path: Path) -> None:
+    from apm_cli.cache.cached_repo import require_trusted_cached_repo
+
+    origin = tmp_path / "origin"
+    _git("init", "-q", "-b", 'release"prod', "--template=", str(origin))
+    (origin / "AGENTS.md").write_text("one\n", encoding="ascii")
+    _git("-C", str(origin), "add", "-A")
+    _git("-C", str(origin), "-c", "user.email=t@e", "-c", "user.name=T", "commit", "-qm", "one")
+    clone = tmp_path / "clone"
+    _git("clone", "-q", "--template=", str(origin), str(clone))
+    config = (clone / ".git" / "config").read_text(encoding="utf-8")
+    assert '[branch "release\\"prod"]' in config
+
+    require_trusted_cached_repo(clone, bare=False, origin_ok=lambda _url: True)

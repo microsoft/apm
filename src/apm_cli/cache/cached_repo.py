@@ -31,7 +31,15 @@ _REFSPEC = re.compile(r"\+?refs/[A-Za-z0-9_./*-]+:refs/[A-Za-z0-9_./*-]+")
 # refspec; no "..", "//" or "@{", so never a path or a revision expression.
 _BRANCH_MERGE = re.compile(r"refs/heads/(?!.*(?:\.\.|//|@\{))[^\x00-\x20\x7f~^:?*\[\\]+")
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
-_SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"([^"\\\n]*)")?\]')
+_SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"((?:[^"\\\n]|\\["\\])*)")?\]')
+_SUBSECTION_ESCAPE = re.compile(r'\\(["\\])')
+_HEAD = re.compile(r"(?:ref: refs/[^\x00-\x20\x7f]+|[0-9a-f]{40}|[0-9a-f]{64})\n?")
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
 _ALLOWED_PROTOCOLS = "file:http:https:ssh"
 
@@ -113,9 +121,23 @@ def _value(raw: str) -> str:
     return "".join(out)
 
 
+def _regular_text(path: Path) -> str:
+    """The UTF-8 text of *path*, read only as a regular file (never a link, pipe or device)."""
+    if not stat.S_ISREG(os.lstat(path).st_mode):
+        raise UntrustedCachedRepoError(f"{path.name} is not a regular file")
+    try:
+        fd = os.open(path, _READ_FLAGS)
+    except OSError as error:
+        raise UntrustedCachedRepoError(f"{path.name} is not a regular file") from error
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise UntrustedCachedRepoError(f"{path.name} is not a regular file")
+        return handle.read().decode("utf-8")
+
+
 def _config_entries(path: Path) -> Iterator[tuple[str, str | None, str, str]]:
     """Yield ``(section, subsection, key, value)``; refuse anything unusual."""
-    text = path.read_bytes().decode("utf-8")
+    text = _regular_text(path)
     section: tuple[str, str | None] | None = None
     for raw in text.splitlines():
         line = raw.strip()
@@ -125,7 +147,10 @@ def _config_entries(path: Path) -> Iterator[tuple[str, str | None, str, str]]:
             match = _SECTION.fullmatch(line)
             if match is None:
                 raise UntrustedCachedRepoError(f"unsupported config section {line!r}")
-            section = (match.group(1).lower(), match.group(2))
+            subsection = match.group(2)
+            if subsection is not None:
+                subsection = _SUBSECTION_ESCAPE.sub(r"\1", subsection)
+            section = (match.group(1).lower(), subsection)
             continue
         match = _KEY.fullmatch(line)
         if match is None or section is None:
@@ -155,15 +180,18 @@ def _check_alternates(git_dir: Path, alternates_root: Path | None) -> None:
     if (objects / "http-alternates").exists():
         raise UntrustedCachedRepoError("http-alternates present")
     alternates = objects / "alternates"
-    if not alternates.exists():
+    if not alternates.exists() and not alternates.is_symlink():
         return
     if alternates_root is None:
         raise UntrustedCachedRepoError("object alternates present")
     root = alternates_root.resolve()
-    for line in alternates.read_text(encoding="utf-8").splitlines():
-        if not line.strip() or line.startswith("#"):
+    # Git reads each entry up to the newline exactly as written (no trimming).
+    for line in _regular_text(alternates).split("\n"):
+        if not line or line.startswith("#"):
             continue
-        target = (git_dir / "objects" / line.strip()).resolve()
+        if line.startswith('"'):
+            raise UntrustedCachedRepoError("quoted object alternate")
+        target = (git_dir / "objects" / line).resolve()
         if target != root and root not in target.parents:
             raise UntrustedCachedRepoError("object alternates leave the cache")
         # Git follows alternates recursively; APM's bares never have their own.
@@ -205,9 +233,13 @@ def require_trusted_cached_repo(
         for name in ("commondir", "info/attributes"):
             if (git_dir / name).exists():
                 raise UntrustedCachedRepoError(f"{name} present")
+        # Without a valid HEAD Git does not take this as a repository and
+        # searches the enclosing directories instead.
+        if _HEAD.fullmatch(_regular_text(git_dir / "HEAD")) is None:
+            raise UntrustedCachedRepoError("HEAD is not a ref or an object id")
         _check_config(git_dir / "config", origin_ok=origin_ok, worktree=False)
         worktree_config = git_dir / "config.worktree"
-        if worktree_config.exists():
+        if worktree_config.exists() or worktree_config.is_symlink():
             _check_config(worktree_config, origin_ok=origin_ok, worktree=True)
         _check_alternates(git_dir, alternates_root)
         _check_hooks(git_dir)
