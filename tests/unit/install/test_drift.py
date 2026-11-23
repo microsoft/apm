@@ -933,3 +933,35 @@ def test_run_replay_threads_locked_skill_subset(
             "deployment_frame": (scratch_root, project_root),
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("route", "refused"),
+    [("native: false", False), ("native: no", True), ('native: "off"', True)],
+    ids=["valid", "yaml-1-1-spelling", "string"],
+)
+def test_run_replay_reads_only_the_route_keys_of_a_versionless_root(
+    monkeypatch, tmp_path, route: str, refused: bool
+):
+    """Replay needs only the root's route choices (#4995): a version-less root still
+    replays, and an invalid native value still fails closed, naming the field."""
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.drift import ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "apm.yml").write_text(
+        f"name: proj\ntargets: [claude]\ndependencies:\n  apm:\n    - path: ./pkg\n      {route}\n",
+        encoding="utf-8",
+    )
+    lockfile_path = project_root / "apm.lock.yaml"
+    LockFile().write(lockfile_path)
+    lock_bytes = lockfile_path.read_bytes()
+    config = ReplayConfig(project_root=project_root, lockfile_path=lockfile_path)
+
+    if refused:
+        with pytest.raises(ValueError, match="'native' field must be true or false"):
+            run_replay(config, CheckLogger(verbose=False))
+    else:
+        run_replay(config, CheckLogger(verbose=False))
+    assert lockfile_path.read_bytes() == lock_bytes

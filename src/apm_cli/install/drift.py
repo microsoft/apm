@@ -519,15 +519,14 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
 
 
 def _route_manifest(root: Path) -> Any:
-    """The root manifest the replay decides each native route by (#4995).
+    """The root manifest's native route choices the replay decides by (#4995).
 
-    A manifest that fails to parse raises: replaying without its route
-    choices could activate a plugin it keeps loose (fail closed).
+    Only the route keys are read; an invalid ``native`` or ``native_plugins``
+    value raises (fail closed), other manifest problems leave routes automatic.
     """
-    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.native_plugins.route import load_route_manifest
 
-    path = manifest_file(root)
-    return APMPackage.from_apm_yml(path) if path.exists() else None
+    return load_route_manifest(manifest_file(root))
 
 
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
