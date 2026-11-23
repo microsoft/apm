@@ -523,9 +523,15 @@ def require_verified_copy(
     """
     prefix = subdir.strip("/")
     manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
+    copied: set[str] = set()
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)
         _check_bytes(manifest, source, path.read_bytes(), os.lstat(path))
+        copied.add(source)
+    under = f"{prefix}/" if prefix else ""
+    missing = sorted(rel for rel in manifest.files if rel.startswith(under) and rel not in copied)
+    if missing:
+        raise CheckoutVerificationError(f"{missing[0]} is missing from the copy")
 
 
 def read_verified_file(

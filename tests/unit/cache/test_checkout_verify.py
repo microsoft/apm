@@ -324,3 +324,18 @@ def test_an_unhealable_cache_entry_is_refused(tmp_path: Path) -> None:
         GitCache(cache_root).get_checkout(str(origin), sha, locked_sha=sha)
 
     assert not checkout.exists(), "the unverifiable checkout was kept"
+
+
+def test_a_truncated_copy_is_refused(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    (repo / "pkg" / "SKILL.md").write_bytes(b"skill\n")
+    git("-C", str(repo), "add", "-A")
+    git("-C", str(repo), "commit", "-q", "-m", "two")
+    sha = git("-C", str(repo), "rev-parse", "HEAD")
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    dest = tmp_path / "dest"
+    shutil.copytree(repo / "pkg", dest)
+    (dest / "SKILL.md").unlink()
+
+    with pytest.raises(CheckoutVerificationError, match="missing from the copy"):
+        require_verified_copy(dest, repo, sha, "pkg")
