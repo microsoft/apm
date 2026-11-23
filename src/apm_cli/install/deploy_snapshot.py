@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -716,19 +717,21 @@ def _apply(unit: _Replay) -> None:
     if unit.copy is None:
         raise OSError("no journal copy to restore from")
     path.parent.mkdir(parents=True, exist_ok=True)
-    staged = Path(tempfile.mkdtemp(prefix=".apm-replay-", dir=path.parent)) / "staged"
+    # Beside its destination, so it gets every recorded mode before the rename.
+    staged = path.parent / f".apm-replay-{secrets.token_hex(8)}"
     try:
         _modes.stage_private(unit.copy, staged, unit.kind, _read_no_follow)
         written = {"": compute_file_hash(staged)} if unit.kind == "file" else _tree_hashes(staged)
         if written != unit.expected or unit.mode is None:
             raise OSError("restored bytes do not re-hash to the recorded hash")
         _modes.apply_entry_modes(staged, unit.mode)
+        _modes.apply_own_mode(staged, unit.mode)
         if os.path.lexists(path):
             _remove(path)
         os.replace(staged, path)
-        _modes.apply_own_mode(path, unit.mode)
     finally:
-        robust_rmtree(staged.parent)
+        if os.path.lexists(staged):
+            _remove(staged)
 
 
 def _keep(store: Path) -> Path:
