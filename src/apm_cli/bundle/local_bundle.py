@@ -552,3 +552,22 @@ def check_target_mismatch(
         active=", ".join(sorted(install_set)) or "<none>",
         missing=", ".join(missing),
     )
+
+
+def bundle_declares_mcp(bundle_info: LocalBundleInfo) -> bool:
+    """Whether a local bundle ships ``.mcp.json`` / ``mcp.json`` metadata.
+
+    A bundle with an embedded lockfile declares it in ``pack.bundle_files``;
+    one without is read from its source directory.
+    """
+    names = {".mcp.json", "mcp.json"}
+    if bundle_info.lockfile is not None:
+        bundle_files = (bundle_info.lockfile.get("pack") or {}).get("bundle_files") or {}
+        return isinstance(bundle_files, dict) and any(
+            str(path).lower() in names for path in bundle_files
+        )
+    if bundle_info.source_dir is None:
+        return False
+    return any(
+        path.is_file() and path.name.lower() in names for path in bundle_info.source_dir.iterdir()
+    )

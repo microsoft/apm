@@ -99,9 +99,19 @@ def _check_sparse_symlink_validation(provider: FactsProvider) -> tuple[Violation
             _GH_DOWNLOADER,
             (
                 ("sub", "materialize_tracked_symlinks(", 3, "eq"),
-                ("sub", "validate_materialized_symlinks(", 2, "eq"),
+                ("sub", "validate_cached_links(", 2, "eq"),
             ),
             "github_downloader must materialize and validate links through the owner",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inv,
+            _RID_SPARSE,
+            "src/apm_cli/cache/cached_repo.py",
+            (("sub", "validate_materialized_symlinks(", 1, "eq"),),
+            "Cached-checkout link validation must delegate to the owner",
         )
     )
     findings.extend(

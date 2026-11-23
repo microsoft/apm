@@ -796,7 +796,7 @@ def test_git_cache_ls_remote_rejects_unsafe_effective_rewrite(tmp_path: Path) ->
 
 
 def test_git_cache_fetch_rejects_dependency_bare_local_rewrite(tmp_path: Path) -> None:
-    """A cached repository's own config cannot activate an unsafe fetch rewrite."""
+    """A cached repository whose own config carries a URL rewrite is never fetched into."""
     remote_url = "https://git.example.test/org/repo"
     bare = tmp_path / "dependency.git"
     subprocess.run(
@@ -819,7 +819,7 @@ def test_git_cache_fetch_rejects_dependency_bare_local_rewrite(tmp_path: Path) -
         env=git_subprocess_env(),
     )
 
-    with pytest.raises(GitUrlRewriteError, match="insecure HTTP"):
+    with pytest.raises(RuntimeError, match="untrusted cache entry"):
         GitCache(tmp_path / "cache")._fetch_into_bare_locked(
             bare,
             remote_url,
@@ -829,7 +829,7 @@ def test_git_cache_fetch_rejects_dependency_bare_local_rewrite(tmp_path: Path) -
 
 
 def test_git_cache_fetch_fallback_contacts_only_explicit_remote(tmp_path: Path) -> None:
-    """A broadened SHA fetch cannot fan out to configured sibling remotes."""
+    """A broadened SHA fetch names only the explicit remote; a sibling remote is refused."""
     import apm_cli.cache.git_cache as git_cache_module
 
     source = tmp_path / "source"
@@ -853,21 +853,6 @@ def test_git_cache_fetch_fallback_contacts_only_explicit_remote(tmp_path: Path) 
         capture_output=True,
         env=git_subprocess_env(),
     )
-    subprocess.run(
-        [
-            get_git_executable(),
-            "--git-dir",
-            str(cache_bare),
-            "remote",
-            "add",
-            "unrelated",
-            "http://127.0.0.1:9/unrelated.git",
-        ],
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-    )
-
     real_run = subprocess.run
     fetch_calls: list[list[str]] = []
 
@@ -891,6 +876,24 @@ def test_git_cache_fetch_fallback_contacts_only_explicit_remote(tmp_path: Path) 
 
     assert len(fetch_calls) == 2
     assert "--all" not in fetch_calls[1]
+    subprocess.run(
+        [
+            get_git_executable(),
+            "--git-dir",
+            str(cache_bare),
+            "remote",
+            "add",
+            "unrelated",
+            "http://127.0.0.1:9/unrelated.git",
+        ],
+        check=True,
+        capture_output=True,
+        env=git_subprocess_env(),
+    )
+    with pytest.raises(RuntimeError, match="untrusted cache entry"):
+        GitCache(tmp_path / "cache")._fetch_into_bare_locked(
+            cache_bare, source_bare.as_uri(), sha, env={"PATH": os.environ["PATH"]}
+        )
     assert source_bare.as_uri() in fetch_calls[1]
     assert (
         real_run(

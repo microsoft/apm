@@ -1,0 +1,17 @@
+{
+  "issue": 4757,
+  "fixed_in": "Unreleased",
+  "summary": "apm audit --ci passed every check after a user hand-edited a native MCP entry the lockfile records APM writing (for example a self-defined server in .mcp.json or ~/.claude.json), while apm install preserved and refused the same entry; audit now fails with native-mcp-drift naming the server and the config file, read-only.",
+  "failure_modes": [
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_audit_reports_a_hand_edited_recorded_mcp_entry",
+    "tests/unit/install/test_mcp_ownership.py::test_a_hand_edited_recorded_user_claude_entry_is_reported",
+    "tests/integration/test_mcp_portable_approval_lifecycle.py::test_audit_accepts_a_frozen_rewrite_in_a_moved_clone_and_names_an_edit",
+    "tests/unit/install/test_mcp_ownership.py::test_a_replay_backed_audit_binds_the_live_package_root"
+  ]
+}
