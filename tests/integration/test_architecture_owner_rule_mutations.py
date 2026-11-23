@@ -1053,6 +1053,47 @@ def test_marketplace_source_parsing_guard_covers_packed_sources() -> None:
     ("path", "old", "new"),
     [
         pytest.param(
+            "src/apm_cli/commands/uninstall/engine.py",
+            "        if not install_path.is_dir() or local_source_matches_copy(\n",
+            "        if not install_path.is_dir() or current == compute_local_package_hash(\n",
+            id="survivor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            and local_source_matches_copy(row, source, copy)\n",
+            "            and compute_local_package_hash(source, framed=True)\n",
+            id="reanchor-fresh-copy-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/uninstall/local_reanchor.py",
+            "            if copy.is_dir() and not local_source_matches_copy(row, source, copy):\n",
+            "            if copy.is_dir() and not compute_local_package_hash(source, framed=True):\n",
+            id="reanchor-refresh-raw-hash",
+        ),
+        pytest.param(
+            "src/apm_cli/install/phases/local_content.py",
+            "            _normalize_legacy_local_plugin_for_replay(lock_dep, image)\n",
+            "            pass\n",
+            id="source-compare-skips-normalization",
+        ),
+    ],
+)
+def test_local_source_compare_cannot_bypass_the_normalizing_owner(
+    path: str, old: str, new: str
+) -> None:
+    """#5049: uninstall judges a local source against its copy through one normalizing owner."""
+    rule_id = "install-deployment-single-file-materialization"
+    source = (ROOT / path).read_text(encoding="utf-8")
+    assert old in source
+    report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: source.replace(old, new)})
+    assert report.failures == ()
+    assert any(violation.rule_id == rule_id for violation in report.violations)
+
+
+@pytest.mark.parametrize(
+    ("path", "old", "new"),
+    [
+        pytest.param(
             "src/apm_cli/install/template.py",
             "            skill_pairing=selection.skill_pairing,\n",
             "",
