@@ -194,18 +194,50 @@ def _recorded(observation: Observation) -> frozenset[str]:
 
 
 def _approve_under_org_deny(machine, op, before, after, result) -> bool:
-    """A new approval of an installed package an org deny still blocks (exit 1)."""
+    """A new approval of an installed package an org deny still blocks (exit 1),
+    whose only manifest change is that package's grant."""
+    surfaces = [
+        surface
+        for surface in op.cell_kinds
+        if machine.gate_state(surface) in {"org-deny", "org-deny-all"}
+        and machine._locked(surface)
+        and machine.store_state.get(surface) != "allow"
+    ]
     return (
         op.name == "approve"
         and result is not None
         and result.returncode == 1
-        and any(
-            machine.gate_state(surface) in {"org-deny", "org-deny-all"}
-            and machine._locked(surface)
-            and machine.store_state.get(surface) != "allow"
-            for surface in op.cell_kinds
+        and bool(surfaces)
+        and _only_grants_added(
+            before, after, [str(machine.world.packages[surface]) for surface in surfaces]
         )
     )
+
+
+def _only_grants_added(before, after, paths: list[str]) -> bool:
+    """True when the manifest gained a grant for every path and changed nothing else."""
+
+    def manifest(observation) -> dict:
+        raw = observation.state.manifest_bytes
+        return (yaml.safe_load(raw) if raw else None) or {}
+
+    old, new = manifest(before), manifest(after)
+    allow = dict((new.get("executables") or {}).get("allow") or {})
+    if not all(any(k == p or k.startswith(p + "#") for k in allow) for p in paths):
+        return False
+    old_allow = (old.get("executables") or {}).get("allow") or {}
+    for key in [k for k in allow if k not in old_allow]:
+        if any(key == p or key.startswith(p + "#") for p in paths):
+            del allow[key]
+    return _without_empty_store(
+        {**new, "executables": {**(new.get("executables") or {}), "allow": allow}}
+    ) == _without_empty_store(old)
+
+
+def _without_empty_store(data: dict) -> dict:
+    executables = {k: v for k, v in (data.get("executables") or {}).items() if v not in ({}, None)}
+    rest = {k: v for k, v in data.items() if k != "executables"}
+    return {**rest, "executables": executables} if executables else rest
 
 
 # gate-cell-c-lock (#4043) is fixed: install --frozen refuses a tightened gate
