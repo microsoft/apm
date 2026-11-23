@@ -123,3 +123,24 @@ def test_a_native_plugins_mcp_server_meets_org_trust_transitive(
     policy = ApmPolicy(enforcement="block", mcp=mcp)
     violation = native_policy_violation(root, policy, transitive=transitive)
     assert (violation is not None and "mcp-trust-transitive" in violation) is refused
+
+
+@pytest.mark.parametrize(
+    ("transitive", "refused"), [(True, True), (False, False)], ids=["transitive", "direct"]
+)
+def test_an_unreadable_native_mcp_bundle_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, refused: bool
+) -> None:
+    """A bundle APM cannot read never shows it is in mcp.allow (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": "./bundle.dxt"})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    policy = ApmPolicy(enforcement="block", mcp=McpPolicy(trust_transitive=False))
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None) is refused

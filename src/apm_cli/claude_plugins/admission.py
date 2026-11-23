@@ -164,7 +164,9 @@ def _mcp_policy_violation(
     from apm_cli.models.dependency.mcp import MCPDependency
     from apm_cli.policy.policy_checks import mcp_policy_checks, mcp_policy_restricts
 
-    if unmodeled and mcp_policy_restricts(policy):
+    # A transitive plugin's unreadable server cannot show it is in mcp.allow either.
+    restricts_transitive = transitive and not policy.mcp.trust_transitive
+    if unmodeled and (mcp_policy_restricts(policy) or restricts_transitive):
         return f"MCP {unmodeled[0]} cannot be checked against org MCP policy (APM cannot read it)"
     subjects = [
         MCPDependency(
