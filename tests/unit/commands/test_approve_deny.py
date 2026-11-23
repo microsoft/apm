@@ -7,6 +7,7 @@ to ``~/.apm/config.json`` only with ``--user`` (personal, lowest authority).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -995,10 +996,8 @@ def test_approve_clears_a_deny_stored_under_another_spelling() -> None:
     ]
 
 
-def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+def _hook_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_text: str) -> Path:
+    """A project with installed ``org-denied`` and ``fine`` hook packages; returns apm.yml."""
     project = tmp_path / "project"
     apm_home = tmp_path / "home" / ".apm"
     apm_home.mkdir(parents=True)
@@ -1013,11 +1012,26 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
             f"name: {name}\nversion: '1.0'\n", encoding="utf-8"
         )
     manifest = project / "apm.yml"
-    manifest.write_text("name: consumer\nversion: '1.0'\n", encoding="utf-8")
+    manifest.write_text(manifest_text, encoding="utf-8")
     monkeypatch.chdir(project)
-    policy = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+    return manifest
 
-    with patch("apm_cli.commands.approve._load_org_policy", return_value=policy):
+
+_ORG_DENY = ApmPolicy(executables=ExecutablesPolicy(deny=["org-denied"]))
+
+
+def _org_denies():
+    """Serve the org deny at the policy discovery boundary."""
+    return _serve_policy(_ORG_DENY)
+
+
+def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm approve --all`` writes no allow for a package another layer denies (#3957)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+
+    with _org_denies():
         result = CliRunner().invoke(approve_cmd, ["--all"])
 
     allow = (yaml.safe_load(manifest.read_text(encoding="utf-8")).get("executables") or {}).get(
@@ -1026,3 +1040,222 @@ def test_bulk_approval_skips_an_org_denied_package_and_approves_the_rest(
     assert not any("org-denied" in key for key in allow), result.output
     assert any("fine" in key for key in allow), result.output
     assert "Skipped org-denied" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize(
+    ("manifest_text", "args"),
+    [
+        pytest.param("name: consumer\nversion: '1.0'\n", ["org-denied"], id="org-deny"),
+        pytest.param(
+            "name: consumer\nversion: '1.0'\n", ["fine", "org-denied"], id="with-an-allowed-one"
+        ),
+        pytest.param(
+            "name: consumer\nversion: '1.0'\n"
+            "executables:\n  deny:\n    org-denied:\n      hooks: true\n",
+            ["org-denied"],
+            id="project-deny-kept",
+        ),
+    ],
+)
+def test_approve_refuses_an_org_denied_package_before_any_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_text: str, args: list[str]
+) -> None:
+    """A failed approve changes nothing: the org deny is decided before the write (#4923)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, manifest_text)
+    config = tmp_path / "home" / ".apm" / "config.json"
+    before = manifest.read_bytes()
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, args)
+
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before, result.output
+    assert not config.exists()
+    text = " ".join(result.output.split())
+    assert "org-denied is still denied (org-deny)" in text
+    assert "ask its owner to change apm-policy.yml" in text
+    assert "Nothing written." in text
+    assert "Approved" not in text
+
+
+def test_approve_records_a_package_no_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control for #4923: an org deny on another package leaves this approve unchanged."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, ["fine"])
+
+    assert result.exit_code == 0, result.output
+    allow = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert any("fine" in key for key in allow), result.output
+    assert not any("org-denied" in key for key in allow), result.output
+
+
+def test_approve_refuses_a_denied_package_before_writing_a_named_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundle key named beside an org-denied package is not saved either (#4923)."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    record_bundle_executables(manifest.parent, "bun", _BUNDLE_KEY, ["hooks"])
+    before = manifest.read_bytes()
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY, "org-denied"])
+
+    assert result.exit_code == 1, result.output
+    assert manifest.read_bytes() == before, result.output
+    assert "org-denied is still denied (org-deny)" in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize(
+    "args", [["org-denied"], ["--user", "org-denied"]], ids=["project", "user"]
+)
+def test_refused_approve_keeps_legacy_personal_approvals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """The refusal reads legacy approvals.yml without migrating it (#4923)."""
+    manifest = _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    legacy = tmp_path / "home" / ".apm" / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    config = tmp_path / "home" / ".apm" / "config.json"
+    before = (manifest.read_bytes(), legacy.read_bytes())
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, args)
+
+    assert result.exit_code == 1, result.output
+    assert (manifest.read_bytes(), legacy.read_bytes()) == before, result.output
+    assert not config.exists(), result.output
+
+
+def test_user_approve_retires_legacy_approvals_on_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: a successful --user approve folds approvals.yml into config.json."""
+    _hook_packages(tmp_path, monkeypatch, "name: consumer\nversion: '1.0'\n")
+    legacy = tmp_path / "home" / ".apm" / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    config = tmp_path / "home" / ".apm" / "config.json"
+
+    with _org_denies():
+        result = CliRunner().invoke(approve_cmd, ["--user", "fine"])
+
+    assert result.exit_code == 0, result.output
+    allow = json.loads(config.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert allow["acme/old"] == {"hooks": True}
+    assert any("fine" in key for key in allow), result.output
+    assert not legacy.exists()
+
+
+def _bundle_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    """A project with an installed local bundle 'bun' parked on hooks; returns apm.yml, config."""
+    from apm_cli.install.local_bundle_pending import record_bundle_executables
+
+    project = tmp_path / "project"
+    project.mkdir()
+    apm_home = tmp_path / "home" / ".apm"
+    apm_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(apm_home.parent))
+    monkeypatch.setenv("APM_HOME", str(apm_home))
+    monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(apm_home / "config.json"))
+    manifest = project / "apm.yml"
+    manifest.write_text("name: consumer\nversion: '1.0'\nexecutables: {}\n", encoding="utf-8")
+    record_bundle_executables(project, "bun", _BUNDLE_KEY, ["hooks"])
+    monkeypatch.chdir(project)
+    return manifest, apm_home / "config.json"
+
+
+def _serve_policy(policy: ApmPolicy):
+    found = PolicyFetchResult(policy=policy, source="org:contoso/.github", outcome="found")
+    return patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=found)
+
+
+@pytest.mark.parametrize(
+    ("layer", "store_flag"),
+    [("org", ()), ("user", ()), ("org", ("--user",)), ("project", ("--user",))],
+    ids=["org", "user", "org-user-store", "project-user-store"],
+)
+def test_bundle_approve_refuses_before_any_write_when_another_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layer: str, store_flag: tuple[str, ...]
+) -> None:
+    """A still-denied bundle approve exits 1 and leaves every store unchanged (#4933)."""
+    manifest, config = _bundle_project(tmp_path, monkeypatch)
+    policy = ApmPolicy()
+    if layer == "org":
+        policy = ApmPolicy(executables=ExecutablesPolicy(deny=[_BUNDLE_KEY]))
+    elif layer == "project":
+        manifest.write_text(
+            f"name: consumer\nversion: '1.0'\nexecutables:\n  deny:\n"
+            f"    '{_BUNDLE_KEY}':\n      hooks: true\n",
+            encoding="utf-8",
+        )
+    else:
+        store = {"executables": {"allow": {}, "deny": {_BUNDLE_KEY: {"hooks": True}}}}
+        config.write_text(json.dumps(store), encoding="utf-8")
+    legacy = config.parent / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    stores = [path for path in (manifest, config, legacy) if path.exists()]
+    before = {path: path.read_bytes() for path in stores}
+
+    with _serve_policy(policy):
+        result = CliRunner().invoke(approve_cmd, [*store_flag, _BUNDLE_KEY])
+
+    assert result.exit_code == 1, result.output
+    assert {path: path.read_bytes() for path in stores} == before, result.output
+    assert config.exists() == (layer == "user")
+    text = " ".join(result.output.split())
+    assert f"{_BUNDLE_KEY} is still denied by another trust layer ({layer}-deny)" in text
+    hint = {
+        "org": "ask its owner to change apm-policy.yml",
+        "user": f"apm approve --user '{_BUNDLE_KEY}'",
+        "project": f"apm approve '{_BUNDLE_KEY}'",
+    }[layer]
+    assert hint in text
+    assert "Nothing written." in text
+    assert "Approved local bundle" not in text
+
+
+@pytest.mark.parametrize("own_deny", [False, True], ids=["fresh", "clears-own-deny"])
+def test_bundle_approve_records_a_grant_no_layer_denies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, own_deny: bool
+) -> None:
+    """Control for #4933: an approve no other layer denies writes its exact-key grant."""
+    manifest, _config = _bundle_project(tmp_path, monkeypatch)
+    if own_deny:
+        manifest.write_text(
+            f"name: consumer\nversion: '1.0'\nexecutables:\n  deny:\n"
+            f"    '{_BUNDLE_KEY}':\n      hooks: true\n",
+            encoding="utf-8",
+        )
+
+    with _serve_policy(ApmPolicy()):
+        result = CliRunner().invoke(approve_cmd, [_BUNDLE_KEY])
+
+    assert result.exit_code == 0, result.output
+    executables = yaml.safe_load(manifest.read_text(encoding="utf-8"))["executables"]
+    assert executables["allow"][_BUNDLE_KEY] == {"hooks": True}
+    assert not executables.get("deny")
+    assert "Approved local bundle 'bun': hooks" in " ".join(result.output.split())
+
+
+def test_user_bundle_approve_retires_legacy_approvals_on_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: an unblocked --user bundle approve folds approvals.yml into config.json."""
+    manifest, config = _bundle_project(tmp_path, monkeypatch)
+    legacy = config.parent / "approvals.yml"
+    legacy.write_text("acme/old:\n  hooks: true\n", encoding="utf-8")
+    before = manifest.read_bytes()
+
+    with _serve_policy(ApmPolicy()):
+        result = CliRunner().invoke(approve_cmd, ["--user", _BUNDLE_KEY])
+
+    assert result.exit_code == 0, result.output
+    allow = json.loads(config.read_text(encoding="utf-8"))["executables"]["allow"]
+    assert allow == {"acme/old": {"hooks": True}, _BUNDLE_KEY: {"hooks": True}}
+    assert not legacy.exists()
+    assert manifest.read_bytes() == before

@@ -184,6 +184,10 @@ RESTORE_EDITED = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# A managed config entry (an LSP server) install kept the same way (#4626).
+KEPT_ENTRY_RESTORE = _entry(
+    "kept-entry-restore", "apm install", "restore it", before="remove the entry"
+)
 # A skill copy a --target-narrowed install kept stale in an inactive target (#4692).
 KEPT_SKILL_REFRESH = _entry("kept-skill-refresh", "apm install --target {targets}", "refresh it")
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
@@ -353,6 +357,12 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
     "apm uninstall",
     "finish the uninstall",
     before="if the source is unreachable, move each listed file aside or delete it",
+)
+UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
+    "uninstall-evidence-trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
+    "delete the files marked deletable and keep the rest",
+    before="if the source is gone for good",
 )
 # -- end W2 integration --
 # -- W2 marketplace --
@@ -1320,6 +1330,12 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "apm install",
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
+)
+NATIVE_MCP_ENTRY_EDITED = _entry(
+    "native-mcp-entry-edited",
+    "apm install",
+    "write each removed MCP entry again as APM recorded it",
+    before="undo your edit to each entry or remove the entry",
 )
 KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",

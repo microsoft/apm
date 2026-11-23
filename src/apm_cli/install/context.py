@@ -208,6 +208,8 @@ class InstallContext:
     # Declared members integration left on disk unwritten; cleanup retains them.
     kept_deployed_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
+    # A package's own ``targets:`` restriction, recorded for pack (#4850).
+    package_targets: dict[str, list[str]] = field(default_factory=dict)
     # Package content hashes in the stream the existing lockfile records
     # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
     # digest of the same bytes for the one-time promotion to version 4.

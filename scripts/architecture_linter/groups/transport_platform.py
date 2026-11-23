@@ -21,6 +21,12 @@ from scripts.architecture_linter.checks.transport_cache_identity import (
     COLLECTORS as _CACHE_COLLECTORS,
 )
 from scripts.architecture_linter.checks.transport_cache_identity import RULES as _CACHE_RULES
+from scripts.architecture_linter.checks.transport_cached_repo_git import (
+    RULES as _CACHED_REPO_GIT_RULES,
+)
+from scripts.architecture_linter.checks.transport_checkout_verify import (
+    RULES as _CHECKOUT_VERIFY_RULES,
+)
 from scripts.architecture_linter.checks.transport_credential_value_rendering import (
     RULES as _CREDENTIAL_RENDERING_RULES,
 )
@@ -74,6 +80,8 @@ RULES = (
     + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _CACHED_REPO_GIT_RULES
+    + _CHECKOUT_VERIFY_RULES
     + _SPARSE_RULES
     + _GITLAB_SPARSE_RULES
     + _REVISION_PIN_RULES

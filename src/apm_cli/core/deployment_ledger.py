@@ -344,13 +344,7 @@ class DeploymentMaterializationSession:
         )
 
     def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
-        return DeploymentLedgerCodec.locator_for_path(
-            candidate,
-            project_root=self.root,
-            target=target,
-            scope=self.scope,
-            candidate_resolved=True,
-        )
+        return DeploymentLedgerCodec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, candidate_resolved=True)  # fmt: skip
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
         candidate = resolve_for_containment(path)
@@ -777,12 +771,11 @@ class OverwriteGate:
         )
 
     def keep(self, path: Path, claim: str, *, edit: str | None = None) -> bool:
-        """Record a kept dependency file; its prior lock entry stays (reported at finalize).
+        """Record a kept managed file (owner "." too, #4873); its prior lock entry stays.
 
-        *edit* classifies a file a pre-0.37 lock or a receipt proves edited:
-        ``"drift"`` or ``"blocked"`` (#4398, RA-012).
+        *edit* (``"drift"``/``"blocked"``) classifies a lock- or receipt-proven edit (RA-012).
         """
-        if self.session is None or self.owner == ".":
+        if self.session is None:
             return False
         self.session.kept_overwrites.append((self.owner, path))
         if edit is not None:
@@ -811,15 +804,15 @@ class OverwriteGate:
     def legacy_edit(self, path: Path, claim: str, rendered_hash: str) -> str | None:
         """Classify a pre-0.37 managed file whose bytes differ from its lock hash.
 
-        ``"drift"`` when the package renders the recorded bytes (a user edit
-        with nothing new to deploy), ``"blocked"`` when it renders new bytes.
+        ``"drift"`` or ``"blocked"``, as the shared ``edit_kind`` decides.
         """
+        from apm_cli.integration.base_integrator import edit_kind
         from apm_cli.utils.content_hash import compute_file_hash
 
         recorded = self.session.legacy_recorded_hash(claim) if self.session else None
         if recorded is None or compute_file_hash(path) == recorded:
             return None
-        return "drift" if rendered_hash == recorded else "blocked"
+        return edit_kind(recorded, rendered_hash)
 
     @property
     def user_scope(self) -> bool:

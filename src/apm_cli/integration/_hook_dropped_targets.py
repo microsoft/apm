@@ -82,6 +82,8 @@ def reconcile_dropped_targets(
             stats,
             container=config.event_container_key,
             sidecar_path=sidecar_path,
+            defaults=config.top_level_defaults,
+            root=project_root,
         )
         if stats["errors"] > errors_before:
             _rich_warning(

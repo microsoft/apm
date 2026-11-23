@@ -8,8 +8,13 @@ Split out of ``policy/discovery.py`` (file-length guardrail); discovery's
 from __future__ import annotations
 
 import hmac
+import json
+import os
+import stat
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..utils.file_ops import robust_replace
 from .project_config import ProjectPolicyConfigError
 
 if TYPE_CHECKING:
@@ -35,7 +40,7 @@ def _cached_pin_matches(raw_bytes_hash: str, expected_hash: str | None) -> bool:
     return raw_bytes_hash.lower() == f"{exp_algo}:{exp_hex}"
 
 
-def _cached_policy_verified(serialized: str, meta: dict, expected_hash: str | None) -> bool:
+def _cached_policy_verified(serialized: str | None, meta: dict, expected_hash: str | None) -> bool:
     """Whether a cached policy document may be used (#827, #4218).
 
     The recorded raw-bytes hash must satisfy the project pin, and the cached
@@ -44,9 +49,112 @@ def _cached_policy_verified(serialized: str, meta: dict, expected_hash: str | No
     verifies the pin on fresh bytes.
     """
     raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
+    if serialized is None:
+        return False
+    if expected_hash is not None:  # ``cached_document`` re-hashed the leaf bytes
+        from .parser import load_policy
+
+        # A leaf that extends others needs its parents resolved: fetch again.
+        leaf, _warnings = load_policy(serialized)
+        return _cached_pin_matches(raw_bytes_hash, expected_hash) and leaf.extends is None
     return _cached_pin_matches(raw_bytes_hash, expected_hash) and _cached_policy_matches(
         serialized, meta
     )
+
+
+# A cached document never keeps itself fresh for longer than this.
+MAX_FRESH_TTL = 24 * 3600
+# Cache files larger than this are not read; the policy is fetched again.
+MAX_CACHE_FILE_BYTES = 1 << 20
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+
+def read_cache_file(path: Path) -> bytes | None:
+    """The bytes of a regular cache file of bounded size, else ``None`` (never a link or pipe)."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        fd = os.open(path, _READ_FLAGS)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CACHE_FILE_BYTES:
+            return None
+        data = handle.read(MAX_CACHE_FILE_BYTES + 1)
+    return data if len(data) <= MAX_CACHE_FILE_BYTES else None
+
+
+def load_cache_meta(meta_file: Path) -> dict | None:
+    """A cache entry's metadata, or ``None`` when it cannot be read as a JSON object."""
+    data = read_cache_file(meta_file)
+    try:
+        meta = json.loads(data.decode("utf-8")) if data is not None else None
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def capped_ttl(ttl: int) -> int:
+    """The freshness a cached policy may claim for itself, bounded in code."""
+    return min(ttl, MAX_FRESH_TTL)
+
+
+def _raw_leaf_path(policy_file: Path) -> Path:
+    return policy_file.with_suffix(".raw")
+
+
+def store_raw_leaf(policy_file: Path, content: str | bytes | None, uid: str) -> None:
+    """Keep the fetched leaf bytes beside a cache entry, or drop bytes it no longer has."""
+    raw_file = _raw_leaf_path(policy_file)
+    if content is None:
+        raw_file.unlink(missing_ok=True)
+        return
+    data = content if isinstance(content, bytes) else content.encode("utf-8")
+    tmp = raw_file.with_name(f"{raw_file.name}.{uid}.tmp")
+    try:
+        tmp.write_bytes(data)
+        robust_replace(tmp, raw_file)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raw_file.unlink(missing_ok=True)
+
+
+def cached_document(
+    policy_file: Path, meta: dict, expected_hash: str | None, repo_ref: str = ""
+) -> str | None:
+    """The text a cache entry may be parsed from, or ``None`` to fetch again.
+
+    Unpinned, it is the stored document (``_cached_policy_verified`` then checks
+    its recorded fingerprint). Pinned, it is the fetched leaf bytes kept with the
+    entry, re-hashed against the pin. An entry composed from a policy chain or
+    a namespace ancestry has no single leaf to verify, so it is fetched again.
+    """
+    if expected_hash is None:
+        document = read_cache_file(policy_file)
+        if document is None:
+            return None
+        # Written in text mode: read back with universal newlines, as it was hashed.
+        return document.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    from .discovery import _verify_hash_pin
+
+    chain = meta.get("chain_refs")
+    recorded = meta.get("raw_bytes_hash", "") or ""
+    if not isinstance(chain, list) or len(chain) != 1 or repo_ref.endswith("#ancestry"):
+        return None
+    if not _cached_pin_matches(recorded, expected_hash):
+        return None
+    raw = read_cache_file(_raw_leaf_path(policy_file))
+    if raw is None:
+        return None
+    if _verify_hash_pin(raw, expected_hash, "cache") is not None:
+        return None
+    return raw.decode("utf-8")
 
 
 def _cached_policy_matches(serialized: str, meta: dict) -> bool:

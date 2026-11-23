@@ -180,6 +180,18 @@ def read_repository_license(
     )
 
 
+def checked_license(
+    repository_root: Path, package_subpath: str, commit: str | None
+) -> RepositoryLicense | None:
+    """:func:`read_repository_license`, refused unless its bytes are the verified commit's."""
+    from ..cache.checkout_verify import require_verified_bytes
+
+    found = read_repository_license(repository_root, package_subpath)
+    if found is not None:
+        require_verified_bytes(repository_root, commit, found.source, found.data, package_subpath)
+    return found
+
+
 def carry_licenses(
     package_root: Path,
     *,
