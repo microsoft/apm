@@ -21,7 +21,6 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
-from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.world import use_policy, use_registry
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
@@ -535,14 +534,6 @@ def test_self_defined_allow_installs_an_inline_server(lifecycle_world) -> None:
     assert _configured(lifecycle_world, "p-inline"), _text(result)
 
 
-_SILENT_WARN = KnownFailure(
-    "#5070",
-    "install reports no policy finding for a self-defined MCP server under warn",
-    r"no policy warning names the self-defined server",
-)
-
-
-@_SILENT_WARN.mark()
 def test_self_defined_warn_installs_an_inline_server_and_says_so(lifecycle_world) -> None:
     """mcp.self_defined: warn -- the inline server is written and the warning names it."""
     _self_defined(lifecycle_world, "warn")
@@ -551,7 +542,8 @@ def test_self_defined_warn_installs_an_inline_server_and_says_so(lifecycle_world
     assert _configured(lifecycle_world, "p-inline"), _text(result)
     # The policy finding itself, not the "(self-defined, stdio)" progress label.
     text = _text(result)
-    warned = "Policy warning" in text or "self-defined MCP server(s) (warn)" in text
+    # Install reports warn findings in its summary: "[!] 1 policy warning" (#5070).
+    warned = "policy warning" in text.lower()
     assert warned and "p-inline" in text, f"no policy warning names the self-defined server: {text}"
 
 
