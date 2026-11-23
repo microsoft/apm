@@ -36,6 +36,27 @@ def _hook_package(root: Path, name: str, matcher: str) -> None:
     write(root / ".apm" / "hooks" / f"{name}.json", json.dumps({"hooks": {"PreToolUse": [hook]}}))
 
 
+def _script_hook_package(root: Path, name: str) -> None:
+    """A hook that runs a packaged script, deployable to every hook target."""
+    write(root / "apm.yml", f"name: {name}\nversion: 1.0.0\n")
+    hook = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": f"bash ./scripts/{name}.sh"}],
+    }
+    write(root / ".apm" / "hooks" / f"{name}.json", json.dumps({"hooks": {"PreToolUse": [hook]}}))
+    write(root / ".apm" / "hooks" / "scripts" / f"{name}.sh", "#!/bin/bash\necho guard\n")
+
+
+def _residue(world: ReplayWorld, root: str, script: str) -> list[str]:
+    """Files under *root* that are, or name, the package script."""
+    base = world.project / root
+    return sorted(
+        path.relative_to(world.project).as_posix()
+        for path in base.rglob("*")
+        if path.is_file() and (path.name == script or script in path.read_text(encoding="utf-8"))
+    )
+
+
 def _manifest(world: ReplayWorld, names: list[str], targets: tuple[str, ...] = ("claude",)) -> None:
     manifest = {
         "name": "proj",
@@ -116,18 +137,17 @@ def test_install_retires_the_hooks_in_a_declared_target_it_skips(
 ) -> None:
     """A run narrowed by --target still retires the entry in another declared runtime."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
-    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    _script_hook_package(world.project / "vendor" / "h", "h")
     for root in (".claude", ".gemini"):
         (world.project / root).mkdir()
     _manifest(world, ["h"], ("claude", "gemini"))
     world.apm("install")
-    gemini = world.project / ".gemini" / "settings.json"
-    assert "echo h" in gemini.read_text(encoding="utf-8")
+    assert _residue(world, ".gemini", "h.sh"), "the hook did not deploy to gemini"
 
     _manifest(world, [], ("claude", "gemini"))
     world.apm("install", "--target", "claude")
 
-    assert "echo h" not in gemini.read_text(encoding="utf-8")
+    assert _residue(world, ".gemini", "h.sh") == []
 
 
 def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
@@ -135,18 +155,17 @@ def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
 ) -> None:
     """Without targets: in apm.yml, a runtime chosen only by --target earlier is still cleaned."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
-    _hook_package(world.project / "vendor" / "h", "h", "Bash")
+    _script_hook_package(world.project / "vendor" / "h", "h")
     for root in (".claude", ".gemini"):
         (world.project / root).mkdir()
     _manifest(world, ["h"], ())
     world.apm("install", "--target", "claude,gemini")
-    gemini = world.project / ".gemini" / "settings.json"
-    assert "echo h" in gemini.read_text(encoding="utf-8")
+    assert _residue(world, ".gemini", "h.sh"), "the hook did not deploy to gemini"
 
     _manifest(world, [], ())
     world.apm("install", "--target", "claude")
 
-    assert "echo h" not in gemini.read_text(encoding="utf-8")
+    assert _residue(world, ".gemini", "h.sh") == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
