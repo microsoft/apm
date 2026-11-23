@@ -1898,10 +1898,12 @@ def resolve_audit_targets(
         resolve_reintegration_targets,
     )
 
+    if not recorded_layout:
+        lock = None  # the caller resolves the skill layout per dependency
     return resolve_reintegration_targets(
         get_workspace_deploy_root(project_root),
         user_scope=user_scope,
         explicit_target=decision.value,
-        recorded_paths=recorded_deployed_paths(lock) if recorded_layout else (),
+        recorded_paths=recorded_deployed_paths(lock),
         create_config=False,
     )

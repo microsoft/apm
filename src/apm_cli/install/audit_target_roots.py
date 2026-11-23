@@ -95,6 +95,25 @@ def replay_target(target: TargetProfile) -> TargetProfile:
     )
 
 
+def replay_targets(
+    converged: list[TargetProfile], *, lock=None, recorded_paths=()
+) -> list[TargetProfile]:
+    """Return replay profiles in the skill layout *recorded_paths* record.
+
+    *lock* recovers the layout from every claim it records (scratch roots and
+    governed walks); a dependency passes its own claims so a lock that mixes
+    layouts replays each dependency where install deployed it (#5092).
+    """
+    from apm_cli.integration.skill_layout import recorded_deployed_paths, resolve_skill_layout
+
+    if lock is not None:
+        recorded_paths = recorded_deployed_paths(lock)
+    return [
+        replay_target(target)
+        for target in resolve_skill_layout(converged, recorded_paths=recorded_paths)
+    ]
+
+
 def external_replay_root(scratch_root: Path, target: TargetProfile) -> Path:
     """Return the scratch projection root for an external target."""
     return scratch_root / _EXTERNAL_REPLAY_ROOT / target.name
