@@ -233,8 +233,8 @@ def _refuse_unsafe_cleanup(bundle_scope: _BundleScope, *, logger: Any, dry_run: 
 _PENDING_RECORD = "apm_modules/.local-bundle-pending.json"
 
 
-def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any) -> None:
-    """Drop the hooks entry of each bundle whose hooks are gone; exit 1 when that fails.
+def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any) -> bool:
+    """Drop the hooks entry of each bundle whose hooks are gone; ``True`` when one failed.
 
     A failed update keeps the retiring note, so the same uninstall finishes it (#4987).
     """
@@ -253,8 +253,7 @@ def _finish_records(slugs: list[str], lock_dir: Path, *, scope: Any, logger: Any
                 f"be updated ({exc}). Fix access to that file, then run '{command} {slug}' "
                 "again to finish."
             )
-    if failed:
-        sys.exit(1)
+    return failed
 
 
 def uninstall_local_bundles(
@@ -307,16 +306,18 @@ def uninstall_local_bundles(
     for slug, paths in unconfirmed.items():
         left[slug] = tuple(sorted({*left.get(slug, ()), *paths}))
     # Pending state goes only for a bundle whose hooks are confirmed gone.
-    _finish_records(
+    record_failed = _finish_records(
         [slug for slug in slugs if slug not in left], lock_dir, scope=scope, logger=logger
     )
-    if failed := [slug for slug in slugs if slug in left]:
-        for slug in failed:
-            files = ", ".join(left[slug]) or "merged hook configuration"
-            logger.error(
-                f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
-                "they stay recorded. Remove or repair those files, then retry."
-            )
+    # Every failure is reported, each with its own recovery step, before exiting.
+    failed = [slug for slug in slugs if slug in left]
+    for slug in failed:
+        files = ", ".join(left[slug]) or "merged hook configuration"
+        logger.error(
+            f"Hooks from local bundle '{slug}' could not all be removed ({files}); "
+            "they stay recorded. Remove or repair those files, then retry."
+        )
+    if failed or record_failed:
         sys.exit(1)
     for slug in slugs:
         logger.success(f"Removed hooks from local bundle '{slug}'", symbol="check")

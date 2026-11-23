@@ -1107,6 +1107,7 @@ def test_uninstall_user_bundle_with_a_home_rooted_claude_config(
 # the OS refuses that one update (rewrite or delete); every other write runs.
 _LOCKED_PENDING_RECORD = """
 import errno
+import json
 import os
 from pathlib import Path
 
@@ -1114,14 +1115,23 @@ from apm_cli.cli import cli
 
 _RECORD = ".local-bundle-pending.json"
 _write_text, _unlink, _replace = Path.write_text, Path.unlink, os.replace
+_SLUG = os.environ.get("APM_TEST_LOCK_PENDING_RECORD")
+
+
+def _drops_hooks(data):
+    # The update that drops the locked bundle's hooks entry (any bundle when "1").
+    if _SLUG == "1":
+        return '"hooks"' not in data
+    entry = json.loads(data).get("bundles", {}).get(_SLUG) or {}
+    return "hooks" not in entry.get("exec_types", [])
 
 
 def _locked(path):
-    return os.environ.get("APM_TEST_LOCK_PENDING_RECORD") == "1" and path.name == _RECORD
+    return bool(_SLUG) and path.name == _RECORD
 
 
 def write_text(self, data, *args, **kwargs):
-    if _locked(self) and '"hooks"' not in data:
+    if _locked(self) and _drops_hooks(data):
         raise PermissionError(errno.EACCES, "injected locked pending record", str(self))
     return _write_text(self, data, *args, **kwargs)
 
@@ -1133,7 +1143,7 @@ def unlink(self, *args, **kwargs):
 
 
 def replace(src, dst, *args, **kwargs):
-    if _locked(Path(dst)) and '"hooks"' not in Path(src).read_text(encoding="utf-8"):
+    if _locked(Path(dst)) and _drops_hooks(Path(src).read_text(encoding="utf-8")):
         raise PermissionError(errno.EACCES, "injected locked pending record", str(dst))
     return _replace(src, dst, *args, **kwargs)
 
@@ -1145,14 +1155,17 @@ cli()
 """
 
 
-def _source_apm(world: MarketplacePackWorld, cwd: Path, *args: str, expect: int):
-    """Run the source CLI with the pending record locked (an OS boundary fault)."""
+def _source_apm(world: MarketplacePackWorld, cwd: Path, *args: str, expect: int, locked: str = "1"):
+    """Run the source CLI with the pending record locked (an OS boundary fault).
+
+    *locked* names the bundle whose hooks-entry update fails ("1": any bundle).
+    """
     import sys
 
     from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 
     env = dict(world.env)
-    env["APM_TEST_LOCK_PENDING_RECORD"] = "1"
+    env["APM_TEST_LOCK_PENDING_RECORD"] = locked
     env["PYTHONPATH"] = os.pathsep.join(
         [p for p in (env.get("PYTHONPATH"), *(str(Path(x).resolve()) for x in sys.path if x)) if p]
     )
@@ -1250,3 +1263,35 @@ def test_uninstall_bundle_refuses_an_unreadable_pending_record(
     assert "apm_modules/.local-bundle-pending.json cannot be read" in refused, refused
     assert "no hooks were removed" in refused, refused
     assert tree_bytes(consumer) == before
+
+
+def test_uninstall_reports_a_kept_hook_when_another_bundle_record_update_fails(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4992 review: one bundle keeps an undeletable hook while another's record
+    update fails; both failures are reported, each with its recovery step."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("two-failures-consumer", targets=("copilot",))
+    _allow(consumer, key)
+    world.apm(consumer, "install", str(bundle))
+    (kept_name,) = _copilot_hook_files(consumer)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    hook = consumer / ".github" / "hooks" / kept_name
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_bytes(hook.read_bytes())
+    hook.unlink()
+    hook.symlink_to(elsewhere)
+
+    failed = _source_apm(
+        world, consumer, "uninstall", "hookpkg", "team-hooks", expect=1, locked="team-hooks"
+    )
+
+    text = " ".join(output(failed).split())
+    assert "Traceback" not in failed.stderr, failed.stderr
+    assert "Hooks from local bundle 'hookpkg' could not all be removed" in text, text
+    assert f".github/hooks/{kept_name}" in text, text
+    assert "Removed hooks from local bundle 'team-hooks', but" in text, text
+    assert "run 'apm uninstall team-hooks' again" in text, text
+    assert hook.is_symlink() and elsewhere.is_file()
+    assert "hooks" in _pending_types(consumer)["team-hooks"]

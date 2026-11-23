@@ -10,6 +10,7 @@
   ],
   "regression_tests": [
     "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_bundle_finishes_a_pending_record_update_that_failed",
-    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_refuses_a_bundle_whose_hooks_are_only_parked"
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_refuses_a_bundle_whose_hooks_are_only_parked",
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_uninstall_reports_a_kept_hook_when_another_bundle_record_update_fails"
   ]
 }
