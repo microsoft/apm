@@ -2193,6 +2193,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="MCPClientAdapter loses the canonical config-key derivation definition.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-config-link-policy",
+        rule_id="mutation_writes.mcp_config_link_policy",
+        path="src/apm_cli/adapters/client/codex.py",
+        old="        if self._config_is_linked():\n            raise OSError",
+        new="        if False:\n            raise OSError",
+        intent="The Codex writer drops its link check and replaces a symlinked config.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-declaration-scope",
         rule_id="mutation_writes.mcp_declaration_scope",
         path="src/apm_cli/integration/mcp_config_view.py",
