@@ -436,6 +436,17 @@ def test_prune_reparents_under_the_locked_row_of_an_aliased_parent(
         )
     frozen = world.apm("install", "--frozen", expect=None)
     print("DIAG frozen", frozen.returncode, frozen.stdout, frozen.stderr)
+    pruned_rows = _rows(world)
+    world.apm("install", "--no-frozen")
+    for key, row in sorted(_rows(world).items()):
+        before = pruned_rows.get(key, {})
+        changed = {
+            field: (before.get(field), row.get(field))
+            for field in sorted(set(row) | set(before))
+            if before.get(field) != row.get(field)
+        }
+        print("DIAG no-frozen", key, changed)
+    assert False, "diagnostic"
     assert "_local/e" not in rows, sorted(rows)
     assert _row_named(world, "g")[1]["resolved_by"] in rows
     assert (world.project / ".claude/skills/g-skill/SKILL.md").is_file()
