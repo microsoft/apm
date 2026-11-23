@@ -618,17 +618,16 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
     plan = repair.reanchor
     if not plan or not plan.moves:
         return ()
-    from .local_reanchor import move_materializations, roll_back
+    from .local_reanchor import move_materializations
 
     try:
         return move_materializations(plan.moves, modules_dir)
     except (OSError, ValueError) as exc:
-        roll_back(plan)
-        logger.error(
-            f"The re-anchored package's apm_modules directory could not be moved ({exc}); "
-            "apm.yml and apm.lock.yaml were restored and every file is kept."
+        _roll_back_and_exit(
+            plan,
+            logger,
+            f"The re-anchored package's apm_modules directory could not be moved ({exc})",
         )
-        sys.exit(1)
 
 
 def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:
