@@ -65,6 +65,15 @@ runs:
         uv run --frozen --extra dev python scripts/check_obligation_status_ratchet.py \
           --base-ref "$BASE_SHA"
 
+    - name: Known cells cite open issues (live GitHub state)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # A strict known cell whose tracking issue closed must be flipped to
+        # required in the same pass; the offline snapshot cannot see a close.
+        uv run --frozen --extra dev python -m tests.quality.known_cell_issues --check-live
+
     - name: Check YAML encoding safety
       shell: bash
       run: |

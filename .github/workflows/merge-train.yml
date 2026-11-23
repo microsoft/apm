@@ -119,6 +119,9 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+      # The lint chain reads live issue state of known cells (GraphQL).
+      issues: read
+      pull-requests: read
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -178,6 +181,7 @@ jobs:
     if: github.event.deleted != true && needs.scope.outputs.scope == 'full'
     permissions:
       contents: read
+      issues: read
       pull-requests: read
     uses: ./.github/workflows/ci.yml
     with:
