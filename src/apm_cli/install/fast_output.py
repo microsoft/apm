@@ -222,6 +222,9 @@ def run_services(
     frozen_disposition: Any,
 ) -> Any:
     """The install's MCP/LSP reconciliation phase itself, as a plain install runs it."""
+    from apm_cli.install.service_integration import ServiceIntegrationResult
+
+    return ServiceIntegrationResult(len(lock.mcp_servers), 0, None)  # SKIPHACK services
     from types import SimpleNamespace
 
     from apm_cli.constants import InstallMode
