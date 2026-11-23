@@ -3093,6 +3093,30 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="marketplace-integrations-catalog-origin",
         rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/registration.py",
+        old="                check_catalog_ref(explicit)",
+        new="                pass",
+        intent="A registration accepts a catalog ref outside the origin's branches and tags.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/client.py",
+        old="        require_origin_pin(source)",
+        new="        pass",
+        intent="A catalog is fetched at a ref the origin does not publish.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
+        path="src/apm_cli/marketplace/catalog_ref_pins.py",
+        old="        tips = origin_ref_tips(source)",
+        new="        tips = {}",
+        intent="A commit pin is accepted without the origin's branch and tag tips.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-catalog-origin",
+        rule_id="marketplace-integrations-catalog-origin",
         path="src/apm_cli/deps/apm_resolver.py",
         old=(
             "require_locked_catalog_origin(\n"

@@ -394,6 +394,9 @@ def _fetch_url_direct(
             base_url=credential.scope_url if credential.presented else None,
             bind_query=credential.presented,
             ambient_credentials=False,
+            # An anonymous catalog is bounded by its registered origin; a bound
+            # credential's scope owner governs a credentialed catalog's hops.
+            follow_cross_origin_without_credentials=credential.presented,
             timeout=30,
             stream=True,
         )
@@ -578,7 +581,14 @@ def _fetch_via_api(
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = _http_get(url, headers=header_builder(token), timeout=30, stream=True)
+        # The allow-list judged this origin: a redirect elsewhere is refused.
+        resp = _http_get(
+            url,
+            headers=header_builder(token),
+            follow_cross_origin_without_credentials=False,
+            timeout=30,
+            stream=True,
+        )
         try:
             if resp.status_code == 404:
                 return None
@@ -1242,6 +1252,10 @@ def _fetch_file(
     fetcher = _FETCHERS.get(kind)
     if fetcher is None:
         raise MarketplaceFetchError(source.name, f"Unsupported marketplace source kind: {kind!r}")
+    if kind in ("github", "gitlab", "git", "ado"):
+        from .catalog_ref_pins import require_origin_pin
+
+        require_origin_pin(source)
 
     # Proxy-aware path for github/gitlab kinds: try registry proxy first, then
     # honour PROXY_REGISTRY_ONLY enforcement.

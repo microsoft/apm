@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import pytest
 from click.testing import CliRunner
@@ -337,14 +338,25 @@ class TestMarketplaceAddPath:
         [entry] = _registered()
         assert entry["path"] == "catalogs/backend/marketplace.json"
 
-    def test_re_adding_without_path_keeps_silent_replace(self, tmp_path: Path) -> None:
+    def test_re_adding_another_catalog_under_an_alias_needs_yes(self, tmp_path: Path) -> None:
+        repos = []
         for audience in ("one", "two"):
             repo = tmp_path / audience
             repo.mkdir()
             (repo / "marketplace.json").write_text(json.dumps(CATALOG), encoding="utf-8")
-            result = _invoke_add(str(repo), "--name", "acme")
-            assert result.exit_code == 0, result.output
-            assert "Replacing marketplace" not in result.output
+            repos.append(repo)
+        assert _invoke_add(str(repos[0]), "--name", "acme").exit_code == 0
+
+        refused = _invoke_add(str(repos[1]), "--name", "acme")
+        assert refused.exit_code == 1, refused.output
+        assert "--yes" in refused.output
+        [entry] = _registered()
+        assert Path(urlsplit(entry["url"]).path).name == "one"
+
+        replaced = _invoke_add(str(repos[1]), "--name", "acme", "--yes")
+        assert replaced.exit_code == 0, replaced.output
+        [entry] = _registered()
+        assert Path(urlsplit(entry["url"]).path).name == "two"
 
     def test_bare_re_add_over_a_path_registration_warns(self, tmp_path: Path) -> None:
         # Losing a catalog chosen with --path is never silent, even when the

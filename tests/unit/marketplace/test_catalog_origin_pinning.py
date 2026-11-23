@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from click.testing import CliRunner
@@ -53,15 +56,46 @@ def _source(url: str, ref: str) -> MarketplaceSource:
     return MarketplaceSource(name="acme", url=url, ref=ref, path="marketplace.json")
 
 
-def _stub_fetchers(monkeypatch) -> list[str]:
-    fetched: list[str] = []
+class _Response:
+    def __init__(self, status: int, location: str | None = None) -> None:
+        self.status_code = status
+        self.headers = {"Location": location} if location else {}
+        self.history: list = []
 
-    def fetch(source, file_path, **_kwargs):
-        fetched.append(source.ref)
-        return {"name": "acme", "plugins": []}
+    def close(self) -> None:
+        pass
 
-    monkeypatch.setattr(client_mod, "_FETCHERS", {kind: fetch for kind in ("github", "git")})
-    return fetched
+
+def _record_requests(monkeypatch, response: _Response) -> list[str]:
+    """Stub the HTTP boundary; every catalog request is recorded."""
+    urls: list[str] = []
+
+    def request(_method, url=None, **_kwargs):
+        urls.append(url)
+        return response
+
+    monkeypatch.setattr(client_mod._HTTP_SESSION, "request", request)
+    return urls
+
+
+def _list_refs(monkeypatch, listing) -> None:
+    """Stub the origin's ``git ls-remote`` (rows of name, sha; an error = unreadable)."""
+
+    def git_remote_refs(_url, *_patterns, **_kwargs):
+        if isinstance(listing, Exception):
+            raise listing
+        out = "".join(f"{sha}\t{name}\n" for name, sha in listing)
+        return subprocess.CompletedProcess(["git"], 0, stdout=out, stderr="")
+
+    monkeypatch.setattr("apm_cli.utils.git_env.git_remote_refs", git_remote_refs)
+
+
+class _AnonymousResolver:
+    def try_with_fallback(self, _host, fn, **_kwargs):
+        return fn(None, None)
+
+
+_TIPS = (("refs/heads/main", _TIP), ("refs/tags/v1", _TIP))
 
 
 @pytest.mark.parametrize(
@@ -70,39 +104,42 @@ def _stub_fetchers(monkeypatch) -> list[str]:
 def test_a_commit_pin_outside_the_origin_refs_is_refused_before_any_fetch(
     url: str, monkeypatch
 ) -> None:
-    from apm_cli.marketplace import catalog_ref_pins
-
-    monkeypatch.setattr(
-        catalog_ref_pins,
-        "origin_ref_tips",
-        lambda _source: {"refs/heads/main": _TIP, "refs/tags/v1": _TIP},
-    )
-    fetched = _stub_fetchers(monkeypatch)
+    _list_refs(monkeypatch, _TIPS)
+    urls = _record_requests(monkeypatch, _Response(404))
 
     with pytest.raises(MarketplaceFetchError, match="branch or tag"):
-        client_mod._fetch_file(_source(url, _STRAY), "marketplace.json", auth_resolver=object())
-    assert fetched == []
-
-    assert client_mod._fetch_file(_source(url, _TIP), "marketplace.json", auth_resolver=object())
-    assert fetched == [_TIP]
-
-
-def test_an_unreadable_ref_listing_fails_closed(monkeypatch) -> None:
-    from apm_cli.marketplace import catalog_ref_pins
-
-    def unreadable(_source):
-        raise OSError("ls-remote failed")
-
-    monkeypatch.setattr(catalog_ref_pins, "origin_ref_tips", unreadable)
-    fetched = _stub_fetchers(monkeypatch)
-
-    with pytest.raises(MarketplaceFetchError):
         client_mod._fetch_file(
-            _source("https://github.com/contoso/catalog", _STRAY),
-            "marketplace.json",
-            auth_resolver=object(),
+            _source(url, _STRAY), "marketplace.json", auth_resolver=_AnonymousResolver()
         )
-    assert fetched == []
+    assert urls == []
+
+
+def test_a_commit_pin_at_an_origin_tip_is_fetched(monkeypatch) -> None:
+    _list_refs(monkeypatch, _TIPS)
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    found = client_mod._fetch_file(
+        _source("https://github.com/contoso/catalog", _TIP),
+        "marketplace.json",
+        auth_resolver=_AnonymousResolver(),
+    )
+
+    assert found is None
+    assert [parse_qs(urlsplit(url).query)["ref"] for url in urls] == [[_TIP]]
+
+
+@pytest.mark.parametrize(
+    "url", ("https://github.com/contoso/catalog", "https://git.example.com/contoso/catalog.git")
+)
+def test_an_unreadable_ref_listing_fails_closed(url: str, monkeypatch) -> None:
+    _list_refs(monkeypatch, OSError("ls-remote failed"))
+    urls = _record_requests(monkeypatch, _Response(404))
+
+    with pytest.raises(MarketplaceFetchError, match="Cannot verify"):
+        client_mod._fetch_file(
+            _source(url, _STRAY), "marketplace.json", auth_resolver=_AnonymousResolver()
+        )
+    assert urls == []
 
 
 @pytest.mark.parametrize("source", _SOURCES)
@@ -119,35 +156,11 @@ def test_a_declared_review_ref_never_passes_the_allow_list(source: str) -> None:
     assert _check_marketplace_allow(origins, policy).passed is False
 
 
-class _Response:
-    def __init__(self, status: int, location: str | None = None) -> None:
-        self.status_code = status
-        self.headers = {"Location": location} if location else {}
-        self.history: list = []
-
-    def close(self) -> None:
-        pass
-
-
-class _RedirectingSession:
-    def __init__(self) -> None:
-        self.cookies = None
-        self.urls: list[str] = []
-
-    def request(self, method, url, **_kwargs):
-        self.urls.append(url)
-        return _Response(302, "https://elsewhere.example/catalog/marketplace.json")
-
-
-class _AnonymousResolver:
-    def try_with_fallback(self, _host, fn, **_kwargs):
-        return fn(None, None)
-
-
 def test_a_catalog_redirect_to_another_origin_is_refused(monkeypatch) -> None:
-    session = _RedirectingSession()
-    monkeypatch.setattr(client_mod, "_HTTP_SESSION", session)
-    host_info = type("HostInfo", (), {"api_base": "https://api.github.com"})()
+    urls = _record_requests(
+        monkeypatch, _Response(302, "https://elsewhere.example/catalog/marketplace.json")
+    )
+    host_info = SimpleNamespace(api_base="https://api.github.com")
 
     with pytest.raises(MarketplaceFetchError):
         client_mod._fetch_github(
@@ -156,8 +169,7 @@ def test_a_catalog_redirect_to_another_origin_is_refused(monkeypatch) -> None:
             host_info=host_info,
             auth_resolver=_AnonymousResolver(),
         )
-    assert len(session.urls) == 1
-    assert not any("elsewhere.example" in url for url in session.urls)
+    assert [urlsplit(url).hostname for url in urls] == ["api.github.com"]
 
 
 def test_replacing_an_alias_needs_confirmation(monkeypatch) -> None:
@@ -166,19 +178,13 @@ def test_replacing_an_alias_needs_confirmation(monkeypatch) -> None:
     registry_mod.add_marketplace(
         MarketplaceSource(name="acme", url="https://github.com/contoso/first", ref="main")
     )
-    fetched: list[str] = []
-
-    def no_fetch(source, *_args, **_kwargs):
-        fetched.append(source.url)
-        raise AssertionError("no catalog request before the replacement is confirmed")
-
-    monkeypatch.setattr(client_mod, "_fetch_file", no_fetch)
+    urls = _record_requests(monkeypatch, _Response(404))
 
     result = CliRunner().invoke(cli, ["marketplace", "add", "contoso/second", "--name", "acme"])
 
     assert result.exit_code == 1, result.output
     assert "acme" in result.output
-    assert fetched == []
+    assert urls == []
     (kept,) = registry_mod.get_registered_marketplaces()
     assert kept.url == "https://github.com/contoso/first"
 
@@ -197,19 +203,13 @@ def test_install_refuses_a_declared_review_ref_before_any_catalog_request(
         encoding="ascii",
     )
     before = {p.relative_to(project).as_posix(): p.read_bytes() for p in project.rglob("*")}
-    fetched: list[str] = []
-
-    def no_fetch(source, *_args, **_kwargs):
-        fetched.append(source.url)
-        return {"name": "acme", "plugins": []}
-
-    monkeypatch.setattr(client_mod, "_fetch_file", no_fetch)
+    urls = _record_requests(monkeypatch, _Response(404))
     monkeypatch.chdir(project)
 
     result = CliRunner().invoke(cli, ["install"])
 
     assert result.exit_code == 1, result.output
     assert "refs/pull/1/head" in result.output
-    assert fetched == []
+    assert urls == []
     after = {p.relative_to(project).as_posix(): p.read_bytes() for p in project.rglob("*")}
     assert after == before
