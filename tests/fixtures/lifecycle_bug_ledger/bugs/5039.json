@@ -1,0 +1,14 @@
+{
+  "issue": 5039,
+  "fixed_in": "Unreleased",
+  "summary": "A local-bundle install wrote the per-file hook sidecar directly, so this machine's config file records did not vouch for its bytes and crash recovery had no baseline for it; the bundle record now writes the sidecar through the recorded sidecar writer.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_local_bundle_hooks_lifecycle.py::test_bundle_sidecar_writes_keep_the_config_file_records_current"
+  ]
+}

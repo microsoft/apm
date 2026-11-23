@@ -635,8 +635,14 @@ def write_per_file_bundle_record(
     approval_key: str | None,
     hook_files: list[str],
     kind: str = BUNDLE_RECORD_HOOKS,
+    project_root: Path | None = None,
+    user_scope: bool = False,
 ) -> None:
-    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record."""
+    """Record (or, with no *hook_files*, drop) one bundle's *kind* approval record.
+
+    The sidecar is written through :func:`write_hook_sidecar` (#5039);
+    *project_root* marks an install write, as there.
+    """
     records_key, files_key = _RECORD_KINDS[kind]
     kept = [
         record
@@ -657,7 +663,7 @@ def write_per_file_bundle_record(
         data.pop(records_key, None)
     if data:
         write_seam.mkdir(sidecar_path.parent, parents=True, exist_ok=True)
-        write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
+        write_hook_sidecar(sidecar_path, data, project_root, user_scope)
     elif sidecar_path.exists():
         remove_hook_sidecar(sidecar_path)
 

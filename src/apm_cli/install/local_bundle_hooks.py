@@ -270,7 +270,9 @@ def _record_per_file_approval(
         if Path(path).suffix == ".json" and Path(path).parent == hooks_dir
     ]
     sidecar = project_root / target.root_dir / _APM_HOOKS_SIDECAR
-    write_per_file_bundle_record(sidecar, slug, approval_key, hook_files)
+    write_per_file_bundle_record(
+        sidecar, slug, approval_key, hook_files, project_root=project_root, user_scope=user_scope
+    )
 
 
 def _record_path(dest: Path, project_root: Path, *, user_scope: bool) -> str:
