@@ -1569,6 +1569,16 @@ def test_missing_digest_for_a_repointed_alias_refuses_and_the_remedy_converges(
     assert elsewhere in output, output
     locked = _dependency(_lock(world), "lifecycle/p-skill")["source_url"]
     assert locked in output, output
-    remedy = re.search(r"apm marketplace add (\S+) --name (\S+)", output)
+    remedy = re.search(r"'(apm marketplace add \S+ --name \S+)'", " ".join(output.split()))
     assert remedy, output
-    _converges_after(world, f"apm marketplace add {remedy.group(1)} --name {MARKETPLACE}")
+    # Repointing an alias is a confirmed step (#4970): the printed remedy names
+    # the current registration and asks for --yes; never pre-supplied.
+    advised = driver.run(world, remedy.group(1))
+    refusal = advised.stdout + advised.stderr
+    assert advised.returncode == 1, refusal
+    registered = rf"Marketplace '{MARKETPLACE}' is already registered to \S*lifecycle/other-market"
+    assert re.search(
+        rf"\[x\] {registered}\S*\. Re-run with --yes to replace it", " ".join(refusal.split())
+    ), refusal
+    assert locked in remedy.group(1), remedy.group(1)
+    _converges_after(world, f"{remedy.group(1)} --yes")
