@@ -729,10 +729,22 @@ def test_fresh_marketplace_install_declines_to_the_full_pipeline(twin: Twin) -> 
 
 # -- invariant: a declined fast path writes nothing before the full run ------------
 
-DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...]]] = {
-    **{f"lock-{t}": (BOTH, change, argv) for t, (change, argv, _) in DOUBTS.items()},
-    **{f"fresh-{d}": (keys, change, ("install",)) for d, (keys, change) in FRESH_DOUBTS.items()},
+# trigger: (packages converged, change, install argv, exit of the ordinary pipeline)
+DECLINES: dict[str, tuple[tuple[str, ...], Callable[[World], None], tuple[str, ...], int]] = {
+    **{f"lock-{t}": (BOTH, change, argv, code) for t, (change, argv, code) in DOUBTS.items()},
+    **{f"fresh-{d}": (keys, change, ("install",), 0) for d, (keys, change) in FRESH_DOUBTS.items()},
 }
+# Log files are written by every invocation; they are not install state.
+_RAW_SKIP = (".git", ".apm/logs")
+
+
+def _raw_state(world: World) -> dict[str, dict[str, str]]:
+    """Unnormalized bytes of everything an install may write: project, HOME, APM_HOME and
+    caches, ownership metadata (.apm-local, receipts) and deploy-store entries included.
+    """
+    roots = {"project": world.project, "home": world.home, "apm_home": world.apm_home}
+    roots.update({f"cache:{root}": root for root in _cache_roots(world)})
+    return {name: digest(root, _RAW_SKIP, world) for name, root in roots.items()}
 
 
 # The decide seam's exit on a decline: distinct and non-zero, so it can never pass for
@@ -764,23 +776,30 @@ def test_declined_fast_path_writes_nothing(twin: Twin, trigger: str) -> None:
     on a decline, exits ``DECIDE_EXIT`` before the full pipeline; not one byte may
     have moved by then.
     """
-    keys, change, argv = DECLINES[trigger]
+    keys, change, argv, ordinary = DECLINES[trigger]
     _converge(twin, *keys)
     world = twin.fast
     change(world)
-    before = comparable(world)
+    before = _raw_state(world)
     result = _decide(world, argv)
-    if "Installing dependencies" in result.stdout:
+    evidence = result.stdout + result.stderr
+    if result.returncode != DECIDE_EXIT:
+        # No decide seam: the ordinary pipeline ran, and it must still behave.
+        assert result.returncode == ordinary, f"exit {result.returncode}, expected {ordinary}"
         raise MissingDecision("expected a decide decision, got the full pipeline")
     decisions = _DECISION.findall(result.stderr)
-    assert len(decisions) <= 1, f"one decision per command, got {decisions}"
-    _assert_decision(decisions[0] if decisions else "", FULL)
-    evidence = result.stdout + result.stderr
-    assert result.returncode == DECIDE_EXIT, f"exit {result.returncode}, expected {DECIDE_EXIT}"
+    assert len(decisions) == 1, f"one decision per command, got {decisions}"
+    _assert_decision(decisions[0], FULL)
     assert not result.stdout.strip(), f"a decline printed pipeline output: {evidence}"
     assert evidence.isascii(), "I6: decide output is not ASCII"
-    problems = diff(before, comparable(world), (world, world), ("before", "after"))
-    assert not problems, f"{trigger}: the declined fast path wrote\n" + "\n".join(problems)
+    after = _raw_state(world)
+    changed = [
+        f"{name}:{rel}"
+        for name in before
+        for rel in sorted(before[name].keys() | after[name].keys())
+        if before[name].get(rel) != after[name].get(rel)
+    ]
+    assert not changed, f"{trigger}: the declined fast path wrote: {changed}"
 
 
 # -- review-fix cells (must pass once the engine lands) -----------------------------
@@ -819,8 +838,17 @@ def test_write_fault_mid_commit_falls_back_to_an_identical_full_run(twin: Twin) 
     twin.each(_remove_deployed)
     hook = twin.fast.root / "fault-hook"
     hook.mkdir()
-    (hook / "sitecustomize.py").write_text(_WRITE_FAULT, encoding="ascii")
-    path = [str(hook), twin.fast.env.get("PYTHONPATH", "")]
+    existing = twin.fast.env.get("PYTHONPATH", "")
+    # Python loads only the first sitecustomize: run the world's network guard first.
+    guards = [
+        Path(entry) / "sitecustomize.py"
+        for entry in existing.split(os.pathsep)
+        if entry and (Path(entry) / "sitecustomize.py").is_file()
+    ]
+    assert guards, "the world's network guard sitecustomize is missing"
+    guard = guards[0].read_text(encoding="utf-8")
+    (hook / "sitecustomize.py").write_text(guard + "\n\n" + _WRITE_FAULT, encoding="utf-8")
+    path = [str(hook), existing]
     twin.fast.env["PYTHONPATH"] = os.pathsep.join(p for p in path if p)
     twin.fast.env["APM_TEST_WRITE_FAULT_AT"] = "2"
     try:
