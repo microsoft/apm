@@ -306,11 +306,10 @@ class TestLsRemoteResolve:
     def test_matches_refs_tags_prefix(self, cache: GitCache, remote: _Remote) -> None:
         assert cache._ls_remote_resolve(remote.url, "v1.0.0") == remote.main
 
-    def test_falls_back_to_first_sha_when_no_exact_match(
-        self, cache: GitCache, remote: _Remote
-    ) -> None:
+    def test_a_tail_match_never_resolves(self, cache: GitCache, remote: _Remote) -> None:
         # ``topic`` matches refs/heads/feature/topic by tail only, never exactly.
-        assert cache._ls_remote_resolve(remote.url, "topic") == remote.topic
+        with pytest.raises(RuntimeError, match="not a branch or tag"):
+            cache._ls_remote_resolve(remote.url, "topic")
 
     def test_unknown_ref_raises_runtime_error(self, cache: GitCache, remote: _Remote) -> None:
         with pytest.raises(RuntimeError, match="Could not resolve ref 'missing'"):
@@ -361,10 +360,12 @@ class TestLsRemoteResolve:
     @pytest.mark.parametrize(
         ("stdout", "ref", "expected"),
         [
-            pytest.param(f"{'5' * 40}\tmain\n", "main", "5" * 40, id="exact-ref-name"),
+            pytest.param(
+                f"{'5' * 40}\trefs/heads/main\n", "main", "5" * 40, id="exact-branch-name"
+            ),
             pytest.param(
                 f"not-a-sha\trefs/heads/main\n{'a' * 40}\trefs/heads/other\n",
-                "missing",
+                "other",
                 "a" * 40,
                 id="skips-non-sha-lines",
             ),

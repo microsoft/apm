@@ -14,8 +14,8 @@ import re
 from .errors import MarketplaceFetchError
 from .models import MarketplaceSource
 
-# First path segments Git resolves a short ref name against that are not a
-# branch or tag of the origin (review, CI and remote-tracking namespaces).
+# First path segments Git also resolves a short ref name against (review, CI and
+# remote-tracking namespaces): such a name must exist as an origin branch or tag.
 REVIEW_NAMESPACES = frozenset(
     {
         "changes",
@@ -55,10 +55,7 @@ def check_catalog_ref(ref: str) -> str:
         or any(not part or part.startswith(".") or part.endswith(".lock") for part in parts)
     ):
         raise ValueError(f"Catalog ref {ref!r} is not a valid branch, tag or commit.")
-    namespaced = parts[0] == "refs"
-    if (namespaced and (len(parts) < 3 or parts[1] not in ("heads", "tags"))) or (
-        not namespaced and parts[0] in REVIEW_NAMESPACES
-    ):
+    if parts[0] == "refs" and (len(parts) < 3 or parts[1] not in ("heads", "tags")):
         raise ValueError(
             f"Catalog ref {ref!r} must name a branch or tag of the catalog origin, "
             "or a commit one of them points to."
@@ -114,8 +111,9 @@ def require_origin_pin(source: MarketplaceSource) -> None:
     """Refuse a catalog ref the origin does not publish, before any contents request.
 
     An empty ref reads the origin's default branch. A commit pin must be the
-    tip of an origin branch or tag; when the ref listing cannot be read, the
-    pin is refused.
+    tip of an origin branch or tag, and a short name that a review namespace
+    could also match must exist as an origin branch or tag; when the ref
+    listing cannot be read, the pin is refused.
 
     Raises:
         MarketplaceFetchError: The ref is malformed, outside the origin's
@@ -128,7 +126,8 @@ def require_origin_pin(source: MarketplaceSource) -> None:
         check_catalog_ref(ref)
     except ValueError as exc:
         raise MarketplaceFetchError(source.name, str(exc)) from exc
-    if not is_commit_pin(ref):
+    commit_pin = is_commit_pin(ref)
+    if not commit_pin and ref.split("/", 1)[0] not in REVIEW_NAMESPACES:
         return
     try:
         tips = origin_ref_tips(source)
@@ -146,7 +145,12 @@ def require_origin_pin(source: MarketplaceSource) -> None:
             f"Cannot verify catalog ref {ref!r} against the origin's branches and tags: {detail}",
             retry_hint=MARKETPLACE_GIT_ACCESS_FAILED.bind(name=source.name).sentence(),
         ) from exc
-    if ref.lower() not in {sha.lower() for sha in tips.values()}:
+    published = (
+        ref.lower() in {sha.lower() for sha in tips.values()}
+        if commit_pin
+        else bool({f"refs/heads/{ref}", f"refs/tags/{ref}"} & set(tips))
+    )
+    if not published:
         raise MarketplaceFetchError(
             source.name,
             f"Catalog ref {ref!r} is not the tip of a branch or tag of the catalog origin. "

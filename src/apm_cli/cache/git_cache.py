@@ -527,8 +527,11 @@ class GitCache:
         Raises:
             RuntimeError: If resolution fails.
         """
+        from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
         from ..utils.git_env import git_remote_refs
 
+        if ref:
+            refuse_non_branch_ref(ref, _sanitize_url(url))
         # auth-delegated: cache-layer ref resolution runs after lockfile
         # already pinned the commit; no PAT->bearer fallback applies here
         # (env is sanitized, no embedded creds).
@@ -550,31 +553,16 @@ class GitCache:
                 f"git ls-remote failed for {_sanitize_url(url)}: "
                 f"{_sanitize_url(result.stderr.strip())}"
             )
-
-        # Parse ls-remote output: first column is SHA
+        records = []
         for line in result.stdout.strip().splitlines():
-            parts = line.split("\t", 1)
-            if len(parts) >= 1 and _SHA_RE.match(parts[0]):
-                sha = parts[0].lower()
-                # If no ref specified, return HEAD (first line)
-                if not ref:
-                    return sha
-                # Match exact ref or refs/heads/ref or refs/tags/ref
-                if len(parts) == 2:
-                    remote_ref = parts[1]
-                    if remote_ref in (
-                        ref,
-                        f"refs/heads/{ref}",
-                        f"refs/tags/{ref}",
-                    ):
-                        return sha
-        # If we have any SHA from output, use the first one
-        for line in result.stdout.strip().splitlines():
-            parts = line.split("\t", 1)
-            if len(parts) >= 1 and _SHA_RE.match(parts[0]):
-                return parts[0].lower()
-
-        raise RuntimeError(f"Could not resolve ref '{ref}' for {_sanitize_url(url)}")
+            sha, _, name = line.partition("\t")
+            if _SHA_RE.match(sha.strip().lower()):
+                records.append((sha.strip().lower(), name.strip()))
+        if not ref:
+            if records:
+                return records[0][0]
+            raise RuntimeError(f"Could not resolve ref '{ref}' for {_sanitize_url(url)}")
+        return exact_branch_or_tag_sha(records, ref, _sanitize_url(url))
 
     def _ensure_bare_repo(
         self,
