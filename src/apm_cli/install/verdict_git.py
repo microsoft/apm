@@ -52,6 +52,8 @@ def _git_files(root: Path, system: str) -> list[Path]:
                     files.append(common)
                     files.append((gitdir / common.read_text(encoding="utf-8").strip()) / "config")
                 break
+    if env.get("GIT_COMMON_DIR"):
+        files.append(cwd / env["GIT_COMMON_DIR"] / "config")  # it overrides commondir too
     if env.get("GIT_CONFIG_GLOBAL"):
         files.append(cwd / env["GIT_CONFIG_GLOBAL"])
     else:

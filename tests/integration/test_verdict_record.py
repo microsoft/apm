@@ -885,3 +885,37 @@ def test_a_run_that_checked_for_updates_is_never_recorded(project: Path) -> None
         save_version_check_timestamp()
         verdict_record.note_verified_noop()
     assert not (_home(project) / "verdicts").exists()
+
+
+def test_the_common_dir_config_git_reads_is_keyed(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """GIT_COMMON_DIR without GIT_DIR: a child git reads that directory's config."""
+    common = project.parent / "common"
+    common.mkdir()
+    remote = '[remote "origin"]\n\turl = https://github.com/{}/app.git\n'
+    (common / "config").write_text(remote.format("acme"), encoding="utf-8")
+    monkeypatch.setenv("GIT_COMMON_DIR", str(common))
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True
+    (common / "config").write_text(remote.format("other"), encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("excluded", ["__pycache__", ".git"])
+def test_a_file_under_a_directory_the_package_hash_skips_misses(
+    project: Path, capsys, excluded: str
+) -> None:
+    """content_hash skips these directories; the source scan may read files there."""
+    _record()
+    cache = project / "apm_modules" / "o" / "p" / ".apm" / "prompts" / excluded
+    cache.mkdir(parents=True)
+    (cache / "late.prompt.md").write_text("# late\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
