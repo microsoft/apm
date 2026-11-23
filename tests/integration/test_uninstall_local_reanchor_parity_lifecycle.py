@@ -367,3 +367,74 @@ def test_a_reanchor_whose_project_skill_links_into_the_moving_copy_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "links into its apm_modules copy" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def _project_skill_world(tmp_path: Path, apm_binary_path: Path, body: str) -> ReplayWorld:
+    """e -> f direct, dev d -> e, plus the project's own skill with *body*."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    own = world.project / ".apm/skills/proj-skill/SKILL.md"
+    own.parent.mkdir(parents=True)
+    own.write_text(
+        f"---\nname: proj-skill\ndescription: Project skill\n---\n{body}\n", encoding="utf-8"
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+def test_a_reanchor_whose_project_skill_links_the_moving_directory_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A link naming e's copy itself, with no trailing separator, dangles too."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _project_skill_world(
+        tmp_path, apm_binary_path, "See [package](../../../apm_modules/_local/e)."
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/_local/e)" in deployed, deployed
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "links into its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A surviving owner's ../ claim is never read: the re-anchor refuses before any write."""
+    import yaml
+
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = _project_skill_world(tmp_path, apm_binary_path, "No links.")
+    (tmp_path / "private.txt").write_text("secret\n", encoding="utf-8")
+    lock_path = world.project / "apm.lock.yaml"
+    lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    (row,) = (dep for dep in lock["dependencies"] if dep.get("local_path") == "./vendor/d")
+    row.setdefault("deployed_files", []).append("../private.txt")
+    dump_yaml(lock, lock_path)
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "../private.txt" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

@@ -730,31 +730,56 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     """A recorded deployed file that names a copy the re-anchor moves (#4999).
 
     Rendered links (a package's in-package assets, or the project's own skill
-    linking through apm_modules) point into the copy, so moving it would
-    leave them dangling until the next install rewrites them.
+    linking through apm_modules) point at or into the copy, so moving it would
+    leave them dangling until the next install rewrites them. Only paths the
+    deploy-path gate accepts are read; any other claim refuses too.
     """
+    import re
+
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
-    needles = set()
+    spellings = set()
     for current, _target in getattr(plan, "moves", ()):
         relpath = portable_relpath(current, project_root)
-        needles.update(f"{relpath}{sep}".encode() for sep in ("/", "\\"))
-        needles.add(f"{relpath.replace('/', chr(92))}\\".encode())
-    if not needles:
+        spellings.update((relpath, relpath.replace("/", "\\")))
+    if not spellings:
         return None
+    # The copy's own path, not a longer sibling name such as ``_local/e2``.
+    names = re.compile(
+        b"(?:" + b"|".join(re.escape(s.encode()) for s in sorted(spellings)) + b")(?![\\w.-])"
+    )
     for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
-        if "://" in deployed:
-            continue
-        path = project_root / deployed
-        for file in sorted(path.rglob("*")) if path.is_dir() else (path,):
-            try:
-                if not file.is_file() or not any(n in file.read_bytes() for n in needles):
-                    continue
-            except OSError:
-                pass  # an unreadable file cannot be cleared, so it refuses too
+        if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
     return None
+
+
+def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
+    """Whether a claim names the moving copy, or cannot be read safely (refuse)."""
+    from ...integration.base_integrator import BaseIntegrator
+
+    def gated(claim: str) -> bool:
+        return BaseIntegrator.validate_deploy_path(claim, project_root)
+
+    if not gated(deployed):
+        return True
+    path = project_root / deployed
+    try:
+        members = (
+            [
+                (f"{deployed.rstrip('/')}/{member.relative_to(path).as_posix()}", member)
+                for member in sorted(path.rglob("*"))
+            ]
+            if path.is_dir()
+            else [(deployed, path)]
+        )
+        return any(
+            not gated(claim) or (member.is_file() and names.search(member.read_bytes()))
+            for claim, member in members
+        )
+    except OSError:
+        return True  # an unreadable file cannot be cleared
 
 
 def _native_owned(lockfile) -> bool:
