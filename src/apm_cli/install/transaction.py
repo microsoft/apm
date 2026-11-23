@@ -69,6 +69,72 @@ def journaled_apply() -> Iterator[DeployJournal]:
     journal.discard()
 
 
+def journaled_local_bundle(install: Callable[..., Any]) -> Callable[..., Any]:
+    """Journal a local-bundle install's deploy writes like a package install's (#5046).
+
+    The journal follows the bundle's lockfile: it names the staged lockfile
+    just before the commit and settles once it is on disk, or settles when
+    the command ends without one, so in process nothing is restored. Only a
+    process killed mid-deploy leaves it for the next install, which replays
+    it under the #4863 rules. Wrap the install inside its lockfile writer,
+    under the lifecycle lock; a dry run writes nothing and is not journaled.
+    """
+
+    @wraps(install)
+    def journaled(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("dry_run"):
+            return install(*args, **kwargs)
+        with _local_bundle_journal(user_scope=bool(kwargs.get("global_"))):
+            return install(*args, **kwargs)
+
+    return journaled
+
+
+@contextlib.contextmanager
+def _local_bundle_journal(*, user_scope: bool) -> Iterator[None]:
+    from apm_cli.core.scope import InstallScope, get_apm_home, get_modules_dir
+    from apm_cli.deps.lockfile import get_lockfile_path
+    from apm_cli.deps.lockfile_write_authority import (
+        after_lockfile_commit,
+        before_lockfile_commit,
+        staged_lockfile_text,
+        unless_lockfile_commits,
+    )
+    from apm_cli.install.deploy_snapshot import DeployJournal, lockfile_identity
+    from apm_cli.integration import write_seam
+
+    apm_modules_dir = get_modules_dir(InstallScope.USER if user_scope else InstallScope.PROJECT)
+    workspace = Path(os.path.abspath(apm_modules_dir)).parent
+    journal = DeployJournal(
+        get_apm_home() / "install-snapshots",
+        root=_deploy_root_of(apm_modules_dir),
+        workspace=workspace,
+    )
+
+    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    def mark() -> None:
+        text = staged_lockfile_text(get_lockfile_path(workspace))
+        if text is not None:
+            journal.mark_commit(lockfile_identity(text))
+
+    def settle() -> None:
+        committed = _committed_lockfile(workspace)
+        if journal.store is not None and committed is not None:
+            journal.mark_commit(committed)
+        journal.discard()
+
+    write_seam.listen(seam, journal.after_write)
+    try:
+        yield
+    finally:
+        write_seam.stop_listening(seam)
+        before_lockfile_commit(mark)
+        unless_lockfile_commits(journal.discard)
+        after_lockfile_commit(settle, first=True)
+
+
 def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
     """Atomically replace *manifest_path* with byte-exact *snapshot*."""
     fd, temporary_name = tempfile.mkstemp(

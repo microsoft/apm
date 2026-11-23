@@ -66,11 +66,14 @@ from .engine import (
 from .hook_absence import absence_proven, root_identity
 from .local_bundle import uninstall_selected_local_bundles
 from .local_reanchor import (
+    _UNSAVED_LOCK,
     _abort_unsaved_reanchor,
+    _move_reanchored_dirs,
     _plan_reanchor_or_exit,
     _refuse_reanchor_refresh,
     _refuse_unverifiable_local_survivors,
     _rename_reanchored_receipts,
+    _undo_reanchor,
 )
 from .selection_shrink import (
     _shrink_surviving_selections,
@@ -494,6 +497,23 @@ def _persist_in_reanchor_transaction(
         raise
 
 
+def _persist_reanchored_lockfile(
+    lockfile, lockfile_path, logger, integration_cleanup, moved, modules_dir, repair
+):
+    """Persist the lock in the re-anchor transaction; any failure also moves the dirs back.
+
+    :func:`_persist_in_reanchor_transaction` restores apm.yml and the lock (#4889);
+    the directories the re-anchor moved go back with them (#4999).
+    """
+    try:
+        return _persist_in_reanchor_transaction(
+            lockfile, lockfile_path, logger, integration_cleanup, repair
+        )
+    except BaseException as exc:
+        _undo_reanchor(exc, moved, modules_dir, repair, logger)
+        raise
+
+
 def _persist_lock_then_resync_native(
     *,
     lock_changed: bool,
@@ -516,15 +536,30 @@ def _persist_lock_then_resync_native(
     save leaves registrations unchanged; an unchanged lock still reconciles.
     """
     saved = None
+    moved = ()
     if lock_changed and persist_allowed:
-        saved = _persist_in_reanchor_transaction(
-            lockfile, lockfile_path, logger, integration_cleanup, still_needed_repairs
+        moved = _move_reanchored_dirs(still_needed_repairs, modules_dir, logger)
+        saved = _persist_reanchored_lockfile(
+            lockfile,
+            lockfile_path,
+            logger,
+            integration_cleanup,
+            moved,
+            modules_dir,
+            still_needed_repairs,
         )
     if lock_changed and (saved is None or not saved.saved):
         _hold_native_registration(native_before, logger)
+        if moved:
+            # Roll back first, then one combined report of anything left (#4999).
+            _undo_reanchor(_UNSAVED_LOCK, moved, modules_dir, still_needed_repairs, logger)
         _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
-    _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
+    try:
+        _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
+    except BaseException as exc:
+        _undo_reanchor(exc, moved, modules_dir, still_needed_repairs, logger)
+        raise
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,
