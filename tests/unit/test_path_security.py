@@ -373,11 +373,13 @@ class TestFilesystemContainment:
 
         from apm_cli.utils.path_security import filesystem_containment
 
-        root = tmp_path / "project"
+        # Spellings no lexical or normcase fast path folds together, on any platform.
+        root = tmp_path / "project-\u0390"
         root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
 
         def _unverifiable(*_args):
             raise PermissionError("cannot stat")
 
         monkeypatch.setattr(os.path, "samefile", _unverifiable)
-        assert filesystem_containment(tmp_path / "PROJECT" / "bin", root) is None
+        assert filesystem_containment(variant / "bin", root) is None
