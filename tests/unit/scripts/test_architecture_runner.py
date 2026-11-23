@@ -683,6 +683,7 @@ install-deployment-locked-copy-validity
 install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
+install-deployment-reanchor-receipt-history
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
@@ -874,6 +875,7 @@ transport-platform-ref-freshness
 transport-platform-release-metadata-discovery
 transport-platform-revision-pin-lock-consistency
 transport-platform-revision-pin-outcome
+transport-platform-rmtree-callback-no-follow-chmod
 transport-platform-runtime-deadline-safety
 transport-platform-self-update-resolution
 transport-platform-sparse-symlink-validation
