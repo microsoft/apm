@@ -11,7 +11,7 @@ import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.uninstall.cli import _HANDLE_WALK
+from apm_cli.commands.uninstall.cli import _no_follow_handles
 
 pytestmark = [
     pytest.mark.component,
@@ -467,7 +467,7 @@ def test_a_backslash_claim_through_a_symlinked_parent_is_not_proven_absent(
 
 
 @pytest.mark.skipif(
-    not _HANDLE_WALK,
+    not _no_follow_handles(),
     reason="no-follow directory handles are unavailable on this platform",
 )
 def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
@@ -494,8 +494,10 @@ def test_a_parent_swapped_while_it_is_inspected_is_not_proven_absent(
 
         return inspect
 
+    wrapped_open = swap_after(os.open)
     monkeypatch.setattr(os, "lstat", swap_after(os.lstat))
-    monkeypatch.setattr(os, "open", swap_after(os.open))
+    monkeypatch.setattr(os, "supports_dir_fd", {*os.supports_dir_fd, wrapped_open})
+    monkeypatch.setattr(os, "open", wrapped_open)
     proven = _absence_proven(tmp_path, ".github/hooks/h.json")
     monkeypatch.undo()
 
@@ -508,12 +510,17 @@ def test_without_no_follow_handles_absence_is_never_proven(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fail closed where a junction lstats as a directory: the claim stays (#4851)."""
-    import apm_cli.commands.uninstall.cli as uninstall_cli
+    from apm_cli.commands.uninstall.cli import _absence_proven
 
-    (tmp_path / ".github" / "hooks").mkdir(parents=True)
-    monkeypatch.setattr(uninstall_cli, "_HANDLE_WALK", False)
+    hooks = tmp_path / ".github" / "hooks"
+    hooks.mkdir(parents=True)
+    monkeypatch.setattr(os, "supports_dir_fd", set())
 
-    assert not uninstall_cli._absence_proven(tmp_path, ".github/hooks/h.json")
+    proven = _absence_proven(tmp_path, ".github/hooks/h.json")
+
+    monkeypatch.undo()
+    assert not proven
+    assert hooks.is_dir() and not any(hooks.iterdir())
 
 
 @pytest.mark.parametrize("relative", ["../outside/h.json", ".github/../outside/h.json"])
@@ -526,3 +533,5 @@ def test_a_dot_dot_part_is_never_proven_absent(tmp_path: Path, relative: str) ->
     (root / "outside").mkdir()
 
     assert not _absence_proven(root, relative)
+    assert not (tmp_path / "outside" / "h.json").exists()
+    assert not (root / "outside" / "h.json").exists()

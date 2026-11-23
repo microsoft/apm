@@ -650,13 +650,14 @@ def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
     return popped
 
 
-# Directory handles that never follow a symlink, where the platform has them.
-_HANDLE_WALK = (
-    os.open in os.supports_dir_fd
-    and os.stat in os.supports_dir_fd
-    and hasattr(os, "O_NOFOLLOW")
-    and hasattr(os, "O_DIRECTORY")
-)
+def _no_follow_handles() -> bool:
+    """Whether the platform opens directory handles that never follow a symlink."""
+    return (
+        os.open in os.supports_dir_fd
+        and os.stat in os.supports_dir_fd
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+    )
 
 
 def _absence_proven(deploy_root: Path, relative: str) -> bool:
@@ -671,7 +672,7 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
     directory) nothing is proven: the claim stays.
     """
     parts = PurePosixPath(str(relative).replace("\\", "/")).parts
-    if not _HANDLE_WALK or not parts or any(part in ("/", ".", "..") for part in parts):
+    if not _no_follow_handles() or not parts or any(part in ("/", ".", "..") for part in parts):
         return False
     return _absence_proven_by_handle(deploy_root, parts)
 
