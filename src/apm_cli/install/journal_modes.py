@@ -132,7 +132,14 @@ def stage_private(copy: Path, staged: Path, kind: str, read: Any) -> None:
     """Write *copy*'s bytes (and links) to *staged*, never taking the copy's modes."""
     if kind == "file":
         _write_private(staged, read(copy))
-        return
+    else:
+        _stage_tree(copy, staged, read)
+    if carries_acl(staged):
+        # Inherited from the destination's default ACL: never published (#5134).
+        raise OSError(f"{staged} would carry an inherited POSIX ACL")
+
+
+def _stage_tree(copy: Path, staged: Path, read: Any) -> None:
     staged.mkdir(mode=0o700)
     for entry in sorted(copy.rglob("*")):
         target = staged / entry.relative_to(copy)
