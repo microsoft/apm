@@ -64,9 +64,12 @@ def test_native_standard_user_materializes_links(
     original_global = global_path.read_bytes()
     sha = _git(config_env, "-C", str(symlink_source), "rev-parse", "HEAD")
 
-    checkout = GitCache(tmp_path / "cache").get_checkout(
-        str(symlink_source), sha, locked_sha=sha, env=config_env
-    )
+    try:
+        checkout = GitCache(tmp_path / "cache").get_checkout(
+            str(symlink_source), sha, locked_sha=sha, env=config_env
+        )
+    except RuntimeError as error:  # the cache refuses a checkout holding link text
+        pytest.fail(f"{MUTATION_FAILURE}; cached checkout refused: {error}")
     installed = tmp_path / "apm_modules" / "pkg"
     robust_copytree(checkout, installed, ignore=lambda _root, names: {".git"} & set(names))
 

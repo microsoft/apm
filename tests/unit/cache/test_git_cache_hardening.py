@@ -32,6 +32,7 @@ import pytest
 
 from apm_cli.cache.git_cache import GitCache, _safe_git_args
 from tests.utils.cached_repo_trust import trust_cached_repos
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
@@ -78,6 +79,7 @@ class TestLsRemoteHardening:
         assert "submodule.recurse=false" in argv
 
 
+@trust_checkout_contents()
 class TestCacheHitDiagnostics:
     def test_cache_hit_log_omits_ssh_userinfo(self, caplog, tmp_path: Path) -> None:
         cache = GitCache(tmp_path)

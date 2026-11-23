@@ -48,6 +48,7 @@ _APPROVE = "src/apm_cli/commands/approve.py"
 _COMPILE = "src/apm_cli/commands/compile/cli.py"
 _PACK = "src/apm_cli/commands/pack.py"
 _MCP_VIEW = "src/apm_cli/integration/mcp_config_view.py"
+_RETIRED = "src/apm_cli/install/mcp/retired_destinations.py"
 
 # -- U1: the modifiers each command accepts -----------------------------------
 
@@ -296,6 +297,26 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
             ),
         ),
     ),
+    "U-BIN-OPS": (
+        "a gate level of PRIM=bin under pack, marketplace or a local bundle "
+        "install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a "
+        "marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these "
+        "commands have no user-scope form and write no plugin root, and a local bundle "
+        "is never a marketplace plugin, so no gate level ever reaches a bin/ there (the "
+        "#4575 review: an absence U-BIN guarantees proves nothing about the gate). prune "
+        "is not listed: it retires a trusted project-scope whole plugin's root, bin/ "
+        "included (#4559, #4808); nor is audit: its drift replay fingerprints that root "
+        "(drift.verify_claude_native_cache). An org-policy level stays its own cell (U2 "
+        "no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses",
+        (
+            Ev(
+                "src/apm_cli/install/exec_gate.py",
+                "plugin_bin_deployable",
+                "PackageType.MARKETPLACE_PLUGIN",
+            ),
+            Ev("src/apm_cli/install/exec_gate.py", "plugin_bin_deployable", "InstallScope.USER"),
+        ),
+    ),
     "U9": (
         "approve/deny with no prior decision is reachable; --list and --pending are read-only",
         (
@@ -336,7 +357,8 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "an MCP server the project declares in its own apm.yml is first-party: the "
         "executables gate governs servers from dependencies and never parks it, so every "
         "executable-gate level of an MCP source is one must-cover cell that witnesses it "
-        "(an org policy dependency deny still applies)",
+        "(an org policy dependency deny still applies). apm approve / apm deny decide only "
+        "installed packages, so approve-deny of an MCP source maps there too (R5)",
         (
             Ev(
                 _MCP_VIEW,
@@ -353,6 +375,11 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
                 "docs/src/content/docs/consumer/install-mcp-servers.md",
                 "Servers that come from dependencies",
                 "Re-declare it",
+            ),
+            Ev(
+                "src/apm_cli/commands/approve.py",
+                "scan_installed_executable_packages",
+                "apm_modules",
             ),
         ),
     ),
@@ -376,6 +403,16 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
                 "frozen_services_error",
                 "cannot replay the selected native services",
             ),
+        ),
+    ),
+    "U-MCPOWN-USER": (
+        "the retired MCP owners (vscode, legacy-receipt) exist only at project scope: APM "
+        "<= 0.36 wrote them to project files and the retired-claim reader returns no claims "
+        "at user scope, so a user-scope cell with a retired owner is unreachable and removed",
+        (
+            Ev(_RETIRED, "", "APM <= 0.36 wrote ``copilot`` project MCP servers"),
+            Ev(_RETIRED, "split_mcp_claims", "if user_scope:"),
+            Ev(_RETIRED, "split_mcp_claims", "return RetiredMcpClaims({}, {})"),
         ),
     ),
     "E1": (
@@ -440,6 +477,8 @@ EXCEPTION_PARTNERS: Mapping[str, Mapping[str, tuple[str, ...] | None]] = {
 }
 # Ops where E3's exception (compile-staging routing) applies to a file primitive.
 FILEROUTE_OPS = frozenset({"compile", "bundle-install"})
+# MCPOWN values that name a retired project destination (U-MCPOWN-USER).
+RETIRED_MCP_OWNERS = frozenset({"vscode", "legacy-receipt"})
 MARKETPLACE_SOURCES = frozenset({"marketplace-git", "marketplace-local", "marketplace-file"})
 # Sources of a single MCP server (install --mcp), not of a package.
 MCP_SOURCES = frozenset({"mcp-registry", "inline-mcp"})
@@ -565,6 +604,10 @@ def definition_rule(cell: Mapping[str, str]) -> str | None:
         return "U8"
     if u_bin_applies(cell) and u_bin_pinned():
         return "U-BIN"
+    if u_bin_ops_applies(cell) and u_bin_pinned():
+        return "U-BIN-OPS"
+    if cell.get("SCOPE") == "user" and cell.get("MCPOWN") in RETIRED_MCP_OWNERS:
+        return "U-MCPOWN-USER"
     if (deployed in ("clean", "edited") and lock == "absent") or (
         deployed == "present-provenance-unknown" and lock not in (None, "absent")
     ):
@@ -594,11 +637,21 @@ def _u8_target(cell: Mapping[str, str]) -> dict[str, str] | str | None:
 
 
 def _source_mapping(cell: Mapping[str, str]) -> tuple[dict[str, str] | str, str] | None:
-    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP."""
+    """(target, rule) of a mapping the source decides: U8, or U-FIRST-PARTY-MCP.
+
+    ``install --mcp NAME`` declares NAME in the root apm.yml, so the server it
+    installs is first-party too: its executable-gate levels map the same way.
+    """
     target = _u8_target(cell)
     if target is not None:
         return target, "U8"
-    if cell.get("SRC") in MCP_SOURCES and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+    first_party = cell.get("SRC") in MCP_SOURCES or (
+        cell.get("OP") == "mcp-install" and cell.get("PRIM") == "mcp" and "SRC" not in cell
+    )
+    if first_party and GATE_AUTHORITY.get(cell.get("GATE")) == "executable-gate":
+        return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
+    # R5: approve / deny decide only installed packages, never a root-declared server.
+    if cell.get("SRC") in MCP_SOURCES and cell.get("OP") == "approve-deny" and "GATE" not in cell:
         return FIRST_PARTY_MCP_CELL, "U-FIRST-PARTY-MCP"
     return None
 
@@ -698,6 +751,23 @@ U_BIN_PIN = "a2fb54bea5abdfe3d5aababbe1a10461fc5a89ec357c94f0dbca9e21b57e6851"
 def u_bin_applies(cell: Mapping[str, str]) -> bool:
     """bin/ at project scope: the shape U-BIN defines away (exec_gate.py::plugin_bin_deployable)."""
     return cell.get("PRIM") == "bin" and cell.get("SCOPE") == "project"
+
+
+# Commands with no user-scope form that write no plugin root, and the local bundle
+# install: bin/ never deploys there. prune retires a whole plugin's root, bin/ included
+# (#4559, #4808), and audit's drift replay fingerprints that root (drift.py
+# verify_claude_native_cache), so their bin gate levels are reachable cells.
+BIN_LESS_OPS = frozenset({"pack", "marketplace", "bundle-install"})
+
+
+def u_bin_ops_applies(cell: Mapping[str, str]) -> bool:
+    """U-BIN-OPS: an OP x PRIM x GATE cell of bin/ under a command bin/ never reaches."""
+    return (
+        set(cell) == {"OP", "PRIM", "GATE"}
+        and cell["PRIM"] == "bin"
+        and cell["OP"] in BIN_LESS_OPS
+        and GATE_AUTHORITY.get(cell["GATE"]) != "org-policy"
+    )
 
 
 def u_bin_pinned() -> bool:

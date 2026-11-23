@@ -1356,14 +1356,36 @@ shows the consumer deployed the bytes currently on disk: either a local
 deployment record, written by the consumer on this installation when it
 wrote the file, whose content hash matches the file, or byte equality,
 over the canonical content domain of [req-lk-012](#req-lk-012), with what
-the locked version of the owning dependency renders for that path. A
-lockfile content hash alone MUST NOT authorize the deletion: it proves
-content, not that the consumer deployed it. Without such evidence, or
-when the file differs from it, the consumer MUST keep the file and emit a
-diagnostic naming its path and the manual resolution. A consumer that
+the locked version of the owning dependency renders for that path. Except
+under the consent exception below, a lockfile content hash alone MUST NOT
+authorize the deletion: it proves content, not that the consumer deployed
+it. Without such evidence, or when the file differs from it, the consumer
+MUST keep the file and emit a diagnostic naming its path and the manual
+resolution, except as the consent exception below permits. A consumer that
 needs the dependency's source to establish the render MUST establish it
 before removing that source. Removing a consumer-managed final symbolic
 link removes no file content and is outside this requirement.
+One consent exception applies, only to an uninstall the user explicitly
+consents to on that invocation. It covers a file that lacks evidence
+because the consumer read its local deployment records without error and
+holds none for the file (an absent record store holds none; a store that
+exists but cannot be read or parsed does not qualify), and because the
+consumer attempted, and failed, to produce any render of the locked
+dependencies that own the path. For such a file the consumer MAY delete it
+when its content hash, over the canonical domain of
+[req-lk-012](#req-lk-012), equals the one distinct content hash the
+lockfile records for that path across all its owning dependencies,
+compared per [req-lk-016](#req-lk-016) (a bare hexadecimal value reads as
+`sha256`; a value naming another algorithm does not match). The consumer
+MUST re-evaluate every condition of this exception immediately before
+removing the file, and MUST name each file so deleted and state that its
+lockfile hash was the basis. The consumer MUST NOT apply the exception to
+a path that a dependency remaining after the uninstall also lists, when a
+deployment record or a render shows different bytes, when a render lacks
+the path, when the lockfile records no hash or two or more distinct hashes
+for the path, or when the file is unreadable or is not a regular file (a
+symbolic link included), and MUST NOT infer consent from another option,
+an environment variable, configuration, or manifest or lockfile content.
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -4632,7 +4654,15 @@ For supported dependency aliases, [req-mf-025](#req-mf-025) constrains
 destinations and records canonical placement for later cleanup. Containment
 alone does not establish ownership or authorize deletion of existing content.
 [req-lk-024](#req-lk-024) requires deployment evidence, not a
-lockfile hash alone, before a lockfile-driven deletion.
+lockfile hash alone, before a lockfile-driven deletion; its only exception
+is an uninstall the user explicitly consents to per invocation, limited to
+files no deployment record or render can speak for. Under that consent the
+deletion rests on the provenance of the lockfile: a tampered lockfile can
+direct the deletion of any file whose current bytes it records, confined
+to paths the uninstall removes and named in its output, so a user consents
+only for a lockfile of trusted provenance. Because a render that can be
+produced takes precedence over the exception, the same uninstall can keep a
+file online and delete it offline.
 
 ### 10.8 Policy bypass via crafted manifest
 
@@ -5500,7 +5530,9 @@ renumbering of conformance classes.
 
 Conditional requirements retain the applicability limits in their bodies.
 In particular, [req-lk-023](#req-lk-023) applies only to the proposed
-staged-replacement capability, not every consumer implementation.
+staged-replacement capability, not every consumer implementation. The
+consent exception of [req-lk-024](#req-lk-024) applies only to an
+uninstall the user explicitly consents to on that invocation.
 
 | ID                                       | Keyword | Section | Class       |
 |------------------------------------------|---------|---------|-------------|
@@ -5740,10 +5772,12 @@ staged-replacement capability, not every consumer implementation.
 | 0.1.74 (proposed) | 2026-11-20 | Amendment for issue #3921 (native plugins at project scope for Claude Code and GitHub Copilot; PR #4559, superseding #4010). Pending editor decision; the number is provisional. Revised the [req-na-002](#req-na-002) root digest clause in place: at project scope, where the deployed roots and the lockfile are shared project files, the recorded root digest omits the executable-bit byte (it equals the [req-na-005](#req-na-005) approval digest construction), and the consumer compares the deployed root with the materialized source under the executable-bit-including construction on the deploying machine before writing activation entries, without recording that comparison; the editorial note is rewritten accordingly. Revised criterion [A5](#na-crit-a5) in place: at project scope, a target that documents which other target's files it reads but not their precedence meets A5 for a consumer that discloses the file priority it verified against a cited client version, with a conformance test that runs that client where installed and skips where not. Revised [req-na-004](#req-na-004) in place: at project scope, in the settings file of a target that also reads another target's file at lower priority, the enable key of a plugin the consumer declares to that other target is the consumer's own, written `false` when the plugin's effective targets exclude the reading target (cross-target suppression) and changed or removed as targets or the lockfile change; every other `false` stays untouched. Part C (informative) records GitHub Copilot CLI as native-eligible at project scope under that test, with the order `.claude/settings.json` < `.claude/settings.local.json` < `.github/copilot/settings.json` < `.github/copilot/settings.local.json` verified against Copilot CLI 1.0.112, records that a Claude-only plugin gets the consumer's own `false` in `.github/copilot/settings.json`, and records that the Copilot route of [req-tg-013](#req-tg-013) moved to this profile. The Section 5.2 `native_plugin` row is updated and names the optional sibling `native_declared` (the targets whose settings held the consumer's `true` when the lock was written), which is advisory and not trust-bearing: it has no identity, replay or ownership role. [req-na-005](#req-na-005) is unchanged. Under Section 9.2 this changes verdicts: a project-scope consumer that records the executable bit in the committed root digest, that does not compare the bit on the deploying machine, or that lets Copilot load a plugin activated for Claude Code alone, no longer conforms; a project-scope root digest recorded with the bit is reported as drift until the next install records it without. Sections 5.2 and 8.5.11 are updated; schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 151 (146 MUST, 5 SHOULD). |
 | 0.1.75  | 2026-11-21 | Amendment for accepted issue #1925 (explicit policy source on install and update). Added [req-pl-022](#req-pl-022) (Section 6.1, governance MUST): an install or update operation that accepts an explicit policy source in addition to discovery evaluates the tighten-only merge of the discovered policy (parent) and the explicit policy (child) per [req-pl-006](#req-pl-006), uses the explicit policy alone when none is discovered, fails closed when the explicit source cannot be resolved, fetched or parsed into a valid policy or publishes none (non-zero before any deployment write, naming the source and the cause, whatever `policy.fetch_failure_default` says; a discovered-policy failure keeps its own routing), and reports every policy source in effect; a valid stale cached copy counts as resolved and the manifest `policy.hash` pin still covers only the discovered policy. Revised [req-pl-001](#req-pl-001) and the Section 6.1 lead sentence in place to admit the composed explicit source; [req-pl-021](#req-pl-021) is unchanged. Under Section 9.2 this adds a capability, so it is an amendment, not behavior-neutral errata; an operation that replaces discovery is unchanged. Proposed and adopted 2026-11-21 in this Working Draft by editor decision (CEO sign-off D5, issue #1925), without the Section 9.3 reviewer-panel approval and public comment period. Statement count: 151 -> 152 (147 MUST, 5 SHOULD). |
 | 0.1.76 (proposed) | 2026-11-22 | Amendment from private security coordination (direction signed by the CEO). Revised [req-sc-016](#req-sc-016) (Section 10.13, consumer MUST) in place: when the organization policy sets `mcp.trust_transitive` to `false`, or leaves it unset while setting any restriction (a non-default field; metadata and `enforcement` alone are not restrictions), a transitive MCP server of any declaration form, including a plain registry reference, is admitted only when `mcp.allow` matches its name, neither a bound grant nor the per-invocation opt-in overrides that, and a root re-declaration makes it a direct declaration; `enforcement: block` fails the operation before deployment, `enforcement: warn` emits a diagnostic as for `mcp.deny`, and an audit reports each such server. A policy that sets no restriction imposes nothing. Under Section 9.2 a consumer that deploys such a server without a matching `mcp.allow` entry no longer conforms. Schema bytes are unchanged. No requirement ID, keyword or statement count changes. Statement count: 152 (147 MUST, 5 SHOULD). |
+| 0.1.77 (proposed) | 2026-11-21 | Amendment for accepted issue #4295 (uninstall consent for missing evidence). Revised [req-lk-024](#req-lk-024) (Section 5.2, consumer MUST) in place with one per-invocation consent exception: on an uninstall the user explicitly consents to, a file whose local deployment records were read without error and hold none for it (an absent record store holds none; an unreadable one does not qualify), and for which the consumer attempted and failed to produce any render of its owning locked dependencies, MAY be deleted when its content hash over the [req-lk-012](#req-lk-012) domain equals the one distinct hash the lockfile records for that path across its owners, compared per [req-lk-016](#req-lk-016); every condition is re-evaluated immediately before removal, and each deletion is named with the lockfile hash as its basis. The exception never covers a path a remaining dependency also lists, a differing record or render, a render lacking the path, no or two or more distinct recorded hashes, or an unreadable file or one that is not a regular file, and consent is never inferred from another option, an environment variable, configuration, or manifest or lockfile content. Under Section 9.2 this relaxes a fail-closed obligation only under explicit per-invocation consent, so it is an amendment, not errata; a consumer that does not offer the exception still conforms, and the only verdict that changes is for a consented deletion on a lockfile hash alone, which now conforms. Without consent, behavior is unchanged. Section 10.7 and Appendix C, the requirements manifest and conformance coverage are updated; schema bytes and `lockfile_version` are unchanged. No statement added; the count remains 152 (147 MUST, 5 SHOULD). |
 
 In the Date column, a row marked (proposed) gives its proposal date and any other row gives the date its change took effect in this working draft; for 0.1.61, 0.1.62, 0.1.63, 0.1.65 and 0.1.69 that is the adoption date, and each of those rows states its proposal date.
+Version 0.1.74 is reserved for a concurrently proposed amendment (open pull request #4559) and has no row in this working draft.
 The independently drafted 0.1.52, 0.1.53, 0.1.55, 0.1.57, 0.1.58 and
-0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, and the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place; none adds a statement. Together, this
+0.1.60 proposals, the adopted 0.1.63, 0.1.69 and 0.1.75 amendments and the 0.1.64 proposal each add one MUST; 0.1.54 adds four; the 0.1.73 proposal adds two; the adopted 0.1.65 amendment adds seven; 0.1.56 revises [req-tg-005](#req-tg-005) in place, 0.1.59 revises [req-pl-018](#req-pl-018) in place, the 0.1.67 proposal revises it again in place, the adopted 0.1.61 amendment revises Section 4.2.1 and [req-tg-008](#req-tg-008) in place, the adopted 0.1.62 amendment revises the [req-pl-006](#req-pl-006) merge-table `fetch_failure` row in place, and the 0.1.66 proposal revises [req-na-005](#req-na-005) and the [req-na-002](#req-na-002) file-set exclusion clause in place, the 0.1.68 proposal revises [req-lk-016](#req-lk-016) in place, and the 0.1.74 proposal revises the [req-na-002](#req-na-002) root digest clause, the [req-na-004](#req-na-004) `false` rule and criterion [A5](#na-crit-a5) in place, the 0.1.76 proposal revises [req-sc-016](#req-sc-016) in place, and the 0.1.77 proposal revises [req-lk-024](#req-lk-024) in place; none adds a statement. Together, this
 working draft
 contains 152 statements (147 MUST, 5 SHOULD). Combining the proposals does not establish
 Section 9.3 adoption or CLI release. Amendments 0.1.61, 0.1.62 and 0.1.63 were adopted on 2026-11-19 by editor decision (issue #3904), amendment 0.1.65 on the same date by editor decision (issue #3919), and amendment 0.1.69 on 2026-11-20 by editor decision (issue #3701), not through the Section 9.3 reviewer-panel approval and public comment period. Where adopted text cites a field or requirement that a still-proposed amendment adds (for example `subset_pairings` and [req-rs-018](#req-rs-018) from 0.1.60, and [req-mf-026](#req-mf-026) from 0.1.57), the citation is a cross-reference to that text as it reads in this working draft and does not adopt it.
