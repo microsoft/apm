@@ -450,6 +450,9 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+        for dep_key, targets in self.ctx.package_targets.items():
+            if dep_key in lockfile.dependencies:
+                lockfile.dependencies[dep_key].package_targets = list(targets)
 
     def _attach_exec_status(self, lockfile: LockFile) -> None:
         """Attach the #1873 ``exec_status`` trust state computed at the gate.

@@ -35,7 +35,8 @@ connection (TCP + TLS) and 1 for each request.
 ## Journey harness
 
 `tests/benchmarks/journeys.py` runs the CLI as a subprocess. It finds the CLI
-from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm`. The journeys are:
+from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm` (`.venv/Scripts/apm.exe`
+on Windows). The journeys are:
 
 - boot: `--version`, `--help`
 - install: cold and warm cache, no-op, `--frozen` CI replay (committed
@@ -48,8 +49,9 @@ from `--apm`, then `APM_BINARY_PATH`, then `.venv/bin/apm`. The journeys are:
   bundles that carry hooks)
 
 It writes `journeys-<sha>.json` and `.md`. Each cell reports wall p50 and p90,
-CPU p50 (user + sys of the `apm` child and every descendant it waited for, so
-the mirror's server-side work is excluded), request, round-trip and connect
+CPU p50 (user + sys of the `apm` child and every descendant it waited for; on
+Windows, every process of its Job Object; so the mirror's server-side work is
+excluded), request, round-trip and connect
 counts, and the 1-min load of every sample. It also adds a scaling table for
 the tree sizes. `--counts` adds subprocess spawns per executable and the
 number of imported modules, through an audit-hook `sitecustomize` on the

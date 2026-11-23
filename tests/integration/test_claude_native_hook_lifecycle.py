@@ -212,6 +212,137 @@ def test_runtime_plugin_root_hooks_stay_intact_per_plugin(
         pytest.skip("Declaration checks passed; hook execution needs node on POSIX.")
 
 
+_COMPANION_APP_SERVER = """\
+import fs from "node:fs";
+const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), "utf8");
+export const PLUGIN_MANIFEST = JSON.parse(read("../../.claude-plugin/plugin.json"));
+export const PROMPT = read("../../prompts/review.md").trim();
+export const SCHEMA = JSON.parse(read("../../schemas/verdict.json"));
+"""
+_COMPANION_HOOK = """\
+import fs from "node:fs";
+import { PLUGIN_MANIFEST, PROMPT, SCHEMA } from "./lib/app-server.mjs";
+const row = { name: PLUGIN_MANIFEST.name, prompt: PROMPT, schema: SCHEMA.title };
+fs.appendFileSync(process.env.APM_HOOK_PROBE_MARKER, JSON.stringify(row) + "\\n");
+"""
+
+
+def test_user_scope_hook_reads_the_plugin_manifest_from_its_native_root(
+    tmp_path: Path, apm_engine_command: tuple[str, ...]
+) -> None:
+    """#2824: a user-scope hook that reads ../../.claude-plugin/plugin.json finds it.
+
+    Codex Companion layout: hook scripts under scripts/ read the plugin manifest,
+    prompts/ and schemas/ outside scripts/. The plugin deploys whole as its own
+    native root (#4559), so ${CLAUDE_PLUGIN_ROOT} is a faithful plugin root and
+    nothing is split into ~/.claude/hooks/<pkg>/.
+    """
+    scenario = _native_scenario(tmp_path)
+    isolated, env = scenario.isolated, scenario.env
+    factory = LocalGitRepositoryFactory(isolated.repository_root, env=env)
+    repository = factory.create("codex-plugin-cc")
+    source = repository.worktree / "plugins/codex"
+    files = {
+        ".claude-plugin/plugin.json": json.dumps({"name": "codex", "version": "1.0.0"}),
+        "hooks/hooks.json": json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'node "${CLAUDE_PLUGIN_ROOT}'
+                                    '/scripts/stop-review-gate-hook.mjs"',
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ),
+        "scripts/package.json": '{"type": "module"}',
+        "scripts/stop-review-gate-hook.mjs": _COMPANION_HOOK,
+        "scripts/lib/app-server.mjs": _COMPANION_APP_SERVER,
+        "prompts/review.md": "REVIEW_PROMPT\n",
+        "schemas/verdict.json": '{"title": "verdict"}',
+    }
+    for relative, text in files.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="ascii")
+    revision = factory.commit(repository, message="Codex Companion layout").sha
+    dependency = "fixture/codex-plugin-cc"
+    env = factory.url_rewrite_subprocess_env(repository, f"https://github.com/{dependency}.git")
+    manifest = {
+        "name": "companion-consumer",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": [{"git": dependency, "ref": revision, "path": "plugins/codex"}]},
+        "executables": {"allow": {}},
+    }
+    (isolated.config_root / "apm.yml").write_text(json.dumps(manifest), encoding="utf-8")
+    runner = ApmLifecycleRunner(apm_engine_command)
+
+    def run(*args: str, cwd: Path = isolated.work_root) -> None:
+        result = runner.run(args, scenario_id="claude-native-2824", cwd=cwd, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (result.stdout + result.stderr).isascii()
+
+    def tree(root: Path) -> dict[str, bytes]:
+        return {
+            path.relative_to(root).as_posix(): path.read_bytes()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    install = ("install", "--global", "--target", "claude", "--only", "apm")
+    run(*install)
+    assert not scenario.plugins.exists()
+    run("approve", "--all", cwd=isolated.config_root)
+    run(*install)
+
+    root = scenario.plugins / "codex"
+    # The deployed root is the whole plugin: manifest, scripts, prompts, schemas.
+    assert tree(root) == tree(source)
+    claude_home = isolated.home / ".claude"
+    assert not (claude_home / "hooks").exists()
+    assert "hooks" not in scenario.declared()
+    mkt = marketplace_name(isolated.config_root)
+    assert scenario.declared()["enabledPlugins"] == {f"codex@{mkt}": True}
+    lock = load_yaml(isolated.config_root / "apm.lock.yaml")
+    assert [dep["native_plugin"]["root"] for dep in lock["dependencies"]] == [
+        ".agents/plugins/codex"
+    ]
+
+    # I2: a converged reinstall rewrites nothing.
+    before = (tree(root), scenario.settings.read_bytes())
+    run(*install)
+    assert (tree(root), scenario.settings.read_bytes()) == before
+
+    if shutil.which("node") is not None and os.name != "nt":
+        witness = isolated.root / "hook-witness.jsonl"
+        hooks = json.loads((root / "hooks/hooks.json").read_text(encoding="utf-8"))
+        completed = subprocess.run(
+            hooks["hooks"]["Stop"][0]["hooks"][0]["command"],
+            shell=True,
+            input=json.dumps({"hook_event_name": "Stop"}),
+            text=True,
+            capture_output=True,
+            env=dict(env, CLAUDE_PLUGIN_ROOT=str(root), APM_HOOK_PROBE_MARKER=str(witness)),
+            cwd=isolated.work_root,
+            timeout=30,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert json.loads(witness.read_text(encoding="utf-8")) == {
+            "name": "codex",
+            "prompt": "REVIEW_PROMPT",
+            "schema": "verdict",
+        }
+    assert not scenario.trap.exists()
+
+
 @pytest.mark.parametrize("failure", ["", "install", "uninstall"])
 @pytest.mark.parametrize("local", [False, True])
 def test_installed_hook_source_reinstall_and_removal(
