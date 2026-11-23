@@ -1076,6 +1076,32 @@ def test_a_reanchor_refuses_a_shared_skill_in_a_layout_the_render_cannot_reprodu
     _assert_refused_before_any_write(world, ".cursor/skills/")
 
 
+def test_a_reanchor_carries_a_shared_skill_directory_claim_spelled_with_a_slash(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 review: ``.claude/skills/shared/`` is the same claim as without the "/"."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True)
+    directory = ".claude/skills/shared"
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    for row in lock["deployments"]:
+        if row["value"] == directory:
+            row["value"] = f"{directory}/"
+    for row in lock["dependencies"]:
+        files = row.get("deployed_files") or []
+        row["deployed_files"] = [f"{path}/" if path == directory else path for path in files]
+    dump_yaml(lock, world.project / "apm.lock.yaml")
+
+    result = world.apm("uninstall", "./vendor/e")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    owners = {
+        row["value"].rstrip("/"): row["active_owner"]
+        for row in load_yaml(world.project / "apm.lock.yaml")["deployments"]
+    }
+    assert owners[directory] == owners[_SHARED_SKILL] == "local:vendor/e", owners
+
+
 def test_a_reanchor_refuses_a_directory_only_shared_skill_claim(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
