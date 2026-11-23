@@ -20,13 +20,12 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import sys
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.fixtures.perf.generator import TreeFixture, publish_repositories
+from tests.fixtures.perf.generator import TreeFixture, publish_repositories, remove_tree
 from tests.lifecycle.world.services import WorldServices
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_scripted_https_proxy import Traffic
@@ -69,7 +68,7 @@ class OfflineWorld:
 
     def clear_cache(self) -> None:
         """Empty APM_CACHE_DIR: the next command runs against a cold cache."""
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
+        remove_tree(self.cache_dir)
         self.cache_dir.mkdir(parents=True)
 
 

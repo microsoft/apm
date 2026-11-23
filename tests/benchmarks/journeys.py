@@ -59,7 +59,7 @@ from tests.fixtures.perf import (  # noqa: E402
     isolated_environment,
     serve_offline,
 )
-from tests.fixtures.perf.generator import consumer_manifest, write_lf  # noqa: E402
+from tests.fixtures.perf.generator import consumer_manifest, remove_tree, write_lf  # noqa: E402
 
 LOCAL_JOURNEYS = ("compile", "audit", "pack", "install-bundle")
 NETWORK_JOURNEYS = (
@@ -122,7 +122,7 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
     directory = work / "fixtures" / name
     if name == "real":
         template = directory / "project"
-        shutil.rmtree(directory, ignore_errors=True)
+        remove_tree(directory)
         template.mkdir(parents=True)
         text = consumer_manifest("real-consumer", list(REAL_PACKAGES), ("copilot",))
         write_lf(template / "apm.yml", text)
@@ -157,7 +157,7 @@ def prepare_fixture(name: str, work: Path) -> Fixture:
 
 def _rebuild(directory: Path, recipe: object, build: Callable[[Path], object]):
     """Regenerate the fixture; generation is seeded, so this is cheap to trust."""
-    shutil.rmtree(directory, ignore_errors=True)
+    remove_tree(directory)
     directory.mkdir(parents=True)
     return build(directory / "src")
 
@@ -192,13 +192,13 @@ class _RealWorld:
         self.tunnel.reset_traffic()
 
     def clear_cache(self) -> None:
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
+        remove_tree(self.cache_dir)
         self.cache_dir.mkdir(parents=True)
 
 
 @contextlib.contextmanager
 def open_world(fixture: Fixture, directory: Path) -> Iterator[object]:
-    shutil.rmtree(directory / "env", ignore_errors=True)
+    remove_tree(directory / "env")
     if fixture.real:
         isolated, env = isolated_environment(directory / "env")
         with counting_tunnel() as tunnel:
@@ -462,7 +462,7 @@ class Context:
     # state helpers (untimed)
 
     def fresh_project(self) -> None:
-        shutil.rmtree(self.project, ignore_errors=True)
+        remove_tree(self.project)
         shutil.copytree(self.fixture.template, self.project)
         self.elsewhere.mkdir(parents=True, exist_ok=True)
         self.is_installed = False
@@ -488,7 +488,7 @@ class Context:
                 shutil.rmtree(path)
             elif path.exists():
                 path.unlink()
-        shutil.rmtree(Path(self.world.env["HOME"]) / ".copilot", ignore_errors=True)
+        remove_tree(Path(self.world.env["HOME"]) / ".copilot")
         shutil.copyfile(self.fixture.template / "apm.yml", home / "apm.yml")
 
 
@@ -544,10 +544,10 @@ def _setup_install_bundle(ctx: Context) -> None:
     """A plugin bundle packed from the installed project; a fresh consumer installs it."""
     ctx.installed()
     dist = ctx.work / "dist-bundle"
-    shutil.rmtree(dist, ignore_errors=True)
+    remove_tree(dist)
     ctx.checked(["pack", "--archive", "-o", str(dist)], ctx.roots()[0])
     consumer = ctx.work / "bundle-consumer"
-    shutil.rmtree(consumer, ignore_errors=True)
+    remove_tree(consumer)
     consumer.mkdir()
     text = consumer_manifest("bundle-consumer", [], ("copilot",))
     write_lf(consumer / "apm.yml", text)
@@ -568,7 +568,7 @@ def _uninstall_steps(ctx: Context) -> list[Step]:
 
 def _setup_pack(ctx: Context) -> None:
     ctx.installed()
-    shutil.rmtree(ctx.work / "dist", ignore_errors=True)
+    remove_tree(ctx.work / "dist")
 
 
 @dataclass(frozen=True)
@@ -1080,7 +1080,7 @@ def verify_real(args: argparse.Namespace) -> int:
     """Install each REAL_PACKAGES entry alone; exit 1 when any fails to resolve."""
     apm = resolve_apm(args.apm)
     work = Path(args.work).resolve() / "verify-real"
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     failures = 0
     isolated, env = isolated_environment(work / "env")
     with counting_tunnel() as tunnel:

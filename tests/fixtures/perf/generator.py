@@ -15,10 +15,13 @@ SHAs on every machine.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import random
 import shutil
+import stat
 import subprocess
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -313,6 +316,24 @@ def plan_tree(recipe: TreeRecipe) -> tuple[list[list[str]], dict[str, list[str]]
     return levels, {name: sorted(children) for name, children in edges.items()}
 
 
+def remove_tree(path: Path) -> None:
+    """``shutil.rmtree(path, ignore_errors=True)`` that also deletes read-only files.
+
+    Git writes object files read-only, and on Windows a read-only file cannot
+    be deleted, so a plain ``ignore_errors`` rmtree silently leaves them behind.
+    """
+
+    def retry(func, target, _exc) -> None:
+        with contextlib.suppress(OSError):
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=retry)
+    else:
+        shutil.rmtree(path, onerror=retry)
+
+
 def write_lf(path: Path, text: str) -> None:
     """Write *text* as UTF-8 with LF newlines on every platform (byte-stable fixtures)."""
     path.write_bytes(text.encode("utf-8"))
@@ -484,7 +505,7 @@ def publish_repositories(fixture: TreeFixture, directory: Path) -> dict[str, Pat
     every call, so a changed recipe never serves stale content.
     """
     root = directory / fixture.recipe.name
-    shutil.rmtree(root, ignore_errors=True)
+    remove_tree(root)
     root.mkdir(parents=True)
     served: dict[str, Path] = {}
     for name, tree in sorted(fixture.packages.items()):
