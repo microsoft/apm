@@ -22,6 +22,7 @@ from apm_cli.core.remediation import (
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...deps.lockfile import lockfile_parent_identity
 from ...deps.lockfile_generator import require_current_cli
 from ...deps.lockfile_write_authority import (
     LockfileWriter,
@@ -134,6 +135,7 @@ def _split_still_needed_packages(
         for package in packages_to_remove
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
+    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
     repair = _StillNeededRepair(
         dict(decision.rescued_parents),
@@ -142,6 +144,43 @@ def _split_still_needed_packages(
         frozenset(decision.rescued_roots),
     )
     return removed, still_needed, repair
+
+
+def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
+    """Name a lock parent the way the user declared it (``./vendor/d``)."""
+    for dep in lockfile.get_package_dependencies():
+        if lockfile_parent_identity(dep, lockfile.replacements) == parent_identity:
+            if dep.source == "local" and dep.local_path:
+                return dep.local_path
+            return dep.repo_url
+    return parent_identity or "another dependency"
+
+
+def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) -> None:
+    """Refuse before any write when a still-needed package is a local one (#4882).
+
+    Keeping a local package under its new parent changes its lock identity
+    (the anchored key), which uninstall cannot re-key yet, so it would leave
+    a lockfile ``apm install --frozen`` rejects. Remote packages keep the
+    declaration-only removal (#4749).
+    """
+    local = []
+    for package in still_needed:
+        key = _removed_lock_key(package, lockfile)
+        row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local":
+            parent = _locked_parent_label(lockfile, parents.get(key, (None,))[0])
+            local.append((_dependency_public_label(package), parent))
+    if not local:
+        return
+    for label, parent in local:
+        logger.error(
+            f"{label} stays: {parent} still needs it; apm.yml and apm.lock.yaml were not changed."
+        )
+    logger.progress(
+        "Uninstall the package that still needs it first, or keep the local declaration in apm.yml."
+    )
+    sys.exit(1)
 
 
 def _split_removals(

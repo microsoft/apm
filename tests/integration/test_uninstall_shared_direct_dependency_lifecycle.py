@@ -354,3 +354,42 @@ def test_uninstall_makes_a_shared_descendant_dev_only_graph_wide(
     assert rows["test/e"].get("is_dev") is True
     assert rows["test/f"].get("is_dev") is True
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_refuses_a_local_dependency_another_package_still_needs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4882: dev ./vendor/d declares ../e; uninstalling direct ./vendor/e refuses.
+
+    A kept local dependency would change lock identity (its anchored key), so
+    uninstall refuses before any write instead of leaving a lock that
+    ``install --frozen`` rejects.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    before = tree_digest(world.project)
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    assert refused.returncode == 1
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert (
+        "./vendor/e stays: ./vendor/d still needs it; apm.yml and apm.lock.yaml were not changed."
+    ) in output
+    assert "Uninstall the package that still needs it first" in output
+    assert tree_digest(world.project) == before
+    world.apm("install", "--frozen")
