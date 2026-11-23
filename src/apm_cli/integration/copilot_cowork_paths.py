@@ -236,6 +236,26 @@ def from_lockfile_path(lockfile_path: str, cowork_root: Path) -> Path:
     return ensure_path_within(candidate, cowork_root)
 
 
+def cowork_locator(lockfile_path: str, cowork_root: Path) -> Path:
+    """Decode a ``cowork://`` entry without following its final component.
+
+    Like :func:`from_lockfile_path`, but only the parent directory is resolved
+    and contained, so a final symlink stays the link itself.  Deletion
+    decisions must judge, and unlink, the locator the lockfile names, never
+    the file a link points at (#4295).
+    """
+    from apm_cli.utils.path_security import ensure_path_within
+
+    # Validates scheme, segments and containment of the full path first.
+    resolved = from_lockfile_path(lockfile_path, cowork_root)
+    rel_posix = lockfile_path[len(COWORK_URI_SCHEME) :]
+    rel_posix = rel_posix.removeprefix("skills/")
+    candidate = cowork_root / rel_posix
+    if candidate == cowork_root or not candidate.name:
+        return resolved
+    return ensure_path_within(candidate.parent, cowork_root) / candidate.name
+
+
 def is_cowork_path(lockfile_path: str) -> bool:
     """Return ``True`` if *lockfile_path* uses the ``cowork://`` scheme."""
     return lockfile_path.startswith(COWORK_URI_SCHEME)
