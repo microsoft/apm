@@ -281,10 +281,10 @@ def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
     machine.decide("hook", "approve")
     machine.install("plain")
     world = machine.world
-    approve = world.run(("approve", str(world.packages["hook"])))
-    output = " ".join(f"{approve.stdout}\n{approve.stderr}".split())
-    assert approve.returncode == 1, output
-    assert "is still denied" in output and "org policy denies it" in output, output
+    manifest = (world.workspace / "apm.yml").read_text(encoding="utf-8")
+    # A repeat is not a new grant: decide() checks exit 1, the org layer and I7.
+    machine.decide("hook", "approve")
+    assert (world.workspace / "apm.yml").read_text(encoding="utf-8") == manifest
     assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
