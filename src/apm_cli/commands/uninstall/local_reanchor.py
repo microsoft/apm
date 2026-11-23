@@ -153,7 +153,8 @@ def _respelled_descendants(
             continue
         copy = row.to_dependency_ref().get_install_path(modules_dir)
         _require_copy(copy, key, label, modules_dir)
-        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir)
+        # It moves like a root, so stale excluded files take the fresh-copy path.
+        _require_fresh_copy(row, real_dir, copy, key, label, modules_dir, unhashed=False)
         respelled[key] = (via[1], nearest[0], real_dir, declared)
     return respelled
 
@@ -183,13 +184,14 @@ def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir:
 def _same_install_dir(row, declared: str | None, modules_dir: Path) -> bool:
     """Whether *declared* names *row*'s own package directory (a case-insensitive filesystem).
 
-    Spellings are first matched by NFC normalization, then case folding (the
-    order of ``utils.paths`` spelling keys); the filesystem then decides.
+    Spellings are first matched by the canonical caseless key (NFD, case
+    folding, then NFC, as ``utils.paths.caseless``); the filesystem decides.
     """
     import unicodedata
 
     def key(spelling: str) -> str:
-        return unicodedata.normalize("NFC", spelling).casefold()
+        # utils.paths.caseless: NFD, case folding, then NFC (#5167).
+        return unicodedata.normalize("NFC", unicodedata.normalize("NFD", spelling).casefold())
 
     if declared is None or key(declared) != key(row.repo_url):
         return False
@@ -323,7 +325,9 @@ def _stale_excluded_copies(lockfile, nodes, moves, walk, modules_dir: Path) -> t
         except (OSError, ValueError):
             stale = False
         if stale:
-            fresh.append((current, ref, row.content_hash_framed))
+            # A descendant's local_path is relative to its parent: stage from the source itself.
+            sourced = replace(ref, local_path=os.path.abspath(source))
+            fresh.append((current, sourced, row.content_hash_framed))
     return tuple(fresh)
 
 
@@ -379,12 +383,21 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
 
 
 def _require_fresh_copy(
-    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+    row,
+    source: Path | None,
+    copy: Path,
+    key: str,
+    label,
+    modules_dir: Path,
+    *,
+    unhashed: bool = True,
 ) -> None:
     """Refuse a kept descendant whose local source no longer matches its copy (#4999).
 
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
+    With *unhashed* false, only the hashed content counts: a moving copy whose
+    excluded files went stale is re-materialized instead (#5102).
     """
     from ...install.phases.local_content import local_source_matches_copy
 
@@ -392,7 +405,7 @@ def _require_fresh_copy(
         fresh = (
             source is not None
             and local_source_matches_copy(row, source, copy)
-            and _unhashed_files_match(source, copy)
+            and (not unhashed or _unhashed_files_match(source, copy))
         )
     except (OSError, ValueError, TypeError):
         fresh = False

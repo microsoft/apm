@@ -914,3 +914,26 @@ def test_an_nfd_descendant_spelling_reanchors_to_the_fresh_spelling(
     world.apm("uninstall", "./vendor/e")
 
     _assert_no_frozen_rewrites_nothing(world)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_respelled_descendant_with_stale_excluded_files_reanchors_as_a_fresh_copy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """F's .git/HEAD changes after install: the respelled copy is re-materialized (#5102)."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("vendor/f and vendor/F are one name here; the case-only cell covers it")
+
+    def link_f(vendor: Path) -> None:
+        head = vendor / "F/.git/HEAD"
+        head.parent.mkdir(parents=True)
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (vendor / "f").symlink_to(vendor / "F", target_is_directory=True)
+
+    world = _respelled_world(tmp_path, apm_binary_path, link_f)
+    (world.project / "vendor/F/.git/HEAD").write_text("ref: refs/heads/other\n", encoding="utf-8")
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+    assert not list((world.project / "apm_modules").rglob(".apm-reanchor-*"))
