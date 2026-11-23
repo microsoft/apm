@@ -24148,8 +24148,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -24173,8 +24174,9 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "baseline",
-   "strength": "e2e"
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [
