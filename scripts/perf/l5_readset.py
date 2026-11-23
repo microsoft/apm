@@ -136,6 +136,9 @@ def covered_from_record(record: dict, root: Path, env: dict) -> tuple[set[str], 
             files.add(os.path.normpath(rest if kind == "parent" else os.path.join(rest, "HEAD")))
         elif kind == "modules":
             trees_listed.add(str(root / rest))
+            LISTED.add(str(root / rest))
+        elif kind == "listing":
+            LISTED.add(str(root / rest))
     files.add(str(root / "apm.lock.yaml"))
     if record.get("notice"):
         files.add(record["notice"])
@@ -228,6 +231,7 @@ def git_dirs(env: dict | None = None) -> list[str]:
     return [git, exec_path, "/usr/share/git-core", "/usr/share/gitweb", *extra]
 
 
+LISTED: set[str] = set()
 gaps_total = 0
 prefixes = interpreter_prefixes(new_apm)
 gdirs = git_dirs()
@@ -246,6 +250,7 @@ for name in fixture_names:
         for root in ctx.roots():
             ctx.checked(["install"], root)
         shutil.rmtree(home / "verdicts", ignore_errors=True)
+        LISTED.clear()
         log = work / f"strace-{name}.log"
         run_env = dict(env)
         run_env["APM_INSTALL_FAST_PATH"] = "verdict"
@@ -280,7 +285,7 @@ for name in fixture_names:
                     ancestors.add(parent)
                     parent = os.path.dirname(parent)
         env["_FILE_ANCESTORS"] = ancestors
-        env["_LISTED"] = {f for f in files if os.path.isdir(f)}
+        env["_LISTED"] = set(LISTED)  # only real listings (modules:, listing:), never parent kinds
         gdirs_here = gdirs + git_dirs(env)[4:]
         classes: Counter[str] = Counter()
         gaps: list[str] = []
