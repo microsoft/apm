@@ -1,20 +1,43 @@
-# Real-harness lane: does a real, pinned Claude Code / Copilot CLI LOAD a plugin
+# Real Harness: does a real, pinned Claude Code / Copilot CLI LOAD a plugin
 # that apm installs natively? The lifecycle suite asserts deployed files and
-# settings; this lane asserts the harness itself loads them (hook fires, MCP
-# server handshakes, skill listed). See scripts/real_harness/probe.py.
+# settings; this lane asserts that the harness itself loads them: the plugin's
+# SessionStart hook fires, its stdio MCP server handshakes, and its skill is
+# listed (Claude: the `claude -p` init event; Copilot: `copilot skill list`).
+# See scripts/real_harness/probe.py.
 #
-# Non-required. Secrets: COPILOT_GITHUB_TOKEN starts Copilot sessions; it is
-# never available to fork PRs, where the Copilot session cells report BLOCKED.
-# Claude Code never reaches a model (ANTHROPIC_BASE_URL is a closed port).
+# Red-first oracle: scripts/real_harness/expected.json holds the expected
+# verdict per cell, including known bugs. Any divergence fails the job; a fix
+# flips its cells there. BLOCKED (no credential, rate limit) never fails.
+#
+# Not a required check. Trust model: COPILOT_GITHUB_TOKEN reaches the pinned
+# Copilot binary only on schedule and workflow_dispatch (write access), never
+# on pull_request, so PR code never sees it; Copilot session cells report
+# BLOCKED on PRs. Claude Code never reaches a model: ANTHROPIC_BASE_URL is a
+# closed local port. Never add pull_request_target. No cache is saved.
 name: Real Harness
 
 on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
   push:
     branches: [danielmeppiel-ql-real-harness-lane]
     paths:
       - scripts/real_harness/**
       - .github/workflows/real-harness.yml
-  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/real_harness/**
+      - .github/workflows/real-harness.yml
+      - src/apm_cli/native_plugins/**
+      - src/apm_cli/claude_plugins/**
+      - src/apm_cli/copilot_plugins/**
+      - src/apm_cli/agent_plugins/**
+      - src/apm_cli/install/native_plugin_admission.py
+      - src/apm_cli/install/phases/claude_plugins.py
+      - src/apm_cli/install/diff_apply.py
+      - src/apm_cli/install/manifest_reconcile.py
+      - src/apm_cli/install/target_governance.py
 
 permissions:
   contents: read
@@ -30,7 +53,7 @@ jobs:
   probe:
     name: ${{ matrix.harness }} ${{ matrix.version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +65,8 @@ jobs:
           - { harness: copilot, package: '@github/copilot', version: '1.0.114-0', os: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -50,11 +75,14 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Build apm from this SHA
         run: |
@@ -75,25 +103,37 @@ jobs:
       - name: Probe every cell
         env:
           HARNESS: ${{ matrix.harness }}
-          COPILOT_GITHUB_TOKEN: ${{ matrix.harness == 'copilot' && secrets.COPILOT_GITHUB_TOKEN || '' }}
+          COPILOT_GITHUB_TOKEN: ${{ matrix.harness == 'copilot' && github.event_name != 'pull_request' && secrets.COPILOT_GITHUB_TOKEN || '' }}
         run: |
           python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
           if [ "$HARNESS" = claude ]; then
             python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
-              --env headless-rerun --env headless-abspath --env headless-untrusted \
-              --env headless-native --env headless-wt-branch \
-              --env headless-wt-after-main --scope project
-            python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
-              --scope project --register-known-marketplace \
-              --env normal --env worktree --env headless --env headless-wt-branch
+              --scope project --env headless-rerun --env headless-abspath \
+              --env headless-untrusted --env headless-native --env headless-wt-branch \
+              --env headless-wt-after-main
           fi
+
+      - name: Fix-shape oracles (scratch)
+        if: github.event_name == 'push' && matrix.harness == 'claude'
+        run: |
+          python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh-scratch" \
+            --scope project --env headless-wt-shared-known --env headless-wt-named-known
+          python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh-scratch" \
+            --scope project --register-known-marketplace \
+            --env normal --env worktree --env headless --env headless-wt-branch
 
       - name: Summary
         if: always()
+        env:
+          TITLE: ${{ matrix.harness }} ${{ matrix.version }} on ${{ matrix.os }}
         run: |
           {
-            echo "### ${{ matrix.harness }} ${{ matrix.version }} on ${{ matrix.os }}"
+            echo "### $TITLE"
             python3 scripts/real_harness/probe.py summarize "$RUNNER_TEMP/rh"
+            if [ -d "$RUNNER_TEMP/rh-scratch" ]; then
+              echo "#### Fix-shape oracles (scratch)"
+              python3 scripts/real_harness/probe.py summarize "$RUNNER_TEMP/rh-scratch"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload evidence
@@ -102,16 +142,19 @@ jobs:
         with:
           name: real-harness-${{ matrix.harness }}-${{ matrix.version }}-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/rh/*/cell.json
-            ${{ runner.temp }}/rh/*/logs/
-            ${{ runner.temp }}/rh/*/markers/
-            ${{ runner.temp }}/rh/*/home/.claude/
-            ${{ runner.temp }}/rh/*/home/.claude.json
-            ${{ runner.temp }}/rh/*/home/.copilot/settings.json
-            ${{ runner.temp }}/rh/*/home/.copilot/config.json
-            ${{ runner.temp }}/rh/*/work/consumer/.claude/
-            ${{ runner.temp }}/rh/*/work/consumer/.github/
-            ${{ runner.temp }}/rh/*/work/consumer/apm.yml
-            ${{ runner.temp }}/rh/*/work/consumer/apm.lock.yaml
+            ${{ runner.temp }}/rh*/*/cell.json
+            ${{ runner.temp }}/rh*/*/logs/
+            ${{ runner.temp }}/rh*/*/markers/
+            ${{ runner.temp }}/rh*/*/home/.claude/
+            ${{ runner.temp }}/rh*/*/home/.claude.json
+            ${{ runner.temp }}/rh*/*/home/.copilot/settings.json
+            ${{ runner.temp }}/rh*/*/home/.copilot/config.json
+            ${{ runner.temp }}/rh*/*/work/*/.claude/
+            ${{ runner.temp }}/rh*/*/work/*/.github/
+            ${{ runner.temp }}/rh*/*/work/*/apm.yml
+            ${{ runner.temp }}/rh*/*/work/*/apm.lock.yaml
           include-hidden-files: true
           retention-days: 14
+
+      - name: Check verdicts against expected.json
+        run: python3 scripts/real_harness/probe.py check "$RUNNER_TEMP/rh"

@@ -51,6 +51,8 @@ ENVS = ("normal", "worktree", "headless")
 # plugin state wiped to simulate a fresh clone). Worktree diagnostics: apm installs
 # only on the worktree's branch (main checkout has no .agents/plugins), or a
 # session runs in the main checkout before the first session in a worktree.
+# Fix-shape oracles (#5176/#5180): main and a worktree both registered in Claude's
+# user registry, under one shared marketplace name or one name per checkout.
 DIAG_ENVS = (
     "headless-rerun",
     "headless-abspath",
@@ -58,6 +60,8 @@ DIAG_ENVS = (
     "headless-native",
     "headless-wt-branch",
     "headless-wt-after-main",
+    "headless-wt-shared-known",
+    "headless-wt-named-known",
 )
 _AUTH_BLOCKERS = ("could not be validated", "rate limit exceeded", "No authentication")
 TOOL_PROMPT = (
@@ -474,51 +478,136 @@ class Cell:
         self.run("tmux-kill", [*tmux, "kill-server"], cwd, timeout=30)
         self.evidence["screen_tail"] = _tail(pane.stdout, 3000)
 
+    def claude_session(self, label: str, cwd: Path) -> tuple[str, dict | None]:
+        """Run ``claude -p`` and stop it 10s after its init event.
+
+        The model call can never succeed (closed ANTHROPIC_BASE_URL), so waiting
+        for the client's retries only burns time; hooks and MCP start by then.
+        """
+        argv = [
+            "claude",
+            "-p",
+            "Reply with the single word OK.",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--max-turns",
+            "1",
+        ]
+        log = self.logs / f"{len(self.steps):02d}-{label}.log"
+        started = time.monotonic()
+        with log.open("w", encoding="utf-8") as sink:
+            proc = subprocess.Popen(  # noqa: S603 -- fixed argv, pinned harness
+                argv,
+                cwd=str(cwd),
+                env=self.base_env(),
+                stdin=subprocess.DEVNULL,
+                stdout=sink,
+                stderr=sink,
+            )
+            seen = None
+            while proc.poll() is None and time.monotonic() - started < SESSION_SECONDS + 30:
+                if seen is None and '"subtype":"init"' in _read(log):
+                    seen = time.monotonic()
+                if seen is not None and time.monotonic() - seen > 10:
+                    break
+                time.sleep(1)
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+        output = _read(log)
+        self.steps.append(
+            {
+                "label": label,
+                "argv": argv,
+                "cwd": str(cwd),
+                "exit": proc.returncode,
+                "seconds": round(time.monotonic() - started, 1),
+            }
+        )
+        init = None
+        for line in output.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("type") == "system" and event.get("subtype") == "init":
+                init = event
+                break
+        return output, init
+
+    @staticmethod
+    def plugin_paths(init: dict | None) -> list[str]:
+        plugins = (init or {}).get("plugins") or []
+        return [str(entry.get("path")) for entry in plugins if PLUGIN in str(entry)]
+
+    def reset_markers(self) -> None:
+        self.hook_marker.unlink(missing_ok=True)
+        self.mcp_marker.unlink(missing_ok=True)
+
+    def two_checkouts(self) -> None:
+        """Register main and the worktree in Claude's registry; one session in each."""
+        main_name = self.marketplace()
+        wt_name = main_name
+        if self.env == "headless-wt-named-known":
+            wt_name = f"{main_name}-wt"
+            settings = self.worktree / ".claude" / "settings.json"
+            _write(settings, _read(settings).replace(main_name, wt_name))
+        registry = self.home / ".claude" / "plugins" / "known_marketplaces.json"
+        data: dict = {}
+        for name, root in ((main_name, self.project), (wt_name, self.worktree)):
+            location = str(root / ".agents" / "plugins")
+            data[name] = {
+                "source": {"source": "directory", "path": location},
+                "installLocation": location,
+                "lastUpdated": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            }
+        _json(registry, data)
+        self.evidence["known_marketplaces"] = _read(registry)
+        sessions = {}
+        for key, root in (("main", self.project), ("worktree", self.worktree)):
+            self.reset_markers()
+            _output, init = self.claude_session(f"headless-{key}", root)
+            paths = self.plugin_paths(init)
+            sessions[key] = {
+                "plugin_paths": paths,
+                "loads_own_copy": bool(paths) and all(p.startswith(f"{root}/") for p in paths),
+                "skill": SKILL in json.dumps((init or {}).get("skills")),
+                "hook": "SessionStart" in _read(self.hook_marker),
+                "mcp": "initialize" in _read(self.mcp_marker).split(),
+            }
+        self.evidence["two_checkouts"] = sessions
+        self.evidence["registry_after"] = _read(registry)
+
     def headless(self, cwd: Path) -> None:
         if self.harness == "claude":
-            argv = [
-                "claude",
-                "-p",
-                "Reply with the single word OK.",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--max-turns",
-                "1",
-            ]
             if self.env == "headless-abspath" and self.scope == "project":
                 self.absolutize_project_marketplace()
             if self.env == "headless-native" and self.scope == "project":
                 self.native_oracle(cwd)
+            if self.env.startswith(("headless-wt-shared", "headless-wt-named")):
+                self.two_checkouts()
+                return
             if self.env == "headless-wt-after-main":
-                main = self.run("headless-main", argv, self.project, timeout=SESSION_SECONDS + 30)
-                self.evidence["main_session_plugin_paths"] = re.findall(
-                    r'"path":\s*"([^"]*rh-probe[^"]*)"', main.stdout
-                )
-                self.hook_marker.unlink(missing_ok=True)
-                self.mcp_marker.unlink(missing_ok=True)
-            proc = self.run("headless", argv, cwd, timeout=SESSION_SECONDS + 30)
+                _output, init = self.claude_session("headless-main", self.project)
+                self.evidence["main_session_plugin_paths"] = self.plugin_paths(init)
+                self.reset_markers()
+            output, init = self.claude_session("headless", cwd)
             if self.env == "headless-rerun":
                 self.evidence["first_session_hook"] = _read(self.hook_marker)
-                self.evidence["first_session_init_has_skill"] = SKILL in proc.stdout
-                self.hook_marker.unlink(missing_ok=True)
-                self.mcp_marker.unlink(missing_ok=True)
-                proc = self.run("headless-2", argv, cwd, timeout=SESSION_SECONDS + 30)
-            init = None
-            for line in proc.stdout.splitlines():
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                if event.get("type") == "system" and event.get("subtype") == "init":
-                    init = event
-                    break
-            self.evidence["headless_tail"] = _tail(proc.stdout + proc.stderr, 2000)
+                self.evidence["first_session_init_has_skill"] = SKILL in json.dumps(
+                    (init or {}).get("skills")
+                )
+                self.reset_markers()
+                output, init = self.claude_session("headless-2", cwd)
+            self.evidence["headless_tail"] = _tail(output, 2000)
             if init is not None:
                 _json(self.logs / "init-event.json", init)
-                self.evidence["init_plugin_paths"] = [
-                    entry.get("path") for entry in init.get("plugins") or [] if PLUGIN in str(entry)
-                ]
+                self.evidence["init_plugin_paths"] = self.plugin_paths(init)
                 keys = ("plugins", "mcp_servers", "skills", "slash_commands", "claude_code_version")
                 self.evidence["init"] = {key: init.get(key) for key in keys}
             return
@@ -555,19 +644,29 @@ class Cell:
             sig["init_skill"] = SKILL in skills
             sig["init_mcp"] = MCP in json.dumps(init.get("mcp_servers"))
             paths = self.evidence.get("init_plugin_paths") or []
-            sig["init_path_in_cwd"] = any(
-                str(path).startswith(str(self.run_dir())) for path in paths
+            sig["init_path_in_cwd"] = bool(paths) and all(
+                str(path).startswith(f"{self.run_dir()}/") for path in paths
             )
         return sig
 
     def verdict(self, sig: dict) -> tuple[str, str]:
         if self.evidence.get("apm_error"):
             return "BLOCKED", "apm install: " + self.evidence["apm_error"].splitlines()[0][:160]
+        two = self.evidence.get("two_checkouts")
+        if two:
+            own = [k for k, v in two.items() if v["loads_own_copy"] and v["skill"] and v["hook"]]
+            if len(own) == len(two):
+                return "LOADS", "main and worktree each load their own copy"
+            detail = "; ".join(f"{k}: {v['plugin_paths']}" for k, v in two.items())
+            verdict = "PARTIAL" if own else "DOES NOT LOAD"
+            return verdict, f"own copy only in {', '.join(own) or 'none'} ({detail})"
         runtime = [sig["mcp_initialized"]]
         if not self.agent_plugin:
             runtime.append(sig["hook_fired"])
         if self.env.startswith("headless") and self.harness == "claude":
             runtime.append(bool(sig.get("init_skill")))
+        if self.env.startswith("headless-wt") and self.harness == "claude":
+            runtime.append(bool(sig.get("init_path_in_cwd")))
         if self.harness == "copilot":
             runtime.append(sig["skill_listed"])
         if all(runtime):
@@ -607,7 +706,9 @@ class Cell:
             self.run("git-commit", ["git", "commit", "-q", "-m", "apm install"], self.install_root)
             if self.register_known and self.harness == "claude" and self.scope == "project":
                 self.register_known_marketplace()
-            if self.env in ("worktree", "headless-wt-after-main"):
+            if self.env == "worktree" or self.env.startswith(
+                ("headless-wt-after-main", "headless-wt-shared", "headless-wt-named")
+            ):
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
             self.list_probes(cwd)
@@ -649,6 +750,34 @@ def summarize(out: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def check(out: Path, expected_path: Path) -> list[str]:
+    """Compare every cell verdict with the committed expectation (red-first oracle).
+
+    BLOCKED (no credential, rate limit) is reported but never fails. Any other
+    divergence fails, including a known bug cell that now LOADS: flip its
+    expectation and close the linked issue in the fixing PR.
+    """
+    expected = json.loads(expected_path.read_text(encoding="utf-8"))["cells"]
+    problems = []
+    for path in sorted(out.rglob("cell.json")):
+        row = json.loads(path.read_text(encoding="utf-8"))
+        cell, verdict = row["cell"], row["verdict"]
+        want = expected.get(cell)
+        if verdict == "BLOCKED":
+            print(f"[!] {cell}: BLOCKED ({row['reason']})")
+            continue
+        if want is None:
+            problems.append(
+                f"{cell}: {verdict}, but the cell has no expectation in {expected_path}"
+            )
+        elif verdict != want["verdict"]:
+            issue = f" (tracked in #{want['issue']})" if want.get("issue") else ""
+            problems.append(
+                f"{cell}: expected {want['verdict']}{issue}, got {verdict}: {row['reason']}"
+            )
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Real-harness native plugin load probe")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -660,7 +789,15 @@ def main() -> int:
     run.add_argument("--register-known-marketplace", action="store_true")
     summ = sub.add_parser("summarize")
     summ.add_argument("out", type=Path)
+    chk = sub.add_parser("check")
+    chk.add_argument("out", type=Path)
+    chk.add_argument("--expected", type=Path, default=Path(__file__).with_name("expected.json"))
     args = parser.parse_args()
+    if args.command == "check":
+        problems = check(args.out, args.expected)
+        for problem in problems:
+            print(f"[x] {problem}")
+        return 1 if problems else 0
     if args.command == "summarize":
         sys.stdout.write(summarize(args.out))
         return 0
