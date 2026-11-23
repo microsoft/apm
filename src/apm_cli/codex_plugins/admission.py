@@ -107,6 +107,28 @@ def _replays_lock(ctx: Any) -> bool:
     return InstallService.frozen_disposition(ctx).replay
 
 
+def _meet_trust_transitive(
+    manifest: CodexCompatibilityPlugin, dependency_key: str, policy: Any, ctx: Any
+) -> None:
+    """Refuse (block) or warn (warn) for servers org ``mcp.allow`` does not list."""
+    from apm_cli.security.trust import unlisted_transitive_servers
+
+    unlisted = unlisted_transitive_servers(manifest.mcp_server_names, policy)
+    if not unlisted:
+        return
+    message = (
+        f"Codex native plugin {dependency_key}: transitive MCP server '{unlisted[0]}' "
+        "is not in org mcp.allow (mcp.trust_transitive: false)"
+    )
+    if policy.enforcement == "block":
+        raise CodexNativeError(
+            f"{message}. Ask your org policy owner to allow the server, or remove this dependency."
+        )
+    diagnostics = getattr(ctx, "diagnostics", None)
+    if diagnostics is not None:
+        diagnostics.warn(message, package=dependency_key)
+
+
 def plan_native_codex_plugin(
     package_info: Any,
     dependency_key: str,
@@ -118,8 +140,15 @@ def plan_native_codex_plugin(
     ctx: InstallContext | None,
     read_only: bool = False,
     parked_reported: bool = False,
+    policy: Any = None,
+    transitive: bool = False,
 ) -> CodexNativePlugin | None:
-    """Never normalize or partially project a selected Codex compatibility bundle."""
+    """Never normalize or partially project a selected Codex compatibility bundle.
+
+    A *transitive* bundle's servers meet org ``mcp.trust_transitive`` as a
+    loose transitive server does (req-sc-016): Codex loads them itself, so the
+    merged-set preflight never sees them.
+    """
     package = getattr(package_info, "package", None)
     manifest = getattr(package, "codex_plugin", None)
     if not isinstance(manifest, CodexCompatibilityPlugin):
@@ -138,6 +167,8 @@ def plan_native_codex_plugin(
             "Codex native registration requires the complete bundle. "
             "Remove the skill subset and retry; no loose skills were registered."
         )
+    if transitive:
+        _meet_trust_transitive(manifest, dependency_key, policy, ctx)
     root = Path(package_info.install_path).resolve()
     types = set(plugin_root_exec_types(root))
     types.update(scan_package_executables(root, dependency_key, manifest.version).exec_types)

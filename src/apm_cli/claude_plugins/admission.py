@@ -302,6 +302,38 @@ def locked_native_retired(
     return retired
 
 
+def locked_transitive_native_refusals(lockfile: Any, modules_dir: Path, policy: Any) -> list[str]:
+    """Subjects of each locked transitive native plugin org ``mcp.trust_transitive`` withholds.
+
+    The audit counterpart of the install park (:func:`_mcp_policy_violation`):
+    a server ``mcp.allow`` does not list, and any MCP entry APM cannot read,
+    for a policy applied after deployment (req-sc-016).
+    """
+    from apm_cli.security.trust import unlisted_transitive_servers, withholds_transitive
+
+    if not withholds_transitive(policy):
+        return []
+    refused: list[str] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or dep.native_plugin is None or (dep.depth or 1) <= 1:
+            continue
+        root, unverified = _judged_root(
+            dep.native_plugin, dep.to_dependency_ref().get_install_path(modules_dir), modules_dir
+        )
+        if root is None:
+            refused.extend([f"{key}: MCP cannot be checked ({unverified})"] if unverified else [])
+            continue
+        try:
+            manifest = parse_plugin_manifest(root / ".claude-plugin/plugin.json")
+        except (OSError, ValueError):
+            refused.append(f"{key}: MCP cannot be checked (plugin.json cannot be read)")
+            continue
+        servers, unmodeled = claude_native_mcp_servers(root, manifest)
+        refused.extend(unlisted_transitive_servers([s["name"] for s in servers], policy))
+        refused.extend(f"{key}: MCP {entry} (APM cannot read it)" for entry in unmodeled)
+    return refused
+
+
 def refuse_disallowed_carried_native(ctx: Any, dep_key: str, package_info: Any) -> None:
     """Refuse a run that would carry a native plugin the gates no longer admit (#3921).
 

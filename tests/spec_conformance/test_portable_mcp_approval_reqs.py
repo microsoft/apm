@@ -186,7 +186,7 @@ def test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_
         "policy's `mcp.allow` matches the server name; a grant under (b) and an",
         "makes the server the consuming project's own declaration, judged as a",
         "MUST emit a default-visible diagnostic naming the server, as for an",
-        "such server as a policy violation. A policy that sets no field imposes",
+        "such server as a policy violation. A policy that sets no restriction",
     )
     root, lock, _dependency = _project(tmp_path)
     policy = ApmPolicy(enforcement=enforcement, mcp=McpPolicy(deny=("unrelated",)))
@@ -196,6 +196,11 @@ def test_org_trust_transitive_false_admits_a_transitive_server_only_through_mcp_
     assert (refused.omissions.get("leaf-server") or {}).get("reason") == (
         None if deployed else "policy-transitive"
     )
+    lock.mcp_servers = ["leaf-server"]
+    problem = refused.consent_problems(lock).get("leaf-server", "")
+    # An approval cannot lift this policy: the remediation names the policy fields.
+    assert ("mcp.allow" in problem and "apm approve" not in problem) is not deployed
+    lock.mcp_servers = []
 
     listed = ApmPolicy(enforcement=enforcement, mcp=McpPolicy(allow=("leaf-server",)))
     allowed = McpAdmission(None, one_off=True, org_policy=lambda: listed)

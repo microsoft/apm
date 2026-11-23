@@ -94,6 +94,40 @@ def test_native_admission_fingerprints_every_publisher_asset(tmp_path: Path, fau
     assert _admit(tmp_path).source_hash != original
 
 
+@pytest.mark.parametrize(
+    ("enforcement", "allow", "transitive", "outcome"),
+    [
+        ("block", None, True, "refused"),
+        ("block", ("other",), True, "refused"),
+        ("block", ("server",), True, "admitted"),
+        ("block", None, False, "admitted"),
+        ("warn", None, True, "warned"),
+    ],
+    ids=["block", "block-unlisted", "block-listed", "direct", "warn"],
+)
+def test_a_transitive_codex_plugin_meets_org_trust_transitive(
+    tmp_path, enforcement, allow, transitive, outcome
+):
+    """A transitive Codex plugin's servers need mcp.allow under trust_transitive false (req-sc-016)."""
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    policy = ApmPolicy(
+        enforcement=enforcement, mcp=McpPolicy(allow=allow, deny=("x",), trust_transitive=False)
+    )
+    warnings: list[str] = []
+    ctx = SimpleNamespace(diagnostics=SimpleNamespace(warn=lambda m, **_: warnings.append(m)))
+    options = {"policy": policy, "transitive": transitive}
+    if outcome == "refused":
+        with pytest.raises(CodexNativeError, match=r"'server'.*mcp\.allow"):
+            _admit(tmp_path, **options)
+        return
+    plan = _admit(tmp_path, ctx=ctx, **options)
+    assert plan.mcp_server_names == ("server",)
+    assert [("'server'" in m and "mcp.allow" in m) for m in warnings] == (
+        [True] if outcome == "warned" else []
+    )
+
+
 def test_read_only_projection_does_not_qualify_or_start_native_client(tmp_path, monkeypatch):
     from apm_cli.codex_plugins.client import CodexNativeClient
 

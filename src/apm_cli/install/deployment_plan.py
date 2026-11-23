@@ -154,6 +154,14 @@ def prepare_package_deployment(  # noqa: PLR0913
     )
     if skip_bin and bin_skip_reason_override is not None:
         reason = bin_skip_reason_override
+    # The org policy the install gate fetched; callers that pass none
+    # (preflight) defer to it, as effective_allow_map does for trust.
+    org_policy = (
+        policy
+        if policy is not None
+        else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    )
+    transitive = _is_transitive(package_info, ctx)
     codex_native = plan_native_codex_plugin(
         package_info,
         package_name,
@@ -172,13 +180,8 @@ def prepare_package_deployment(  # noqa: PLR0913
         ctx=ctx,
         read_only=read_only,
         parked_reported=parked_reported,
-    )
-    # The org policy the install gate fetched; callers that pass none
-    # (preflight) defer to it, as effective_allow_map does for trust.
-    org_policy = (
-        policy
-        if policy is not None
-        else getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+        policy=org_policy,
+        transitive=transitive,
     )
     # The project's own content is never deployed as one of its native plugins.
     native_claude_plugin = (
@@ -197,7 +200,7 @@ def prepare_package_deployment(  # noqa: PLR0913
             skip_bin=resolve_bin_skip(True, trust_bin, non_interactive=not sys.stdout.isatty())[0],
             policy=org_policy,
             bin_denied=bin_deploy_denial(package_info, org_policy),
-            transitive=_is_transitive(package_info, ctx),
+            transitive=transitive,
         )
     )
     projection_targets = PackageDeploymentPlan(

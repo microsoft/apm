@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import copy
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -260,6 +260,25 @@ def transitive_server_listed(name: str, mcp: Any) -> bool:
     return mcp.allow is not None and first_matching_pattern(name, mcp.allow) is not None
 
 
+def withholds_transitive(policy: Any) -> bool:
+    """Whether org policy admits transitive MCP servers only through ``mcp.allow``.
+
+    True when the policy enforces (``block`` or ``warn``) and does not set
+    ``mcp.trust_transitive: true``; the caller applies the enforcement mode.
+    """
+    mcp = getattr(policy, "mcp", None)
+    if mcp is None or mcp.trust_transitive:
+        return False
+    return getattr(policy, "enforcement", None) in ("block", "warn")
+
+
+def unlisted_transitive_servers(names: Iterable[str], policy: Any) -> tuple[str, ...]:
+    """The transitive servers in *names* org ``mcp.trust_transitive`` withholds."""
+    if not withholds_transitive(policy):
+        return ()
+    return tuple(name for name in names if not transitive_server_listed(name, policy.mcp))
+
+
 class McpAdmission:
     """MCP admission inputs for one command run.
 
@@ -432,12 +451,11 @@ class McpAdmission:
         alike (req-sc-016).
         """
         policy = self.org_policy()
-        mcp = getattr(policy, "mcp", None)
         # Under enforcement: warn the server deploys and the merged-set
         # preflight warns, as for mcp.deny (policy_checks.mcp_policy_checks).
-        if mcp is None or mcp.trust_transitive or getattr(policy, "enforcement", None) != "block":
+        if getattr(policy, "enforcement", None) != "block":
             return False
-        return not transitive_server_listed(name, mcp)
+        return bool(unlisted_transitive_servers((name,), policy))
 
     def _fingerprint(self, declaration: Any, package_keys: tuple[str, ...], needs_trust: bool):
         registry_entry = None

@@ -274,3 +274,38 @@ def test_the_settings_preview_refuses_a_moved_marketplace_binding(tmp_path: Path
             lockfile=following,
             deploy_root=project,
         )
+
+
+@pytest.mark.parametrize(
+    ("mcp_servers", "depth", "trust", "subject"),
+    [
+        ("./bundle.dxt", 2, False, "acme/tool: MCP"),
+        ({"srv": {"command": "npx"}}, 2, False, "srv"),
+        ("./bundle.dxt", 1, False, None),
+        ("./bundle.dxt", 2, True, None),
+    ],
+    ids=["transitive-bundle", "transitive-server", "direct", "trust-transitive-true"],
+)
+def test_audit_judges_a_deployed_transitive_native_plugin_under_trust_transitive(
+    tmp_path: Path, mcp_servers, depth: int, trust: bool, subject: str | None
+) -> None:
+    """A policy applied after deployment fails audit for a transitive plugin's MCP (req-sc-016)."""
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    project, modules, lock = _deployed_project(tmp_path, ("tool",))
+    root = modules / "acme/tool"
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": mcp_servers})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    lock.dependencies["acme/tool"].depth = depth
+    lock.write(project / "apm.lock.yaml")
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(deny=("unrelated",), trust_transitive=trust)
+    )
+    result = run_policy_checks(project, policy, fail_fast=False)
+    checks = [c for c in result.checks if c.name == "mcp-trust-transitive"]
+    refs = [s.ref for c in checks if not c.passed for s in c.violation_subjects()]
+    assert bool(refs) is (subject is not None)
+    assert all(subject in ref for ref in refs)

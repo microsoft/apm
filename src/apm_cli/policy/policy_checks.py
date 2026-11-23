@@ -809,14 +809,23 @@ def _check_mcp_trust_transitive(mcp_deps: list, policy: McpPolicy) -> CheckResul
     )
 
 
-def _parked_trust_transitive(view: CurrentMcpConfigView) -> CheckResult | None:
-    """Audit: transitive servers the trust owner withheld under ``mcp.trust_transitive``."""
+def _parked_trust_transitive(
+    view: CurrentMcpConfigView, native: Sequence[str] = ()
+) -> CheckResult | None:
+    """Audit: transitive servers withheld under ``mcp.trust_transitive``.
+
+    *view* carries the servers the trust owner parked; *native* names those
+    of locked transitive native plugins, which Claude loads itself.
+    """
     from ..security.trust import REASON_POLICY_TRANSITIVE
 
     parked = sorted(
-        name
-        for name, evidence in view.omissions.items()
-        if isinstance(evidence, Mapping) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+        {
+            name
+            for name, evidence in view.omissions.items()
+            if isinstance(evidence, Mapping) and evidence.get("reason") == REASON_POLICY_TRANSITIVE
+        }
+        | set(native)
     )
     return _trust_transitive_result(parked) if parked else None
 
@@ -1968,7 +1977,12 @@ def run_policy_checks(
         )
         mcp_deps = list(view.kept_dependencies())
         mcp_brought_in_by = view.brought_in_by
-        trust_check = _parked_trust_transitive(view)
+        from ..claude_plugins.admission import locked_transitive_native_refusals
+
+        native = locked_transitive_native_refusals(
+            lock, modules_root or project_root / "apm_modules", policy
+        )
+        trust_check = _parked_trust_transitive(view, native)
 
     try:
         source_deps = _audit_source_dependencies(manifest, lock)

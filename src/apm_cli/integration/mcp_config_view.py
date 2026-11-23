@@ -348,6 +348,15 @@ class CurrentMcpConfigView:
                     f"(denied); {MCP_ADMITTED_DENIED.bind(target=target).clause()}"
                 )
                 continue
+            if reason == REASON_POLICY_TRANSITIVE:
+                # An approval cannot lift org mcp.trust_transitive: name the policy fields.
+                problems[name] = (
+                    "admitted in apm.lock.yaml but org policy now withholds it "
+                    "(mcp.trust_transitive is false and mcp.allow does not list it); "
+                    "ask the policy owner to add it to mcp.allow or set "
+                    "mcp.trust_transitive: true"
+                )
+                continue
             problems[name] = (
                 f"admitted in apm.lock.yaml but not approved in apm.yml ({reason}); "
                 f"{MCP_ADMITTED_UNAPPROVED.bind(target=target).clause()}"
