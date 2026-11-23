@@ -1764,6 +1764,44 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "        if self._keeps_nothing(planned",
             id="canvas-bundle-not-left-whole",
         ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                if integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                ):\n"
+            "                    files_skipped += 1\n"
+            "                    continue\n",
+            "                integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                )\n",
+            id="gate-result-ignored",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if True or not self.keeps_edited_output(",
+            id="gate-short-circuited",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.copy2(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-writer",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:

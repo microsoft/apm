@@ -16,8 +16,12 @@ files (through ``keeps_edited_output``). The guard is closed-world:
 * in every file-primitive integrator, a function that writes bytes asks the
   owner itself, or is one of the listed leaf writers whose in-module callers
   all ask the owner;
-* each executable writer (Copilot and Kiro hook files, the hook script copy,
-  the canvas bundle) asks ``keeps_edited_output`` before it writes.
+* in every executable writer module (Copilot and Kiro hook files, the hook
+  script copy, the canvas bundle), every write is control-dependent on the
+  gate's result: it sits in the body of ``if not <gate>(...)``, or follows a
+  sibling ``if <gate>(...):`` whose body leaves (``continue``/``return``).
+  A short-circuited test, an ignored result or a new unguarded writer fails;
+  only the listed non-executable writers (merged settings, cleanup) are exempt.
 """
 
 from __future__ import annotations
@@ -39,14 +43,29 @@ _OWNER = "BaseIntegrator.keeps_unproven_file"
 _ADAPTERS = ("BaseIntegrator._check_adopt_or_skip", "BaseIntegrator.keeps_edited_output")
 _OWNER_CALL = "_check_adopt_or_skip"
 _EDITED_CALL = "keeps_edited_output"
-# Executable writers: each named function asks keeps_edited_output (#4626).
-_EXECUTABLE_WRITERS = {
-    "src/apm_cli/integration/hook_integrator.py": ("HookIntegrator.integrate_package_hooks",),
-    "src/apm_cli/integration/hook_bundle.py": ("copy_deployed_hook_bundle",),
-    "src/apm_cli/integration/kiro_hook_integrator.py": ("_write_kiro_hook_docs",),
-    "src/apm_cli/integration/canvas_integrator.py": ("CanvasIntegrator._keeps_edited_bundle",),
+# Executable writer modules: every write in them is gated (#4626, #4936).
+_EXECUTABLE_MODULES = (
+    "src/apm_cli/integration/hook_integrator.py",
+    "src/apm_cli/integration/hook_bundle.py",
+    "src/apm_cli/integration/kiro_hook_integrator.py",
+    "src/apm_cli/integration/canvas_integrator.py",
+)
+# Gate asks whose result a write must depend on.
+_EXECUTABLE_GATES = frozenset({"keeps_edited_output", "_keeps_edited_bundle"})
+# Writers in those modules that never replace an executable output.
+_UNGATED_EXECUTABLE_WRITERS = {
+    "src/apm_cli/integration/hook_integrator.py": {
+        # Merged hook entries in shared settings files are not file outputs.
+        "HookIntegrator._integrate_merged_hooks",
+        # Removing APM entries from shared settings on cleanup.
+        "HookIntegrator._clean_apm_source_from_json",
+        "HookIntegrator._clean_apm_entries_from_json",
+    },
 }
-_CANVAS_DEPLOY = ("src/apm_cli/integration/canvas_integrator.py", "CanvasIntegrator._deploy_bundle")
+_CANVAS_GATE = (
+    "src/apm_cli/integration/canvas_integrator.py",
+    "CanvasIntegrator._keeps_edited_bundle",
+)
 _AUTHORIZED = "DeploymentMaterializationSession.overwrite_authorized"
 _GATE = "OverwriteGate.authorizes"
 _WRITERS = (
@@ -66,8 +85,8 @@ _RAW_WRITES = frozenset(
         "open",
     }
 )
-# One keeps_edited_output ask per write in each executable writer.
-_EXECUTABLE_WRITES = _RAW_WRITES | {"atomic_write_text"}
+# Content writes in an executable writer module (``open`` only in a write mode).
+_EXECUTABLE_WRITES = (_RAW_WRITES - {"open"}) | {"atomic_write_text", "copytree", "copyfile"}
 # The only writers that may skip the owner: leaves for direct callers or for
 # an in-module caller that asked the owner first. Every other writer asks.
 _LEAF_WRITERS = frozenset(
@@ -158,37 +177,109 @@ def _owner_findings(provider: FactsProvider, rule: str) -> list[Violation]:
     return findings
 
 
+def _is_write(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    name = _call_name(node)
+    if name in _EXECUTABLE_WRITES:
+        return True
+    if name != "open":
+        return False
+    modes = [*node.args[1:2], *(kw.value for kw in node.keywords if kw.arg == "mode")]
+    return any(
+        isinstance(mode, ast.Constant)
+        and isinstance(mode.value, str)
+        and set(mode.value) & set("wax+")
+        for mode in modes
+    )
+
+
+def _gate_test(test: ast.AST) -> bool | None:
+    """``True`` for ``<gate>(...)``, ``False`` for ``not <gate>(...)``, else ``None``.
+
+    Only the bare ask decides; any other test (``True or ...``) is not a gate.
+    """
+    negated = isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
+    call = test.operand if negated else test
+    if isinstance(call, ast.Call) and _call_name(call) in _EXECUTABLE_GATES:
+        return not negated
+    return None
+
+
+def _leaves(body: list[ast.stmt]) -> bool:
+    return bool(body) and isinstance(body[-1], (ast.Continue, ast.Return, ast.Raise))
+
+
+def _gated(index, write: ast.AST) -> bool:
+    """*write* runs only when the executable overwrite gate let it through."""
+    child, parent = write, index.parent(write)
+    while parent is not None:
+        if isinstance(parent, ast.If) and child in parent.body and _gate_test(parent.test) is False:
+            return True
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(parent, field, None)
+            if isinstance(block, list) and child in block:
+                earlier = block[: block.index(child)]
+                if any(
+                    isinstance(stmt, ast.If)
+                    and _gate_test(stmt.test) is True
+                    and _leaves(stmt.body)
+                    for stmt in earlier
+                ):
+                    return True
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+        child, parent = parent, index.parent(parent)
+    return False
+
+
+def _enclosing_function(index, node: ast.AST) -> ast.AST | None:
+    parent = index.parent(node)
+    while parent is not None and not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        parent = index.parent(parent)
+    return parent
+
+
 def _executable_findings(provider: FactsProvider, rule: str) -> list[Violation]:
     findings: list[Violation] = []
-    for path, names in _EXECUTABLE_WRITERS.items():
+    for path in _EXECUTABLE_MODULES:
         _facts, failures = _facts_for(provider, path, rule)
         if failures:
             findings.extend(failures)
             continue
         index = provider.tree_index(path)
-        for name in names:
-            function = index.function(name) if index is not None else None
-            names_called = (
-                [_call_name(node) for node in index.walk(function) if isinstance(node, ast.Call)]
-                if function is not None
-                else []
-            )
-            writes = sum(called in _EXECUTABLE_WRITES for called in names_called)
-            if names_called.count(_EDITED_CALL) < max(1, writes):
+        if index is None:
+            findings.append(_summary(rule, path, "executable writer module must be parseable"))
+            continue
+        exempt = _UNGATED_EXECUTABLE_WRITERS.get(path, set())
+        exempt_used: set[str] = set()
+        for node in index.nodes:
+            if not _is_write(node):
+                continue
+            function = _enclosing_function(index, node)
+            qualname = index.function_qualname(function) if function is not None else "<module>"
+            if qualname in exempt:
+                exempt_used.add(qualname)
+                continue
+            if not _gated(index, node):
                 findings.append(
-                    _summary(
+                    violation(
                         rule,
                         path,
-                        f"{name} must ask {_EDITED_CALL} before replacing an executable output",
+                        f"{qualname} writes an executable output without depending on "
+                        f"{_EDITED_CALL}'s result; edited outputs must be kept",
+                        line=node.lineno,
                     )
                 )
-    path, name = _CANVAS_DEPLOY
-    index = provider.tree_index(path)
-    deploy = index.function(name) if index is not None else None
-    if deploy is None or "_keeps_edited_bundle" not in _calls(index, deploy):
-        findings.append(
-            _summary(rule, path, f"{name} must leave a bundle with a kept member whole")
+        findings.extend(
+            _summary(rule, path, f"stale ungated-writer exemption {name}: it no longer writes")
+            for name in sorted(exempt - exempt_used)
         )
+    path, name = _CANVAS_GATE
+    index = provider.tree_index(path)
+    gate = index.function(name) if index is not None else None
+    if gate is None or _EDITED_CALL not in _calls(index, gate):
+        findings.append(_summary(rule, path, f"{name} must ask {_EDITED_CALL} for every member"))
     return findings
 
 
