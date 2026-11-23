@@ -337,3 +337,32 @@ def test_prune_keeps_a_survivor_spelled_another_way(
     assert "_local/e" not in rows, sorted(rows)
     assert any(row.get("name") == "f" for row in rows.values()), sorted(rows)
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
+
+
+def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Equal-depth diamond: f was recorded under e; after prune it takes z, as install would."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for name, deps in (
+        ("f", ()),
+        ("e", ("../f",)),
+        ("z", ("../f",)),
+        ("d", ("../e",)),
+        ("a", ("../z",)),
+    ):
+        _skill_package(vendor / name, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    _manifest(world, ["./vendor/a"])
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" not in rows, sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/z"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    _assert_frozen_then_no_frozen_converge(world)
