@@ -170,8 +170,9 @@ At project scope a plugin without `.claude-plugin/plugin.json` or with a
 (unapproved executables, declared plugin `dependencies`, symlinks, `monitors/`
 or `workflows/`; with `-g`, also a skill subset or no
 `.claude-plugin/plugin.json`) is parked: not deployed or declared, a warning
-names the package and the next step, and the install continues (exit 0). To
-approve a parked plugin, run `apm approve <package>` (from `~/.apm` for `-g`;
+names the package and the next step, and the install continues (exit 0). Loose
+files an earlier install deployed for that harness stay as they were and are
+named in a `Kept` warning. To approve a parked plugin, run `apm approve <package>` (from `~/.apm` for `-g`;
 or `--pending`). `bin/` deploys inside the plugin root under the same approval
 and org `bin_deploy` policy, and needs `--trust-bin` when not interactive. MCP
 and LSP servers the plugin ships are loaded by the harness from the plugin, not
