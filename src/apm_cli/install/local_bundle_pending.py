@@ -32,6 +32,16 @@ def _record_path(scope_dir: Path) -> Path:
     return Path(scope_dir) / _RECORD
 
 
+def pending_record_blocker(scope_dir: Path) -> str | None:
+    """Return why the scope's pending record cannot be safely written, else ``None``."""
+    from ..utils.path_security import has_symlink_component
+
+    path = _record_path(scope_dir)
+    if has_symlink_component(Path(scope_dir), path):
+        return f"{_RECORD.as_posix()} (linked path)"
+    return None
+
+
 def _read(scope_dir: Path) -> dict[str, dict]:
     path = _record_path(scope_dir)
     try:
@@ -54,12 +64,23 @@ def record_bundle_executables(
         del bundles[slug]
     else:
         return
+    _write(scope_dir, bundles)
+
+
+def _write(scope_dir: Path, bundles: dict[str, dict]) -> None:
     path = _record_path(scope_dir)
+    if blocker := pending_record_blocker(scope_dir):
+        from ..utils.path_security import PathTraversalError
+
+        raise PathTraversalError(f"Refusing to write the local bundle record through {blocker}")
     if not bundles:
         path.unlink(missing_ok=True)
         return
+    from ..integration.write_seam import atomic_write_text
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n", "utf-8")
+    # Atomic: a failed update leaves the previous record (and its notes) intact.
+    atomic_write_text(path, json.dumps({"bundles": bundles}, indent=2, sort_keys=True) + "\n")
 
 
 @dataclass
@@ -94,6 +115,85 @@ def _recorded(scope_dir: Path) -> list[PendingBundle]:
             continue
         found.append(PendingBundle(str(slug), key, tuple(str(t) for t in types)))
     return found
+
+
+def recorded_bundle_slugs(scope_dir: Path) -> list[str]:
+    """Return the slugs of the installed bundles that ship executables."""
+    return [bundle.slug for bundle in _recorded(scope_dir)]
+
+
+def _read_strict(scope_dir: Path) -> dict[str, dict]:
+    """The record's bundles for an uninstall update; raise when it exists but cannot be read."""
+    path = _record_path(scope_dir)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{_RECORD.as_posix()} cannot be read: {exc}") from exc
+    bundles = data.get("bundles") if isinstance(data, dict) else None
+    if not isinstance(bundles, dict):
+        raise ValueError(f"{_RECORD.as_posix()} cannot be read: no 'bundles' mapping")
+    return bundles
+
+
+def _retiring(entry: Any) -> list[str]:
+    types = entry.get("retiring") if isinstance(entry, dict) else None
+    return [str(t) for t in types] if isinstance(types, list) else []
+
+
+def mark_bundle_retiring(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Note, before uninstall removes anything, that it is retiring *exec_type* (#4987).
+
+    A retry after a failed :func:`drop_bundle_exec_type` finds the note and
+    finishes; a bundle whose *exec_type* is only parked carries none. Raises
+    ``ValueError`` when the record exists but cannot be read.
+    """
+    bundles = _read_strict(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    if exec_type in _retiring(entry):
+        return
+    bundles[slug] = {**entry, "retiring": sorted({*_retiring(entry), exec_type})}
+    _write(scope_dir, bundles)
+
+
+def retiring_bundle_slugs(scope_dir: Path, exec_type: str) -> set[str]:
+    """Slugs whose uninstall began retiring *exec_type* and did not finish its record update."""
+    return set(retiring_bundle_keys(scope_dir, exec_type))
+
+
+def retiring_bundle_keys(scope_dir: Path, exec_type: str) -> dict[str, str | None]:
+    """Each retiring slug with the approval key its install recorded (#5003)."""
+    return {
+        slug: entry.get("approval_key") if isinstance(entry.get("approval_key"), str) else None
+        for slug, entry in _read(scope_dir).items()
+        if exec_type in _retiring(entry)
+    }
+
+
+def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Forget *exec_type* for one installed bundle once its uninstall removed it (#3700).
+
+    Raises ``ValueError`` when the record exists but cannot be read.
+    """
+    bundles = _read_strict(scope_dir)
+    entry = bundles.get(slug)
+    types = entry.get("exec_types") if isinstance(entry, dict) else None
+    if not isinstance(types, list) or exec_type not in types:
+        return
+    remaining = [t for t in types if t != exec_type]
+    retiring = [t for t in _retiring(entry) if t != exec_type]
+    if not remaining:
+        del bundles[slug]
+    else:
+        bundles[slug] = {k: v for k, v in entry.items() if k != "retiring"}
+        bundles[slug]["exec_types"] = remaining
+        if retiring:
+            bundles[slug]["retiring"] = retiring
+    _write(scope_dir, bundles)
 
 
 def pending_bundles(
