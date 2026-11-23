@@ -1,0 +1,16 @@
+{
+  "issue": 4899,
+  "fixed_in": "Unreleased",
+  "summary": "A refused MCP retirement could keep a recorded registry baseline for a server whose new self-defined declaration writes another native key, so a later removal looked for the old key and left the new entry behind unowned; a baseline is now kept only when both declarations key the server to the same native entry.",
+  "failure_modes": [
+    "ownership",
+    "transaction"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_native_mcp_collision_lifecycle.py::test_a_refused_deselection_never_keeps_a_baseline_with_another_native_key"
+  ]
+}
