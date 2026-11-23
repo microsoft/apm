@@ -45,7 +45,7 @@ def test_view_json_installed_optional_fields(
             "source": None,
             "ref": None,
             "commit": None,
-            "install_path": str(package),
+            "install_path": package.resolve().as_posix(),
             "context_files": {"instructions": 1, "agents": 0, "contexts": 0},
             "workflows": 0,
             "hooks": 0,
@@ -304,7 +304,8 @@ def test_view_json_installed_scope_and_lockfile(
     assert data["source"] == "registry"
     assert data["description"] == "Review changes"
     assert data["author"] == "Alice"
-    assert data["install_path"] == str(expected_root / "apm_modules" / "org" / "review")
+    expected_path = expected_root / "apm_modules" / "org" / "review"
+    assert data["install_path"] == expected_path.resolve().as_posix()
 
 
 @pytest.mark.parametrize("manifest", ["name: minimal\n", ""])
@@ -479,7 +480,7 @@ def test_view_json_omits_cache_locations(tmp_path: Path, monkeypatch: pytest.Mon
     assert installed.exit_code == 0, installed.output
     data = json.loads(installed.stdout)["data"]
     assert data["source"] is None
-    assert data["install_path"] == str(package)
+    assert data["install_path"] == package.resolve().as_posix()
     assert cache_source not in installed.stdout
 
 
@@ -520,7 +521,7 @@ def test_view_json_sanitizes_installed_metadata(
         assert parsed.query == ""
         assert parsed.fragment == ""
     assert data["author"] == "unknown"
-    assert data["install_path"] == str(package)
+    assert data["install_path"] == package.resolve().as_posix()
     assert data["workflows"] == 1
     assert data["hooks"] == 1
     for secret in ("PASSWORD", "SECRET", "PRIVATE"):
