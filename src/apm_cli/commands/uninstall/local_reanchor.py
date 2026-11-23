@@ -456,7 +456,8 @@ def _rename_ledger_owners(lockfile, renames: dict[str, str], writers=None) -> No
     for key, record in ledger.records.items():
         owners = tuple(renames.get(owner, owner) for owner in record.owners)
         active = renames.get(record.active_owner, record.active_owner)
-        if writer := (writers or {}).get(DeploymentLedgerCodec.legacy_value(record.locator)):
+        value = DeploymentLedgerCodec.legacy_value(record.locator).rstrip("/")
+        if writer := (writers or {}).get(value):
             owners, active = (writer,), writer  # the writer a fresh install records (#5048)
         records[key] = (
             replace(record, owners=owners, active_owner=active)

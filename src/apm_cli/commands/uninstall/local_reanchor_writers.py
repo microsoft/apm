@@ -125,8 +125,11 @@ def _unrendered_skill_claim(records, providers, post, skill_roots) -> str | None
 
 def _unproven_directory(writers, providers, records, project_root: Path) -> str | None:
     """A carried directory whose files are not all carried to, or owned by, its writer."""
+    # Keys are normalized without a trailing "/", as every path index here is.
     members = {
-        path: set() for path, writer in writers.items() if providers[path][writer] == _DIRECTORY
+        path.rstrip("/"): set()
+        for path, writer in writers.items()
+        if providers[path][writer] == _DIRECTORY
     }
     if not members:
         return None
@@ -183,7 +186,7 @@ def _render_providers(post: Any, project_root: Path) -> dict[str, dict[str, str]
 
     def record(key: str, paths: list[str], scratch_root: Path) -> None:
         for path in paths:
-            providers.setdefault(path, {})[key] = _digest(scratch_root / path)
+            providers.setdefault(path.rstrip("/"), {})[key] = _digest(scratch_root / path)
 
     scratch = _render_locked(
         bare,
@@ -213,16 +216,15 @@ def _install_rank(post: Any) -> dict[str, int]:
 
 
 def _file_records(post: Any) -> dict[str, list]:
-    """Every non-URI claim by deployed path; a path several targets claim has several."""
+    """Every non-URI claim by deployed path (no trailing "/"); several targets, several."""
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.deployment_state import LocatorKind
 
     records: dict[str, list] = {}
     for record in DeploymentLedgerCodec.from_lockfile(post).records.values():
         if record.locator.kind != LocatorKind.URI:
-            records.setdefault(DeploymentLedgerCodec.legacy_value(record.locator), []).append(
-                record
-            )
+            value = DeploymentLedgerCodec.legacy_value(record.locator).rstrip("/")
+            records.setdefault(value, []).append(record)
     return records
 
 

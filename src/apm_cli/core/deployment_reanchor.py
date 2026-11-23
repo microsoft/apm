@@ -79,7 +79,7 @@ class _ReanchorSession(DeploymentMaterializationSession):
         from apm_cli.utils.content_hash import compute_file_hash
 
         claims = {
-            DeploymentLedgerCodec.legacy_value(record.locator): record
+            DeploymentLedgerCodec.legacy_value(record.locator).rstrip("/"): record
             for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values()
         }
         valid_writers = DeploymentLedgerCodec.valid_owner_keys(lockfile)
@@ -125,7 +125,7 @@ class _ReanchorSession(DeploymentMaterializationSession):
             # Only receipts the validated owner transition covers move: the
             # committed claim must name a new owner, or the path is one the
             # preflight proved for carrying. A stale receipt is untouched.
-            if value not in carried and not any(
+            if value.rstrip("/") not in carried and not any(
                 owner in new_owners
                 for claim in self._claims.get(value, ())
                 for owner in claim.owners
@@ -133,7 +133,7 @@ class _ReanchorSession(DeploymentMaterializationSession):
                 continue
             owners = tuple(renames.get(owner, owner) for owner in record.owners)
             active = renames.get(record.active_owner, record.active_owner)
-            if writer := carried.get(value):
+            if writer := carried.get(value.rstrip("/")):
                 owners, active = (writer,), writer
             renamed = replace(record, owners=owners, active_owner=active)
             self._records[key] = renamed
