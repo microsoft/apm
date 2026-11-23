@@ -3397,8 +3397,11 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="marketplace-integrations-ref-pin-commit",
         rule_id="marketplace-integrations-ref-pin-commit",
         path="src/apm_cli/install/transaction.py",
-        old="            try:\n                self._ref_pins.discard()\n                try:",
-        new="            try:\n                try:",
+        old=(
+            "                self._discard_deploy_evidence()\n"
+            "                self._ref_pins.discard()\n                try:"
+        ),
+        new="                self._discard_deploy_evidence()\n                try:",
         intent="A rolled-back install keeps its staged ref pins for a later commit.",
     ),
     MutationCase(
@@ -3802,6 +3805,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
             '                click.echo(body["token"])\n'
         ),
         intent="apm config echoes a stored registry token outside the owner's mask.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-deploy-store-verified-reads",
+        rule_id="transport-platform-deploy-store-verified-reads",
+        path="src/apm_cli/cache/deploy_store.py",
+        old="if data is None or canonical_digest(data) != key:",
+        new="if data is None:",
+        intent="A deploy store read returns bytes without re-hashing them against the key.",
     ),
     MutationCase(
         guard_id="transport-platform-egress-route-policy",
@@ -6152,7 +6163,7 @@ def test_manifest_target_declaration_guard_rejects_raw_readers(
     [
         pytest.param(
             "src/apm_cli/models/manifest_io.py",
-            "    reject_manifest_anchors(manifest_path, text)\n",
+            "        reject_manifest_anchors(manifest_path, text)\n",
             "",
             id="read-owner-stops-rejecting-anchors",
         ),

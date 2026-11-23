@@ -521,7 +521,12 @@ class DeploymentMaterializationSession:
                 if profile
                 else None
             )
-        if recorded_target is None or locate(path, [recorded_target]) != record.locator:
+        if recorded_target is None:
+            return None
+        # When the first lookup already matched the recorded target, its verdict stands.
+        if locator.target != record.locator.target:
+            locator = locate(path, [recorded_target])
+        if locator != record.locator:
             return None
         if key in self._written:
             return record.content_hash
