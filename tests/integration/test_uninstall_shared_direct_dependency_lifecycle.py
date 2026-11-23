@@ -302,3 +302,55 @@ def test_uninstall_reparents_to_a_surviving_local_parent_by_its_lock_key(
     world.apm("uninstall", "test/e")
     assert _rows(world)["test/e"]["depth"] == 2
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_reparents_a_descendant_to_its_nearest_surviving_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: d -> e -> f and g -> f; once e is not direct, f sits under g at depth 2."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("g", "f")),
+        ["test/d", "test/e", "test/g"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert (rows["test/e"]["resolved_by"], rows["test/e"]["depth"]) == ("test/d", 2)
+    assert (rows["test/f"]["resolved_by"], rows["test/f"]["depth"]) == ("test/g", 2)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_takes_the_shorter_dev_path_through_an_expanded_node(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: p -> q -> x -> e and b -> c -> e, with x also a direct dev dependency."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("x", "e"), ("q", "x"), ("p", "q"), ("c", "e"), ("b", "c")),
+        ["test/p", "test/b", "test/e"],
+        dev=["test/x"],
+    )
+    world.apm("uninstall", "test/e")
+    row = _rows(world)["test/e"]
+    assert (row["resolved_by"], row["depth"], row.get("is_dev")) == ("test/x", 2, None)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_makes_a_shared_descendant_dev_only_graph_wide(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: dev d -> e, e -> f, dev a -> f; once e is not direct, f is dev-only."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("a", "f")),
+        ["test/e"],
+        dev=["test/d", "test/a"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert rows["test/e"].get("is_dev") is True
+    assert rows["test/f"].get("is_dev") is True
+    _assert_install_rewrites_nothing(world)
