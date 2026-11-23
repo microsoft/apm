@@ -241,13 +241,13 @@ def cowork_locator(
 ) -> Path:
     """Decode a ``cowork://`` entry without following its final component.
 
-    Like :func:`from_lockfile_path`, but a final symlink stays the link itself:
-    only the parent directory is resolved and contained, and a regular final
-    component is still contained in full. Deletion decisions must judge, and
-    unlink, the locator the lockfile names, never the file a link points at
-    (#4295, #5022). With *reject_linked_ancestors*, a symlinked directory
-    between *cowork_root* and the entry is refused, as the project-scope path
-    gate refuses one under the deploy root.
+    Like :func:`from_lockfile_path`, but the named entry is returned, never
+    the file a final link points at: deletion decisions must judge, and
+    unlink, the locator the lockfile names (#4295). The full path is still
+    contained. With *reject_linked_ancestors* (the path gate's final-link
+    mode, #5022), a symlinked directory between *cowork_root* and the entry
+    is refused and a final link only needs its parent contained, as the
+    project-scope gate treats one under the deploy root.
     """
     from apm_cli.utils.path_security import (
         PathTraversalError,
@@ -266,10 +266,12 @@ def cowork_locator(
     if reject_linked_ancestors and has_symlink_component(cowork_root, candidate.parent):
         raise PathTraversalError(f"Refusing a symlinked ancestor of {lockfile_path}")
     locator = ensure_path_within(candidate.parent, cowork_root) / candidate.name
-    if locator.is_symlink():
-        return locator
-    # A regular entry is contained in full, exactly as from_lockfile_path decodes it.
-    return from_lockfile_path(lockfile_path, cowork_root)
+    # Only the ancestor-checked gate may accept an outward final link; every
+    # other caller keeps full containment. Either way the named entry is
+    # returned, never what from_lockfile_path resolves it to.
+    if not (reject_linked_ancestors and locator.is_symlink()):
+        from_lockfile_path(lockfile_path, cowork_root)
+    return locator
 
 
 def is_cowork_path(lockfile_path: str) -> bool:

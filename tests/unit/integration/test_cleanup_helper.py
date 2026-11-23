@@ -569,6 +569,81 @@ def test_cowork_stale_entry_from_lockfile_error_retains_in_failed(tmp_path, diag
     assert any("failed path resolution" in m for m in msgs)
 
 
+def _cowork_link(tmp_path, name: str, target: Path, *, linked_ancestor: bool = False):
+    """A cowork:// claim whose file is a link to *target*; optionally under a linked dir."""
+    cowork = tmp_path / "cowork-skills"
+    skill = cowork / "alpha"
+    if linked_ancestor:
+        real = tmp_path / "cowork-skills" / "real-alpha"
+        real.mkdir(parents=True)
+        try:
+            skill.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+    else:
+        skill.mkdir(parents=True)
+    try:
+        (skill / name).symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    return cowork, f"cowork://skills/alpha/{name}"
+
+
+@pytest.mark.parametrize("linked_ancestor", [False, True], ids=["dangling", "linked-ancestor"])
+def test_cowork_outward_final_link_stays_retained_as_a_failure(
+    tmp_path, diagnostics, monkeypatch, linked_ancestor
+):
+    """Only the ancestor-checked gate allows an outward final link (#5022); cleanup's own
+    decode keeps full containment, so the entry and its lock row are retained."""
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    outside = tmp_path / "outside.md"
+    if linked_ancestor:
+        outside.write_text("outside\n", encoding="utf-8")
+    cowork, stale = _cowork_link(tmp_path, "notes.md", outside, linked_ancestor=linked_ancestor)
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+
+    result = remove_stale_deployed_files(
+        [stale],
+        project_root,
+        dep_key="pkg",
+        targets=None,
+        diagnostics=diagnostics,
+        evidence=no_evidence(project_root),
+    )
+
+    assert stale in result.failed and result.deleted == [], result
+    assert (cowork / "alpha" / "notes.md").is_symlink()
+
+
+def test_cowork_locator_returns_the_named_entry_when_it_becomes_a_link(tmp_path, monkeypatch):
+    """A file swapped for an inward link after the kind check is never decoded to its referent."""
+    from apm_cli.integration import copilot_cowork_paths
+
+    cowork = tmp_path / "cowork-skills"
+    (cowork / "alpha").mkdir(parents=True)
+    entry = cowork / "alpha" / "notes.md"
+    entry.write_text("notes\n", encoding="utf-8")
+    referent = cowork / "untracked.md"
+    referent.write_text("notes\n", encoding="utf-8")
+    real = copilot_cowork_paths.from_lockfile_path
+
+    def swap_then_decode(lockfile_path, root):
+        if not entry.is_symlink():
+            entry.unlink()
+            try:
+                entry.symlink_to(referent)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        return real(lockfile_path, root)
+
+    monkeypatch.setattr(copilot_cowork_paths, "from_lockfile_path", swap_then_decode)
+    found = copilot_cowork_paths.cowork_locator("cowork://skills/alpha/notes.md", cowork.resolve())
+
+    assert found == cowork.resolve() / "alpha" / "notes.md" and found.is_symlink()
+    assert referent.read_text(encoding="utf-8") == "notes\n"
+
+
 def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
     """A stale spelling that is the live file's directory entry is renamed, never deleted."""
     rules = project_root / ".github" / "instructions"
