@@ -302,6 +302,8 @@ _PLUGIN_LAYOUT = "src/apm_cli/bundle/plugin_layout.py"
 _LOCAL_BUNDLE_PATHS = "src/apm_cli/install/local_bundle_paths.py"
 _LOCAL_BUNDLE_AGENTS = "src/apm_cli/install/local_bundle_agents.py"
 _INSTALL_SERVICES = "src/apm_cli/install/services.py"
+_PLUGIN_EXPORTER_LAYOUT = "src/apm_cli/bundle/plugin_exporter.py"
+_LOCAL_BUNDLE_RULES = "src/apm_cli/install/local_bundle_renderings.py"
 _TARGET_NAME_COMPARISON = re.compile(r"\btarget\.name\s*(?:==|!=)|(?:==|!=)\s*target\.name\b")
 
 
@@ -335,7 +337,7 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
                 "def _lower_to_target(",
                 "PLUGIN_LAYOUT.get(head)",
                 "for primitive_kind in spec.primitive_kinds:",
-                "_retarget_basename(parts[-1], mapping, spec.apm_basename_fn)",
+                "deployed_file_extension(primitive_kind, mapping)",
                 '_UNSUPPORTED_PLUGIN_FORMAT_IDS = frozenset({"gemini_command"})',
                 '_RENDERED_PLUGIN_FORMAT_IDS = frozenset({"codex_agent"})',
             ),
@@ -351,6 +353,43 @@ def _check_bundle_native_layout(provider: FactsProvider) -> tuple[Violation, ...
             _INSTALL_SERVICES,
             ("if _bundle_render_format(", "skipped += _deploy_bundle_codex_agent("),
             "the bundle deploy loop must hand rendered-format agents to local_bundle_agents",
+        )
+    )
+    # One rendering per primitive (#3686): pack and bundle install select it
+    # through plugin_layout; packed instructions convert via InstructionIntegrator.
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _INSTALL_SERVICES,
+            (
+                "_superseded_renderings(",
+                "_warn_superseded(",
+                "_bundle_rule_format(",
+                "_render_bundle_rule(",
+            ),
+            "the bundle deploy loop must select and render renderings through the owners",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _LOCAL_BUNDLE_RULES,
+            ("InstructionIntegrator.convert_rule_content(",),
+            "packed instructions must convert through InstructionIntegrator",
+        )
+    )
+    findings.extend(
+        _require_subs(
+            provider,
+            inv,
+            _RID_BUNDLE_LAYOUT,
+            _PLUGIN_EXPORTER_LAYOUT,
+            ("superseded_plugin_renderings(", "deployed_rendering_extension("),
+            "plugin pack must drop per-target renderings through plugin_layout",
         )
     )
     findings.extend(

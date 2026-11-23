@@ -1,0 +1,27 @@
+{
+  "issue": 3686,
+  "fixed_in": "Unreleased",
+  "summary": "apm pack --format plugin for a multi-target producer shipped one primitive in several renderings, and a Claude consumer kept the Copilot instruction without its path scoping; the bundle now carries one rendering per primitive and names the dropped ones, and bundle install converts packed applyTo instructions to each target's rule format.",
+  "failure_modes": [
+    "routing",
+    "outcome"
+  ],
+  "properties": [
+    "routing.authorized_targets_only",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_pack_bundle_roundtrip_lifecycle.py::test_multi_target_pack_ships_one_rendering_per_primitive",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_duplicated_bundle_keeps_the_target_own_rendering",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_hidden_character_in_decoded_frontmatter_rejects_the_rule",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_malformed_instruction_frontmatter_skips_only_that_file",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_agents_lower_by_rendering_provenance",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_apm_instructions_render_to_the_target_rule_format",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_packed_native_claude_rule_with_dotted_stem_keeps_its_paths",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_rendering_provenance_prefers_the_packed_winner",
+    "tests/unit/install/test_install_local_bundle.py::TestLocalBundlePathRouting::test_superseded_renderings_count_as_skipped",
+    "tests/unit/test_plugin_exporter.py::TestExportPluginBundle::test_claude_and_copilot_commands_pack_once",
+    "tests/unit/test_plugin_exporter.py::TestExportPluginBundle::test_pack_records_the_winning_rendering_provenance",
+    "tests/unit/test_plugin_exporter_logic.py::TestDuplicatePluginRenderings::test_drops_only_other_target_renderings"
+  ]
+}

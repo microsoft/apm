@@ -17,6 +17,7 @@ import ast
 import re
 from collections.abc import Sequence
 
+from scripts.architecture_linter.checks.agent_plugin_scan_primitives import _call_name
 from scripts.architecture_linter.checks.contracts_generation_footer import (
     check_generation_footer_authority,
 )
@@ -1471,29 +1472,25 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                     )
                 )
             prepare_function = facts.tree_index.function(
-                "InstructionIntegrator._prepare_instruction"
+                "InstructionIntegrator.decoded_frontmatter_blocked"
             )
             prepare_scope = (
                 facts.tree_index.own_scope(prepare_function) if prepare_function is not None else ()
             )
+            # One decoded-frontmatter scan owner, called with force=force (#3686).
+            caller = facts.tree_index.function("InstructionIntegrator._prepare_instruction")
+            owner_calls = [
+                node
+                for node in (facts.tree_index.own_scope(caller) if caller is not None else ())
+                if isinstance(node, ast.Call)
+                and _call_name(node) == "self.decoded_frontmatter_blocked"
+                and _keyword_is_name(node, "force", "force")
+            ]
+            calls = [node for node in prepare_scope if isinstance(node, ast.Call)]
             security_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "SecurityGate"
-                and node.func.attr == "scan_text"
+                node for node in calls if _call_name(node) == "SecurityGate.scan_text"
             ]
-            json_calls = [
-                node
-                for node in prepare_scope
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "json"
-                and node.func.attr == "dumps"
-            ]
+            json_calls = [node for node in calls if _call_name(node) == "json.dumps"]
             force_value = (
                 next(
                     (item.value for item in security_calls[0].keywords if item.arg == "force"),
@@ -1513,11 +1510,11 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
             block_checks = [
                 node
                 for node in prepare_scope
-                if isinstance(node, ast.If)
-                and isinstance(node.test, ast.Attribute)
-                and isinstance(node.test.value, ast.Name)
-                and node.test.value.id == "verdict"
-                and node.test.attr == "should_block"
+                if isinstance(node, ast.Return)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "verdict"
+                and node.value.attr == "should_block"
             ]
             if (
                 len(security_calls) != 1
@@ -1527,6 +1524,7 @@ def check_frontmatter_yaml(provider: FactsProvider) -> tuple[Violation, ...]:
                 or not isinstance(ensure_ascii, ast.Constant)
                 or ensure_ascii.value is not False
                 or len(block_checks) != 1
+                or len(owner_calls) != 1
             ):
                 findings.append(
                     _summary(

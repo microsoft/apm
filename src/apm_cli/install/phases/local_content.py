@@ -24,6 +24,8 @@ _project_has_root_primitives
     Return True when the project root contains a ``.apm/`` directory.
 _has_local_apm_content
     Return True when ``.apm/`` contains at least one primitive file.
+_root_holds_only_hook_primitives
+    Return True when ``.apm/`` carries hooks and no other primitive.
 _copy_local_package
     Copy a local-path dependency into ``apm_modules/``.
 materialize_local_package
@@ -75,6 +77,27 @@ def _project_has_root_primitives(project_root) -> bool:
     return (root / ".apm").is_dir()
 
 
+_PRIMITIVE_DIRS = (
+    "skills",
+    "instructions",
+    "chatmodes",
+    "agents",
+    "prompts",
+    "hooks",
+    "commands",
+    "extensions",
+)
+
+
+def _populated_primitive_dirs(apm_dir) -> set[str]:
+    """Return the primitive subdirectories of *apm_dir* holding at least one file."""
+    return {
+        name
+        for name in _PRIMITIVE_DIRS
+        if (apm_dir / name).is_dir() and any(p.is_file() for p in (apm_dir / name).rglob("*"))
+    }
+
+
 def _has_local_apm_content(project_root):
     """Check if the project has local .apm/ content worth integrating.
 
@@ -85,21 +108,21 @@ def _has_local_apm_content(project_root):
     apm_dir = project_root / ".apm"
     if not apm_dir.is_dir():
         return False
-    _PRIMITIVE_DIRS = (
-        "skills",
-        "instructions",
-        "chatmodes",
-        "agents",
-        "prompts",
-        "hooks",
-        "commands",
-        "extensions",
-    )
-    for subdir_name in _PRIMITIVE_DIRS:
-        subdir = apm_dir / subdir_name
-        if subdir.is_dir() and any(p.is_file() for p in subdir.rglob("*")):
-            return True
-    return False
+    return bool(_populated_primitive_dirs(apm_dir))
+
+
+def _root_holds_only_hook_primitives(root) -> bool:
+    """Return True when *root*/.apm/ carries hooks and no other primitive.
+
+    A hook that names no script merges into a shared config and claims no
+    file, so installing such a root records no self-entry (#4837). Every
+    other primitive claims files; a lock with no self-entry for a root that
+    carries them predates user-root recording (#3772), so audit replay
+    leaves that root out exactly as released audits did.
+    """
+    from pathlib import Path as _Path
+
+    return _populated_primitive_dirs(_Path(root) / ".apm") == {"hooks"}
 
 
 # ---------------------------------------------------------------------------
