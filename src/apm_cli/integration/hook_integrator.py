@@ -43,6 +43,8 @@ from apm_cli.integration.hook_bundle import (
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
+    SCRIPTS_SUBDIR_HOOK_TARGETS,
+    hook_scripts_parent,
     iter_plugin_root_paths,
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
@@ -610,11 +612,11 @@ class HookIntegrator(BaseIntegrator):
         command = normalize_quoted_plugin_root(command)
         edits: list[tuple[int, int, str]] = []
 
-        if target == "vscode":
-            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
+        if target in SCRIPTS_SUBDIR_HOOK_TARGETS:
+            default_root = ".github"
         else:
             default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
-            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name
 
         def scoped(target_rel: str, quote: str) -> str:
             return self._project_scoped_command_path(

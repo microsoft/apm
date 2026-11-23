@@ -34,7 +34,14 @@ from .engine import _dependency_public_label, _removed_lock_key
 
 
 class LocalReanchorRefused(ValueError):
-    """A still-needed local dependency cannot be re-anchored; nothing was written."""
+    """A still-needed local dependency cannot be re-anchored; nothing was written.
+
+    *next_step* replaces the generic advice when the refusal has its own fix.
+    """
+
+    def __init__(self, message: str, next_step: str | None = None) -> None:
+        super().__init__(message)
+        self.next_step = next_step
 
 
 @dataclass(frozen=True)
@@ -204,7 +211,7 @@ def plan_local_reanchor(
             _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
             copy = row.to_dependency_ref().get_install_path(modules_dir)
             _require_copy(copy, key, label, modules_dir)
-            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label)
+            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label, modules_dir)
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
@@ -250,28 +257,32 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
         )
 
 
-def _require_fresh_copy(row, source: Path | None, copy: Path, key: str, label) -> None:
+def _require_fresh_copy(
+    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+) -> None:
     """Refuse a kept descendant whose local source no longer matches its copy (#4999).
 
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
-    framed = row.content_hash_framed
     try:
         fresh = (
             source is not None
-            and compute_local_package_hash(source, framed=framed)
-            == compute_local_package_hash(copy, framed=framed)
+            and local_source_matches_copy(row, source, copy)
             and _unhashed_files_match(source, copy)
         )
     except (OSError, ValueError, TypeError):
         fresh = False
     if not fresh:
+        from ...core.remediation import UNINSTALL_REANCHOR_STALE_COPY
+
         raise LocalReanchorRefused(
-            f"{label(key)} stays, but its local source differs from its apm_modules copy, "
-            "so the re-anchor cannot keep it as a fresh install would"
+            f"{label(key)} stays, but its local source differs from its apm_modules copy "
+            f"{copy.relative_to(modules_dir).as_posix()}, so the re-anchor cannot keep it as "
+            "a fresh install would",
+            next_step=UNINSTALL_REANCHOR_STALE_COPY.sentence(),
         )
 
 
@@ -543,7 +554,7 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
     Uninstall re-copies those before it rebuilds survivors, which a re-anchor
     rollback could not undo, so the re-anchor refuses them first (read-only).
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
     stale = []
     for key, row in sorted(lockfile.dependencies.items()):
@@ -552,10 +563,8 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
         try:
             ref = row.to_dependency_ref()
             copy = ref.get_install_path(modules_dir)
-            framed = row.content_hash_framed
-            if copy.is_dir() and compute_local_package_hash(
-                (source_root / ref.local_path).resolve(), framed=framed
-            ) != compute_local_package_hash(copy, framed=framed):
+            source = (source_root / ref.local_path).resolve()
+            if copy.is_dir() and not local_source_matches_copy(row, source, copy):
                 stale.append(key)
         except (OSError, ValueError, TypeError):
             stale.append(key)
@@ -698,7 +707,8 @@ def _plan_reanchor_or_exit(
     except LocalReanchorRefused as exc:
         logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
         logger.progress(
-            "Uninstall the package that still needs it first, or keep the local "
+            exc.next_step
+            or "Uninstall the package that still needs it first, or keep the local "
             "declaration in apm.yml."
         )
         sys.exit(1)
