@@ -966,7 +966,10 @@ def test_escaped_hidden_unicode_in_a_deployed_hook_declines(twin: Twin) -> None:
         twin.run(*argv)  # a scanner finding may block: parity holds either way
     decision = twin.run("install")
     _assert_decision(decision, FULL)
-    assert "non-ASCII deployed content" in decision, decision
+    # Either guard may decline first: the content scan, or the deploy store refusing a
+    # record whose replayed body is not printable ASCII. Both decline before any write.
+    reasons = ("non-ASCII deployed content", "no matching package record")
+    assert any(reason in decision for reason in reasons), decision
 
 
 @NEEDS_ANY
