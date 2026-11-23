@@ -55,6 +55,7 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
+from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
 from apm_cli.install.drift_records import ReplayRecords, replay_all_live
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
@@ -745,6 +746,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
+                    carry_kept_loose_into_replay(
+                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                    )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(
                             lock_dep,

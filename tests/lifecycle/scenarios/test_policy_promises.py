@@ -8,7 +8,7 @@ Each row authors its own packages and serves its own ``apm-policy.yml`` from a
 unique org (``_serve_policy``), so the shared world variants stay untouched.
 A promise row is paired with a control row that proves the fixture really
 deploys what the promise restricts, so the promise row can never pass
-vacuously. Rows whose promise is under private tracking are strict xfail.
+vacuously. A promise row the CLI does not keep yet is a strict xfail citing its issue.
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ import pytest
 import yaml
 
 from tests.lifecycle import driver
-from tests.lifecycle.world import use_policy
+from tests.lifecycle.known import KnownFailure
+from tests.lifecycle.world import use_policy, use_registry
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
 
@@ -473,3 +474,409 @@ def test_content_types_judge_a_local_source_not_its_stale_copy(lifecycle_world) 
     assert "content_types" in _text(result) and "hook" in _text(result), _text(result)
     assert not _hook_deployed(lifecycle_world), _text(result)
     assert not (lifecycle_world.project / ".agents/skills/t-third").exists(), _text(result)
+
+
+# -- G11: manifest.scripts (policy-schema.md, manifest section) --------------------
+
+
+def _scripts_deny(world) -> None:
+    _serve_policy(
+        world,
+        "policy-g11-scripts-deny",
+        {"name": "g11", "version": "1.0", "enforcement": "block", "manifest": {"scripts": "deny"}},
+    )
+
+
+def test_scripts_deny_accepts_a_manifest_without_scripts(lifecycle_world) -> None:
+    """Control: under scripts: deny a manifest with no scripts block is compliant."""
+    _scripts_deny(lifecycle_world)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    output = " ".join((audit.stdout + audit.stderr).split())
+    assert "No scripts section (compliant with deny policy)" in output, output
+
+
+def test_scripts_deny_fails_audit_for_a_scripts_block(lifecycle_world) -> None:
+    """manifest.scripts: deny -- a scripts block in apm.yml fails ``apm audit --ci``, named."""
+    _scripts_deny(lifecycle_world)
+    manifest = lifecycle_world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data["scripts"] = {"hello": "echo hello"}
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    before = manifest.read_bytes()
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    assert audit.returncode == 1, _text(audit)
+    assert "scripts-policy" in _text(audit), _text(audit)
+    assert "Scripts section present but denied by policy" in _text(audit), _text(audit)
+    assert manifest.read_bytes() == before
+
+
+# -- G6: mcp.self_defined (policy-schema.md, mcp section) ---------------------------
+
+_INLINE = ("install", "--mcp", "p-inline", "--", "apm-lifecycle-inert-server", "--stdio")
+
+
+def _self_defined(world, level: str) -> None:
+    mcp: dict[str, object] = {"self_defined": level}
+    if level == "warn":
+        # warn is the default: alone it leaves the policy empty and unenforced.
+        mcp["transport"] = {"allow": ["stdio"]}
+    _serve_policy(
+        world,
+        f"policy-g6-self-defined-{level}",
+        {"name": "g6", "version": "1.0", "enforcement": "block", "mcp": mcp},
+    )
+
+
+def test_self_defined_allow_installs_an_inline_server(lifecycle_world) -> None:
+    """Control: self_defined allow writes the inline server with no self-defined finding."""
+    _self_defined(lifecycle_world, "allow")
+    result = driver.run(lifecycle_world, list(_INLINE))
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+
+
+_SILENT_WARN = KnownFailure(
+    "#5070",
+    "install reports no policy finding for a self-defined MCP server under warn",
+    r"no policy warning names the self-defined server",
+)
+
+
+@_SILENT_WARN.mark()
+def test_self_defined_warn_installs_an_inline_server_and_says_so(lifecycle_world) -> None:
+    """mcp.self_defined: warn -- the inline server is written and the warning names it."""
+    _self_defined(lifecycle_world, "warn")
+    result = driver.run(lifecycle_world, list(_INLINE))
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+    # The policy finding itself, not the "(self-defined, stdio)" progress label.
+    text = _text(result)
+    warned = "Policy warning" in text or "self-defined MCP server(s) (warn)" in text
+    assert warned and "p-inline" in text, f"no policy warning names the self-defined server: {text}"
+
+
+def test_self_defined_deny_refuses_an_inline_server(lifecycle_world) -> None:
+    """mcp.self_defined: deny -- the inline server is refused and nothing is written."""
+    _self_defined(lifecycle_world, "deny")
+    manifest = lifecycle_world.project / "apm.yml"
+    before = manifest.read_bytes()
+    result = driver.run(lifecycle_world, list(_INLINE))
+    assert result.returncode == 1, _text(result)
+    assert "self-defined" in _text(result), _text(result)
+    assert not _configured(lifecycle_world, "p-inline"), _text(result)
+    assert manifest.read_bytes() == before
+
+
+# -- G3: dependencies.max_depth (policy-schema.md, dependencies section) -----------
+
+
+def _three_deep(world) -> str:
+    """t-a -> t-b -> t-c (local packages); returns t-a."""
+    factory = LocalPackageFactory(world.root / "g3")
+    for name, child in (("t-c", None), ("t-b", "t-c"), ("t-a", "t-b")):
+        package = factory.create(
+            name, version="1.0.0", dependencies=[f"../{child}"] if child else []
+        )
+        _skill(factory, package, name)
+    return str(world.root / "g3" / "t-a")
+
+
+def _max_depth(world, depth: int) -> None:
+    _serve_policy(
+        world,
+        f"policy-g3-max-depth-{depth}",
+        {
+            "name": "g3",
+            "version": "1.0",
+            "enforcement": "block",
+            "dependencies": {"max_depth": depth},
+        },
+    )
+
+
+@pytest.mark.parametrize(("depth", "passes"), [(5, True), (1, False)], ids=["within", "exceeded"])
+def test_max_depth_bounds_the_locked_graph_in_audit(lifecycle_world, depth, passes) -> None:
+    """dependencies.max_depth -- audit --ci fails when the locked graph is deeper, naming the limit."""
+    installed = driver.run(lifecycle_world, ["install", _three_deep(lifecycle_world)])
+    assert installed.returncode == 0, _text(installed)
+    _max_depth(lifecycle_world, depth)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    if passes:
+        assert f"All dependencies within depth limit ({depth})" in _text(audit), _text(audit)
+    else:
+        assert audit.returncode == 1, _text(audit)
+        assert f"exceed max depth {depth}" in _text(audit), _text(audit)
+
+
+# -- G10: dependencies.require_resolution (policy-schema.md, dependencies section) --
+
+
+@pytest.mark.parametrize(
+    ("resolution", "fails"),
+    [("project-wins", False), ("policy-wins", True), ("block", True)],
+)
+def test_require_resolution_decides_a_pinned_required_package_mismatch(
+    lifecycle_world, resolution, fails
+) -> None:
+    """dependencies.require_resolution -- a required pin the lock does not match fails audit
+    under policy-wins and block; project-wins keeps the project's ref."""
+    spec = lifecycle_world.packages["p-skill:git"].spec
+    installed = driver.run(lifecycle_world, ["install", spec])
+    assert installed.returncode == 0, _text(installed)
+    _serve_policy(
+        lifecycle_world,
+        f"policy-g10-{resolution}",
+        {
+            "name": "g10",
+            "version": "1.0",
+            "enforcement": "block",
+            "dependencies": {
+                "require": ["lifecycle/p-skill#v9.9.9"],
+                "require_resolution": resolution,
+            },
+        },
+    )
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    if fails:
+        assert audit.returncode == 1, _text(audit)
+        assert "version mismatch" in _text(audit), _text(audit)
+    else:
+        # The audit ran require_resolution and accepted the project's ref.
+        assert audit.returncode == 0, _text(audit)
+        assert "version mismatch" not in _text(audit), _text(audit)
+
+
+# -- G5: compilation.source_attribution (policy-schema.md, compilation section) ----
+
+
+@pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "missing"])
+def test_source_attribution_policy_requires_the_manifest_setting(lifecycle_world, enabled) -> None:
+    """compilation.source_attribution: true -- audit --ci fails unless apm.yml enables it."""
+    _serve_policy(
+        lifecycle_world,
+        f"policy-g5-attribution-{'on' if enabled else 'off'}",
+        {
+            "name": "g5",
+            "version": "1.0",
+            "enforcement": "block",
+            "compilation": {"source_attribution": True},
+        },
+    )
+    if enabled:
+        manifest = lifecycle_world.project / "apm.yml"
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        data["compilation"] = {"source_attribution": True}
+        manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    if enabled:
+        assert "Source attribution enabled" in _text(audit), _text(audit)
+    else:
+        assert audit.returncode == 1, _text(audit)
+        assert "Source attribution required by policy but not enabled" in _text(audit), _text(audit)
+
+
+# -- G7: unmanaged_files (policy-schema.md, unmanaged_files section) ----------------
+
+_UNMANAGED = ".github/instructions/hand-written.instructions.md"
+
+
+def _unmanaged_policy(world, case: str, **fields) -> None:
+    _serve_policy(
+        world,
+        f"policy-g7-unmanaged-{case}",
+        {"name": "g7", "version": "1.0", "enforcement": "block", "unmanaged_files": fields},
+    )
+
+
+def _hand_written_file(world) -> None:
+    path = world.project / _UNMANAGED
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('---\napplyTo: "**"\n---\n\nWritten by hand.\n', encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("case", "fields", "fails", "reported"),
+    [
+        ("deny", {"action": "deny"}, True, True),
+        ("warn", {"action": "warn"}, False, False),
+        (
+            "deny-excluded",
+            {"action": "deny", "exclude": [".github/instructions/hand-*"]},
+            False,
+            False,
+        ),
+    ],
+    ids=["deny", "warn", "deny-excluded"],
+)
+def test_unmanaged_files_policy_in_audit(lifecycle_world, case, fields, fails, reported) -> None:
+    """unmanaged_files -- deny fails audit --ci on a file the lock does not record, warn
+    reports it, and exclude suppresses it."""
+    _unmanaged_policy(lifecycle_world, case, **fields)
+    _hand_written_file(lifecycle_world)
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    text = _text(audit)
+    assert audit.returncode == (1 if fails else 0), text
+    # deny names each file; warn reports only the count; exclude suppresses it.
+    assert ("hand-written.instructions.md" in text) is reported, text
+    if case == "warn":
+        assert "1 unmanaged file(s) found (warn)" in text, text
+    assert (lifecycle_world.project / _UNMANAGED).is_file()
+
+
+def test_unmanaged_files_deny_blocks_an_install_that_would_leave_drift(lifecycle_world) -> None:
+    """unmanaged_files.action: deny -- "deny blocks installs that would leave drift" (#4826)."""
+    project = lifecycle_world.project
+    _unmanaged_policy(lifecycle_world, "install-deny", action="deny")
+    _hand_written_file(lifecycle_world)
+    kept = {name: (project / name).read_bytes() for name in ("apm.yml", _UNMANAGED)}
+    lock = project / "apm.lock.yaml"
+    lock_before = lock.read_bytes() if lock.exists() else None
+    result = driver.run(lifecycle_world, ["install", lifecycle_world.packages["p-skill:git"].spec])
+    assert result.returncode == 1, _text(result)
+    assert "unmanaged_files.action: deny" in _text(result), _text(result)
+    assert "hand-written.instructions.md" in _text(result), _text(result)
+    # A refused install rolls back (P-INV-I7): inputs, lock and the user's file unchanged.
+    assert {name: (project / name).read_bytes() for name in kept} == kept, _text(result)
+    assert (lock.read_bytes() if lock.exists() else None) == lock_before, _text(result)
+    assert not (project / ".agents" / "skills" / "p-skill").exists(), _text(result)
+
+
+# -- G8: security.audit.fail_on_drift (policy-schema.md, security section) ----------
+
+
+@pytest.mark.parametrize("fail_on_drift", [True, False], ids=["on", "off"])
+def test_fail_on_drift_decides_the_bare_audit_exit_code(lifecycle_world, fail_on_drift) -> None:
+    """security.audit.fail_on_drift -- a bare ``apm audit`` exits non-zero on drift only when on."""
+    installed = driver.run(
+        lifecycle_world, ["install", lifecycle_world.packages["p-skill:git"].spec]
+    )
+    assert installed.returncode == 0, _text(installed)
+    skill = lifecycle_world.project / ".agents/skills/p-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\nEdited by hand.\n", encoding="utf-8")
+    _serve_policy(
+        lifecycle_world,
+        f"policy-g8-drift-{'on' if fail_on_drift else 'off'}",
+        {
+            "name": "g8",
+            "version": "1.0",
+            "enforcement": "block",
+            # mcp.self_defined keeps the off policy non-empty, so it is enforced too.
+            "mcp": {"self_defined": "allow"},
+            "security": {"audit": {"fail_on_drift": fail_on_drift}},
+        },
+    )
+    audit = driver.run(lifecycle_world, ["audit"])
+    assert (audit.returncode != 0) is fail_on_drift, _text(audit)
+    assert "SKILL.md" in _text(audit), _text(audit)
+    assert "Edited by hand." in skill.read_text(encoding="utf-8")
+
+
+# -- G9: dependencies.require_pinned_constraint, manifest.require_explicit_includes -
+
+
+@pytest.mark.parametrize(
+    ("ref", "refused"),
+    [("", True), ("#main", True), ("#v1.0.0", False)],
+    ids=["no-ref", "bare-branch", "literal-tag"],
+)
+def test_require_pinned_constraint_refuses_an_unbounded_direct_dependency(
+    lifecycle_world, ref, refused
+) -> None:
+    """require_pinned_constraint -- install refuses a direct dep without a bounded ref."""
+    _serve_policy(
+        lifecycle_world,
+        f"policy-g9-pinned-{ref.strip('#') or 'none'}",
+        {
+            "name": "g9",
+            "version": "1.0",
+            "enforcement": "block",
+            "dependencies": {"require_pinned_constraint": True},
+        },
+    )
+    manifest = lifecycle_world.project / "apm.yml"
+    before = manifest.read_bytes()
+    result = driver.run(lifecycle_world, ["install", f"lifecycle/p-skill{ref}"])
+    if refused:
+        assert result.returncode == 1, _text(result)
+        assert "dependency-pinned-constraint" in _text(result), _text(result)
+        assert "Nothing was changed" in _text(result), _text(result)
+        assert manifest.read_bytes() == before
+        assert not (lifecycle_world.project / ".agents/skills/p-skill").exists()
+    else:
+        assert result.returncode == 0, _text(result)
+
+
+@pytest.mark.parametrize(
+    ("includes", "fails"),
+    [(None, True), ("auto", True), ([".apm/"], False)],
+    ids=["absent", "auto", "explicit-list"],
+)
+def test_require_explicit_includes_in_audit(lifecycle_world, includes, fails) -> None:
+    """manifest.require_explicit_includes -- audit --ci fails unless apm.yml lists includes."""
+    _serve_policy(
+        lifecycle_world,
+        f"policy-g9-includes-{'none' if includes is None else 'auto' if includes == 'auto' else 'list'}",
+        {
+            "name": "g9",
+            "version": "1.0",
+            "enforcement": "block",
+            "manifest": {"require_explicit_includes": True},
+        },
+    )
+    manifest = lifecycle_world.project / "apm.yml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    data.pop("includes", None)
+    if includes is not None:
+        data["includes"] = includes
+    manifest.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    audit = driver.run(lifecycle_world, ["audit", "--ci"])
+    text = _text(audit)
+    if fails:
+        assert audit.returncode == 1, text
+        assert "explicit-includes" in text, text
+    else:
+        assert "Manifest declares explicit includes paths" in text, text
+
+
+# -- G4: registry_source (policy-schema.md, registry_source section) ---------------
+
+
+def _registry_only(world) -> None:
+    use_registry(world)
+    _serve_policy(
+        world,
+        "policy-g4-registry-only",
+        {
+            "name": "g4",
+            "version": "1.0",
+            "enforcement": "block",
+            "registry_source": {"allow_non_registry": False},
+        },
+    )
+
+
+def test_registry_only_policy_admits_a_registry_package(lifecycle_world) -> None:
+    """Control: registry_source allow_non_registry false installs a registry package."""
+    _registry_only(lifecycle_world)
+    result = driver.run(
+        lifecycle_world, ["install", lifecycle_world.packages["p-skill:registry"].spec]
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 0, output
+    assert (lifecycle_world.project / ".agents/skills/p-skill/SKILL.md").is_file(), output
+
+
+def test_registry_only_policy_refuses_a_non_registry_package(lifecycle_world) -> None:
+    """registry_source.allow_non_registry: false -- a local-path package is refused."""
+    _registry_only(lifecycle_world)
+    factory = LocalPackageFactory(lifecycle_world.root / "g4")
+    package = factory.create("t-local", version="1.0.0")
+    _skill(factory, package, "t-local")
+    manifest = lifecycle_world.project / "apm.yml"
+    before = manifest.read_bytes()
+    result = driver.run(lifecycle_world, ["install", str(package.root)])
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 1, output
+    assert "non-registry source not permitted" in output, output
+    assert manifest.read_bytes() == before
+    assert not (lifecycle_world.project / ".agents/skills/t-local").exists(), output

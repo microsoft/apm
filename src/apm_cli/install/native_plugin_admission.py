@@ -213,7 +213,12 @@ def queue_native_agent_plugin(
         ctx,
         package_name,
         ClaudeNativePlugin(
-            package_name, name, root.resolve(), fingerprint, harnesses=frozenset({COPILOT})
+            package_name,
+            name,
+            root.resolve(),
+            fingerprint,
+            harnesses=frozenset({COPILOT}),
+            agent_plugin=True,
         ),
         diagnostics,
     )
