@@ -25,6 +25,6 @@
     "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_uninstall_survivor_rebuild_fails_closed_on_unverifiable_policy",
     "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_unpack_refuses_executable_content",
     "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_accepts_new_content_for_a_moved_commit",
-    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_altered_bytes_for_an_unchanged_commit"
+    "tests/integration/test_trust_integrity_consistency_lifecycle.py::test_update_refuses_a_modified_cache_copy_it_cannot_rebuild"
   ]
 }
