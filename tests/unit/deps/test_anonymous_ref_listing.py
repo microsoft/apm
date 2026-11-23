@@ -177,7 +177,8 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
         arl._proxy({"HTTPS_PROXY": "http://user:pw@q:2"})
 
 
-def test_ca_follows_git_precedence(tmp_path: Path):
+def test_ca_follows_git_precedence(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(arl, "_system_ca", lambda: True)
     git_ca, config_ca, cert_file = (tmp_path / n for n in ("git.pem", "cfg.pem", "ssl.pem"))
     for path in (git_ca, config_ca, cert_file):
         path.write_text("pem", encoding="ascii")
@@ -192,3 +193,12 @@ def test_ca_follows_git_precedence(tmp_path: Path):
         arl._verify({}, {"http.sslbackend": "schannel"})
     with pytest.raises(arl._Fallback):
         arl._verify({"GIT_SSL_CAINFO": str(tmp_path / "missing.pem")}, {})
+
+
+def test_default_ca_is_the_platform_openssl_store(tmp_path: Path, monkeypatch):
+    store = tmp_path / "cert.pem"
+    store.write_text("pem", encoding="ascii")
+    paths = arl.ssl.DefaultVerifyPaths(str(store), None, "", "", "", "")
+    monkeypatch.setattr(arl.ssl, "get_default_verify_paths", lambda: paths)
+
+    assert arl._verify({}, {}) == str(store)

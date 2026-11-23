@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import ssl
 import threading
 import urllib.parse
 from collections.abc import Mapping
@@ -167,6 +168,16 @@ def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str | bool:
             if not os.path.isfile(path):
                 raise _Fallback("CA file is not a regular file")
             return path
+    return _system_ca()
+
+
+def _system_ca() -> str | bool:
+    """The platform OpenSSL CA store git's libcurl uses; certifi only when absent."""
+    paths = ssl.get_default_verify_paths()
+    if paths.cafile and os.path.isfile(paths.cafile):
+        return paths.cafile
+    if paths.capath and os.path.isdir(paths.capath):
+        return paths.capath
     return True
 
 
@@ -201,7 +212,7 @@ def _session_for_refs():
 def _read_body(response) -> bytes:
     chunks = []
     size = 0
-    for chunk in response.iter_content(chunk_size=65536):
+    for chunk in response.iter_content(chunk_size=8192):
         size += len(chunk)
         if size > MAX_RESPONSE_BYTES:
             raise _Fallback("advertisement exceeds the size cap")
