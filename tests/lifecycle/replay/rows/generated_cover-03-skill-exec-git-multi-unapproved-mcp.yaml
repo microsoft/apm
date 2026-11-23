@@ -67,6 +67,7 @@ when:
   - pair|OP=lock|GATE=unapproved-exec
 - run: apm audit
   cells:
+  - T1|OP=audit|PRIM=bin|GATE=unapproved-exec
   - T1|OP=audit|PRIM=hook|GATE=unapproved-exec
   - T1|OP=audit|PRIM=mcp|GATE=unapproved-exec
   - pair|OP=audit|GATE=unapproved-exec

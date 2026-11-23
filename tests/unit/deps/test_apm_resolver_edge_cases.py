@@ -61,6 +61,14 @@ def _write_pkg(
     return pkg_dir
 
 
+def _assert_depths(tree, expected: dict[str, int]) -> None:
+    assert {key: node.depth for key, node in tree.nodes.items()} == expected
+
+
+def _assert_no_cut(resolver: APMDependencyResolver) -> None:
+    assert resolver.depth_limit_chains == []
+
+
 def _make_dep_ref(repo_url: str = "org/pkg", *, is_local: bool = False) -> MagicMock:
     ref = MagicMock(spec=DependencyReference)
     ref.repo_url = repo_url
@@ -301,6 +309,23 @@ class TestBuildDependencyTree:
         tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
         # max_depth=0: depth-1 items exceed 0, none should be added
         assert len(tree.nodes) == 0
+
+    def test_a_cycle_with_a_self_edge_terminates_under_max_depth(self, tmp_path: Path) -> None:
+        """A -> B -> A and A -> A under max_depth 2: two nodes, nothing cut (#4826)."""
+        mods = tmp_path / "apm_modules"
+        mods.mkdir()
+        _write_pkg(mods / "org", "a", deps=["org/b", "org/a"])
+        _write_pkg(mods / "org", "b", deps=["org/a"])
+        (tmp_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {"name": "root", "version": "0.0.1", "dependencies": {"apm": ["org/a"], "mcp": []}}
+            )
+        )
+        resolver = APMDependencyResolver(apm_modules_dir=mods, max_depth=2)
+        resolver._project_root = tmp_path
+        tree = resolver.build_dependency_tree(tmp_path / "apm.yml")
+        _assert_depths(tree, {"org/a": 1, "org/b": 2})
+        _assert_no_cut(resolver)
 
     def test_dev_dep_added_when_not_in_prod(self, tmp_path: Path) -> None:
         mods = tmp_path / "apm_modules"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import unicodedata
-from collections.abc import Callable, Container, Iterable
+from collections.abc import Callable, Container, Iterable, Iterator
 from pathlib import Path, PurePosixPath
 
 
@@ -97,10 +97,16 @@ class SpellingAliasIndex:
 
     def alias(self, rel_path: str, root: Path) -> str | None:
         """Return the inventory path naming the same entry as *rel_path* under *root*."""
+        return next(self._aliases(rel_path, root), None)
+
+    def aliases(self, rel_path: str, root: Path) -> tuple[str, ...]:
+        """Return every other inventory path naming the same entry as *rel_path* under *root*."""
+        return tuple(self._aliases(rel_path, root))
+
+    def _aliases(self, rel_path: str, root: Path) -> Iterator[str]:
         for candidate in self._buckets.get(_spelling_key(rel_path), ()):
             if candidate != rel_path and _same_entry(root / rel_path, root / candidate):
-                return candidate
-        return None
+                yield candidate
 
 
 def physical_alias(rel_path: str, root: Path, candidates: Iterable[str]) -> str | None:

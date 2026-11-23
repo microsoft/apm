@@ -456,7 +456,7 @@ class TestMcpChecksInResolvedSet:
         result = run_dependency_policy_checks(deps, policy=policy, mcp_deps=[])
         assert result.passed
         mcp_check_names = [c.name for c in result.checks if c.name.startswith("mcp-")]
-        assert len(mcp_check_names) == 4, (
+        assert len(mcp_check_names) == 5, (
             "MCP checks should run when mcp_deps=[] (explicitly provided)"
         )
 

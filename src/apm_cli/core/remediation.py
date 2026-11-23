@@ -358,6 +358,12 @@ UNINSTALL_EVIDENCE_REMOVE = _entry(
     "finish the uninstall",
     before="if the source is unreachable, move each listed file aside or delete it",
 )
+UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
+    "uninstall-evidence-trust-lockfile",
+    "apm uninstall {packages} --trust-lockfile",
+    "delete the files marked deletable and keep the rest",
+    before="if the source is gone for good",
+)
 # -- end W2 integration --
 # -- W2 marketplace --
 MARKETPLACE_DUPLICATE_ALIAS = _entry(
@@ -1324,6 +1330,12 @@ NATIVE_MCP_OWNERSHIP_UNRECORDED = _entry(
     "apm install",
     "record the native MCP entries' ownership in apm.lock.yaml",
     before="make each entry match its declaration or remove it",
+)
+NATIVE_MCP_ENTRY_EDITED = _entry(
+    "native-mcp-entry-edited",
+    "apm install",
+    "write each removed MCP entry again as APM recorded it",
+    before="undo your edit to each entry or remove the entry",
 )
 KEPT_MCP_ENTRIES = _entry(
     "kept-mcp-entries",

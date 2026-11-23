@@ -942,6 +942,63 @@ def test_an_edited_mcp_entry_is_refused_not_overwritten(lifecycle_world) -> None
     scenario.finish()
 
 
+def test_audit_reports_a_hand_edited_recorded_mcp_entry(lifecycle_world) -> None:
+    """#4757: ``audit --ci`` names a recorded Claude MCP entry the user edited, and the file.
+
+    The unedited entry passes (control); the printed remedy (undo the edit,
+    then ``apm install``) makes the audit pass again. Audit never writes.
+    User scope (~/.claude.json) is pinned at the owner in
+    tests/unit/install/test_mcp_ownership.py: the driver has no user-scope audit.
+    """
+    config = ".mcp.json"
+    factory = LocalPackageFactory(lifecycle_world.root / "owned")
+    server = {
+        "name": "o-mcp-mcp",
+        "registry": False,
+        "transport": "stdio",
+        "command": "apm-lifecycle-inert-server",
+        "args": ["--stdio"],
+    }
+    package = factory.create("o-mcp", version="1.0.0", mcp_dependencies=[server])
+    use_policy(lifecycle_world, "allow")
+    scenario = Scenario(
+        lifecycle_world,
+        {"o-mcp": str(package.root)},
+        kinds={"o-mcp": ("mcp",)},
+        targets=("claude",),
+        policy="allow",
+    )
+    scenario.run("install o-mcp")
+    scenario.run("approve o-mcp")
+    scenario.run("install")
+    assert "o-mcp-mcp" in scenario.lock().mcp_target_servers.get("claude", [])
+    control = scenario.run("audit --ci", read_only=True, exit=0)
+    assert "native-mcp-drift" not in control.output, control.output
+
+    path = scenario.deploy_root / config
+    original = path.read_text(encoding="utf-8")
+    data = json.loads(original)
+    data["mcpServers"]["o-mcp-mcp"] = {"command": "personal"}
+    edited = json.dumps(data, indent=2) + "\n"
+    scenario.user_write(config, edited)
+    scenario.source_moved()
+    keep = {"project": (config,)}
+    audit = scenario.run("audit --ci", read_only=True, exit=1, keep=keep)
+    text = " ".join(audit.output.split())
+    assert re.search(rf"native-mcp-drift.*'o-mcp-mcp' in \S*{re.escape(config)}", text), text
+    # install --frozen refuses the same entry, keeping the user's bytes.
+    scenario.run("install --frozen", exit=1, keep=keep)
+    assert path.read_text(encoding="utf-8") == edited
+
+    # The printed remedy: undo the edit, then apm install; the audit passes again.
+    assert "undo your edit to each entry or remove the entry, then run 'apm install'" in text
+    scenario.user_write(config, original)
+    scenario.source_moved()
+    scenario.run("install")
+    scenario.run("audit --ci", read_only=True, exit=0)
+    scenario.finish()
+
+
 _UNOWNED_EXEC = {
     "unapproved": [
         _pair("unowned", PRIM="hook", GATE="unapproved-exec", SRC="local-path"),

@@ -8,8 +8,10 @@ Hermetic chains against the installed CLI:
 * uninstall's survivor rebuild reads trust through the same policy-outcome
   owner, so an unverifiable org policy fails closed instead of dropping the
   org layer;
-* ``apm update`` on an unchanged commit refuses altered bytes and leaves the
-  lock untouched, while a moved commit is accepted;
+* ``apm update`` on an unchanged commit rebuilds a modified cache copy from
+  its commit with a warning; when the commit can no longer be fetched it
+  refuses, names the package and leaves the lock untouched, while a moved
+  commit is accepted;
 * ``apm update`` verifies an unchanged registry version against its locked
   hash, while a new registry version re-locks (#4125);
 * ``apm unpack`` never deploys executable content;
@@ -23,6 +25,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -258,7 +261,18 @@ def _cached_checkout(world: PolicyScopeWorld, name: str) -> list[Path]:
     ]
 
 
-def test_update_refuses_altered_bytes_for_an_unchanged_commit(
+def _drop_committed_skill(pkg: PublishedPackage, env: dict) -> None:
+    """Remove the skill blob of the locked commit from the served repository."""
+    origin = pkg.repository.origin
+    rel = f".apm/skills/{pkg.name}-skill/SKILL.md"
+    blob = _git(origin, env, "rev-parse", f"{pkg.commit.sha}:{rel}").strip()
+    loose = origin / "objects" / blob[:2] / blob[2:]
+    assert loose.is_file(), loose
+    loose.chmod(0o644)
+    loose.unlink()
+
+
+def test_update_refuses_a_modified_cache_copy_it_cannot_rebuild(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = PolicyScopeWorld(tmp_path, dict(os.environ))
@@ -271,10 +285,14 @@ def test_update_refuses_altered_bytes_for_an_unchanged_commit(
         run_step(runner, ("install", "--no-policy"), cwd=project, env=env, step="install")
         cached = _cached_checkout(world, "pkg-a")
         assert cached, sorted(str(p) for p in world.isolated.cache_root.rglob("*"))[:80]
+        altered = b"# altered\n"
         for path in cached:
-            path.write_text("# altered\n", encoding="utf-8")
+            path.write_bytes(altered)
         shutil.rmtree(project / "apm_modules")
+        # The tag still resolves, but the commit can no longer be fetched.
+        _drop_committed_skill(pkg, world.git_env())
         lock_before = file_digest(project / "apm.lock.yaml")
+        project_before = tree_snapshot(project, exclude=(".git", "apm_modules"))
 
         result = run_step(
             runner,
@@ -285,8 +303,18 @@ def test_update_refuses_altered_bytes_for_an_unchanged_commit(
             expected=1,
         )
 
-        assert "Content hash mismatch" in output(result), output(result)
+        text = " ".join(output(result).split())
+        assert re.search(
+            r"Cached copy of \S*pkg-a\S* @ [0-9a-f]{12} failed verification against its commit",
+            text,
+        ), output(result)
+        assert re.search(r"\[x\][^\[]*contoso/pkg-a", text), output(result)
         assert file_digest(project / "apm.lock.yaml") == lock_before
+        assert tree_snapshot(project, exclude=(".git", "apm_modules")) == project_before
+        modules = project / "apm_modules"
+        assert not any(
+            path.read_bytes() == altered for path in modules.rglob("*") if path.is_file()
+        ), sorted(str(path) for path in modules.rglob("*"))
 
 
 def test_update_accepts_new_content_for_a_moved_commit(
