@@ -1376,3 +1376,58 @@ def test_a_directory_mode_is_never_applied_through_a_link(tmp_path: Path) -> Non
 
     assert outside.stat().st_mode & 0o7777 == 0o700
     assert restored.is_symlink()
+
+
+def _header(store: Path) -> dict:
+    return json.loads((store / "journal.jsonl").read_text(encoding="utf-8").splitlines()[0])
+
+
+def test_a_journal_with_recorded_modes_is_refused_by_older_readers(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """An older apm replays only format version 1 journals, and it would restore a
+    copy's mode bits: a journal that records modes is a version it refuses."""
+    project = tmp_path / "project"
+    config, _ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+
+    header = _header(store)
+    assert (store / "journal.jsonl").read_text(encoding="utf-8").startswith("{")
+    assert header["format"] == "apm-deploy-journal"
+    assert header["version"] != 1
+
+
+def test_an_older_apms_journal_is_kept_and_reported(tmp_path: Path, apm_home: Path) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    manifest = store / "journal.jsonl"
+    lines = manifest.read_text(encoding="utf-8").splitlines()
+    lines[0] = json.dumps({**json.loads(lines[0]), "version": 1})
+    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(JournalReplayError):
+        _replay(apm_home, project, lambda: ledger)
+
+    assert config.read_bytes() == b"killed\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_sticky_directory_is_kept_not_restored_without_its_sticky_bit(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    skill, ledger, _store = _killed_skill(apm_home, tmp_path / "project", 0o1777)
+    skill.chmod(0o1777)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, tmp_path / "project", lambda: ledger)
+
+    assert kept.value.issues == [
+        (".kiro/skills/s", "the journal does not record a verifiable mode")
+    ]
+    assert (skill / "SKILL.md").read_bytes() == b"killed\n"
+    assert skill.stat().st_mode & 0o7777 == 0o1777
