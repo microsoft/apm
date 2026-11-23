@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import sys
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +115,11 @@ def serve_offline(
             )
         repositories.update(published)
     isolated, env = isolated_environment(directory / "env", base_env)
+    if sys.platform == "win32":
+        # Git for Windows' schannel backend cannot check revocation for the
+        # mirror's local CA (no CRL or OCSP endpoint) and refuses the connection.
+        with open(env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
+            config.write("[http]\n\tschannelCheckRevoke = false\n")
     (directory / "services").mkdir(parents=True, exist_ok=True)
     services = WorldServices(repositories).start(directory / "services")
     try:

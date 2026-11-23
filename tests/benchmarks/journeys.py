@@ -362,10 +362,35 @@ def _job_wait_with_deadline(proc: subprocess.Popen, job: int, timeout_s: float) 
             None,
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        print(f"[i] DEBUG job processes={info.TotalProcesses} active={info.ActiveProcesses} cpu={(info.TotalUserTime + info.TotalKernelTime) / 1e7}", flush=True)  # TEMP
-        return (info.TotalUserTime + info.TotalKernelTime) / 1e7
+        cpu = _job_cpu_seconds(info.TotalUserTime, info.TotalKernelTime)
+        print(f"[i] DEBUG job processes={info.TotalProcesses} cpu={cpu}", flush=True)  # TEMP
+        return cpu
     finally:
         _close_job(job)
+
+
+def _job_cpu_seconds(user_100ns: int, kernel_100ns: int) -> float:
+    """Job Object user + kernel times (100 ns units) as CPU seconds."""
+    return (user_100ns + kernel_100ns) / 10_000_000
+
+
+def _run_measured(
+    argv: list[str], timeout_s: float, *, platform: str = sys.platform, **popen_kwargs
+) -> tuple[int, float]:
+    """Run *argv* to completion, bounded; return its exit code and CPU seconds.
+
+    CPU is user + sys of the child and its descendants: ``wait4`` on POSIX
+    (descendants it waited for), a Job Object on Windows (every process ever
+    in the job).
+    """
+    if platform == "win32":
+        proc, job = _job_popen(argv, **popen_kwargs)
+        cpu = _job_wait_with_deadline(proc, job, timeout_s)
+        return proc.returncode, cpu
+    proc = subprocess.Popen(argv, **popen_kwargs)
+    status, usage = _wait4_with_deadline(proc, timeout_s)
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    return proc.returncode, usage.ru_utime + usage.ru_stime
 
 
 @dataclass
@@ -418,21 +443,14 @@ class Context:
             tempfile.TemporaryFile() as out,
             tempfile.TemporaryFile() as err,
         ):
-            if sys.platform == "win32":
-                proc, job = _job_popen([*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err)
-                cpu = _job_wait_with_deadline(proc, job, _COMMAND_TIMEOUT_S)
-            else:
-                proc = subprocess.Popen(
-                    [*self.apm, *argv], cwd=cwd, env=env, stdout=out, stderr=err
-                )
-                status, usage = _wait4_with_deadline(proc, _COMMAND_TIMEOUT_S)
-                proc.returncode = os.waitstatus_to_exitcode(status)
-                cpu = usage.ru_utime + usage.ru_stime
+            returncode, cpu = _run_measured(
+                [*self.apm, *argv], _COMMAND_TIMEOUT_S, cwd=cwd, env=env, stdout=out, stderr=err
+            )
             out.seek(0)
             err.seek(0)
             tail = out.read()[-3000:].decode(errors="replace") + "\n"
             tail += err.read()[-3000:].decode(errors="replace")
-        return proc.returncode, tail, cpu
+        return returncode, tail, cpu
 
     def checked(self, argv: list[str], cwd: Path) -> None:
         result = self.run(argv, cwd)
