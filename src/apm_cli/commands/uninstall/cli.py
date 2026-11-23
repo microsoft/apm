@@ -480,6 +480,9 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
             logger,
             f"The re-anchored package's apm_modules directory could not be moved ({exc})",
         )
+    except BaseException as exc:
+        _undo_reanchor(exc, (), modules_dir, repair)
+        raise
 
 
 def _persist_reanchored_lockfile(
@@ -494,9 +497,19 @@ def _persist_reanchored_lockfile(
         return _persist_in_reanchor_transaction(
             lockfile, lockfile_path, logger, integration_cleanup, repair
         )
-    except BaseException:
-        _restore_reanchored_dirs(moved, modules_dir)
+    except BaseException as exc:
+        _undo_reanchor(exc, moved, modules_dir, repair)
         raise
+
+
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair) -> None:
+    """Move the re-anchored directories back; anything but a handled exit also restores
+    apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor."""
+    _restore_reanchored_dirs(moved, modules_dir)
+    if not isinstance(exc, SystemExit) and repair.reanchor:
+        from .local_reanchor import roll_back
+
+        roll_back(repair.reanchor)
 
 
 def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:
@@ -548,8 +561,8 @@ def _persist_lock_then_resync_native(
         return
     try:
         _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
-    except SystemExit:
-        _restore_reanchored_dirs(moved, modules_dir)
+    except BaseException as exc:
+        _undo_reanchor(exc, moved, modules_dir, still_needed_repairs)
         raise
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,

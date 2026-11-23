@@ -225,14 +225,14 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
     for key, node in nodes.items():
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
-        if current == target:
-            continue
         if current.is_symlink() or not current.is_dir():
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its apm_modules copy "
                 f"{current.relative_to(modules_dir).as_posix()} is missing, so it cannot move "
                 "with the re-anchor"
             )
+        if current == target:
+            continue
         if target.exists():
             raise LocalReanchorRefused(
                 f"{label(key)} stays, but its re-anchored directory "
@@ -270,7 +270,8 @@ def move_materializations(
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             current.rename(target)
-        except OSError:
+        except BaseException:
+            # A failed or interrupted (Ctrl-C) move leaves apm_modules as it was.
             _remove_created(created)
             restore_materializations(tuple(done), root)
             raise

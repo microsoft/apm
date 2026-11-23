@@ -209,3 +209,134 @@ def test_a_receipt_rename_that_raises_leaves_the_tree_as_it_was(
 
     assert exc.value.code == 1
     assert (_tree(modules), manifest.read_bytes(), lock_path.read_bytes()) == before
+
+
+class _InterruptedPath(type(Path())):
+    """A directory whose move is cancelled (Ctrl-C) mid-rename."""
+
+    def rename(self, target):
+        raise KeyboardInterrupt
+
+
+def test_an_interrupted_rename_cleans_up_before_cancelling(tmp_path: Path) -> None:
+    modules = tmp_path / "apm_modules"
+    first, second = _package(modules, "a"), _package(modules, "b")
+    before = _tree(modules)
+    moves = (
+        (first, modules / "_local" / "h1" / "a"),
+        (_InterruptedPath(second), modules / "_local" / "h2" / "b"),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        move_materializations(moves, modules)
+
+    assert _tree(modules) == before
+    assert not (modules / "_local" / "h1").exists()
+    assert not (modules / "_local" / "h2").exists()
+
+
+def _reanchor_call(tmp_path: Path, **overrides):
+    """Run the persist step of a re-anchor whose directory moves; return the roots to compare."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import (
+        _persist_lock_then_resync_native,
+        _StillNeededRepair,
+    )
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    manifest, lock_path = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock_path.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(repo_url="acme/e", depth=2))
+    (new_key,) = lock.dependencies
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(
+            renames={"./vendor/e": new_key},
+            moves=((current, modules / "_local" / "h1" / "e"),),
+        ),
+        (manifest, lock_path),
+    )
+    before = (_tree(modules), manifest.read_bytes(), lock_path.read_bytes())
+    manifest.write_text("name: changed\n", encoding="utf-8")
+    cleanup = IntegrationCleanupOutcome(
+        counts={}, deployed_files={}, failed_paths=[], error_count=0, **overrides
+    )
+
+    def run() -> None:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=lock,
+            lockfile_path=lock_path,
+            logger=MagicMock(),
+            integration_cleanup=cleanup,
+            deploy_root=tmp_path,
+            modules_dir=modules,
+            scope=None,
+            native_before=None,
+            still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
+        )
+
+    def after():
+        return (_tree(modules), manifest.read_bytes(), lock_path.read_bytes())
+
+    return run, before, after
+
+
+def test_an_interrupted_receipt_binding_restores_everything(tmp_path: Path) -> None:
+    """Ctrl-C while binding claims after the save: dirs, apm.yml and lock all go back."""
+    from unittest.mock import MagicMock
+
+    session = MagicMock(bind_committed_claims=MagicMock(side_effect=KeyboardInterrupt))
+    run, before, after = _reanchor_call(tmp_path, materialization_session=session)
+
+    with pytest.raises(KeyboardInterrupt):
+        run()
+
+    assert after() == before
+
+
+def test_an_interrupted_receipt_rename_restores_everything(tmp_path: Path, monkeypatch) -> None:
+    """Ctrl-C while renaming receipt owners after the save: everything goes back."""
+
+    def _interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("apm_cli.core.deployment_reanchor.rename_receipt_owners", _interrupt)
+    run, before, after = _reanchor_call(tmp_path)
+
+    with pytest.raises(KeyboardInterrupt):
+        run()
+
+    assert after() == before
+
+
+def test_a_missing_copy_refuses_even_when_the_install_path_does_not_change(
+    tmp_path: Path,
+) -> None:
+    """Same alias on both edges, same install path, no copy: install would recreate it."""
+    from types import SimpleNamespace
+
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorRefused,
+        _materialization_moves,
+    )
+
+    modules = tmp_path / "apm_modules"
+    path = modules / "_local" / "e"
+    ref = SimpleNamespace(get_install_path=lambda _modules: path)
+    lockfile = SimpleNamespace(
+        get_dependency=lambda _key: SimpleNamespace(to_dependency_ref=lambda: ref)
+    )
+
+    with pytest.raises(LocalReanchorRefused, match="is missing"):
+        _materialization_moves(lockfile, {"./vendor/e": ref}, modules, lambda key: key)
