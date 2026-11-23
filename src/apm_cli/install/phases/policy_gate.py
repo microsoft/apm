@@ -305,7 +305,7 @@ def enforce_content_types(ctx: InstallContext, materialized) -> None:
     fetch = getattr(ctx, "policy_fetch", None)
     policy = getattr(fetch, "policy", None)
     if (
-        not ctx.policy_enforcement_active
+        not getattr(ctx, "policy_enforcement_active", False)
         or policy is None
         or policy.manifest.content_types is None
         or getattr(ctx, "dry_run", False) is True
@@ -315,9 +315,11 @@ def enforce_content_types(ctx: InstallContext, materialized) -> None:
     from apm_cli.policy.install_preflight import emit_check_violations
     from apm_cli.policy.models import CIAuditResult
 
+    # A package with no targets materializes without package_info and deploys nothing.
     roots = {
         source.dep_key: (Path(materialization.package_info.install_path),)
         for source, materialization in materialized
+        if materialization.package_info is not None
     }
     check = check_content_types(roots, policy.manifest)
     if check.passed:
