@@ -118,8 +118,10 @@ def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
                 base = (
                     f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else target.prefix
                 )
-                # A root of "." (CLAUDE_CONFIG_DIR=$HOME) records claims as "skills/...".
-                prefixes.append(f"{posixpath.normpath(f'{base}{mapping.subdir}')}/")
+                # Claims are POSIX: a Windows root is spelled with "/", and a
+                # root of "." (CLAUDE_CONFIG_DIR=$HOME) records "skills/...".
+                prefix = f"{base}{mapping.subdir}".replace("\\", "/")
+                prefixes.append(f"{posixpath.normpath(prefix)}/")
     return tuple(prefixes)
 
 
@@ -412,7 +414,8 @@ def carry_kept_loose_into_replay(
             )
             validate_path_segments(relative, context="kept lock claim", reject_empty=True)
             live_file = ensure_path_within(live_root / relative, live_root)
-            replayed = ensure_path_within(replay_root / relative, replay_root)
+            # Contain the copy at scratch_root: a symlinked replay root never redirects it.
+            replayed = ensure_path_within(replay_root / relative, scratch_root)
         except PathTraversalError:
             continue  # a claim outside its root is never carried; drift reports it
         if has_symlink_component(live_root, live_root / relative) or not live_file.is_file():

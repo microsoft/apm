@@ -1846,11 +1846,14 @@ def resolve_audit_targets(
     user_scope: bool = False,
     lockfile: LockFile | None = None,
     include_recorded: bool = False,
+    recorded_layout: bool = True,
 ) -> list[TargetProfile]:
     """Resolve read-only audit profiles through target and deployment owners.
 
     *include_recorded* adds the targets the lock recorded to a declared
     manifest target set, so a render covers targets the manifest just dropped.
+    *recorded_layout* recovers the skill layout from every lock claim; a
+    caller that resolves the layout per dependency passes ``False``.
     """
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import get_workspace_deploy_root
@@ -1899,6 +1902,6 @@ def resolve_audit_targets(
         get_workspace_deploy_root(project_root),
         user_scope=user_scope,
         explicit_target=decision.value,
-        recorded_paths=recorded_deployed_paths(lock),
+        recorded_paths=recorded_deployed_paths(lock) if recorded_layout else (),
         create_config=False,
     )

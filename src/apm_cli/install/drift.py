@@ -519,6 +519,24 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
+def _replay_targets(converged, *, lock=None, recorded_paths=()) -> list:
+    """Return replay profiles in the skill layout *recorded_paths* record.
+
+    *lock* recovers the layout from every claim it records (scratch roots and
+    governed walks); a dependency passes its own claims so a lock that mixes
+    layouts replays each dependency where install deployed it (#5092).
+    """
+    from apm_cli.install.audit_target_roots import replay_target
+    from apm_cli.integration.skill_layout import recorded_deployed_paths, resolve_skill_layout
+
+    if lock is not None:
+        recorded_paths = recorded_deployed_paths(lock)
+    return [
+        replay_target(target)
+        for target in resolve_skill_layout(converged, recorded_paths=recorded_paths)
+    ]
+
+
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
@@ -532,7 +550,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
+    from apm_cli.install.audit_target_roots import replay_deployment_frame
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -584,13 +602,17 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     )
     codex_records = None
 
-    live_targets = resolve_audit_targets(
-        project_root,
-        user_scope=config.user_scope,
-        lockfile=lock,
-        include_recorded=config.include_recorded_targets,
+    converged_targets = _filter_targets(
+        resolve_audit_targets(
+            project_root,
+            user_scope=config.user_scope,
+            lockfile=lock,
+            include_recorded=config.include_recorded_targets,
+            recorded_layout=False,
+        ),
+        config.targets,
     )
-    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
+    targets = _replay_targets(converged_targets, lock=lock)
     registries: dict[str, str] | None = None
     downloader = None
     registry_resolver = None
@@ -718,7 +740,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         result = integrate_package_primitives(
                             package_info,
                             scratch_root,
-                            targets=targets,
+                            # Each dependency replays in the skill layout its claims record (#5092).
+                            targets=_replay_targets(
+                                converged_targets, recorded_paths=lock_dep.deployed_files
+                            ),
                             integrators=IntegratorBundle(
                                 prompt=integrators["prompt"],
                                 agent=integrators["agent"],
@@ -751,7 +776,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         deployment_frame[1],
                         scratch_root,
                         config.user_scope,
-                        live_targets,
+                        converged_targets,
                     )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(

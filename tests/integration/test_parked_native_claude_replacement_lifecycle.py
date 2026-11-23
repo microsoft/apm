@@ -34,6 +34,7 @@ pytestmark = [
 
 _REMOTE = "https://github.com/fixture/marketplace"
 _SUBDIR = "plugins/demo"
+_COMPANION = "plugins/other"
 _CLAUDE_SKILL = ".claude/skills/demo/SKILL.md"
 _CODEX_SKILL = ".agents/skills/demo/SKILL.md"
 _INSTALL = ("install", "--global", "--no-policy", "--no-audit")
@@ -62,6 +63,7 @@ class _World:
         claude: str = "default",
         project: bool = False,
         targets: tuple[str, ...] = ("codex", "claude"),
+        companion: bool = False,
     ) -> None:
         isolated = IsolatedApmEnvironment.create(
             tmp_path.resolve() / "world", base_env=dict(os.environ)
@@ -91,6 +93,19 @@ class _World:
             "dependencies:\n  apm: []\n  mcp: []\nincludes:\n  - skills\n",
             encoding="ascii",
         )
+        # An ordinary skill package beside the parked one, in the same repository.
+        self.companion = companion
+        if companion:
+            other = self.repository.worktree / _COMPANION
+            (other / "skills" / "other").mkdir(parents=True)
+            (other / "skills" / "other" / "SKILL.md").write_text(
+                "---\nname: other\ndescription: Other\n---\nOther skill.\n", encoding="ascii"
+            )
+            (other / "apm.yml").write_text(
+                f"name: other\nversion: 1.0.0\ntargets: [{', '.join(targets)}]\n"
+                "dependencies:\n  apm: []\n  mcp: []\nincludes:\n  - skills\n",
+                encoding="ascii",
+            )
         self.env = repositories.url_rewrite_subprocess_env(self.repository, _REMOTE)
         for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "APM_LEGACY_SKILL_PATHS"):
             self.env.pop(name, None)
@@ -108,12 +123,10 @@ class _World:
         return self.repositories.commit(self.repository, message=f"publish {body}").sha
 
     def pin(self, commit: str) -> None:
-        dependency = {
-            "git": "fixture/marketplace",
-            "path": _SUBDIR,
-            "ref": commit,
-            "targets": self.targets,
-        }
+        dependencies = [
+            {"git": "fixture/marketplace", "path": path, "ref": commit, "targets": self.targets}
+            for path in (_SUBDIR, _COMPANION)[: 2 if self.companion else 1]
+        ]
         self.manifest.parent.mkdir(parents=True, exist_ok=True)
         self.manifest.write_text(
             json.dumps(
@@ -121,7 +134,7 @@ class _World:
                     "name": "consumer",
                     "version": "1.0.0",
                     **({"targets": self.targets} if self.project else {}),
-                    "dependencies": {"apm": [dependency], "mcp": []},
+                    "dependencies": {"apm": dependencies, "mcp": []},
                 }
             ),
             encoding="ascii",
@@ -146,7 +159,11 @@ class _World:
 
     def deployed(self) -> list[str]:
         lock = load_yaml(self.manifest.parent / "apm.lock.yaml")
-        (row,) = lock["dependencies"]
+        (row,) = [
+            row
+            for row in lock["dependencies"]
+            if any("skills/demo" in value for value in row.get("deployed_files") or ())
+        ]
         return list(row["deployed_files"])
 
 
@@ -298,15 +315,24 @@ def test_a_parked_native_replacement_keeps_the_loose_skill_under_a_relocated_cla
     _assert_kept_and_bound(world, {claim: skill}, upgraded)
 
 
+@pytest.mark.parametrize("companion", [False, True], ids=["alone", "beside-an-ordinary-skill"])
 def test_a_parked_native_replacement_keeps_legacy_layout_skills_in_a_project(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, companion: bool
 ) -> None:
     """--legacy-skill-paths install, then a flagless parked upgrade (#5092).
 
     At project scope the Claude-format plugin serves Claude and Copilot, so
     both loose copies are kept, including Copilot's under .github/skills/.
+    An ordinary skill package beside it migrates to .agents/skills/, so the
+    lock mixes layouts and each dependency replays in its own.
     """
-    world = _World(tmp_path, apm_binary_path, project=True, targets=("copilot", "claude"))
+    world = _World(
+        tmp_path,
+        apm_binary_path,
+        project=True,
+        targets=("copilot", "claude"),
+        companion=companion,
+    )
     for harness in (".github", ".claude"):
         (world.cwd / harness).mkdir(exist_ok=True)
     kept = {
@@ -319,4 +345,7 @@ def test_a_parked_native_replacement_keeps_legacy_layout_skills_in_a_project(
     assert set(kept) <= set(before), before
     assert not (world.cwd / ".agents" / "skills" / "demo").exists(), _evidence(upgraded)
     assert "Kept .claude/skills/demo, .github/skills/demo:" in _text(upgraded), _evidence(upgraded)
+    if companion:
+        assert (world.cwd / ".agents/skills/other/SKILL.md").is_file(), _evidence(upgraded)
+        assert not (world.cwd / ".github/skills/other").exists(), _evidence(upgraded)
     _assert_kept_and_bound(world, kept, upgraded)

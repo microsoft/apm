@@ -156,3 +156,60 @@ def test_a_claude_root_at_home_matches_claims_recorded_without_a_dot_prefix() ->
     )
 
     assert sorted(kept) == ["skills/demo", "skills/demo/SKILL.md"]
+
+
+def test_a_windows_claude_root_matches_claims_recorded_with_forward_slashes() -> None:
+    # for_scope() keeps an external Windows root with backslashes; claims are POSIX.
+    from dataclasses import replace
+
+    plan = _plan(parked="Parked native plugin pkg: denied")
+    plan.target_selection.targets[0] = replace(
+        KNOWN_TARGETS["claude"], root_dir="C:\\profiles\\claude-config"
+    )
+
+    kept = plan.kept_loose_values(
+        (
+            "C:/profiles/claude-config/skills/demo/SKILL.md",
+            "C:/profiles/claude-config/settings.json",
+        ),
+        user_scope=True,
+    )
+
+    assert kept == ("C:/profiles/claude-config/skills/demo/SKILL.md",)
+
+
+def _external_claude(tmp_path: Path) -> tuple[object, str, Path]:
+    from dataclasses import replace
+
+    root = tmp_path.resolve() / "claude-config"
+    (root / "skills/demo").mkdir(parents=True)
+    (root / "skills/demo/SKILL.md").write_text("kept", encoding="ascii")
+    claude = replace(KNOWN_TARGETS["claude"], root_dir=str(root))
+    return claude, (root / "skills/demo/SKILL.md").as_posix(), tmp_path.resolve() / "scratch"
+
+
+def test_replay_carries_a_kept_external_claim_into_its_replay_root(tmp_path: Path) -> None:
+    claude, value, scratch = _external_claude(tmp_path)
+    lock_dep = SimpleNamespace(deployed_files=[value], deployed_file_hashes={value: "sha256:a"})
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, tmp_path / "home", scratch, True, [claude])
+
+    replayed = scratch / ".apm-audit-targets/claude/skills/demo/SKILL.md"
+    assert replayed.read_text(encoding="ascii") == "kept"
+
+
+def test_replay_never_carries_a_kept_external_claim_through_a_symlinked_replay_root(
+    tmp_path: Path,
+) -> None:
+    claude, value, scratch = _external_claude(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (scratch / ".apm-audit-targets").mkdir(parents=True)
+    (scratch / ".apm-audit-targets/claude").symlink_to(outside, target_is_directory=True)
+    lock_dep = SimpleNamespace(deployed_files=[value], deployed_file_hashes={value: "sha256:a"})
+    result = {"deployment_plan": _plan(parked="Parked native plugin pkg: denied")}
+
+    carry_kept_loose_into_replay(result, lock_dep, tmp_path / "home", scratch, True, [claude])
+
+    assert list(outside.rglob("*")) == []
