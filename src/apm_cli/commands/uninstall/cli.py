@@ -105,11 +105,15 @@ def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list)
 
 
 class _StillNeededRepair(NamedTuple):
-    """Orphan-owner repair for still-needed rows: parents, subtree depth and dev status."""
+    """Orphan-owner repair: parent, depth and dev status for every affected row.
+
+    ``roots`` are the still-needed rows whose own declaration goes.
+    """
 
     parents: dict
     depths: dict
     dev: dict
+    roots: frozenset = frozenset()
 
 
 _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
@@ -138,10 +142,12 @@ def _split_still_needed_packages(
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
     removed = [package for package in packages_to_remove if package not in still_needed]
-    parents = {
-        key: repair for key, repair in decision.repairs.items() if key in decision.rescued_roots
-    }
-    repair = _StillNeededRepair(parents, dict(decision.rescued_depths), dict(decision.rescued_dev))
+    repair = _StillNeededRepair(
+        dict(decision.rescued_parents),
+        dict(decision.rescued_depths),
+        dict(decision.rescued_dev),
+        frozenset(decision.rescued_roots),
+    )
     return removed, still_needed, repair
 
 
@@ -160,21 +166,25 @@ def _split_removals(
 
 
 def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
-    """Re-parent each still-needed row, then re-derive its subtree's depth and dev status."""
+    """Give every affected row the parent, depth and dev status install records."""
     updated = False
     # Dev status comes only from ``repair.dev``: a partial walk proves
     # production paths, never their absence.
-    for key, (parent, local_path, _dev_only) in repair.parents.items():
+    for key, (parent, local_path) in repair.parents.items():
         kept = lockfile.get_dependency(key)
         if kept is None:
             continue
-        kept.resolved_by = parent
-        if local_path is not None:
+        if kept.resolved_by != parent:
+            kept.resolved_by = parent
+            updated = True
+        if local_path is not None and kept.local_path != local_path:
             kept.local_path = local_path
-        if kept.replacement is not None:
-            # The removed declaration's own request goes; surviving parents' stay.
-            kept.replacement.drop_root_requests()
-        updated = True
+            updated = True
+    for key in repair.roots:
+        kept = lockfile.get_dependency(key)
+        # The removed declaration's own request goes; surviving parents' stay.
+        if kept is not None and kept.replacement is not None:
+            updated |= kept.replacement.drop_root_requests()
     for field_name, values in (("depth", repair.depths), ("is_dev", repair.dev)):
         for key, value in values.items():
             kept = lockfile.get_dependency(key)

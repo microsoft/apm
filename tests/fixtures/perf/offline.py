@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
+import sys
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.fixtures.perf.generator import TreeFixture, publish_repositories
+from tests.fixtures.perf.generator import TreeFixture, publish_repositories, remove_tree
 from tests.lifecycle.world.services import WorldServices
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_scripted_https_proxy import Traffic
@@ -68,7 +68,7 @@ class OfflineWorld:
 
     def clear_cache(self) -> None:
         """Empty APM_CACHE_DIR: the next command runs against a cold cache."""
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
+        remove_tree(self.cache_dir)
         self.cache_dir.mkdir(parents=True)
 
 
@@ -114,6 +114,13 @@ def serve_offline(
             )
         repositories.update(published)
     isolated, env = isolated_environment(directory / "env", base_env)
+    if sys.platform == "win32":
+        # Git for Windows' default schannel backend refuses the mirror's local CA
+        # (no CRL or OCSP endpoint: "revocation status is unknown"). APM carries
+        # only http.sslBackend/sslCAInfo/sslCAPath from this config into its
+        # isolated git env, so pick OpenSSL, which trusts GIT_SSL_CAINFO as on Linux.
+        with open(env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
+            config.write("[http]\n\tsslBackend = openssl\n")
     (directory / "services").mkdir(parents=True, exist_ok=True)
     services = WorldServices(repositories).start(directory / "services")
     try:

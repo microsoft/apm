@@ -632,6 +632,42 @@ def test_native_resync_never_runs_ahead_of_the_survivor_lock(
 
 
 @pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("target_name", "skill", "skill_dir"),
+    [
+        ("copilot", "skills", ".agents/skills/skills"),
+        ("grok-bot", "research", "agent-data/workflows/research"),
+    ],
+    ids=["skill-named-skills", "workflows-skills-root"],
+)
+def test_adopted_user_root_skill_receipt_records_its_skill_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_name: str, skill: str, skill_dir: str
+) -> None:
+    """A migrated pre-0.38 skill member also gets the directory entry a normal install records."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    target = KNOWN_TARGETS[target_name].for_scope(user_scope=True)
+    assert target is not None
+    path = target.skills_deploy_path(home) / skill / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("rendered\n", encoding="utf-8")
+    session = DeploymentMaterializationSession(home, InstallScope.USER, None)
+    session.record({path: compute_file_hash(path)}, [target], ".")
+    session.flush()
+    data = json.loads(session.state_path.read_text(encoding="utf-8"))
+    data["bindings"] = {key: [".", "[]"] for key in data["bindings"]}
+    session.state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    migrating = DeploymentMaterializationSession(home, InstallScope.USER, None)
+    adopted = migrating.adopt_root_receipts([], [target])
+    migrating.flush()
+
+    assert adopted == [skill_dir, f"{skill_dir}/SKILL.md"]
+    persisted = json.loads(session.state_path.read_text(encoding="utf-8"))
+    assert [".", "[]"] not in persisted["bindings"].values(), persisted
+
+
 def test_scope_isolation_and_atomic_lf_serialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
