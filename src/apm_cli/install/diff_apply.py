@@ -133,19 +133,37 @@ def _extras_key(lock_text: str, manifest: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _deploy_tops() -> set[str]:
+    """First path components any known target deploys under (bounds the snapshot walk)."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    tops: set[str] = set()
+    for target in KNOWN_TARGETS.values():
+        roots = [
+            target.root_dir,
+            *(m.deploy_root for m in target.primitives.values() if m.deploy_root),
+        ]
+        tops.update(str(r).split("/", 1)[0] for r in roots if r)
+    return tops - _SKIP_DIRS
+
+
 def _snapshot(root: Path) -> dict[str, str]:
+    """Hashes of root-level files and of files under target deploy roots only."""
     out: dict[str, str] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        if os.path.samefile(dirpath, root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
-        for name in filenames:
-            path = Path(dirpath, name)
-            if path.is_symlink():
-                continue
-            rel = path.relative_to(root).as_posix()
-            if rel in _SKIP_HARVEST:
-                continue
-            out[rel] = _sha256(path.read_bytes())
+    tops = _deploy_tops()
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if entry.is_file(follow_symlinks=False) and entry.name not in _SKIP_HARVEST:
+                out[entry.name] = _sha256(Path(entry.path).read_bytes())
+    for top in sorted(tops):
+        base = root / top
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for dirpath, _dirnames, filenames in os.walk(base):
+            for name in filenames:
+                path = Path(dirpath, name)
+                if not path.is_symlink():
+                    out[path.relative_to(root).as_posix()] = _sha256(path.read_bytes())
     return out
 
 
@@ -198,7 +216,9 @@ def harvest(project_root: Path, before: dict[str, str] | None) -> None:
                 continue
             data = (project_root / rel).read_bytes()
             extras.append([rel, before.get(rel), _store_put(store, data)])
-        key = _extras_key(lock_path.read_text(encoding="utf-8"), (project_root / "apm.yml").read_bytes())
+        key = _extras_key(
+            lock_path.read_text(encoding="utf-8"), (project_root / "apm.yml").read_bytes()
+        )
         index = store / _EXTRAS_DIR / f"{key}.json"
         index.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=index.parent, prefix=".idx.")
@@ -225,7 +245,9 @@ def _outcomes(lock: Any, files: list, store: Path) -> list[PackageOutcome]:
         if count != total:
             raise Decline("partial package diff")
         try:
-            body = json.loads((store / _BODY_DIR / f"{_body_key(dep, targets)}.json").read_text("utf-8"))
+            body = json.loads(
+                (store / _BODY_DIR / f"{_body_key(dep, targets)}.json").read_text("utf-8")
+            )
         except (OSError, ValueError):
             raise Decline("no recorded output") from None
         if not isinstance(body, list) or not all(isinstance(line, str) for line in body):
@@ -235,7 +257,12 @@ def _outcomes(lock: Any, files: list, store: Path) -> list[PackageOutcome]:
 
 
 def _within(root: Path, rel: str) -> Path:
-    if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in rel.split("/")):
+    if (
+        not rel
+        or rel.startswith("/")
+        or "\\" in rel
+        or any(p in ("", ".", "..") for p in rel.split("/"))
+    ):
         raise Decline(f"unsafe path {rel!r}")
     path = root / rel
     current = root
@@ -321,15 +348,16 @@ def _copy_package(checkout: Path, install_path: Path, sha: str) -> None:
     from apm_cli.install.cache_pin import write_marker
 
     for dirpath, dirnames, filenames in os.walk(checkout):
-        if ".git" in dirnames:
-            dirnames.remove(".git")
+        dirnames[:] = [d for d in dirnames if d != ".git"]
         for name in (*dirnames, *filenames):
             if os.path.islink(os.path.join(dirpath, name)):
                 raise Decline("symlink in a package")
     install_path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(dir=install_path.parent, prefix=f".{install_path.name}."))
     try:
-        shutil.copytree(checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
+        shutil.copytree(
+            checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git")
+        )
         os.replace(staging, install_path)
     except BaseException:
         _discard_staging(staging)
@@ -464,7 +492,9 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
 
     if not (count or packages):
         elapsed = time.perf_counter() - started
-        _rich_info(f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info")
+        _rich_info(
+            f"No changes -- install state already up to date in {elapsed:.1f}s.", symbol="info"
+        )
         return True
 
     _rich_success(
