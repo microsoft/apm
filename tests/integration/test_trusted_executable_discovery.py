@@ -521,3 +521,78 @@ def test_runtime_listing_never_follows_a_link_out_of_the_runtime_directory(
     assert listed["path"] is None or not Path(listed["path"]).resolve().is_relative_to(project)
     assert manager.is_runtime_available("codex") is False
     assert not marker.exists()
+
+
+def _untrusted_path_entries(project: Path) -> str:
+    """A PATH whose first entries resolve to the project: '.', empty and absolute."""
+    return os.pathsep.join([".", "", str(project), *os.environ.get("PATH", "").split(os.pathsep)])
+
+
+def _path_entries(env: dict[str, str]) -> list[str]:
+    value = next((v for k, v in env.items() if k.upper() == "PATH"), "")
+    return value.split(os.pathsep)
+
+
+def test_apm_setup_scripts_run_with_a_path_outside_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime setup script APM authors never sees the project on PATH."""
+    from unittest.mock import MagicMock, patch
+
+    from apm_cli.runtime.manager import RuntimeManager
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", _untrusted_path_entries(project))
+    monkeypatch.chdir(project)
+
+    with patch("subprocess.run", return_value=MagicMock(returncode=0)) as run:
+        RuntimeManager().run_embedded_script("echo setup", "echo common")
+
+    entries = _path_entries(run.call_args.kwargs["env"])
+    assert "." not in entries
+    assert "" not in entries
+    assert all(
+        not Path(entry).resolve().is_relative_to(project.resolve()) for entry in entries if entry
+    )
+
+
+def test_apm_installer_runs_with_a_path_outside_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The self-update installer environment drops project PATH entries."""
+    from apm_cli.commands import self_update
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    monkeypatch.setenv("PATH", _untrusted_path_entries(project))
+    monkeypatch.chdir(project)
+
+    env = self_update._build_self_update_installer_env(
+        self_update._resolve_self_update_release("1.0.0")
+    )
+
+    entries = _path_entries(env)
+    assert "." not in entries
+    assert "" not in entries
+    assert all(
+        not Path(entry).resolve().is_relative_to(project.resolve()) for entry in entries if entry
+    )
+
+
+def test_user_scripts_keep_the_users_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scripts the user wrote keep PATH exactly as the user set it."""
+    from apm_cli.core.lifecycle_scripts import ScriptEntry
+    from apm_cli.core.script_executors import _build_script_env
+
+    project = tmp_path / "project"
+    project.mkdir()
+    user_path = _untrusted_path_entries(project)
+    monkeypatch.setenv("PATH", user_path)
+    monkeypatch.chdir(project)
+
+    env = _build_script_env(ScriptEntry(script_type="command", event="post-install", command="x"))
+
+    assert _path_entries(env) == user_path.split(os.pathsep)
