@@ -32,7 +32,11 @@ def test_native_replay_owner_rules_pass() -> None:
         ),
         (REPLAY, "agent_plugin_detection=native_detection", "agent_plugin_detection=None"),
         (REPLAY, "read_only=True", "read_only=False"),
-        (REPLAY, "with native_registration_scope(targets):", "with native_registration_scope([]):"),
+        (
+            REPLAY,
+            "with native_registration_scope(targets, route_manifest):",
+            "with native_registration_scope([], route_manifest):",
+        ),
         (
             REPLAY,
             'if result.get("native_plugin") and not result.get("native_claude_plugin"):',

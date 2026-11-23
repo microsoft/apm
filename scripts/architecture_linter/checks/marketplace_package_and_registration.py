@@ -178,7 +178,7 @@ def _check_package_projection(provider: FactsProvider) -> tuple[Violation, ...]:
             (
                 "native_detection = route_agent_plugin_package(install_path)",
                 "agent_plugin_detection=native_detection,\n            read_only=True",
-                "with native_registration_scope(targets):",
+                "with native_registration_scope(targets, route_manifest):",
                 'if result.get("native_plugin") and not result.get("native_claude_plugin"):',
                 "from apm_cli.install.native_plugin_admission import verify_native_plugin_cache",
                 "verify_native_plugin_cache(\n                            lock_dep,",
