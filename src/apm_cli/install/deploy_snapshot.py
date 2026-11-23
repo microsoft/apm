@@ -522,8 +522,7 @@ class _Bases:
 
     root: Path
     receipts: Path
-    # The abandoned journal's token: the config file records name it (#5051).
-    journal: str | None = None
+    journal: str | None = None  # the abandoned journal's token (#5051)
 
 
 class _Unproven(Exception):
