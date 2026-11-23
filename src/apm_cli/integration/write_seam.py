@@ -19,7 +19,8 @@ from __future__ import annotations
 import os
 import shutil
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any
 
@@ -29,7 +30,29 @@ from apm_cli.utils import atomic_io
 Recorder = Callable[[Path, bool], None]
 
 _recorder: Recorder | None = None
+_planning = False
 _guard = threading.Lock()
+
+
+class PlannedWriteError(RuntimeError):
+    """A deploy write reached the seam while install computed its write plan (#4381)."""
+
+
+@contextmanager
+def planning() -> Iterator[None]:
+    """Run integrators without touching disk while install plans its writes (#4381).
+
+    Directory creation is skipped; any other write raises
+    :class:`PlannedWriteError`, so a plan can never deploy a byte.
+    """
+    global _planning
+    with _guard:
+        _planning = True
+    try:
+        yield
+    finally:
+        with _guard:
+            _planning = False
 
 
 def listen(recorder: Recorder) -> None:
@@ -47,6 +70,24 @@ def stop_listening(recorder: Recorder) -> None:
             _recorder = None
 
 
+@contextmanager
+def private_scratch() -> Iterator[None]:
+    """Write a private scratch tree no target deploys to: not journaled, not planned.
+
+    The locked render that proves deployment evidence replays packages into
+    such a tree, also while install plans its writes (#4381).
+    """
+    global _recorder, _planning
+    with _guard:
+        saved = (_recorder, _planning)
+        _recorder, _planning = None, False
+    try:
+        yield
+    finally:
+        with _guard:
+            _recorder, _planning = saved
+
+
 def record_before_write(path: str | os.PathLike[str], *, follow: bool = False) -> None:
     """Record *path* before it is created, replaced or removed.
 
@@ -54,6 +95,8 @@ def record_before_write(path: str | os.PathLike[str], *, follow: bool = False) -
     in-place write): the link's destination is recorded too, since that is
     where the bytes change. Replacing or removing writers record the link only.
     """
+    if _planning:
+        raise PlannedWriteError(f"Install planned a write to {path} before its preflight passed")
     recorder = _recorder
     if recorder is not None:
         recorder(Path(path), True)
@@ -69,7 +112,9 @@ def record_before_mkdir(path: str | os.PathLike[str]) -> None:
 
 
 def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: int = 0o777) -> None:
-    """Create the directory *path* through the seam."""
+    """Create the directory *path* through the seam (skipped while planning)."""
+    if _planning:
+        return
     record_before_mkdir(path)
     path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
 
@@ -106,16 +151,16 @@ def open_for_write(path: Path, mode: str = "w", **kwargs: Any) -> IO[Any]:
     return open(path, mode, **kwargs)
 
 
-def copy2(source: Path, destination: Path, **kwargs: Any) -> Any:
-    """``shutil.copy2`` through the seam."""
+def copy2(source: Path, destination: Path) -> Path:
+    """``shutil.copy2`` through the seam, replacing the destination atomically (#4691)."""
     record_before_write(destination, follow=True)
-    return shutil.copy2(source, destination, **kwargs)
+    return atomic_io.atomic_copy(source, destination, metadata=True)
 
 
-def copyfile(source: Path, destination: Path) -> Any:
-    """``shutil.copyfile`` through the seam."""
+def copyfile(source: Path, destination: Path) -> Path:
+    """``shutil.copyfile`` through the seam, replacing the destination atomically (#4691)."""
     record_before_write(destination, follow=True)
-    return shutil.copyfile(source, destination)
+    return atomic_io.atomic_copy(source, destination, metadata=False)
 
 
 def rename(source: Path, destination: Path) -> None:

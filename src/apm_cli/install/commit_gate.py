@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from apm_cli.core.target_detection import EffectiveTargetDecision
@@ -192,15 +193,16 @@ def prospective_lockfile(ctx: InstallContext) -> LockFile:
     return prospective
 
 
-def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None:
-    """Collect the merged MCP set from acquired packages and enforce policy."""
+def _prepare_merged_mcp(
+    ctx: InstallContext, prospective: LockFile, native_keys: frozenset[str] = frozenset()
+) -> Any:
+    """The merged MCP set the acquired packages declare, prepared silently."""
     from apm_cli.core.scope import is_user_scope
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.mcp.integration import prepare_mcp_integration
     from apm_cli.install.template import effective_allow_map
 
-    user_scope = is_user_scope(ctx.scope)
-    prepared = prepare_mcp_integration(
+    return prepare_mcp_integration(
         apm_package=ctx.apm_package,
         mcp_deps=list(ctx.apm_package.get_all_mcp_dependencies()),
         apm_modules_path=ctx.apm_modules_dir,
@@ -209,13 +211,21 @@ def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None
         trust_transitive_mcp=ctx.trust_transitive_mcp,
         logger=_SilentLogger(),
         active_package_keys=frozenset(ctx.update_plan_complete_dep_keys),
-        user_scope=user_scope,
+        user_scope=is_user_scope(ctx.scope),
         project_root=ctx.project_root,
         executable_context=(effective_allow_map(ctx), True),
         no_policy=ctx.no_policy,
-        claude_native_keys=frozenset(ctx.claude_native_keys),
+        claude_native_keys=frozenset(ctx.claude_native_keys) | native_keys,
         prospective_lock=prospective,
     )
+
+
+def _check_merged_mcp_policy(ctx: InstallContext, prospective: LockFile) -> None:
+    """Collect the merged MCP set from acquired packages and enforce policy."""
+    from apm_cli.core.scope import is_user_scope
+
+    user_scope = is_user_scope(ctx.scope)
+    prepared = _prepare_merged_mcp(ctx, prospective)
     view = prepared.current_view
     ctx.preview_mcp_dependencies = tuple(prepared.dependencies)
     enforce_mcp_policy(
@@ -260,8 +270,13 @@ def check_before_resolve(ctx: InstallContext, committed: LockFile | None) -> Non
     enforce_policy_hashes(policy, committed, get_lockfile_path(ctx.apm_dir))
 
 
-def check_before_deploy(ctx: InstallContext) -> None:
-    """Run every check that must pass before the first deployed byte."""
+def check_before_deploy(ctx: InstallContext, write_plan: Sequence[PlannedPackage] = ()) -> None:
+    """Run every check that must pass before the first deployed byte.
+
+    *write_plan* holds every package the integrate phase is about to deploy;
+    a managed file it would replace without deployment evidence refuses the
+    whole install here, before any write (#4381).
+    """
     from apm_cli.install.integrity import enforce_installed_hash_policy
     from apm_cli.install.service import InstallService
 
@@ -273,6 +288,153 @@ def check_before_deploy(ctx: InstallContext) -> None:
         enforce_installed_hash_policy(ctx, ctx.existing_lockfile if frozen else prospective)
     if ctx.install_mcp and not ctx.lockfile_only and ctx.apm_package is not None:
         _check_merged_mcp_policy(ctx, prospective)
+        if not ctx.dry_run:
+            _refuse_native_mcp_collisions(ctx, prospective, write_plan)
+    if write_plan and not ctx.dry_run and not ctx.force:
+        _refuse_unproven_overwrites(ctx, write_plan)
+
+
+def _refuse_native_mcp_collisions(
+    ctx: InstallContext, prospective: LockFile, write_plan: Sequence[PlannedPackage]
+) -> None:
+    """Refuse an MCP server that collides with a native connection, before any write.
+
+    The targets resolve as the later MCP stage resolves them, from the
+    command's ``--runtime`` and ``--exclude`` (carried by ``lsp_preflight``);
+    without them the MCP stage runs the same projection before its first write.
+    A package the plan routes to Claude natively has its servers loaded by
+    Claude, as the MCP stage will know once integration queued it (#4741).
+    """
+    from apm_cli.core.scope import is_user_scope
+    from apm_cli.install.lsp.integration import lsp_target_config
+    from apm_cli.install.mcp.collision_preflight import refuse_projected_mcp_collisions
+    from apm_cli.install.service import InstallService
+
+    filters = ctx.lsp_preflight
+    if filters is None or ctx.target_decision is None or not ctx.preview_mcp_dependencies:
+        return
+    native_keys = frozenset(
+        package_info.dependency_ref.get_unique_key()
+        for package_info, plan, _managed in write_plan
+        if getattr(plan, "claude_native", None) is not None
+        and getattr(package_info, "dependency_ref", None) is not None
+    )
+    dependencies = (
+        _prepare_merged_mcp(ctx, prospective, native_keys).dependencies
+        if native_keys - set(ctx.claude_native_keys)
+        else ctx.preview_mcp_dependencies
+    )
+    refuse_projected_mcp_collisions(
+        dependencies,
+        lockfile=ctx.existing_lockfile,
+        project_root=ctx.project_root,
+        user_scope=is_user_scope(ctx.scope),
+        logger=ctx.logger,
+        replay_claims=InstallService.frozen_disposition(ctx).withhold_lockfile_writes,
+        runtime=filters.runtime,
+        exclude=filters.exclude,
+        apm_config=lsp_target_config(ctx.apm_package),
+        explicit_target=ctx.target_decision.value,
+        target_decision=ctx.target_decision,
+        scope=ctx.scope,
+    )
+
+
+# (package_info, its PackageDeploymentPlan, the managed files it integrates with)
+PlannedPackage = tuple[Any, Any, "set[str] | None"]
+# The file primitives whose managed files OverwriteGate guards (#4360).
+_GATED_PRIMITIVES = ("prompts", "agents", "commands", "instructions")
+# Targets whose primitives deploy outside files (the Copilot App's SQLite
+# workflows): no OverwriteGate applies and planning them would write.
+_UNGATED_TARGETS = frozenset({"copilot-app"})
+
+
+def _refuse_unproven_overwrites(ctx: InstallContext, write_plan: Sequence[PlannedPackage]) -> None:
+    """Name every managed file the plan would keep without evidence, then refuse (#4381).
+
+    The integrators run their own plan through the write seam in planning
+    mode: ``BaseIntegrator._check_adopt_or_skip`` decides each file with the
+    deployment session's ``overwrite_authorized``, as the real run does, and
+    records the files ``OverwriteGate`` would keep instead of writing. The
+    gate stays the per-file backstop for anything the plan cannot see.
+    """
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.deployed_paths import deployed_path_entry
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    skill = ctx.integrators.get("skill")
+    if getattr(skill, "_materialization_session", None) is None or ctx.diagnostics is None:
+        return
+    kept = [
+        (owner, path, edit)
+        for package_info, plan, managed in write_plan
+        for owner, path, edit in _planned_keeps(ctx, skill, package_info, plan, managed)
+    ]
+    user_scope = ctx.scope is InstallScope.USER
+    for owner, path, edit in kept:
+        entry = deployed_path_entry(path, ctx.project_root, ctx.targets)
+        message = kept_edit_message(entry, user_scope=user_scope, proven_edit=edit is not None)
+        ctx.diagnostics.error(message, package=owner)
+    ctx.overwrite_preflight_refused = bool(kept)
+
+
+def _planned_keeps(
+    ctx: InstallContext,
+    skill: Any,
+    package_info: Any,
+    plan: Any,
+    managed: set[str] | None,
+) -> list[tuple[str, Path, str | None]]:
+    """Plan one package's gated file writes; a package the plan cannot render is left to its run."""
+    from apm_cli.copilot_plugins.capability import admits_native_plugin
+    from apm_cli.core.deployment_ledger import recorded_writes
+    from apm_cli.integration import write_seam
+    from apm_cli.integration.dispatch import get_dispatch_table
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    if plan is None or plan.source_plan is None or plan.codex_native is not None:
+        return []
+    if admits_native_plugin(package_info):
+        return []
+    targets = [t for t in plan.target_selection.targets if t in plan.projection_targets]
+    table = get_dispatch_table()
+    kept: list[tuple[str, Path, str | None]] = []
+    for primitive in _GATED_PRIMITIVES:
+        integrator = ctx.integrators.get(primitive.removesuffix("s"))
+        if integrator is None:
+            continue
+        for target in targets:
+            if target.primitives.get(primitive) is None or target.name in _UNGATED_TARGETS:
+                continue
+            planned: list[tuple[Path, str | None]] = []
+            integrator._overwrite_plan = planned
+            owner = ""
+            try:
+                with (
+                    write_seam.planning(),
+                    recorded_writes(skill, integrator, [target], package_info),
+                ):
+                    owner = integrator._overwrite_gate.owner
+                    getattr(integrator, table[primitive].integrate_method)(
+                        target,
+                        package_info,
+                        ctx.project_root,
+                        force=ctx.force,
+                        managed_files=managed,
+                        diagnostics=DiagnosticCollector(),
+                        scope=ctx.scope,
+                        source_plan=plan.source_plan,
+                    )
+            except write_seam.PlannedWriteError:
+                raise
+            except Exception:
+                # The real run reports this package's own failure; files the
+                # plan already found unproven still refuse the install.
+                return [*kept, *((owner, path, edit) for path, edit in planned)]
+            finally:
+                integrator._overwrite_plan = None
+            kept.extend((owner, path, edit) for path, edit in planned)
+    return kept
 
 
 def check_before_lockfile(ctx: InstallContext, lockfile: LockFile | None) -> None:

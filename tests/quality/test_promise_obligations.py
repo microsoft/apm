@@ -510,3 +510,26 @@ def test_generated_witnesses_match_the_collected_tables_and_journeys() -> None:
     )
     assert result.returncode == 0, f"{fix}\n{result.stdout}{result.stderr}"
     assert "[+] up to date:" in result.stdout, f"{fix}\n{result.stdout}"
+
+
+def test_every_scenario_credit_names_a_collected_node() -> None:
+    """A CREDITS key that matches no collected node id credits nothing real (#4586).
+
+    Parametrize ids join the values bottom decorator first, so a hand-built key
+    in the wrong order still imports and still feeds the generator a witness.
+    """
+    from tests.lifecycle.generator.witnesses import scenario_credits
+
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/lifecycle/scenarios", "--collect-only", "-q"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    collected = {line.strip() for line in result.stdout.splitlines() if "::" in line}
+    assert collected, f"collection found no scenario nodes\n{result.stdout}{result.stderr}"
+    stray = sorted({credit.node for credit in scenario_credits()} - collected)
+    assert not stray, f"CREDITS name nodes pytest never collects: {stray[:5]}"

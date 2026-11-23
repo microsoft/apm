@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.security.gate import is_generated_python_artifact
-from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    resolve_for_containment,
+)
 from apm_cli.utils.paths import portable_relpath
 
 
@@ -64,6 +68,14 @@ def deployed_path_entry(
     from apm_cli.core.scope import InstallScope
     from apm_cli.integration.targets import encode_external_target_locator
 
+    resolved: list[Path] = []
+
+    def _resolved_candidate() -> Path:
+        # Resolved lazily, once per call (external-root targets never need it).
+        if not resolved:
+            resolved.append(resolve_for_containment(target_path))
+        return resolved[0]
+
     def _try_target(tgts) -> str | None:
         for _t in tgts:
             deploy_root = _t.managed_deploy_root
@@ -87,10 +99,11 @@ def deployed_path_entry(
                     return portable_relpath(resolved_target, project_root)
             try:
                 locator = DeploymentLedgerCodec.locator_for_path(
-                    target_path,
+                    _resolved_candidate(),
                     project_root=project_root,
                     target=_t,
                     scope=InstallScope.PROJECT,
+                    candidate_resolved=True,
                 )
             except RuntimeError:
                 continue
@@ -110,6 +123,36 @@ def deployed_path_entry(
             f"path is outside the project tree and no dynamic-root "
             f"target matched. This is a bug -- please report it."
         )
+
+
+def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
+    """Return the skill directory entry a normal lock records beside a member (#3772).
+
+    The receipt's own target is resolved at user scope even when this run did
+    not select it (#4813); its directory is adopted only for a selected target
+    that deploys skills to that same destination (Copilot and Codex share
+    ``~/.agents/skills``), and is attributed to that selected target. An
+    unselected target whose user root cannot resolve adopts nothing.
+    """
+    from apm_cli.integration.targets import KNOWN_TARGETS, scoped_profile_or_none
+
+    origin = next((t for t in targets if t.name == target_name), None)
+    if origin is None and (static := KNOWN_TARGETS.get(target_name)) is not None:
+        origin = scoped_profile_or_none(static, user_scope=True)
+    if origin is None or not origin.supports("skills"):
+        return ()
+    skills_root = origin.skills_deploy_path(root).resolve()
+    try:
+        parts = physical.relative_to(skills_root).parts
+    except ValueError:
+        return ()
+    if len(parts) < 2:
+        return ()
+    for target in targets:
+        destination = target.skills_deploy_path(root) if target.supports("skills") else None
+        if destination is not None and destination.resolve() == skills_root:
+            return (deployed_path_entry(destination / parts[0], root, [target]),)
+    return ()
 
 
 def skill_bundle_file_entries(

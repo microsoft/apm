@@ -736,7 +736,76 @@ def _orphan_removed(world: _World, result) -> None:
     assert not (world.consumer.root / "docs" / "AGENTS.md").exists()
 
 
+def _claude_blocked_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create(
+        "claude-consumer", dependencies=(source.dependency,), targets=("claude",)
+    )
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _hand_author_claude_md(world: _World) -> None:
+    (world.consumer.root / "CLAUDE.md").write_text("# mine\n", encoding="ascii")
+
+
+def _import_agents_md(world: _World) -> None:
+    with (world.consumer.root / "CLAUDE.md").open("a", encoding="ascii") as handle:
+        handle.write("@AGENTS.md\n")
+
+
+def _rule_moved_to_agents_md(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert not (world.consumer.root / ".claude/rules/advice.md").exists()
+
+
+def _claude_directory_world(tmp_path: Path, apm_binary_path: Path) -> _World:
+    scenario = _new_scenario(tmp_path / "remediation", apm_binary_path)
+    source = _publish(scenario, "advice-kit", instruction="advice")
+    consumer = scenario.consumers.create("claude-dir-consumer", targets=("claude",))
+    scenario.consumers.add_instruction(
+        consumer, "srcdir", "---\napplyTo: 'src/**'\ndescription: Src\n---\n# src\n"
+    )
+    (consumer.root / "src").mkdir()
+    (consumer.root / "src" / "app.py").write_text("x = 1\n", encoding="ascii")
+    return _World(scenario=scenario, source=source, consumer=consumer)
+
+
+def _route_directory_instruction(world: _World) -> None:
+    _expect_ok(world, _run(world, _INSTALL_ARGS, "route-directory-instruction"))
+    assert not (world.consumer.root / ".claude/rules/srcdir.md").exists()
+
+
+def _declare_single_file(world: _World) -> None:
+    manifest = load_yaml(world.consumer.manifest_path)
+    manifest["compilation"] = {"strategy": "single-file"}
+    dump_yaml(manifest, world.consumer.manifest_path)
+
+
+def _directory_rule_kept(world: _World, result) -> None:
+    _expect_ok(world, result)
+    assert (world.consumer.root / ".claude/rules/srcdir.md").is_file()
+
+
 W3_DEPS_COMPILATION_PROOFS: tuple[_TextProof, ...] = (
+    _TextProof(
+        "claude-agents-md-blocked",
+        _claude_blocked_world,
+        _hand_author_claude_md,
+        lambda _world: _INSTALL_ARGS,
+        0,
+        _rule_moved_to_agents_md,
+        before=_import_agents_md,
+    ),
+    _TextProof(
+        "claude-directory-instruction-single-file",
+        _claude_directory_world,
+        _route_directory_instruction,
+        lambda _world: ("compile", "--single-agents"),
+        0,
+        _directory_rule_kept,
+        before=_declare_single_file,
+    ),
     _TextProof(
         "root-context-hand-authored",
         _compile_world,
@@ -771,7 +840,7 @@ _FIXTURE_MCP = {
     "command": "printf",
     "args": ["fixture"],
 }
-_COPILOT_SETTINGS = ".github/copilot/settings.local.json"
+_COPILOT_SETTINGS = ".github/copilot/settings.json"
 # 'intellij' is not an apm.yml targets: value; only --target selects it.
 _INTELLIJ_INSTALL_ARGS = (*_INSTALL_ARGS, "--target", "intellij")
 
@@ -862,7 +931,7 @@ W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
         before=lambda world: _intellij_config(world).unlink(),
     ),
     _TextProof(
-        "copilot-settings-invalid",
+        "native-settings-invalid",
         _agent_plugin_world,
         lambda world: (world.consumer.root / _COPILOT_SETTINGS).write_text(
             "{malformed\n", encoding="ascii"
@@ -870,7 +939,7 @@ W3_PLUGINS_RUNTIME_PROOFS: tuple[_TextProof, ...] = (
         lambda _world: _INSTALL_ARGS,
         1,
         _copilot_registered,
-        before=_unlink(_COPILOT_SETTINGS),
+        before=_move_aside(_COPILOT_SETTINGS),
     ),
 )
 

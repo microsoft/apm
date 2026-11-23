@@ -97,8 +97,10 @@ def _scenario(
     (subdir_source / _SUBDIR / "agents").mkdir()
     (subdir_source / _SUBDIR / "agents" / "openai.yaml").write_text("x: 1\n", encoding="utf-8")
     plugin = subdir_source / _PLUGIN
-    (plugin / ".claude-plugin").mkdir(parents=True)
-    (plugin / ".claude-plugin" / "plugin.json").write_text(
+    # A root plugin.json keeps the split route that deploys loose skills; a
+    # .claude-plugin manifest installs whole at project scope (#3921).
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
         json.dumps({"name": "tool", "version": "1.0.0", "description": "Fixture"}),
         encoding="utf-8",
     )

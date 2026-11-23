@@ -53,6 +53,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "skill_subset": ["alpha", "beta"],
     "target_subset": ["copilot"],
     "subset_pairings": None,
+    "package_targets": ["copilot"],
     "resolved_url": "https://registry.example.invalid/consume-contract.tgz",
     "resolved_hash": f"sha256:{'e' * 64}",
     "constraint": "^1.0.0",
@@ -69,6 +70,7 @@ _LOCKED_DEPENDENCY_VALUES = {
     "native_plugin": NativePluginRecord(
         "consume", f"sha256:{'a' * 64}", "apm-u-0a1b2c3d", "/home/u/.agents/plugins"
     ),
+    "native_declared": ["claude"],
     "replacement": None,
     "_unknown_fields": {"future_consumer_field": {"enabled": True}},
 }

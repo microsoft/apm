@@ -83,9 +83,9 @@ Use the native command for a personal tool. Use `apm install` when the plugin
 belongs to the project.
 
 
-A Claude Code plugin installed with `apm install -g --target claude <plugin>@<marketplace>`
-is deployed whole and registered in Claude Code's settings; see
-[Claude Code plugins at user scope](../install-plugins/#claude-code-plugins-at-user-scope).
+A Claude Code plugin installed with `apm install <plugin>@<marketplace>` for
+`claude` or `copilot` is deployed whole to `.agents/plugins/` and declared in
+the harness settings; see [Native plugins](../install-plugins/#native-plugins).
 
 ## How marketplace installs lock
 
@@ -108,6 +108,12 @@ plus where it was found:
   locked commit still pins the download. If the marketplace now selects another
   source or commit, install fails; run `apm update <plugin>@<marketplace>` to
   move to it.
+- An entry the marketplace routes through a package registry locks the exact
+  version, `resolved_url` and `resolved_hash` instead of a commit, and replays
+  through a registry declared in `apm.yml`, like any registry dependency; the
+  archive hash is checked before anything is extracted. `apm install <plugin>@<marketplace>`
+  writes such an entry to `apm.yml` in registry form (`id`, `registry`,
+  `version`), never as a Git entry.
 - A plugin from a local catalog (a directory or a `marketplace.json` file) is
   locked by its content, not a commit. `apm install` reads the catalog again,
   so catalog edits apply. `apm install --frozen` passes while the catalog still

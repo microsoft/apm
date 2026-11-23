@@ -66,6 +66,8 @@ _TRUST_OWNER_CALLERS = frozenset(
         ("src/apm_cli/security/trust.py", "pins"),
         (_EXEC_GATE, "_trust_ctx"),
         (_EXEC_GATE, "_resolve"),
+        # apm audit --ci judges withheld hooks on its own routed policy (#4821).
+        (_EXEC_GATE, "trust_context_for_policy"),
         (_EXECUTABLES, "effective_exec_map_for_project"),
         # The offline dry-run preview reads the same layers, policy-free (#4018).
         ("src/apm_cli/install/dry_run_plan.py", "with_allowed_lsp_dependencies"),
@@ -194,6 +196,10 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     "resolve_project_exec_allow_map(project_root, apm_package, user_scope",
                 ),
                 _AUDIT_COMMAND: ("policy_provider=replay_policy",),
+                "src/apm_cli/install/local_bundle_canvas.py": (
+                    "keys = () if approval_key is None else (approval_key,)",
+                    "package_type_approved(allow_executables, keys, EXEC_TYPE_CANVAS)",
+                ),
                 _LOCAL_BUNDLE: (
                     "bundle_approval_key = _bundle_approval_key(bundle_info, allow_executables)",
                     "    return local_bundle_approval_key(",
@@ -204,7 +210,7 @@ def check_executable_trust_context(provider: FactsProvider) -> tuple[Violation, 
                     # Bundle hooks and canvas are approved for the exact bundle content.
                     "_bundle_keys = () if approval_key is None else (approval_key,)",
                     "package_type_approved(allow_executables, _bundle_keys, EXEC_TYPE_HOOKS)",
-                    "allow_executables, _bundle_keys, EXEC_TYPE_CANVAS",
+                    "_canvas_ok, _canvas_blocked = gate_bundle_canvas(",
                     # A gated package's hooks retire through the hook owner (#3924).
                     "reconcile_package_targets(package_info, project_root, targets),",
                 ),

@@ -18,18 +18,6 @@ _ALL = (
     "revoke-approval",
 )
 _LOCAL = ("local-deny", "revoke-approval")
-_STALE_EXEC_STATUS = (
-    "#4053 apm install --frozen accepts a lock whose exec_status is out of date after a gate change"
-)
-_XFAIL = {
-    **{
-        f"G|{path}|{change}|lsp": _STALE_EXEC_STATUS
-        for path in ("frozen", "audit-ci")
-        for change in _ALL
-        if change != "policy-dep-deny"
-    },
-    **{f"G|frozen-g|{change}|lsp": _STALE_EXEC_STATUS for change in _LOCAL},
-}
 _SMOKE = {"G|install|local-deny|lsp"}
 
 # G path -> (changes with a row, surface files)
@@ -53,7 +41,6 @@ SLICE = GateSlice(
             f"G|{path}|{change}|lsp",
             surface=surface,
             smoke=f"G|{path}|{change}|lsp" in _SMOKE,
-            xfail=_XFAIL.get(f"G|{path}|{change}|lsp", ""),
         )
         for path, (changes, surface) in _PATHS.items()
         for change in changes

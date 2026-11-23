@@ -204,9 +204,17 @@ def run_service_integrations(  # noqa: PLR0913
                 if getattr(dep, "native_runtimes", None)
             },
         )
+    from apm_cli.deps.lockfile_write_authority import staged_lockfile_text
     from apm_cli.install.mcp.ownership import frozen_unrecorded_mcp_pairs
+    from apm_cli.install.mcp.write_receipts import journal_mcp_writes
 
-    with frozen_unrecorded_mcp_pairs(frozen_unrecorded):
+    lock_before_mcp = staged_lockfile_text(lock_path)
+    with (
+        frozen_unrecorded_mcp_pairs(frozen_unrecorded),
+        journal_mcp_writes(
+            ctx.project_root, user_scope=ctx.scope is InstallScope.USER, logger=ctx.logger
+        ),
+    ):
         mcp_count, mcp_apm_config = run_mcp_integration(
             apm_package=apm_package,
             mcp_deps=mcp_deps,
@@ -265,6 +273,8 @@ def run_service_integrations(  # noqa: PLR0913
         force=ctx.force,
         no_policy=ctx.no_policy,
         prepared=prepared_lsp,
+        # MCP writes are recorded only by this command's lockfile (#4697).
+        refuse_unwritten_conflict=staged_lockfile_text(lock_path) == lock_before_mcp,
     )
     return ServiceIntegrationResult(mcp_count, lsp_count, target_decision)
 

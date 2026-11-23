@@ -15,12 +15,12 @@ targeted. It governs what gets installed, not what
 an agent does at runtime. Every field is in the [policy schema](../../reference/policy-schema/).
 
 :::caution[Project installs only]
-Org policy does not govern user-scope (`-g`) installs in 0.37; local approvals and denies
+Org policy does not govern user-scope (`-g`) installs in 0.38; local approvals and denies
 still apply. User scope has no git remote, so `apm install -g` (including `--mcp` and local
 bundles), `update -g` and `uninstall -g` discover no org policy, from your home directory or
 the project you run them in. `apm policy status -g` shows source `none`. Settings such as
 `policy.fetch_failure_default` come from the user manifest (`$APM_HOME/apm.yml`).
-[#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy for 0.38.
+[#3703](https://github.com/microsoft/apm/issues/3703) tracks user-scope org policy for 0.39.
 
 When the executables gate is on at user scope, it still parks hooks, MCP servers, LSP servers
 and `bin/` from dependencies, and `apm approve --user` and `apm deny --user` (including
@@ -51,7 +51,12 @@ Priya, on the Contoso platform team, starts in `warn` so nothing breaks on day o
    `*` matches one path segment, `**` any depth. A host-qualified pattern such as
    `github.com/contoso/**` matches that host and no other, which closes the gap where a
    same-named repository on another host would also match. `deny` always wins over
-   `allow`, and both apply to transitive dependencies too.
+   `allow`, and both apply to transitive dependencies too. For a local bundle
+   (`apm install <bundle>`), both judge the packages its embedded `apm.lock.yaml`
+   records. `deny` also matches the bundle's own name (`_local/<name>`); `allow` never
+   does, because the bundle author picks that name. Under an allow list, a bundle that
+   records no packages is a violation: `warn` reports it, `block` refuses the install
+   before any file is written.
 
 2. **Test the draft** from a member repository before you commit it:
 
@@ -136,8 +141,34 @@ and looks for `apm-policy.yml` in these repositories, in this order. The earlies
 Prefer `.github-private`: policy rules are internal. APM recognizes self-managed
 GitLab when `GITLAB_HOST` or `APM_GITLAB_HOSTS` names it. GitLab answers 404 for a private
 project the token cannot read, so give the CI token read access to every `apm-policy`
-project in the group path. For other hosts, pass the source explicitly:
-`apm audit --ci --policy <path-or-url>`.
+project in the group path. For other hosts, pass the source explicitly; see
+[Enforce a policy discovery cannot reach](#enforce-a-policy-discovery-cannot-reach).
+
+## Enforce a policy discovery cannot reach
+
+`apm install --policy <source>` and `apm update --policy <source>` enforce a policy
+that discovery cannot reach: a plain git remote, another host, or an air-gapped
+install. The source is a local path, `owner/repo`, or an `https://` URL.
+
+```bash frame="terminal"
+apm install --policy ./vendor/apm-policy.yml        # air-gapped: no network
+apm install --policy https://policies.corp.example/apm-policy.yml
+```
+
+- **Adds, never removes.** The source combines with any discovered org policy under
+  the tighten-only merge below. It cannot re-allow what the org policy denies or lower
+  its enforcement.
+- **Fails closed.** A source that cannot be loaded (unreachable, missing, malformed, or
+  publishing no policy) stops the command before anything is written, whatever
+  `policy.fetch_failure_default` says. A cached copy within the stale-cache window counts
+  as loaded. A failed *discovered* policy still follows `fetch_failure_default`.
+- **Reported.** The effective sources print at any verbosity, for example
+  `[i] Policy: org:contoso/.github + file:/repo/vendor/apm-policy.yml -- enforcement=warn`.
+- `policy.hash` pins the discovered org policy, not the explicit source. `--policy` is
+  not valid with `--global` or `--no-policy`.
+
+`apm audit --ci --policy <source>` keeps its own meaning: it audits against that one
+source instead of the discovered policy, and fails closed when the source cannot load.
 
 ## Inherit policies without loosening them
 
@@ -168,6 +199,9 @@ required `apm audit --ci --policy org` check re-runs the policy in CI, where the
 bypass is not set. See [Gate pull requests](../enforce-in-ci/).
 
 ## Debug a policy failure
+
+`apm compile` applies the same dependency rules to installed packages before it writes
+agent context, so a package the policy no longer allows is never compiled in.
 
 A blocked `apm install` prints one `[x] Policy violation: <dependency> -- <reason>`
 line per finding, then `Blocked by org policy at <source> (<check>)`. `apm audit --ci`

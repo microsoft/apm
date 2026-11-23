@@ -17,6 +17,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.lifecycle_smoke,
+    pytest.mark.e2e,
 ]
 
 _NOTICE = "Skipped skill directory cleanup: no lockfile records which skills APM deployed."

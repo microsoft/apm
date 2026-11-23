@@ -62,7 +62,8 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
 ) -> None:
     scenario = _new_scenario(tmp_path / "project-self-audit", apm_binary_path)
     project = scenario.consumers.create("self-audit-project", targets=targets)
-    scenario.consumers.add_instruction(project, "project", _instruction("project"))
+    # Path-scoped: Claude loads ``**`` instructions from AGENTS.md (#3939).
+    scenario.consumers.add_instruction(project, "project", _instruction("project", "**/*.md"))
     scenario.consumers.add_skill(project, "hello", _skill("hello"))
     manifest = load_yaml(project.manifest_path)
     manifest["includes"] = includes
@@ -98,7 +99,7 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
     for target, path in zip(targets, instruction_paths, strict=True):
         deployed = (project.root / path).read_bytes()
         if target == "copilot":
-            assert deployed == _instruction("project").encode()
+            assert deployed == _instruction("project", "**/*.md").encode()
         else:
             assert deployed.endswith(b"# project\n")
     for path in sibling_skill_paths:
@@ -130,14 +131,13 @@ def test_required_project_self_audit_replays_install_without_sibling_skills(
     changed = audit("project-self-audit-changed", expected_returncode=1)
     assert {"content-integrity", "drift"} <= _failed_checks(changed)
     # A changed managed file is never overwritten without evidence (#4360):
-    # install keeps it and exits 1; the printed remedy (move it aside) converges.
+    # install keeps it and exits 0 (#4873); the printed remedy (move it aside) converges.
     _run_refused(
         scenario,
         project,
         managed,
         "project-self-repair-changed-refused",
         environment=scenario.environment,
-        local=True,
     )
     managed.unlink()
     run(_INSTALL_ARGS, "project-self-repair-changed")

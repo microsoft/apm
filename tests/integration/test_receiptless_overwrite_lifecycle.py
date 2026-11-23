@@ -4,10 +4,10 @@ A managed instruction, agent, prompt, command or rule whose bytes differ
 from what APM renders is replaced only when this checkout holds a
 deployment receipt for it, or its bytes equal the locked render
 (req-lk-024). A clone, or a project last installed by an APM that wrote no
-receipts, has neither for a user-edited file: install keeps it, names it
-with the remedy, keeps its prior lock entry and exits 1. A lockfile hash
-that matches the edited bytes proves nothing. Unedited files adopt
-silently.
+receipts, has neither for a user-edited file: install refuses before any
+write, names every such file with the remedy, leaves every deployed file
+and the lockfile unchanged and exits 1 (#4381). A lockfile hash that
+matches the edited bytes proves nothing. Unedited files adopt silently.
 """
 
 from __future__ import annotations
@@ -76,7 +76,8 @@ class _World:
 def _write_package(root: Path) -> None:
     files = {
         "apm.yml": "name: kit\nversion: 1.0.0\n",
-        ".apm/instructions/style.instructions.md": "---\napplyTo: '**'\n---\n# Style\n",
+        # A file-type glob keeps a per-file Claude rule at both scopes (#3939).
+        ".apm/instructions/style.instructions.md": "---\napplyTo: '**/*.py'\n---\n# Style\n",
         ".apm/agents/helper.agent.md": "---\nname: helper\ndescription: Helper\n---\n# Helper\n",
         ".apm/prompts/review.prompt.md": "---\ndescription: Review\n---\n# Review\n",
     }
@@ -154,6 +155,17 @@ def _output(result: CommandResult) -> str:
     return " ".join((result.stdout + result.stderr).split())
 
 
+def _deployed_bytes(world: _World) -> dict[str, bytes]:
+    """Every file under the deploy roots, as the install found or left them."""
+    roots = (".copilot", ".claude") if world.scope else (".github", ".claude")
+    return {
+        path.relative_to(world.root).as_posix(): path.read_bytes()
+        for root in roots
+        for path in sorted((world.root / root).rglob("*"))
+        if path.is_file()
+    }
+
+
 @pytest.mark.parametrize("lock", ["recorded", "forged-to-edit"])
 @pytest.mark.parametrize("scope", ["project", "user"])
 def test_receiptless_install_keeps_each_edited_kind(
@@ -182,43 +194,22 @@ def test_receiptless_install_keeps_each_edited_kind(
                 assert count == 1, (pattern, text)
         world.lock_path.write_text(text, encoding="utf-8")
     hashes_before = _locked_hashes(world)
+    deployed_before = _deployed_bytes(world)
+    lock_before = world.lock_path.read_bytes()
 
-    lock_unchanged_runs = 0
+    # #4381: refused before any write, so a repeat refuses identically.
     for _ in range(2):
-        lock_before = world.lock_path.read_bytes()
         result = world.install()
         output = _output(result)
         assert result.returncode == 1, output
         for path in paths.values():
             assert _kept_line(_entry(world, path), user_scope=user_scope) in output, output
-        # The closing line names what the rewritten lock records (RA-009). The
-        # header appears only when a file was written; when the install writes
-        # nothing (receipted files are unchanged, RA-012) it says only what is kept.
-        kept_note = "keeps the previous entries of the 5 kept file(s)."
-        written = re.search(r"\[i\] This install wrote (\d+) file\(s\)", output)
-        if written:
-            assert int(written.group(1)) > 0, output
-            assert (
-                f"apm.lock.yaml records the {written.group(1)} written file(s) and {kept_note}"
-            ) in output
-        else:
-            assert "written file(s)" not in output, output
-            if world.lock_path.read_bytes() != lock_before:
-                # RA-009: no file written, but the lock itself was rewritten.
-                assert (
-                    "apm.lock.yaml is rewritten in the current format; it records the "
-                    "5 kept file(s) as APM last deployed them."
-                ) in output, output
-                assert kept_note not in output, output
-            else:
-                lock_unchanged_runs += 1
-                assert f"apm.lock.yaml {kept_note}" in output, output
-                assert "is rewritten in the current format" not in output, output
+        assert "This install wrote" not in output, output
+        assert "No install transaction changes were committed." in output, output
+        assert _deployed_bytes(world) == deployed_before
+        assert world.lock_path.read_bytes() == lock_before
         assert {path: path.read_bytes() for path in paths.values()} == edited
         assert _locked_hashes(world) == hashes_before
-
-    # The repeat install changes nothing, so its line keeps the previous entries.
-    assert lock_unchanged_runs >= 1
 
     # Restore remedy, as printed: move each file aside, then install.
     for path in paths.values():
@@ -247,16 +238,12 @@ def test_receiptless_install_adopts_render_equal_files(
     assert world.lock_path.read_bytes() == lock_before
 
 
-def test_receiptless_upgrade_replaces_files_equal_to_the_locked_render(
-    tmp_path: Path, apm_binary_path: Path
-) -> None:
-    """The locked render proves an unedited file, so a new version replaces it."""
-    world = _world(tmp_path, apm_binary_path, user_scope=False, git=True)
+def _upgrade_with_an_edited_instruction(world: _World) -> tuple[dict[str, Path], Path, bytes]:
+    """Edit the receiptless instruction, then move the package to a v2 of three kinds."""
     paths = world.kind_paths()
     kept = paths.pop("instruction")
     world.forget_receipts()
     kept.write_text(kept.read_text(encoding="utf-8") + _EDIT, encoding="utf-8")
-    edited = kept.read_bytes()
     assert world.repositories is not None and world.repository is not None
     for relative in (
         ".apm/instructions/style.instructions.md",
@@ -269,17 +256,51 @@ def test_receiptless_upgrade_replaces_files_equal_to_the_locked_render(
     manifest = load_yaml(world.root / "apm.yml")
     manifest["dependencies"]["apm"][0]["ref"] = sha
     dump_yaml(manifest, world.root / "apm.yml")
+    return paths, kept, kept.read_bytes()
+
+
+def test_receiptless_upgrade_with_an_edited_file_refuses_before_any_write(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4381: one managed file without evidence refuses the whole upgrade up front."""
+    world = _world(tmp_path, apm_binary_path, user_scope=False, git=True)
+    paths, kept, edited = _upgrade_with_an_edited_instruction(world)
+    deployed_before = _deployed_bytes(world)
+    lock_before = world.lock_path.read_bytes()
 
     result = world.install()
 
     output = _output(result)
     assert result.returncode == 1, output
-    assert _kept_line(_entry(world, kept), user_scope=False) in output
+    assert _kept_line(_entry(world, kept), user_scope=False) in output, output
+    assert "This install wrote" not in output, output
     assert kept.read_bytes() == edited
+    assert not any("Version 2." in path.read_text(encoding="utf-8") for path in paths.values())
+    assert _deployed_bytes(world) == deployed_before
+    assert world.lock_path.read_bytes() == lock_before
+
+
+def test_receiptless_upgrade_replaces_files_equal_to_the_locked_render(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """The locked render proves an unedited file, so a new version replaces it.
+
+    The edited file refuses the upgrade first (#4381); moved aside as the
+    remedy says, the next install replaces every render-equal file.
+    """
+    world = _world(tmp_path, apm_binary_path, user_scope=False, git=True)
+    paths, kept, _edited = _upgrade_with_an_edited_instruction(world)
+    refused = world.install()
+    assert refused.returncode == 1, _output(refused)
+
+    kept.rename(kept.with_name(f"{kept.name}.aside"))
+    result = world.install()
+
+    output = _output(result)
+    assert result.returncode == 0, output
+    assert "Kept " not in output, output
     assert all("Version 2." in path.read_text(encoding="utf-8") for path in paths.values())
-    assert "This install wrote" in output
-    for path in paths.values():
-        assert _entry(world, path) in output
+    assert "Version 2." in kept.read_text(encoding="utf-8")
 
 
 def _write_skill_bundle(root: Path) -> Path:

@@ -16,9 +16,12 @@ incident that motivated this lockstep.
 import re
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.policy._help_text import POLICY_SOURCE_FORMS_HELP
+
+pytestmark = pytest.mark.component
 
 EXPECTED_FORM_TOKENS = ("'org'", "owner/repo", "https://", "file path")
 
@@ -123,20 +126,14 @@ def test_docs_policy_status_bullet_lists_all_forms():
         )
 
 
-def test_no_broken_install_policy_cross_reference_anywhere_in_docs():
-    """Regression guard for #994: no doc page may reference ``apm install --policy``.
+def test_install_and_update_policy_help_use_canonical_constant():
+    """``apm install --help`` / ``apm update --help`` list the same --policy forms (#1925)."""
+    from apm_cli.cli import cli
 
-    ``apm install`` has no ``--policy`` flag (only ``--no-policy``). Any
-    cross-reference to ``apm install --policy`` is a broken pointer.
-    Scoped to the entire ``docs/`` tree (not just cli-commands.md) so a
-    future copy-paste into another docs page is also caught.
-    """
-    docs_root = REPO_ROOT / "docs"
-    offenders = []
-    for md_path in docs_root.rglob("*.md"):
-        if "apm install --policy" in md_path.read_text(encoding="utf-8"):
-            offenders.append(md_path.relative_to(REPO_ROOT))
-    assert not offenders, (
-        "Found broken reference to `apm install --policy` (no such flag) "
-        f"in: {[str(p) for p in offenders]}. See #994."
-    )
+    runner = CliRunner()
+    for command in ("install", "update"):
+        result = runner.invoke(cli, [command, "--help"])
+        assert result.exit_code == 0, result.output
+        output = _normalize_help_output(result.output)
+        for token in EXPECTED_FORM_TOKENS:
+            assert token in output, f"`apm {command} --help` missing --policy form: {token!r}"

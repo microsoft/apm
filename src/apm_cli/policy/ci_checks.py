@@ -839,6 +839,41 @@ def _check_native_mcp_ownership(
     )
 
 
+def _kept_mcp_entries(
+    project_root: Path, lock: LockFile, *, user_scope: bool, lockless: bool = False
+) -> tuple[CheckResult, ...]:
+    """Report MCP entries install kept without a lockfile because it could not prove them (#4737).
+
+    Empty when nothing was kept, so audit output is unchanged for every other project.
+    """
+    from ..install.mcp.write_receipts import kept_mcp_writes, unusable_mcp_evidence
+
+    kept = kept_mcp_writes(
+        project_root, user_scope=user_scope, managed=lock.mcp_servers, configs=lock.mcp_configs
+    )
+    details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
+    # Without a lockfile, unusable evidence keeps every entry it lists, so it is
+    # reported; with one, only evidence an earlier lockless install met (and
+    # kept every entry for) is still reported.
+    unusable = unusable_mcp_evidence(project_root, user_scope=user_scope, noted_only=not lockless)
+    if unusable is not None:
+        details.append(unusable)
+    if not details:
+        return ()
+    check = CheckResult(
+        name="kept-mcp-entries",
+        passed=False,
+        message=(
+            f"{len(details)} MCP finding(s): APM kept entries it wrote for servers it no "
+            "longer deploys because it cannot confirm them -- "
+            f"{remediation.KEPT_MCP_ENTRIES.clause()}"
+        ),
+        remediations=(remediation.KEPT_MCP_ENTRIES,),
+        details=details,
+    )
+    return (check,)
+
+
 @dataclass(frozen=True)
 class DeployedHashDrift:
     """One deployed file whose on-disk bytes differ from its locked hash envelope."""
@@ -1414,9 +1449,10 @@ def _check_local_bundle_hooks(
     user_scope: bool,
     no_policy: bool,
 ) -> CheckResult:
-    """Fail when a deployed local-bundle hook's approval no longer holds."""
+    """Fail when a deployed local-bundle hook or canvas extension's approval no longer holds."""
     from ..core.deployment_ledger import DeploymentLedgerCodec
     from ..install.errors import PolicyViolationError
+    from ..install.local_bundle_canvas import unadmitted_bundle_canvas
     from ..install.local_bundle_hook_trust import unadmitted_bundle_hooks
     from ..security.executables import resolve_project_exec_allow_map
 
@@ -1430,22 +1466,79 @@ def _check_local_bundle_hooks(
     )
     try:
         unadmitted = unadmitted_bundle_hooks(deployment_root, targets, allow_provider, bundle_paths)
+        canvas = unadmitted_bundle_canvas(deployment_root, targets, allow_provider, bundle_paths)
     except PolicyViolationError as exc:
         return CheckResult(name="local-bundle-hooks", passed=False, message=str(exc))
-    if not unadmitted:
+    if not unadmitted and not canvas:
         return CheckResult(
             name="local-bundle-hooks", passed=True, message="Local bundle hooks are approved"
         )
+    counts = [
+        f"{len(items)} local bundle(s) have {kind} the current executables trust does not admit"
+        for kind, items in (("hooks", unadmitted), ("canvas extensions", canvas))
+        if items
+    ]
     return CheckResult(
         name="local-bundle-hooks",
         passed=False,
         message=(
-            f"{len(unadmitted)} local bundle(s) have hooks the current executables "
-            f"trust does not admit; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
+            f"{'; '.join(counts)}; {remediation.BUNDLE_HOOKS_UNADMITTED.clause()}, "
             f"or {remediation.BUNDLE_HOOKS_APPROVED.clause()}"
         ),
-        details=[f"{item.slug}: {item.reason}" for item in unadmitted],
+        details=[
+            *(f"{item.slug}: {item.reason}" for item in unadmitted),
+            *(f"{item.slug}: canvas: {item.reason}" for item in canvas),
+        ],
     )
+
+
+class _PolicyRouteBlocks(Exception):
+    """The audit's policy-outcome route blocks on its one discovery."""
+
+
+def _audit_trust_provider(
+    project_root: Path,
+    manifest: APMPackage,
+    user_scope: bool,
+    policy_fetch: Callable[[], Any] | None,
+    fallback: Callable[[], Any],
+) -> Callable[[], Any]:
+    """The executables trust context judged on the audit's own policy discovery.
+
+    *policy_fetch* is the one discovery ``apm audit --ci`` routes its policy
+    outcome from; it is classified exactly as that route classifies it, so a
+    deferral here always coincides with the route failing the audit (#4821).
+    Without it (no audit-level discovery) *fallback* resolves the context.
+    """
+    resolved: list[Any] = []
+
+    def provide() -> Any:
+        if resolved:
+            return resolved[0]
+        if policy_fetch is None:
+            resolved.append(fallback())
+            return resolved[0]
+        from ..core.scope import scope_manifest_path
+        from ..install.exec_gate import trust_context_for_policy
+        from .outcome_routing import classify_discovery_outcome
+        from .project_config import read_project_fetch_failure_default
+
+        route = classify_discovery_outcome(
+            policy_fetch(),
+            fetch_failure_default=read_project_fetch_failure_default(project_root),
+        )
+        if route.blocks:
+            raise _PolicyRouteBlocks(route.outcome)
+        resolved.append(
+            trust_context_for_policy(
+                scope_manifest_path(project_root, user_scope=user_scope),
+                route.policy,
+                getattr(manifest, "allow_executables", None),
+            )
+        )
+        return resolved[0]
+
+    return provide
 
 
 def _check_hook_approval_pins(
@@ -1457,8 +1550,14 @@ def _check_hook_approval_pins(
     user_scope: bool,
     no_policy: bool,
     prepared_replay: PreparedCiAuditReplay | None,
+    targets: Sequence[TargetProfile] = (),
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CheckResult:
     """Fail when a locked hook file's pinned approval no longer admits it (#4188).
+
+    Also fails when a file the lock does not record sits at the hook path of
+    a package whose hooks the gate withholds (a denied or unapproved
+    package): install keeps such a file and announces it, never deletes it.
 
     Routes through the owner ``apm install --frozen`` uses, so both commands
     reach one verdict with one remediation.
@@ -1466,6 +1565,8 @@ def _check_hook_approval_pins(
     from ..constants import APM_MODULES_DIR
     from ..install.errors import PolicyViolationError
     from ..install.exec_gate import locked_hook_pin_mismatches
+    from ..install.withheld_hooks import locked_withheld_hook_files
+    from ..install.withheld_merged_hooks import ENTRY_REASON
     from ..security.executables import resolve_project_exec_allow_map
 
     modules_root = (
@@ -1474,17 +1575,70 @@ def _check_hook_approval_pins(
         else project_root / APM_MODULES_DIR
     )
 
+    resolved: list[Any] = []
+
     def trust_ctx() -> Any:
-        # Resolved only when a locked package deploys hook files.
-        allow = resolve_project_exec_allow_map(
-            deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
-        )
-        return getattr(allow, "trust_context", None)
+        # Resolved once, and only when a locked package declares executables.
+        if not resolved:
+            allow = resolve_project_exec_allow_map(
+                deployment_root, manifest, user_scope=user_scope, no_policy=no_policy
+            )
+            resolved.append(getattr(allow, "trust_context", None))
+        return resolved[0]
 
     try:
         mismatches = locked_hook_pin_mismatches(lock, modules_root, trust_ctx)
     except PolicyViolationError as exc:
         return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    try:
+        withheld = locked_withheld_hook_files(
+            lock,
+            modules_root,
+            _audit_trust_provider(project_root, manifest, user_scope, policy_fetch, trust_ctx),
+            deployment_root,
+            targets,
+            user_scope=user_scope,
+        )
+    except _PolicyRouteBlocks:
+        # The audit's own policy route blocks on this same discovery and fails,
+        # reporting the cause once; this check does not repeat it (#4821).
+        withheld = []
+    except PolicyViolationError as exc:
+        return CheckResult(name="hook-approval-pins", passed=False, message=str(exc))
+    if withheld:
+        entries = [row for row in withheld if row[0] and ENTRY_REASON in row[2]]
+        files = [row for row in withheld if row[0] and ENTRY_REASON not in row[2]]
+        unchecked = [row for row in withheld if not row[0]]
+        message = []
+        if entries:
+            message.append(
+                f"{len(entries)} merged hook entr(ies) match the hooks of a package the "
+                "executables gate withholds, and no ownership record attributes them -- "
+                f"{remediation.WITHHELD_HOOK_ENTRY_UNRECORDED.clause()}"
+            )
+        if files:
+            message.append(
+                f"{len(files)} file(s) sit at the hook path of a package whose hooks the "
+                "executables gate withholds, and apm.lock.yaml does not record them -- "
+                f"{remediation.WITHHELD_HOOK_FILE_UNRECORDED.clause()}"
+            )
+        if unchecked:
+            message.append(
+                f"{len(unchecked)} withheld package(s) whose hook paths cannot be checked -- "
+                f"{remediation.WITHHELD_HOOK_PATHS_UNCHECKED.clause()}"
+            )
+        return CheckResult(
+            name="hook-approval-pins",
+            passed=False,
+            message="; ".join(message),
+            details=[f"{path}: hook entry of {key} ({reason})" for path, key, reason in entries]
+            + [
+                f"{path}: hook path of {key} ({reason}); not recorded in apm.lock.yaml"
+                for path, key, reason in files
+            ]
+            + [f"{key}: {reason}" for _, key, reason in unchecked]
+            + [mismatch.describe() for mismatch in mismatches],
+        )
     if not mismatches:
         return CheckResult(
             name="hook-approval-pins",
@@ -1512,6 +1666,7 @@ def run_baseline_checks(
     replay_error_owner: str | None = None,
     no_policy: bool = False,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> CIAuditResult:
     """Run all baseline CI checks against a project directory.
 
@@ -1522,6 +1677,8 @@ def run_baseline_checks(
     anything; otherwise it is an advisory warning only when APM artifacts exist.
     *replay_error_owner* names the later check that reports *prepared_replay_error*
     in full (``drift``); without it the first check that needs the replay does.
+    *policy_fetch* is the one org policy discovery ``apm audit --ci`` routes
+    its policy outcome from, so checks that judge trust use the same result.
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..constants import APM_MODULES_DIR
@@ -1589,6 +1746,9 @@ def run_baseline_checks(
                 deployment_root, LockFile(), resolved_targets, user_scope=user_scope
             )
         )
+        result.checks.extend(
+            _kept_mcp_entries(deployment_root, LockFile(), user_scope=user_scope, lockless=True)
+        )
         return result
 
     if lock is None or manifest is None:
@@ -1645,17 +1805,24 @@ def run_baseline_checks(
 
     # Check 7: Config consistency (MCP); 7b: a differing same-name native MCP
     # entry --frozen refuses (#4477)
-    if _run(
-        _check_config_consistency(
-            manifest,
-            lock,
-            prepared_replay=prepared_replay,
-            prepared_replay_error=prepared_replay_error,
-            replay_error_owner=replay_error_owner,
-            no_policy=no_policy,
+    if (
+        _run(
+            _check_config_consistency(
+                manifest,
+                lock,
+                prepared_replay=prepared_replay,
+                prepared_replay_error=prepared_replay_error,
+                replay_error_owner=replay_error_owner,
+                no_policy=no_policy,
+            )
         )
-    ) or _run(
-        _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
+        or _run(
+            _check_native_mcp_ownership(project_root, lock, resolved_targets, user_scope=user_scope)
+        )
+        # 7c: MCP entries kept without a lockfile because they could not be proven (#4737)
+        or any(
+            _run(check) for check in _kept_mcp_entries(deployment_root, lock, user_scope=user_scope)
+        )
     ):
         return result
 
@@ -1675,7 +1842,8 @@ def run_baseline_checks(
             )
         )
         or _run(
-            # 8c: locked hooks still admitted by their approval pins (#4188)
+            # 8c: locked hooks still admitted by their approval pins (#4188),
+            # and no unrecorded file at a withheld package's hook path
             _check_hook_approval_pins(
                 project_root,
                 deployment_root,
@@ -1684,6 +1852,8 @@ def run_baseline_checks(
                 user_scope=user_scope,
                 no_policy=no_policy,
                 prepared_replay=prepared_replay,
+                targets=resolved_targets,
+                policy_fetch=policy_fetch,
             )
         )
         or _run(

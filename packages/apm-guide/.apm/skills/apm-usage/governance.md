@@ -117,6 +117,17 @@ dependencies:
 - Hostless patterns (`contoso/**`) keep matching every host.
 - Enforced at install and by `apm audit` (direct deps incl. dev deps and
   `replace` sources, plus lockfile transitives).
+- `deny` also applies to `apm install <bundle>` (the bundle's own name as
+  `_local/<name>`, so `**/<name>` matches, plus every package its embedded
+  lockfile records; an unreadable embedded lockfile is refused) and to
+  `apm pack`, which refuses to ship a denied declared or locked package
+  (`Pack blocked by org policy: <pkg>`, exit 1). Pack applies deny only:
+  allow, require and pin rules do not apply to it.
+- `allow` judges `apm install <bundle>` by the packages its embedded
+  lockfile records only, never by the author-chosen `_local/<name>`. Under
+  an allow list, a bundle that records no packages is a violation (`the
+  bundle records no packages for dependencies.allow to match`):
+  `enforcement: block` refuses it before any write, `warn` only reports it.
 
 `dependencies.require` entries are exact and name ONE host: a hostless
 entry (`contoso/baseline`) names the default host only; write other hosts
@@ -291,7 +302,9 @@ The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
 `executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
 `apm approve` pins `hooks` and `mcp` grants per item to a `sha256:<64 hex>`
-fingerprint of what runs; `bin`, `lsp` and `canvas` stay `true`. A native
+fingerprint of what runs (for a hook: its document, referenced scripts, every
+file deployed with them and their Node module type; pre-0.38 hook pins need one
+re-approval); `bin`, `lsp` and `canvas` stay `true`. A native
 Copilot/Codex plugin, loaded intact, gets one `plugin:` pin over its whole
 root (every file's path and bytes; executable bits are left out so the pin
 holds across operating systems), next to item pins for a split install; any
@@ -360,12 +373,10 @@ executable-trust configuration under either `executables` or the deprecated
 > `executables.deny` (bin type only) and honored as an alias for one minor
 > cycle. Prefer `executables.deny` for new policies.
 
-When a `marketplace_plugin` package ships a `bin/` directory, a global
-install (`apm install -g`) deploys those executables into
-`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
-commands (the skills-directory plugin contract). Deployment is
-Claude-only and user-scope only; project-scope installs never deploy
-executables.
+When a `marketplace_plugin` package ships a `bin/` directory, `apm install`
+with the `claude` target keeps it inside the plugin deployed whole to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `-g`), so Claude Code
+invokes the scripts as bare commands. A denied `bin/` parks the whole plugin.
 
 ```yaml
 # .github/apm-policy.yml
@@ -503,8 +514,9 @@ These checks run without a policy file:
 - `skill-subset-consistency` -- selected skill subsets match the lockfile
 - `config-consistency` -- MCP configs match lockfile; servers the executables gate left out pass, and a server the lock admits but `apm.yml` does not approve fails
 - `native-mcp-ownership` -- no unrecorded same-name native MCP entry differs from its self-defined declaration; `apm install --frozen` refuses the same entry
+- `kept-mcp-entries` -- reported only when an install without `apm.lock.yaml` kept an MCP entry it could not confirm it wrote for a server it no longer deploys, or met an unusable MCP write record (still reported after the lockfile is rewritten; every later install announces kept entries); remove the entry or declare the server again, remove an unusable record file, then run `apm install`
 - `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
-- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch
+- `hook-approval-pins` -- every hook file the lockfile records as deployed still matches its pinned approval; `apm install --frozen` refuses on the same mismatch. It also fails, naming the path, on a file the lockfile does not record at a denied or unapproved package's own hook path, or on a merged hook config entry (`.claude/settings.json`, `.cursor/hooks.json`, `.codex/hooks.json`, ...) matching that package's hook that no other source owns (`apm install` keeps it and warns; it never deletes it)
 - `includes-consent` -- advisory notice when local content lacks an explicit `includes:` declaration
 
 Marketplace object declarations must match one locked coordinate through
@@ -542,6 +554,13 @@ An explicit `--policy` path, URL, or `owner/repo` that cannot be loaded
 `policy.fetch_failure_default`. Auto-discovery and `--policy org` keep the
 warn-by-default behaviour. CI JSON/SARIF report `policy.enforced` so a
 wrapper can tell whether policy checks actually ran.
+
+`apm install --policy <source>` and `apm update --policy <source>` add a
+policy on top of discovery (tighten-only). The named source fails closed
+the same way: if it cannot be loaded the command exits non-zero before any
+write, whatever `policy.fetch_failure_default` says; a cached copy within
+the stale-cache window counts as loaded. A failed discovered policy keeps
+following `policy.fetch_failure_default`.
 
 ## Install-time enforcement
 
@@ -731,6 +750,29 @@ fail the PR for the same policy violation.
 
 `APM_POLICY` is reserved for a future override env var and is **not**
 equivalent to `APM_POLICY_DISABLE`.
+
+### Explicit policy source (`--policy`)
+
+`apm install --policy SOURCE` and `apm update --policy SOURCE` enforce a
+policy discovery cannot reach: plain git remotes, other hosts, air-gapped
+installs. SOURCE is a local path, `owner/repo`, or `https://` URL (same forms
+as `apm audit --policy`).
+
+- Tighten-only: it combines with any discovered org policy through the
+  inheritance merge and can never loosen it (no re-allowing a denied
+  dependency, no lowering `enforcement`).
+- A local path needs no network.
+- A source that cannot be loaded (unreachable, missing, malformed, or
+  publishing no policy) fails the command before any write, whatever
+  `policy.fetch_failure_default` says; a cached copy within the stale-cache
+  window counts as loaded. Only a failed discovered policy follows
+  `policy.fetch_failure_default`.
+- Effective sources always print: `[i] Policy: org:contoso/.github + file:/repo/p.yml -- enforcement=block`.
+- `policy.hash` pins the discovered org policy only. Not valid with
+  `--global` or `--no-policy`.
+
+`apm audit --ci --policy SOURCE` differs: it audits against that one source
+instead of discovery and fails closed when it cannot be loaded.
 
 ### 9. Cache and offline behaviour
 

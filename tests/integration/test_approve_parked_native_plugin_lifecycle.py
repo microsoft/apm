@@ -144,18 +144,18 @@ def _row(world: _World, plugin: Path) -> dict:
 
 
 def _claude_deployed(world: _World, plugin: Path) -> bool:
-    """The plugin's MCP server is live where Claude reads it, and the lock agrees (I1)."""
-    if world.scope == "user":
-        settings = world.home / ".claude" / "settings.json"
-        enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
-        row = _row(world, plugin)
-        root = row.get("native_plugin") and world.home / row["native_plugin"]["root"]
-        assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
-        return bool(enabled)
-    config = world.project / ".mcp.json"
-    on_disk = config.is_file() and "p-claude-mcp" in config.read_text("utf-8")
-    assert on_disk == ("p-claude-mcp" in (_lock(world).get("mcp_servers") or [])), _lock(world)
-    return on_disk
+    """The plugin is declared where Claude reads it, its deployed root carries its
+    own MCP server, and the lock agrees (I1). Both scopes install it whole (#3921)."""
+    base = world.home if world.scope == "user" else world.project
+    settings = base / ".claude" / "settings.json"
+    enabled = settings.is_file() and "p-native-claude" in settings.read_text("utf-8")
+    row = _row(world, plugin)
+    root = row.get("native_plugin") and base / row["native_plugin"]["root"]
+    assert bool(enabled) == bool(root and (root / ".mcp.json").is_file()), row
+    # Claude loads the server from the plugin; APM never claims it for Claude.
+    claimed = (_lock(world).get("mcp_target_servers") or {}).get("claude") or []
+    assert "p-claude-mcp" not in claimed, _lock(world)
+    return bool(enabled)
 
 
 @pytest.mark.parametrize("scope", ["user", "project"])
@@ -197,6 +197,31 @@ def test_claude_plugin_is_approved_by_the_printed_command(
     retired = world.run_hint(
         denied.stdout, rf"Run '({re.escape(install)})' to remove executables already deployed"
     )
+    assert retired.returncode == 0, _evidence(retired)
+    assert not _claude_deployed(world, plugin), _evidence(retired)
+
+
+def test_a_narrowed_run_refuses_to_carry_a_denied_claude_plugin(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """--target copilot never reaches a user Claude plugin, so it cannot keep it once denied."""
+    world = _World(tmp_path, apm_binary_path, "user", "claude")
+    plugin = _claude_plugin(world.packages)
+    installed = _parked_install(world, plugin)
+    approved = world.run_hint(installed.stdout, r"Approve: (apm approve -g \S+)")
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", "-g")
+    assert deployed.returncode == 0, _evidence(deployed)
+    assert _claude_deployed(world, plugin), _evidence(deployed)
+    denied = world.apm("deny", "-g", str(plugin))
+    assert denied.returncode == 0, _evidence(denied)
+
+    narrowed = world.apm("install", "-g", "--target", "copilot")
+    assert narrowed.returncode == 1, _evidence(narrowed)
+    assert "is no longer allowed" in narrowed.stdout + narrowed.stderr, _evidence(narrowed)
+    assert _claude_deployed(world, plugin), _evidence(narrowed)
+
+    retired = world.apm("install", "-g")
     assert retired.returncode == 0, _evidence(retired)
     assert not _claude_deployed(world, plugin), _evidence(retired)
 

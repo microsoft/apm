@@ -93,23 +93,23 @@ File primitives resolve targets in this order: `--target`, manifest
 `--runtime` / `--target`, then manifest targets, saved config, then
 auto-detection only when `apm.yml` declares no targets.
 
-[Copilot Agent Plugin registration](../../../consumer/install-plugins/)
-does not discover or execute the Copilot CLI; APM owns materialization and
-target-file generation. Use a supported Copilot runtime for that registration.
-
-Plugins installed with `--global --target claude` are copied intact to
-`~/.agents/plugins/<plugin>/` and declared in Claude's `settings.json`
-(`extraKnownMarketplaces` and `enabledPlugins`); APM never runs the `claude`
-CLI. A plugin is enabled only when its executables are approved; otherwise it is
-not declared, with a warning. Rejected capabilities fail without loose-file
-fallback. See
-[Claude admission and qualification](../../../consumer/install-plugins/#claude-code-plugins-at-user-scope).
+Native plugins (Claude plugins targeting `claude`, or `copilot` at project
+scope, and Agent Plugins targeting `copilot`) are copied intact to
+`.agents/plugins/<plugin>/` (`~/.agents/plugins/` with `--global`) and declared
+in `.claude/settings.json` and `.github/copilot/settings.json`
+(`~/.claude/settings.json` and `~/.copilot/settings.json` with `--global`).
+Commit `.agents/plugins/`, those settings files and `apm.lock.yaml` so a fresh
+clone loads the plugins without APM. APM never runs the `claude` or `copilot`
+CLI. A plugin is enabled only when its executables are approved; otherwise it
+is parked with a warning naming the next step, without loose-file fallback. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 ### Policy and trust
 
 | Flag | Default | Description |
 |---|---|---|
 | `--no-policy` | off | Skip org policy enforcement for this invocation. Loudly logged. Does not bypass `apm audit --ci`. Env: `APM_POLICY_DISABLE=1`. |
+| `--policy SOURCE` | none | Also enforce this policy: a local path, `owner/repo`, or `https://` URL (same forms as `apm audit --policy`). It combines with any auto-discovered org policy and can only add constraints. Use it on remotes auto-discovery cannot reach (plain git) and in air-gapped installs (a local path needs no network). A source that cannot be loaded (unreachable, missing, malformed, or publishing no policy) fails the command before anything is written, whatever `policy.fetch_failure_default` says; a cached copy within the stale-cache window counts as loaded. Not valid with `--global` or `--no-policy`. See [Enforce a policy discovery cannot reach](../../../enterprise/apm-policy/#enforce-a-policy-discovery-cannot-reach). |
 | `--audit <off\|warn\|block>` | (config/policy) | Run a content audit over the files this install deploys. `warn` records findings in the summary; `block` halts the install on critical findings and restores the files it deployed to their previous bytes. Overrides your `audit-on-install` config but cannot relax an org policy floor. Requires the `external-scanners` experimental flag. |
 | `--no-audit` | off | Disable the install-time audit for this invocation (equivalent to `--audit off`). Cannot relax an org policy `block` floor. |
 | `--trust-transitive-mcp` | off | Deploy, for this run only, MCP servers from transitive packages that are self-defined or set their own `registry:` URL or `env`, `headers`, `args`, `url`, `command`, `cwd` or extra keys, including a pinned one whose definition changed. Install warns that consent is not saved: the next install without the flag removes them. To keep one, run [`apm approve`](../approve/#pinned-approvals) on its package and commit `apm.yml`. The flag never writes `apm.yml` and does not bypass the executables gate or org policy. |
@@ -226,7 +226,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
 - **Required service writes fail loudly.** If MCP or LSP work is declared but no target can be resolved, install exits non-zero before changing the manifest, package deployment, or native service config. A native MCP/LSP config write failure also exits non-zero with the failed target and a permissions/path next step. A successful direct `--mcp` add never reports `Install interrupted`.
 - **Direct registry lookup fails closed.** Registry-form MCP entries (`apm install --mcp NAME` with no `--url` and no post-`--` command) resolve one unique registry identity before writing the manifest or user config. An unreachable registry, missing identity, or ambiguous bare server name exits non-zero without changing state. A no-match error names the searched registry and how to choose another; APM never switches registries on its own. See [Choosing an MCP registry](../../../consumer/install-mcp-servers/#choosing-an-mcp-registry).
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically, as are `apm_modules/` copies that no longer match the commit or content recorded in `apm.lock.yaml`. MCP servers with matching config are skipped; unchanged APM-managed connections can be updated when their declaration changes.
-- **MCP connection collisions.** On Claude, Codex and every JSON-config target (Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity), a differing connection with the same name is preserved unless its native configuration still matches the recorded APM baseline. Install identifies the conflicting target and exits nonzero; successful writes to other targets remain recorded. An identical foreign entry is not adopted; it needs no write, so install and `--frozen` pass and leave it unowned (on Codex, the user's `enabled` switch is not part of the comparison). Neither `--force` nor `--frozen` takes over a user connection. Removal also preserves entries with a differing or unverifiable baseline. Windsurf has no workspace MCP config, so even a project install writes `~/.codeium/windsurf/mcp_config.json`; install output names that file on add and removal. See [MCP conflict recovery](../../../consumer/install-mcp-servers/#resolve-a-connection-name-conflict).
+- **MCP connection collisions.** On Claude, Codex and every JSON-config target (Copilot, Cursor, Gemini, Kiro, OpenCode, Windsurf, Antigravity), a differing connection with the same name is preserved unless its native configuration still matches the recorded APM baseline. Install identifies the conflicting target and exits nonzero before writing anything, so no file, MCP config or lockfile changes. Three cases are still found at the MCP write, which keeps the successful writes to other targets recorded: a registry server whose configuration needs environment or runtime values APM would prompt for, a `--frozen` install of a server the lockfile records, and a lockfile from APM 0.36 or earlier that records Copilot or VS Code servers. An identical foreign entry is not adopted; it needs no write, so install and `--frozen` pass and leave it unowned (on Codex, the user's `enabled` switch is not part of the comparison). Neither `--force` nor `--frozen` takes over a user connection. Removal also preserves entries with a differing or unverifiable baseline. Windsurf has no workspace MCP config, so even a project install writes `~/.codeium/windsurf/mcp_config.json`; install output names that file on add and removal. See [MCP conflict recovery](../../../consumer/install-mcp-servers/#resolve-a-connection-name-conflict).
 - **Claude Code profiles.** For user-scope MCP installs, an absolute `CLAUDE_CONFIG_DIR` selects that profile's `.claude.json` for both installation and stale-server cleanup. Removing an APM-managed server in the selected profile preserves other profiles and user-owned entries. Cleanup refuses symlinked config files or profile directories; replace the link with a regular file or directory before retrying. Skills, agents, and other deployed files follow the same rule: profiles share one user lockfile, and a global install removes stale files only under the selected `CLAUDE_CONFIG_DIR` (or `~/.claude`), leaving files deployed to other profiles in place. Files of a profile you no longer install into stay on disk and in the lockfile; remove them manually. `apm uninstall -g` follows the same rule; see [Harness profiles](../uninstall/#harness-profiles).
 - **Copilot CLI profiles.** For user-scope installs, an absolute `COPILOT_HOME` selects the Copilot CLI profile for instructions, agents, hooks, `mcp-config.json`, `lsp-config.json` and plugin settings. Skills stay in `~/.agents/skills/` unless you pass `--legacy-skill-paths`. Profiles share one user lockfile and stale cleanup stays inside the selected profile, as for Claude Code. `CODEX_HOME` and `HERMES_HOME` follow the same rule, and a relative value for any of them fails; see [harness home variables](../../environment-variables/#harness-home-variables).
 - **Failed or interrupted installs.** The first time an install is about to
@@ -236,9 +236,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Ctrl-C or SIGTERM, before `apm.lock.yaml` is written, it puts every written
   file back, removes the directories it created and left empty, keeps
   `apm.lock.yaml` unchanged and prints
-  `Deployed files restored to their previous state.` A failure after the
-  lockfile is written (for example an MCP connection collision) keeps the
-  deployed files the lockfile records. A killed process (SIGKILL, power loss)
+  `Deployed files restored to their previous state.` A failed MCP or LSP
+  configuration write or a refused `--frozen` install restores them the same
+  way. An MCP connection collision found before any write changes nothing;
+  one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore: `apm audit --ci` reports the files the lockfile does not
   record, and the next `apm install` converges and deletes the leftover copies.
 - **Transactional replacement.** `--update` and `--refresh` download package
@@ -249,10 +250,10 @@ still cleans up its managed files, subject to the usual user-edit protections.
   retains recovery data; the prior package may no longer be active.
   Follow [Windows recovery guidance](../../../troubleshooting/install-failures/#windows-file-locks-and-incomplete-recovery)
   before retrying.
-  If updating Claude settings for native plugins fails, the settings file and
+  If updating harness settings for native plugins fails, the settings files and
   deployed plugin roots are left as they were and the previous lockfile is
   restored. Registration success is not runtime proof. See
-  [Claude user plugins](../../../consumer/install-plugins/#claude-code-plugins-at-user-scope).
+  [Native plugins](../../../consumer/install-plugins/#native-plugins).
 - **Git-hook isolation.** Dependency Git operations ignore repository-locating
   hook variables, preserving the caller's branch and HEAD. APM allows safe URL
   rewrites but rejects credentials, insecure transports including `http://` and
@@ -269,6 +270,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   installation. See [Author primitives](../../../producer/write-primitives/)
   for fence and UTF-8 BOM syntax.
 - **MCP-only lock state.** A normal project install creates or updates `apm.lock.yaml` when `apm.yml` declares only MCP dependencies, records the resolved MCP configs and targets, and migrates a legacy `apm.lock` first. Repeating the same install leaves the lockfile and target configs byte-identical. If initial lock creation fails, install exits nonzero and warns with writable-directory and rerun guidance.
+- **MCP cleanup without a lockfile.** Install records each MCP entry it writes on this machine (`$APM_HOME/deployment-receipts/mcp/`, bound to the checkout like the deployment receipts), including entries a local bundle wires, one record per runtime config file (each `COPILOT_HOME` profile has its own). When `apm.lock.yaml` is missing, install uses that record to remove an entry APM wrote for a server it no longer deploys, provided the entry is unchanged and sits in the config the current environment selects; another profile's config is never touched. An entry it has no record of stays, even one identical to a declaration. An entry it cannot confirm (edited since, or an unusable record) stays too: every later install (including `apm install <bundle>`, `apm install --mcp NAME` and `apm mcp install NAME`) prints `Kept MCP server '<name>' in <config>` and `apm audit --ci` fails with [`kept-mcp-entries`](../../baseline-checks/#kept-mcp-entries) until you remove the entry or declare the server again. An unusable evidence file met here (unreadable, unsafe or bound to another checkout) keeps every entry, is reported by that install, and stays reported by `apm audit --ci`, also after the lockfile is rewritten, until you remove that file. With a lockfile, MCP cleanup is unchanged.
 - **Lockfile replay and Git ref freshness.** Plain and `--frozen` installs reuse the locked commit for matching Git dependencies, declared refs and host providers across the resolved graph, without checking whether upstream branches moved. A mutable ref without a matching lock entry resolves upstream instead of reusing a stale bare-cache ref, even if another package or sibling path is locked. In contrast, `apm install --update`, `apm install --refresh`, [`apm update`](../update/) with or without `--force`, [`apm lock --update`](../lock/), and [`apm outdated`](../outdated/) establish mutable Git refs from upstream. APM picks up upstream changes to a transitive package's `apm.yml` only when you regenerate the graph -- run `apm update`, `apm install --update` or `apm lock --update`. A normal install re-reads local-path dependencies, so edits to their `apm.yml` apply in the same run; a targeted `apm install PACKAGE` or `apm update PACKAGE` re-reads only the selected packages and their dependencies, so an unrelated local package mid-edit neither blocks it nor changes the lock; `--frozen` instead fails on changed local content (see **Frozen mode**). See the [lockfile specification](../../lockfile-spec/) for the replay contract.
 - **Semver ranges on git deps.** `ref:` accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) for git-source deps, including positional virtual-subdirectory references. APM runs `git ls-remote` against the dep, picks the highest tag matching the range, and pins the resolved tag plus commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `--update` (or change the manifest constraint) to re-resolve. See [manage dependencies](../../../consumer/install-packages/#pin-a-semver-range) for the supported syntax.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
@@ -289,8 +291,13 @@ still cleans up its managed files, subject to the usual user-edit protections.
   Switching targets that share a skill path refreshes valid same-writer evidence
   through a guarded copy, even when the source bytes are unchanged.
   A receipt vouches only for bytes APM wrote under the current lock, or for
-  bytes still on disk. A new worktree has no receipts, and a receipt written
-  under another branch's lock does not count. Missing evidence, including
+  bytes still on disk. A new worktree has no receipts. A receipt also
+  remembers the last few versions this installation wrote to each file, for
+  the same owner and lockfile claims; deployed bytes that equal one of them
+  are recognized, so after switching branches and back without reinstalling,
+  a source edit installs directly. Bytes written under a different owner or
+  claims, or by another checkout, do not count, and this history never
+  authorizes deleting a file. Missing evidence, including
   installations predating these receipts, does not authorize overwriting
   existing files. The one exception: a skill directory recorded in the
   lockfile whose files each match either what this install would write
@@ -306,7 +313,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   aside (or delete it if it holds no edits), then run `apm install`. That
   rewrites only that skill; edited files elsewhere are kept.
   Invalid evidence fails explicitly.
-- **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) the file is kept and named, the files that could be written are written and recorded, the kept file keeps its previous lockfile entry, and install exits `1`. Move the file aside and rerun `apm install` to restore it, or run `apm export-patch` to keep the edit as an upstream patch (project scope). Install never suggests `--force` here: it would also deploy despite critical security findings. A project last installed by an APM before 0.37 upgrades automatically: its lockfile hash proves a file APM wrote when the file still holds those bytes and git tracks it unchanged, so install re-renders it once and records receipts. An edited file is kept and named; install exits `1` only when the package brings new content for it. `apm install --frozen` verifies such a project without rewriting it.
+- **Edited managed files.** Install replaces an existing instruction, agent, prompt, command or rule file that differs from what it renders only with the same evidence: a local deployment receipt, or bytes equal to what the locked version renders. Lockfile hashes are never that proof. Without evidence (for example a fresh clone, or a project last installed by an APM that recorded no receipts) install refuses before writing anything: it names every such file, leaves every deployed file and `apm.lock.yaml` unchanged, and exits `1`. Move the file aside and rerun `apm install` to restore it, or run `apm export-patch` to keep the edit as an upstream patch (project scope). Install never suggests `--force` here: it would also deploy despite critical security findings. A project last installed by an APM before 0.37 upgrades automatically: its lockfile hash proves a file APM wrote when the file still holds those bytes and git tracks it unchanged, so install re-renders it once and records receipts. An edited file is kept and named; install exits `1` only when the package brings new content for it. `apm install --frozen` verifies such a project without rewriting it. Hook files, copied hook scripts and canvas extension files follow the same evidence rule as install writes them: an unproven file, or an edit that blocks new content, is kept and named, the other files are written and recorded, the kept file keeps its previous lockfile entry, and install exits `1`; an edit with nothing new to deploy is kept and named, and install exits `0`. A canvas extension with a kept file is left whole, so a half-updated extension never runs. An APM-managed LSP server entry is judged on its own against the entry APM renders from the locked config: an edited entry is kept and named the same way (remove the entry and rerun `apm install` to restore it), and other servers and keys in the file are still updated or kept as they are. Hook entries merged into shared settings files, MCP servers and `bin/` executables are not covered. `--force` still overwrites.
   Creating this state requires filesystem hard-link support. State-write failures
   fail the install, which restores the files it wrote.
   Audit and dry-run never establish this authority. Frozen install may record
@@ -324,7 +331,7 @@ still cleans up its managed files, subject to the usual user-edit protections.
   After hash drift, the deployed files are already on disk; only the lockfile write is withheld. To recover, run `apm install` without `--frozen`, then commit the deployed files and the updated `apm.lock.yaml`. Export local edits you want to keep with `apm export-patch` first. The unrecorded-files check is one-directional and matches the tolerance above: claims the install would *drop* (a `--target` filter, `--only`) do not fail, and a removed dependency's claims are kept rather than dropped (see **Frozen mode**). `generated_at` and `apm_version` are excluded, so a newer CLI reading an older lockfile is not a rewrite.
 - **Frozen native-service targets.** The no-write boundary includes late MCP/LSP integration and MCP-only installs: `apm.yml` and `apm.lock.yaml` keep their exact bytes, including legacy timestamps. Frozen mode replays recorded target/server ownership, not an unrecorded personal deployment. If Copilot and Claude own a server but IntelliJ does not, `apm install --frozen --target copilot,claude,intellij` exits `1`, names the missing target/server claim, and leaves native MCP/LSP configs and user entries unchanged. A registry server the lock records but never claimed for Codex or Antigravity (because that harness refuses its transport, for example SSE) is looked up in its declared registry before any write and skipped with a warning; if the harness can load it after all, the install fails the same way. Run the same command without `--frozen`, keeping the intended `--target`, `--only`, `--root DIR` or `--global` options, to record that ownership; commit the lockfile, then replay frozen. `--only mcp` does not hydrate package sources, even without `--frozen`. Restore the package sources and declarations matching the lock using `apm install` without `--only mcp` in the same deployment store (retain `--root DIR` or `--global`, if used) before retrying. Reordered, repeated and narrower selections remain valid. Source acquisition may precede this check; this is not a general rollback guarantee for package deployment or lifecycle scripts.
   Late MCP checks use the complete resolved package graph, not just the packages selected for installation.
-- **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped with `--only mcp`. At `--global` the source root is `$HOME`, so `~/.apm/` primitives deploy to user-scope targets.
+- **Local `.apm/` deployment.** After dependencies are integrated, primitives in the project's own `.apm/` directory are deployed to the same targets. Local files win on collision. Skipped with `--only mcp`. At `--global` the source root is `$HOME`, so `~/.apm/` primitives deploy to user-scope targets and are recorded in `$APM_HOME/apm.lock.yaml`: a later `apm install -g` updates them when you edit the source, and still skips a file APM did not deploy.
 - **User-scope skill paths.** Global skill installation reads the lockfile from the APM user home (`$APM_HOME`, default `~/.apm/`), separate from the skill deployment root. `HOME` or `APM_HOME` directory symlink aliases work without extra flags; package-descendant symlinks and symlinked skill destinations remain rejected. Explicit dependency `alias:` placement is separate; unrelated user files remain protected.
 - **Shared skill assets.** When dependencies deploy the same skill directory,
   matching managed files still use last-writer behavior, but reinstalling one
@@ -461,12 +468,25 @@ the same hook merge a source install uses, once the exact bundle key printed by
 with one warning. Every later `apm install` (including `--frozen`), `apm update`
 and `apm prune` re-checks that exact key against current approvals and org
 policy and retires the hooks when it no longer holds; `apm audit --ci` reports
-them first. `apm uninstall` does not remove local-bundle content. A
+them first. Canvas extensions a bundle deploys (with the `canvas` experimental
+flag) follow the same approval, re-check and retirement; a reinstall retires
+the extensions the new bundle content no longer ships. Retiring one bundle's
+extensions never removes another bundle's or anything outside the target's
+extensions directory, and an extension you edited is kept.
+Org policy `dependencies.deny` applies to the bundle's package
+name (as `_local/<name>`) and to every package its `apm.lock.yaml` records: a
+denied bundle is refused before any file is written. `dependencies.allow`
+judges the bundle only by the packages its `apm.lock.yaml` records, never by its
+name; under an allow list, a bundle that records no packages is a violation.
+With `enforcement: block` a violating bundle is refused before any file is
+written; `warn` reports it and installs. A bundle whose
+`apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
+remove local-bundle content. A
 portable Agent Plugins v1 package installs declaratively instead:
-declare it in `apm.yml` and run `apm install --target copilot`, which keeps it
-whole and registers it without locating or executing Copilot. Stable Copilot
-CLI 1.0.81 or newer is required when loading the projection. See
-[Install Agent Plugins for Copilot](../../../consumer/install-plugins/).
+declare it in `apm.yml` and run `apm install --target copilot`, which deploys
+it whole to `.agents/plugins/` without locating or executing Copilot. Stable
+Copilot CLI 1.0.81 or newer is required to load it. See
+[Native plugins](../../../consumer/install-plugins/#native-plugins).
 :::
 
 ### Install only a subset of skills from a bundle

@@ -23,7 +23,7 @@ from tests.integration._target_compile_kit import (
     write_project,
 )
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary]
+pytestmark = [pytest.mark.integration, pytest.mark.requires_apm_binary, pytest.mark.e2e]
 
 INSTALL = ("install", "--no-policy")
 
@@ -88,12 +88,12 @@ def test_same_name_user_rules_survive_install_update_uninstall(
     assert not (project / ".claude/rules/py.md").exists()
     assert not (project / ".cursor/rules/py.mdc").exists()
 
-    forced = _seed(tmp_path / "forced", {".claude/rules/global.md": "USER claude rule\n"})
+    # Claude loads the always-on instruction from AGENTS.md (#3939), so only a
+    # path-scoped rule can collide with a hand-authored .claude/rules/ file.
+    forced = _seed(tmp_path / "forced", {".claude/rules/py.md": "USER claude rule\n"})
     forced_project = write_project(tmp_path / "forced", ("claude",))
     scenario.run(*INSTALL, "--force", cwd=forced_project)
-    assert (forced_project / ".claude/rules/global.md").read_bytes() != forced[
-        ".claude/rules/global.md"
-    ]
+    assert (forced_project / ".claude/rules/py.md").read_bytes() != forced[".claude/rules/py.md"]
 
 
 def test_same_name_user_rule_survives_global_install_and_uninstall(

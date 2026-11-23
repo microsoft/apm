@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from apm_cli.core.remediation import (
     DRY_RUN_INCOMPLETE,
+    LEGACY_RENDER_MIGRATE,
     LOCKED_REFS_SATISFIED,
     ORPHANED_PACKAGES,
 )
@@ -799,6 +800,15 @@ class InstallLogger(CommandLogger):
             symbol="info",
         )
 
+    def frozen_stale_kept(self, paths: list[str]) -> None:
+        """Name locked files a frozen install left because this version no longer renders them."""
+        _rich_info(
+            f"Left {len(paths)} file(s) recorded in apm.lock.yaml that this APM version "
+            f"no longer deploys, because --frozen does not change apm.lock.yaml: "
+            f"{', '.join(paths)}. {LEGACY_RENDER_MIGRATE.sentence()}",
+            symbol="info",
+        )
+
     def orphan_cleanup(self, cleanups: Sequence[CleanupResult]) -> int:
         """Name post-install orphan cleanup at default verbosity.
 
@@ -840,6 +850,7 @@ class InstallLogger(CommandLogger):
         age_seconds: int | None = None,
         subgroup_scoped: bool = False,
         chain: list[str] | None = None,
+        explicit: bool = False,
     ):
         """Log policy discovery outcome.
 
@@ -847,7 +858,8 @@ class InstallLogger(CommandLogger):
         (users must know blocking is active) or when ``subgroup_scoped``
         is set and enforcement is not ``off`` -- a GitLab subgroup policy
         composed with its ancestors names its ordered extends chain even at
-        default verbosity (#2753).
+        default verbosity (#2753). An ``explicit`` ``--policy`` source is
+        likewise always named so the user sees it was applied (#1925).
 
         Format: ``[i] Policy: <source> (cached, fetched 5m ago) -- enforcement=block``
         """
@@ -876,7 +888,7 @@ class InstallLogger(CommandLogger):
         if enforcement == "block":
             # Always visible — blocking installs is a big deal
             _rich_warning(message, symbol="warning")
-        elif self.verbose or (subgroup_scoped and enforcement != "off"):
+        elif self.verbose or explicit or (subgroup_scoped and enforcement != "off"):
             # GitLab subgroup composition: show the chain even in non-verbose
             # warn mode so the dev sees which namespaces applied (#2753);
             # an ``off`` policy needs no action and stays silent.
@@ -1088,6 +1100,31 @@ class InstallLogger(CommandLogger):
             return False
         self._policy_banners.add(key)
         return True
+
+    def policy_source_unavailable(
+        self, source: str, error: str, blocking: bool = False, explicit: bool = False
+    ):
+        """Log a composed policy source that could not be loaded (#1925).
+
+        Always visible: a source that silently drops out would hide a gap in
+        enforcement. The line names whether the explicit ``--policy`` source
+        or the discovered policy failed. With ``blocking`` the caller fails
+        closed right after, so the line is an error instead of a warning; an
+        explicit source always blocks.
+        """
+        kind = "Explicit" if explicit else "Discovered"
+        if not self._first_policy_banner("unavailable", kind, source, error, str(blocking)):
+            return
+        if blocking:
+            _rich_error(
+                f"{kind} policy source {source} could not be loaded: {error}", symbol="error"
+            )
+            return
+        _rich_warning(
+            f"{kind} policy source {source} could not be loaded ({error}); continuing "
+            "without it. Set policy.fetch_failure_default: block in apm.yml to fail closed.",
+            symbol="warning",
+        )
 
     def policy_disabled(self, reason: str):
         """Log a loud warning that policy enforcement is disabled.

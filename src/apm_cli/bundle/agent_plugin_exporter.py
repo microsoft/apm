@@ -46,7 +46,6 @@ from ..utils.console import _rich_warning
 from ..utils.path_security import ensure_path_within, safe_rmtree
 from .credential_files import refuse_credential_files
 from .export_common import (
-    _cache_would_contribute_hooks_or_mcp,
     _cache_would_contribute_primitives,
     _collect_apm_components,
     _collect_deployed_components,
@@ -58,8 +57,10 @@ from .export_common import (
     _sanitize_bundle_name,
     _scan_bundle_sources,
     _warn_no_local_primitives,
+    _warn_parked_executables,
     _warn_skipped_root_components,
     _warn_skipped_source_links,
+    _warn_unpacked_dependency_config,
     _write_bundle_sources,
 )
 from .formats import BundleFormat, agent_plugin_warning
@@ -378,6 +379,7 @@ def export_agent_plugin_bundle(
 
             dep_name = dep.repo_url
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger, format_carries=False)
             if dep.deployed_files:
                 dep_components, dep_dropped = _portable_components(
                     _collect_deployed_components(project_root, dep)
@@ -400,16 +402,7 @@ def export_agent_plugin_bundle(
             else:
                 dep_components = []
 
-            if _cache_would_contribute_hooks_or_mcp(install_path):
-                _warn = (
-                    f"dependency {dep.repo_url} contributed hooks/MCP config that is "
-                    "not attested in apm.lock.yaml; it will NOT be packed. "
-                    "Attested primitives (skills/agents/etc.) are unaffected."
-                )
-                if logger:
-                    logger.warning(_warn)
-                else:
-                    _rich_warning(_warn, symbol="warning")
+            _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 

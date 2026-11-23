@@ -344,7 +344,7 @@ def run_owned_lsp_integration(
 ) -> int:
     """Reconcile one bundle owner's LSP servers and persist ownership."""
     from apm_cli.deps.lockfile import LockFile
-    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 
     lockfile = LockFile.read(lock_path) or LockFile()
     owner_token = f"{_BUNDLE_LSP_OWNER_PREFIX}{owner}"
@@ -382,7 +382,8 @@ def run_owned_lsp_integration(
     supported_target_runtimes = LSPIntegrator.supported_target_runtimes(target_runtimes)
     count = 0
     user_conflict = None
-    kept: dict[str, set[str]] = {}
+    record = LspInstallRecord()
+    kept = record.kept_unowned
     if dependencies:
         require_lsp_capable_target(supported_target_runtimes, bundle=True)
         try:
@@ -395,7 +396,7 @@ def run_owned_lsp_integration(
                 fail_on_write_error=fail_on_write_error,
                 managed_target_servers=old_targets,
                 force=force,
-                kept_unowned=kept,
+                record=record,
             )
         except LSPUserEntryConflictError as exc:
             # The other servers were written; record them, then fail (#4628).
@@ -651,6 +652,18 @@ def _legacy_lsp_owner_names(names: set[str], targets_recorded: bool) -> dict:
     return {} if targets_recorded or not names else {"legacy_server_names": set(names)}
 
 
+def _refusal(conflict):
+    """*conflict* as a refusal: it wrote no server, so the install commits nothing (#4697).
+
+    Like an MCP native conflict that wrote no connection, nothing is recorded;
+    the transaction discards the staged lockfile, so a failed install leaves
+    ``apm.lock.yaml`` byte-identical.
+    """
+    from apm_cli.install.errors import LSPUserEntryRefusal
+
+    return LSPUserEntryRefusal(str(conflict), preserved=conflict.preserved, wrote_servers=False)
+
+
 def _unowned_everywhere(kept: dict[str, set[str]], new_targets: dict[str, set[str]]) -> set[str]:
     """User entries APM owns on no target, so the lock never claims them (#4628)."""
     return set().union(*kept.values(), set()) - set().union(*new_targets.values(), set())
@@ -680,6 +693,7 @@ def run_lsp_integration(  # noqa: PLR0913
     force: bool = False,
     no_policy: bool = False,
     persist: bool = True,
+    refuse_unwritten_conflict: bool = True,
     prepared: PreparedLspIntegration | None = None,
 ) -> int:
     """Run LSP server integration after APM package installation.
@@ -709,12 +723,17 @@ def run_lsp_integration(  # noqa: PLR0913
         scope: Optional InstallScope for user/project filtering.
         target_context: Compact `(apm_config, explicit_target, scope)` tuple
             used by the install command to keep entry-point glue small.
+        persist: False when an uninstall reconciles survivors in memory; a
+            user-entry conflict then finishes reconciliation before failing.
+        refuse_unwritten_conflict: Whether a user-entry conflict that wrote no
+            server refuses the commit (#4697). False when this command already
+            staged other service writes (an MCP connection) that must be recorded.
 
     Returns:
         Number of LSP servers configured.
     """
     from apm_cli.install.errors import LSPUserEntryConflictError
-    from apm_cli.integration.lsp_integrator import LSPIntegrator
+    from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 
     if target_context is not None:
         apm_config, explicit_target, scope = target_context
@@ -794,7 +813,8 @@ def run_lsp_integration(  # noqa: PLR0913
             )
 
         conflict = None
-        kept: dict[str, set[str]] = {}
+        record = LspInstallRecord(locked_configs=old_lsp_configs)
+        kept, kept_servers = record.kept_unowned, record.kept_edits
         if lsp_deps:
             if fail_on_write_error:
                 require_lsp_capable_target(target_runtimes)
@@ -809,10 +829,12 @@ def run_lsp_integration(  # noqa: PLR0913
                     fail_on_write_error=fail_on_write_error,
                     managed_target_servers=old_lsp_targets,
                     force=force,
-                    kept_unowned=kept,
+                    record=record,
                     **_legacy_lsp_owner_names(old_lsp_servers, old_lsp_targets_present),
                 )
             except LSPUserEntryConflictError as exc:
+                if not exc.wrote_servers and persist and refuse_unwritten_conflict:
+                    raise _refusal(exc) from None
                 # The other servers were written; record them, then fail (#4628).
                 conflict = exc
 
@@ -840,6 +862,12 @@ def run_lsp_integration(  # noqa: PLR0913
         # A server kept as the user's on every target is not APM's: record nothing for it.
         unwritten = _unowned_everywhere(kept, new_targets)
         new_regular_configs = LSPIntegrator.get_server_configs(lsp_deps)
+        # A kept entry keeps its locked config: an edit never becomes APM's baseline (#4626).
+        for name in kept_servers:
+            if name in old_lsp_configs:
+                new_regular_configs[name] = old_lsp_configs[name]
+            else:
+                new_regular_configs.pop(name, None)
         new_configs = {
             name: config for name, config in old_lsp_configs.items() if name in bundle_names
         }

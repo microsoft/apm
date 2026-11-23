@@ -617,6 +617,7 @@ contracts-tooling-lifecycle-script-gate
 contracts-tooling-lifecycle-policy-errors
 contracts-tooling-linter-cache-content-key
 contracts-tooling-linter-cache-parse-once
+contracts-tooling-local-identity
 contracts-tooling-local-path-anchor
 contracts-tooling-lockfile-generator-gate
 contracts-tooling-lockfile-generator-stamp
@@ -652,6 +653,7 @@ install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
 install-deployment-gate-retirement
 install-deployment-codex-agent-link-resolution
+install-deployment-claude-agents-md-routing
 install-deployment-agent-render-then-adopt
 install-deployment-command-render-then-adopt
 install-deployment-overwrite-evidence
@@ -662,6 +664,7 @@ install-deployment-drift-claim-classification
 install-deployment-effective-selection
 install-deployment-executable-item-admission
 install-deployment-executable-trust-context
+install-deployment-explicit-policy-source-owner
 install-deployment-frozen-flag-reader
 install-deployment-frozen-mutation-eligibility
 install-deployment-git-object-field-authority
@@ -779,6 +782,7 @@ mutation_writes.copilot_cli_mcp_paths
 mutation_writes.drift_hook_membership
 mutation_writes.hook_cleanup_scope
 mutation_writes.hook_command_vocabulary
+mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
 mutation_writes.mcp_declaration_scope

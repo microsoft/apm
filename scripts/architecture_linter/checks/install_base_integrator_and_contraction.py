@@ -193,7 +193,7 @@ def check_base_integrator(provider: FactsProvider) -> tuple[Violation, ...]:
 _SPELLING_ALIAS_CALLERS = {
     "src/apm_cli/integration/cleanup.py": "live_index.alias(stale_path, project_root)",
     "src/apm_cli/install/phases/cleanup.py": "live_paths=surviving_files | set(new_deployed)",
-    "src/apm_cli/install/manifest_reconcile.py": "live_paths=files",
+    "src/apm_cli/install/manifest_reconcile.py": "live_paths=[*files, *protected_values]",
     "src/apm_cli/deps/file_provenance.py": "alias = physical_alias(",
 }
 
@@ -1266,6 +1266,38 @@ def _local_bundle_findings(provider: FactsProvider, rule_id: str) -> list[Violat
     return findings
 
 
+_LOCKFILE_LOADER = "src/apm_cli/deps/lockfile.py"
+_ROW_PROJECTION_OWNER = "src/apm_cli/core/legacy_lock_evidence.py"
+_ROW_PROJECTION_MESSAGE = (
+    "Whether a lockfile load may skip per-row legacy projection is decided only by "
+    "DeploymentLedgerCodec.load_observes_per_row_projection"
+)
+
+
+def _row_projection_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
+    """Lockfile loads skip per-row ledger projection only on the codec's verdict."""
+    loader, loader_fail = _facts_for(provider, _LOCKFILE_LOADER, rule_id)
+    owner, owner_fail = _facts_for(provider, _ROW_PROJECTION_OWNER, rule_id)
+    if loader_fail or owner_fail:
+        return list(loader_fail) + list(owner_fail)
+    hardcoded = re.compile(r"\bproject_ledger\s*=\s*(?:False|0)\b")
+    findings: list[Violation] = []
+    for path in _python_paths(provider, _SRC_PREFIX):
+        facts = provider.file_facts(path)
+        if getattr(facts, "read_error", None) is not None:
+            continue
+        findings.extend(
+            _line_findings(
+                facts, path, rule_id, hardcoded, _ROW_PROJECTION_MESSAGE, respect_exempt=True
+            )
+        )
+    if not _present(loader, "DeploymentLedgerCodec.load_observes_per_row_projection(") or not all(
+        _present(owner, needle) for needle in ("cls.valid_owner_keys(", "cls._legacy_locator(")
+    ):
+        findings.append(_summary(rule_id, _DEPLOYMENT_LEDGER, _ROW_PROJECTION_MESSAGE))
+    return findings
+
+
 def _drift_membership_findings(provider: FactsProvider, rule_id: str) -> list[Violation]:
     """Drift deployment membership must route through DeploymentLedgerCodec."""
     drift, drift_fail = _facts_for(provider, "src/apm_cli/install/drift.py", rule_id)
@@ -1434,6 +1466,12 @@ def _materialization_evidence_findings(provider: FactsProvider, rule_id: str) ->
             "finally:",
             "project_root, removed_skill_paths, user_scope=user_scope",
         ),
+        # MCP write evidence (#4737) borrows the session's binding and paths only.
+        "src/apm_cli/install/mcp/write_receipts.py": (
+            "session = DeploymentMaterializationSession(Path(project_root), scope, None)",
+            "if not session.binds(data):",
+            "data = self._session.binding()",
+        ),
         "src/apm_cli/commands/uninstall/cli.py": (
             "_persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)",
             "else:\n        if integration_cleanup.materialization_session is not None:",
@@ -1541,6 +1579,7 @@ def check_provenance_state(provider: FactsProvider) -> tuple[Violation, ...]:
     findings.extend(_legacy_scope_findings(provider, rule_id))
     findings.extend(_state_mutation_findings(provider, rule_id))
     findings.extend(_local_bundle_findings(provider, rule_id))
+    findings.extend(_row_projection_findings(provider, rule_id))
     findings.extend(_drift_membership_findings(provider, rule_id))
     findings.extend(_scanner_membership_findings(provider, rule_id))
     findings.extend(_membership_owner_findings(provider, rule_id))

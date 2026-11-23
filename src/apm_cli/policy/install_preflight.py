@@ -14,9 +14,11 @@ rather than duplicate it.  The gate phase adds pipeline-specific wiring
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
 # ``PolicyBlockError`` remains as an alias re-exported below so external
@@ -24,8 +26,9 @@ from pathlib import Path
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
+from .models import LocalBundleSubjects
 from .outcome_routing import route_discovery_outcome
-from .policy_checks import run_dependency_policy_checks
+from .policy_checks import run_dependency_deny_check, run_dependency_policy_checks
 
 # Deprecated alias kept for backward compatibility (#832).  New code
 # should ``raise``/``except`` :class:`PolicyViolationError` directly.
@@ -35,6 +38,13 @@ PolicyBlockError = PolicyViolationError
 # Maximum lines to emit per severity bucket in dry-run preview.
 # Overflow is collapsed into a single tail line pointing to ``apm audit``.
 _DRY_RUN_PREVIEW_LIMIT = 5
+
+
+@dataclass(frozen=True)
+class DenyOnlySubjects:
+    """Packages judged with the declared ones against ``dependencies.deny`` alone."""
+
+    deps: tuple[Any, ...]
 
 
 def emit_check_violations(logger, check, *, severity: str, source: str | None) -> None:
@@ -99,6 +109,7 @@ def run_policy_preflight(
     effective_target: tuple[str, ...] | None = None,
     effective_target_source: str = "effective target",
     fetch_result: PolicyFetchResult | None = None,
+    bundled_deps: Iterable | DenyOnlySubjects | LocalBundleSubjects = (),
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -122,6 +133,13 @@ def run_policy_preflight(
         Where that selection came from, named in violation details.
     fetch_result:
         A discovery the caller already holds, so one install discovers once.
+    bundled_deps:
+        Packages a pack ships without an apm.yml entry here; checked
+        against ``dependencies.deny`` only. A local bundle's
+        :class:`~apm_cli.policy.models.LocalBundleSubjects` also meets
+        ``dependencies.allow`` through its recorded packages (#4646). A
+        :class:`DenyOnlySubjects` judges *apm_deps* and its packages against
+        ``dependencies.deny`` alone (``apm pack``): no other check runs.
     no_policy:
         CLI ``--no-policy`` flag value.
     logger:
@@ -185,22 +203,20 @@ def run_policy_preflight(
         return fetch_result, False
 
     # -- Enforcement (warn or block) -----------------------------------
-    # ``apm_deps`` here is always the direct-deps list from the caller
-    # (manifest or MCP path) -- forward as direct_dep_keys so the
-    # require_pinned_constraint check skips transitives (#1494 Copilot review).
     apm_deps_list = list(apm_deps) if apm_deps is not None else []
-    audit_result = run_dependency_policy_checks(
-        apm_deps_list,
-        lockfile=None,
-        policy=policy,
-        mcp_deps=mcp_deps,
-        mcp_brought_in_by=mcp_brought_in_by,
-        effective_target=effective_target,
-        effective_target_source=effective_target_source,
-        fail_fast=(enforcement == "block"),
-        registries=registries,
-        direct_dep_keys={d.get_unique_key() for d in apm_deps_list},
-    )
+    if isinstance(bundled_deps, DenyOnlySubjects):
+        audit_result = run_dependency_deny_check(apm_deps_list, policy, bundled_deps.deps)
+    else:
+        audit_result = _full_dependency_checks(
+            apm_deps_list,
+            policy,
+            mcp_deps=mcp_deps,
+            mcp_brought_in_by=mcp_brought_in_by,
+            effective_target=effective_target,
+            effective_target_source=effective_target_source,
+            registries=registries,
+            bundled_deps=bundled_deps,
+        )
 
     if not audit_result.passed:
         if dry_run:
@@ -223,6 +239,21 @@ def run_policy_preflight(
             )
 
     return fetch_result, True
+
+
+def _full_dependency_checks(apm_deps_list, policy, *, bundled_deps, **checks):
+    """Every dependency, MCP and target check an install preflight runs."""
+    return run_dependency_policy_checks(
+        apm_deps_list,
+        lockfile=None,
+        policy=policy,
+        fail_fast=(policy.enforcement == "block"),
+        # ``apm_deps`` is the caller's direct-deps list, so the
+        # require_pinned_constraint check skips transitives (#1494).
+        direct_dep_keys={d.get_unique_key() for d in apm_deps_list},
+        bundled_deps=bundled_deps,
+        **checks,
+    )
 
 
 def prefetch_identity_policy(policy_root: Path, *, no_policy: bool = False):

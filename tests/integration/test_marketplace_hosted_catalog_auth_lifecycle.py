@@ -273,8 +273,9 @@ class _Scenario:
         repositories = LocalGitRepositoryFactory(self.isolated.repository_root, env=environment)
         repository = repositories.create("pkg")
         plugin = repository.worktree
-        (plugin / ".claude-plugin").mkdir(parents=True)
-        (plugin / ".claude-plugin" / "plugin.json").write_text(
+        # A root plugin.json keeps the split route that deploys the loose skill;
+        # a .claude-plugin manifest installs whole at project scope (#3921).
+        (plugin / "plugin.json").write_text(
             json.dumps({"name": _PLUGIN, "version": "1.0.0", "description": "hello"}),
             encoding="utf-8",
         )

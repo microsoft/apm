@@ -1247,20 +1247,16 @@ class TestInstallInternalHelpers:
         logger.progress.assert_not_called()
         logger.warning.assert_not_called()
 
-    def test_check_package_conflicts_empty(self) -> None:
-        """Empty dep list returns empty identity set."""
+    @pytest.mark.parametrize(
+        ("deps", "count"), [([], 0), (["owner/repo"], 1)], ids=["empty", "string_dep"]
+    )
+    def test_check_package_conflicts_identities(self, deps, count) -> None:
+        """String-form deps are parsed into a set of identity strings."""
         from apm_cli.commands.install import _check_package_conflicts
 
-        result = _check_package_conflicts([])
-        assert result == set()
-
-    def test_check_package_conflicts_with_string_dep(self) -> None:
-        """String-form deps are parsed into identity strings."""
-        from apm_cli.commands.install import _check_package_conflicts
-
-        identities = _check_package_conflicts(["owner/repo"])
-        # Should have exactly one identity
-        assert len(identities) == 1
+        identities = _check_package_conflicts(deps)
+        assert isinstance(identities, set)
+        assert len(identities) == count
 
 
 # ===========================================================================

@@ -291,11 +291,14 @@ class McpAdmission:
         include_user: bool = True,
         logger: Any = None,
         trust_context: ExecTrustContext | None = None,
+        migrate_user_legacy: bool = True,
     ) -> McpAdmission:
         """Resolve org, project and (optionally) user layers for *project_root*.
 
         Org policy and the grants both come from the scope's manifest root
-        (``$APM_HOME`` at user scope).
+        (``$APM_HOME`` at user scope). A preview passes
+        ``migrate_user_legacy=False`` to read a legacy ``approvals.yml``
+        without migrating it.
         """
         if trust_context is not None:
             return cls(trust_context, one_off=one_off)
@@ -316,15 +319,26 @@ class McpAdmission:
                 policy = route.policy
                 if policy is None and (route.blocks or route.unresolved):
                     admission.policy_unavailable = route.outcome
+                elif route.unavailable_source:
+                    # A --policy source that did not load leaves the policy partial (#1925).
+                    admission.policy_unavailable = route.unavailable_source
             return exec_trust_context_for_project(
-                grants_manifest, policy=policy, logger=logger, include_user=include_user
+                grants_manifest,
+                policy=policy,
+                logger=logger,
+                include_user=include_user,
+                migrate_user_legacy=migrate_user_legacy,
             )
 
         def pins() -> ExecTrustContext:
             from .executables import exec_trust_context_for_project
 
             return exec_trust_context_for_project(
-                grants_manifest, policy=None, logger=None, include_user=include_user
+                grants_manifest,
+                policy=None,
+                logger=None,
+                include_user=include_user,
+                migrate_user_legacy=migrate_user_legacy,
             )
 
         admission = cls(resolve, one_off=one_off, pins=pins)

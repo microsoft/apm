@@ -29,11 +29,11 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tests.lifecycle.generator.rules import MARKETPLACE_UNTOUCHED
 from tests.lifecycle.machines._kit import Bench, Step, StepRunner
 from tests.lifecycle.model.expected import expected_deployed
 from tests.lifecycle.model.state import ModelState
 from tests.lifecycle.oracles import Evidence, check_obligation
-from tests.lifecycle.rows import _SURFACE_GLOBS
 from tests.lifecycle.world.scopes import use_policy
 from tests.lifecycle.world.services import REGISTRY_SERVER
 from tests.utils.local_package import LocalPackageFactory
@@ -84,6 +84,17 @@ def author_mixed(root: Path) -> Path:
     factory.add_instruction(package, MIXED, _INSTRUCTION)
     factory.add_hook(package, "session", _HOOK)
     return package.root
+
+
+# The gate levels the U-MKT rule cell must be witnessed at (Q&L ruling
+# 2026-11-21): the allowed level and the most restrictive one that still has
+# executables deployed.
+UMKT_LEVELS = frozenset({"allowed", "revoked-after-deploy"})
+
+
+def umkt_ready(levels: Collection[str]) -> bool:
+    """Whether the U-MKT witness steps cover every required gate level."""
+    return set(levels) >= UMKT_LEVELS
 
 
 @dataclass
@@ -152,10 +163,15 @@ class GateMatrix(StepRunner):
         self.scope = scope
         self.state = GateState()
         self.credited: set[str] = set()
+        # Gate level -> (step, evidence) of each U-MKT witness step run so far.
+        self.umkt_steps: dict[str, tuple[Step, Evidence]] = {}
 
     # -- labels ------------------------------------------------------------------
 
     def cells(self, command: Command) -> list[str]:
+        if command.op == "marketplace" and not self.state.denied_by_policy:
+            # U-MKT: below an org deny every marketplace cell maps onto one rule cell.
+            return [MARKETPLACE_UNTOUCHED]
         unobserved = _UNOBSERVED
         if command.op == "mcp-install":
             # U7 credits the collateral primitives only: the MCP level would be
@@ -185,6 +201,9 @@ class GateMatrix(StepRunner):
         requested = self._requested(command)
         if not self.dry:
             args = (*words, *(self.spec(p) for p in named))
+            fields = {"mutating": self._reconciles(op, words)}
+            if op == "marketplace":
+                fields.update(forbidden={"project": ("*",), "outside": ("*",)}, allowed={})
             servers = _mcp_servers(self.bench.deploy_root)
             step = self.step(
                 args,
@@ -192,7 +211,7 @@ class GateMatrix(StepRunner):
                 cells=cells,
                 model=requested.model(),
                 converged=False,
-                mutating=self._reconciles(op, words),
+                **fields,
             )
             self._check_outcome(command, requested, step, servers)
             self._credit(command, cells, step)
@@ -272,7 +291,7 @@ class GateMatrix(StepRunner):
             wanted = {
                 "/".join(cell)
                 for cell in expected_deployed(requested.model(), OBSERVED)
-                if (cell[1], cell[2]) in _SURFACE_GLOBS
+                if (cell[1], cell[2]) in self.bench.surface_globs()
             }
             assert set(after) == wanted, f"deployed {sorted(after)}, model {sorted(wanted)}"
 
@@ -287,7 +306,10 @@ class GateMatrix(StepRunner):
         exit_code = step.result.returncode
         unchanged: dict[str, tuple[str, ...]] = {"outside": ("*",)}
         present: dict[str, list[str]] = {}
-        if command.op == "mcp-install":
+        if command.op == "marketplace":
+            # A catalog command leaves every project byte, deployed or locked, alone.
+            unchanged["project"] = ("*",)
+        elif command.op == "mcp-install":
             unchanged["project"] = _NON_MCP
         elif exit_code != 0:
             unchanged["project"] = _DURABLE
@@ -297,8 +319,25 @@ class GateMatrix(StepRunner):
             and command.args[0] != "uninstall"
             and exit_code == 0
         ):
-            present["project"] = [_MIXED_SKILL]
+            present["project" if self.scope == "project" else "home"] = [_MIXED_SKILL]
         evidence = Evidence(unchanged=unchanged, present=present, exit=command.exits)
+        if list(cells) == [MARKETPLACE_UNTOUCHED]:
+            # U-MKT needs its witness at both gate levels: hold this step's
+            # receipt until the other level has run too.
+            self.umkt_steps[self.state.gate("p-exec", "hook")] = (step, evidence)
+            if not umkt_ready(self.umkt_steps):
+                return
+            for held, held_evidence in self.umkt_steps.values():
+                check_obligation(
+                    MARKETPLACE_UNTOUCHED,
+                    strength="e2e-evidence",
+                    before=held.before,
+                    after=held.after,
+                    result=held.result,
+                    evidence=held_evidence,
+                    scope=self.scope,
+                )
+            return
         for cell in cells:
             check_obligation(
                 cell,
@@ -321,13 +360,25 @@ class GateMatrix(StepRunner):
         self.edit_inputs("gate-off", change, lambda state: setattr(state, "gate_on", False))
 
     def revoke(self, packages: Sequence[str]) -> None:
-        def change() -> None:
-            data = self.bench.manifest()
+        """Drop every decision on *packages* from the scope's approval store."""
+
+        def drop(block: dict) -> None:
             for store in ("allow", "deny"):
-                entries = (data.get("executables") or {}).get(store) or {}
+                entries = block.get(store) or {}
                 for key in [k for k in entries if any(self.spec(p) in k for p in packages)]:
                     del entries[key]
-            self.bench.write_manifest(data)
+
+        def change() -> None:
+            if self.scope == "project":
+                data = self.bench.manifest()
+                drop(data.get("executables") or {})
+                self.bench.write_manifest(data)
+                return
+            # User-scope decisions live in APM_HOME/config.json (approve --user).
+            config = self.bench.world.apm_home / "config.json"
+            data = json.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+            drop(data.get("executables") or {})
+            config.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
         def transition(state: GateState) -> None:
             for package in packages:
@@ -345,6 +396,14 @@ class GateMatrix(StepRunner):
             state.denied_by_policy = frozenset(PACKAGES)
 
         self.edit_inputs("policy-deny-all-deps", change, transition)
+
+    def marketplace(self, verb: str) -> None:
+        """``apm marketplace add|update``: a catalog command over the declared set."""
+        words = ("marketplace", verb)
+        if verb == "add":
+            url = "" if self.dry else self.bench.world.services.marketplace_url
+            words = (*words, url)
+        self.run("marketplace", *words)
 
     def probes(self, *ops: str, exits: Mapping[str, int] | None = None) -> None:
         """Run the package-wide commands *ops* over the declared set."""
@@ -365,6 +424,46 @@ class GateMatrix(StepRunner):
 
 
 def replay_matrix(machine: GateMatrix) -> None:
+    """Replay the spine of the machine's scope."""
+    if machine.scope == "user":
+        replay_user_matrix(machine)
+    else:
+        replay_project_matrix(machine)
+
+
+# install --frozen refuses a lock whose recorded executables decision the gate no
+# longer makes (#4053): after a deny of what is deployed, and after a revoke.
+USER_FROZEN_EXITS = {"revoked-after-deploy": 1, "unapproved-exec": 1}
+
+
+def replay_user_matrix(machine: GateMatrix, exits: Mapping[str, int] = USER_FROZEN_EXITS) -> None:
+    """User scope: install --frozen at every gate level an approval store reaches (T2).
+
+    Org policy does not govern user scope in 0.37 (docs/src/content/docs/enterprise/
+    apm-policy.mdx; #3703), so the dependency-deny level has no user-scope command.
+    """
+    exec_and_mixed = (*EXEC_PACKAGES, MIXED)
+
+    def frozen(level: str) -> None:
+        machine.probes("install-frozen", exits={"install-frozen": exits.get(level, 0)})
+
+    machine.gate_off()
+    machine.run("install", "install", packages=PACKAGES)
+    frozen("none")
+    machine.run("approve", "approve", packages=exec_and_mixed)
+    machine.probes("install")
+    frozen("allowed")
+    machine.run("deny", "deny", packages=exec_and_mixed)
+    frozen("revoked-after-deploy")
+    machine.probes("install")
+    machine.run("uninstall", "uninstall", packages=exec_and_mixed)
+    machine.run("install", "install", packages=exec_and_mixed)
+    frozen("denied-executable")
+    machine.revoke(exec_and_mixed)
+    frozen("unapproved-exec")
+
+
+def replay_project_matrix(machine: GateMatrix) -> None:
     """Walk the six gate levels; each level runs only the commands that earn a new id.
 
     Dropped as redundant (the covering replay or an earlier level holds them):
@@ -382,8 +481,12 @@ def replay_matrix(machine: GateMatrix) -> None:
     # approve under the open gate turns the gate on (allowed).
     machine.run("approve", "approve", packages=exec_and_mixed)
     machine.probes("install", "mcp-install")
+    machine.run("uninstall", "uninstall", packages=("p-lsp",))
+    machine.run("install", "install", packages=("p-lsp",))
+    machine.marketplace("add")
     # revoked-after-deploy: deny what is deployed; the plain files of p-mixed stay.
     machine.run("deny", "deny", packages=exec_and_mixed)
+    machine.marketplace("update")
     machine.probes("mcp-install", "install", *reads)
     machine.run("deny", "deny", packages=(MIXED,))
     machine.run("uninstall", "uninstall", packages=exec_and_mixed)
@@ -399,9 +502,17 @@ def replay_matrix(machine: GateMatrix) -> None:
     # denied-dependency: the org policy denies every package of the project.
     machine.run("install", "install", packages=exec_and_mixed)
     machine.deny_by_policy()
-    refused = {"install": 1, "install-frozen": 1, "update": 1, "lock": 1, "audit-ci": 1}
+    refused = {
+        "install": 1,
+        "install-frozen": 1,
+        "update": 1,
+        "lock": 1,
+        "audit-ci": 1,
+        "compile": 1,
+    }
     probes = ("install", "install-frozen", "update", "lock", "audit-ci", "compile", "prune")
     machine.probes(*probes, "mcp-install", exits=refused)
+    machine.marketplace("update")
     machine.run("approve", "approve", packages=exec_and_mixed)
     machine.run("uninstall", "uninstall", packages=PACKAGES)
 

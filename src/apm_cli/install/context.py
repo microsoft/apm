@@ -88,6 +88,10 @@ class InstallContext:
     claude_native_plugins: dict[str, ClaudeNativePlugin] = field(default_factory=dict)
     # Dependency keys routed to native Claude this run, admitted or parked.
     claude_native_keys: set[str] = field(default_factory=set)
+    # Plugin names this run evaluated for Copilot and refused (parked or withheld).
+    native_rejected_names: set[str] = field(default_factory=set)
+    # Native plugins this run's targets never reach: deployed nothing, rows kept whole.
+    native_carried_keys: set[str] = field(default_factory=set)
     lsp_preflight: Any = None  # LspPreflight when services integrate LSP after this pipeline
     # The caller's MCP/LSP reconciliation, run before native Claude
     # registration commits the lockfile (install/phases/services.py, #4329).
@@ -204,6 +208,8 @@ class InstallContext:
     # Declared members integration left on disk unwritten; cleanup retains them.
     kept_deployed_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
+    # A package's own ``targets:`` restriction, recorded for pack (#4850).
+    package_targets: dict[str, list[str]] = field(default_factory=dict)
     # Package content hashes in the stream the existing lockfile records
     # (legacy for versions 1-3, framed for 4 or a new lockfile), and the framed
     # digest of the same bytes for the one-time promotion to version 4.
@@ -247,6 +253,7 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     skill_baseline_refused: bool = False  # integrate -- preflight refused before any write
+    overwrite_preflight_refused: bool = False  # commit gate -- unproven overwrite (#4381)
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.

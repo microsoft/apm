@@ -61,15 +61,27 @@ class MCPNativeConflictError(InstallFailureAlreadyRendered):
 
 
 class LSPUserEntryConflictError(InstallFailureAlreadyRendered):
-    """Same-name LSP entries APM did not write were preserved (#4628).
+    """Same-name LSP entries APM did not write were preserved (#4628), or
+    managed entries a user edited were kept with no collector to count them (#4626).
 
     *preserved* maps each runtime to the server names left as the user wrote
-    them; every other server in the install was still configured.
+    them; every other server in the install was still configured, and
+    *wrote_servers* says whether any of them changed a config.
     """
 
-    def __init__(self, message: str, *, preserved: dict[str, set[str]]) -> None:
+    def __init__(
+        self, message: str, *, preserved: dict[str, set[str]], wrote_servers: bool = True
+    ) -> None:
         super().__init__(message)
         self.preserved = preserved
+        self.wrote_servers = wrote_servers
+
+
+class LSPUserEntryRefusal(LSPUserEntryConflictError):
+    """An LSP user-entry conflict that wrote no server: the install commits nothing (#4697)."""
+
+    # A check refusal: the lockfile writer scope commits nothing (#4085).
+    refuses_commit = True
 
 
 class RequiredIntegrationError(RuntimeError):
@@ -151,6 +163,50 @@ def log_frozen_install_error(error: FrozenInstallError, logger: InstallLogger) -
         logger.error_detail(reason)
     if tip := frozen_install_tip(error):
         logger.info(tip)
+
+
+def log_authentication_error(error: AuthenticationError, logger: InstallLogger) -> None:
+    """Render auth diagnostics on the default path, not only under --verbose (#1015)."""
+    logger.error(str(error))
+    if error.diagnostic_context:
+        logger.error_detail(error.diagnostic_context)
+    logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+
+
+def render_apm_dependency_failure(
+    error: Exception, logger: InstallLogger, *, verbose: bool
+) -> InstallFailureAlreadyRendered:
+    """Render a failed APM dependency phase once; the caller raises the returned marker.
+
+    Auth and frozen errors use their own renderers. A native plugin settings refusal
+    or the LSP capability gate is already actionable, so it prints verbatim with any
+    raw decoder detail behind --verbose. A policy violation prints as a refusal
+    without nesting (#832); anything else gets the "Failed to install" prefix.
+    """
+    from apm_cli.claude_plugins.admission import ClaudeNativePluginError
+    from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
+
+    if isinstance(error, AuthenticationError):
+        log_authentication_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, FrozenInstallError):
+        log_frozen_install_error(error, logger)
+        return InstallFailureAlreadyRendered(str(error))
+    verbatim = (CopilotSettingsCollisionError, ClaudeNativePluginError, RequiredIntegrationError)
+    if isinstance(error, verbatim):
+        logger.error(str(error))
+        if detail := getattr(error, "detail", None):
+            logger.verbose_detail(detail)
+        return InstallFailureAlreadyRendered(str(error))
+    if isinstance(error, PolicyViolationError):
+        message = str(error)
+        logger.refusal(message)
+    else:
+        message = f"Failed to install APM dependencies: {error}"
+        logger.error(message)
+    if not verbose:
+        logger.progress("Run with --verbose for detailed diagnostics")
+    return InstallFailureAlreadyRendered(message)
 
 
 def frozen_install_tip(error: FrozenInstallError) -> str:

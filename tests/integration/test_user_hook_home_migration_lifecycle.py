@@ -27,6 +27,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(os.name == "nt", reason="POSIX shell contract; Windows stays absolute"),
+    pytest.mark.e2e,
 ]
 
 _PACKAGE = "portable-hooks"

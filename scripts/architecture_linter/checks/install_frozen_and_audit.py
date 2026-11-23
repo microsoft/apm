@@ -581,6 +581,49 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
         (_MCP_INTEGRATOR, "_install_self_defined_deps", "compare_native_mcp_connection"),
         (_MCP_INTEGRATOR, "_install_registry_group", "compare_native_mcp_connection"),
         (_MCP_INTEGRATOR, "run_mcp_install", "compare_native_mcp_connection"),
+        # The install preflight projects collisions through the same comparator
+        # and diagnostic before any write (#4268).
+        (
+            "src/apm_cli/install/mcp/collision_preflight.py",
+            "project_native_mcp_conflicts",
+            "compare_native_mcp_connection",
+        ),
+        (
+            "src/apm_cli/install/mcp/collision_preflight.py",
+            "project_native_mcp_conflicts",
+            "_report_native_conflict",
+        ),
+        (
+            "src/apm_cli/install/mcp/collision_preflight.py",
+            "refuse_projected_mcp_collisions",
+            "project_native_mcp_conflicts",
+        ),
+        (
+            "src/apm_cli/install/commit_gate.py",
+            "_refuse_native_mcp_collisions",
+            "refuse_projected_mcp_collisions",
+        ),
+        # A direct ``install --mcp`` entry refuses before apm.yml is written (#4759).
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "run_mcp_install",
+            "_refuse_native_mcp_collision",
+        ),
+        (
+            "src/apm_cli/install/mcp/command.py",
+            "_refuse_native_mcp_collision",
+            "refuse_projected_mcp_collisions",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "run_mcp_integration",
+            "refuse_projected_mcp_collisions",
+        ),
+        (
+            "src/apm_cli/install/commit_gate.py",
+            "check_before_deploy",
+            "_refuse_native_mcp_collisions",
+        ),
         (
             _MCP_OWNERSHIP_OWNER,
             "require_removable_mcp_connections",

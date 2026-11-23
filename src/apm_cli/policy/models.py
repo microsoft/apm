@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.core.remediation import Remediation
+    from apm_cli.models.dependency.reference import DependencyReference
     from apm_cli.security.content_scanner import ScanFinding
     from apm_cli.security.file_scanner import CoverageEntry
 
@@ -82,6 +83,22 @@ class PolicySubject:
     reason: str
     remedy: PolicyRemedy | None = PolicyRemedy.REMOVE
     declared_by: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalBundleSubjects:
+    """What a local bundle presents to org dependency policy (#4646).
+
+    ``names`` are the bundle itself as ``_local/<name>``. The bundle author
+    chooses that name, so it meets ``dependencies.deny`` only and never
+    satisfies ``dependencies.allow``. ``packages`` are the packages the
+    bundle's embedded lockfile records; they meet both lists, matched as a
+    remote dependency is. Under an allow list a bundle with no ``packages``
+    is refused: nothing in it can be matched against the list.
+    """
+
+    names: tuple[DependencyReference, ...]
+    packages: tuple[DependencyReference, ...]
 
 
 @dataclass

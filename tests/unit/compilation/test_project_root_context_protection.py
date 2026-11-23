@@ -783,7 +783,8 @@ def test_distributed_compile_retains_hand_authored_nested_context(
         assert result.exit_code == 0, result.output
         output = " ".join(result.output.split())
         assert "Protected docs/AGENTS.md: hand-authored file will not be overwritten" in output
-        assert "Protected docs/CLAUDE.md: hand-authored file will not be overwritten" in output
+        # No generated docs/AGENTS.md means no docs/CLAUDE.md import to write (#3939).
+        assert "docs/CLAUDE.md" not in output
         assert "Orphaned" not in output
         assert (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8") == _MANUAL_AGENTS
         assert (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8") == _MANUAL_CLAUDE
@@ -807,7 +808,7 @@ def test_distributed_compile_replaces_generated_nested_context(
     assert result.exit_code == 0, result.output
     assert "Protected" not in result.output
     assert "Docs rule v2." in (tmp_path / "docs" / "AGENTS.md").read_text(encoding="utf-8")
-    assert "Docs rule v2." in (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@AGENTS.md" in (tmp_path / "docs" / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_nested_git_skip_precedes_hand_authored_protection(tmp_path: Path) -> None:

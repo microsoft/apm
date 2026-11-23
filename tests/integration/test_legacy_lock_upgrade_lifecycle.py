@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,6 +44,8 @@ FIXTURE_036 = FIXTURES / "v0.36.1"
 RE_RENDERED = (".codex/agents/editor.toml", ".cursor/rules/everywhere.mdc")
 # A file whose 0.37 render equals the bytes 0.35.1 wrote.
 UNCHANGED_RENDER = ".cursor/rules/python.mdc"
+# An always-on rule both fixtures deployed; 0.38 routes it to AGENTS.md (#3939).
+ROUTED_CLAUDE_RULE = ".claude/rules/everywhere.md"
 _IGNORED = {"apm_modules", ".git", ".apm-local"}
 _DEPLOY_ROOTS = (".agents/", ".claude/", ".codex/", ".cursor/")
 _USER_EDIT = "\n# local note\n"
@@ -204,6 +205,7 @@ def test_c2_one_edited_pre036_file_is_kept_and_named_once(
     target = world.project / edited
     target.write_bytes(target.read_bytes() + _USER_EDIT.encode("ascii"))
     edited_bytes = target.read_bytes()
+    before = world.snapshot()
 
     code, out, err = world.run("install")
 
@@ -211,6 +213,12 @@ def test_c2_one_edited_pre036_file_is_kept_and_named_once(
     assert target.read_bytes() == edited_bytes
     assert _kept_lines(out + err) == [_kept_line(edited)]
     after = world.snapshot()
+    if expected_exit:
+        # #4381: a blocking edit refuses the whole install before any write.
+        assert after == before
+        target.rename(world.project.parent / "c2-aside")
+        world.ok("install")
+        after = world.snapshot()
     for path in RE_RENDERED:
         if path != edited:
             assert after[path] == expected[path], f"{path} did not converge"
@@ -227,6 +235,10 @@ def test_c4_frozen_install_of_untouched_pre036_project_writes_nothing(
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     assert _kept_lines(result.stdout + result.stderr) == []
     assert world.snapshot() == before
+    # A file this version no longer renders keeps its lock claim under --frozen.
+    squeezed = " ".join((result.stdout + result.stderr).split())
+    assert "no longer deploys, because --frozen does not change apm.lock.yaml: " in squeezed
+    assert ROUTED_CLAUDE_RULE in squeezed, squeezed
 
 
 def _forge_lock_hash(world: _World, path: str) -> bytes:
@@ -253,57 +265,23 @@ def _kept_entry(world: _World, path: str) -> tuple[str | None, list[str | None]]
     return dependency["deployed_file_hashes"].get(path), rows
 
 
-def _keep_only_sentence(kept: int, *, lock_rewritten: bool) -> str:
-    """The closing line of a failed install that wrote no file (RA-009).
-
-    A lock the install rewrote (older format, or hash copies normalized to the
-    deployment ledger) is said to be rewritten; an untouched lock keeps its entries.
-    """
-    if lock_rewritten:
-        return (
-            "apm.lock.yaml is rewritten in the current format; it records the "
-            f"{kept} kept file(s) as APM last deployed them."
-        )
-    return f"apm.lock.yaml keeps the previous entries of the {kept} kept file(s)."
-
-
-def _assert_kept_partial_apply(
+def _assert_refused_before_write(
     world: _World,
     output: str,
-    kept_entry_before: tuple,
+    before: dict[str, bytes],
     edited_bytes: bytes,
-    *,
-    rewrites: bool,
-    lock_rewritten: bool,
 ) -> None:
-    """RA-009/RA-010: a failed install with a kept file is an honest partial apply.
+    """#4381: a kept file without evidence refuses the install before any write.
 
-    The kept file's lock entry and ledger rows are unchanged, the lock matches
-    the disk for every file, the closing sentence names what was written, the
-    two read-only verifiers agree, and either printed remedy converges.
-
-    *rewrites*: a pre-0.37 lock has no deployment receipts, so the install
-    writes (adopts) the other files and names them. A 0.37 lock's other files
-    are receipted and identical, so they are unchanged (RA-012, I2): the
-    install writes nothing and says only that the kept entries are kept.
+    Every deployed file and the lockfile keep their bytes, nothing is said to
+    be written, the two read-only verifiers agree, and either printed remedy
+    converges.
     """
     target = world.project / _C3_EDITED
-    assert _kept_entry(world, _C3_EDITED) == kept_entry_before
-    _assert_lock_matches_disk(world)
-    flat = [" ".join(line.split()) for line in output.splitlines()]
-    headers = [line for line in flat if line.startswith("[i] This install wrote ")]
-    kept_note = "keeps the previous entries of the 1 kept file(s)."
-    if rewrites:
-        (header,) = headers
-        written = int(header.split()[4])
-        assert written > 0, header
-        assert f"apm.lock.yaml records the {written} written file(s) and {kept_note}" in (
-            " ".join(flat)
-        )
-    else:
-        assert headers == [], headers
-        assert "written file(s)" not in " ".join(flat)
-        assert _keep_only_sentence(1, lock_rewritten=lock_rewritten) in " ".join(flat)
+    assert world.snapshot() == before
+    flat = " ".join(output.split())
+    assert "This install wrote" not in flat, flat
+    assert "No install transaction changes were committed." in flat, flat
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
     # Remedy: export the edit (RA-008: --force is no Kept remedy). This fixture's
@@ -394,8 +372,7 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
     git_status = world._git("status", "--porcelain", "--", _C3_EDITED)
     assert (git_status == "") is (git_state == "tracked-clean"), git_status
 
-    kept_entry_before = _kept_entry(world, _C3_EDITED)
-    lock_before = (world.project / "apm.lock.yaml").read_bytes()
+    before = world.snapshot()
 
     code, out, err = world.run("install")
 
@@ -415,25 +392,18 @@ def test_c3_forged_lock_hash_overwrites_only_a_clean_tracked_pre037_file(
         # evidence the file is kept under the #4360 wording.
         assert _kept_lines(out + err) == [_unproven_line(_C3_EDITED)]
         assert world._git("status", "--porcelain", "--", _C3_EDITED) == git_status
-        _assert_kept_partial_apply(
-            world,
-            out + err,
-            kept_entry_before,
-            edited_bytes,
-            rewrites=stamp != "candidate",
-            lock_rewritten=(world.project / "apm.lock.yaml").read_bytes() != lock_before,
-        )
+        _assert_refused_before_write(world, out + err, before, edited_bytes)
 
 
 def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A lock whose two hash copies disagree is normalized to the ledger's record (RA-009).
+    """A lock whose two hash copies disagree proves nothing past the ledger's record.
 
     Forging only ``deployed_file_hashes`` (not the deployment ledger row) leaves
-    the lock inconsistent. The ledger owns deployment evidence, so the install
-    projects its unchanged row into ``deployed_file_hashes``, keeps the edited
-    file, and both read-only verifiers then report the edit.
+    the lock inconsistent. The ledger owns deployment evidence, so the edited
+    file has none: the install refuses before any write and leaves the lock as
+    it is (#4381), and both read-only verifiers report the edit.
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
@@ -451,26 +421,18 @@ def test_c3b_half_forged_lock_hash_follows_the_deployment_ledger(
     )
     _hash_before, rows_before = _kept_entry(world, _C3_EDITED)
     assert rows_before == [recorded], rows_before
-    lock_before = lock_path.read_bytes()
+    before = world.snapshot()
 
     code, out, err = world.run("install")
 
     assert code == 1, f"{out}\n{err}"
     assert target.read_bytes() == edited_bytes
-    # The kept file's lock entry keeps APM's evidence: the unchanged ledger hash.
-    assert _kept_entry(world, _C3_EDITED) == (recorded, [recorded])
+    assert world.snapshot() == before
     assert _kept_lines(err) == [_unproven_line(_C3_EDITED)]
     assert _kept_lines(out) == []
     flat = " ".join((out + err).split())
-    wrote = re.search(r"\[i\] This install wrote (\d+) file\(s\)", flat)
-    if wrote:
-        sentence = (
-            f"apm.lock.yaml records the {wrote.group(1)} written file(s) and keeps the "
-            "previous entries of the 1 kept file(s)."
-        )
-    else:
-        sentence = _keep_only_sentence(1, lock_rewritten=lock_path.read_bytes() != lock_before)
-    assert sentence in flat, flat
+    assert "This install wrote" not in flat, flat
+    assert "No install transaction changes were committed." in flat, flat
     audit, frozen = world.run("audit", "--ci"), world.run("install", "--frozen")
     assert (audit[0], frozen[0]) == (1, 1), (audit, frozen)
     assert target.read_bytes() == edited_bytes
@@ -486,14 +448,13 @@ _SINGLE = ".github/instructions/tools.instructions.md"
 def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """RA-009 residue: a failed install that writes no file names what happened
-    to apm.lock.yaml. The red team's upg.sh 0.36.1 world: one Copilot file, a
-    v0.36.1 lock (lockfile_version 1, real release binary), edited after install.
+    """A refused install names the kept file and changes no byte, lock included.
 
-    Only deployed_file_hashes is forged to the edit. The install writes no file
-    but rewrites the lock (v1 -> 4, the hash normalized to the ledger row), so it
-    says the lock is rewritten; the repeat install leaves the lock untouched and
-    says it keeps the previous entries. (The unforged upgrade is c3d.)
+    The red team's upg.sh 0.36.1 world: one Copilot file, a v0.36.1 lock
+    (lockfile_version 1, real release binary), edited after install. Only
+    deployed_file_hashes is forged to the edit. The install refuses before any
+    write (#4381): the v1 lock is not rewritten, and a repeat refuses the same
+    way. (The unforged upgrade is c3d.)
     """
     from apm_cli.utils.content_hash import compute_file_hash
 
@@ -509,30 +470,17 @@ def test_c3c_nothing_written_kept_line_says_what_the_lock_did(
     assert text.count(pattern) == 1, text
     lock_path.write_text(text.replace(pattern, f"{_SINGLE}: {compute_file_hash(target)}"), "utf-8")
     lock_before = lock_path.read_bytes()
-    code, out, err = world.run("install")
-    assert code == 1, f"{out}\n{err}"
-    assert target.read_bytes() == edited_bytes
-    assert lock_path.read_bytes() != lock_before
-    assert lock_path.read_text(encoding="utf-8").startswith("lockfile_version: '4'\n")
-    assert _kept_entry(world, _SINGLE) == (recorded, [recorded])
-    assert _kept_lines(err) == [_unproven_line(_SINGLE)]
-    assert _kept_lines(out) == []
-    flat_err = " ".join(err.split())
-    assert "This install wrote" not in " ".join((out + err).split())
-    assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=True)), flat_err
-    assert "keeps the previous entries" not in " ".join((out + err).split())
-
-    lock_before = lock_path.read_bytes()
-    code, out, err = world.run("install")
-
-    assert code == 1, f"{out}\n{err}"
-    assert target.read_bytes() == edited_bytes
-    assert lock_path.read_bytes() == lock_before
-    assert _kept_lines(err) == [_unproven_line(_SINGLE)]
-    flat_err = " ".join(err.split())
-    assert "This install wrote" not in " ".join((out + err).split())
-    assert flat_err.endswith(_keep_only_sentence(1, lock_rewritten=False)), flat_err
-    assert "is rewritten in the current format" not in " ".join((out + err).split())
+    for _ in range(2):
+        code, out, err = world.run("install")
+        assert code == 1, f"{out}\n{err}"
+        assert target.read_bytes() == edited_bytes
+        assert lock_path.read_bytes() == lock_before
+        assert _kept_lines(err) == [_unproven_line(_SINGLE)]
+        assert _kept_lines(out) == []
+        flat = " ".join((out + err).split())
+        assert "This install wrote" not in flat, flat
+        assert "is rewritten in the current format" not in flat, flat
+        assert flat.endswith("No install transaction changes were committed."), flat
 
 
 def test_c3d_upgrade_keeps_the_edit_proof_on_every_install(
@@ -597,7 +545,10 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     expected = _fresh_render(tmp_path, apm_binary_path, FIXTURE_036)
     world = _World(tmp_path / "c5", apm_binary_path, FIXTURE_036)
     before = world.snapshot()
-    deployed = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    recorded = sorted(p for p in before if p not in {"apm.yml", "apm.lock.yaml", ".gitignore"})
+    # The always-on rule Claude now loads from AGENTS.md is the only file 0.38 drops (#3939).
+    assert sorted(set(recorded) - set(expected)) == [ROUTED_CLAUDE_RULE]
+    deployed = [p for p in recorded if p != ROUTED_CLAUDE_RULE]
     assert deployed and all(before[p] == expected[p] for p in deployed)
 
     code, out, err = world.run("install")
@@ -606,7 +557,7 @@ def test_c5_unedited_036_project_upgrades_unchanged(tmp_path: Path, apm_binary_p
     assert _kept_lines(out + err) == []
     after = world.snapshot()
     assert {p: after.get(p) for p in deployed} == {p: before[p] for p in deployed}
-    assert set(after) == set(before)
+    assert set(after) == set(before) - {ROUTED_CLAUDE_RULE}
     world.ok("audit", "--ci")
     world.ok("install", "--frozen")
     assert world.snapshot() == after

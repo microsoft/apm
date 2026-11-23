@@ -227,6 +227,8 @@ def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScen
         for harness in ("copilot", "claude", "hermes")
     }
 
+    unhealed = _entry(scene, "copilot", "heal-sse", user=False)
+
     result = scene.run(*_command("install", user=False))
 
     assert result.returncode != 0, describe(result)
@@ -240,7 +242,8 @@ def test_foreign_entry_in_a_retired_shape_is_never_taken_over(scene: HarnessScen
     for harness, entry in foreign.items():
         assert _entry(scene, harness, "heal-foreign", user=False) == entry, harness
         assert harness not in scene.claimed_runtimes("heal-foreign", user=False)
-    assert _entry(scene, "copilot", "heal-sse", user=False).get("type") == "sse"
+    # The unrecorded collision refuses before any write, so nothing heals (#4268).
+    assert _entry(scene, "copilot", "heal-sse", user=False) == unhealed
 
 
 # --------------------------------------------------------------------------

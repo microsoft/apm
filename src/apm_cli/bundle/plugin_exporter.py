@@ -163,8 +163,12 @@ def _collect_apm_components(
     # agents/ -> agents/
     _collect_flat(apm_dir / "agents", "agents", components, skipped=skipped_links)
 
-    # skills/ -> skills/ (preserve sub-directory structure)
-    _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
+    # skills/ -> skills/ (preserve sub-directory structure). When .apm/ authors
+    # no skill, the root skills/ install deploys is packed instead (#4709).
+    if _packs_root_skills(apm_dir.parent):
+        _collect_recursive(apm_dir.parent / "skills", "skills", components, skipped=skipped_links)
+    else:
+        _collect_recursive(apm_dir / "skills", "skills", components, skipped=skipped_links)
 
     # prompts/ -> commands/ (rename .prompt.md -> .md)
     _collect_recursive(
@@ -184,6 +188,30 @@ def _collect_apm_components(
     _collect_recursive(apm_dir / "extensions", "extensions", components, skipped=skipped_links)
 
     return components
+
+
+def _packs_root_skills(package_root: Path) -> bool:
+    """Whether pack takes skills from root ``skills/`` beside an ``.apm/`` tree.
+
+    Only when ``.apm/skills/`` authors no skill and the root ``skills/`` holds
+    one: the skills a path install deploys then come from the root (see
+    ``SkillIntegrator.skill_source_paths``). With skills in both, ``.apm/``
+    stays the publishing source and the root directory is reported skipped.
+    """
+    from ..integration.skill_integrator import SkillIntegrator
+
+    root = package_root / "skills"
+    authored = package_root / ".apm" / "skills"
+    # A skill is a directory holding a SKILL.md file, as install counts them.
+    if root.is_symlink() or (
+        authored.is_dir()
+        and any(child.is_dir() and (child / "SKILL.md").is_file() for child in authored.iterdir())
+    ):
+        return False
+    return any(
+        source.parent == root
+        for source in SkillIntegrator.skill_source_paths(package_root).values()
+    )
 
 
 def _collect_root_plugin_components(
@@ -230,6 +258,8 @@ def _warn_skipped_source_links(project_root: Path, links: list[Path], logger=Non
 def _warn_skipped_root_components(project_root: Path, logger=None) -> None:
     """Explain why plugin-native root sources are not packed."""
     for source in find_plugin_root_sources(project_root):
+        if source == "skills" and _packs_root_skills(project_root):
+            continue
         if source == "hooks.json":
             message = (
                 "Skipping root-level hooks.json because .apm/ is present. "
@@ -872,29 +902,136 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     probe = _collect_apm_components(install_path / ".apm")
     probe.extend(_collect_root_plugin_components(install_path))
     _collect_bare_skill(install_path, dep, probe)
+    # A canvas the executable gate kept from deploying is not a provenance
+    # gap: install recorded it as withheld, and pack omits it (#4714).
+    if _gate_parked_types(install_path, dep):
+        probe = [item for item in probe if not item[1].startswith("extensions/")]
     return bool(probe)
 
 
-def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
-    """Return True if the unattested cache holds hooks-config or MCP-config.
+def _gate_parked_types(install_path: Path, dep: LockedDependency) -> tuple[str, ...]:
+    """Executable types the cache ships that the lock records the gate withheld (#4714).
+
+    Of the executable kinds only canvas extensions pack from ``.apm/``; the
+    lock row's ``exec_status`` and ``exec_allowed_types`` say whether install
+    deployed them.
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, TRUST_GATED
+
+    if dep.exec_status not in (TRUST_GATED, TRUST_DENIED):
+        return ()
+    if EXEC_TYPE_CANVAS in (dep.exec_allowed_types or ()):
+        return ()
+    canvas: list[tuple[Path, str]] = []
+    _collect_recursive(install_path / ".apm" / "extensions", "extensions", canvas)
+    return (EXEC_TYPE_CANVAS,) if canvas else ()
+
+
+def _warn_parked_executables(
+    dep: LockedDependency, install_path: Path, logger=None, *, format_carries: bool = True
+) -> None:
+    """Name a dependency's gate-parked canvas that pack leaves out, and its remedy (#4714).
+
+    *format_carries* is False for a bundle format that cannot carry canvas
+    extensions at all, so approving alone would not ship them.
+    """
+    from ..install.exec_skip_reasons import withheld_executable_reason
+
+    for exec_type in _gate_parked_types(install_path, dep):
+        label = dep.get_unique_key()
+        reason = withheld_executable_reason(
+            label,
+            exec_type,
+            "canvas extension(s)",
+            denied=_canvas_denied(dep, install_path),
+            outcome="not packed",
+        )
+        message = f"dependency {label}: {reason}"
+        if not format_carries:
+            message += (
+                " The agent-plugin format does not carry canvas extensions;"
+                " pack with '--format claude-plugin' to ship them."
+            )
+        if logger:
+            logger.warning(message)
+        else:
+            _rich_warning(message, symbol="warning")
+
+
+def _canvas_denied(dep: LockedDependency, install_path: Path) -> bool | None:
+    """Whether the lock row's worst-case status is the canvas's own verdict.
+
+    ``exec_status`` is the worst case across executable types: a denied row
+    proves the canvas denied only when canvas is the package's one executable
+    type; otherwise it is unknown (``None``).
+    """
+    from ..security.executables import EXEC_TYPE_CANVAS, TRUST_DENIED, scan_package_executables
+
+    if dep.exec_status != TRUST_DENIED:
+        return False
+    try:
+        declared = set(scan_package_executables(install_path, dep.repo_url, "").exec_types)
+    except Exception:
+        return None
+    return True if declared <= {EXEC_TYPE_CANVAS} else None
+
+
+def _cache_config_kinds(install_path: Path) -> tuple[str, ...]:
+    """Return the config kinds (``hooks``, ``MCP``) the unattested cache holds.
 
     Hooks/MCP *configuration* (``.apm/hooks/*.json``, root ``hooks.json`` /
-    ``hooks/``, ``.mcp.json``) is merged into shared host settings by
-    ``apm install`` and is never recorded in the lockfile ``deployed_files``.
-    Because plugin pack now emits only lockfile-attested content, such config
-    is dropped from the bundle. This probe drives a transition warning that
-    names the dependency whose cached config will NOT be packed; it never
-    copies cache bytes. Hook *scripts* recorded in ``deployed_files`` are
-    unaffected and still pack.
+    ``hooks/``, ``.mcp.json``) is never copied from the cache: plugin pack
+    emits only lockfile-attested content. This probe drives a transition
+    warning that names the dependency whose cached config will NOT be packed;
+    it never copies cache bytes.
     """
     if not install_path.is_dir():
-        return False
+        return ()
+    kinds: list[str] = []
+    if _collect_hooks_from_apm(install_path / ".apm") or _collect_hooks_from_root(install_path):
+        kinds.append("hooks")
     # A dependency's own .mcp.json is authored by that package, not rendered by APM.
     if _collect_mcp(install_path, exclude_apm_managed=False):
-        return True
-    if _collect_hooks_from_apm(install_path / ".apm"):
-        return True
-    return bool(_collect_hooks_from_root(install_path))
+        kinds.append("MCP")
+    return tuple(kinds)
+
+
+def _packs_hook_config(components: list[tuple[Path, str]]) -> bool:
+    """Whether *components* carry a hooks config file (``hooks.json`` or ``hooks/*.json``)."""
+    for _source, rel in components:
+        parts = PurePosixPath(rel).parts
+        if parts == ("hooks.json",) or (
+            len(parts) == 2 and parts[0] == "hooks" and parts[1].endswith(".json")
+        ):
+            return True
+    return False
+
+
+def _warn_unpacked_dependency_config(
+    dep: LockedDependency,
+    install_path: Path,
+    dep_components: list[tuple[Path, str]],
+    logger=None,
+) -> None:
+    """Name the dependency hooks/MCP config the bundle will not carry (#2013).
+
+    A hooks file the lockfile attests (``deployed_files`` plus its hash) packs
+    with the dependency's components, so only hook config that reaches no
+    packed hooks file is named, and MCP config, which install merges into
+    shared settings and never attests.
+    """
+    kinds = [
+        kind
+        for kind in _cache_config_kinds(install_path)
+        if kind != "hooks" or not _packs_hook_config(dep_components)
+    ]
+    if kinds:
+        _emit_pack_warning(
+            f"dependency {dep.repo_url} contributed {'/'.join(kinds)} config that "
+            "is not attested in apm.lock.yaml; it will NOT be packed. "
+            "Attested primitives (skills/agents/etc.) are unaffected.",
+            logger,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +1086,38 @@ def _collect_lsp_servers(
             for config in lsp_servers_to_apm_deps(authored, project_root, warn_on_invalid=False):
                 _admit(config)
     return dict(sorted(servers.items())), sorted(names - servers.keys())
+
+
+def _routed_rule_components(
+    lockfile, project_root: Path, dependency_keys: set[str]
+) -> dict[str, list[tuple[Path, str]]]:
+    """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
+
+    A pre-#3939 install deployed them as ``.claude/rules/`` files, which the
+    plugin pack mapped to ``instructions/``; render them through the same
+    projection so the bundle keeps those bytes. Only *dependency_keys* (the
+    dependencies the bundle ships) render. Keyed by dependency key.
+    """
+    import atexit
+    import tempfile
+
+    from .claude_routed_rules import routed_claude_rules, write_routed_claude_rules
+
+    components: dict[str, list[tuple[Path, str]]] = {}
+    routed = routed_claude_rules(lockfile, project_root, dependency_keys=dependency_keys)
+    if not routed:
+        return components
+    rendered_root = Path(tempfile.mkdtemp(prefix="apm-pack-rules-"))
+    atexit.register(shutil.rmtree, rendered_root, ignore_errors=True)
+    for dep_key, rules in routed.items():
+        dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
+        write_routed_claude_rules(dep_root, rules)
+        components[dep_key] = [
+            (dep_root / rel, plugin_rel)
+            for rel in sorted(rules)
+            if (plugin_rel := _plugin_rel_for_deployed_path(rel, None)) is not None
+        ]
+    return components
 
 
 def export_plugin_bundle(
@@ -1032,16 +1201,21 @@ def export_plugin_bundle(
 
     apm_modules_dir = project_root / "apm_modules"
 
+    # Prefer lockfile is_dev flag (covers transitive deps);
+    # fall back to apm.yml URL matching for older lockfiles
+    packed_deps = [
+        dep
+        for dep in (lockfile.get_all_dependencies() if lockfile else [])
+        if not (
+            getattr(dep, "is_dev", False)
+            or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
+        )
+    ]
+    routed_rules = _routed_rule_components(
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}
+    )
     if lockfile:
-        for dep in lockfile.get_all_dependencies():
-            # Prefer lockfile is_dev flag (covers transitive deps);
-            # fall back to apm.yml URL matching for older lockfiles
-            if (
-                getattr(dep, "is_dev", False)
-                or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
-            ):
-                continue
-
+        for dep in packed_deps:
             dep_name = dep.repo_url
 
             # Provenance rule (issue #1999 follow-up): a dependency's content
@@ -1050,6 +1224,8 @@ def export_plugin_bundle(
             # ``apm_modules`` is an unattested cache -- it carries no integrity
             # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
+            _warn_parked_executables(dep, install_path, logger)
+            dep_routed = routed_rules.get(dep.get_unique_key(), [])
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
@@ -1060,7 +1236,7 @@ def export_plugin_bundle(
                         "were not found among its installed files. "
                         f"{PACK_SKILL_SUBSET_MISSING.sentence()}"
                     )
-            elif _cache_would_contribute_primitives(install_path, dep):
+            elif not dep_routed and _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
                 # recorded none of them: a stale or partial install. Refuse
                 # to pack the cache -- fail loudly with a fix.
@@ -1076,23 +1252,12 @@ def export_plugin_bundle(
                 # MCP-only or hooks-config-only package). Skip it cleanly.
                 dep_components = []
 
-            # Transition warning (#2013): dependency hooks/MCP *config* lives in
-            # the unattested cache and is never packed. Name the dependency so
-            # an author who relied on it merging into shared settings is not
-            # surprised by the silent exclusion. Attested primitives are packed
-            # regardless of this warning.
-            if _cache_would_contribute_hooks_or_mcp(install_path):
-                _warn = (
-                    f"dependency {dep.repo_url} contributed hooks/MCP config that "
-                    "is not attested in apm.lock.yaml; it will NOT be packed. "
-                    "Attested primitives (skills/agents/etc.) are unaffected."
-                )
-                if logger:
-                    logger.warning(_warn)
-                else:
-                    _rich_warning(_warn, symbol="warning")
+            # Transition warning (#2013): name dependency hooks/MCP config the
+            # bundle will not carry, so an author who relied on it merging into
+            # shared settings is not surprised by the exclusion.
+            _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
-            _merge_file_map(file_map, dep_components, dep_name, force, collisions)
+            _merge_file_map(file_map, dep_components + dep_routed, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
     from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS

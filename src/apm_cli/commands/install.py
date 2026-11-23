@@ -14,7 +14,6 @@ from apm_cli.agent_plugins.errors import (
     AgentPluginError,
     enforce_agent_plugin_deployment_boundary,
 )
-from apm_cli.copilot_plugins.settings import CopilotSettingsCollisionError
 from apm_cli.core.remediation import (
     BUNDLE_REPACK_PLUGIN,
     FROZEN_UPDATE_CONFLICT,
@@ -53,10 +52,10 @@ from apm_cli.install.errors import (
     DirectDependencyError,
     FrozenInstallError,
     InstallFailureAlreadyRendered,
-    PolicyViolationError,
-    RequiredIntegrationError,
     install_failure_message,
+    log_authentication_error,
     log_frozen_install_error,
+    render_apm_dependency_failure,
 )
 from apm_cli.install.finalization import close_install_contexts
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
@@ -191,6 +190,7 @@ from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests 
 from ._helpers import (
     _create_minimal_apm_yml,
     _get_bootstrap_config,
+    explicit_policy_option,
     trust_transitive_mcp_option,
 )
 
@@ -436,9 +436,11 @@ def _resolve_package_references(
         verbose = bool(logger and logger.verbose)
         # Registry routing is authoritative: it validates its own version
         # selectors before git semver eligibility can defer the raw-ref probe.
+        # A catalog entry routed to a registry is never probed on Git (#4009).
         denied = identity_policy_refuses(dep_ref)  # never contact a denied source
         if not denied and (
-            existing_source_is_registry
+            dep_ref.source == "registry"
+            or existing_source_is_registry
             or should_skip_github_probe_for_dep(dep_ref, default_registry)
         ):
             ref_ok, ref_err = validate_registry_ref(dep_ref)
@@ -1036,6 +1038,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     default=False,
     help="Skip org policy enforcement for this invocation. Does NOT bypass apm audit --ci.",
 )
+@explicit_policy_option
 @click.option(
     "--audit",
     "audit_mode",
@@ -1164,6 +1167,7 @@ def install(  # noqa: PLR0913
         apm install --only=apm                  # Install only APM packages
         apm update                              # Update dependencies to latest Git refs
         apm install --dry-run                   # Show what would change
+        apm install --policy ./org-policy.yml   # Also enforce a vendored policy
         apm install -g org/pkg1                 # Install to user scope (~/.apm/)
         apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)
         apm install --skill my-skill org/bundle  # Install one skill from bundle
@@ -1652,10 +1656,7 @@ def install(  # noqa: PLR0913
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
     except AuthenticationError as e:
-        logger.error(str(e))
-        if e.diagnostic_context:
-            logger.error_detail(e.diagnostic_context)
-        logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
+        log_authentication_error(e, logger)
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1870,7 +1871,9 @@ def _install_apm_packages(ctx, outcome):
     _check_insecure_dependencies(
         project_manifest_dependencies(apm_package), ctx.allow_insecure, logger
     )
+    from apm_cli.install.pipeline_entry import enforce_explicit_policy_without_deps
 
+    enforce_explicit_policy_without_deps(ctx.project_root, apm_package, logger)
     apm_count = 0
 
     from apm_cli.install.phases.targets import reject_undeployable_manifest_targets
@@ -1988,46 +1991,10 @@ def _install_apm_packages(ctx, outcome):
             }:
                 ctx.install_result = install_result
                 return apm_count, 0, 0, apm_diagnostics
-        except InsecureDependencyPolicyError:
+        except (InsecureDependencyPolicyError, InstallFailureAlreadyRendered, click.UsageError):
             raise
-        except AuthenticationError as e:
-            # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
-            logger.error(str(e))
-            if e.diagnostic_context:
-                logger.error_detail(e.diagnostic_context)
-            logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
-            raise InstallFailureAlreadyRendered(str(e)) from e
-        except FrozenInstallError as e:
-            log_frozen_install_error(e, logger)
-            raise InstallFailureAlreadyRendered(str(e)) from e
-        except InstallFailureAlreadyRendered:
-            raise
-        except click.UsageError:
-            raise
-        except (CopilotSettingsCollisionError, RequiredIntegrationError) as e:
-            # A Copilot settings merge collision or the LSP capability gate.
-            # Surface the already-actionable message verbatim (no
-            # "Failed to install..." prefix) and keep the raw decoder detail,
-            # when present, behind --verbose.
-            logger.error(str(e))
-            detail = getattr(e, "detail", None)
-            if detail:
-                logger.verbose_detail(detail)
-            raise InstallFailureAlreadyRendered(str(e)) from e
         except Exception as e:
-            # #832: surface PolicyViolationError verbatim (no double-nesting).
-            msg = (
-                str(e)
-                if isinstance(e, PolicyViolationError)
-                else f"Failed to install APM dependencies: {e}"
-            )
-            if isinstance(e, PolicyViolationError):
-                logger.refusal(msg)
-            else:
-                logger.error(msg)
-            if not ctx.verbose:
-                logger.progress("Run with --verbose for detailed diagnostics")
-            raise InstallFailureAlreadyRendered(msg) from e
+            raise render_apm_dependency_failure(e, logger, verbose=ctx.verbose) from e
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 

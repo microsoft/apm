@@ -157,6 +157,7 @@ _KEPT_LINE_ALLOWED = {
     "adapters/client/opencode.py": "an OpenCode config entry, not a file",
     "core/command_logger.py": "kept packages under --frozen, not a file",
     "install/mcp/retired_destinations.py": "an MCP server entry, not a file",
+    "install/mcp/write_receipts.py": "an MCP server entry, not a file",
     "marketplace/reconcile.py": "kept marketplaces, not a file",
 }
 

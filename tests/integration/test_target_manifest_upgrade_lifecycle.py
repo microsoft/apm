@@ -10,7 +10,9 @@ project whose ``apm.yml`` and ``apm.lock.yaml`` were produced by 0.35.1 or
   lockfile's deployment rows, except for the one move #3866 makes on the first
   install: Copilot project MCP servers leave ``.github/mcp.json`` (and the
   former ``vscode`` alias's ``.vscode/mcp.json``) for ``.mcp.json``, and their
-  deployment rows are recorded for ``copilot``. Nothing changes after that.
+  deployment rows are recorded for ``copilot``; and the one move #3939 makes:
+  Claude always-on and directory rules leave ``.claude/rules/`` because Claude
+  loads them from compiled ``AGENTS.md``. Nothing changes after that.
 * ``audit --ci`` writes nothing.
 * Only compilation-target policy verdicts change, exactly as the brief
   predicts: comma-separated and alias spellings stop failing, ``target: all``
@@ -27,7 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.utils.yaml_io import load_yaml
+from apm_cli.compilation.claude_agents_md import routes_to_agents_md
+from apm_cli.utils.yaml_io import load_yaml, loads_frontmatter
 from tests.integration._policy_scope_kit import output, tree_snapshot
 from tests.integration._target_policy_kit import (
     block_policy,
@@ -42,6 +45,7 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.requires_apm_binary,
     pytest.mark.skipif(openssl_executable() is None, reason="openssl CLI not available"),
+    pytest.mark.e2e,
 ]
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "upgrade_0361" / "t2"
@@ -121,6 +125,23 @@ def _after_mcp_move(
     return moved_rows, moved_files
 
 
+def _claude_agents_md_rules(package: Path) -> frozenset[str]:
+    """The ``.claude/rules/`` files #3939's one-time move retires for *package*."""
+    retired = set()
+    for source in (package / ".apm" / "instructions").glob("*.instructions.md"):
+        metadata = loads_frontmatter(source.read_text(encoding="utf-8")).metadata or {}
+        if routes_to_agents_md(metadata.get("applyTo")):
+            retired.add(f".claude/rules/{source.name.removesuffix('.instructions.md')}.md")
+    return frozenset(retired)
+
+
+def _after_claude_agents_md_move(
+    retired: frozenset[str], rows: set[tuple], files: set[str]
+) -> tuple[set[tuple], set[str]]:
+    """The deployment rows and files left once Claude rules move to AGENTS.md."""
+    return {row for row in rows if row[2] not in retired}, set(files) - retired
+
+
 @pytest.mark.parametrize("case", list(VERDICTS))
 @pytest.mark.parametrize("version", VERSIONS)
 def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
@@ -134,10 +155,15 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         shutil.copytree(source / case, project, dirs_exist_ok=True)
         manifest = (project / "apm.yml").read_bytes()
         lock_path = project / "apm.lock.yaml"
-        original_rows, original_paths = _after_mcp_move(
-            _deployment_rows(lock_path),
-            set(_project_files(project)),
-            declares_copilot=case in _DECLARES_COPILOT,
+        retired = _claude_agents_md_rules(source / "pkg")
+        assert retired, "fixture package must exercise the #3939 move"
+        original_rows, original_paths = _after_claude_agents_md_move(
+            retired,
+            *_after_mcp_move(
+                _deployment_rows(lock_path),
+                set(_project_files(project)),
+                declares_copilot=case in _DECLARES_COPILOT,
+            ),
         )
         settled_files: dict[str, str] | None = None
         settled_lock_bytes: bytes | None = None
@@ -174,6 +200,10 @@ def test_upgraded_project_keeps_targets_and_only_policy_verdicts_change(
         # declares (#4517); a pre-0.37 lock has none.
         assert "manifest_targets" not in fixture_lock
         assert settled.pop("manifest_targets") == _DECLARED_TARGETS[case]
+        for dependency in fixture_lock.get("dependencies") or []:
+            dependency["deployed_files"] = [
+                path for path in dependency.get("deployed_files") or [] if path not in retired
+            ]
         for lock in (fixture_lock, settled):
             lock.pop("deployments", None)
             servers = lock.get("mcp_target_servers") or {}

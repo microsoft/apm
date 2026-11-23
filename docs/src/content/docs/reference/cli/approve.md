@@ -91,9 +91,12 @@ each self-defined MCP server gets a SHA-256 fingerprint of what runs. `bin`,
   and extra keys. A registry-resolved server from a transitive package that
   sets its own `registry:` or an overlay also binds the resolved registry
   entry, so pinning it needs registry access.
-- **Hook file**: the hook JSON document plus the bytes of every script it
-  references that APM copies. Code a hook downloads at run time (`npx`,
-  `curl`) or loads indirectly is not covered.
+- **Hook file**: the hook JSON document, every script it references, every
+  other file APM copies with those scripts (imported helpers, nested
+  `package.json` and other assets in the script's hooks directory), and the
+  Node module type the scripts run under. Code a hook downloads at run time
+  (`npx`, `curl`) is not covered. Hook pins recorded before APM 0.38 cover
+  less, so they show as changed once: run `apm approve <pkg>` again.
 
 Each item is then admitted in this order (first match wins):
 
@@ -121,12 +124,13 @@ deployed.
 A type-level `hooks: true` or `mcp: true` grant still deploys any content, and
 every install warns once that it is `not pinned to content`. Run
 `apm approve <package>` to pin it. `mcp: true` never admits a transitive MCP
-server. A Copilot or Codex native plugin is loaded intact by the harness, so
-`apm approve` records ONE item for it, `plugin: sha256:<64 hex>`, over the path
-and bytes of every file in the plugin root (as installed in `apm_modules/`).
-Executable bits are left out so an approval committed on macOS or Linux also
-holds on Windows; the installed copy is still integrity-checked including file
-modes. Any byte change parks the whole plugin: it is not registered, and
+server. A Claude, Copilot or Codex native plugin is loaded intact by the
+harness, so `apm approve` records ONE item for it, `plugin: sha256:<64 hex>`,
+over the path and bytes of every file in the plugin root (as installed in
+`apm_modules/`). Executable bits are left out so an approval committed on macOS
+or Linux also holds on Windows; APM still checks file modes on each machine
+when it deploys the copy. Any byte change parks the whole plugin: it is not
+deployed or declared, and
 install warns `Parked native plugin <pkg>: content changed since approval`
 with the re-approve command. Per-file hook pins never admit a native plugin.
 An Agent Plugin's root `mcp.json` counts: `mcp`, plus `bin` when a server
@@ -315,9 +319,10 @@ apm install ./hookpkg-1.0.0                  # rerun the install to deploy
 This writes the same grant as adding the key under `executables.allow` in
 `apm.yml` (or `$APM_HOME/config.json` with `--user`; use `-g` for a bundle
 installed with `apm install -g`). Either path works. `apm approve --pending`
-lists parked bundles with their keys. A key with a wrong digest, or a key
-printed before the bundle's bytes changed, is refused: `apm approve` exits 1
-with an `[x]` line and writes nothing.
+lists parked bundles with their keys. A key with a wrong digest, a key
+printed before the bundle's bytes changed, or a key another layer (org policy
+or the other store) still denies is refused: `apm approve` exits 1 with an
+`[x]` line and writes nothing.
 
 ## Examples
 
