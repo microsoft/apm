@@ -385,8 +385,14 @@ class McpWriteReceipts:
             _native_config_key(client, name, stored_config=configs.get(name)) for name in declared
         }
 
-    def kept(self, managed: set[str]) -> list[tuple[McpWrite, str]]:
-        """Kept records of unmanaged servers in the selected configs whose entry is still present."""
+    def kept(
+        self, managed: set[str], configs: dict[str, Any] | None = None
+    ) -> list[tuple[McpWrite, str]]:
+        """Kept records of unmanaged servers in the selected configs whose entry is still present.
+
+        A record whose native entry a managed server now deploys to is not kept
+        (#4861): install and audit share this one filter.
+        """
         return [
             (write, self.display(write))
             for _, write in sorted(self.writes.items())
@@ -394,6 +400,10 @@ class McpWriteReceipts:
             and write.name not in managed
             and self._selected(write)
             and self._presence(write) is not False
+            and not (
+                write.key is not None
+                and write.key in self._declared_keys(write.runtime, managed, configs or {})
+            )
         ]
 
     def save(self) -> None:
@@ -457,17 +467,10 @@ def retire_undeclared_mcp_writes(
         return
     _clear_unusable_note(project_root, user_scope=user_scope)
     if not retire:
-        declared = set(declared)
         included = store.included_runtimes(exclude)
-        for write, _ in store.kept(declared):
-            if write.runtime not in included:
-                continue
-            # A declared server deploying to this exact native entry owns it again.
-            if write.key is not None and write.key in store._declared_keys(
-                write.runtime, declared, declared_configs or {}
-            ):
-                continue
-            store.warn_kept(write, logger)
+        for write, _ in store.kept(set(declared), declared_configs):
+            if write.runtime in included:
+                store.warn_kept(write, logger)
         return
     removed = store.retire_undeclared(
         set(declared), exclude=exclude, logger=logger, declared_configs=declared_configs
@@ -614,7 +617,11 @@ def _parses(config: str | None) -> bool:
 
 
 def kept_mcp_writes(
-    project_root: Path, *, user_scope: bool, managed: Iterable[str]
+    project_root: Path,
+    *,
+    user_scope: bool,
+    managed: Iterable[str],
+    configs: dict[str, Any] | None = None,
 ) -> list[tuple[McpWrite, str]]:
     """Read-only: ``(record, config)`` of entries install kept that are still present.
 
@@ -625,4 +632,4 @@ def kept_mcp_writes(
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
     except (OSError, ValueError):
         return []
-    return store.kept(set(managed))
+    return store.kept(set(managed), configs)

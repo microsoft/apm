@@ -590,6 +590,7 @@ def test_announce_only_skips_a_server_redeclared_on_the_same_native_key(project:
 
     assert _config(project).read_bytes() == before, "announce-only never edits the config"
     assert not logger.warnings, logger.warnings
+    assert kept_mcp_writes(project, user_scope=False, managed={"demo"}) == [], "audit agrees"
 
 
 def test_symlinked_evidence_is_reported_on_a_lockless_install(
