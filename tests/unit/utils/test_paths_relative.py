@@ -9,6 +9,7 @@ flavours, including UNC, ``\\\\?\\``, drive-relative, ``..`` and unicode case.
 
 from __future__ import annotations
 
+import os
 import random
 from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
@@ -155,3 +156,21 @@ def test_the_same_path_is_dot() -> None:
     assert paths.relative_posix(PurePosixPath("/w/a"), PurePosixPath("/w/a")) == "."
     same = paths.relative_to(PureWindowsPath("C:\\A"), PureWindowsPath("c:\\a"))
     assert same == PureWindowsPath(".")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the property test covers Windows path shapes")
+def test_owner_containment_checks_take_the_string_route(
+    tmp_path, no_pathlib_containment: None
+) -> None:
+    """Resolved, same-class absolute paths never reach pathlib's containment walk."""
+    from apm_cli.utils import content_hash, path_security
+
+    root = tmp_path.resolve()
+    inner = root / "pkg" / "x.md"
+    inner.parent.mkdir()
+    inner.write_text("x\n", encoding="utf-8")
+    assert path_security.resolved_relative_within(inner.resolve(), root) == "pkg/x.md"
+    assert path_security.ensure_path_within_resolved(inner, root) == inner.resolve()
+    assert path_security.has_symlink_component(root, inner) is False
+    assert paths.portable_relpath(inner, root) == "pkg/x.md"
+    assert content_hash.compute_package_hash(root / "pkg").startswith("sha256:")

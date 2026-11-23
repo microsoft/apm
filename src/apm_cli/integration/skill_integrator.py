@@ -50,6 +50,7 @@ from apm_cli.models.dependency.subsets import (
     skill_subset_filter_tokens,
     skill_subset_selects_all,
 )
+from apm_cli.utils.paths import relative_to
 
 __all__ = [
     "SkillIntegrationResult",
@@ -562,10 +563,10 @@ class SkillIntegrator(BaseIntegrator):
             source_root = plan.source_root
             physical_root = destination.parent.resolve()
             self._skill_completed_roots.setdefault(physical_root, set()).add(
-                source.relative_to(source_root).as_posix()
+                relative_to(source, source_root).as_posix()
             )
             self._skill_completed_files.setdefault(physical_root, set()).update(
-                (source / path.relative_to(destination)).relative_to(source_root).as_posix()
+                relative_to(source / relative_to(path, destination), source_root).as_posix()
                 for path in copied
             )
         return copied

@@ -104,12 +104,15 @@ def portable_relpath(path: Path, base: Path) -> str:
     a resolved absolute POSIX path.
     """
     try:
-        return path.resolve().relative_to(base.resolve()).as_posix()
+        relative = relative_posix(path.resolve(), base.resolve())
     except (ValueError, OSError, RuntimeError):
-        try:
-            return path.resolve().as_posix()
-        except (OSError, RuntimeError):
-            return path.as_posix()
+        relative = None
+    if relative is not None:
+        return relative
+    try:
+        return path.resolve().as_posix()
+    except (OSError, RuntimeError):
+        return path.as_posix()
 
 
 def portable_link_relpath(

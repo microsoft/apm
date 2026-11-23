@@ -24,6 +24,7 @@ from pathlib import Path
 from stat import S_ISLNK
 
 from .file_ops import robust_rmtree
+from .paths import is_within, relative_posix, relative_to
 
 
 class PathTraversalError(ValueError):
@@ -232,9 +233,7 @@ def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
         _strip_extended_prefix(resolved_base),
     )
     try:
-        if not resolved.is_relative_to(resolved_base):
-            return None
-        return resolved.relative_to(resolved_base).as_posix()
+        return relative_posix(resolved, resolved_base)
     except (TypeError, ValueError):
         return None
 
@@ -244,7 +243,7 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     resolved = _strip_extended_prefix(path.resolve())
     resolved_base = _strip_extended_prefix(resolved_base)
     try:
-        if not resolved.is_relative_to(resolved_base):
+        if not is_within(resolved, resolved_base):
             raise PathTraversalError(
                 f"Path '{path}' resolves to '{resolved}' which is outside "
                 f"the allowed base directory '{resolved_base}'"
@@ -259,7 +258,7 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics."""
     try:
-        relative = path.relative_to(base_dir)
+        relative = relative_to(path, base_dir)
         current = base_dir
         for part in relative.parts:
             current /= part
