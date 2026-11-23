@@ -664,6 +664,32 @@ def check_mcp_ownership_migration(provider: FactsProvider) -> tuple[Violation, .
             "_preserve_existing_mcp_state",
             "DeploymentLedgerCodec.mcp_native_hashes",
         ),
+        # A config file APM emptied is deleted only by the provenance owner (#4867).
+        (
+            "src/apm_cli/integration/mcp_integrator.py",
+            "_write_cleaned_json_config",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_ownership.py",
+            "remove_emptied_hook_file",
+            "delete_emptied_config",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_source_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/integration/hook_integrator.py",
+            "_clean_apm_entries_from_json",
+            "remove_emptied_hook_file",
+        ),
+        (
+            "src/apm_cli/install/mcp/retired_destinations.py",
+            "heal_retired_project_mcp_destinations",
+            "delete_emptied_config",
+        ),
     ):
         facts, failures = _facts_for(provider, path, rule_id)
         findings.extend(failures)

@@ -169,9 +169,9 @@ class _Store:
     def save(self) -> None:
         from apm_cli.integration.write_seam import atomic_write_text, mkdir, unlink
 
-        rows = [
-            {"path": key, **self.files[key]} for key in sorted(self.files) if os.path.lexists(key)
-        ]
+        # Never pruned by absence: the store is shared, and a file away for now (an
+        # unmounted drive) keeps its record. Only a retirement forgets a record.
+        rows = [{"path": key, **self.files[key]} for key in sorted(self.files)]
         if not rows:
             if os.path.lexists(self.path):
                 unlink(self.path)  # like the other receipts: no records, no file
@@ -227,24 +227,55 @@ def _unrecorded_origin(manifest_root: Path, before: bytes) -> Origin:
     return Origin.PREEXISTING
 
 
+def _origin_before_write(
+    store: _Store, path: Path, before: bytes | None, manifest_root: Path | None
+) -> tuple[str, Origin | None]:
+    """The key of *path* and its origin once APM writes it (``None``: stays unrecorded)."""
+    key, row = store.lookup(path)
+    recorded = _origin(row)
+    if before is None:
+        return key, Origin.CREATED
+    if recorded is Origin.CREATED and row.get("hash") != _digest(before):
+        # Not the bytes APM last wrote: replaced since (by the user, or recreated
+        # after a rollback), so never APM's again. Every APM writer records here.
+        return key, Origin.PREEXISTING
+    if recorded is not None:
+        return key, recorded
+    if manifest_root is None:
+        return key, None  # a rewrite of an unrecorded file stays unrecorded
+    return key, _unrecorded_origin(manifest_root, before)
+
+
+def _secure_users_file(path: Path, before: bytes | None, manifest_root: Path | None) -> None:
+    """Before APM writes a file that is the user's, make that record durable.
+
+    Without it the file would later look like a pre-record APM file and could be
+    deleted, so a record that cannot be saved refuses the write.
+    """
+    if before is None:
+        return
+    try:
+        store = _Store.load()
+        key, origin = _origin_before_write(store, path, before, manifest_root)
+        if origin is not Origin.PREEXISTING or _origin(store.files.get(key)) is origin:
+            return
+        store.files[key] = {"origin": origin.value, "hash": _digest(before)}
+        store.save()
+    except (OSError, ValueError) as exc:
+        raise OSError(
+            f"Could not record that {path} existed before APM wrote to it ({exc}); "
+            "refusing to write it. Fix or remove the config file records under APM_HOME "
+            "and retry."
+        ) from exc
+
+
 def _note(path: Path, before: bytes | None, after: bytes, manifest_root: Path | None) -> None:
     if before == after:
         return  # nothing written: a converged install records nothing (I2)
     store = _Store.load()
-    key, row = store.lookup(path)
-    recorded = _origin(row)
-    if before is None:
-        origin = Origin.CREATED
-    elif recorded is Origin.CREATED and row.get("hash") != _digest(before):
-        # Not the bytes APM last wrote: replaced since (by the user, or recreated
-        # after a rollback), so never APM's again. Every APM writer records here.
-        origin = Origin.PREEXISTING
-    elif recorded is not None:
-        origin = recorded
-    elif manifest_root is None:
-        return  # a rewrite of an unrecorded file stays unrecorded
-    else:
-        origin = _unrecorded_origin(Path(manifest_root), before)
+    key, origin = _origin_before_write(store, path, before, manifest_root)
+    if origin is None:
+        return
     store.files[key] = {"origin": origin.value, "hash": _digest(after)}
     store.save()
 
@@ -270,6 +301,8 @@ def recorded_config_write(
         before = None if linked else _regular_bytes(path)
     except OSError:
         linked = True
+    if not linked:
+        _secure_users_file(path, before, Path(manifest_root) if manifest_root else None)
     yield
     if linked:
         return

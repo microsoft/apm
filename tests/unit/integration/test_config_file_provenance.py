@@ -398,3 +398,36 @@ def test_an_empty_record_store_leaves_no_file(tmp_path, apm_home) -> None:
     assert not (apm_home / "deployment-receipts" / "config-files").exists() or not any(
         (apm_home / "deployment-receipts" / "config-files").iterdir()
     )
+
+
+def test_a_record_of_a_temporarily_absent_file_survives_other_saves(tmp_path, apm_home) -> None:
+    """The store is shared: saving project B while project A's file is absent (an
+    unmounted drive) keeps A's record, so A's file is still the user's when it returns."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    a_config.parent.mkdir()
+    a_config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(a_config, _WITH_ENTRY, manifest_root=tmp_path / "a")
+    held = a_config.read_bytes()
+    a_config.unlink()  # the drive is away
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)  # project B saves the store
+    a_config.write_bytes(held)  # the drive is back
+
+    assert config_file_origin(a_config) is Origin.PREEXISTING
+    assert _apm_empties(a_config, root=tmp_path / "a") is False
+    assert a_config.read_bytes() == held
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_users_file_is_not_written_when_its_record_cannot_be_saved(tmp_path, apm_home) -> None:
+    """Without a durable record a user's file would later look legacy and be deleted:
+    APM refuses the write instead, leaving the file as it was."""
+    project = tmp_path / "project"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")
+    apm_home.mkdir(parents=True)
+    (apm_home / "deployment-receipts").write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(OSError, match="refusing to write"):
+        _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    assert config.read_text(encoding="utf-8") == _SKELETON
