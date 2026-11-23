@@ -12,9 +12,10 @@ import json
 import os
 from unittest.mock import patch
 
-import pytest  # noqa: F401
+import pytest
 
 from apm_cli.marketplace.version_pins import (
+    RefPinStoreError,
     _pin_key,
     _pins_path,
     check_ref_pin,
@@ -55,19 +56,14 @@ class TestLoadRefPins:
         assert "expected but missing" in caplog.text
         assert "ref-swap detection is disabled" in caplog.text
 
-    def test_load_corrupt_json(self, tmp_path):
-        """Corrupt JSON returns empty dict without raising."""
+    @pytest.mark.parametrize("content", ["{not valid json!!!", '["a list", "not a dict"]'])
+    def test_an_unreadable_pins_file_fails_closed(self, tmp_path, content):
+        """Corrupt or non-object JSON refuses instead of disabling detection."""
         path = tmp_path / "version-pins.json"
-        path.write_text("{not valid json!!!")
-        result = load_ref_pins(pins_dir=str(tmp_path))
-        assert result == {}
-
-    def test_load_non_dict_json(self, tmp_path):
-        """JSON that is not an object returns empty dict."""
-        path = tmp_path / "version-pins.json"
-        path.write_text('["a list", "not a dict"]')
-        result = load_ref_pins(pins_dir=str(tmp_path))
-        assert result == {}
+        path.write_text(content)
+        with pytest.raises(RefPinStoreError, match="delete it to start a new record"):
+            load_ref_pins(pins_dir=str(tmp_path))
+        assert path.read_text() == content
 
     def test_load_valid(self, tmp_path):
         """Valid JSON is returned as-is."""
@@ -254,12 +250,12 @@ class TestFailOpen:
         bad_dir = "/dev/null/impossible"
         save_ref_pins({"k": "r"}, pins_dir=bad_dir)
 
-    def test_check_with_corrupt_file_returns_none(self, tmp_path):
-        """check_ref_pin with corrupt file returns None (no warning)."""
+    def test_check_with_corrupt_file_refuses(self, tmp_path):
+        """check_ref_pin with a corrupt file refuses the install."""
         path = tmp_path / "version-pins.json"
         path.write_text("CORRUPT!!!")
-        result = check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
-        assert result is None
+        with pytest.raises(RefPinStoreError, match=str(path)):
+            check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
 
     def test_check_with_non_string_plugin_entry(self, tmp_path):
         """If the plugin entry is not a string, return None gracefully."""
@@ -268,3 +264,19 @@ class TestFailOpen:
         path.write_text(json.dumps(data))
         result = check_ref_pin("mkt", "plug", "ref", pins_dir=str(tmp_path))
         assert result is None
+
+
+def test_an_unreadable_pins_file_refuses_a_marketplace_resolution(tmp_path):
+    """The resolver's pin gate refuses rather than staging an unchecked ref."""
+    from apm_cli.marketplace.version_pins import enforce_ref_pin, open_ref_pin_stage
+
+    path = tmp_path / "version-pins.json"
+    path.write_text("{truncated")
+    stage = open_ref_pin_stage()
+    try:
+        with pytest.raises(RefPinStoreError, match=str(path)):
+            enforce_ref_pin("mkt", "plug", "v1", pins_dir=str(tmp_path))
+        assert stage.keys() == frozenset()
+    finally:
+        stage.discard()
+    assert path.read_text() == "{truncated"

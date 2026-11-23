@@ -394,9 +394,9 @@ def _fetch_url_direct(
             base_url=credential.scope_url if credential.presented else None,
             bind_query=credential.presented,
             ambient_credentials=False,
-            # An anonymous catalog is bounded by its registered origin; a bound
-            # credential's scope owner governs a credentialed catalog's hops.
-            follow_cross_origin_without_credentials=credential.presented,
+            # The allow-list judged this URL: a hop outside the registered
+            # origin (or a bound credential's scope) is refused, never followed.
+            follow_cross_origin_without_credentials=False,
             timeout=30,
             stream=True,
         )

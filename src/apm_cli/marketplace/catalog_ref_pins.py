@@ -25,6 +25,7 @@ REVIEW_NAMESPACES = frozenset(
         "notes",
         "pipelines",
         "pull",
+        "pull-requests",
         "remotes",
         "stash",
     }

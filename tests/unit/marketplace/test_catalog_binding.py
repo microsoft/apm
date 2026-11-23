@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -13,6 +14,7 @@ from apm_cli.marketplace.errors import (
     MarketplaceAccessDeniedError,
     MarketplaceBindingConflictError,
     MarketplaceCredentialError,
+    MarketplaceFetchError,
 )
 from apm_cli.marketplace.models import ORIGIN_PROJECT, MarketplaceSource
 
@@ -136,33 +138,38 @@ def test_denied_refresh_keeps_the_cache_and_is_not_reported_fresh(monkeypatch) -
     assert client_mod._read_stale_meta(key) == meta_before
 
 
-def test_sign_in_redirect_is_denied_access(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "location",
+    ["https://sso.example.net/login", "/elsewhere/marketplace.json"],
+    ids=["other-origin", "outside-scope"],
+)
+def test_a_bound_catalog_redirect_outside_its_scope_is_refused(monkeypatch, location) -> None:
     monkeypatch.setenv("APM_MARKETPLACE_TOKEN_CORP", "tok-1")
     session = _install(
         monkeypatch,
-        _response(302, headers={"Location": "https://sso.example.net/login"}),
-        _response(200, body=b"<html>sign in</html>", headers={"Content-Type": "text/html"}),
-    )
-
-    with pytest.raises(MarketplaceAccessDeniedError, match="sign-in page"):
-        client_mod.fetch_marketplace(_bound(), force_refresh=True)
-
-    assert "Authorization" not in session.calls[1][1]
-
-
-def test_out_of_scope_redirect_is_followed_without_the_credential(monkeypatch) -> None:
-    monkeypatch.setenv("APM_MARKETPLACE_TOKEN_CORP", "tok-1")
-    session = _install(
-        monkeypatch,
-        _response(302, headers={"Location": "/elsewhere/marketplace.json"}),
+        _response(302, headers={"Location": location}),
         _response(200, body=_CATALOG),
     )
 
-    client_mod.fetch_marketplace(_bound(), force_refresh=True)
+    with pytest.raises(MarketplaceFetchError, match="refused"):
+        client_mod.fetch_marketplace(_bound(), force_refresh=True)
 
-    assert [("Authorization" in headers) for _url, headers, _auth in session.calls] == [
-        True,
-        False,
+    assert [("Authorization" in headers) for _url, headers, _auth in session.calls] == [True]
+
+
+def test_an_anonymous_hosted_catalog_redirect_to_another_origin_is_refused(monkeypatch) -> None:
+    session = _install(
+        monkeypatch,
+        _response(302, headers={"Location": "https://elsewhere.example/marketplace.json"}),
+        _response(200, body=_CATALOG),
+    )
+    source = MarketplaceSource(name="open", url=_URL, ref="", path="")
+
+    with pytest.raises(MarketplaceFetchError, match="refused"):
+        client_mod.fetch_marketplace(source, force_refresh=True)
+
+    assert [urlsplit(url).hostname for url, _headers, _auth in session.calls] == [
+        urlsplit(_URL).hostname
     ]
 
 

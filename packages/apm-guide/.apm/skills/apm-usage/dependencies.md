@@ -214,7 +214,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 |-------|----------|-------------|
 | `git` | REQUIRED | Clone URL (HTTPS, SSH, or FQDN shorthand). The literal `parent` inherits the consuming package's repo. |
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
-| `ref` | OPTIONAL | Branch, tag, or commit SHA. |
+| `ref` | OPTIONAL | Branch, tag, or commit SHA. Matches a branch or tag exactly (use `refs/heads/` or `refs/tags/` when a name is both); a SHA must be reachable from a branch or tag (checked once, online). |
 | `alias` | OPTIONAL | Install-directory name (`^[a-zA-Z0-9._-]+$`), excluding exactly `.` and `..`. Dotted names such as `my-skill.v2` are valid. |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 | `allow_insecure` | OPTIONAL | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
