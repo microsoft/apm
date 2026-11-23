@@ -25,9 +25,15 @@ def main() -> None:
         command.main(args=sys.argv[1:])
         return
 
+    from apm_cli.install import verdict_record
+
+    argv = sys.argv[1:]
+    if verdict_record.replay(argv):
+        return
     from apm_cli.cli import main as cli_main
 
-    cli_main()
+    with verdict_record.recording(argv):
+        cli_main()
 
 
 if __name__ == "__main__":
