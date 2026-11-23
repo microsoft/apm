@@ -473,7 +473,8 @@ def test_frozen_replay_of_a_pre_3825_lock_keeps_native_state_removable(
 
     world.apm(project, "uninstall", remote_url("synth"))
     for path in _NATIVE_REFERENCES:
-        assert "synth-db" not in _servers(project, path)
+        # A shared file emptied of APM's last entry is deleted (#4852).
+        assert not (project / path).exists() or "synth-db" not in _servers(project, path)
 
 
 def test_install_migrates_an_unfingerprinted_pre_3825_entry_per_target(
@@ -490,4 +491,5 @@ def test_install_migrates_an_unfingerprinted_pre_3825_entry_per_target(
     world.apm(project, "install", "--frozen", "--no-policy")
     world.apm(project, "uninstall", remote_url("synth"))
     for path in _NATIVE_REFERENCES:
-        assert "synth-db" not in _servers(project, path)
+        # A shared file emptied of APM's last entry is deleted (#4852).
+        assert not (project / path).exists() or "synth-db" not in _servers(project, path)

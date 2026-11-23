@@ -741,12 +741,12 @@ def test_project_self_replay_preserves_governed_drift(
 ) -> None:
     """The mixed source layout must not masquerade as governed deployment drift."""
     from dataclasses import replace
-    from types import SimpleNamespace
 
     from click.testing import CliRunner
 
     from apm_cli.cli import cli
     from apm_cli.policy import discovery
+    from apm_cli.policy.discovery import PolicyFetchResult
     from apm_cli.policy.parser import load_policy
     from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -784,7 +784,7 @@ def test_project_self_replay_preserves_governed_drift(
     monkeypatch.setattr(
         discovery,
         "discover_policy_with_chain",
-        lambda project_root: SimpleNamespace(policy=policy),
+        lambda project_root: PolicyFetchResult(policy=policy, outcome="found"),
     )
     before_clean = ArtifactSnapshot.capture(audit_project)
     clean = runner.invoke(cli, ["audit"])
@@ -809,12 +809,12 @@ def test_hook_sidecar_comparison_preserves_governed_drift_exit(
 ) -> None:
     """Sidecar normalization must preserve req-pl-014's governed drift exit."""
     import json
-    from types import SimpleNamespace
 
     from click.testing import CliRunner
 
     from apm_cli.cli import cli
     from apm_cli.policy import discovery
+    from apm_cli.policy.discovery import PolicyFetchResult
     from apm_cli.policy.parser import load_policy
     from tests.utils.artifact_snapshot import ArtifactSnapshot, assert_unchanged
 
@@ -860,7 +860,9 @@ def test_hook_sidecar_comparison_preserves_governed_drift_exit(
     policy, _ = load_policy(policy_path)
     monkeypatch.delenv("APM_POLICY_DISABLE", raising=False)
     monkeypatch.setattr(
-        discovery, "discover_policy_with_chain", lambda project_root: SimpleNamespace(policy=policy)
+        discovery,
+        "discover_policy_with_chain",
+        lambda project_root: PolicyFetchResult(policy=policy, outcome="found"),
     )
     before = ArtifactSnapshot.capture(audit_project)
     clean = runner.invoke(cli, ["audit"])

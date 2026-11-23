@@ -532,6 +532,15 @@ def run_mcp_integration(  # noqa: PLR0913
             target_decision=target_decision,
             logger=logger,
         )
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        announce_kept_mcp_writes(
+            lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
+        )
         return mcp_count, {"scripts": apm_package.scripts or {}}
 
     previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
@@ -794,7 +803,11 @@ def run_mcp_integration(  # noqa: PLR0913
             deselected_mcp_claims,
             names_owned_by_active_peers,
         )
-        from apm_cli.install.mcp.retirement import record_refused_retirement, retire_mcp_claims
+        from apm_cli.install.mcp.retirement import (
+            record_refused_retirement,
+            retire_mcp_claims,
+            stale_claim_remover,
+        )
         from apm_cli.integration.mcp_integrator_install import mcp_servers_for_runtime
 
         # Targets the manifest itself stopped selecting leave every entry's reach;
@@ -865,19 +878,9 @@ def run_mcp_integration(  # noqa: PLR0913
                 ):
                     cleanup_owners.setdefault(legacy_runtime, builtins.set()).update(stale_servers)
 
-        def _remove(names: builtins.set, cleanup_runtime, cleanup_exclude) -> None:
-            MCPIntegrator.remove_stale(
-                names,
-                cleanup_runtime,
-                cleanup_exclude,
-                project_root=project_root,
-                user_scope=user_scope,
-                scope=scope,
-                fail_on_write_error=True,
-                stored_configs=old_mcp_configs,
-                native_hashes=old_native_hashes,
-            )
-            logger.record_mcp_removed(names)
+        _remove = stale_claim_remover(
+            logger, (project_root, user_scope, scope), (old_mcp_configs, old_native_hashes)
+        )
 
         def _record_refusal(removed, planned) -> None:
             # A preserved (edited) entry stopped retirement after this run's
@@ -887,7 +890,8 @@ def run_mcp_integration(  # noqa: PLR0913
                 lock_path,
                 logger,
                 managed_target_servers=managed_target_servers,
-                old_target_servers=old_mcp_target_servers,
+                # cleanup_owners adds the runtimes a legacy lock's cleanup reached.
+                old_target_servers=cleanup_owners or old_mcp_target_servers,
                 removed=removed,
                 planned=planned,
                 servers=(new_mcp_servers, old_mcp_servers),

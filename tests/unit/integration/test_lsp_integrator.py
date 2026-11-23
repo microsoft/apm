@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apm_cli.integration.lsp_integrator import LSPIntegrator
+from apm_cli.integration.lsp_integrator import LspInstallRecord, LSPIntegrator
 from apm_cli.models.dependency.lsp import LSPDependency
 
 pytestmark = pytest.mark.component
@@ -478,6 +478,246 @@ class TestInstallCopilotTarget:
                 }
             }
         }
+
+
+_LOCKED = {"pyright": {"name": "pyright", "command": "pyright-langserver"}}
+
+
+class TestManagedEntryKeptEdits:
+    """A managed entry is judged per server against the locked render (#4626)."""
+
+    def _deploy(self, tmp_path, pyright: dict) -> Path:
+        config = tmp_path / ".github" / "lsp.json"
+        config.parent.mkdir(parents=True)
+        servers = {"pyright": pyright, "ruff": {"command": "old-ruff", "args": []}}
+        config.write_text(json.dumps({"userKey": 1, "lspServers": servers}), encoding="utf-8")
+        return config
+
+    def _install(self, tmp_path, *, locked=_LOCKED, command="pyright-langserver") -> dict:
+        diagnostics, record = (
+            MagicMock(),
+            LspInstallRecord(
+                locked_configs={**locked, "ruff": {"name": "ruff", "command": "old-ruff"}}
+            ),
+        )
+        LSPIntegrator.install(
+            [
+                _make_dep("pyright", command=command, extension_to_language=None),
+                _make_dep("ruff", extension_to_language=None),
+            ],
+            project_root=tmp_path,
+            target_runtimes=["copilot"],
+            managed_target_servers={"copilot": {"pyright", "ruff"}},
+            record=record,
+            diagnostics=diagnostics,
+        )
+        return {"kept": record.kept_edits, "diagnostics": diagnostics}
+
+    def test_drift_edit_is_kept_with_a_warning_and_other_servers_update(self, tmp_path):
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
+
+        outcome = self._install(tmp_path)
+
+        data = json.loads(config.read_text())
+        assert data["lspServers"]["pyright"] == edited
+        assert data["lspServers"]["ruff"]["command"] == "ruff-langserver"
+        assert data["userKey"] == 1
+        assert outcome["kept"] == {"pyright": "drift"}
+        (message,) = outcome["diagnostics"].warn.call_args.args
+        assert message.startswith("Kept LSP server 'pyright' in .github/lsp.json: it was modified")
+        outcome["diagnostics"].error.assert_not_called()
+
+    def test_edit_that_blocks_a_new_render_fails(self, tmp_path):
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
+
+        outcome = self._install(tmp_path, command="pyright-v2")
+
+        assert json.loads(config.read_text())["lspServers"]["pyright"] == edited
+        assert outcome["kept"] == {"pyright": "blocked"}
+        outcome["diagnostics"].error.assert_called_once()
+
+    def test_entry_without_a_locked_render_is_an_unproven_keep(self, tmp_path):
+        edited = {"command": "my-pyright", "args": []}
+        config = self._deploy(tmp_path, edited)
+
+        outcome = self._install(tmp_path, locked={})
+
+        assert json.loads(config.read_text())["lspServers"]["pyright"] == edited
+        assert outcome["kept"] == {"pyright": "unproven"}
+        (message,) = outcome["diagnostics"].error.call_args.args
+        assert "no local deployment receipt or locked render" in message
+
+    def test_unedited_entry_updates_silently(self, tmp_path):
+        config = self._deploy(tmp_path, {"command": "pyright-langserver", "args": []})
+
+        outcome = self._install(tmp_path, command="pyright-v2")
+
+        assert json.loads(config.read_text())["lspServers"]["pyright"]["command"] == "pyright-v2"
+        assert outcome["kept"] == {}
+
+
+class TestKeptEntryHoldsEveryTarget:
+    """A server kept on one target stays at its locked render on every target (#4626)."""
+
+    def test_unedited_target_is_not_upgraded_past_the_shared_baseline(self, tmp_path):
+        v1 = _make_dep("pyright", command="pyright-v1")
+        both = ["copilot", "claude"]
+        LSPIntegrator.install([v1], project_root=tmp_path, target_runtimes=both)
+        copilot = tmp_path / ".github" / "lsp.json"
+        claude = tmp_path / _CLAUDE_PROJECT_PLUGIN
+        claude_v1 = json.loads(claude.read_text())["lspServers"]["pyright"]
+        data = json.loads(copilot.read_text())
+        data["lspServers"]["pyright"]["command"] = "my-pyright"
+        copilot.write_text(json.dumps(data), encoding="utf-8")
+
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs([v1]))
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="pyright-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright"}, "claude": {"pyright"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        assert json.loads(claude.read_text())["lspServers"]["pyright"] == claude_v1
+        assert json.loads(copilot.read_text())["lspServers"]["pyright"]["command"] == "my-pyright"
+        assert record.kept_edits == {"pyright": "blocked"}
+
+
+class TestKeptEntryKindsSurviveTheHold:
+    """Holding one server on every target keeps each target's own keep kind (#4626)."""
+
+    def test_two_blocked_edits_on_two_targets_both_stay_blocked(self, tmp_path):
+        v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        both = ["copilot", "claude"]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=both)
+        for path, server in (
+            (tmp_path / ".github" / "lsp.json", "pyright"),
+            (tmp_path / _CLAUDE_PROJECT_PLUGIN, "ruff"),
+        ):
+            data = json.loads(path.read_text())
+            data["lspServers"][server]["command"] = "mine"
+            path.write_text(json.dumps(data), encoding="utf-8")
+
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(v1))
+        diagnostics = MagicMock()
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2"), _make_dep("ruff", command="r-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright", "ruff"}, "claude": {"pyright", "ruff"}},
+            record=record,
+            diagnostics=diagnostics,
+        )
+
+        copilot = json.loads((tmp_path / ".github" / "lsp.json").read_text())["lspServers"]
+        claude = json.loads((tmp_path / _CLAUDE_PROJECT_PLUGIN).read_text())["lspServers"]
+        assert copilot["pyright"]["command"] == "mine"
+        assert claude["ruff"]["command"] == "mine"
+        assert record.kept_edits == {"pyright": "blocked", "ruff": "blocked"}
+        assert diagnostics.error.call_count == 2
+        diagnostics.warn.assert_not_called()
+
+
+class TestKeptEntryReviewThree:
+    """#4626 review: legacy names, held-but-unwritten targets, a keep with no collector."""
+
+    def _edit(self, path: Path, server: str) -> dict:
+        data = json.loads(path.read_text())
+        data["lspServers"][server]["command"] = "mine"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return data["lspServers"][server]
+
+    def test_an_edited_entry_a_legacy_lock_owns_is_kept(self, tmp_path):
+        v1 = [_make_dep("pyright", command="p-v1")]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=["copilot"])
+        config = tmp_path / ".github" / "lsp.json"
+        edited = self._edit(config, "pyright")
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(v1))
+
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2")],
+            project_root=tmp_path,
+            target_runtimes=["copilot"],
+            managed_target_servers={"copilot": set()},
+            legacy_server_names={"pyright"},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        assert json.loads(config.read_text())["lspServers"]["pyright"] == edited
+        assert record.kept_edits == {"pyright": "blocked"}
+
+    def test_a_held_server_a_target_cannot_render_is_not_claimed_there(self, tmp_path):
+        socket = _make_dep("pyright", command=None, transport="socket", extension_to_language=None)
+        targets = ["copilot", "opencode"]
+        LSPIntegrator.install([socket], project_root=tmp_path, target_runtimes=targets)
+        self._edit(tmp_path / ".github" / "lsp.json", "pyright")
+        record = LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs([socket]))
+
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2")],
+            project_root=tmp_path,
+            target_runtimes=targets,
+            managed_target_servers={"copilot": {"pyright"}, "opencode": set()},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        opencode = tmp_path / "opencode.json"
+        assert "pyright" not in json.loads(opencode.read_text()).get("lsp", {})
+        assert record.kept_unowned.get("opencode") == {"pyright"}
+
+    def test_a_targets_own_unproven_keep_stays_claimed_when_another_is_held(self, tmp_path):
+        """#4626 review: rebuilding for a held server never withholds the target's own keep."""
+        v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        both = ["copilot", "claude"]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=both)
+        copilot = tmp_path / ".github" / "lsp.json"
+        edited = self._edit(copilot, "pyright")
+        self._edit(tmp_path / _CLAUDE_PROJECT_PLUGIN, "ruff")
+        locked = {"ruff": LSPIntegrator.get_server_configs(v1)["ruff"]}
+        record = LspInstallRecord(locked_configs=locked)
+
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2"), _make_dep("ruff", command="r-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright", "ruff"}, "claude": {"pyright", "ruff"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        assert json.loads(copilot.read_text())["lspServers"]["pyright"] == edited
+        assert "pyright" not in record.kept_unowned.get("copilot", set())
+
+    def test_a_blocking_keep_without_a_collector_fails_the_install(self, tmp_path):
+        from apm_cli.install.errors import LSPUserEntryConflictError
+
+        v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=["copilot"])
+        config = tmp_path / ".github" / "lsp.json"
+        edited = self._edit(config, "pyright")
+        logger = MagicMock()
+
+        with pytest.raises(LSPUserEntryConflictError, match="kept pyright"):
+            LSPIntegrator.install(
+                [_make_dep("pyright", command="p-v2"), _make_dep("ruff", command="r-v2")],
+                project_root=tmp_path,
+                target_runtimes=["copilot"],
+                managed_target_servers={"copilot": {"pyright", "ruff"}},
+                record=LspInstallRecord(locked_configs=LSPIntegrator.get_server_configs(v1)),
+                logger=logger,
+            )
+
+        servers = json.loads(config.read_text())["lspServers"]
+        assert servers["pyright"] == edited
+        assert servers["ruff"]["command"] == "r-v2"
+        lines = [call.args[0] for call in logger.info.call_args_list]
+        assert "This install wrote 1 file(s), recorded in apm.lock.yaml:" in lines
 
 
 class TestResolveLspTargets:

@@ -37,11 +37,17 @@ _OWNER_NEEDLES = (
     "route = classify_discovery_outcome(fetch_result, fetch_failure_default=fetch_failure_default)",
     'reason = f"unrecognized policy discovery outcome',
 )
-_CONSUMERS: dict[str, str] = {
-    "src/apm_cli/commands/audit.py": "route = classify_discovery_outcome(",
-    "src/apm_cli/commands/approve.py": "policy = resolve_trust_policy(project_root, logger=logger)",
-    "src/apm_cli/commands/update.py": "route = classify_project_policy(",
-    "src/apm_cli/security/trust.py": "route = classify_project_policy(policy_root)",
+_CONSUMERS: dict[str, tuple[str, ...]] = {
+    "src/apm_cli/commands/audit.py": (
+        "route = classify_discovery_outcome(",
+        # Bare audit's fail_on_drift reader: an unresolvable required policy fails closed.
+        "route = classify_project_policy(project_root, fetch_result=fetch_result)",
+    ),
+    "src/apm_cli/commands/approve.py": (
+        "policy = resolve_trust_policy(project_root, logger=logger)",
+    ),
+    "src/apm_cli/commands/update.py": ("route = classify_project_policy(",),
+    "src/apm_cli/security/trust.py": ("route = classify_project_policy(policy_root)",),
 }
 # Display-only readers that name outcomes to word a status line.
 _DISPLAY_SCOPES = frozenset({("src/apm_cli/commands/policy.py", "_build_report")})
@@ -150,15 +156,16 @@ def check_policy_outcome_routing(provider: FactsProvider) -> tuple[Violation, ..
             )
         )
 
-    for path, needle in _CONSUMERS.items():
+    for path, needles in _CONSUMERS.items():
         facts, path_failures = _facts_for(provider, path, rule)
         findings.extend(path_failures)
-        if not path_failures and not _present(facts, needle):
-            findings.append(
-                _summary(
-                    rule, path, f"Policy readers ask the outcome routing owner; missing {needle}"
-                )
-            )
+        if path_failures:
+            continue
+        findings.extend(
+            _summary(rule, path, f"Policy readers ask the outcome routing owner; missing {needle}")
+            for needle in needles
+            if not _present(facts, needle)
+        )
 
     for path in _python_paths(provider, "src/apm_cli/"):
         if path == _OWNER:

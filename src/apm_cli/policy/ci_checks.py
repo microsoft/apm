@@ -848,7 +848,9 @@ def _kept_mcp_entries(
     """
     from ..install.mcp.write_receipts import kept_mcp_writes, unusable_mcp_evidence
 
-    kept = kept_mcp_writes(project_root, user_scope=user_scope, managed=lock.mcp_servers)
+    kept = kept_mcp_writes(
+        project_root, user_scope=user_scope, managed=lock.mcp_servers, configs=lock.mcp_configs
+    )
     details = [f"MCP server {write.name!a} in {config} ({write.runtime})" for write, config in kept]
     # Without a lockfile, unusable evidence keeps every entry it lists, so it is
     # reported; with one, only evidence an earlier lockless install met (and
