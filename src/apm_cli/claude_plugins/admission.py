@@ -73,12 +73,19 @@ class ClaudeNativePlugin:
     warning: str | None = None
     approved_pin: str | None = None
     harnesses: frozenset[str] = frozenset({CLAUDE})
+    # Admitted as an Agent Plugin (always native), not a Claude-format plugin.
+    agent_plugin: bool = False
 
 
 def has_loose_route(plugin: ClaudeNativePlugin, *, user_scope: bool) -> bool:
-    """Whether ``native: false`` would deploy *plugin* loose instead, at either scope."""
+    """Whether ``native: false`` would deploy *plugin* loose instead, at either scope.
+
+    A Claude-format plugin deploys every primitive loose under ``native: false``
+    (#4995), commands included; an Agent Plugin, even one that also ships a
+    Claude manifest, has no loose route.
+    """
     del user_scope
-    return (plugin.source_root / ".claude-plugin/plugin.json").is_file()
+    return not plugin.agent_plugin and (plugin.source_root / ".claude-plugin/plugin.json").is_file()
 
 
 def fingerprint_native_claude_source(root: Path, *, portable: bool = False) -> str:
