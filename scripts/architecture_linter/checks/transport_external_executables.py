@@ -129,7 +129,8 @@ class _Aliases:
     Names bind in their function, class or module scope (or the scope a
     ``global``/``nonlocal`` declaration names) and resolve through enclosing
     functions to the module, as Python resolves them; comprehension variables
-    never shadow. Attribute targets (``self.run = ...``) bind per owning class.
+    and parameters never shadow. Attribute targets (``self.run = ...``) bind
+    per owning class, and a class that binds none inherits any other's.
     A binding maps to every program argument index its launchers use, empty
     when it is no launcher, so reassignment never drops one.
     """
@@ -139,6 +140,7 @@ class _Aliases:
         self._modules = modules
         self._names: dict[tuple[int, str], frozenset[int]] = {}
         self._attributes: dict[tuple[int, str], frozenset[int]] = {}
+        self._attribute_spellings: dict[str, frozenset[int]] = {}
         self._classes: dict[int, int] = {}
         self._declared: dict[tuple[int, str], int] = {}
         nonlocals: list[tuple[ast.AST | None, str]] = []
@@ -222,8 +224,6 @@ class _Aliases:
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             if not self._in_comprehension_target(node):
                 self._names.setdefault(self._name_key(node, node.id), _NONE)
-        elif isinstance(node, ast.arg):
-            self._names.setdefault(self._name_key(node, node.arg), _NONE)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             self._names.setdefault(self._name_key(node, node.name), _NONE)
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
@@ -253,6 +253,11 @@ class _Aliases:
         if program <= known:
             return False
         table[key] = known | program
+        if table is self._attributes:
+            spelled = key[1]
+            self._attribute_spellings[spelled] = (
+                self._attribute_spellings.get(spelled, _NONE) | program
+            )
         return True
 
     def _name_program(self, name: str, at: ast.AST) -> frozenset[int]:
@@ -278,11 +283,13 @@ class _Aliases:
             return _NONE
         spelled = _dotted(expr)
         if spelled is not None:
-            for key in ((self._owning_class(at), spelled), (0, spelled)):
-                if key in self._attributes:
-                    if self._attributes[key]:
-                        return self._attributes[key]
-                    break
+            # A class binding the attribute itself decides; otherwise any class
+            # (a base, say) or module binding of that spelling may supply it.
+            own = self._attributes.get((self._owning_class(at), spelled))
+            if own:
+                return own
+            if own is None and self._attribute_spellings.get(spelled):
+                return self._attribute_spellings[spelled]
         owner, attr = _dotted(expr.value), expr.attr
         if (owner in self._modules.subprocess and attr in _LAUNCHERS) or (
             owner in self._modules.asyncio and attr in _ASYNC_LAUNCHERS
