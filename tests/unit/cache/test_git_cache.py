@@ -65,7 +65,7 @@ def test_corrupt_remote_ref_receipt_does_not_revive_stale_bare_ref(tmp_path: Pat
     cache.remember_resolved_ref(url, "main", "b" * 40)
     cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
     (cache._db_root / cache_shard_key(url)).mkdir()
-    with patch.object(L2BareRevParse, "_rev_parse", return_value="a" * 40) as bare:
+    with patch.object(GitCache, "bare_ref_sha", return_value="a" * 40) as bare:
         assert L2BareRevParse(cache).try_resolve(dependency, "main") is None
     bare.assert_not_called()
     assert cache._resolved_ref_path(url, "main").read_text(encoding="ascii") == "broken"
@@ -93,19 +93,26 @@ def test_receipt_precedence_with_actual_stale_bare_reference(
     bare = cache._db_root / cache_shard_key(url)
     # Pushes can start background auto-maintenance in the origin; skip its
     # transient lock and temp files so the snapshot copy cannot race them.
+    # An APM-shaped cache bare: the fixture's bare objects under the config APM writes.
     shutil.copytree(
         repository.origin, bare, ignore=shutil.ignore_patterns("*.lock", "tmp_*", "gc.pid")
     )
+    shutil.rmtree(bare / "hooks", ignore_errors=True)
+    (bare / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n"
+        f'[remote "origin"]\n\turl = {url}\n\ttagopt = --no-tags\n',
+        encoding="utf-8",
+    )
     payload.write_text("current\n", encoding="ascii")
     current_commit = repositories.commit(repository, message="Current observation")
-    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    assert cache.bare_ref_sha(url, "main") == old_commit.sha
     if receipt_state != "absent":
         cache.remember_resolved_ref(url, "main", current_commit.sha)
         if receipt_state == "corrupt":
             cache._resolved_ref_path(url, "main").write_text("broken", encoding="ascii")
     expected = {"valid": current_commit.sha, "absent": old_commit.sha, "corrupt": None}
     assert L2BareRevParse(cache).try_resolve(dependency, "main") == expected[receipt_state]
-    assert L2BareRevParse._rev_parse(bare, "main") == old_commit.sha
+    assert cache.bare_ref_sha(url, "main") == old_commit.sha
     assert cache._resolved_ref_path(url, "main").exists() is (receipt_state != "absent")
 
 
@@ -194,6 +201,9 @@ class TestGitCacheGetCheckout:
         checkout_dir = tmp_path / "git" / "checkouts_v1" / real_shard / sha / "full"
         checkout_dir.mkdir(parents=True)
         (checkout_dir / ".git").mkdir()
+        (checkout_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (checkout_dir / ".git" / "objects").mkdir()
+        (checkout_dir / ".git" / "refs").mkdir()
         (checkout_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -432,6 +442,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",
@@ -501,6 +514,9 @@ class TestCheckoutWriteDedup:
         final_dir = tmp_path / "git" / "checkouts_v1" / shard / sha / "full"
         final_dir.mkdir(parents=True)
         (final_dir / ".git").mkdir()
+        (final_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        (final_dir / ".git" / "objects").mkdir()
+        (final_dir / ".git" / "refs").mkdir()
         (final_dir / ".git" / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",

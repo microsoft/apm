@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import copy
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,6 +53,7 @@ from .trust_fingerprint import (
 REASON_DENIED = "denied"
 REASON_DEFINITION_CHANGED = "definition-changed"
 REASON_UNTRUSTED_TRANSITIVE = "untrusted-transitive"
+REASON_POLICY_TRANSITIVE = "policy-transitive"
 REASON_UNAPPROVED = "unapproved-executables"
 # A native plugin's executable surface points into APM-owned paths that the
 # plugin pin does not cover (root ``.apm/`` or ``apm.yml``).
@@ -62,6 +63,7 @@ LAYER_PROJECT_ITEM = "project-allow"
 LAYER_USER_ITEM = "user-allow"
 LAYER_ONE_OFF = "one-off"
 LAYER_NOT_GATED = "not-gated"
+LAYER_ORG_TRUST_TRANSITIVE = "org-trust-transitive"
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,8 @@ class TrustSubject:
     fingerprint: str | None
     needs_transitive_trust: bool = False
     exec_gated: bool = True
+    # Declared by a dependency at depth > 1 (org ``mcp.trust_transitive``).
+    transitive: bool = False
 
 
 @dataclass(frozen=True)
@@ -244,6 +248,37 @@ def resolve_registry_entry(dependency: Any) -> dict[str, Any] | None:
     }
 
 
+def transitive_server_listed(name: str, mcp: Any) -> bool:
+    """Whether org ``mcp.allow`` lists transitive server *name* (req-sc-016).
+
+    The one eligibility decision under ``mcp.trust_transitive: false``, for
+    admission and the policy check alike. Only the allow list decides it;
+    ``mcp.deny`` is judged by its own check.
+    """
+    from apm_cli.policy.matcher import first_matching_pattern
+
+    return mcp.allow is not None and first_matching_pattern(name, mcp.allow) is not None
+
+
+def withholds_transitive(policy: Any) -> bool:
+    """Whether org policy admits transitive MCP servers only through ``mcp.allow``.
+
+    True when the policy enforces (``block`` or ``warn``) and does not set
+    ``mcp.trust_transitive: true``; the caller applies the enforcement mode.
+    """
+    mcp = getattr(policy, "mcp", None)
+    if mcp is None or mcp.trust_transitive:
+        return False
+    return getattr(policy, "enforcement", None) in ("block", "warn")
+
+
+def unlisted_transitive_servers(names: Iterable[str], policy: Any) -> tuple[str, ...]:
+    """The transitive servers in *names* org ``mcp.trust_transitive`` withholds."""
+    if not withholds_transitive(policy):
+        return ()
+    return tuple(name for name in names if not transitive_server_listed(name, policy.mcp))
+
+
 class McpAdmission:
     """MCP admission inputs for one command run.
 
@@ -260,8 +295,13 @@ class McpAdmission:
         registry_resolver: Callable[[Any], dict[str, Any] | None] | None = None,
         permissive: bool = False,
         pins: Callable[[], ExecTrustContext | None] | None = None,
+        org_policy: Callable[[], Any] | None = None,
     ) -> None:
         self._trust = trust
+        # Lazy org policy for the mcp.trust_transitive rung; None: no policy.
+        self._org_policy = org_policy
+        self._org_policy_value: Any = None
+        self._org_policy_resolved = org_policy is None
         self._resolved = not callable(trust)
         self._ctx = None if callable(trust) else trust
         # Policy-free source of item pins, so checking for an existing pin
@@ -300,12 +340,25 @@ class McpAdmission:
         ``migrate_user_legacy=False`` to read a legacy ``approvals.yml``
         without migrating it.
         """
-        if trust_context is not None:
-            return cls(trust_context, one_off=one_off)
         from apm_cli.core.scope import manifest_root, scope_manifest_path
 
-        grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)
         policy_root = manifest_root(project_root, user_scope=user_scope)
+        routes: list[Any] = []
+
+        def route() -> Any:
+            if not routes:
+                from apm_cli.policy.outcome_routing import classify_project_policy
+
+                route = classify_project_policy(policy_root)
+                routes.append(route)
+            return routes[0]
+
+        def org_policy() -> Any:
+            return None if no_policy else route().policy
+
+        if trust_context is not None:
+            return cls(trust_context, one_off=one_off, org_policy=org_policy)
+        grants_manifest = scope_manifest_path(project_root, user_scope=user_scope)
         admission: McpAdmission
 
         def resolve() -> ExecTrustContext:
@@ -313,15 +366,13 @@ class McpAdmission:
 
             policy = None
             if not no_policy:
-                from apm_cli.policy.outcome_routing import classify_project_policy
-
-                route = classify_project_policy(policy_root)
-                policy = route.policy
-                if policy is None and (route.blocks or route.unresolved):
-                    admission.policy_unavailable = route.outcome
-                elif route.unavailable_source:
+                routed = route()
+                policy = routed.policy
+                if policy is None and (routed.blocks or routed.unresolved):
+                    admission.policy_unavailable = routed.outcome
+                elif routed.unavailable_source:
                     # A --policy source that did not load leaves the policy partial (#1925).
-                    admission.policy_unavailable = route.unavailable_source
+                    admission.policy_unavailable = routed.unavailable_source
             return exec_trust_context_for_project(
                 grants_manifest,
                 policy=policy,
@@ -341,7 +392,7 @@ class McpAdmission:
                 migrate_user_legacy=migrate_user_legacy,
             )
 
-        admission = cls(resolve, one_off=one_off, pins=pins)
+        admission = cls(resolve, one_off=one_off, pins=pins, org_policy=org_policy)
         return admission
 
     @property
@@ -381,7 +432,30 @@ class McpAdmission:
             fingerprint=fingerprint,
             needs_transitive_trust=needs_trust,
             exec_gated=exec_gated,
+            transitive=(getattr(locked_dependency, "depth", None) or 1) > 1,
         )
+
+    def org_policy(self) -> Any:
+        """The effective org policy (resolved once), or ``None`` without one."""
+        if not self._org_policy_resolved:
+            self._org_policy_resolved = True
+            self._org_policy_value = self._org_policy()  # type: ignore[misc]
+        return self._org_policy_value
+
+    def refuses_transitive(self, name: str) -> bool:
+        """Whether org ``mcp.trust_transitive: false`` withholds transitive server *name*.
+
+        Under that policy with ``enforcement: block`` a server a dependency at
+        depth > 1 declares deploys only when ``mcp.allow`` admits it: a
+        registry reference, an approval pin and ``--trust-transitive-mcp``
+        alike (req-sc-016).
+        """
+        policy = self.org_policy()
+        # Under enforcement: warn the server deploys and the merged-set
+        # preflight warns, as for mcp.deny (policy_checks.mcp_policy_checks).
+        if getattr(policy, "enforcement", None) != "block":
+            return False
+        return bool(unlisted_transitive_servers((name,), policy))
 
     def _fingerprint(self, declaration: Any, package_keys: tuple[str, ...], needs_trust: bool):
         registry_entry = None
@@ -401,6 +475,8 @@ class McpAdmission:
     def admit(self, subject: TrustSubject) -> Admission:
         if self.permissive:
             return Admission(True, None, LAYER_ONE_OFF)
+        if subject.transitive and self.refuses_transitive(subject.item):
+            return Admission(False, REASON_POLICY_TRANSITIVE, LAYER_ORG_TRUST_TRANSITIVE)
         if (
             not subject.needs_transitive_trust
             and not subject.exec_gated
@@ -491,6 +567,23 @@ def approve_command(argument: str, *, user_scope: bool = False, user_store: bool
     """
     flags = ("-g " if user_scope else "") + ("--user " if user_store else "")
     return f"apm approve {flags}{_shell_argument(argument)}"
+
+
+def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: Any) -> None:
+    """Say that --trust-transitive-mcp consent lasts for this run only."""
+    if not one_off:
+        return
+    noun = "server" if len(one_off) == 1 else "servers"
+    shown = "; ".join(f"{name}, {package}" for name, package in one_off[:3])
+    more = f"; and {len(one_off) - 3} more" if len(one_off) > 3 else ""
+    first_package = one_off[0][1]
+    logger.warning(
+        f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
+        f"only ({shown}{more})\n"
+        "    It is not saved: the next install without the flag removes it. "
+        f"Keep it: apm approve {first_package}",
+        symbol="warning",
+    )
 
 
 def explain_command(package: str, *, user_scope: bool = False) -> str:

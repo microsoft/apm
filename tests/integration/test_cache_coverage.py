@@ -15,6 +15,7 @@ import pytest
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.cache.paths import get_git_checkouts_path, get_git_db_path
 from apm_cli.cache.url_normalize import cache_shard_key
+from tests.utils.cached_repo_trust import trust_cached_repos
 
 
 class TestGitCacheShardinig:
@@ -198,6 +199,7 @@ class TestGitCacheLSRemoteResolution:
             assert resolved == "f" * 40
 
 
+@trust_cached_repos()
 class TestGitCacheBareRepoEnsurance:
     """Test ensuring bare repos exist."""
 
@@ -259,6 +261,7 @@ class TestGitCacheBareRepoEnsurance:
                 mock_fetch.assert_called_once()
 
 
+@trust_cached_repos()
 class TestGitCacheBareHasSHA:
     """Test SHA verification in bare repos."""
 
@@ -543,6 +546,7 @@ class TestGitCacheIntegrityVerification:
                         mock_resolve.assert_called_once()
 
 
+@trust_cached_repos()
 class TestGitCacheLocking:
     """Test locking mechanisms."""
 

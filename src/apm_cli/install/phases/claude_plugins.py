@@ -80,8 +80,9 @@ def run(ctx: InstallContext) -> None:
         if ctx.existing_lockfile is not None and lock_path.is_file()
         else None
     )
+    retired = _retired_harnesses(ctx)
     if ctx.claude_native_plugins or previous_owned:
-        planned = _planned_declarations(ctx, lock_path, previous_owned)
+        planned = _planned_declarations(ctx, lock_path, previous_owned, retired)
         if planned is not None:
             planned.write(lock_path)
         # Claude's declarations never run ahead of the lock they follow.
@@ -99,6 +100,7 @@ def run(ctx: InstallContext) -> None:
             logger=ctx.logger,
             dry_run=ctx.dry_run,
             rejected=frozenset(ctx.native_rejected_names),
+            retired_harnesses=retired,
         )
     except ClaudeNativePluginError:
         previous = _with_reconciled_services(ctx.existing_lockfile, committed)
@@ -120,7 +122,21 @@ def run(ctx: InstallContext) -> None:
         stamped.write(lock_path)
 
 
-def _planned_declarations(ctx: InstallContext, lock_path, previous_owned) -> LockFile | None:
+def _retired_harnesses(ctx: InstallContext) -> frozenset[str]:
+    """Harnesses whose APM enable entries target contraction retires (#4874).
+
+    The same rule that retires a plugin every harness of which is dropped
+    (#4744): apm.yml declares targets and neither they nor this run name it.
+    """
+    from apm_cli.install.phases.targets import declared_target_profiles
+    from apm_cli.install.target_governance import retired_native_harnesses
+
+    return retired_native_harnesses(ctx.targets or (), declared_target_profiles(ctx))
+
+
+def _planned_declarations(
+    ctx: InstallContext, lock_path, previous_owned, retired: frozenset[str]
+) -> LockFile | None:
     """The lock with the planned ``native_declared``, so the flush commits once (#4329).
 
     A failed declaration restores the previous lock, so a stamp ahead of the
@@ -139,6 +155,7 @@ def _planned_declarations(ctx: InstallContext, lock_path, previous_owned) -> Loc
         prepared=ctx.claude_native_plugins,
         deploy_root=ctx.project_root,
         run_targets=frozenset(target.name for target in ctx.targets or ()),
+        retired_harnesses=retired,
     )
     return _record_declared(staged, planned)
 

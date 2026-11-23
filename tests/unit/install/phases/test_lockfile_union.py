@@ -1667,3 +1667,35 @@ def test_a_retired_native_root_is_named_after_a_harness_the_lock_declared() -> N
     retired = retired_native_plugins(lock, (), [codex])
 
     assert retired == {dep.get_unique_key(): (dep.native_plugin.root, "copilot")}
+
+
+@pytest.mark.parametrize(
+    ("manifest_targets", "native_declared", "expected"),
+    [
+        # apm lock after the narrowing refreshed manifest_targets; a --target run declared claude.
+        (["copilot"], ["claude", "copilot"], {".claude/settings.json": "claude"}),
+        (["claude", "copilot"], ["claude", "copilot"], {".claude/settings.json": "claude"}),
+        # native_declared is advisory: a name that is no native harness is ignored.
+        (["copilot"], ["copilot", "cursor"], {}),
+    ],
+)
+def test_a_retired_native_declaration_ignores_manifest_history(
+    tmp_path, manifest_targets, native_declared, expected
+) -> None:
+    """#4874: the settings file of a retired harness that held APM's true is a dropped
+    path whatever manifest_targets records, so --frozen refuses before any write."""
+    from apm_cli.install.manifest_reconcile import dropped_target_files
+    from apm_cli.native_plugins.record import NativePluginRecord
+    from apm_cli.native_plugins.scopes import PROJECT_MARKETPLACE_PATH
+
+    (tmp_path / "apm.yml").write_text("name: p\nversion: 1.0.0\ntargets: [copilot]\n")
+    lock = LockFile()
+    lock.manifest_targets = manifest_targets
+    dep = LockedDependency(repo_url="acme/plugin", package_type="marketplace_plugin")
+    dep.native_plugin = NativePluginRecord(
+        "plugin", "sha256:" + "0" * 64, "apm", PROJECT_MARKETPLACE_PATH
+    )
+    dep.native_declared = native_declared
+    lock.add_dependency(dep)
+
+    assert dropped_target_files(tmp_path, lock) == expected
