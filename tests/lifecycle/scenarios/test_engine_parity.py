@@ -988,14 +988,16 @@ import signal
 
 _spec = os.environ.get("APM_TEST_KILL_AT", "")
 if _spec:
-    _module, _attr, _nth, _when = _spec.split(":")
+    _module, _attrs, _nth, _when = _spec.split(":")
     try:
         import importlib
 
         _engine = importlib.import_module(_module)
     except Exception:
         _engine = None
-    if _engine is not None and hasattr(_engine, _attr):
+    _names = [n for n in _attrs.split("|") if _engine is not None and hasattr(_engine, n)]
+    if _names:
+        _attr = _names[0]
         _original, _calls = getattr(_engine, _attr), [0]
 
         def _killing(*args, **kwargs):
@@ -1011,11 +1013,13 @@ if _spec:
         setattr(_engine, _attr, _killing)
 """
 _ENGINE_MODULE = "apm_cli.install.diff_apply"
-# point: module:attribute:call:before|after (hooks named by the diff-apply owner)
+# point: module:attribute[|fallback]:call:before|after, hooks of the diff-apply owner.
+# _publish supersedes _commit_package; _render runs the services and receipt writes
+# inside the commit journal.
 KILL_POINTS = {
-    "after-first-package-published": f"{_ENGINE_MODULE}:_publish:1:after",
+    "after-first-package-published": f"{_ENGINE_MODULE}:_publish|_commit_package:1:after",
     "after-first-file-linked": f"{_ENGINE_MODULE}:_write:1:after",
-    "inside-services-render": f"{_ENGINE_MODULE}:_render_services:1:before",
+    "inside-services-render": f"{_ENGINE_MODULE}:_render:1:before",
 }
 _KILLED = (-signal.SIGKILL, 128 + signal.SIGKILL)
 
