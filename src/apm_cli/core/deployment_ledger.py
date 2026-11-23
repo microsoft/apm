@@ -344,13 +344,7 @@ class DeploymentMaterializationSession:
         )
 
     def _encode(self, candidate: Path, target: TargetProfile) -> DeploymentLocator:
-        return DeploymentLedgerCodec.locator_for_path(
-            candidate,
-            project_root=self.root,
-            target=target,
-            scope=self.scope,
-            candidate_resolved=True,
-        )
+        return DeploymentLedgerCodec.locator_for_path(candidate, project_root=self.root, target=target, scope=self.scope, candidate_resolved=True)  # fmt: skip
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
         candidate = resolve_for_containment(path)
