@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -515,6 +515,62 @@ def _relative_value(value: str, project_root: Path) -> str:
     return _record_value(path, project_root) if path.is_absolute() else value
 
 
+def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str]) -> list[str]:
+    """Return each script row under *target_root*, spelled relative to it."""
+    tails = []
+    for value in scripts:
+        spelled = Path(value) if Path(value).is_absolute() else project_root / value
+        if spelled.is_relative_to(target_root):
+            tails.append(spelled.relative_to(target_root).as_posix())
+    return tails
+
+
+def _hook_commands(node: Any) -> Iterator[str]:
+    """Yield every hook command field anywhere in a per-file hook document."""
+    from apm_cli.hook_contract import HOOK_COMMAND_KEYS
+
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in HOOK_COMMAND_KEYS and isinstance(value, str):
+                yield value.replace("\\", "/")
+            else:
+                yield from _hook_commands(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _hook_commands(item)
+
+
+def _per_file_configs_running(
+    project_root: Path, targets: Any, owned: Collection[str], scripts: Collection[str]
+) -> set[str]:
+    """Return per-file hook files outside *owned* whose commands run *scripts*.
+
+    Without its approval record a per-file hook file cannot be attributed to
+    a bundle (Kiro folds the package slug into a longer file stem), so a hook
+    file that still runs the bundle's scripts keeps them and refuses retirement.
+    """
+    from apm_cli.integration.hook_ownership import read_hook_object
+
+    found: set[str] = set()
+    for target in _per_file_targets(targets):
+        target_root = project_root / target.root_dir
+        tails = _script_tails(project_root, target_root, scripts)
+        hooks_dir = target_root / "hooks"
+        if not tails or not hooks_dir.is_dir():
+            continue
+        for path in sorted(hooks_dir.glob("*.json")):
+            value = _record_value(path, project_root)
+            if value in owned:
+                continue
+            try:
+                document = read_hook_object(path)
+            except (OSError, ValueError, TypeError):
+                continue
+            if any(tail in text for text in _hook_commands(document) for tail in tails):
+                found.add(value)
+    return found
+
+
 def _configs_still_running(
     project_root: Path, targets: Any, slug: str, scripts: Collection[str]
 ) -> set[str]:
@@ -554,11 +610,7 @@ def _configs_still_running(
         if config is None:
             continue
         target_root = project_root / target.root_dir
-        tails = []
-        for value in scripts:
-            spelled = Path(value) if Path(value).is_absolute() else project_root / value
-            if spelled.is_relative_to(target_root):
-                tails.append(spelled.relative_to(target_root).as_posix())
+        tails = _script_tails(project_root, target_root, scripts)
         json_path = target_root / config.config_filename
         if not tails or not json_path.is_file():
             continue
@@ -678,7 +730,9 @@ def retire_bundle_hooks(
     rows = scripts | {
         value for value in lock_paths if _relative_value(value, project_root) in hook_files
     }
-    still_running = _configs_still_running(project_root, targets, slug, scripts)
+    still_running = _configs_still_running(
+        project_root, targets, slug, scripts
+    ) | _per_file_configs_running(project_root, targets, hook_files, scripts)
     if still_running:
         # Nothing is retired: the bundle keeps the ownership trust checks read.
         return BundleHookRetirement(True, tuple(sorted(still_running)))

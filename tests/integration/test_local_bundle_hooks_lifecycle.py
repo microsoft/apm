@@ -1269,6 +1269,39 @@ def test_uninstall_bundle_removes_kiro_scripts_and_claims(
     assert not (consumer / ".kiro" / "hooks" / "hookpkg").exists()
 
 
+def test_uninstall_bundle_keeps_kiro_scripts_an_unrecorded_hook_file_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4903 review: without its Kiro record, no kept hook file runs a deleted script."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-no-record-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+    hooks_dir = consumer / ".kiro" / "hooks"
+
+    def runs(path: Path) -> list[str]:
+        body = path.read_text(encoding="utf-8").replace("\\", "/")
+        return [c for c in kiro_scripts if c.removeprefix(".kiro/") in body]
+
+    descriptors = [p for p in hooks_dir.glob("*.json") if runs(p)]
+    assert descriptors, sorted(hooks_dir.iterdir())
+    (consumer / ".kiro" / "apm-hooks.json").unlink()
+
+    result = world.apm(consumer, "uninstall", "hookpkg", expect=None)
+    text = output(result)
+
+    assert "Traceback" not in text, text
+    claims = _claims(world, consumer)
+    for path in (p for p in descriptors if p.is_file()):
+        # A hook file left registered keeps every script it runs, and is named.
+        assert all((consumer / c).is_file() and c in claims for c in runs(path)), text
+        assert result.returncode == 1 and path.name in text, text
+        assert "Removed hooks from local bundle 'hookpkg'" not in text, text
+
+
 def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
