@@ -771,8 +771,9 @@ def _holds_apm_state(unit: _Replay) -> bool:
     if current in (_ABSENT, unit.prior, sealed):
         return True
     if isinstance(whole, tuple):
-        if whole[1] == _ABSENT_EXPECTED and "dir" in current:
-            # A removal killed partway leaves part of the tree (#5087).
+        was_dir = "dir" in unit.prior or (isinstance(sealed, dict) and "dir" in sealed)
+        if whole[1] == _ABSENT_EXPECTED and "dir" in current and was_dir:
+            # A removal of a directory killed partway leaves part of the tree (#5087).
             return _dir_holds_apm_state(unit, current, sealed)
         if not _matches_expected(current, whole[1]):
             return False

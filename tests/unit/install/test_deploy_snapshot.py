@@ -1311,3 +1311,29 @@ def test_a_partial_directory_a_user_changed_after_the_kill_is_kept(
     assert _tree(skill) == changed
     assert not (skill / "SKILL.md").exists()
     assert [store.name.split("-")[0] for store in outcome.retained] == ["retained"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_directory_a_user_made_where_a_killed_unlink_removed_a_file_is_kept(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """#5087: only a directory APM was removing counts as a partial removal."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    script = project / "run.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(b"prior\n")
+    script.chmod(0o755)
+    ledger = {"run.sh": compute_file_hash(script)}
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(script, expected="absent")
+    script.unlink()
+    script.mkdir()
+    script.chmod(0o755)
+
+    outcome = _replay(apm_home, project, lambda: ledger)
+
+    assert outcome.kept == (("run.sh", "it changed after the interrupted install"),)
+    assert script.is_dir()
