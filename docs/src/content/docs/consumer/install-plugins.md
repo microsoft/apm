@@ -223,7 +223,8 @@ Work down this list:
    runs (including claude-code-action) and in Copilot CLI 1.0.106. `apm install`
    prints `[!] <package> installed as a native plugin ...` for each dependency
    it installs this way. To deploy its skills loose instead, set
-   `skills: ["*"]` on that dependency in `apm.yml`.
+   `skills: ["*"]` on that dependency in `apm.yml` (project scope only: with
+   `-g`, a `skills:` selection parks the plugin instead).
 
 :::tip[Other options]
 Packaging your own plugin: [Build a plugin](../../producer/build-a-plugin/).

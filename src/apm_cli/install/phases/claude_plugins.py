@@ -129,10 +129,12 @@ def _note_native_route(ctx: InstallContext) -> None:
     """Name each dependency this install deployed through the native plugin route."""
     if ctx.diagnostics is None:
         return
-    from apm_cli.claude_plugins.admission import NATIVE_ROUTE_NOTICE
+    from apm_cli.claude_plugins.admission import native_route_notice
+    from apm_cli.core.scope import is_user_scope
 
+    notice = native_route_notice(user_scope=is_user_scope(ctx.scope))
     for package_name in ctx.claude_native_plugins:
-        ctx.diagnostics.warn(NATIVE_ROUTE_NOTICE, package=package_name)
+        ctx.diagnostics.warn(notice, package=package_name)
 
 
 def _retired_harnesses(ctx: InstallContext) -> frozenset[str]:
