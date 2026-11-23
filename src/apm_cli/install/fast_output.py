@@ -54,6 +54,7 @@ def render(
     bodies: Mapping[str, PackageBody] | None = None,
     installed: int = 0,
     frozen_disposition: Any,
+    fetched: frozenset[str] = frozenset(),
 ) -> Any:
     """Print the install output for an already applied (or empty) diff.
 

@@ -319,6 +319,8 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     from apm_cli.cache.git_cache import GitCache
     from apm_cli.cache.paths import get_cache_root
     from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.drift import locked_copy_is_stale
+    from apm_cli.install.source_helpers import locked_content_mismatch
 
     modules = project_root / APM_MODULES_DIR
     cache = GitCache(get_cache_root(), read_only=True)
@@ -336,6 +338,11 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
             raise Decline("virtual package")
         install_path = ref.get_install_path(modules)
         if install_path.is_dir():
+            # A present copy must already prove its locked content: decline before any write.
+            if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
+                key, dep, install_path, lockfile=lock
+            ):
+                raise Decline("stale package copy")
             continue
         try:
             checkout = cache.get_checkout(ref.to_github_url(), dep.resolved_ref, locked_sha=sha)
@@ -407,7 +414,10 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=content_integrity,
     )
-    return result.passed and not any(getattr(c, "warned", False) for c in result.checks)
+    failing = [c.name for c in result.checks if not c.passed or getattr(c, "warned", False)]
+    if failing:
+        raise Decline(f"post-apply audit: {failing[0]}")
+    return True
 
 
 def try_apply(
@@ -525,6 +535,9 @@ def try_apply(
         bodies=bodies if (count or packages) else None,
         installed=installed,
         frozen_disposition=frozen_disposition,
+        fetched=frozenset(
+            o.key for o in outcomes if str(_install_path(project_root, o.dep)) in copied
+        ),
     )
     return True
 
