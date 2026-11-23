@@ -36,9 +36,9 @@ def test_error_envelope_contains_only_version_and_code() -> None:
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        ("user:PASS'WORD@host:path", "ssh://host:path"),
-        ("user:PASS@host:path", "ssh://host:path"),
-        ("git@github.com:user/repo.git", "ssh://github.com:user/repo.git"),
+        ("user:PASS'WORD@host:path", "ssh://host/path"),
+        ("user:PASS@host:path", "ssh://host/path"),
+        ("git@github.com:user/repo.git", "ssh://github.com/user/repo.git"),
         ("https://user:PASS'WORD@github.com/repo", "https://github.com/repo"),
     ],
 )

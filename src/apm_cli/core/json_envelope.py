@@ -62,20 +62,9 @@ def safe_text(value: object) -> str | None:
         ):
             return safe_source(token) or "[internal-cache]"
         if "://" not in token:
-            # SSH URL: user:password@host:port or user@host:path
-            # Parse it to extract and redact credentials
-            try:
-                at_index = token.rfind("@")
-                if at_index != -1:
-                    # Has credentials - redact them by taking only the part after @
-                    host_part = token[at_index + 1 :]
-                    parsed = urlsplit("ssh://" + host_part)
-                    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
-                else:
-                    # No @ sign - just format as SSH URL
-                    token = "ssh://" + token.replace(":", "/", 1)
-            except ValueError:
-                return "[redacted-url]"
+            # SCP-style source (user@host:org/repo): drop credentials, keep host and path.
+            host_part = token[token.rfind("@") + 1 :].replace(":", "/", 1)
+            token = "ssh://" + host_part
         try:
             parsed = urlsplit(token)
             return urlunsplit(
