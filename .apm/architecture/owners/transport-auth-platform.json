@@ -38,6 +38,7 @@
       "guards": [
         "transport-platform-rmtree-callback-fallback-attempt",
         "transport-platform-rmtree-callback-fallback-follow",
+        "transport-platform-rmtree-callback-fallback-nested",
         "transport-platform-rmtree-callback-no-follow-chmod"
       ]
     },

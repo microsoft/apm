@@ -18,6 +18,7 @@ _RULE_ID = "transport-platform-rmtree-callback-no-follow-chmod"
 # The NotImplementedError fallback: it must follow a no-follow attempt and never follow.
 _ATTEMPT_GUARD_ID = "transport-platform-rmtree-callback-fallback-attempt"
 _FOLLOW_GUARD_ID = "transport-platform-rmtree-callback-fallback-follow"
+_NESTED_GUARD_ID = "transport-platform-rmtree-callback-fallback-nested"
 _OWNER = "src/apm_cli/utils/file_ops.py"
 _CALLBACK_KEYWORDS = frozenset({"onerror", "onexc"})
 
@@ -84,10 +85,17 @@ def _follow_symlinks(call: ast.Call) -> object:
 
 
 def _no_follow_attempt(body: list[ast.stmt]) -> bool:
+    """Whether *body* itself states the no-follow ``chmod`` its handler falls back from.
+
+    Only a direct statement counts: an attempt nested in an inner ``try``,
+    ``with`` or function may have its ``NotImplementedError`` consumed before
+    it reaches this handler.
+    """
     return any(
-        _is_os_chmod(node) and _follow_symlinks(node) is False
+        isinstance(statement, ast.Expr)
+        and _is_os_chmod(statement.value)
+        and _follow_symlinks(statement.value) is False
         for statement in body
-        for node in ast.walk(statement)
     )
 
 
@@ -173,7 +181,7 @@ RULES = (
     Rule(
         id=_RULE_ID,
         group=GROUP,
-        guard_ids=(_RULE_ID, _ATTEMPT_GUARD_ID, _FOLLOW_GUARD_ID),
+        guard_ids=(_RULE_ID, _ATTEMPT_GUARD_ID, _FOLLOW_GUARD_ID, _NESTED_GUARD_ID),
         description="An rmtree error callback never changes a mode through a link.",
         check=_check_rmtree_callbacks,
     ),

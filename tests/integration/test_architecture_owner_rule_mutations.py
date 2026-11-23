@@ -4224,6 +4224,19 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The no-follow fallback asks chmod to follow a link.",
     ),
     MutationCase(
+        guard_id="transport-platform-rmtree-callback-fallback-nested",
+        rule_id="transport-platform-rmtree-callback-no-follow-chmod",
+        path="src/apm_cli/utils/file_ops.py",
+        old="            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)\n",
+        new=(
+            "            try:\n"
+            "                os.chmod(path, stat.S_IWRITE, follow_symlinks=False)\n"
+            "            except NotImplementedError:\n"
+            "                pass\n"
+        ),
+        intent="An inner handler consumes the no-follow attempt, so the outer fallback follows.",
+    ),
+    MutationCase(
         guard_id="transport-platform-rmtree-callback-no-follow-chmod",
         rule_id="transport-platform-rmtree-callback-no-follow-chmod",
         path="src/apm_cli/utils/file_ops.py",
