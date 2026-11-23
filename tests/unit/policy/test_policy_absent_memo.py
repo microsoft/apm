@@ -25,7 +25,7 @@ from apm_cli.core.invocation_memo import (
 )
 from apm_cli.policy.discovery import discover_policy
 
-pytestmark = [pytest.mark.component, pytest.mark.promise("P-OWN-policy-outcome-routing")]
+pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-policy-outcome-routing")]
 
 _SOURCE = "contoso/.github"
 
@@ -286,17 +286,16 @@ def test_one_command_run_reads_the_git_remote_once_for_policy(server, tmp_path, 
 
     from apm_cli.policy.discovery import discover_policy_with_chain
 
-    for args in (["init", "-q"], ["remote", "add", "origin", "https://github.com/contoso/app.git"]):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / ".git").mkdir()
     remote_reads: list[list[str]] = []
-    real_run = subprocess.run
 
-    def counting_run(argv, *args, **kwargs):
-        if "remote" in list(argv):
-            remote_reads.append(list(argv))
-        return real_run(argv, *args, **kwargs)
+    def fake_git(argv, *args, **kwargs):
+        # The process boundary is faked: the project's origin is contoso/app.
+        remote_reads.append(list(argv))
+        url = "https://github.com/contoso/app.git\n" if "get-url" in list(argv) else "origin\n"
+        return subprocess.CompletedProcess(argv, 0, stdout=url, stderr="")
 
-    monkeypatch.setattr(subprocess, "run", counting_run)
+    monkeypatch.setattr(subprocess, "run", fake_git)
     with invocation_scope():
         outcomes = [discover_policy_with_chain(tmp_path).outcome for _ in range(3)]
         reads = len(remote_reads)

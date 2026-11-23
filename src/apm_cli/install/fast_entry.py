@@ -14,7 +14,7 @@ import click
 
 DECLINED = "apm_install_fast_path_declined"
 _FAST_ARGV = (("install",), ("install", "--frozen"))
-_TRACED: list[bool] = []
+_TRACED = "apm_install_fast_path_traced"
 
 
 # Test seam only, never documented: APM_INSTALL_FAST_PATH=decide prints the
@@ -51,11 +51,11 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
     if disabled():
         return None
     if raw not in _FAST_ARGV:
-        if raw[:1] == ("install",) and not _TRACED:
+        if raw[:1] == ("install",) and not ctx.meta.get(_TRACED):
             from apm_cli.install.diff_apply import _trace
 
-            # click may resolve the command more than once: one decision line per install.
-            _TRACED.append(True)
+            # click may resolve the command more than once: one decision line per invocation.
+            ctx.meta[_TRACED] = True
             _trace("full run (options)")
         if raw[:1] == ("install",) and _decide_only():
             return _decided()
