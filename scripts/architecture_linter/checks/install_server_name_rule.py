@@ -25,7 +25,7 @@ _OWNER = "src/apm_cli/models/dependency/server_names.py"
 _OWNER_NEEDLES = (
     "def validate_server_name(",
     'RESERVED_OBJECT_KEYS = frozenset({"__proto__", "constructor", "prototype"})',
-    'return name.rstrip().rsplit("/", 1)[-1].lower() in RESERVED_OBJECT_KEYS',
+    "return name.rstrip().lower() in RESERVED_OBJECT_KEYS",
 )
 _CONSUMERS = {
     "src/apm_cli/models/dependency/mcp.py": "validate_server_name(",

@@ -387,6 +387,14 @@ class MCPDependency:
             parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
 
+    def _registry_config_key(self) -> str | None:
+        """The config key a registry reference writes under (canonical owner), else None."""
+        if self.registry is False or not isinstance(self.name, str):
+            return None
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        return MCPClientAdapter.determine_config_key(self.name, None)
+
     def validate(self, strict: bool = True) -> None:
         """Validate the dependency. Raises ValueError on invalid state.
 
@@ -399,7 +407,10 @@ class MCPDependency:
         if not self.name:
             raise ValueError("MCP dependency 'name' must not be empty")
         validate_server_name(
-            self.name, "MCP", example="'io.github.acme/cool-server' or 'my-server'"
+            self.name,
+            "MCP",
+            example="'io.github.acme/cool-server' or 'my-server'",
+            config_key=self._registry_config_key(),
         )
         # C2 (defense-in-depth): reject embedded ``..`` segments. The regex
         # above allows ``a/../../../evil`` because '/', '.', '-' are all in

@@ -781,7 +781,7 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
-| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; not `__proto__`, `constructor` or `prototype` (any case), whole or as the last `/` segment | Server identifier (registry name or custom name). |
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; neither the name nor the config key it is written under (a registry name `owner/server` writes under `server`) may be `__proto__`, `constructor` or `prototype` (any case) | Server identifier (registry name or custom name). |
 | `transport` | `enum<string>` | Conditional | `stdio`, `sse`, `http`, `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes; remote variants connect over HTTPS. |
 | `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}` or `${env:VAR}` references; see Section 4.2.4. |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry); list for positional args (self-defined). |
@@ -906,7 +906,7 @@ A plain server name reference: `gopls`. String-form entries carry only a name an
 
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
-| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; not `__proto__`, `constructor` or `prototype` (any case), whole or as the last `/` segment | Server identifier. |
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; not `__proto__`, `constructor` or `prototype` (any case) | Server identifier. |
 | `command` | `string` | REQUIRED | No `..` path segments | Binary to execute (must be on `$PATH` or a relative path). |
 | `extensionToLanguage` | `map<string, string>` | REQUIRED | Non-empty dict | Maps file extensions to LSP language identifiers (e.g. `".go": "go"`). |
 | `args` | `list<string>` | OPTIONAL | | Command-line arguments for the server. |

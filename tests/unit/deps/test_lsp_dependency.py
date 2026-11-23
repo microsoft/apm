@@ -49,9 +49,7 @@ class TestFromString:
     def test_name_containing_reserved_word_accepted(self, name):
         assert LSPDependency.from_string(name).name == name
 
-    @pytest.mark.parametrize(
-        "name", ["__proto__\n", "io.github.acme/constructor", "acme/__PROTO__", "x/Prototype"]
-    )
+    @pytest.mark.parametrize("name", ["__proto__\n"])
     def test_reserved_key_variant_rejected(self, name):
         with pytest.raises(ValueError, match=r"(?s)Invalid LSP dependency name .*: reserved"):
             LSPDependency.from_string(name)
@@ -59,6 +57,10 @@ class TestFromString:
     def test_trailing_newline_ordinary_name_still_accepted(self):
         name = "ok-name\n"
         LSPDependency.from_string(name)
+
+    @pytest.mark.parametrize("name", ["io.github.acme/constructor", "@scope/prototype"])
+    def test_namespaced_name_accepted_because_lsp_keys_keep_the_full_name(self, name):
+        assert LSPDependency.from_string(name).name == name
 
 
 # ===========================================================================

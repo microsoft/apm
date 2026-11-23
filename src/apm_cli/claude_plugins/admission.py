@@ -440,12 +440,22 @@ def _unsupported_capability(root: Path, manifest: dict[str, Any]) -> _Ineligible
 
 
 def _reserved_server_name(root: Path, manifest: dict[str, Any]) -> str | None:
-    """The first MCP or LSP server name Claude would load that is a reserved key."""
-    from apm_cli.deps.plugin_parser import _extract_lsp_servers
+    """The first MCP or LSP server key Claude could load that is a reserved key.
 
-    servers, _unmodeled = claude_native_mcp_servers(root, manifest)
-    names = [server["name"] for server in servers]
+    Reads raw keys from every source: all MCP declarations whatever their
+    transport, the manifest's ``lspServers`` and every LSP file at the root.
+    """
+    import logging
+
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers, _read_lsp_file
+
+    names: list[str] = []
+    claude_native_mcp_servers(root, manifest, keys=names)
     names.extend(str(name) for name in _extract_lsp_servers(root, manifest))
+    quiet = logging.getLogger("apm.native-admission")
+    for candidate in ("com.microsoft.apm/lsp.json", "lsp.json", ".lsp.json"):
+        if (root / candidate).is_file():
+            names.extend(str(name) for name in _read_lsp_file(root, candidate, quiet))
     return next((name for name in names if is_reserved_server_name(name)), None)
 
 

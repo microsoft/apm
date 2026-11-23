@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.promise("P-OWN-claude-native-plugin-
 _LSP = {"command": "pyls", "extensionToLanguage": {".py": "python"}}
 
 
-def _claude_plan(tmp_path: Path, relative: str, document: dict):
+def _claude_plan(tmp_path: Path, relative: str, document: dict, **extra: dict):
     from apm_cli.claude_plugins.admission import plan_native_claude_plugin
 
     root = tmp_path / "plugin"
@@ -34,7 +34,9 @@ def _claude_plan(tmp_path: Path, relative: str, document: dict):
     (root / ".claude-plugin/plugin.json").write_text(
         json.dumps({"name": "owned", "commands": []}), encoding="utf-8"
     )
-    (root / relative).write_text(json.dumps(document), encoding="utf-8")
+    for path, value in {relative: document, **extra}.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(json.dumps(value), encoding="utf-8")
     info = PackageInfo(
         package=APMPackage(name="owned", version="1.0.0"),
         install_path=root,
@@ -57,6 +59,8 @@ def _claude_plan(tmp_path: Path, relative: str, document: dict):
         (".mcp.json", {"mcpServers": {"__proto__": {"command": "echo"}}}, "__proto__"),
         (".mcp.json", {"mcpServers": {"Constructor": {"command": "echo"}}}, "Constructor"),
         (".lsp.json", {"prototype": _LSP}, "prototype"),
+        # A server Claude starts whatever its transport: an empty spec is unmodeled.
+        (".mcp.json", {"mcpServers": {"__proto__": {}}}, "__proto__"),
     ],
 )
 def test_claude_native_route_parks_a_reserved_server_name(
@@ -73,7 +77,20 @@ def test_claude_native_route_parks_a_reserved_server_name(
     assert step.strip().startswith("Ask the publisher to rename the server")
 
 
-@pytest.mark.parametrize("server", ["__proto__", "Constructor", "acme/prototype"])
+def test_claude_native_route_checks_every_lsp_file(tmp_path: Path) -> None:
+    # The normalized route reads only the first LSP file; Claude may load the root one.
+    plan = _claude_plan(
+        tmp_path,
+        "com.microsoft.apm/lsp.json",
+        {"pyls": _LSP},
+        **{".lsp.json": {"constructor": _LSP}},
+    )
+
+    assert plan is not None and plan.parked is not None
+    assert "its server name 'constructor' is a reserved object key" in plan.parked
+
+
+@pytest.mark.parametrize("server", ["__proto__", "Constructor", "prototype"])
 def test_codex_manifest_refuses_a_reserved_mcp_server_name(tmp_path: Path, server: str) -> None:
     manifest = tmp_path / CODEX_COMPAT_MANIFEST
     manifest.parent.mkdir(parents=True)

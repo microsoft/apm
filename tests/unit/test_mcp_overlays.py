@@ -572,6 +572,14 @@ class TestMCPDependencyHardening:
         name = "ok-name\n"
         MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
 
+    @pytest.mark.parametrize(
+        ("name", "registry"), [("@scope/constructor", None), ("acme/constructor", False)]
+    )
+    def test_name_whose_config_key_is_not_reserved_accepted(self, name, registry):
+        # A scoped name and a self-defined name keep their full name as the config key.
+        dep = MCPDependency(name=name, registry=registry, url="https://example.com/mcp")
+        dep.validate(strict=False)
+
     def test_from_string_fails_for_invalid_name(self):
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_string("bad name with space")
