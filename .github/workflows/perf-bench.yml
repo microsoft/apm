@@ -6,7 +6,9 @@ name: Perf bench
 # Trigger: a push to perf-bench/** carrying bench-request.env (no main change
 # needed), or a manual dispatch once this file is on main.
 # Reported: CPU (user+sys of apm and its children, wait4) and deterministic
-# counts. Wall time is never reported: hosted runners are shared VMs.
+# counts, plus modeled-RTT wall (evidence for network-bound journeys only:
+# hosted runners are shared VMs). PROFILE=1 adds one cProfile run per cell on
+# the new side (shard 1 artifact, profiles/*.txt).
 
 on:
   push:
@@ -34,6 +36,9 @@ on:
       os:
         description: Runner OS (linux or macos).
         default: linux
+      profile:
+        description: 1 adds one cProfile run per cell on the new side.
+        default: '0'
 
 permissions:
   contents: read
@@ -57,6 +62,7 @@ jobs:
       rtt: ${{ steps.req.outputs.rtt }}
       pairs: ${{ steps.req.outputs.pairs }}
       runner: ${{ steps.req.outputs.runner }}
+      profile: ${{ steps.req.outputs.profile }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
@@ -70,18 +76,20 @@ jobs:
         IN_RTT: ${{ inputs.rtt }}
         IN_PAIRS: ${{ inputs.pairs }}
         IN_OS: ${{ inputs.os }}
+        IN_PROFILE: ${{ inputs.profile }}
       run: |
         set -euo pipefail
         BASE="$IN_BASE"; NEW="$IN_NEW"; FIXTURES="${IN_FIXTURES:-tree-10}"
         JOURNEYS="${IN_JOURNEYS:-install-noop,install-locked-warm,install-warm,install-frozen-warm}"
         RTT="${IN_RTT:-30}"; PAIRS="${IN_PAIRS:-3}"; OS="${IN_OS:-linux}"
+        PROFILE="${IN_PROFILE:-0}"
         if [ "${GITHUB_EVENT_NAME}" = push ]; then
           # KEY=VALUE lines only; never sourced, so the file cannot run code.
           while IFS='=' read -r key value; do
             case "$key" in
               BASE) BASE="$value" ;; NEW) NEW="$value" ;; FIXTURES) FIXTURES="$value" ;;
               JOURNEYS) JOURNEYS="$value" ;; RTT) RTT="$value" ;; PAIRS) PAIRS="$value" ;;
-              OS) OS="$value" ;;
+              OS) OS="$value" ;; PROFILE) PROFILE="$value" ;;
             esac
           done < <(grep -E '^[A-Z]+=' bench-request.env)
         fi
@@ -91,6 +99,7 @@ jobs:
         [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
         [[ "$RTT" =~ ^[0-9]{1,4}$ ]] || { echo "::error::bad RTT"; exit 1; }
         [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
+        [[ "$PROFILE" =~ ^[01]$ ]] || { echo "::error::PROFILE must be 0 or 1"; exit 1; }
         case "$OS" in
           linux) RUNNER=ubuntu-24.04 ;;
           macos) RUNNER=macos-15 ;;
@@ -99,6 +108,7 @@ jobs:
         {
           echo "base=$BASE"; echo "new=$NEW"; echo "fixtures=$FIXTURES"
           echo "journeys=$JOURNEYS"; echo "rtt=$RTT"; echo "pairs=$PAIRS"; echo "runner=$RUNNER"
+          echo "profile=$PROFILE"
         } >> "$GITHUB_OUTPUT"
 
   bench:
@@ -145,8 +155,11 @@ jobs:
         JOURNEYS: ${{ needs.request.outputs.journeys }}
         RTT: ${{ needs.request.outputs.rtt }}
         SHARD: ${{ matrix.shard }}
+        PROFILE: ${{ needs.request.outputs.profile }}
       run: |
-        uv run --frozen python -m tests.benchmarks.ci_bench abab \
+        PROFILE_FLAG=()
+        if [ "$PROFILE" = 1 ] && [ "$SHARD" = 1 ]; then PROFILE_FLAG=(--profile); fi
+        uv run --frozen python -m tests.benchmarks.ci_bench abab "${PROFILE_FLAG[@]}" \
           --base-apm "$GITHUB_WORKSPACE/base/.venv/bin/apm" \
           --new-apm "$GITHUB_WORKSPACE/new/.venv/bin/apm" \
           --pairs "$PAIRS" --fixtures "$FIXTURES" --journeys "$JOURNEYS" --rtt "$RTT" \
@@ -158,6 +171,8 @@ jobs:
         path: |
           out/shard-${{ matrix.shard }}/runs/**/*.json
           out/shard-${{ matrix.shard }}/runs/**/*.md
+          out/shard-${{ matrix.shard }}/profile/*.md
+          out/shard-${{ matrix.shard }}/profile/profiles/*.txt
         if-no-files-found: warn
 
   report:

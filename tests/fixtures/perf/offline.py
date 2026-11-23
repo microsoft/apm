@@ -25,12 +25,26 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.fixtures.perf.generator import TreeFixture, publish_repositories
+import yaml
+
+from tests.fixtures.perf.generator import TreeFixture, commit_bare, publish_repositories
 from tests.lifecycle.world.services import WorldServices
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_scripted_https_proxy import Traffic
 
 _NETWORK_GUARD_ENV = "PYTHONPATH"
+# The org whose ``.github/apm-policy.yml`` governs a ``-policy`` fixture's
+# project (its git remote selects the org, as it does for a real user).
+POLICY_ORG = "perf-policy"
+# A blocking org policy shaped like an enterprise one: deny and MCP rules that
+# every dependency is matched against, none of which refuse the perf packages.
+POLICY_DOCUMENT = {
+    "name": "perf-enterprise",
+    "version": "1.0",
+    "enforcement": "block",
+    "dependencies": {"deny": ["evil-org/**", "**/forbidden-*"]},
+    "mcp": {"deny": ["evil-org/*"]},
+}
 
 
 @dataclass
@@ -99,8 +113,12 @@ def serve_offline(
     *,
     rtt_ms: float = 0.0,
     base_env: Mapping[str, str] | None = None,
+    policy: bool = False,
 ) -> Iterator[OfflineWorld]:
-    """Serve every package of *fixtures* offline; yield the world for ``apm`` children."""
+    """Serve every package of *fixtures* offline; yield the world for ``apm`` children.
+
+    ``policy`` also serves ``POLICY_DOCUMENT`` as org ``POLICY_ORG``'s policy.
+    """
     if isinstance(fixtures, TreeFixture):
         fixtures = (fixtures,)
     repositories: dict[str, Path] = {}
@@ -113,6 +131,15 @@ def serve_offline(
                 f"{overlap[:3]}...; serve one tree per world or give recipes distinct owners"
             )
         repositories.update(published)
+    if policy:
+        tree = directory / "policy-tree"
+        shutil.rmtree(tree, ignore_errors=True)
+        tree.mkdir(parents=True)
+        (tree / "apm-policy.yml").write_text(yaml.safe_dump(POLICY_DOCUMENT), encoding="utf-8")
+        bare = directory / "repositories" / f"{POLICY_ORG}__github.git"
+        shutil.rmtree(bare, ignore_errors=True)
+        commit_bare(bare, tree, tag=None)
+        repositories[f"{POLICY_ORG}/.github"] = bare
     isolated, env = isolated_environment(directory / "env", base_env)
     (directory / "services").mkdir(parents=True, exist_ok=True)
     services = WorldServices(repositories).start(directory / "services")
