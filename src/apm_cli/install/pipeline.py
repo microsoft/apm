@@ -153,7 +153,7 @@ def _run_integration_phase(ctx: InstallContext) -> DeploymentMaterializationSess
                 materialization_session=session,
             )
         ):
-            _run_phase("integrate", _integrate_phase, ctx)
+            pass  # PERF FALSIFICATION HACK: skip integrate -- NEVER SHIP
     finally:
         if locked is not None:
             locked.close()
