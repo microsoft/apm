@@ -265,6 +265,14 @@ _UNPORTABLE_NAMES = [
     "Com1.md",
     "LPT9",
     "a/PRN.md",
+    "COM0.md",
+    "lpt0",
+    "COM\u00b9.md",
+    "LPT\u00b3",
+    "CONIN$",
+    "conout$.txt",
+    "a\x01b.md",
+    "a/\x1f.md",
 ]
 _PORTABLE_NAMES = ["a.b.md", "v1.2/notes.md", "console.md", "COM10.md", "con_notes/x.md"]
 _FORMATS = ["tar.gz", "zip"]

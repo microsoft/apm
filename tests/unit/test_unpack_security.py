@@ -191,19 +191,23 @@ class TestUnpackDestinationContainment:
 
         assert not any(output.rglob("*"))
 
-    def test_unportable_lockfile_names_refused_before_any_write(self, tmp_path):
+    @pytest.mark.parametrize(
+        "unportable",
+        [
+            ".github/instructions/a. /x.md",
+            ".github/instructions/x.md:y",
+            ".github/instructions/aux.md",
+        ],
+        ids=["trailing-space-segment", "colon", "device-name"],
+    )
+    def test_unportable_lockfile_names_refused_before_any_write(self, tmp_path, unportable):
         bundle = _build_bundle_dir(tmp_path, {".github/instructions/ok.md": "ok\n"})
         lockfile = LockFile()
         lockfile.add_dependency(
             LockedDependency(
                 repo_url="owner/repo",
                 resolved_commit="abc123",
-                deployed_files=[
-                    ".github/instructions/ok.md",
-                    ".github/instructions/a. /x.md",
-                    ".github/instructions/x.md:y",
-                    ".github/instructions/aux.md",
-                ],
+                deployed_files=[".github/instructions/ok.md", unportable],
             )
         )
         lockfile.write(bundle / "apm.lock.yaml")

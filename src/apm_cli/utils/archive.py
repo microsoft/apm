@@ -91,7 +91,7 @@ def _raise(error_type: type[_ErrorT], message: str) -> None:
 # Windows reserved device names, matched on the text before the first dot;
 # COM and LPT also take a superscript digit (U+00B9, U+00B2, U+00B3).
 _RESERVED_DEVICE_STEM = re.compile(
-    r"(?:CON|PRN|AUX|NUL|(?:COM|LPT)[0-9\u00b9\u00b2\u00b3])", re.IGNORECASE
+    r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[0-9\u00b9\u00b2\u00b3])", re.IGNORECASE
 )
 
 
