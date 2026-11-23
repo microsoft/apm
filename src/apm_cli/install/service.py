@@ -464,13 +464,15 @@ class InstallService:
         with its own cause instead of the MCP drift its missing manifest
         would imply. Nothing has been deployed at this point.
         """
+        failures = list(failures)
         reasons = [f"  - {message}" for _, message in failures]
         if not reasons:
             return
         from apm_cli.install.errors import FrozenInstallError
 
+        names = ", ".join(dict.fromkeys(name for name, _ in failures))
         raise FrozenInstallError(
-            "--frozen: locked dependencies could not be restored.",
+            f"--frozen: locked dependencies could not be restored: {names}.",
             reasons=reasons,
             tip="Tip: nothing was deployed. Fix the cause above and re-run.",
         )

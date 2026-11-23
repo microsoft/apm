@@ -263,6 +263,37 @@ def test_first_upgraded_install_updates_a_migrated_user_root_skill(
     assert deployed[0].read_text(encoding="utf-8").rstrip().endswith("Version two.")
 
 
+def test_first_upgrade_switching_to_a_target_sharing_the_skills_dir_updates_it(
+    scene: HarnessScene,
+) -> None:
+    """#4813: a 0.37 Copilot skill receipt migrates on a first ``install -g --target codex``.
+
+    Copilot and Codex share ``~/.agents/skills``; the receipt's target is not
+    selected, yet its skill directory is the selected target's destination.
+    """
+    source = scene.isolated.config_root / "skills" / "research" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion one.\n",
+        encoding="utf-8",
+    )
+    _install(scene, target="copilot")
+    deployed = scene.home / ".agents" / "skills" / "research" / "SKILL.md"
+    assert deployed.is_file(), sorted(p.as_posix() for p in scene.home.rglob("SKILL.md"))
+    _as_037_state(scene, deployed)
+    (scene.home / ".codex").mkdir(exist_ok=True)
+    source.write_text(
+        "---\nname: research\ndescription: Research skill\n---\nVersion two.\n",
+        encoding="utf-8",
+    )
+
+    upgraded = _install(scene, target="codex")
+
+    assert "skipped" not in flat(upgraded.stdout + upgraded.stderr), describe(upgraded)
+    assert deployed.read_text(encoding="utf-8").rstrip().endswith("Version two.")
+    assert ".agents/skills/research" in (_lock(scene).get("local_deployed_files") or [])
+
+
 def test_adding_a_dependency_that_deploys_a_root_claimed_agent_keeps_its_file(
     scene: HarnessScene,
 ) -> None:
@@ -315,5 +346,63 @@ def _install_claude_hook_then_audit(scene: HarnessScene, command: str) -> Comman
 def test_install_g_then_audit_accepts_a_user_root_scripted_hook(scene: HarnessScene) -> None:
     """I3: audit --ci replays a user-root scripted hook with the commands install -g wrote."""
     audit = _install_claude_hook_then_audit(scene, "./scripts/g.sh")
+
+    assert audit.returncode == 0, describe(audit)
+
+
+def test_install_g_then_audit_accepts_a_user_root_context_link(scene: HarnessScene) -> None:
+    """I3: audit --ci replays a user-root agent's context link as install -g wrote it (#4832).
+
+    Install renders ``../context/notes.context.md`` relative to the live
+    ``~/.copilot/agents``; replay must emit the same text, not a path from its
+    scratch directory, or a clean install reports drift.
+    """
+    context = scene.isolated.config_root / "context"
+    context.mkdir()
+    (context / "notes.context.md").write_text(
+        "---\ndescription: Notes\n---\n\nShared notes.\n", encoding="utf-8"
+    )
+    _source(scene).write_text(
+        _agent("Read [the notes](../context/notes.context.md) first."), encoding="utf-8"
+    )
+    _install(scene)
+    deployed = (scene.home / _DEPLOYED).read_text(encoding="utf-8")
+    assert "[the notes](../../.apm/context/notes.context.md)" in deployed, deployed
+
+    def audit() -> CommandResult:
+        return scene.runner.run(
+            ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+        )
+
+    clean = audit()
+
+    assert clean.returncode == 0, describe(clean)
+    assert (scene.home / _DEPLOYED).read_text(encoding="utf-8") == deployed
+
+    # Control: a real edit to the deployed agent still reports drift.
+    (scene.home / _DEPLOYED).write_text(deployed + "Hand edit.\n", encoding="utf-8")
+    edited = audit()
+
+    assert edited.returncode == 1, describe(edited)
+    assert "research.agent.md" in flat(edited.stdout + edited.stderr), describe(edited)
+
+
+def test_install_g_then_audit_accepts_a_dependency_context_link(scene: HarnessScene) -> None:
+    """I3: a scratch-materialized dependency's context link replays as install -g wrote it."""
+    factory = LocalPackageFactory(scene.isolated.package_root)
+    package = factory.create("notes-pack")
+    factory.add_agent(
+        package, "research", _agent("Read [the notes](../context/notes.context.md) first.")
+    )
+    context = package.root / ".apm" / "context" / "notes.context.md"
+    context.parent.mkdir(parents=True)
+    context.write_text("---\ndescription: Notes\n---\n\nShared notes.\n", encoding="utf-8")
+    _install(scene, str(package.root), "--no-policy", "--parallel-downloads", "0")
+    deployed = (scene.home / _DEPLOYED).read_text(encoding="utf-8")
+    assert "notes.context.md)" in deployed, deployed
+
+    audit = scene.runner.run(
+        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+    )
 
     assert audit.returncode == 0, describe(audit)
