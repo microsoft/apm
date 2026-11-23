@@ -962,8 +962,9 @@ class LSPIntegrator:
         for runtime, spec, prepared in prepared_targets:
             servers, options = inputs[runtime]
             if kept & (builtins.set(servers) - builtins.set(prepared.kept)):
+                # A target's own keeps are re-judged, never withheld: that drops their claim.
                 rebuilt = LSPIntegrator._prepare_target_config(
-                    spec, servers, **options, held=frozenset(kept)
+                    spec, servers, **options, held=frozenset(kept - builtins.set(prepared.kept))
                 )
                 # The held render is the locked one: keep the original kinds.
                 prepared = replace(rebuilt, kept={**rebuilt.kept, **prepared.kept})

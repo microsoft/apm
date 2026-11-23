@@ -671,6 +671,29 @@ class TestKeptEntryReviewThree:
         assert "pyright" not in json.loads(opencode.read_text()).get("lsp", {})
         assert record.kept_unowned.get("opencode") == {"pyright"}
 
+    def test_a_targets_own_unproven_keep_stays_claimed_when_another_is_held(self, tmp_path):
+        """#4626 review: rebuilding for a held server never withholds the target's own keep."""
+        v1 = [_make_dep("pyright", command="p-v1"), _make_dep("ruff", command="r-v1")]
+        both = ["copilot", "claude"]
+        LSPIntegrator.install(v1, project_root=tmp_path, target_runtimes=both)
+        copilot = tmp_path / ".github" / "lsp.json"
+        edited = self._edit(copilot, "pyright")
+        self._edit(tmp_path / _CLAUDE_PROJECT_PLUGIN, "ruff")
+        locked = {"ruff": LSPIntegrator.get_server_configs(v1)["ruff"]}
+        record = LspInstallRecord(locked_configs=locked)
+
+        LSPIntegrator.install(
+            [_make_dep("pyright", command="p-v2"), _make_dep("ruff", command="r-v2")],
+            project_root=tmp_path,
+            target_runtimes=both,
+            managed_target_servers={"copilot": {"pyright", "ruff"}, "claude": {"pyright", "ruff"}},
+            record=record,
+            diagnostics=MagicMock(),
+        )
+
+        assert json.loads(copilot.read_text())["lspServers"]["pyright"] == edited
+        assert "pyright" not in record.kept_unowned.get("copilot", set())
+
     def test_a_blocking_keep_without_a_collector_fails_the_install(self, tmp_path):
         from apm_cli.install.errors import LSPUserEntryConflictError
 
