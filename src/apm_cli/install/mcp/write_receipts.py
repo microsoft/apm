@@ -513,12 +513,16 @@ def _unusable_noted(project_root: Path, *, user_scope: bool) -> bool:
 def _note_unusable(project_root: Path, *, user_scope: bool, reason: str) -> None:
     """Note that unusable evidence kept every entry, so audit reports it with a lockfile too."""
     from apm_cli.integration.write_seam import atomic_write_text
+    from apm_cli.utils.path_security import ensure_path_within, has_symlink_component
 
     path = _unusable_note_path(project_root, user_scope=user_scope)
     if path is None or os.path.lexists(path):
         return
+    # The evidence owner's containment anchor (above APM_HOME): no linked component.
+    base = path.parent.parent.parent.parent
     try:
-        if path.parent.is_symlink() or not path.parent.is_dir():
+        ensure_path_within(path, base)
+        if has_symlink_component(base, path, raise_on_error=True) or not path.parent.is_dir():
             return
         atomic_write_text(path, reason + "\n", new_file_mode=0o600, create_only=True)
     except (OSError, ValueError):

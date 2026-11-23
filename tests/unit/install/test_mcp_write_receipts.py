@@ -533,3 +533,19 @@ def test_unusable_evidence_met_without_a_lockfile_stays_reported(project: Path) 
     assert _kept_mcp_entries(project, LockFile(), user_scope=False) == ()
     _retire(project, _Logger())
     assert not list(path.parent.glob("*.unusable")), "the note is cleared once evidence is usable"
+
+
+def test_the_unusable_note_is_never_written_through_a_linked_directory(
+    project: Path, tmp_path: Path
+) -> None:
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    receipts = path.parent.parent
+    elsewhere = tmp_path / "elsewhere"
+    receipts.rename(elsewhere)
+    receipts.symlink_to(elsewhere, target_is_directory=True)
+
+    _retire(project, _Logger())
+
+    assert SERVER in _servers(project), "unusable evidence must not remove anything"
+    assert not list(elsewhere.rglob("*.unusable")), "nothing is written outside APM_HOME"
