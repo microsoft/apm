@@ -1,0 +1,15 @@
+{
+  "issue": 5150,
+  "fixed_in": "Unreleased",
+  "summary": "The parked-native kept-claim subtraction compared paths as exact strings, so a case or NFD/NFC variant of a path another package wrote stayed kept on a volume where both spellings are one entry; spellings the volume proves identical now count as written.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/unit/install/test_parked_native_keep.py::test_a_kept_spelling_of_a_written_path_follows_the_volume"
+  ]
+}

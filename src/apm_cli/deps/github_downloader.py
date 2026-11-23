@@ -1078,14 +1078,16 @@ class GitHubPackageDownloader:
         # Determine the ref to use
         ref = dep_ref.reference or "main"
 
-        # Resolve the commit SHA cheaply BEFORE the file download. This is one
-        # short HTTP call (Accept: application/vnd.github.sha returns just the
-        # 40-char SHA in the body) and the result is propagated into PackageInfo
-        # so the lockfile and per-dep header can render the SHA suffix instead
-        # of just the ref name. On non-GitHub hosts or any failure this returns
-        # None and we fall back to ref-name only -- the install never fails on
-        # SHA resolution.
-        resolved_commit = self._resolve_commit_sha_for_ref(dep_ref, ref)
+        # Resolve and admit the commit BEFORE the file download. A declared
+        # ref is fetched by its admitted commit, never by name, and the commit
+        # is propagated into PackageInfo so the lockfile records it. A ref
+        # that names no origin branch or tag, or an unreachable commit,
+        # raises CommitNotReachableError. An undeclared ref keeps the
+        # default-branch fallback and records the commit when the cheap
+        # commits API returns one.
+        from ..cache.commit_reachability import admit_ref_commit
+
+        fetch_ref, resolved_commit = admit_ref_commit(self, dep_ref, ref)
 
         # Update progress - downloading
         if progress_obj and progress_task_id is not None:
@@ -1096,7 +1098,7 @@ class GitHubPackageDownloader:
         # sparse-Git fallback and use its observed commit for lock provenance.
         api_throttle: GitHubThrottleError | None = None
         try:
-            file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, ref)
+            file_content = self.download_raw_file(dep_ref, dep_ref.virtual_path, fetch_ref)
         except GitHubThrottleError as throttle:
             api_throttle = throttle
         except RuntimeError as e:
@@ -1108,7 +1110,7 @@ class GitHubPackageDownloader:
             fetched = self._strategies.download_github_file_via_throttle_fallback(
                 dep_ref,
                 dep_ref.virtual_path,
-                ref,
+                fetch_ref,
                 api_throttle,
             )
             file_content = fetched.content
@@ -1399,6 +1401,9 @@ class GitHubPackageDownloader:
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
+        from ..cache.commit_reachability import admit_fetch_ref
+
+        ref = admit_fetch_ref(self, dep_ref, ref)  # before any cache, bare or clone fetch
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
         _resolved_sha_for_cache: str | None = None
@@ -1734,8 +1739,8 @@ class GitHubPackageDownloader:
 
         # Get the resolved reference for metadata
         resolved_ref = ResolvedReference(
-            original_ref=ref or "default",
-            ref_name=ref or "default",
+            original_ref=dep_ref.reference or "default",
+            ref_name=dep_ref.reference or "default",
             ref_type=GitReferenceType.BRANCH,
             resolved_commit=resolved_commit,
         )
@@ -1885,8 +1890,10 @@ class GitHubPackageDownloader:
                 "Set PROXY_REGISTRY_URL or use explicit Artifactory FQDN syntax."
             )
 
-        # Regular package download (existing logic)
-        resolved_ref = self.resolve_git_reference(dep_ref)
+        # Regular package download: a declared commit is admitted before resolution can fetch it.
+        from ..cache.commit_reachability import admit_and_resolve
+
+        resolved_ref = admit_and_resolve(self, dep_ref)
 
         # Create target directory if it doesn't exist
         target_path.mkdir(parents=True, exist_ok=True)
@@ -1976,8 +1983,10 @@ class GitHubPackageDownloader:
         try:
             # Clone the repository using fallback authentication methods
             # Use shallow clone for performance if we have a specific commit
-            if resolved_ref.ref_type == GitReferenceType.COMMIT:
-                # For commits, we need to clone and checkout the specific commit
+            if resolved_ref.ref_type == GitReferenceType.COMMIT or resolved_ref.ref_name.startswith(
+                "refs/"
+            ):
+                # Commits and fully qualified refs: clone, then check out the resolved commit
                 progress_reporter = (
                     _git_progress_reporter_class()(
                         progress_task_id, progress_obj, package_display_name

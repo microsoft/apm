@@ -247,8 +247,12 @@ still cleans up its managed files, subject to the usual user-edit protections.
   one found at the MCP write keeps the deployed files the lockfile records. A killed process (SIGKILL, power loss)
   cannot restore itself: the next `apm install` in that project (including
   `--mcp` and local-bundle installs) restores every file first and prints `Restored N deployed path(s) left by an interrupted
-  install.` It restores only bytes that `apm.lock.yaml` records for the path,
-  and never removes or replaces a file that changed after the interrupted
+  install.` It restores only bytes that `apm.lock.yaml` records for the path.
+  A shared config file the lockfile does not record (hook settings such as
+  `.claude/settings.json`, the `apm-hooks.json` sidecar, an MCP config file) is
+  restored only when it still holds exactly what the interrupted install wrote
+  and this machine's record of APM's config file writes confirms those bytes.
+  It never removes or replaces a file that changed after the interrupted
   install (for example one you wrote there): it keeps that file and names it
   in a warning. A directory a killed removal left half-deleted is restored
   whole, unless you changed it.
@@ -256,9 +260,8 @@ still cleans up its managed files, subject to the usual user-edit protections.
   cannot be restored, it restores the others. Either way it names each path,
   keeps the copies under `~/.apm/install-snapshots/retained-*` and exits 1.
   Restore or remove the listed paths by hand, then run the command again.
-  Shared settings the lockfile does not record (hook settings, MCP
-  configuration) are not restored this way: the copies are kept and reported
-  for you to restore by hand.
+  A shared config file this machine's records cannot confirm is not restored
+  either: its copy is kept and reported for you to restore by hand.
 - **Transactional replacement.** `--update` and `--refresh` download package
   replacements to isolated staging paths and validate them before publication.
   Failed downloads or validation leave the previous package active. Failed
