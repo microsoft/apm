@@ -223,17 +223,20 @@ class _Store:
     def _load_shard(self, shard: str) -> None:
         if shard in self.loaded:
             return
-        self.loaded.add(shard)
         path = self._shard_path(shard)
         if not os.path.lexists(path):
+            self.loaded.add(shard)
             return
         try:
             data = _read_json(path)
             if data.get("version") != _VERSION:
                 raise ValueError("unknown version or layout")
             if data.get("generation", "") != self.generation:
-                return  # another store's leftover: proves nothing, overwritten on save
+                # Another generation's leftover proves nothing. It is not loaded, so a
+                # save never deletes it; a save with records there overwrites it.
+                return
             self._absorb(data)
+            self.loaded.add(shard)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{path}: {exc}") from exc
 
@@ -295,6 +298,35 @@ class _Store:
         )
 
     def save(self) -> None:
+        """Save under APM_HOME's lifecycle lock, after re-reading the index (#5037).
+
+        One writer at a time across processes: a writer that read the store before
+        another migrated it or started its index joins that index, so no record file
+        is ever written under a generation the index does not name.
+        """
+        from apm_cli.install.locking import lifecycle_lock
+
+        with lifecycle_lock():
+            self._refresh()
+            self._save_locked()
+
+    def _refresh(self) -> None:
+        if not os.path.lexists(self.path):
+            self.indexed = self.legacy_layout = False
+            return
+        try:
+            data = _read_json(self.path)
+            if data.get("version") == _V1 and isinstance(data.get("files"), list):
+                self.legacy_layout = True
+                return
+            if self.legacy_layout or not self.indexed or data.get("generation") != self.generation:
+                self.legacy_layout = False
+                self._adopt(data)
+                self._loaded_generation_reset()
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
+            raise _UnreadableStore(f"{self.path}: {exc}") from exc
+
+    def _save_locked(self) -> None:
         # Never pruned by absence: the store is shared, and a file away for now (an
         # unmounted drive) keeps its record. Only a retirement forgets a record.
         grouped = self._grouped()
@@ -325,15 +357,15 @@ class _Store:
         its generation; nothing is deleted, so two first writers keep each other's
         records.
         """
-        from apm_cli.integration.write_seam import chmod, mkdir, open_for_write
+        from apm_cli.integration.write_seam import atomic_write_text, mkdir
 
         generation = secrets.token_hex(16)
         marker = {"version": _VERSION, "layout": _LAYOUT, "generation": generation}
         mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
         try:
-            with open_for_write(self.path, "x", encoding="utf-8") as handle:
-                handle.write(json.dumps(marker, indent=2) + "\n")
-            chmod(self.path, 0o600)  # machine-local evidence, like the record files
+            # Published whole or not at all: a kill never leaves an empty index.
+            text = json.dumps(marker, indent=2) + "\n"  # architecture-authority-exempt: evidence
+            atomic_write_text(self.path, text, create_only=True, new_file_mode=0o600)
         except FileExistsError:
             marker = _read_json(self.path)  # another writer started the store
         self._adopt(marker)
