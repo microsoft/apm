@@ -977,8 +977,12 @@ class LSPIntegrator:
             joined = LSPIntegrator._held_joiners(kept, servers, options)
             if kept & (builtins.set(servers) - builtins.set(own_kept)) or joined:
                 try:
+                    # A target's own keeps are re-judged, never withheld: that drops their claim.
                     rebuilt = LSPIntegrator._prepare_target_config(
-                        spec, {**servers, **joined}, **options, held=frozenset(kept)
+                        spec,
+                        {**servers, **joined},
+                        **options,
+                        held=frozenset(kept - builtins.set(own_kept)),
                     )
                 except Exception:
                     if prepared is None:

@@ -252,3 +252,105 @@ def test_uninstall_tie_rule_spans_production_and_dev_parents(
     world.apm("uninstall", "test/e")
     assert not _rows(world)["test/e"].get("is_dev")
     _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_of_a_virtual_sibling_never_parents_it_to_itself(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4823: test/mono/d declares test/mono/e; both share the legacy identity test/mono."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+
+    def mono(root: Path, _name: str) -> None:
+        _skill_package(root / "d", "d", ("test/mono/e",))
+        _skill_package(root / "e", "e")
+
+    world.publish("mono", mono)
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["test/mono/d", "test/mono/e"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    world.apm("uninstall", "test/mono/e")
+    lock = load_yaml(world.project / "apm.lock.yaml")
+    e_row = next(row for row in lock["dependencies"] if row.get("virtual_path") == "e")
+    assert e_row["depth"] == 2
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_reparents_to_a_surviving_local_parent_by_its_lock_key(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4823: local ./vendor/d declares test/e; e lands one level below d's lock row."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    world.publish("e", _skill_package)
+    _skill_package(world.project / "vendor" / "d", "d", ("test/e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/d", "test/e"]},
+        },
+        world.project / "apm.yml",
+    )
+    world.apm("install")
+    world.apm("uninstall", "test/e")
+    assert _rows(world)["test/e"]["depth"] == 2
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_reparents_a_descendant_to_its_nearest_surviving_parent(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: d -> e -> f and g -> f; once e is not direct, f sits under g at depth 2."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("g", "f")),
+        ["test/d", "test/e", "test/g"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert (rows["test/e"]["resolved_by"], rows["test/e"]["depth"]) == ("test/d", 2)
+    assert (rows["test/f"]["resolved_by"], rows["test/f"]["depth"]) == ("test/g", 2)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_takes_the_shorter_dev_path_through_an_expanded_node(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: p -> q -> x -> e and b -> c -> e, with x also a direct dev dependency."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("e", None), ("x", "e"), ("q", "x"), ("p", "q"), ("c", "e"), ("b", "c")),
+        ["test/p", "test/b", "test/e"],
+        dev=["test/x"],
+    )
+    world.apm("uninstall", "test/e")
+    row = _rows(world)["test/e"]
+    assert (row["resolved_by"], row["depth"], row.get("is_dev")) == ("test/x", 2, None)
+    _assert_install_rewrites_nothing(world)
+
+
+def test_uninstall_makes_a_shared_descendant_dev_only_graph_wide(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4833: dev d -> e, e -> f, dev a -> f; once e is not direct, f is dev-only."""
+    world = _graph_world(
+        tmp_path,
+        apm_binary_path,
+        (("f", None), ("e", "f"), ("d", "e"), ("a", "f")),
+        ["test/e"],
+        dev=["test/d", "test/a"],
+    )
+    world.apm("uninstall", "test/e")
+    rows = _rows(world)
+    assert rows["test/e"].get("is_dev") is True
+    assert rows["test/f"].get("is_dev") is True
+    _assert_install_rewrites_nothing(world)

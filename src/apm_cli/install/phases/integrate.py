@@ -642,8 +642,14 @@ def _keep_prior_entries(
     lockfile = ctx.existing_lockfile
     for owner, path in kept:
         entry = deployed_path_entry(path, ctx.project_root, ctx.targets)
-        previous = lockfile.get_dependency(owner) if lockfile is not None else None
-        prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
+        if lockfile is None:
+            prior = None
+        elif owner == ".":
+            # The project's own outputs keep their local lock hash (#4873).
+            prior = lockfile.local_deployed_file_hashes.get(entry)
+        else:
+            previous = lockfile.get_dependency(owner)
+            prior = previous.deployed_file_hashes.get(entry) if previous is not None else None
         ctx.package_cleanup_retained.setdefault(owner, {})[entry] = prior
         ctx.kept_overwrites.append((owner, entry))
         kind = session_kinds.get(path.resolve().as_posix())
@@ -798,6 +804,9 @@ def run(ctx: InstallContext) -> None:
     # A batch refusal must not swallow the acquired packages' held [+]
     # headers: print them before the refusal surfaces (#3994).
     try:
+        from apm_cli.install.phases.policy_gate import enforce_content_types
+
+        enforce_content_types(ctx, materialized)
         preflight_agent_plugin_materializations(materialized)
         _fail_explicit_target_without_deploy(ctx)
         deployment_plans, local_plan = preflight_skill_materializations(ctx, materialized)

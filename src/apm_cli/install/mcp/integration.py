@@ -532,6 +532,15 @@ def run_mcp_integration(  # noqa: PLR0913
             target_decision=target_decision,
             logger=logger,
         )
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        announce_kept_mcp_writes(
+            lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
+        )
         return mcp_count, {"scripts": apm_package.scripts or {}}
 
     previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None
@@ -964,11 +973,12 @@ def run_mcp_integration(  # noqa: PLR0913
             fail_on_write_error=True,
         )
 
-    if should_install and pre_install_lock is None and not frozen:
+    if should_install:
         from apm_cli.install.mcp.write_receipts import retire_undeclared_mcp_writes
 
         # No prior lockfile names APM's servers: this installation's write
         # evidence retires the entries APM wrote and no longer deploys (#4737).
+        # Otherwise the entries it kept are announced again.
         retire_undeclared_mcp_writes(
             new_mcp_servers,
             declared_configs=new_mcp_configs,
@@ -976,6 +986,7 @@ def run_mcp_integration(  # noqa: PLR0913
             user_scope=user_scope,
             exclude=exclude,
             logger=logger,
+            retire=pre_install_lock is None and not frozen,
         )
 
     if prepared.omission_view is not None and lockfile_exists(lock_path):
