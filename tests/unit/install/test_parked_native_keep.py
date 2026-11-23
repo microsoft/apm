@@ -10,13 +10,18 @@ carry_kept_loose_into_replay
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from apm_cli.claude_plugins.admission import ClaudeNativePlugin
-from apm_cli.install.deployment_plan import PackageDeploymentPlan, carry_kept_loose_into_replay
+from apm_cli.install.deployment_plan import (
+    PackageDeploymentPlan,
+    carry_kept_loose_into_replay,
+    parked_kept_values_after_writes,
+)
 from apm_cli.integration.targets import KNOWN_TARGETS
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I4")]
@@ -157,3 +162,31 @@ def test_replay_never_replaces_a_copy_another_package_rendered(tmp_path: Path) -
     carry_kept_loose_into_replay(result, lock_dep, live, scratch, True)
 
     assert (scratch / ".claude/skills/demo/SKILL.md").read_text(encoding="ascii") == "writer render"
+
+
+@pytest.mark.windows_compat
+@pytest.mark.parametrize(
+    ("written", "kept"),
+    [
+        (".claude/skills/demo/SKILL.md", ".claude/skills/Demo/SKILL.md"),
+        (".claude/skills/caf\u00e9/SKILL.md", ".claude/skills/cafe\u0301/SKILL.md"),
+    ],
+    ids=["case-variant", "nfd-variant"],
+)
+def test_a_kept_spelling_of_a_written_path_follows_the_volume(
+    tmp_path: Path, written: str, kept: str
+) -> None:
+    # #5150: where the volume proves both spellings are one entry, the writer's
+    # claim wins (#5108); a case-sensitive or non-normalizing volume keeps both.
+    root = tmp_path / "home"
+    (root / written).parent.mkdir(parents=True)
+    (root / written).write_text("writer", encoding="ascii")
+    ctx = SimpleNamespace(
+        parked_native_kept_values=frozenset({kept}),
+        package_deployed_files={"writer": [written]},
+        project_root=root,
+    )
+    one_entry = (root / kept).exists() and os.path.samefile(root / kept, root / written)
+
+    expected = frozenset() if one_entry else frozenset({kept})
+    assert parked_kept_values_after_writes(ctx) == expected
