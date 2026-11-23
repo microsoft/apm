@@ -68,8 +68,9 @@ _UNGATED_EXECUTABLE_WRITES = {
         "HookIntegrator._clean_apm_source_from_json": frozenset(
             {("atomic_write_text", "json_path"), ("atomic_write_text", "sidecar_path")}
         ),
+        # Same cleanup; the JSON is written whole through the seam with its hash (#4863).
         "HookIntegrator._clean_apm_entries_from_json": frozenset(
-            {("open_for_write", "json_path"), ("atomic_write_text", "sidecar_path")}
+            {("write_text", "json_path"), ("atomic_write_text", "sidecar_path")}
         ),
     },
 }
