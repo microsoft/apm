@@ -1143,6 +1143,23 @@ class TestLocalBundlePathRouting:
         assert len(warnings) == 1 and ".claude/rules/bad.md" in warnings[0], warnings
         assert "not valid YAML" in warnings[0]
 
+    def test_non_string_frontmatter_keys_install_with_their_sibling(self, tmp_path: Path) -> None:
+        """#3686: valid YAML with a numeric mapping key passes the decoded preflight."""
+        project, result, diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/keys.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: {1: numeric, note: text}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert result["deployed_files"] == [".claude/rules/good.md", ".claude/rules/keys.md"]
+        assert "paths:" in (project / ".claude/rules/keys.md").read_text(encoding="utf-8")
+        assert "paths:" in (project / ".claude/rules/good.md").read_text(encoding="utf-8")
+        assert not diagnostics.has_diagnostics
+
     def test_hidden_character_in_decoded_frontmatter_rejects_the_rule(self, tmp_path: Path) -> None:
         """#3686: packed rules pass the instruction owner's decoded-frontmatter preflight."""
         from apm_cli.utils.diagnostics import CATEGORY_WARNING
