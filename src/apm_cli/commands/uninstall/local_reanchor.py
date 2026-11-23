@@ -526,11 +526,11 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
     from ...core.deployment_reanchor import rename_receipt_owners
     from ...deps.lockfile import LockFile
 
-    committed = LockFile.read(lockfile_path)
-    renamed = {new for old, new in plan.renames.items() if old != new}
-    if committed is None or not renamed <= committed.dependencies.keys():
-        return  # the lock was not committed; receipts still match it
     try:
+        committed = LockFile.read(lockfile_path)
+        renamed = {new for old, new in plan.renames.items() if old != new}
+        if committed is None or not renamed <= committed.dependencies.keys():
+            return  # the lock was not committed; receipts still match it
         rename_receipt_owners(deploy_root, scope, committed, plan.renames)
     except Exception as exc:
         # One transaction: without its receipts the re-anchor does not stand.

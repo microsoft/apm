@@ -174,3 +174,27 @@ def test_any_failed_receipt_rename_rolls_the_reanchor_back(
     assert lock.read_text(encoding="utf-8") == "lockfile_version: '4'\n"
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "unexpected receipt failure" in message and "were restored" in message, message
+
+
+def test_an_unreadable_committed_lock_rolls_the_reanchor_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, lock, repair = _planned(tmp_path)
+    real_read = Path.read_text
+
+    def unreadable_lock(self: Path, *args, **kwargs):
+        if self == lock:
+            raise OSError(5, "Input/output error", str(self))
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable_lock)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _rename_reanchored_receipts(repair, lock, tmp_path, None, logger)
+
+    assert exc.value.code == 1
+    assert "./vendor/e" in manifest.read_text(encoding="utf-8")
+    assert lock.read_bytes() == b"lockfile_version: '4'\n"
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "were restored" in message, message
