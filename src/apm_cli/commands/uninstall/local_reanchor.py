@@ -25,6 +25,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -88,6 +89,41 @@ def _root_identities(
         declared = _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
         identities[key] = (via[1], nearest[0], real_dir, declared)
     return identities
+
+
+def _respelled_descendants(
+    lockfile, decision, walk, local_roots, label, modules_dir: Path
+) -> dict[str, tuple[str, str, Any, str]]:
+    """Kept local descendants whose winning edge spells the same directory differently.
+
+    A case-only spelling on a case-insensitive filesystem, or a symlinked
+    spelling, resolves to the same package directory, but a fresh install
+    records the winning edge's spelling and names its copy after it (#5091).
+    Such a descendant is re-keyed like a root, with the same identity fields.
+    """
+    respelled: dict[str, tuple[str, str, Any, str]] = {}
+    for key in sorted(set(decision.rescued_parents) - set(local_roots)):
+        row = lockfile.get_dependency(key)
+        nearest = _nearest_parents(walk, key)
+        if row is None or row.source != "local" or not nearest:
+            continue
+        declared, alias = walk.local_edge_repos.get((key, nearest[0]), (None, None))
+        via = walk.declaring_edges.get(key, {}).get(nearest[0])
+        real_dir = walk.local_dirs.get(key)
+        if (
+            declared == row.repo_url
+            or alias != row.alias
+            or via is None
+            or via[1] is None
+            or real_dir is None
+            or not _same_install_dir(row, declared, modules_dir)
+        ):
+            continue
+        copy = row.to_dependency_ref().get_install_path(modules_dir)
+        _require_copy(copy, key, label, modules_dir)
+        _require_fresh_copy(row, real_dir, copy, key, label)
+        respelled[key] = (via[1], nearest[0], real_dir, declared)
+    return respelled
 
 
 def _winning_edge_installs_here(walk, key, parent, lockfile, label, modules_dir: Path):
@@ -165,9 +201,10 @@ def plan_local_reanchor(
             root=project_root,
             root_local_dirs={},
         )
-        for key, (local_path, parent_key, real_dir, repo_url) in _root_identities(
-            lockfile, walk, local_roots, label, modules_dir
-        ).items()
+        for key, (local_path, parent_key, real_dir, repo_url) in {
+            **_root_identities(lockfile, walk, local_roots, label, modules_dir),
+            **_respelled_descendants(lockfile, decision, walk, local_roots, label, modules_dir),
+        }.items()
     }
     renames = {key: node.get_unique_key() for key, node in nodes.items()}
     collisions = sorted(
@@ -229,7 +266,18 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
         current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
         target = node.get_install_path(modules_dir)
         _require_copy(current, key, label, modules_dir)
-        if current == target:
+        # Compared as spelled: a case-insensitive Path equality hides a case-only rename.
+        if os.fspath(current) == os.fspath(target):
+            continue
+        if target.exists() and _same_directory(current, target):
+            # A case-only rename goes through a temporary name, which every
+            # case-insensitive filesystem honors (#5091).
+            step = current.with_name(f".apm-reanchor-case-{current.name}")
+            if step.exists():
+                raise LocalReanchorRefused(
+                    f"{label(key)} stays, but {_modules_path(step, modules_dir)} is in the way"
+                )
+            moves += [(current, step), (step, target)]
             continue
         if target.exists():
             raise LocalReanchorRefused(
@@ -238,6 +286,13 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
             )
         moves.append((current, target))
     return tuple(moves)
+
+
+def _same_directory(first: Path, second: Path) -> bool:
+    try:
+        return first.samefile(second)
+    except OSError:
+        return False
 
 
 def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:

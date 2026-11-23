@@ -12,6 +12,7 @@ GRAPH=direct-also-transitive | cross-root diamond | replaced edge
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -438,3 +439,87 @@ def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "../private.txt" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+# -- A descendant the winning edge spells differently (#5091) --------------------
+
+
+def _case_insensitive(path: Path) -> bool:
+    probe = path / "CaseProbe"
+    probe.mkdir()
+    try:
+        return (path / "caseprobe").exists()
+    finally:
+        probe.rmdir()
+
+
+def _respelled_world(tmp_path: Path, apm_binary_path: Path, link_f) -> ReplayWorld:
+    """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "F", "F")
+    link_f(vendor)
+    _skill_package(vendor / "e", "e", ("../F",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", ("../f",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """vendor/f links to vendor/F: a's ../f wins after e goes, so F takes that spelling."""
+    world = _respelled_world(
+        tmp_path,
+        apm_binary_path,
+        lambda vendor: (vendor / "f").symlink_to(vendor / "F", target_is_directory=True),
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+@pytest.mark.windows_compat
+def test_a_case_only_descendant_spelling_reanchors_to_the_fresh_spelling(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """On a case-insensitive filesystem ../f and ../F are one package directory."""
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive filesystem")
+    world = _respelled_world(tmp_path, apm_binary_path, lambda vendor: None)
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+    assert not [key for key in _modules(world.project) if ".apm-reanchor-" in key]
+
+
+def test_two_packages_that_differ_only_by_case_stay_distinct(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """On a case-sensitive filesystem vendor/f and vendor/F are two packages."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("needs a case-sensitive filesystem")
+    world = _respelled_world(
+        tmp_path, apm_binary_path, lambda vendor: _skill_package(vendor / "f", "f")
+    )
+
+    world.apm("uninstall", "./vendor/e")
+
+    copies = {key.rsplit("/", 2)[-2] for key in _modules(world.project) if key.endswith("/apm.yml")}
+    assert {"F", "f"} <= copies, sorted(copies)
+    _assert_no_frozen_rewrites_nothing(world)
