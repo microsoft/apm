@@ -377,15 +377,19 @@ def test_a_reanchor_whose_project_skill_links_into_the_moving_copy_refuses(
     assert (tree_digest(world.project), _modules(world.project)) == before
 
 
-def _project_skill_world(tmp_path: Path, apm_binary_path: Path, body: str) -> ReplayWorld:
+def _project_skill_world(
+    tmp_path: Path, apm_binary_path: Path, body: str, before_install=None
+) -> ReplayWorld:
     """e -> f direct, dev d -> e, plus the project's own skill with *body*."""
     world = ReplayWorld.create(tmp_path, apm_binary_path)
+    if before_install is not None:
+        before_install(world.project)
     vendor = world.project / "vendor"
     _skill_package(vendor / "f", "f")
     _skill_package(vendor / "e", "e", ("../f",))
     _skill_package(vendor / "d", "d", ("../e",))
     own = world.project / ".apm/skills/proj-skill/SKILL.md"
-    own.parent.mkdir(parents=True)
+    own.parent.mkdir(parents=True, exist_ok=True)
     own.write_text(
         f"---\nname: proj-skill\ndescription: Project skill\n---\n{body}\n", encoding="utf-8"
     )
@@ -446,6 +450,168 @@ def test_a_reanchor_with_a_recorded_path_outside_the_project_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "../private.txt" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+# -- Equivalent spellings of a link into the moving copy (#5133) -----------------
+
+
+def _assert_refused_unchanged(world: ReplayWorld) -> None:
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "links into its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_dot_segment_link_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``_local/./e`` names e's copy once normalized: the re-anchor refuses."""
+    world = _project_skill_world(
+        tmp_path, apm_binary_path, "See [package](../../../apm_modules/_local/./e)."
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/_local/./e)" in deployed, deployed
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_link_through_a_symlinked_apm_modules_root_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules is a symlink to a shared store: a link spelled through it still counts."""
+    store = tmp_path / "store"
+
+    def link_modules(project: Path) -> None:
+        store.mkdir()
+        (project / "apm_modules").symlink_to(store, target_is_directory=True)
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/_local/e).",
+        before_install=link_modules,
+    )
+    assert (world.project / "apm_modules").is_symlink()
+    assert (store / "_local/e").is_dir(), sorted(p.name for p in store.rglob("*"))
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_dot_dot_link_through_a_symlinked_apm_modules_root_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store: ``apm_modules/../store/_local/./e`` resolves to e's copy."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store").mkdir()
+        (project / "apm_modules").symlink_to(Path("..") / "store", target_is_directory=True)
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store/_local/./e).",
+        before_install=link_modules,
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/../store/_local/./e)" in deployed, deployed
+    assert (world.project.parent / "store/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
+def test_an_angle_bracket_link_with_a_space_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """``](<... my dir/../...>)`` keeps its space: the whole destination is matched."""
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](<../../../apm_modules/my dir/../_local/./e>).",
+    )
+    deployed = (world.project / ".claude/skills/proj-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "my dir/../_local/./e>" in deployed, deployed
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_link_through_a_symlinked_root_with_a_comma_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store,archive: the comma is part of the link destination."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store,archive").mkdir()
+        (project / "apm_modules").symlink_to(Path("..") / "store,archive", target_is_directory=True)
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store,archive/_local/./e).",
+        before_install=link_modules,
+    )
+    assert (world.project.parent / "store,archive/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_link_through_a_symlinked_root_with_parentheses_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """apm_modules -> ../store(archive): balanced parentheses stay in the destination."""
+
+    def link_modules(project: Path) -> None:
+        (project.parent / "store(archive)").mkdir()
+        (project / "apm_modules").symlink_to(
+            Path("..") / "store(archive)", target_is_directory=True
+        )
+
+    world = _project_skill_world(
+        tmp_path,
+        apm_binary_path,
+        "See [package](../../../apm_modules/../store(archive)/_local/./e).",
+        before_install=link_modules,
+    )
+    assert (world.project.parent / "store(archive)/_local/e").is_dir()
+
+    _assert_refused_unchanged(world)
+
+
+def test_a_binary_asset_with_a_nul_path_token_does_not_stop_the_reanchor(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """A deployed binary asset holding ``\\x00/x`` is no link: the re-anchor proceeds."""
+
+    def blob(project: Path) -> None:
+        asset = project / ".apm/skills/proj-skill/blob.bin"
+        asset.parent.mkdir(parents=True)
+        asset.write_bytes(b"data \x00/x more\n")
+
+    world = _project_skill_world(tmp_path, apm_binary_path, "No links.", before_install=blob)
+    assert (world.project / ".claude/skills/proj-skill/blob.bin").is_file()
+
+    world.apm("uninstall", "./vendor/e")
+
+    _assert_no_frozen_rewrites_nothing(world)
+
+
+def test_an_untracked_user_link_into_the_copy_is_never_read_or_written(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Only recorded deployments are scanned: a user's own note is left as it is."""
+    world = _project_skill_world(tmp_path, apm_binary_path, "No links.")
+    note = world.project / "notes/links.md"
+    note.parent.mkdir()
+    note.write_bytes(b"See [e](../apm_modules/_local/./e).\n")
+
+    world.apm("uninstall", "./vendor/e")
+
+    assert note.read_bytes() == b"See [e](../apm_modules/_local/./e).\n"
+    _assert_no_frozen_rewrites_nothing(world)
 
 
 # -- Open follow-ups, pinned as strict known cells (#5097) -------------------------
