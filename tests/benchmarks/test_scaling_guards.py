@@ -1021,16 +1021,25 @@ class TestRewriteHooksDataScaling:
 
 
 def _write_bench_record(
-    root: Path, shard: int, side: str, pair: int, cpu: float, error: str = ""
+    root: Path,
+    shard: int,
+    side: str,
+    pair: int,
+    cpu: float,
+    error: str = "",
+    wall: float | None = None,
+    traffic: dict | None = None,
+    nested: str = "",
 ) -> None:
-    directory = root / f"perf-bench-shard-{shard}" / f"{side}-{pair:02d}"
+    directory = root / f"perf-bench-shard-{shard}" / nested / f"{side}-{pair:02d}"
     directory.mkdir(parents=True)
     record = {
         "fixture": "tree-10",
         "journey": "install-noop",
         "rtt_ms": 30.0,
         "cpu_p50_s": cpu,
-        "traffic": {"requests": 4 if side == "base" else 0},
+        "p50_s": wall,
+        "traffic": traffic or {"requests": 4 if side == "base" else 0},
         "spawns": {"git": 8} if side == "base" else {},
         "modules": 900,
         "error": error,
@@ -1060,8 +1069,47 @@ def test_bench_paired_ratio_cancels_a_slower_runner(tmp_path: Path, capsys) -> N
 
     assert _bench_report(tmp_path, shards=2, pairs=2, result=result) == 0
     (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
-    assert "| 0.500 | 4->0 | 8->0 | 4/4 | 0/0 |" in capsys.readouterr().out
+    assert "| 0.500 | - | - | 4->0 | - | - | 8->0 | 4/4 | 0/0 |" in capsys.readouterr().out
     assert row["paired_new_over_base"] == 0.5
+
+
+def test_bench_pairs_stay_within_their_shard_under_a_nested_artifact_root(
+    tmp_path: Path, capsys
+) -> None:
+    # Artifacts that also carry profiles keep a ``runs/`` level under each shard.
+    for shard, scale in ((1, 1.0), (2, 2.0)):
+        _write_bench_record(tmp_path, shard, "base", 0, 3.0 * scale, nested="runs")
+        _write_bench_record(tmp_path, shard, "new", 0, 1.5 * scale, nested="runs")
+    result = tmp_path / "result.json"
+
+    assert _bench_report(tmp_path, shards=2, pairs=1, result=result) == 0
+    (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
+    assert row["paired_new_over_base"] == 0.5
+
+
+def test_bench_pairs_a_single_runs_directory(tmp_path: Path, capsys) -> None:
+    # Reporting one shard's runs/ directly: base-00 and new-00 are one pair.
+    _write_bench_record(tmp_path, 1, "base", 0, 3.0, nested="runs")
+    _write_bench_record(tmp_path, 1, "new", 0, 1.5, nested="runs")
+
+    assert _bench_report(tmp_path / "perf-bench-shard-1" / "runs", shards=1, pairs=1) == 0
+    assert "| 2.00x | +50.0% | 0.500 |" in capsys.readouterr().out
+
+
+def test_bench_report_pairs_modeled_rtt_wall_and_round_trips(tmp_path: Path, capsys) -> None:
+    # A network-bound journey: new halves the round trips and the modeled-RTT wall.
+    for pair in range(2):
+        base = {"requests": 10, "round_trips": 20, "connects": 10}
+        new = {"requests": 10, "round_trips": 10, "connects": 1}
+        _write_bench_record(tmp_path, 1, "base", pair, 3.0, wall=2.0, traffic=base)
+        _write_bench_record(tmp_path, 1, "new", pair, 3.0, wall=1.0, traffic=new)
+    result = tmp_path / "result.json"
+
+    assert _bench_report(tmp_path, shards=1, pairs=2, result=result) == 0
+    (row,) = json.loads(result.read_text(encoding="utf-8"))["rows"]
+    out = capsys.readouterr().out
+    assert "| 1.000 | 2.000->1.000 | 0.500 | 10->10 | 20->10 | 10->1 |" in out
+    assert row["paired_wall_new_over_base"] == 0.5
 
 
 def test_bench_report_fails_on_a_failed_sample(tmp_path: Path, capsys) -> None:
@@ -1069,7 +1117,7 @@ def test_bench_report_fails_on_a_failed_sample(tmp_path: Path, capsys) -> None:
     _write_bench_record(tmp_path, 1, "new", 0, 1.0, error="install failed")
 
     assert _bench_report(tmp_path, shards=1, pairs=1) == 1
-    assert "| - | 4->0 | 8->0 | 1/0 | 0/1 |" in capsys.readouterr().out
+    assert "| - | - | - | 4->0 | - | - | 8->0 | 1/0 | 0/1 |" in capsys.readouterr().out
 
 
 def test_bench_report_fails_when_a_shard_is_missing(tmp_path: Path, capsys) -> None:

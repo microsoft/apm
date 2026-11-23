@@ -410,6 +410,12 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         log_bundle_deployed(logger, msg, deployed, targets)
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        lock_path = get_lockfile_path(_bundle_lock_root(global_))
+        announce_kept_mcp_writes(
+            lock_path, project_root=project_root, user_scope=global_, exclude=None, logger=logger
+        )
         if lsp_conflict is not None:
             raise lsp_conflict
 

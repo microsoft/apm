@@ -50,14 +50,17 @@ def _apm() -> str:
 def test_tree_recipes_write_the_pinned_shape(name: str, tmp_path: Path) -> None:
     recipe = TREE_RECIPES[name]
     fixture = build_tree(recipe, tmp_path / name)
-    owner = f"{recipe.owner}/"
+
+    def name_of(spec: str) -> str:
+        return spec.split("#")[0].rsplit("/", 1)[-1]
+
     edges: dict[str, list[str]] = {}
     for manifest in sorted((fixture.root / "packages").glob("*/apm.yml")):
         document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         deps = document.get("dependencies", {}).get("apm", [])
-        edges[document["name"]] = [d.removeprefix(owner).split("#")[0] for d in deps]
+        edges[document["name"]] = [name_of(d) for d in deps]
     project = yaml.safe_load((fixture.project / "apm.yml").read_text(encoding="utf-8"))
-    roots = [d.removeprefix(owner).split("#")[0] for d in project["dependencies"]["apm"]]
+    roots = [name_of(d) for d in project["dependencies"]["apm"]]
     parents: dict[str, int] = {}
     for children in edges.values():
         for child in children:
@@ -73,6 +76,16 @@ def test_tree_recipes_write_the_pinned_shape(name: str, tmp_path: Path) -> None:
     assert max(height(root) for root in roots) == recipe.depth >= 5
     assert set(parents) | set(roots) == set(edges)
     assert sum(1 for count in parents.values() if count >= 2) >= recipe.min_diamonds
+    specs = {
+        d.split("#")[0]
+        for m in (fixture.root / "packages").glob("*/apm.yml")
+        for d in (
+            yaml.safe_load(m.read_text(encoding="utf-8")).get("dependencies", {}).get("apm", [])
+        )
+    } | {d.split("#")[0] for d in project["dependencies"]["apm"]}
+    # One host per package: every parent references it the same way (no forked identity).
+    assert len(specs) == len({name_of(s) for s in specs}) == recipe.packages
+    assert {fixture.spec(name_of(s)).split("#")[0] for s in specs} == specs
     skill_files = list((fixture.root / "packages").rglob("SKILL.md"))
     assert len(skill_files) == recipe.packages * recipe.primitives.skills
 

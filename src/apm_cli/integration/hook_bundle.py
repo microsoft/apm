@@ -312,6 +312,11 @@ def copy_deployed_hook_bundle(
             diagnostics=diagnostics,
         ):
             continue
+        # An edited copied script is kept like any managed file (#4626).
+        if integrator.keeps_edited_output(
+            target_file, source_file, target_rel, force, diagnostics, target_paths
+        ):
+            continue
         write_seam.mkdir(checked.parent, parents=True, exist_ok=True)
         write_seam.copy2(source_file, checked)
         written = _written_path(target_file, checked)
@@ -342,6 +347,16 @@ def copy_deployed_hook_bundle(
             managed_files,
             force,
             diagnostics=diagnostics,
+        ):
+            continue
+        if integrator.keeps_edited_output(
+            target_file,
+            target_file,
+            target_rel,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=content,
         ):
             continue
         write_seam.mkdir(checked.parent, parents=True, exist_ok=True)

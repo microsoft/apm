@@ -182,7 +182,7 @@ class TestDriftE2E:
     def test_install_audit_tamper_audit_reinstall_audit_loop(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Round-trip: clean -> tampered (drift) -> refused reinstall -> remedy -> clean."""
+        """Round-trip: clean -> tampered (drift) -> kept reinstall -> remedy -> clean."""
         project = _make_project(tmp_path)
         monkeypatch.chdir(project)
         assert _run(["install"]).exit_code == 0
@@ -195,14 +195,15 @@ class TestDriftE2E:
         deployed.write_bytes(b"# tampered\n")
         assert _run(["audit", "--ci"]).exit_code == 1
 
-        # Phase 3: install keeps the tampered file it cannot prove it wrote
-        # (#4360), names it with the remedy and exits 1.
-        refused = _run(["install"])
-        text = " ".join(refused.output.split())
-        assert refused.exit_code == 1, text
+        # Phase 3: install keeps the tampered file the receipt proves edited,
+        # names it with the remedy and exits 0 (#4360, #4873); drift stays reported.
+        kept = _run(["install"])
+        text = " ".join(kept.output.split())
+        assert kept.exit_code == 0, text
         assert "Kept .github/instructions/rules.instructions.md:" in text, text
         assert "Move it aside, then run 'apm install'" in text, text
         assert deployed.read_bytes() == b"# tampered\n"
+        assert _run(["audit", "--ci"]).exit_code == 1
 
         # Phase 4: the printed remedy heals -> drift cleared.
         deployed.unlink()

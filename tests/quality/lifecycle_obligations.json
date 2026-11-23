@@ -5563,7 +5563,45 @@
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
   },
+  "T1|OP=prune|PRIM=bin|GATE=allowed": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-03-skill-exec-git-multi-unapproved-mcp]"
+  },
   "T1|OP=prune|PRIM=bin|GATE=denied-dependency": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=denied-executable": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-02-skill-exec-canvas-local-multi-deny-mcp]"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=none": {
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "baseline",
+   "strength": "e2e"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": {
+   "family": "T1",
+   "issue": "#4099",
+   "lane": "T-5",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": {
    "family": "T1",
    "issue": "#4095",
    "lane": "T-1",
@@ -12302,9 +12340,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|DEPLOYED=edited|GATE=denied-dependency": {
@@ -17941,20 +17978,14 @@
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|mcp-install|bin|denied-dependency|project",
-    "G1|mcp-install|canvas|denied-dependency|project",
-    "G1|mcp-install|hook|denied-dependency|project",
-    "G1|mcp-install|lsp|denied-dependency|project",
-    "G1|mcp-install|mcp|denied-dependency|project",
-    "G1|mcp-install|other-file|denied-dependency|project",
-    "G1|mcp-install|skill|denied-dependency|project"
+    "G1|mcp-install|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=mcp-install|GATE=denied-executable": {
    "credited_by": [
@@ -20042,6 +20073,7 @@
    "credited_by": [
     "G1|approve|bin|denied-dependency|user",
     "G1|compile|bin|denied-dependency|user",
+    "G1|mcp-install|bin|denied-dependency|user",
     "G1|uninstall|bin|denied-dependency|user"
    ],
    "family": "pair",
@@ -20240,9 +20272,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=canvas|DEPLOYED=present-provenance-unknown": {
@@ -20749,9 +20780,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=lsp|DEPLOYED=present-provenance-unknown": {
@@ -21924,6 +21954,7 @@
    "credited_by": [
     "G1|approve|bin|denied-dependency|user",
     "G1|compile|bin|denied-dependency|user",
+    "G1|mcp-install|bin|denied-dependency|user",
     "G1|uninstall|bin|denied-dependency|user"
    ],
    "family": "pair",
@@ -25189,7 +25220,7 @@
    "lane": "T-3",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-unchanged]"
   },
   "pair|SRC=native-plugin|LOCK=newer-generator": {
    "family": "pair",
@@ -25358,9 +25389,10 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-multi-narrowed]"
+   "tracking": "#4874",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[multi-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=multi-unchanged": {
    "credited_by": [
@@ -25385,9 +25417,10 @@
    "family": "pair",
    "issue": "#4100",
    "lane": "T-6a",
-   "status": "required",
+   "status": "known-failing",
    "strength": "e2e",
-   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_first_command_after_a_target_change[kinds-offline-single-narrowed]"
+   "tracking": "#4874",
+   "witness": "tests/lifecycle/scenarios/test_target_history_sources.py::test_a_narrowed_target_retires_a_whole_plugins_enable_entry[single-narrowed]"
   },
   "pair|SRC=native-plugin|TGT=single-unchanged": {
    "credited_by": [
@@ -27075,21 +27108,6 @@
   "T1|OP=pack|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
   ],
-  "T1|OP=prune|PRIM=bin|GATE=allowed": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=denied-executable": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=none": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=revoked-after-deploy": [
-   "U-BIN-OPS"
-  ],
-  "T1|OP=prune|PRIM=bin|GATE=unapproved-exec": [
-   "U-BIN-OPS"
-  ],
   "T1|OP=update|PRIM=bin|GATE=denied-dependency": [
    "U-USER-SCOPE-ORG-POLICY"
   ],
@@ -28277,9 +28295,9 @@
   ]
  },
  "rows": {
-  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "fd8341c76fefd1a169f5ad4a193b2bec97de7b93048d259c416ef152b2b2f825",
-  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "49e772e8853fd71fb3d4792fddb4909ed7c23025067d877c9c064d8806816108",
-  "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "3cce4a271012788b41fb141d6429d893f7678644d943e138c979075a06068842",
+  "generated_cover-01-skill-exec-lsp-canvas-git-single-approve-mcp.yaml": "069735b50a32967c7f248d455be4e5d93c73ed83aa9d15ce6c27afd2212cd617",
+  "generated_cover-02-skill-exec-canvas-local-multi-deny-mcp.yaml": "4a6eb824f12c87a2c4f25ce68ee9b9366e9bbbaf52306a1030824037ce359555",
+  "generated_cover-03-skill-exec-git-multi-unapproved-mcp.yaml": "26cef5986ad5c8206c3cc87f8dc3acbb1bb9f8b658e86788145200c1af1be212",
   "generated_cover-04-lsp-canvas-local-multi-unapproved-mcp.yaml": "d1bad85295426b8f97e8520944da9bec38217a569926d51c2388017ed1c6c692",
   "generated_cover-05-exec-lsp-git-single-deny-mcp.yaml": "54a875546bcdfd635e9e5e7096389eb6632891a5d3fd9e0440841b89337f6074",
   "generated_cover-06-exec-git-single-approve-mcp.yaml": "78d18dc8abfaf4e517057d7339de234041dccc2c779c818e507094f23fb12399",
@@ -28325,7 +28343,7 @@
    "evidence": [
     "src/apm_cli/install/exec_gate.py::plugin_bin_deployable"
    ],
-   "text": "a gate level of PRIM=bin under audit, prune, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under prune and marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): both exit 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), so any absence witness there is vacuous"
+   "text": "a gate level of PRIM=bin under audit, pack, marketplace or a local bundle install is vacuous (OP x PRIM x GATE only): a loose bin/ deploys only for a marketplace plugin at user scope (exec_gate.plugin_bin_deployable), these commands have no user-scope form and write no plugin root, and a local bundle is never a marketplace plugin, so no gate level ever reaches a bin/ there (the #4575 review: an absence U-BIN guarantees proves nothing about the gate). prune is not listed: it retires a trusted project-scope whole plugin's root, bin/ included (#4559, #4808). An org-policy level stays its own cell (U2 no-collapse); OP x SRC x PRIM and OP x PRIM cells keep their absence witnesses. Under marketplace that org-policy level stays baseline (Q&L ruling 2026-11-22): it exits 0 under the deny and bin/ never deploys at project scope (U_BIN_PIN), so any absence witness there is vacuous"
   },
   "U-FIRST-PARTY-MCP": {
    "evidence": [
