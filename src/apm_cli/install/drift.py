@@ -55,7 +55,7 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
-from apm_cli.install.deployment_plan import carry_kept_loose_into_replay
+from apm_cli.install.deployment_plan import finish_replayed_package
 from apm_cli.install.drift_records import ReplayRecords, replay_all_live
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
@@ -127,6 +127,8 @@ class ReplayConfig:
     records: bool = True
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
+    # Gets (package key, deployed paths, scratch root) right after each render (#5048).
+    on_package: Callable[[str, list[str], Path], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -540,7 +542,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_target
+    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_targets
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -592,13 +594,17 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     )
     codex_records = None
 
-    live_targets = resolve_audit_targets(
-        project_root,
-        user_scope=config.user_scope,
-        lockfile=lock,
-        include_recorded=config.include_recorded_targets,
+    converged_targets = _filter_targets(
+        resolve_audit_targets(
+            project_root,
+            user_scope=config.user_scope,
+            lockfile=lock,
+            include_recorded=config.include_recorded_targets,
+            recorded_layout=False,
+        ),
+        config.targets,
     )
-    targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
+    targets = replay_targets(converged_targets, lock=lock)
     from apm_cli.install.replay_transport import replay_sources
 
     downloader, registry_resolver, registries, declared_transports = replay_sources(
@@ -719,7 +725,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         result = integrate_package_primitives(
                             package_info,
                             scratch_root,
-                            targets=targets,
+                            # Each dependency replays in the skill layout its claims record (#5092).
+                            targets=replay_targets(
+                                converged_targets, recorded_paths=lock_dep.deployed_files
+                            ),
                             integrators=IntegratorBundle(
                                 prompt=integrators["prompt"],
                                 agent=integrators["agent"],
@@ -746,8 +755,12 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         )
                     except AgentPluginTargetExcludedError:
                         continue
-                    carry_kept_loose_into_replay(
-                        result, lock_dep, deployment_frame[1], scratch_root, config.user_scope
+                    finish_replayed_package(
+                        result,
+                        lock_dep,
+                        (dep_key, deployment_frame[1], scratch_root),
+                        config,
+                        converged_targets,
                     )
                     if result.get("native_plugin") and not result.get("native_claude_plugin"):
                         verify_native_plugin_cache(

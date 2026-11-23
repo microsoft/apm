@@ -141,6 +141,7 @@ def _invoke_install(
     monkeypatch: pytest.MonkeyPatch,
     repos: dict[str, Path],
     extra_args: list[str] | None = None,
+    contacts: list[str] | None = None,
 ) -> object:
     """Run the real ``apm install`` command with git network calls remapped local."""
     original_popen = subprocess.Popen
@@ -188,6 +189,22 @@ def _invoke_install(
             clone_args["branch"] = branch
         return Repo.clone_from(str(repos[repo_key]), str(target_path), **clone_args)
 
+    def admit_locally(
+        _engine: Any,
+        repo_url_base: str,
+        target_path: Path,
+        *,
+        dep_ref: Any = None,
+        clone_action: Any,
+        **_kwargs: Any,
+    ) -> None:
+        # Commit admission contacts the origin over the clone transport plan;
+        # the origin is the local repository, like clone_local_repo.
+        repo_key = dep_ref.repo_url if dep_ref is not None else repo_url_base
+        if contacts is not None:
+            contacts.append(repo_key)
+        clone_action(str(repos[repo_key]), {}, target_path)
+
     with monkeypatch.context() as patch:
         patch.chdir(project)
         patch.setenv("APM_NO_CACHE", "1")
@@ -205,6 +222,7 @@ def _invoke_install(
         patch.setattr(subprocess, "Popen", guarded_popen)
         patch.setattr(GitHubPackageDownloader, "resolve_git_reference", resolve_local_ref)
         patch.setattr(GitHubPackageDownloader, "_clone_with_fallback", clone_local_repo)
+        patch.setattr("apm_cli.deps.clone_engine.CloneEngine.execute", admit_locally)
 
         clear_apm_yml_cache()
         return CliRunner().invoke(cli, ["install", *(extra_args or [])], catch_exceptions=False)
@@ -253,8 +271,12 @@ def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
     # Lockfile replay should keep using the old primary commit and therefore
     # keep the old transitive production dependency in the resolved graph.
     shutil.rmtree(project / "apm_modules", ignore_errors=True)
-    replay = _invoke_install(project, monkeypatch, repos)
+    contacts: list[str] = []
+    replay = _invoke_install(project, monkeypatch, repos, contacts=contacts)
     assert replay.exit_code == 0, f"stdout:\n{replay.output}\nstderr:\n{replay.stderr}"
+    # A locked commit with no recorded verdict is verified once against its
+    # origin (exactly one contact per package) ...
+    assert sorted(contacts) == sorted([PRIMARY_REPO, TRANSITIVE_REPO])
     replay_deps = _lock_deps(project)
     assert replay_deps[PRIMARY_REPO]["resolved_commit"] == old_primary_sha
     assert replay_deps[TRANSITIVE_REPO]["resolved_commit"] == transitive_sha
@@ -262,7 +284,10 @@ def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
     assert (project / "apm_modules" / "example" / "transitive-package" / "apm.yml").is_file()
 
     shutil.rmtree(project / "apm_modules", ignore_errors=True)
-    frozen_replay = _invoke_install(project, monkeypatch, repos, extra_args=["--frozen"])
+    second_contacts: list[str] = []
+    frozen_replay = _invoke_install(
+        project, monkeypatch, repos, extra_args=["--frozen"], contacts=second_contacts
+    )
     assert frozen_replay.exit_code == 0, (
         f"stdout:\n{frozen_replay.output}\nstderr:\n{frozen_replay.stderr}"
     )
@@ -270,6 +295,10 @@ def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
     assert frozen_deps[PRIMARY_REPO]["resolved_commit"] == old_primary_sha
     assert frozen_deps[TRANSITIVE_REPO]["resolved_commit"] == transitive_sha
     assert frozen_deps[TRANSITIVE_REPO]["depth"] == 2
+    # APM_NO_CACHE keeps no verdict between runs, so each replay verifies once
+    # per package again (with a cache, a later replay makes no contact:
+    # test_install_pinned_commit_reachability).
+    assert sorted(second_contacts) == sorted([PRIMARY_REPO, TRANSITIVE_REPO])
     assert (project / "apm_modules" / "example" / "transitive-package" / "apm.yml").is_file()
 
     # Removing the lockfile regenerates from current upstream state. The same

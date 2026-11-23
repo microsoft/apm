@@ -316,6 +316,49 @@ def test_a_lockfile_the_cli_gate_refuses_takes_the_full_pipeline(
     assert (tmp_path / "apm.lock.yaml").read_text(encoding="utf-8") == lock
 
 
+@pytest.mark.parametrize("owner", ["this-workspace", "another-workspace"])
+def test_only_this_workspace_s_abandoned_journal_declines_the_fast_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, owner: str
+) -> None:
+    """Another workspace's journal waits for that workspace; it costs this install nothing."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    for name in ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "trace")
+    project, other = tmp_path / "project", tmp_path / "other"
+    project.mkdir()
+    other.mkdir()
+    _locked_project(project)
+    root = project if owner == "this-workspace" else other
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+
+    def decide() -> tuple[bool, list[str]]:
+        applied = diff_apply.try_apply({}, ["install"], project, frozen_disposition=disposition)
+        trace = [line for line in capsys.readouterr().err.splitlines() if "fast path" in line]
+        return applied, trace
+
+    without_journal = decide()
+    assert not any("interrupted install journal" in line for line in without_journal[1])
+    killed = root / "killed.md"
+    journal = DeployJournal(tmp_path / "home" / "install-snapshots", root=root)
+    journal.record(killed)
+    killed.write_bytes(b"half\n")
+    journal.after_write(killed)
+
+    with_journal = decide()
+
+    if owner == "this-workspace":
+        assert with_journal[0] is False
+        assert any("full run (interrupted install journal)" in line for line in with_journal[1])
+    else:
+        # The same decision, and the same trace, as with no journal at all.
+        assert with_journal == without_journal
+    assert journal.store is not None and journal.store.is_dir()
+    assert killed.read_bytes() == b"half\n"
+
+
 def test_a_symlink_in_a_package_copy_takes_the_full_pipeline(tmp_path: Path) -> None:
     """Package hashes skip symlinks and the source plan warns on them: only the full run judges."""
     from apm_cli.install import noop_diff
@@ -464,6 +507,27 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert lock.read_text(encoding="utf-8") == "locked\n"
     assert not (project / "apm_modules").exists(), "the staging root goes with the rollback"
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
+
+
+@pytest.mark.parametrize("existed", [False, True])
+def test_an_apply_with_no_package_to_stage_leaves_apm_modules_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existed: bool
+) -> None:
+    """A converged apply of a project without packages adds no apm_modules (#5159 I2)."""
+    project = tmp_path / "project"
+    project.mkdir()
+    modules = project / "apm_modules"
+    if existed:
+        modules.mkdir()
+    (project / "apm.lock.yaml").write_text("locked\n", encoding="utf-8")
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    diff_apply._commit(project, None, [], [], [], session, False, lambda: None)
+
+    assert modules.is_dir() is existed
+    if existed:
+        assert not any(modules.iterdir())
 
 
 @pytest.mark.skipif(

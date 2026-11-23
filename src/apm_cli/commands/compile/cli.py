@@ -1314,7 +1314,9 @@ def _run_compilation(  # noqa: PLR0912 -- one flow per compile mode
                             else:
                                 from ...compilation.output_writer import CompiledOutputWriter
 
-                                CompiledOutputWriter().write(output_path, final_content)
+                                CompiledOutputWriter(compiler.base_dir).write(
+                                    output_path, final_content
+                                )
                             from ...compilation.claude_agents_md import refresh_compiled_digest
 
                             refresh_compiled_digest(

@@ -254,6 +254,12 @@ HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
     before="ensure the quote marks match and wrap the complete reference and path in "
     "balanced double quotes",
 )
+HOOK_EVENT_MALFORMED = _entry(
+    "hook-event-malformed",
+    "apm install",
+    "merge the package's hooks into it",
+    before="fix or remove the event",
+)
 HOOK_PATH_ESCAPES_PACKAGE = _entry(
     "hook-path-escapes-package",
     "apm install",
@@ -1442,6 +1448,11 @@ REPLAY_CACHE_CONTENT_STALE = _entry(
     "replay-cache-content-stale",
     "apm install",
     "refresh the apm_modules cache to the locked content",
+)
+CACHED_CHECKOUT_TAMPERED = _entry(
+    "cached-checkout-tampered",
+    "apm install",
+    "rebuild the cached copy from the locked commit",
 )
 HOOKS_UNAPPROVED = _entry(
     "hooks-unapproved",

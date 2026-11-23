@@ -1,0 +1,17 @@
+{
+  "issue": 5038,
+  "fixed_in": "Unreleased",
+  "summary": "MCP cleanup, hook cleanup and the retired MCP destination heal rewrote a config file an older APM wrote into without recording it, so an install killed after that rewrite kept its journal for manual recovery; such a rewrite now records the file as legacy with its pre-write digest, and the next install restores it.",
+  "failure_modes": [
+    "transaction"
+  ],
+  "properties": [
+    "transaction.failed_command_preserves_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_abandoned_deploy_journal_replay_lifecycle.py::test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored",
+    "tests/unit/integration/test_config_file_provenance.py::test_a_cleanup_rewrite_of_an_unrecorded_file_records_it_as_legacy",
+    "tests/unit/test_mcp_integrator_remove_stale.py::test_clean_json_of_an_unrecorded_config_records_it_for_crash_recovery",
+    "tests/unit/install/test_copilot_project_mcp_destination.py::test_heal_of_an_unrecorded_file_records_it_for_crash_recovery"
+  ]
+}
