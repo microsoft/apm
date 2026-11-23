@@ -1374,7 +1374,7 @@ def test_a_pinned_leaf_never_takes_its_parents_from_the_cache(tmp_path: Path) ->
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX pipes and links")
-@pytest.mark.parametrize("kind", ["fifo", "symlink", "oversize"])
+@pytest.mark.parametrize("kind", ["fifo", "symlink", "oversize", "truncated"])
 @pytest.mark.parametrize("target", ["raw", "meta.json"])
 def test_cache_files_that_are_not_bounded_regular_files_are_fetched_again(
     tmp_path: Path, kind: str, target: str
@@ -1383,6 +1383,8 @@ def test_cache_files_that_are_not_bounded_regular_files_are_fetched_again(
     path = policy_file.with_suffix(f".{target}")
     if kind == "oversize":
         path.write_bytes(path.read_bytes() + b" " * (MAX_CACHE_FILE_BYTES + 1))
+    elif kind == "truncated":
+        path.write_bytes(path.read_bytes()[: path.stat().st_size // 2])
     else:
         saved = tmp_path / f"saved.{target}"
         saved.write_bytes(path.read_bytes())
@@ -1425,6 +1427,65 @@ def test_a_gitlab_leaf_keeps_its_fetched_bytes_for_pinned_reads(tmp_path: Path) 
     raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw"
     assert entry is not None
     assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+_GITLAB_REF = "gitlab.com/acme/apm-policy"
+
+
+def _pinned_gitlab_install(root: Path, served: str, fetched: list[str]):
+    """One pinned discovery of a flat GitLab policy project; only HTTP is replaced."""
+    from apm_cli.policy._gitlab import _fetch_from_gitlab_repo
+
+    def fake_get(url: str, headers=None, **_kwargs):
+        fetched.append(url)
+        return MagicMock(status_code=200, text=served)
+
+    resolver = MagicMock()
+    resolver.return_value.try_with_fallback.side_effect = lambda _host, op, **_kw: op(None, {})
+    with (
+        patch("apm_cli.core.auth.AuthResolver", resolver),
+        patch("apm_cli.policy._gitlab.policy_get", side_effect=fake_get),
+    ):
+        return _fetch_from_gitlab_repo(
+            org="acme",
+            repo="apm-policy",
+            host="gitlab.com",
+            project_root=root,
+            expected_hash=_pin(_LEAF),
+        )
+
+
+def test_a_second_pinned_gitlab_install_is_served_from_the_cache(tmp_path: Path) -> None:
+    fetched: list[str] = []
+    first = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+    second = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+
+    assert (first.outcome, first.cached) == ("found", False)
+    assert (second.outcome, second.cached) == ("found", True)
+    assert second.policy.dependencies.deny == ("acme/blocked",)
+    assert len(fetched) == 1
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_GITLAB_REF)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+@pytest.mark.parametrize("change", ["modified", "missing"])
+def test_pinned_gitlab_bytes_that_no_longer_hash_to_the_pin_are_fetched_again(
+    tmp_path: Path, change: str
+) -> None:
+    fetched: list[str] = []
+    _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_GITLAB_REF)}.raw"
+    if change == "modified":
+        raw_file.write_text(_LEAF.replace("acme/blocked", "acme/other"), encoding="utf-8")
+    else:
+        raw_file.unlink()
+
+    second = _pinned_gitlab_install(tmp_path, _LEAF, fetched)
+
+    assert (second.outcome, second.cached) == ("found", False)
+    assert second.policy.dependencies.deny == ("acme/blocked",)
+    assert len(fetched) == 2
     assert raw_file.read_text(encoding="utf-8") == _LEAF
 
 

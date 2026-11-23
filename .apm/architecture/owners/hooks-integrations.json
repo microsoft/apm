@@ -14,7 +14,7 @@
     {
       "id": "audit-primitive-discovery",
       "decision": "Registry-derived deployed primitive discovery and applicable prompt coverage",
-      "owner": "security/primitive_discovery.py (primitive_surfaces), security/file_scanner.py (scan_project_result) through target skills_deploy_path and native hook contracts",
+      "owner": "security/primitive_discovery.py (primitive_surfaces), security/file_scanner.py (scan_project_result) through target skills_deploy_path and native hook contracts; hook-bundle module metadata is recognized only through integration/hook_bundle.py (is_deployed_hook_module_metadata) with module types from integration/hook_native_formats.py (NODE_MODULE_TYPES)",
       "selectors": [
         "src/apm_cli/security/primitive_discovery.py",
         "src/apm_cli/security/file_scanner.py"

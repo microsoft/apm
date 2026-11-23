@@ -230,14 +230,19 @@ def test_unreadable_recognized_file_is_reported(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = _settings(project)
-    read_text = Path.read_text
+    read_text, read_bytes = Path.read_text, Path.read_bytes
 
-    def unreadable(path: Path, *args: object, **kwargs: object) -> str:
-        if path == settings:
-            raise PermissionError("fixture access denied")
-        return read_text(path, *args, **kwargs)
+    def unreadable(read):
+        def deny(path: Path, *args: object, **kwargs: object):
+            if path == settings:
+                raise PermissionError("fixture access denied")
+            return read(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", unreadable)
+        return deny
+
+    # Deny every read API so the fixture does not depend on how the scanner reads.
+    monkeypatch.setattr(Path, "read_text", unreadable(read_text))
+    monkeypatch.setattr(Path, "read_bytes", unreadable(read_bytes))
     result = CliRunner().invoke(cli, ["audit", "--no-drift", "--format", "json"])
     assert result.exit_code == 1, result.output
     report = json.loads(result.stdout)

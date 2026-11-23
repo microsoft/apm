@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import tarfile
+import unicodedata
 import uuid
 import zipfile
 from collections.abc import Callable
@@ -161,11 +162,13 @@ def _member_key(member_name: str) -> str:
     """Return the collision key for an archive member name.
 
     Two names that land on the same path on a case-insensitive filesystem,
-    or that differ only by ``./`` prefixes or separators, share one key.
+    that differ only by ``./`` prefixes or separators, or that are NFC and
+    NFD spellings of one name (one file on macOS), share one key.
     """
     normalized = member_name.replace("\\", "/")
     parts = [part for part in normalized.split("/") if part not in ("", ".")]
-    return "/".join(parts).casefold()
+    key = unicodedata.normalize("NFC", "/".join(parts))
+    return unicodedata.normalize("NFC", key.casefold())
 
 
 class _MemberClaims:
