@@ -193,12 +193,12 @@ def require_origin_pin(source: MarketplaceSource) -> str:
         published = ref.lower() in {sha.lower() for sha in tips.values()}
         bound = ref
     else:
-        named = set()
+        named = []
         if f"refs/heads/{ref}" in tips:
-            named.add(tips[f"refs/heads/{ref}"].lower())
+            named.append(tips[f"refs/heads/{ref}"].lower())
         if f"refs/tags/{ref}" in tips:
             # An annotated tag is bound to the commit it peels to.
-            named.add(tips.get(f"refs/tags/{ref}^{{}}", tips[f"refs/tags/{ref}"]).lower())
+            named.append(tips.get(f"refs/tags/{ref}^{{}}", tips[f"refs/tags/{ref}"]).lower())
         if len(named) > 1:
             raise MarketplaceFetchError(
                 source.name,

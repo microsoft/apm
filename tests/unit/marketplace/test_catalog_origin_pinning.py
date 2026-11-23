@@ -326,9 +326,13 @@ def test_an_ado_catalog_pin_is_listed_through_the_ado_auth_chain(monkeypatch) ->
     assert chained == ["contoso/proj/_git/catalog"]
 
 
-def test_a_short_name_that_is_both_a_branch_and_a_tag_is_refused(monkeypatch) -> None:
+@pytest.mark.parametrize("tag_commit", [_STRAY, _TIP], ids=["different-commits", "same-commit"])
+def test_a_short_name_that_is_both_a_branch_and_a_tag_is_refused(
+    tag_commit: str, monkeypatch
+) -> None:
     _list_refs(
-        monkeypatch, (*_TIPS, ("refs/heads/pull/7/head", _TIP), ("refs/tags/pull/7/head", _STRAY))
+        monkeypatch,
+        (*_TIPS, ("refs/heads/pull/7/head", _TIP), ("refs/tags/pull/7/head", tag_commit)),
     )
     urls = _record_requests(monkeypatch, _Response(404))
 
