@@ -1259,8 +1259,6 @@ class BaseIntegrator:
 
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
-        self.link_resolver = None
-        return  # PERF FALSIFICATION HACK (render skip) -- NEVER SHIP
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
             install_path = Path(package_info.install_path)
