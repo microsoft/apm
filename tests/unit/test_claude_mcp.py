@@ -1202,10 +1202,8 @@ class TestMCPIntegratorClaudeStaleCleanup(unittest.TestCase):
                 stored_configs=self.stored_configs,
             )
 
-            self.assertNotIn(
-                "stale",
-                json.loads(proj.read_text(encoding="utf-8")).get("mcpServers", {}),
-            )
+            # Only APM's entry was in it: the emptied project file goes (#4852).
+            self.assertFalse(proj.exists())
             self.assertEqual(user_cfg.read_text(encoding="utf-8"), user_raw)
 
 
