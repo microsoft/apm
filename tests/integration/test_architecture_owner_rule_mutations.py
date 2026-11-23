@@ -5094,6 +5094,26 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             "        refuse_projected_mcp_collisions(\n            [dep],",
             "        unchecked_mcp_collisions(\n            [dep],",
         ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "        retire_mcp_claims(\n",
+            "        unrecorded_retirement(\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "            record_refused_retirement(\n",
+            "            skipped_refusal_record(\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/retirement.py",
+            "        on_refusal(removed, planned)\n",
+            "        pass\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "def _legacy_cleanup_runtimes(",
+            "def retire_mcp_claims(*_args):\n    return None\n\n\ndef _legacy_cleanup_runtimes(",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -5112,6 +5132,10 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "rebuild-receipt-routing",
         "direct-entry-preflight-routing",
         "direct-entry-preflight-delegation",
+        "retirement-routing",
+        "refusal-persistence",
+        "refusal-callback",
+        "second-retirement-owner",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:
