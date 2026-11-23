@@ -256,20 +256,29 @@ def ensure_path_within_resolved(path: Path, resolved_base: Path) -> Path:
     return resolved
 
 
+def first_symlink_component(base_dir: Path, path: Path) -> Path | None:
+    """Return the first symlinked component of *path* below *base_dir*, or ``None``.
+
+    The walk stops at the first missing component. Raises ``ValueError`` when
+    *path* is not under *base_dir* and ``OSError`` when a component cannot be
+    inspected; :func:`has_symlink_component` turns both into a refusal.
+    """
+    current = base_dir
+    for part in path.relative_to(base_dir).parts:
+        current /= part
+        try:
+            linked = S_ISLNK(current.lstat().st_mode)
+        except FileNotFoundError:
+            return None
+        if linked:
+            return current
+    return None
+
+
 def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = False) -> bool:
     """Reject linked components, optionally preserving access errors for diagnostics."""
     try:
-        relative = path.relative_to(base_dir)
-        current = base_dir
-        for part in relative.parts:
-            current /= part
-            try:
-                linked = S_ISLNK(current.lstat().st_mode)
-            except FileNotFoundError:
-                return False
-            if linked:
-                return True
-        return False
+        return first_symlink_component(base_dir, path) is not None
     except OSError:
         if raise_on_error:
             raise

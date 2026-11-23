@@ -134,18 +134,15 @@ def deployed_path_entry(
 
 def _symlinked_component(target_path: Path, project_root: Path) -> str | None:
     """Return the first symlinked component of a path lexically under *project_root*."""
+    from apm_cli.utils.path_security import first_symlink_component
+
     try:
-        parts = target_path.relative_to(project_root).parts
-    except ValueError:
+        if ".." in target_path.relative_to(project_root).parts:
+            return None
+        linked = first_symlink_component(project_root, target_path)
+    except (OSError, ValueError):
         return None
-    if ".." in parts:
-        return None
-    current = project_root
-    for index, part in enumerate(parts):
-        current = current / part
-        if current.is_symlink():
-            return "/".join(parts[: index + 1])
-    return None
+    return linked.relative_to(project_root).as_posix() if linked is not None else None
 
 
 def skill_dir_entry(physical: Path, root: Path, target_name: str, targets: Any) -> tuple[str, ...]:
