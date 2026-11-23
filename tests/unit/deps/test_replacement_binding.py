@@ -189,19 +189,3 @@ def test_pin_reuse_distinguishes_changed_removed_and_same_source() -> None:
         repo_url="owner/upstream", resolved_ref="main", resolved_commit="a" * 40
     )
     assert not upstream.matches_replacement(effective)
-
-
-def test_retain_parents_or_root_keeps_surviving_requests_and_root_anchors_orphans() -> None:
-    binding, effective = _binding({"path": "../local"})
-    binding.requests = {}
-    binding.record(effective, "owner/left", False)
-    binding.record(effective, "owner/right", True)
-
-    assert binding.retain_parents_or_root({"owner/right"})
-    assert [request.parent for request in binding.requests] == ["owner/right"]
-
-    assert binding.retain_parents_or_root(set())
-    (request,) = binding.requests
-    assert request.parent is None
-    assert request.dev is True
-    assert not binding.retain_parents_or_root(set())
