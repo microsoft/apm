@@ -818,8 +818,9 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
 # A path-like token: anything between whitespace, brackets, quotes and separators.
 _PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
 # A whole Markdown link destination: ``<...>`` may hold spaces; a bare one may
-# hold punctuation such as commas, so neither is split like prose.
-_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|([^\s()<>]+))")
+# hold punctuation such as commas and balanced parentheses, so neither is split
+# like prose. One level of nesting keeps the match linear.
+_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|((?:[^\s()<>]|\([^\s()<>]*\))+))")
 
 
 def _moving_dirs(moves) -> tuple[str, ...]:
@@ -847,8 +848,13 @@ def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bo
 
     text = data.decode("utf-8", "replace")
     destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
+    seen: set[str] = set()
     for token in (*destinations, *_PATH_TOKEN.findall(text)):
         path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+        # A bare destination is also a prose token: resolve each spelling once.
+        if path in seen:
+            continue
+        seen.add(path)
         # A binary asset can hold a NUL, which no filesystem path accepts.
         if "/" not in path or "://" in path or "\x00" in path:
             continue
