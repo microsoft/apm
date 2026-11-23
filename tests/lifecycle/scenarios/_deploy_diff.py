@@ -236,7 +236,8 @@ def _yaml(path: Path) -> object:
 
 _IDENTITY_LINE = re.compile(r"^\s*(install(ation)?_?id|generated_at)\s*:.*$\n?", re.MULTILINE)
 # A receipt's checkout binding; its records, destinations, bindings and history stay compared.
-_RECEIPT_BINDING = ("root", "root_identity", "installation", "root_birth_time")
+# The config file record store's generation is a random per-store token (#5037).
+_RECEIPT_BINDING = ("root", "root_identity", "installation", "root_birth_time", "generation")
 
 
 def _text(path: Path, marker: str) -> str | None:

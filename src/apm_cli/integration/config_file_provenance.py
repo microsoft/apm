@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import stat
 import unicodedata
 from collections.abc import Iterator
@@ -163,6 +164,9 @@ class _Store:
     loaded: set[str] = field(default_factory=set)
     legacy_layout: bool = False
     indexed: bool = False
+    # The index marker's generation; a record file of another generation (left by a
+    # store removed by hand, or an interrupted migration) is never read (#5037).
+    generation: str = ""
 
     def _shard_path(self, shard: str) -> Path:
         return self.path.parent / f"d-{shard}.json"
@@ -183,12 +187,19 @@ class _Store:
                 store.legacy_layout = True  # read whole; the next save migrates it
                 store._absorb(data)
                 return store
-            if data.get("version") != _VERSION or data.get("layout") != _LAYOUT:
-                raise ValueError("unknown version or layout")
+            store._adopt(data)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{store.path}: {exc}") from exc
-        store.indexed = True
         return store
+
+    def _adopt(self, marker: dict[str, Any]) -> None:
+        """Read the store through *marker* (a layout 2 index), or raise ``ValueError``."""
+        generation = marker.get("generation", "")
+        if marker.get("version") != _VERSION or marker.get("layout") != _LAYOUT:
+            raise ValueError("unknown version or layout")
+        if not isinstance(generation, str):
+            raise ValueError("unknown version or layout")
+        self.generation, self.indexed = generation, True
 
     def _absorb(self, data: dict[str, Any]) -> None:
         if not isinstance(data.get("files"), list):
@@ -220,6 +231,8 @@ class _Store:
             data = _read_json(path)
             if data.get("version") != _VERSION:
                 raise ValueError("unknown version or layout")
+            if data.get("generation", "") != self.generation:
+                return  # another store's leftover: proves nothing, overwritten on save
             self._absorb(data)
         except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc:
             raise _UnreadableStore(f"{path}: {exc}") from exc
@@ -305,13 +318,33 @@ class _Store:
         return grouped
 
     def _start_index(self) -> None:
-        """A new store: the marker first, so a record file is never read without it."""
-        from apm_cli.integration.write_seam import unlink
+        """A new store: the marker first, so a record file is never read without it.
 
-        for stale in self._shard_files():
-            unlink(stale)  # left by a store removed by hand: not this store's records
-        self._write(self.path, {"version": _VERSION, "layout": _LAYOUT})
-        self.indexed = True
+        Created exclusively with a new generation, so record files left by a store
+        removed by hand are never read. A writer that finds another's marker joins
+        its generation; nothing is deleted, so two first writers keep each other's
+        records.
+        """
+        from apm_cli.integration.write_seam import chmod, mkdir, open_for_write
+
+        generation = secrets.token_hex(16)
+        marker = {"version": _VERSION, "layout": _LAYOUT, "generation": generation}
+        mkdir(self.path.parent, mode=0o700, parents=True, exist_ok=True)
+        try:
+            with open_for_write(self.path, "x", encoding="utf-8") as handle:
+                handle.write(json.dumps(marker, indent=2) + "\n")
+            chmod(self.path, 0o600)  # machine-local evidence, like the record files
+        except FileExistsError:
+            marker = _read_json(self.path)  # another writer started the store
+        self._adopt(marker)
+        self._loaded_generation_reset()
+
+    def _loaded_generation_reset(self) -> None:
+        # Record files read before the generation was known are read again under it.
+        pending = set(self.loaded)
+        self.loaded.clear()
+        for shard in sorted(pending):
+            self._load_shard(shard)
 
     def _migrate(self, grouped: dict[str, list[str]]) -> None:
         """Layout 1 to 2: every record file first, then the marker in one replace.
@@ -321,13 +354,12 @@ class _Store:
         """
         from apm_cli.integration.write_seam import unlink
 
-        for stale in self._shard_files():
-            if stale.stem.removeprefix("d-") not in grouped:
-                unlink(stale)
+        self.generation = secrets.token_hex(16)  # leftovers of an earlier attempt: unread
         for shard in sorted(grouped):
             self._save_shard(shard, sorted(grouped[shard]))
         if grouped:
-            self._write(self.path, {"version": _VERSION, "layout": _LAYOUT})
+            marker = {"version": _VERSION, "layout": _LAYOUT, "generation": self.generation}
+            self._write(self.path, marker)
         else:
             unlink(self.path)
         self.legacy_layout, self.indexed = False, bool(grouped)
@@ -342,6 +374,7 @@ class _Store:
             return
         data: dict[str, Any] = {
             "version": _VERSION,
+            "generation": self.generation,
             "files": [{"path": key, **self.files[key]} for key in keys],
         }
         history = {key: self.history[key] for key in keys if key in self.history}
