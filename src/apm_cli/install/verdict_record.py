@@ -345,7 +345,7 @@ def _record_path(root: Path) -> Path:
     return _apm_home() / RECORDS_DIR / f"{key}.json"
 
 
-def _read_nofollow(path: Path) -> bytes | None:
+def _read_nofollow(path: Path | str) -> bytes | None:
     """Bytes of a regular file opened no-follow, non-blocking, judged by fstat; None if absent."""
     flags = (
         os.O_RDONLY
@@ -386,7 +386,7 @@ class _Digest:
         # Keyed per-input digests (diagnostics only): a secret value never leaves unkeyed.
         self.tags.append((tag, hmac.new(self._key, data, hashlib.sha256).hexdigest()[:16]))
 
-    def file(self, tag: str, path: Path) -> None:
+    def file(self, tag: str, path: Path | str) -> None:
         data = _read_nofollow(path)
         self.put(tag, b"\x00absent" if data is None else b"\x01" + data)
 
@@ -394,11 +394,33 @@ class _Digest:
         return self._mac.hexdigest()
 
 
+def _tree(
+    base: str, skip: tuple[str, ...] = ()
+) -> Iterator[tuple[str, list[os.DirEntry[str]], list[str]]]:
+    """Pre-order walk in sorted order: (rel dir, non-directory entries, subdir names).
+
+    Directory entries carry their type, so no file is stat'ed twice; a symlink
+    (to a file or a directory) is a non-directory entry and is never followed.
+    """
+    stack = [("", base)]
+    while stack:
+        rel, path = stack.pop()
+        try:
+            with os.scandir(path) as scan:
+                entries = sorted(scan, key=lambda entry: entry.name)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        files = [entry for entry in entries if not entry.is_dir(follow_symlinks=False)]
+        dirs = [e.name for e in entries if e.is_dir(follow_symlinks=False) and e.name not in skip]
+        yield rel, files, dirs
+        for name in reversed(dirs):
+            stack.append((f"{rel}/{name}" if rel else name, os.path.join(path, name)))
+
+
 def _walk_files(base: Path, skip: tuple[str, ...] = ()) -> Iterator[Path]:
-    for directory, dirnames, filenames in os.walk(base):
-        dirnames[:] = sorted(d for d in dirnames if d not in skip)
-        for name in sorted(filenames):
-            yield Path(directory) / name
+    for _rel, files, _dirs in _tree(str(base), skip):
+        for entry in files:
+            yield Path(entry.path)
 
 
 _GIT_TRUE = frozenset({"1", "true", "yes", "on"})
@@ -587,35 +609,32 @@ def _inputs(
     user = Path(os.path.expanduser("~"))
     for rel in _USER_SURFACES:
         digest.file(f"user:{rel}", user / rel)
-    home = _apm_home()
-    for path in _walk_files(home, skip=(RECORDS_DIR, "cache")):
-        if path.name != KEY_FILE:
-            digest.file(f"home:{path.relative_to(home).as_posix()}", path)
+    for rel, files, _dirs in _tree(str(_apm_home()), skip=(RECORDS_DIR, "cache")):
+        for entry in files:
+            if entry.name != KEY_FILE:
+                digest.file(f"home:{rel}/{entry.name}" if rel else f"home:{entry.name}", entry.path)
     cache = _cache_root()
     if cache is not None:
-        policy = cache / "policy_v1"
-        for path in _walk_files(policy):
-            digest.put(
-                f"policy-mtime:{path.relative_to(policy).as_posix()}",
-                b"%d" % os.stat(path).st_mtime_ns,
-            )
-            digest.file(f"policy:{path.relative_to(policy).as_posix()}", path)
+        for rel, files, _dirs in _tree(str(cache / "policy_v1")):
+            for entry in files:
+                name = f"{rel}/{entry.name}" if rel else entry.name
+                digest.put(f"policy-mtime:{name}", b"%d" % entry.stat().st_mtime_ns)
+                digest.file(f"policy:{name}", entry.path)
     for name in _GOVERNED_DIRS:
-        base = root / name
-        digest.put(f"target:{name}", b"%d" % base.is_dir())
-        for directory, dirnames, filenames in os.walk(base):
-            dirnames.sort()
-            listing = [*sorted(filenames), "/", *dirnames]
-            rel = Path(directory).relative_to(root).as_posix()
-            digest.put(f"listing:{rel}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
-            for name in sorted(filenames):
-                path = Path(directory) / name
-                if path.is_symlink():
+        base = os.path.join(root, name)
+        digest.put(f"target:{name}", b"%d" % os.path.isdir(base))
+        for rel, files, dirs in _tree(base):
+            here = f"{name}/{rel}" if rel else name
+            listing = [entry.name for entry in files] + ["/", *dirs]
+            digest.put(f"listing:{here}", "\x00".join(listing).encode("utf-8", "surrogateescape"))
+            for entry in files:
+                if entry.is_symlink():
+                    target = os.readlink(entry.path)
                     digest.put(
-                        f"link:{rel}/{name}", os.readlink(path).encode("utf-8", "surrogateescape")
+                        f"link:{here}/{entry.name}", target.encode("utf-8", "surrogateescape")
                     )
                 else:
-                    digest.file(f"governed:{rel}/{name}", path)
+                    digest.file(f"governed:{here}/{entry.name}", entry.path)
 
 
 # A record expires within a day, and when its earliest cached policy goes stale
@@ -792,12 +811,9 @@ def replay(argv: list[str]) -> bool:
     if not _served(argv) or not _hits_allowed():
         return False
     root = Path.cwd()
-    if not _location_trusted(root):
-        return False
     try:
-        record_path = _record_path(root)
-        raw = _read_nofollow(record_path)
-        if raw is None:
+        raw = _read_nofollow(_record_path(root))
+        if raw is None or not _location_trusted(root):
             return False
         key = _key(create=False)
         if key is None:
@@ -811,6 +827,10 @@ def replay(argv: list[str]) -> bool:
         git_system = record.get("git_system")
         if not _names(run_env) or not _names(surfaces) or not isinstance(git_system, str):
             return False
+        lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
+        if dict(record.get("tags") or []).get("lock") != lock_tag:
+            _trace("miss (inputs changed: lock)")
+            return False  # a changed lock misses before any other input is read
         digest = _Digest(key)
         _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system)
         _body(digest, record)
