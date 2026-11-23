@@ -19,11 +19,11 @@ restores them if the install fails before its lockfile commits.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
@@ -326,7 +326,7 @@ def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
     from apm_cli.core.scope import is_user_scope, manifest_root
 
     refuse_denied_scripts(
-        ctx.apm_package,
+        ctx.apm_package.scripts,
         manifest_root(ctx.project_root, user_scope=is_user_scope(getattr(ctx, "scope", None))),
         no_policy=ctx.no_policy,
         dry_run=ctx.dry_run,
@@ -334,16 +334,39 @@ def _refuse_denied_scripts_before_fetch(ctx: InstallContext) -> None:
     )
 
 
+def refuse_denied_manifest_scripts(
+    manifest_path: Path, *, no_policy: bool, dry_run: bool, logger: Any
+) -> None:
+    """Refuse the scope manifest's ``scripts:`` block before the install command writes.
+
+    Judged on the manifest file itself, before marketplace reconciliation,
+    package validation, hook reconciliation or lockfile migration, with the
+    policy the identity preflight reads at the same root (#4826).
+    """
+    if dry_run:
+        return
+    from apm_cli.policy.policy_checks import _load_raw_apm_yml
+
+    raw = _load_raw_apm_yml(Path(manifest_path).parent) if Path(manifest_path).is_file() else None
+    refuse_denied_scripts(
+        (raw or {}).get("scripts"),
+        Path(manifest_path).parent,
+        no_policy=no_policy,
+        dry_run=dry_run,
+        logger=logger,
+    )
+
+
 def refuse_denied_scripts(
-    apm_package: Any, policy_root: Path, *, no_policy: bool, dry_run: bool, logger: Any
+    scripts: Any, policy_root: Path, *, no_policy: bool, dry_run: bool, logger: Any
 ) -> None:
     """Refuse a ``scripts:`` block a blocking ``manifest.scripts: deny`` forbids (#4826).
 
-    The verdict reads only the parsed manifest, so it runs before any fetch,
-    cache or deploy write, also for an install with no APM dependencies.
-    ``warn`` and ``--dry-run`` are reported at deploy time.
+    The verdict reads only the manifest, so it runs before any fetch, cache
+    or deploy write, also for an install with no APM dependencies. ``warn``
+    and ``--dry-run`` are reported at deploy time.
     """
-    if dry_run or not getattr(apm_package, "scripts", None):
+    if dry_run or not scripts:
         return
     from apm_cli.policy.install_preflight import prefetch_identity_policy
     from apm_cli.policy.policy_checks import _check_scripts_policy
@@ -351,7 +374,7 @@ def refuse_denied_scripts(
     policy = prefetch_identity_policy(policy_root, no_policy=no_policy)
     if policy is None or policy.manifest.scripts != "deny":
         return
-    check = _check_scripts_policy({"scripts": apm_package.scripts}, policy.manifest)
+    check = _check_scripts_policy({"scripts": scripts}, policy.manifest)
     _report_install_policy_checks(logger, policy, [check], dry_run=False, source=None)
 
 

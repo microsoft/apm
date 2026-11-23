@@ -1525,6 +1525,12 @@ def install(  # noqa: PLR0913
                 )
             sys.exit(1)
 
+        from apm_cli.install.commit_gate import refuse_denied_manifest_scripts
+
+        # Before anything writes: marketplaces, validation, hooks, lockfile migration.
+        refuse_denied_manifest_scripts(
+            manifest_path, no_policy=no_policy, dry_run=dry_run, logger=logger
+        )
         reconcile_user_marketplaces_or_exit(manifest_path, scope, logger=logger, dry_run=dry_run)
         outcome = None
         if packages:
@@ -1914,17 +1920,6 @@ def _install_apm_packages(ctx, outcome):
     from apm_cli.install.plan import lockfile_satisfies_replacements
 
     _cli_project_root = _get_deploy_root(ctx.scope)
-    from apm_cli.core.scope import manifest_root as _manifest_root
-    from apm_cli.install.commit_gate import refuse_denied_scripts
-
-    # Before the branch below: an install with no APM work still honors scripts: deny.
-    refuse_denied_scripts(
-        apm_package,
-        _manifest_root(ctx.project_root, user_scope=ctx.scope is _InstallScope.USER),
-        no_policy=ctx.no_policy,
-        dry_run=bool(getattr(ctx, "dry_run", False)),
-        logger=logger,
-    )
     _has_orphan_deps_in_lock = bool(
         _existing_lock
         and not has_any_apm_deps
