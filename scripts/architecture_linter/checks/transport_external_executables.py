@@ -130,7 +130,8 @@ class _Aliases:
     ``global``/``nonlocal`` declaration names) and resolve through enclosing
     functions to the module, as Python resolves them; comprehension variables
     and parameters never shadow. Attribute targets (``self.run = ...``) bind
-    per owning class, and a class that binds none inherits any other's.
+    per owning class. Where the scoped binding is no launcher, any launcher
+    binding of the same name or attribute spelling in the file applies.
     A binding maps to every program argument index its launchers use, empty
     when it is no launcher, so reassignment never drops one.
     """
@@ -141,6 +142,7 @@ class _Aliases:
         self._names: dict[tuple[int, str], frozenset[int]] = {}
         self._attributes: dict[tuple[int, str], frozenset[int]] = {}
         self._attribute_spellings: dict[str, frozenset[int]] = {}
+        self._name_spellings: dict[str, frozenset[int]] = {}
         self._classes: dict[int, int] = {}
         self._declared: dict[tuple[int, str], int] = {}
         nonlocals: list[tuple[ast.AST | None, str]] = []
@@ -239,6 +241,7 @@ class _Aliases:
                     program = _imported_program_index(module, alias.name)
                 indices = frozenset({program}) if program is not None else _NONE
                 self._names[key] = self._names.get(key, _NONE) | indices
+                self._spell(False, key[1], indices)
 
     def _set(self, target: ast.AST, at: ast.AST, program: frozenset[int]) -> bool:
         """Add *program* to *target*'s launcher indices; return whether any is new."""
@@ -253,12 +256,13 @@ class _Aliases:
         if program <= known:
             return False
         table[key] = known | program
-        if table is self._attributes:
-            spelled = key[1]
-            self._attribute_spellings[spelled] = (
-                self._attribute_spellings.get(spelled, _NONE) | program
-            )
+        self._spell(table is self._attributes, key[1], program)
         return True
+
+    def _spell(self, attribute: bool, spelled: str, program: frozenset[int]) -> None:
+        """Record a launcher binding of *spelled* for the file-wide fallback."""
+        spellings = self._attribute_spellings if attribute else self._name_spellings
+        spellings[spelled] = spellings.get(spelled, _NONE) | program
 
     def _name_program(self, name: str, at: ast.AST) -> frozenset[int]:
         """Resolve *name* used at *at* through its enclosing scopes, skipping class bodies."""
@@ -278,18 +282,19 @@ class _Aliases:
     def program_indices(self, expr: ast.AST, at: ast.AST) -> frozenset[int]:
         """Return the program argument indices if *expr* names a launcher at *at*."""
         if isinstance(expr, ast.Name):
-            return self._name_program(expr.id, at)
+            # Fail closed: where the scoped binding is no launcher, any launcher
+            # binding of the name elsewhere in the file still counts.
+            return self._name_program(expr.id, at) or self._name_spellings.get(expr.id, _NONE)
         if not isinstance(expr, ast.Attribute):
             return _NONE
         spelled = _dotted(expr)
         if spelled is not None:
-            # A class binding the attribute itself decides; otherwise any class
-            # (a base, say) or module binding of that spelling may supply it.
+            # Fail closed: where the owning class binds no launcher, any class
+            # or module launcher binding of that spelling still counts.
             own = self._attributes.get((self._owning_class(at), spelled))
-            if own:
-                return own
-            if own is None and self._attribute_spellings.get(spelled):
-                return self._attribute_spellings[spelled]
+            inherited = own or self._attribute_spellings.get(spelled, _NONE)
+            if inherited:
+                return inherited
         owner, attr = _dotted(expr.value), expr.attr
         if (owner in self._modules.subprocess and attr in _LAUNCHERS) or (
             owner in self._modules.asyncio and attr in _ASYNC_LAUNCHERS
