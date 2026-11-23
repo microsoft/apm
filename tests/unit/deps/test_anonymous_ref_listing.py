@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import threading
 import time
-from pathlib import Path
 
 import pytest
 import urllib3
 
 from apm_cli.deps import anonymous_ref_listing as arl
-from apm_cli.utils import http_credentials
 
 pytestmark = [
-    pytest.mark.component,
+    pytest.mark.unit,
     pytest.mark.promise("P-OWN-git-transport-selection", "P-OWN-ls-remote-tag-commits"),
 ]
+
+# Patched by dotted path: the request owner is a collaborator, not the module under test.
+_REQUEST = "apm_cli.utils.http_credentials.origin_bounded_request"
 
 _A = "a" * 40
 _B = "b" * 40
@@ -184,31 +185,39 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
         arl._proxy({"HTTPS_PROXY": "http://user:pw@q:2"})
 
 
-def test_ca_follows_git_precedence(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(arl, "_system_ca", lambda: True)
-    git_ca, config_ca, cert_file = (tmp_path / n for n in ("git.pem", "cfg.pem", "ssl.pem"))
-    for path in (git_ca, config_ca, cert_file):
-        path.write_text("pem", encoding="ascii")
-    config = {"http.sslcainfo": str(config_ca)}
-    env = {"GIT_SSL_CAINFO": str(git_ca), "SSL_CERT_FILE": str(cert_file)}
+def _existing(monkeypatch, *paths: str) -> None:
+    present = set(paths)
+    monkeypatch.setattr(arl.os.path, "isfile", lambda path: path in present)
+    monkeypatch.setattr(arl.os.path, "isdir", lambda _path: False)
 
-    assert arl._verify(env, config) == str(git_ca)
-    assert arl._verify({"SSL_CERT_FILE": str(cert_file)}, config) == str(config_ca)
-    assert arl._verify({"SSL_CERT_FILE": str(cert_file)}, {}) == str(cert_file)
-    assert arl._verify({}, {}) is True
+
+def _verify_paths(cafile: str | None):
+    return arl.ssl.DefaultVerifyPaths(cafile, None, "", "", "", "")
+
+
+def test_ca_follows_git_precedence(monkeypatch):
+    import certifi
+
+    _existing(monkeypatch, "/git.pem", "/cfg.pem", "/ssl.pem")
+    monkeypatch.setattr(arl.ssl, "get_default_verify_paths", lambda: _verify_paths(None))
+    config = {"http.sslcainfo": "/cfg.pem"}
+    env = {"GIT_SSL_CAINFO": "/git.pem", "SSL_CERT_FILE": "/ssl.pem"}
+
+    assert arl._verify(env, config) == "/git.pem"
+    assert arl._verify({"SSL_CERT_FILE": "/ssl.pem"}, config) == "/cfg.pem"
+    assert arl._verify({"SSL_CERT_FILE": "/ssl.pem"}, {}) == "/ssl.pem"
+    assert arl._verify({}, {}) == certifi.where()
     with pytest.raises(arl._Fallback):
         arl._verify({}, {"http.sslbackend": "schannel"})
     with pytest.raises(arl._Fallback):
-        arl._verify({"GIT_SSL_CAINFO": str(tmp_path / "missing.pem")}, {})
+        arl._verify({"GIT_SSL_CAINFO": "/missing.pem"}, {})
 
 
-def test_default_ca_is_the_platform_openssl_store(tmp_path: Path, monkeypatch):
-    store = tmp_path / "cert.pem"
-    store.write_text("pem", encoding="ascii")
-    paths = arl.ssl.DefaultVerifyPaths(str(store), None, "", "", "", "")
-    monkeypatch.setattr(arl.ssl, "get_default_verify_paths", lambda: paths)
+def test_default_ca_is_the_platform_openssl_store(monkeypatch):
+    _existing(monkeypatch, "/store.pem")
+    monkeypatch.setattr(arl.ssl, "get_default_verify_paths", lambda: _verify_paths("/store.pem"))
 
-    assert arl._verify({}, {}) == str(store)
+    assert arl._verify({}, {}) == "/store.pem"
 
 
 def _entries(*pairs: tuple[str, str]):
@@ -254,9 +263,8 @@ def test_config_that_changes_gits_request_falls_back(pair):
 
 @pytest.mark.parametrize("allowed", ["file", "file:ssh", ""])
 def test_https_not_allowed_in_gits_child_env_falls_back(allowed, monkeypatch):
-    child_env = {"GIT_ALLOW_PROTOCOL": allowed}
-    monkeypatch.setattr(arl, "_effective_config", lambda _env: ({}, child_env))
-    monkeypatch.setattr(arl, "_session_for_refs", lambda: pytest.fail("no request expected"))
+    monkeypatch.setitem(arl._config_cache, (), ({}, {"GIT_ALLOW_PROTOCOL": allowed}))
+    monkeypatch.setattr(_REQUEST, lambda *_a, **_k: pytest.fail("no request expected"))
 
     listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=False, env={})
 
@@ -357,25 +365,25 @@ def test_a_body_without_single_reads_falls_back():
         arl._read_body(response, deadline=1e9)
 
 
-def _eligible(monkeypatch, ca: str = "/ca.pem") -> None:
-    monkeypatch.setattr(arl, "_effective_config", lambda _env: ({}, {}))
-    monkeypatch.setattr(arl, "_system_ca", lambda: ca)
+def _eligible(monkeypatch) -> str:
+    """Seed the env-keyed config verdict for ``env={}``: eligible, trusting certifi."""
+    import certifi
+
+    monkeypatch.setitem(arl._config_cache, (), ({}, {"GIT_SSL_CAINFO": certifi.where()}))
+    return certifi.where()
 
 
 def test_a_fetch_stuck_past_the_budget_falls_back(monkeypatch):
-    _eligible(monkeypatch)
+    ca = _eligible(monkeypatch)
     release = threading.Event()
-    monkeypatch.setattr(arl, "_DEADLINE_SECONDS", 0.05)
-    monkeypatch.setattr(arl, "_fetch", lambda *_args: release.wait(5) or b"")
+    monkeypatch.setattr(_REQUEST, lambda *_a, **_k: release.wait(5))
     started = time.monotonic()
     try:
-        listed = arl.list_refs_anonymously(
-            "https://github.com/owner/repo", include_heads=False, env={}
-        )
+        with pytest.raises(arl._Fallback, match="time budget"):
+            arl._fetch_within_deadline("https://github.com/o/r/info/refs", None, ca, budget=0.05)
     finally:
         release.set()
 
-    assert listed is None
     assert time.monotonic() - started < 2.0
 
 
@@ -411,12 +419,7 @@ class _Response:
 )
 def test_transport_errors_while_reading_fall_back(monkeypatch, error):
     _eligible(monkeypatch)
-    monkeypatch.setattr(arl, "_session_for_refs", lambda _ca: object())
-    monkeypatch.setattr(
-        http_credentials,
-        "origin_bounded_request",
-        lambda *_args, **_kwargs: _Response(_FailingRaw(error)),
-    )
+    monkeypatch.setattr(_REQUEST, lambda *_a, **_k: _Response(_FailingRaw(error)))
 
     listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=True, env={})
 

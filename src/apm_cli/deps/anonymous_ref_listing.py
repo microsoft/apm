@@ -420,7 +420,9 @@ def _abort(response) -> None:
             sock.shutdown(socket.SHUT_RDWR)
 
 
-def _fetch_within_deadline(refs_url: str, proxy: str | None, ca: str) -> bytes:
+def _fetch_within_deadline(
+    refs_url: str, proxy: str | None, ca: str, budget: float = _DEADLINE_SECONDS
+) -> bytes:
     """The advertisement body, or ``_Fallback`` on any error or past the budget.
 
     The fetch runs on a worker joined with the budget, so no phase (connect,
@@ -437,7 +439,7 @@ def _fetch_within_deadline(refs_url: str, proxy: str | None, ca: str) -> bytes:
 
     worker = threading.Thread(target=run, name="apm-anonymous-refs", daemon=True)
     worker.start()
-    worker.join(_DEADLINE_SECONDS)
+    worker.join(budget)
     if worker.is_alive():
         _abort(holder.get("response"))
         raise _Fallback("advertisement exceeds the time budget")

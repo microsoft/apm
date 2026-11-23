@@ -21,15 +21,15 @@ pytestmark = [
 _REPOS = ("https://github.com/octocat/Hello-World", "https://github.com/actions/checkout")
 
 
-def _git_ls_remote(url: str, *options: str, env: dict[str, str]) -> str:
+def _git_ls_remote(url: str, *options: str, env: dict[str, str]):
     return subprocess.run(
         ["git", "ls-remote", *options, url],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         env=env,
         timeout=120,
-    ).stdout
+    )
 
 
 @pytest.mark.parametrize("url", _REPOS)
@@ -53,7 +53,8 @@ def test_listing_matches_git_ls_remote(url, include_heads, tmp_path: Path):
     options = ("--tags", "--heads") if include_heads else ("--tags",)
 
     listed = list_refs_anonymously(url, include_heads=include_heads, env=env)
-    expected = _git_ls_remote(url, *options, env=env)
+    git = _git_ls_remote(url, *options, env=env)
 
+    assert git.returncode == 0, git.stderr
     assert listed is not None
-    assert listed == expected
+    assert listed == git.stdout
