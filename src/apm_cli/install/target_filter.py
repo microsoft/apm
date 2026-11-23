@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.remediation import HOOK_RECONCILE_INCOMPLETE
 from apm_cli.models.apm_package import canonical_package_targets
@@ -95,6 +95,29 @@ def warn_target_reconcile_failure(
             f"configs: [{', '.join(failed_paths)}]; {HOOK_RECONCILE_INCOMPLETE.clause()}"
         ),
     )
+
+
+def announced_reconcile(hook_integrator: Any, logger: Any, package_name: str, scope: Any) -> Any:
+    """The hook integrator's package-target reconcile, naming each emptied hook file it deletes.
+
+    Returns ``None`` when the integrator has no such reconcile (#4852).
+    """
+    from apm_cli.core.scope import InstallScope
+
+    reconcile = getattr(hook_integrator, "reconcile_package_target_restriction", None)
+    if not callable(reconcile):
+        return None
+    user_scope = scope is InstallScope.USER
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        stats = reconcile(*args, **kwargs)
+        deleted = stats.get("deleted_paths") if isinstance(stats, dict) else None
+        if logger is not None and deleted:
+            prefix = "~/" if user_scope else ""
+            logger.hook_config_cleanup(package_name, [prefix + path for path in deleted])
+        return stats
+
+    return run
 
 
 # A package declaring this target ships portable, cross-client skills.

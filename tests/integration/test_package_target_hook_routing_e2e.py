@@ -549,8 +549,8 @@ def test_package_target_transition_repairs_cursor_and_uninstall_preserves_user_h
     assert uninstalled.file(".claude/apm-hooks.json").kind == "missing"
     assert uninstalled.file(".cursor/apm-hooks.json").kind == "missing"
     assert _cursor_commands(uninstalled) == [_MANUAL_CURSOR_COMMAND]
-    claude_config = _json(uninstalled, ".claude/settings.json")
-    assert claude_config.get("hooks", {}) == {}
+    # Only APM's hooks were in the settings file APM created: it goes (#4852).
+    assert uninstalled.file(".claude/settings.json").kind == "missing"
     assert not uninstalled.deployment_records
     _assert_audit_passes_without_writes(
         scenario,

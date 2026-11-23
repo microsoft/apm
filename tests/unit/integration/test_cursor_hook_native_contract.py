@@ -578,7 +578,7 @@ def test_explicit_target_contraction_can_choose_one_import_route(
 
     first_path = project / f".{first}" / ("settings.json" if first == "claude" else "hooks.json")
     second_path = project / f".{second}" / ("settings.json" if second == "claude" else "hooks.json")
-    assert not json.loads(first_path.read_text()).get("hooks")
+    assert not first_path.exists(), "the emptied hook file APM created must go (#4852)"
     assert json.loads(second_path.read_text())["hooks"]
     assert not first_path.with_name("apm-hooks.json").exists()
 
