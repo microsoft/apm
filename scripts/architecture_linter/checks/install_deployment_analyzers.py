@@ -45,6 +45,10 @@ from scripts.architecture_linter.checks.install_claude_agents_md_routing import 
     GUARD_CLAUDE_AGENTS_MD_ROUTING,
     check_claude_agents_md_routing,
 )
+from scripts.architecture_linter.checks.install_cleanup_spelling_aliases import (
+    GUARD_CLEANUP_SPELLING_ALIASES,
+    check_cleanup_spelling_aliases,
+)
 from scripts.architecture_linter.checks.install_cleanup_target_roots import (
     GUARD_CLEANUP_TARGET_ROOTS,
     check_cleanup_target_roots,
@@ -174,6 +178,10 @@ from scripts.architecture_linter.checks.install_policy_outcome_routing import (
 from scripts.architecture_linter.checks.install_portable_trust import (
     RULES as PORTABLE_TRUST_RULES,
 )
+from scripts.architecture_linter.checks.install_reanchor_receipts import (
+    GUARD_REANCHOR_RECEIPT_HISTORY,
+    check_reanchor_receipt_history,
+)
 from scripts.architecture_linter.checks.install_receipt_collection import (
     GUARD_RECEIPT_COLLECTION,
     check_receipt_collection,
@@ -197,6 +205,10 @@ from scripts.architecture_linter.checks.install_request_and_source import (
 from scripts.architecture_linter.checks.install_selection_merge import (
     GUARD_SELECTION_MERGE,
     check_selection_merge,
+)
+from scripts.architecture_linter.checks.install_server_name_rule import (
+    GUARD_SERVER_NAME_RULE,
+    check_server_name_rule,
 )
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
@@ -271,6 +283,11 @@ RULES: tuple[Rule, ...] = (
         check_lockfile_required,
     ),
     _rule(
+        GUARD_CLEANUP_SPELLING_ALIASES,
+        "Cleanup reads claim spellings naming one file only through SpellingAliasIndex.aliases.",
+        check_cleanup_spelling_aliases,
+    ),
+    _rule(
         GUARD_CLEANUP_TARGET_ROOTS,
         "Deploy cleanup prunes empty parents only through its owner, which keeps target roots.",
         check_cleanup_target_roots,
@@ -279,6 +296,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_RECEIPT_COLLECTION,
         "Orphaned deployment receipts are collected only by the receipt owner.",
         check_receipt_collection,
+    ),
+    _rule(
+        GUARD_REANCHOR_RECEIPT_HISTORY,
+        "A re-anchored local owner's receipts keep their hash history.",
+        check_reanchor_receipt_history,
     ),
     _rule(
         _GUARD_BUNDLE_STAGING,
@@ -309,6 +331,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_POLICY_OUTCOME_ROUTING,
         "Every policy-discovery outcome routes through one closed-world owner.",
         check_policy_outcome_routing,
+    ),
+    _rule(
+        GUARD_SERVER_NAME_RULE,
+        "MCP and LSP server names are validated by models/dependency/server_names.py.",
+        check_server_name_rule,
     ),
     _rule(
         GUARD_POLICY_FIELD_TYPES,

@@ -16,7 +16,6 @@ import copy
 import json
 import logging
 import re
-import shutil
 import warnings
 from collections.abc import Callable, MutableMapping
 from pathlib import Path
@@ -36,7 +35,6 @@ from apm_cli.deps.lockfile import (
     installed_apm_version,
 )
 from apm_cli.deps.lockfile_write_authority import lockfile_exists
-from apm_cli.integration import write_seam
 from apm_cli.integration.mcp_config_view import (
     _collect_transitive_compat,
     _deduplicate,
@@ -129,7 +127,9 @@ def _is_vscode_available(project_root: Path | str | None = None) -> bool:
             explicit project context is provided. Falls back to CWD when unset.
     """
     root = Path(project_root) if project_root is not None else Path.cwd()
-    return shutil.which("code") is not None or (root / ".vscode").is_dir()
+    from apm_cli.utils.git_env import trusted_executable
+
+    return trusted_executable("code") is not None or (root / ".vscode").is_dir()
 
 
 def _write_cleaned_json_config(
@@ -143,18 +143,25 @@ def _write_cleaned_json_config(
     """Write a cleaned MCP JSON config, or delete it once APM's last entry left.
 
     With *delete_emptied*, a file whose servers were all removed by this
-    cleanup and that holds no other key goes, as a fresh deploy never writes
-    it (#4852). A file with any other key, even an empty one, stays.
+    cleanup and that holds no other key is offered to the provenance owner,
+    which deletes it only when APM created it (#4852, #4867). A file with any
+    other key, even an empty one, stays.
     """
-    if delete_emptied and not config.get(servers_key) and set(config) <= {servers_key}:
-        write_seam.unlink(config_path)
-        return
-    write_json_config(
-        config_path,
-        config,
-        default_trailing_newline=trailing_newline,
-        new_file_mode=0o600,
+    from apm_cli.integration.config_file_provenance import (
+        delete_emptied_config,
+        recorded_config_write,
     )
+
+    empty = not config.get(servers_key) and set(config) <= {servers_key}
+    if delete_emptied and delete_emptied_config(config_path, root=config_path.parent, empty=empty):
+        return
+    with recorded_config_write(config_path):
+        write_json_config(
+            config_path,
+            config,
+            default_trailing_newline=trailing_newline,
+            new_file_mode=0o600,
+        )
 
 
 def _clean_json_mcp_config(
