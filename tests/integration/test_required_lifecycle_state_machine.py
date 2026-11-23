@@ -410,15 +410,12 @@ def _run_refused(
     scenario_id: str,
     *,
     environment: dict[str, str],
-    local: bool = False,
 ) -> None:
     """Plain install keeps an edited managed file and names it (#4360, RA-012).
 
-    For a dependency file the receipt proves the edit; with nothing new to
-    deploy the install keeps the file, warns with the true reason and exits 0
-    (parity with skills). The project's own local content (*local*, owner ".")
-    has no kept-file partial apply: the install refuses with exit 1 and the
-    move-aside remedy (#4360).
+    The receipt proves the edit; with nothing new to deploy the install keeps
+    the file, warns with the true reason and exits 0 (parity with skills),
+    for dependency files and the project's own local content alike (#4873).
     """
     before = kept.read_bytes()
     result = scenario.runner.run(
@@ -428,14 +425,6 @@ def _run_refused(
     entry = kept.relative_to(project.root).as_posix()
     from apm_cli.integration.base_integrator import kept_edit_message
 
-    if local:
-        both = " ".join((result.stdout + result.stderr).split())
-        assert result.returncode == 1, both
-        # The receipt proves the edit, so the refusal names the true reason (RA-012).
-        assert kept_edit_message(entry, user_scope=False, proven_edit=True) in both, both
-        assert "no local deployment receipt" not in both, both
-        assert kept.read_bytes() == before
-        return
     assert result.returncode == 0, text
     assert kept_edit_message(entry, user_scope=False, proven_edit=True) in text, text
     assert "[!] [" in text and "] Kept " in text, text

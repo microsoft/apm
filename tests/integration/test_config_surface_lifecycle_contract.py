@@ -2289,10 +2289,8 @@ def test_saved_target_drives_declared_mcp_and_lsp_without_package(
         cwd=project.root,
         env=environment,
     )
-    assert (
-        "saved-declared-mcp"
-        not in json.loads((project.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-    )
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    assert not (project.root / ".mcp.json").exists()
     assert not (project.root / _CLAUDE_LSP_PLUGIN).exists()
 
 

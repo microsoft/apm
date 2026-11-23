@@ -798,6 +798,35 @@ class TestFrozenRunEndToEnd:
         assert (tmp_path / "apm.lock.yaml").read_bytes() != committed
 
 
+class TestFrozenAcquireFailures:
+    """A failed download is named before any derived frozen check (#4909)."""
+
+    def test_refusal_names_each_failed_package_with_its_recorded_cause(self):
+        from apm_cli.install.phases.integrate import failed_acquisitions
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        diagnostics = DiagnosticCollector()
+        diagnostics.error("Failed to install o/a: clone failed", package="o/a")
+        diagnostics.warn("unrelated", package="o/a")
+        failures = failed_acquisitions(diagnostics, ["o/a", "o/b", "o/a"])
+
+        assert failures == [
+            ("o/a", "Failed to install o/a: clone failed"),
+            ("o/b", "o/b: package could not be acquired"),
+        ]
+        with pytest.raises(FrozenInstallError) as excinfo:
+            InstallService.enforce_frozen_restored(failures)
+        assert str(excinfo.value).splitlines()[0] == (
+            "--frozen: locked dependencies could not be restored: o/a, o/b."
+        )
+
+    def test_no_failed_package_refuses_nothing(self):
+        from apm_cli.install.phases.integrate import failed_acquisitions
+
+        assert failed_acquisitions(None, []) == []
+        InstallService.enforce_frozen_restored([])
+
+
 class TestOutermost:
     def test_drops_paths_covered_by_a_listed_ancestor(self):
         assert _outermost(
