@@ -361,6 +361,24 @@ def test_claude_surfaces_count_only_their_own_entries(lifecycle_world) -> None:
         assert written and (cell in observed) == counted, (cell, written, sorted(observed))
 
 
+def test_a_dropped_target_that_still_enables_a_whole_plugin_keeps_it(lifecycle_world) -> None:
+    """Negative control: the plugin root is shared by claude and copilot, but each
+    harness's enable entry is its own, so a dropped claude still enabling it counts."""
+    scenario = Scenario(lifecycle_world, (_NATIVE,), targets=("copilot",))
+    root = lifecycle_world.project / f".agents/plugins/{_NATIVE}/.claude-plugin/plugin.json"
+    root.parent.mkdir(parents=True)
+    root.write_text(json.dumps({"name": _NATIVE}), encoding="ascii")
+    settings = lifecycle_world.project / _PLUGIN_SETTINGS["claude"]
+    settings.parent.mkdir(parents=True)
+    cell = f"{_NATIVE}/native/claude"
+    for enabled in (True, False):
+        document = {"enabledPlugins": {f"{_NATIVE}@apm-p-0123abcd": enabled}}
+        settings.write_text(json.dumps(document), encoding="ascii")
+        written = settings.read_text(encoding="ascii")
+        kept = scenario.undeclared_target_cells()
+        assert written and (cell in kept) == enabled, (written, sorted(kept))
+
+
 CREDITS = credits(
     __file__,
     {

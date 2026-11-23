@@ -615,7 +615,18 @@ class Scenario:
                 for (scope, surface_kind, target), surface in SURFACE_GLOBS.items():
                     if scope != self.scope or surface_kind != kind:
                         continue
-                    if target in self.model.targets or surface in live:
+                    if target in self.model.targets:
+                        continue
+                    # A whole plugin's root is shared, but each harness's enable entry is
+                    # its own: a dropped target that still enables the plugin keeps it.
+                    if (
+                        kind == "native"
+                        and whole_plugin(self.scope, package, target)
+                        and native_declaration(self.deploy_root, target, package.split(":")[0])
+                    ):
+                        found.add(f"{package}/{kind}/{target}")
+                        continue
+                    if surface in live:
                         continue
                     if kind == "skill" and _skill_root(target) in skill_roots:
                         continue
