@@ -1366,3 +1366,61 @@ def test_a_partial_directory_with_an_unlistable_subtree_is_kept(
 
     assert outcome.kept == ((".kiro/skills/s", "it changed after the interrupted install"),)
     assert (assets / "mine.md").read_bytes() == b"mine\n"
+
+
+def _shared_dir_install(apm_home: Path, project: Path, packages: int) -> Path:
+    """*packages* writers each ensure one shared directory, then write a file into it."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project.mkdir(parents=True, exist_ok=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        for index in range(packages):
+            write_seam.mkdir(shared, parents=True, exist_ok=True)
+            write_seam.write_text_lf(shared / f"p{index}.prompt.md", f"prompt {index}\n")
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    return journal.store
+
+
+def test_an_existing_directory_is_sealed_once_not_per_writer(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Re-ensuring a directory changes nothing, so it is not re-fingerprinted per package."""
+    import json
+
+    store = _shared_dir_install(apm_home, tmp_path / "project", packages=4)
+
+    lines = [json.loads(line) for line in (store / "journal.jsonl").read_text().splitlines()]
+    whole_dir_seals = [line for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert len(whole_dir_seals) == 1
+    file_seals = [line for line in lines if "sealed" in line and line.get("sub")]
+    assert len(file_seals) == 4
+
+
+@pytest.mark.parametrize("user_file", [False, True])
+def test_a_killed_install_into_a_shared_directory_replays_as_before(
+    tmp_path: Path, apm_home: Path, user_file: bool
+) -> None:
+    """Every file below the directory carries its own seal, so replay decides as before."""
+    project = tmp_path / "project"
+    shared = project / ".github" / "prompts"
+    _shared_dir_install(apm_home, project, packages=3)
+    if user_file:
+        (shared / "mine.md").write_text("user\n", encoding="utf-8")
+
+    outcome = _replay(apm_home, project)
+
+    if user_file:
+        assert outcome.restored == 0 and len(outcome.kept) == 1
+        assert (shared / "mine.md").read_text(encoding="utf-8") == "user\n"
+    else:
+        assert (outcome.restored, outcome.kept) == (1, ())
+        assert not shared.exists()

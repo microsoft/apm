@@ -22,6 +22,7 @@ import pytest
 from apm_cli.cache.checkout_verify import (
     CheckoutVerificationError,
     forget_verdicts,
+    materialize_verified_copy,
     read_verified_file,
     require_verified_checkout,
     require_verified_copy,
@@ -285,6 +286,48 @@ def test_a_copy_is_checked_against_the_bytes_verification_accepted(tmp_path: Pat
         require_verified_copy(dest, repo, sha, "pkg")
     with pytest.raises(CheckoutVerificationError, match="verified bytes"):
         read_verified_file(repo, "pkg/AGENTS.md", sha)
+
+
+def test_a_one_pass_copy_writes_only_the_bytes_verification_accepted(tmp_path: Path) -> None:
+    import hashlib
+
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    digests = materialize_verified_copy(dest, repo, sha, "pkg")
+
+    written = (dest / "AGENTS.md").read_bytes()
+    assert written == b"Package instructions\n"
+    assert digests == {"AGENTS.md": hashlib.sha256(written).hexdigest()}
+    assert sorted(p.name for p in dest.iterdir()) == ["AGENTS.md"]
+
+
+def test_a_one_pass_copy_refuses_a_source_changed_after_verification(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Injected instructions\n")  # after verification
+    dest = tmp_path / "dest"
+    dest.mkdir()
+
+    with pytest.raises(CheckoutVerificationError, match="verified bytes"):
+        materialize_verified_copy(dest, repo, sha, "pkg")
+    assert not (dest / "AGENTS.md").exists()
+
+
+@_POSIX_ONLY
+def test_a_one_pass_copy_never_writes_through_a_planted_link(tmp_path: Path) -> None:
+    repo, sha = _plain_repo(tmp_path)
+    require_verified_checkout(repo, sha, env=neutral_git_env())
+    dest, outside = tmp_path / "dest", tmp_path / "outside.md"
+    dest.mkdir()
+    outside.write_bytes(b"untouched\n")
+    (dest / "AGENTS.md").symlink_to(outside)
+
+    with pytest.raises(OSError):
+        materialize_verified_copy(dest, repo, sha, "pkg")
+    assert outside.read_bytes() == b"untouched\n"
 
 
 def _forge_loose(git_dir: Path, oid: str, kind: str, data: bytes) -> None:

@@ -9,6 +9,7 @@ Strategy: hermetic -- all external I/O is mocked.
 from __future__ import annotations
 
 import contextlib
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,18 @@ from apm_cli.deps.github_downloader import GitHubPackageDownloader
 # are no copied bytes to check; real copies are checked in test_checkout_verify.
 _COPIES_ARE_MOCKED = patch(
     "apm_cli.deps.github_downloader.require_verified_copy", new=lambda *_a, **_k: None
+)
+
+
+def _copy_without_verifying(dest, repo, _sha, subdir="", env=None):
+    """The one-pass verified copy, minus the verification these mocked checkouts cannot pass."""
+    source = Path(repo, subdir) if subdir else Path(repo)
+    shutil.copytree(source, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git"))
+    return {}
+
+
+_MATERIALIZE_IS_MOCKED = patch(
+    "apm_cli.deps.github_downloader.materialize_verified_copy", new=_copy_without_verifying
 )
 
 # ---------------------------------------------------------------------------
@@ -352,6 +365,7 @@ class TestDownloadVirtualFilePackage:
 
 
 @_COPIES_ARE_MOCKED
+@_MATERIALIZE_IS_MOCKED
 class TestDownloadSubdirectoryPersistentCache:
     def _make_dep_ref(self, repo_url: str = "owner/repo") -> MagicMock:
         dep_ref = MagicMock()
@@ -548,6 +562,7 @@ class TestDownloadSubdirectoryPersistentCache:
 
 
 @_COPIES_ARE_MOCKED
+@_MATERIALIZE_IS_MOCKED
 class TestDownloadWholeRepositoryPersistentCache:
     def test_cache_identity_preserves_full_nested_gitlab_path(self, tmp_path):
         from apm_cli.models.apm_package import DependencyReference
@@ -620,6 +635,7 @@ class TestDownloadWholeRepositoryPersistentCache:
 
 
 @_COPIES_ARE_MOCKED
+@_MATERIALIZE_IS_MOCKED
 class TestDownloadWholeRepositoryPersistentCacheAgentPluginRejection:
     """Regression test: a rejected Agent Plugin on the cache fast path must not
     leave a partially-populated target_path on disk.
