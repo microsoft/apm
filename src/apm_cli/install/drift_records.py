@@ -18,6 +18,7 @@ import stat
 import unicodedata
 from collections.abc import Callable, Collection, Iterable, Mapping
 from pathlib import Path
+from shutil import rmtree
 from typing import Any
 
 # ``APM_AUDIT_RECORDS=0`` replays every package live.
@@ -430,3 +431,36 @@ class _MappingContext:
         self.targets = targets
         self.integrators = integrators
         self.project_root = root
+
+
+def replay_all_live(
+    config: Any, logger: Any, scratch_root: Path, run_replay: Callable[[Any, Any], Path]
+) -> Path:
+    """Rerun *config*'s replay all live in *scratch_root* (F3b restart, #4940)."""
+    keep = config.modules_root.resolve() if config.modules_root is not None else None
+    # Without a caller's scratch root the restart takes a fresh one; the first
+    # is removed at exit like any replay scratch.
+    if config.scratch_root is not None:
+        for child in scratch_root.iterdir():
+            if child.resolve() != keep:
+                if child.is_dir() and not child.is_symlink():
+                    rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+    return run_replay(config, _Restarted(logger))
+
+
+class _Restarted:
+    """The replay's logger for an all-live restart: the start lines already printed."""
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    def replay_start(self) -> None:
+        return None
+
+    def scratch_root(self, _path: Path) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)

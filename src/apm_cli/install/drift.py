@@ -55,7 +55,7 @@ from apm_cli.install.audit_target_roots import (
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
-from apm_cli.install.drift_records import ReplayRecords
+from apm_cli.install.drift_records import ReplayRecords, replay_all_live
 from apm_cli.install.drift_render import (
     _INLINE_DIFF_BYTE_CAP as _INLINE_DIFF_BYTE_CAP,
 )
@@ -598,8 +598,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         include_recorded=config.include_recorded_targets,
     )
     targets = [replay_target(target) for target in _filter_targets(live_targets, config.targets)]
-    downloader, registry_resolver, registries, declared_transports = _replay_sources(
-        config, project_root, apm_modules_dir
+    from apm_cli.install.replay_transport import replay_sources
+
+    downloader, registry_resolver, registries, declared_transports = replay_sources(
+        config.cache_only, project_root, apm_modules_dir
     )
     if downloader is not None:
         from apm_cli.cache.git_cache import attach_persistent_git_cache
@@ -784,68 +786,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     if not served.finish(logger, replayed_count):
         # A live package rendered onto a served destination: replay all live.
-        return _replay_all_live(config, logger, scratch_root)
+        return replay_all_live(replace(config, records=False), logger, scratch_root, run_replay)
     return scratch_root
-
-
-def _replay_sources(
-    config: ReplayConfig, project_root: Path, apm_modules_dir: Path
-) -> tuple[Any, Any, dict[str, str] | None, DeclaredTransportIndex | None]:
-    """The downloader, registry resolver, registries and declared transports a replay fetches with.
-
-    A cache-only replay fetches nothing, so all four are ``None``.
-    """
-    if config.cache_only:
-        return None, None, None, None
-    from apm_cli.core.auth import AuthResolver
-    from apm_cli.deps.github_downloader import GitHubPackageDownloader
-    from apm_cli.deps.registry.resolver import RegistryPackageResolver
-    from apm_cli.install.replay_transport import DeclaredTransportIndex
-    from apm_cli.models.apm_package import APMPackage
-
-    registries: dict[str, str] | None = None
-    registry_resolver = None
-    downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
-    declared_transports = DeclaredTransportIndex(modules_dir=apm_modules_dir)
-    if (apm_yml := manifest_file(project_root)).exists():
-        manifest = APMPackage.from_apm_yml(apm_yml)
-        declared_transports.record(
-            [*manifest.get_apm_dependencies(), *manifest.get_dev_apm_dependencies()]
-        )
-        registries = getattr(manifest, "registries", None) or {}
-        if registries:
-            registry_resolver = RegistryPackageResolver(registries)
-    return downloader, registry_resolver, registries, declared_transports
-
-
-def _replay_all_live(config: ReplayConfig, logger: CheckLogger, scratch_root: Path) -> Path:
-    keep = config.modules_root.resolve() if config.modules_root is not None else None
-    # Without a caller's scratch root the restart takes a fresh one; the first
-    # is removed at exit like any replay scratch.
-    if config.scratch_root is not None:
-        for child in scratch_root.iterdir():
-            if child.resolve() != keep:
-                if child.is_dir() and not child.is_symlink():
-                    rmtree(child, ignore_errors=True)
-                else:
-                    child.unlink(missing_ok=True)
-    return run_replay(replace(config, records=False), _Restarted(logger))
-
-
-class _Restarted:
-    """The replay's logger for an all-live restart: the start lines already printed."""
-
-    def __init__(self, logger: CheckLogger) -> None:
-        self._logger = logger
-
-    def replay_start(self) -> None:
-        return None
-
-    def scratch_root(self, _path: Path) -> None:
-        return None
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._logger, name)
 
 
 # Diff engine
