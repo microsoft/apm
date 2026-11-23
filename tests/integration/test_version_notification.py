@@ -1,7 +1,8 @@
 """Integration tests for version update notification in CLI."""
 
-import os  # noqa: F401
+import os
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,12 @@ from click.testing import CliRunner
 
 # One HOME is shared by every test in a process or xdist worker (tests/conftest.py).
 _WORKER_HOME = Path.home()
+
+
+def _stamp_path(home: Path) -> Path:
+    """The daily-check stamp under *home*, as version_checker.get_update_cache_path lays it out."""
+    cache = ("AppData", "Local", "apm", "cache") if sys.platform == "win32" else (".cache", "apm")
+    return home.joinpath(*cache, "last_version_check")
 
 
 class TestVersionNotificationIntegration(unittest.TestCase):
@@ -48,8 +55,8 @@ class TestVersionNotificationIntegration(unittest.TestCase):
     def test_notification_ignores_a_daily_stamp_another_test_left(self, mock_check):
         """A daily-check stamp an earlier test on this worker wrote must not hide the notice."""
         mock_check.return_value = "0.7.0"
-        stamp = _WORKER_HOME / ".cache" / "apm" / "last_version_check"
-        existed = stamp.exists()
+        stamp = _stamp_path(_WORKER_HOME)
+        times = (stamp.stat().st_atime_ns, stamp.stat().st_mtime_ns) if stamp.exists() else None
         stamp.parent.mkdir(parents=True, exist_ok=True)
         stamp.touch()
         try:
@@ -58,8 +65,11 @@ class TestVersionNotificationIntegration(unittest.TestCase):
             with self.runner.isolated_filesystem():
                 result = self.runner.invoke(cli, ["init", "test-project", "--yes"])
         finally:
-            if not existed:
+            # Leave the worker stamp exactly as found: absent, or with its own age.
+            if times is None:
                 stamp.unlink()
+            else:
+                os.utime(stamp, ns=times)
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("A new version", result.output)
@@ -70,7 +80,7 @@ class TestVersionNotificationIntegration(unittest.TestCase):
     def test_a_fresh_daily_stamp_skips_the_check_and_the_notice(self, mock_check):
         """Within a day of the last check the notice neither checks nor prints (620c6ea79)."""
         mock_check.return_value = "0.7.0"
-        stamp = self.home / ".cache" / "apm" / "last_version_check"
+        stamp = _stamp_path(self.home)
         stamp.parent.mkdir(parents=True)
         stamp.touch()
 
