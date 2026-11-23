@@ -2454,7 +2454,11 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-command-render-then-adopt",
         rule_id="install-deployment-command-render-then-adopt",
         path="src/apm_cli/integration/command_integrator.py",
-        old="expected_content=self._rendered_command(prompt_file, target_path, mapping),",
+        old=(
+            "expected_content=self._rendered_command(\n"
+            "                    prompt_file, target_path, mapping, target.name\n"
+            "                ),"
+        ),
         new="expected_content=None,",
         intent="Command adoption compares the raw prompt instead of the rendered command.",
     ),
