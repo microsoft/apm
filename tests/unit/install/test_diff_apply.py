@@ -234,6 +234,51 @@ def test_a_parent_pin_the_lock_satisfies_is_admitted(tmp_path: Path) -> None:
     assert (tmp_path / "apm.lock.yaml").read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"PROXY_REGISTRY_URL": "https://proxy.example/artifactory/api/vcs"},
+        {
+            "PROXY_REGISTRY_URL": "https://proxy.example/artifactory/api/vcs",
+            "PROXY_REGISTRY_ONLY": "1",
+        },
+    ],
+    ids=["proxy", "proxy-only"],
+)
+def test_a_configured_registry_proxy_takes_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, env: dict[str, str]
+) -> None:
+    """Source routing (and the proxy-only lockfile refusal) is the full pipeline's decision."""
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "trace")
+    (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+
+    applied = diff_apply.try_apply({}, ["install"], tmp_path, frozen_disposition=disposition)
+
+    assert applied is False
+    assert "full run (registry proxy configured)" in capsys.readouterr().err
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["apm.yml"]
+
+
+def test_a_symlink_in_a_package_copy_takes_the_full_pipeline(tmp_path: Path) -> None:
+    """Package hashes skip symlinks and the source plan warns on them: only the full run judges."""
+    from apm_cli.install import noop_diff
+
+    lock = _lock(**{"o/p": {}})
+    lock.dependencies["o/p"].to_dependency_ref = lambda: SimpleNamespace(
+        get_install_path=lambda modules: modules / "o" / "p"
+    )
+    agents = tmp_path / "apm_modules" / "o" / "p" / ".apm" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "real.agent.md").write_text("# agent\n", encoding="ascii")
+    assert noop_diff.sources_scan_clean(tmp_path, lock)
+    (agents / "extra.agent.md").symlink_to(agents / "real.agent.md")
+    assert not noop_diff.sources_scan_clean(tmp_path, lock)
+    assert (agents / "real.agent.md").read_text(encoding="ascii") == "# agent\n"
+
+
 def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     rel = ".github/prompts/a.prompt.md"
     lock = _lock(**{"o/p": {rel: _digest(b"locked\n")}})

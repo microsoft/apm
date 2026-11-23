@@ -610,8 +610,14 @@ def try_apply(
 
     started = time.perf_counter()
     try:
+        from apm_cli.deps.egress_route import EgressSurface, is_proxy_only
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path, installed_apm_version
+        from apm_cli.deps.registry_proxy import RegistryConfig
 
+        if RegistryConfig.from_env() is not None or is_proxy_only(EgressSurface.SOURCE_ARCHIVE):
+            # Source routing (and PROXY_REGISTRY_ONLY's lockfile refusal,
+            # install/pipeline.py) is the full pipeline's egress decision.
+            raise Decline("registry proxy configured")
         lock_path = get_lockfile_path(project_root)
         lock = LockFile.read(lock_path)
         if lock is None:
