@@ -127,3 +127,27 @@ def test_user_scope_install_names_the_scoped_remedy(tmp_path: Path, apm_binary_p
     settings.write_text(json.dumps({"hooks": {}}) + "\n", encoding="utf-8")
     world.apm("install", "-g", cwd=world.isolated.work_root)
     assert "echo h" in settings.read_text(encoding="utf-8")
+
+
+def test_install_never_prints_control_bytes_from_an_event_name(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """An event name carrying ESC is printed with the control byte replaced."""
+    event = "X\u001bEvt"
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    package = world.project / "vendor" / "h"
+    write(package / "apm.yml", "name: h\nversion: 1.0.0\n")
+    hook = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo h"}]}
+    write(package / ".apm" / "hooks" / "h.json", json.dumps({"hooks": {event: [hook]}}))
+    (world.project / ".claude").mkdir()
+    _manifest(world, ["h"])
+    settings = world.project / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"hooks": {event: None}}) + "\n", encoding="utf-8")
+
+    result = world.apm("install", expect=1)
+
+    output = result.stdout + result.stderr
+    assert "\x1b" not in output, repr(output)
+    text = " ".join(output.split())
+    assert "hook event 'X?Evt' is not a list of hook entries" in text, text
+    assert json.loads(settings.read_text(encoding="utf-8")) == {"hooks": {event: None}}
