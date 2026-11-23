@@ -1455,17 +1455,27 @@ class TestCursorIntegration:
         assert not (temp_project / ".cursor" / "hooks").exists()
 
     def test_sync_removes_empty_hooks_key_cursor(self, temp_project):
-        """Test that empty hooks key is removed from hooks.json after cleanup."""
+        """A hooks.json left with only Cursor's version skeleton is deleted (#4852)."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
         hooks_path.write_text(
-            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+            json.dumps({"version": 1, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
         )
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(hooks_path.read_text())
-        assert "hooks" not in updated
+        assert not hooks_path.exists()
+
+    def test_sync_keeps_cursor_hooks_with_a_non_default_version_type(self, temp_project):
+        """``version: true`` is not Cursor's injected ``version: 1``: the file stays."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"version": True, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(hooks_path.read_text()) == {"version": True}
 
     def test_cursor_version_emitted_on_fresh_install(self, temp_project):
         """Fresh .cursor/hooks.json must contain top-level "version": 1."""
@@ -1690,7 +1700,7 @@ class TestSyncIntegration:
         assert stats["errors"] == 0
 
     def test_sync_removes_empty_hooks_key(self, temp_project):
-        """Test that empty hooks key is removed from settings.json after cleanup."""
+        """Empty hooks key goes; a settings.json left empty is deleted (#4852)."""
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
@@ -1700,8 +1710,61 @@ class TestSyncIntegration:
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(settings_path.read_text())
-        assert "hooks" not in updated  # Completely removed when empty
+        assert not settings_path.exists()
+
+    def test_cleanup_never_deletes_below_a_symlinked_ancestor(self, tmp_path):
+        """A nested hook file under a symlinked ancestor of the root is rewritten, not deleted."""
+        outside = tmp_path / "outside"
+        (outside / "windsurf").mkdir(parents=True)
+        hooks_path = outside / "windsurf" / "hooks.json"
+        hooks_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        root = tmp_path / "home"
+        root.mkdir()
+        (root / ".codeium").symlink_to(outside, target_is_directory=True)
+        stats = {"files_removed": 0, "errors": 0}
+
+        HookIntegrator._clean_apm_entries_from_json(
+            root / ".codeium" / "windsurf" / "hooks.json", stats, root=root
+        )
+
+        assert json.loads(hooks_path.read_text()) == {}
+
+    def test_sync_never_deletes_through_a_symlinked_target_dir(self, temp_project, tmp_path):
+        """An emptied settings.json behind a symlinked .claude is rewritten, not deleted."""
+        outside = tmp_path / "outside-claude"
+        outside.mkdir()
+        settings_path = outside / "settings.json"
+        settings_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        (temp_project / ".claude").symlink_to(outside, target_is_directory=True)
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert settings_path.is_file()
+        assert "hooks" not in json.loads(settings_path.read_text())
+
+    @pytest.mark.parametrize(
+        "user_keys",
+        [{"permissions": {"allow": ["Bash(ls)"]}}, {"version": 1}],
+        ids=["permissions", "cursor-default-is-claude-user-key"],
+    )
+    def test_sync_keeps_settings_with_user_keys(self, temp_project, user_keys):
+        """A settings.json that also holds the user's keys stays, without APM's hooks.
+
+        Cursor's injected ``version: 1`` is a user key in Claude's settings.
+        """
+        claude_dir = temp_project / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings = {**user_keys, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}}
+        settings_path.write_text(json.dumps(settings))
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(settings_path.read_text()) == user_keys
 
 
 # ─── Script path rewriting tests ─────────────────────────────────────────────

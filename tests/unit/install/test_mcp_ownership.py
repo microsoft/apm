@@ -656,7 +656,10 @@ def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
         MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
     )
     config = tmp_path / ".mcp.json"
-    config.write_text(json.dumps({"mcpServers": {"managed": native}}), encoding="utf-8")
+    user_entry = {"command": "user-server"}
+    config.write_text(
+        json.dumps({"mcpServers": {"managed": native, "mine": user_entry}}), encoding="utf-8"
+    )
     MCPIntegrator.remove_stale(
         {"managed"},
         runtime=runtime,
@@ -665,6 +668,7 @@ def test_remove_stale_cleans_recorded_claude_server_without_claude_dir(
     )
     servers = json.loads(config.read_text(encoding="utf-8"))["mcpServers"]
     assert ("managed" in servers) is (runtime is None)
+    assert servers["mine"] == user_entry
 
 
 def test_native_comparison_covers_json_adapters_and_skips_opt_outs(tmp_path):
@@ -699,3 +703,211 @@ def test_native_comparison_distinguishes_json_types():
     assert not MCPClientAdapter.json_identical({"enabled": True}, {"enabled": 1})
     assert not MCPClientAdapter.json_identical({"timeout": 1}, {"timeout": 1.0})
     assert MCPClientAdapter.json_identical({"a": 1, "b": 2}, {"b": 2, "a": 1})
+
+
+def _recorded_user_claude(tmp_path, monkeypatch, *, recorded_hash: bool, registry: bool = False):
+    """A self-defined server APM wrote to ~/.claude.json, as the lockfile records it."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    stored = {"name": "srv", "registry": False, "transport": "stdio", "command": "srv-bin"}
+    if registry:
+        stored = {"name": "srv"}
+    client = ClaudeClientAdapter(project_root=tmp_path / "project", user_scope=True)
+    native = {"type": "stdio", "command": "srv-bin"}
+    path = Path(client.get_config_path())
+    path.write_text(json.dumps({"mcpServers": {"srv": native}}), encoding="utf-8")
+    lock = LockFile()
+    lock.mcp_servers = ["srv"]
+    lock.mcp_configs = {"srv": stored}
+    hashes = {"claude": {"srv": mcp_native_hash(client.managed_server_config(native))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {"claude": ["srv"]}, native_hashes=hashes if recorded_hash else {}
+    )
+    return lock, path
+
+
+def _edited_entries(lock, tmp_path):
+    from apm_cli.install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    return edited_recorded_native_mcp_entries(
+        lock, ["claude"], project_root=tmp_path / "project", user_scope=True
+    )
+
+
+def test_a_hand_edited_recorded_user_claude_entry_is_reported(tmp_path, monkeypatch) -> None:
+    """#4757: an edit to a recorded ~/.claude.json entry is named with its file; read-only."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True)
+    assert _edited_entries(lock, tmp_path) == []
+
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == [("srv", "claude", path.absolute().as_posix())]
+    assert path.read_bytes() == before
+
+
+def test_a_recorded_entry_without_a_fingerprint_is_not_reported(tmp_path, monkeypatch) -> None:
+    """Without a recorded fingerprint there is nothing APM recorded to compare against."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=False)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == []
+    assert path.read_bytes() == before
+
+
+def test_a_hand_edited_user_entry_advises_the_user_scope_install(tmp_path, monkeypatch) -> None:
+    """The audit remedy for a user-scope entry runs the user-scope install."""
+    from apm_cli.policy.ci_checks import _edited_native_mcp_entries
+
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    (check,) = _edited_native_mcp_entries(
+        tmp_path / "project", lock, [SimpleNamespace(name="claude")], user_scope=True
+    )
+
+    assert check.name == "native-mcp-drift" and not check.passed
+    assert "then run 'apm install -g'" in check.message, check.message
+    assert check.details == [
+        f"MCP server 'srv' in {path.absolute().as_posix()} (claude): the entry differs "
+        "from what APM recorded writing"
+    ]
+    assert path.read_bytes() == before
+
+
+def test_an_edited_registry_entry_is_not_compared(tmp_path, monkeypatch) -> None:
+    """A registry render needs its payload to verify a --frozen heal, so audit never guesses."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True, registry=True)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == []
+    assert path.read_bytes() == before
+
+
+def _moved_codex_entry(tmp_path, native_command: str):
+    """A ``${CLAUDE_PLUGIN_ROOT}`` Codex server recorded at an old clone, now in a moved one."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+
+    project = tmp_path / "project"
+    (project / ".codex").mkdir(parents=True)
+    root = (project / "apm_modules" / "o" / "pkg").as_posix()
+    stored = {
+        "name": "srv",
+        "registry": False,
+        "transport": "stdio",
+        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+    }
+    client = CodexClientAdapter(project_root=project)
+    recorded = {"command": f"{tmp_path.as_posix()}/old/apm_modules/o/pkg/bin/srv", "args": []}
+    client.update_config({"srv": {"command": native_command, "args": []}})
+    lock = LockFile()
+    lock.mcp_servers = ["srv"]
+    lock.mcp_configs = {"srv": stored}
+    hashes = {"codex": {"srv": mcp_native_hash(client.managed_server_config(recorded))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(lock, {"codex": ["srv"]}, native_hashes=hashes)
+    return lock, project, root, Path(client.get_config_path())
+
+
+@pytest.mark.parametrize(
+    ("command", "reported"),
+    [("{root}/bin/srv", False), ("/usr/bin/personal", True)],
+    ids=["frozen-rewrite-after-move", "hand-edit"],
+)
+def test_a_frozen_rewrite_after_a_project_move_is_not_a_hand_edit(
+    tmp_path, command, reported
+) -> None:
+    """--frozen renders ${CLAUDE_PLUGIN_ROOT} at the moved package root but keeps the old
+    fingerprint; audit binds the same root, so only a real edit is reported."""
+    from apm_cli.install.mcp.native_entry import edited_recorded_native_mcp_entries
+
+    root = (tmp_path / "project" / "apm_modules" / "o" / "pkg").as_posix()
+    # --frozen substitutes the root in its native spelling (backslashes on Windows).
+    lock, project, root, path = _moved_codex_entry(tmp_path, command.format(root=Path(root)))
+    before = path.read_bytes()
+
+    edited = edited_recorded_native_mcp_entries(
+        lock, ["codex"], project_root=project, user_scope=False, plugin_roots={"srv": root}
+    )
+
+    assert [name for name, _, _ in edited] == (["srv"] if reported else [])
+    assert path.read_bytes() == before
+
+
+def test_a_replay_backed_audit_binds_the_live_package_root(tmp_path) -> None:
+    """A cold-cache audit reads declarations from its scratch replay, but compares the
+    native entry --frozen wrote at the live (moved) package root, so it is not an edit."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.audit_replay import PreparedCiAuditReplay
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.policy.ci_checks import _edited_native_mcp_entries, _native_mcp_plugin_roots
+
+    stored = {
+        "name": "root-srv",
+        "registry": False,
+        "transport": "stdio",
+        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+    }
+    project = tmp_path / "project"
+    (project / ".codex").mkdir(parents=True)
+    (project / "apm.yml").write_text(
+        "name: proj\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: [acme/srv]\n",
+        encoding="utf-8",
+    )
+    scratch = tmp_path / "scratch" / "apm_modules"
+    (scratch / "acme" / "srv").mkdir(parents=True)
+    (scratch / "acme" / "srv" / "apm.yml").write_text(
+        json.dumps({"name": "srv", "version": "1.0.0", "dependencies": {"mcp": [stored]}}),
+        encoding="utf-8",
+    )
+    lock = LockFile.from_yaml(
+        "lockfile_version: '1'\ndependencies:\n  - repo_url: acme/srv\n    host: github.com\n"
+        "    resolved_commit: 0123456789abcdef0123456789abcdef01234567\n    depth: 1\n"
+    )
+    lock.mcp_servers = ["root-srv"]
+    lock.mcp_configs = {"root-srv": stored}
+    live = (project / "apm_modules" / "acme" / "srv").resolve()
+    client = CodexClientAdapter(project_root=project)
+    recorded = {"command": f"{tmp_path.as_posix()}/old/apm_modules/acme/srv/bin/srv", "args": []}
+    hashes = {"codex": {"root-srv": mcp_native_hash(client.managed_server_config(recorded))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {"codex": ["root-srv"]}, native_hashes=hashes
+    )
+    replay = PreparedCiAuditReplay(
+        scratch_root=scratch.parent,
+        modules_root=scratch,
+        lockfile_path=project / "apm.lock.yaml",
+        tracked_files=None,
+        targets=(),
+    )
+    manifest = APMPackage.from_apm_yml(project / "apm.yml")
+
+    config = Path(client.get_config_path())
+
+    def audit(command: str) -> tuple:
+        client.update_config({"root-srv": {"command": command, "args": []}})
+        before = config.read_bytes()
+        found = _edited_native_mcp_entries(
+            project,
+            lock,
+            [SimpleNamespace(name="codex")],
+            user_scope=False,
+            plugin_roots=lambda: _native_mcp_plugin_roots(
+                project, manifest, lock, prepared_replay=replay, no_policy=True
+            ),
+        )
+        assert config.read_bytes() == before, "audit never writes the native config"
+        return found
+
+    # --frozen substitutes the root in its native spelling (backslashes on Windows).
+    assert audit(f"{live}/bin/srv") == ()
+    (check,) = audit("/usr/bin/personal")
+    assert check.name == "native-mcp-drift" and not check.passed
+    assert "'root-srv'" in check.details[0]

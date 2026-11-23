@@ -318,8 +318,51 @@ class UnifiedLinkResolver:
             return None
 
         # Calculate relative path from target location to actual source file
-        # The shared helper owns ../ handling and cross-drive refusal.
-        return portable_link_relpath(actual_file, ctx.target_location)
+        # The shared helper owns ../ handling and cross-drive refusal. Audit
+        # replay renders in the live deployment coordinates install used (#4832).
+        return portable_link_relpath(
+            self._live_context_source(actual_file, ctx), self._live_target_location(ctx)
+        )
+
+    @staticmethod
+    def _live_context_source(actual_file: Path, ctx: LinkResolutionContext) -> Path:
+        """Map a replay-materialized context file to where install deployed it.
+
+        A dependency replay may read its package from scratch; its context
+        file projects through ``deployment_package_root`` like asset links,
+        other scratch paths map through the frame, and live or external
+        sources stay as they are. Projected roots are resolved because
+        discovery registers physical paths (a symlinked ``APM_HOME``).
+        Only link text changes.
+        """
+        if ctx.deployment_frame is None:
+            return actual_file
+        if ctx.package_root is not None and ctx.deployment_package_root is not None:
+            try:
+                package_relative = actual_file.resolve().relative_to(ctx.package_root.resolve())
+                return ctx.deployment_package_root.resolve() / package_relative
+            except (OSError, ValueError):
+                pass
+        replay_root, live_root = ctx.deployment_frame
+        try:
+            return live_root.resolve() / actual_file.resolve().relative_to(replay_root.resolve())
+        except (OSError, ValueError):
+            return actual_file
+
+    @staticmethod
+    def _live_target_location(ctx: LinkResolutionContext) -> Path:
+        """Map a replay target directory to where install deployed it.
+
+        Audit replay writes under ``deployment_frame[0]`` (scratch) but must
+        emit the link text install wrote under ``deployment_frame[1]``; the
+        frame only shapes link text, nothing is read or written through it.
+        """
+        target_location = ctx.target_location
+        if ctx.deployment_frame is not None:
+            replay_root, live_root = ctx.deployment_frame
+            if target_location.is_relative_to(replay_root):
+                target_location = live_root / target_location.relative_to(replay_root)
+        return target_location
 
     def _resolve_to_actual_file(self, link_path: str, source_file: Path) -> Path | None:
         """Resolve a link path to the actual file on disk.
@@ -540,15 +583,10 @@ class UnifiedLinkResolver:
             except (OSError, ValueError):
                 return None
 
-        target_location = ctx.target_location
-        if ctx.deployment_frame is not None:
-            replay_root, live_root = ctx.deployment_frame
-            if target_location.is_relative_to(replay_root):
-                target_location = live_root / target_location.relative_to(replay_root)
         try:
             relative_path = portable_link_relpath(
                 candidate_in_deployment,
-                target_location,
+                self._live_target_location(ctx),
             )
         except (OSError, ValueError):
             return None

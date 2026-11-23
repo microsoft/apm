@@ -84,6 +84,20 @@
       "guards": ["transport-platform-windows-stable-path"]
     },
     {
+      "id": "cached-repository-git",
+      "decision": "Git runs in persisted repositories: their config is allow-listed before any run, and every run is inert",
+      "owner": "cache/cached_repo.py (require_trusted_cached_repo / inert_git_args / cached_repo_env)",
+      "selectors": ["src/apm_cli/cache/cached_repo.py"],
+      "guards": ["transport-platform-cached-repo-git"]
+    },
+    {
+      "id": "checkout-commit-verification",
+      "decision": "Package checkouts are verified against their commit: objects re-hashed, working-tree bytes matched, nothing untracked",
+      "owner": "cache/checkout_verify.py (verify_checkout / require_verified_checkout)",
+      "selectors": ["src/apm_cli/cache/checkout_verify.py"],
+      "guards": ["transport-platform-checkout-verified"]
+    },
+    {
       "id": "git-cache-key-normalization",
       "decision": "Git repository cache-key normalization",
       "owner": "cache/url_normalize.py (normalize_repo_url / cache_shard_key)",

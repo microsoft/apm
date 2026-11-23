@@ -102,6 +102,50 @@ def test_a_missing_source_is_judged_on_the_verified_deployed_root(
     assert retired == expected
 
 
+@pytest.mark.parametrize(
+    ("transitive", "allow", "refused"),
+    [(True, None, True), (False, None, False), (True, ("srv",), False)],
+    ids=["transitive", "direct", "transitive-listed"],
+)
+def test_a_native_plugins_mcp_server_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, allow: tuple[str, ...] | None, refused: bool
+) -> None:
+    """A transitive native plugin's server needs mcp.allow, as a loose one does (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": {"srv": {"command": "npx", "args": ["x"]}}})
+    )
+    mcp = McpPolicy(deny=("unrelated",)) if allow is None else McpPolicy(allow=allow)
+    policy = ApmPolicy(enforcement="block", mcp=mcp)
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None and "mcp-trust-transitive" in violation) is refused
+
+
+@pytest.mark.parametrize(
+    ("transitive", "refused"), [(True, True), (False, False)], ids=["transitive", "direct"]
+)
+def test_an_unreadable_native_mcp_bundle_meets_org_trust_transitive(
+    tmp_path: Path, transitive: bool, refused: bool
+) -> None:
+    """A bundle APM cannot read never shows it is in mcp.allow (req-sc-016)."""
+    from apm_cli.claude_plugins.admission import native_policy_violation
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    root = tmp_path / "tool"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": "./bundle.dxt"})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    policy = ApmPolicy(enforcement="block", mcp=McpPolicy(trust_transitive=False))
+    violation = native_policy_violation(root, policy, transitive=transitive)
+    assert (violation is not None) is refused
+
+
 def _deployed_project(tmp_path: Path, names: tuple[str, ...]) -> tuple[Path, Path, LockFile]:
     """A project whose native plugins *names* are deployed and declared."""
     from apm_cli.claude_plugins.registrar import reconcile_native_plugins, scope_binding
@@ -230,3 +274,146 @@ def test_the_settings_preview_refuses_a_moved_marketplace_binding(tmp_path: Path
             lockfile=following,
             deploy_root=project,
         )
+
+
+@pytest.mark.parametrize(
+    ("mcp_servers", "depth", "trust", "subject"),
+    [
+        ("./bundle.dxt", 2, False, "acme/tool: MCP"),
+        ({"srv": {"command": "npx"}}, 2, False, "srv"),
+        ("./bundle.dxt", 1, False, None),
+        ("./bundle.dxt", 2, True, None),
+    ],
+    ids=["transitive-bundle", "transitive-server", "direct", "trust-transitive-true"],
+)
+def test_audit_judges_a_deployed_transitive_native_plugin_under_trust_transitive(
+    tmp_path: Path, mcp_servers, depth: int, trust: bool, subject: str | None
+) -> None:
+    """A policy applied after deployment fails audit for a transitive plugin's MCP (req-sc-016)."""
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    project, modules, lock = _deployed_project(tmp_path, ("tool",))
+    root = modules / "acme/tool"
+    (root / ".claude-plugin/plugin.json").write_text(
+        json.dumps({"name": "tool", "mcpServers": mcp_servers})
+    )
+    (root / "bundle.dxt").write_bytes(b"PK")
+    lock.dependencies["acme/tool"].depth = depth
+    lock.write(project / "apm.lock.yaml")
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(deny=("unrelated",), trust_transitive=trust)
+    )
+    result = run_policy_checks(project, policy, fail_fast=False)
+    checks = [c for c in result.checks if c.name == "mcp-trust-transitive"]
+    refs = [s.ref for c in checks if not c.passed for s in c.violation_subjects()]
+    assert bool(refs) is (subject is not None)
+    assert all(subject in ref for ref in refs)
+
+
+def _codex_bundle(root: Path, manifest: dict, servers: tuple[str, ...]) -> None:
+    (root / ".codex-plugin").mkdir(parents=True)
+    (root / ".codex-plugin/plugin.json").write_text(json.dumps({"name": "cx", **manifest}))
+    mcp = {"mcpServers": {name: {"command": "x"} for name in servers}}
+    (root / ".mcp.json").write_text(json.dumps(mcp))
+
+
+def _codex_project(tmp_path: Path, manifest: dict, depth: int, state: str) -> Path:
+    """An APM home whose Codex native plugin acme/cx is locked; *state* names the journal.
+
+    ``deployed`` records a completed registration whose installed root is the copy
+    Codex loads; ``cache-differs`` changes only the apm_modules copy after that;
+    ``first-pending`` is a first registration interrupted after Codex upgraded the
+    marketplace but before the journal recorded its installed root.
+    """
+    from apm_cli.codex_plugins.registrar import _Record, _write_records, ledger_path_for
+    from apm_cli.codex_plugins.snapshot import NativeSnapshot
+
+    project = tmp_path / "home"
+    modules = project / "apm_modules"
+    installed = project / "codex-installed/cx"
+    _codex_bundle(modules / "acme/cx", manifest, ("cx-srv",))
+    _codex_bundle(installed, manifest, ("cx-srv",))
+    if state == "cache-differs":
+        (modules / "acme/cx/.mcp.json").write_text(json.dumps({"mcpServers": {}}))
+    if state == "mixed-format":
+        (modules / "acme/cx/.apm").mkdir()
+        (modules / "acme/cx/apm.yml").write_text("name: cx\nversion: 1.0.0\n")
+    (project / "apm.yml").write_text("name: home\nversion: 1.0.0\n", encoding="utf-8")
+    lock = LockFile()
+    lock.dependencies["acme/cx"] = LockedDependency(
+        repo_url="acme/cx", resolved_commit="a" * 40, depth=depth
+    )
+    lock.write(project / "apm.lock.yaml")
+    ledger = ledger_path_for(modules)
+    snapshot = NativeSnapshot(ledger.parent / "snapshots/cx", "a" * 40, "b" * 40)
+    first = state == "first-pending"
+    record = _Record(
+        "cx",
+        "sha256:" + "0" * 64,
+        snapshot,
+        project / "cfg",
+        installed_root=None if first else installed,
+        pending=first,
+    )
+    _write_records(ledger, {} if state == "absent" else {"acme/cx": record})
+    if state in ("journal-missing", "mixed-format"):
+        ledger.unlink()
+    elif state == "journal-unreadable":
+        ledger.write_text("{not json", encoding="utf-8")
+    return project
+
+
+_CANNOT = "acme/cx: MCP cannot be checked"
+
+
+@pytest.mark.parametrize(
+    ("manifest", "depth", "allow", "state", "subject"),
+    [
+        ({"mcpServers": "./.mcp.json"}, 2, None, "deployed", "cx-srv"),
+        ({}, 2, None, "deployed", "cx-srv"),
+        ({"mcpServers": "./.mcp.json"}, 2, ("cx-srv",), "deployed", None),
+        ({"mcpServers": "./.mcp.json"}, 1, None, "deployed", None),
+        ({"mcpServers": "./.mcp.json"}, 2, None, "absent", None),
+        ({"mcpServers": "./.mcp.json"}, 2, ("cx-srv",), "first-pending", _CANNOT),
+        ({"mcpServers": "./.mcp.json"}, 2, None, "cache-differs", "cx-srv"),
+        ({"mcpServers": "./missing.json"}, 2, None, "deployed", _CANNOT),
+        ({"mcpServers": "./.mcp.json"}, 2, ("cx-srv",), "journal-missing", _CANNOT),
+        ({"mcpServers": "./.mcp.json"}, 2, ("cx-srv",), "journal-unreadable", _CANNOT),
+        ({"mcpServers": "./.mcp.json"}, 1, None, "journal-missing", None),
+        ({"mcpServers": "./.mcp.json"}, 2, None, "mixed-format", None),
+    ],
+    ids=[
+        "transitive",
+        "default-mcp-file",
+        "listed",
+        "direct",
+        "not-deployed",
+        "registration-interrupted-before-journal-root",
+        "cache-differs-from-deployed",
+        "unreadable",
+        "journal-missing",
+        "journal-unreadable",
+        "journal-missing-direct",
+        "apm-package-with-codex-manifest",
+    ],
+)
+def test_audit_judges_a_deployed_transitive_codex_plugin_under_trust_transitive(
+    tmp_path: Path, manifest: dict, depth: int, allow, state: str, subject: str | None
+) -> None:
+    """A policy applied after deployment fails audit for a transitive Codex plugin's MCP.
+
+    Audit judges the root Codex loads, not the apm_modules copy. Without a readable
+    ownership journal APM cannot tell what is deployed, so a transitive package
+    that selects the Codex format fails closed.
+    """
+    from apm_cli.policy.policy_checks import run_policy_checks
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    project = _codex_project(tmp_path, manifest, depth, state)
+    mcp = McpPolicy(deny=("unrelated",), trust_transitive=False, allow=allow)
+    result = run_policy_checks(project, ApmPolicy(enforcement="block", mcp=mcp), fail_fast=False)
+    checks = [c for c in result.checks if c.name == "mcp-trust-transitive"]
+    refs = [s.ref for c in checks if not c.passed for s in c.violation_subjects()]
+    assert bool(refs) is (subject is not None)
+    assert all(subject in ref for ref in refs)

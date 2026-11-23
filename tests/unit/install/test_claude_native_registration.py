@@ -34,6 +34,7 @@ from apm_cli.native_plugins.settings import (
     BINDING_CONFLICT,
     NativeSettingsError,
     SettingsDeclaration,
+    apply_declaration,
     write_declaration,
 )
 
@@ -320,3 +321,25 @@ def test_unchanged_deployed_root_is_tightened_to_owner_only_on_upgrade(tmp_path:
     assert outcome.changed is False
     assert stat.S_IMODE(deployed.stat().st_mode) == 0o700
     assert compute_native_plugin_hash(root / "tool") == fingerprint
+
+
+def test_retiring_apm_entries_keeps_a_binding_a_user_enable_still_needs(tmp_path: Path) -> None:
+    """#4874: APM retires its own enable entry in a dropped harness; a user's own enable
+    under the same marketplace keeps loading, so the binding stays."""
+    declaration = SettingsDeclaration(
+        _NAME,
+        "./.agents/plugins",
+        frozenset(),
+        frozenset({"alpha"}),
+        catalog=frozenset({"alpha", "beta"}),
+    )
+    document = {
+        "extraKnownMarketplaces": {_NAME: declaration.marketplace_value},
+        "enabledPlugins": {f"alpha@{_NAME}": True, f"beta@{_NAME}": True},
+    }
+
+    change = apply_declaration(document, declaration, tmp_path / "settings.json")
+
+    assert document["enabledPlugins"] == {f"beta@{_NAME}": True}
+    assert _NAME in document["extraKnownMarketplaces"]
+    assert change.removed == [f"enabledPlugins.alpha@{_NAME}"]

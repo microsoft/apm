@@ -843,6 +843,8 @@ transport-platform-artifactory-netrc-isolation
 transport-platform-auth-outcome-owner
 transport-platform-authenticated-egress
 transport-platform-cache-cleanup-outcome
+transport-platform-cached-repo-git
+transport-platform-checkout-verified
 transport-platform-clone-connect-retry
 transport-platform-credential-origin-scope
 transport-platform-credential-report-owner

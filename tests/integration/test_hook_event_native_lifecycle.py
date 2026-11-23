@@ -13,6 +13,7 @@ import pytest
 from apm_cli.utils.yaml_io import dump_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner, CommandResult
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
+from tests.utils.legacy_lock import record_as_pre_037_lock
 from tests.utils.lifecycle_state import LifecycleStateRoot, LifecycleStateSnapshot
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 from tests.utils.local_package import LocalPackage, LocalPackageFactory
@@ -288,10 +289,13 @@ def test_project_hook_events_converge_update_and_contract(
     assert second.file(_COPILOT_GENERATED).content == first.file(_COPILOT_GENERATED).content
     assert second.file(_CLAUDE_SETTINGS).content == first.file(_CLAUDE_SETTINGS).content
 
+    # An older APM (pre-0.37, so its lock is the evidence it wrote the file,
+    # #4626) rendered the legacy "stop" alias; the update heals it.
     generated = consumer.root / _COPILOT_GENERATED
     stale = json.loads(generated.read_text(encoding="utf-8"))
     stale["hooks"]["stop"] = stale["hooks"].pop("agentStop")
     _write_json(generated, stale)
+    record_as_pre_037_lock(consumer.root / "apm.lock.yaml", consumer.root)
     sources.add_hook(source, "events", _updated_document())
 
     update_result = _run_success(

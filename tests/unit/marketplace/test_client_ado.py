@@ -28,6 +28,7 @@ from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
 from apm_cli.marketplace.client import _fetch_ado
 from apm_cli.marketplace.models import MarketplaceSource
+from tests.utils.checkout_trust import trust_checkout_contents
 from tests.utils.scripted_http import (
     ScriptedTransport,
     json_body,
@@ -35,6 +36,14 @@ from tests.utils.scripted_http import (
     status,
     text_body,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fake_checkouts_are_trusted():
+    """These tests mock GitCache with plain directories; see checkout_trust."""
+    with trust_checkout_contents():
+        yield
+
 
 pytestmark = pytest.mark.unit
 

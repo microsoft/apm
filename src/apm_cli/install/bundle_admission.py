@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from functools import partial
+
     from apm_cli.bundle.unpacker import UnpackCandidate
     from apm_cli.core.target_detection import EffectiveTargetDecision
     from apm_cli.deps.lockfile import LockFile
@@ -75,6 +77,47 @@ def admit_bundle(
     policy = policy_fetch.policy if policy_fetch is not None else None
     integrity_check(require_hashes_enabled(policy.security.integrity if policy else None))
     return policy
+
+
+def refuse_unmanaged_bundle_files(
+    policy: ApmPolicy | None,
+    deploy: partial[Mapping[str, Any]],
+    *,
+    user_scope: bool,
+    logger: Any,
+    dry_run: bool,
+) -> None:
+    """Judge ``unmanaged_files.action: deny`` on the claims a bundle install leaves (#4826).
+
+    *deploy* is the bundle's ``integrate_local_bundle`` call, run here as a
+    dry run, which adopts or skips each file as the deploy does. Its claims
+    join the current lockfile's, so a governed file none of them claims
+    refuses the install before the bundle writes anything.
+    """
+    if policy is None or policy.enforcement == "off":
+        return
+    if policy.unmanaged_files.effective_action != "deny":
+        return
+    from ..core.deployment_ledger import DeploymentLedgerCodec
+    from ..core.scope import InstallScope
+    from ..deps.lockfile import LockFile
+    from .commit_gate import refuse_unmanaged_files
+    from .local_bundle_handler import _bundle_lock_root, _home_relative_claims
+
+    project_root = deploy.args[1]
+    # The dry run applies the deploy's own adopt-or-skip decision to every file.
+    result = deploy(dry_run=True, logger=None, create_config=False)
+    digests = result.get("deployed_file_hashes", {})
+    hashes = {record: digests[record] for record in result.get("deployed_files", [])}
+    files = sorted(hashes)
+    if user_scope:
+        files, hashes = _home_relative_claims(files, hashes, project_root)
+    lockfile = _recorded_lockfile(_bundle_lock_root(user_scope)) or LockFile()
+    scope = InstallScope.USER if user_scope else InstallScope.PROJECT
+    DeploymentLedgerCodec.record_local_bundle_files(lockfile, files, hashes, scope=scope)
+    # The project's own entry carries those claims, as it does once read back.
+    lockfile.dependencies["."] = lockfile.project_self_entry()
+    refuse_unmanaged_files(logger, policy, project_root, lockfile, dry_run=dry_run)
 
 
 def bundle_policy_subjects(bundle_info: Any) -> LocalBundleSubjects:

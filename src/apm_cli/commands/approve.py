@@ -870,44 +870,79 @@ def _approve_bundles(
     logger: CommandLogger,
 ) -> None:
     """Grant parked bundle executables under their exact key: the executables.allow entry."""
-    from dataclasses import replace
-
     if not bundles:
         return
-    cleared = []
+    keys = [bundle.approval_key for bundle in bundles]
+    cleared = [key for key in dict.fromkeys(keys) if key in deny]
+    remaining = {key: value for key, value in deny.items() if key not in cleared}
+    # Decide another layer's deny against the store as it would be saved, and
+    # refuse before any write: a failed approve changes nothing (#4933).
+    blocked = _bundles_still_denied(manifest, user_scope, remaining, bundles, logger=logger)
+    if blocked:
+        global_install = _install_command(manifest).endswith("-g")
+        for key in dict.fromkeys(keys):
+            if key in blocked:
+                hint = _lift_deny_hint(blocked[key], key, user_scope=global_install)
+                _rich_error(
+                    f"{key} is still denied by another trust layer ({blocked[key]}); the "
+                    f"approval has no effect until that deny is lifted: {hint}",
+                    symbol="error",
+                )
+        _rich_info("Nothing written.", symbol="info")
+        sys.exit(1)
     for bundle in bundles:
         entry = allow.get(bundle.approval_key)
         grant = dict(entry) if isinstance(entry, dict) else {}
         grant.update(dict.fromkeys(bundle.exec_types, True))
         allow[bundle.approval_key] = grant
-        if deny.pop(bundle.approval_key, None) is not None:
-            cleared.append(bundle.approval_key)
+    for key in cleared:
+        deny.pop(key)
     _save_store(manifest, user_scope, allow, deny)
     for key in cleared:
         _rich_info(f"Cleared deny for {key} in {_store_label(user_scope)}.", symbol="info")
-    ctx = replace(_effective_trust_context(manifest, logger=logger), gate_enabled=True)
-    blocked = {bundle.approval_key for bundle in _pending_bundles(manifest, ctx)}
     for bundle in bundles:
-        if bundle.approval_key in blocked:
-            _rich_error(
-                f"{bundle.approval_key} is still denied by another trust layer; the approval "
-                "has no effect until that deny is lifted.",
-                symbol="error",
-            )
-        else:
-            _rich_success(
-                f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
-                symbol="check",
-            )
-    approved = len([b for b in bundles if b.approval_key not in blocked])
-    if approved:
-        _rich_info(
-            f"Updated {_store_label(user_scope)} ({approved} approved). "
-            f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
-            symbol="info",
+        _rich_success(
+            f"Approved local bundle '{bundle.slug}': {', '.join(bundle.exec_types)}",
+            symbol="check",
         )
-    if blocked & {bundle.approval_key for bundle in bundles}:
-        sys.exit(1)
+    _rich_info(
+        f"Updated {_store_label(user_scope)} ({len(bundles)} approved). "
+        f"Rerun '{_install_command(manifest)} <bundle>' to deploy.",
+        symbol="info",
+    )
+
+
+def _bundles_still_denied(
+    manifest: Path, user_scope: bool, deny: dict, bundles: list, *, logger: CommandLogger
+) -> dict[str, str]:
+    """Keys of *bundles* a deny blocks once the written store holds *deny*, with its layer.
+
+    The first denying layer is reported, as for a named package (#4933).
+
+    Reads never persist a legacy ``approvals.yml`` migration, so a refused
+    approve leaves the personal store as it found it.
+    """
+    from dataclasses import replace
+
+    from ..models.manifest_io import load_manifest
+    from ..security.executables import TRUST_DENIED, _deny_types, build_exec_trust_context
+    from ..security.trust import package_type_verdicts
+
+    data = load_manifest(manifest) if manifest.is_file() else None
+    ctx = build_exec_trust_context(
+        policy=_load_org_policy(manifest.parent, logger=logger),
+        project_data=data if isinstance(data, dict) else {},
+        migrate_user_legacy=False,
+    )
+    store = "user_deny" if user_scope else "project_deny"
+    ctx = replace(ctx, gate_enabled=True, **{store: _deny_types(deny)})
+    blocked: dict[str, str] = {}
+    for bundle in bundles:
+        verdicts = package_type_verdicts(ctx, (bundle.approval_key,), None, bundle.exec_types)
+        layers = [v.layer for v in verdicts.values() if v.state == TRUST_DENIED]
+        if layers:
+            blocked.setdefault(bundle.approval_key, layers[0])
+    return blocked
 
 
 def _trust_command(

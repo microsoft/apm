@@ -99,6 +99,10 @@ _SPINE: tuple[tuple[object, ...], ...] = (
     ("decide", "hook", "approve"),
     ("install", "plain"),
     ("set_policy", "org-deny"),
+    # A new approval under the org deny is refused, names the org layer (#4919), and
+    # writes nothing (#4923).
+    ("decide", "hook", "revoke"),
+    ("decide", "hook", "approve"),
     ("install", "frozen"),
     ("install", "plain"),
     ("install", "plain"),
@@ -263,6 +267,42 @@ def test_narrowing_one_surface_keeps_another_approved_surface(
     machine.decide(surface, verdict)
     machine.install("plain")
     assert "hook" in machine.world.observe().deployed
+
+
+def test_approve_under_an_org_deny_refuses_and_names_the_org_layer(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Nightly falsifier (#4919): deny wins, so approving an org-denied hook exits 1,
+    names the org layer, and the hook stays undeployed."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.set_policy("org-deny")
+    machine.declare("hook")
+    machine.update()
+    machine.decide("hook", "approve")
+    machine.install("plain")
+    world = machine.world
+    manifest = (world.workspace / "apm.yml").read_text(encoding="utf-8")
+    # A repeat is not a new grant: decide() checks exit 1, the org layer and I7.
+    machine.decide("hook", "approve")
+    assert (world.workspace / "apm.yml").read_text(encoding="utf-8") == manifest
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
+
+
+def test_approving_a_denied_hook_under_an_org_deny_writes_nothing(
+    tmp_path: Path, lifecycle_entry_point: tuple[str, ...]
+) -> None:
+    """Review replay (#4923): approve under the org deny keeps the package's own deny
+    and records no grant; the refusal comes before any write."""
+    machine = GateMachine(GateWorld.create(tmp_path / "world", lifecycle_entry_point, "project"))
+    machine.declare("hook")
+    machine.install("plain")
+    machine.decide("hook", "deny")
+    machine.set_policy("org-deny")
+    world = machine.world
+    before = world.store()
+    machine.decide("hook", "approve")
+    assert world.store() == before
+    assert not (world.deploy_root / ".github/hooks/hook-kit-session.json").is_file()
 
 
 @pytest.mark.parametrize("scope", SCOPES)
