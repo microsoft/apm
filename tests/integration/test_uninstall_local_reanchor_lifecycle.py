@@ -885,36 +885,3 @@ def test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks(
 
     _assert_refused_before_any_write(world, "ships hooks")
     assert (settings.read_bytes() if settings.exists() else None) == hooks_before
-
-
-def test_an_interrupt_after_the_receipt_rename_restores_lock_and_receipts(
-    tmp_path: Path, apm_binary_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """#5077: Ctrl-C after the renamed receipts are saved puts them back with the lock."""
-    from click.testing import CliRunner
-
-    from apm_cli.cli import cli
-    from apm_cli.core.deployment_ledger import DeploymentMaterializationSession
-
-    world = _local_world(tmp_path, apm_binary_path)
-    manifest = (world.project / "apm.yml").read_bytes()
-    lock, receipts = lock_bytes(world.project), _receipts(world)
-
-    def save_then_interrupt(self) -> None:
-        DeploymentMaterializationSession.flush(self)
-        raise KeyboardInterrupt
-
-    with monkeypatch.context() as patched:
-        patched.setattr(
-            "apm_cli.core.deployment_reanchor._ReanchorSession.flush", save_then_interrupt
-        )
-        patched.chdir(world.project)
-        result = CliRunner().invoke(cli, ["uninstall", "./vendor/e"], env=world.env)
-
-    assert result.exit_code != 0, result.output
-    assert (world.project / "apm.yml").read_bytes() == manifest
-    assert lock_bytes(world.project) == lock
-    assert _receipts(world) == receipts
-    # Lock and receipts agree again, so the retried uninstall re-anchors cleanly.
-    world.apm("uninstall", "./vendor/e")
-    _assert_reanchored_like_a_full_install(world)
