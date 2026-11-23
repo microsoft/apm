@@ -127,22 +127,27 @@ def store_raw_leaf(policy_file: Path, content: str | bytes | None, uid: str) -> 
         raw_file.unlink(missing_ok=True)
 
 
-def cached_document(policy_file: Path, meta: dict, expected_hash: str | None) -> str | None:
+def cached_document(
+    policy_file: Path, meta: dict, expected_hash: str | None, repo_ref: str = ""
+) -> str | None:
     """The text a cache entry may be parsed from, or ``None`` to fetch again.
 
     Unpinned, it is the stored document (``_cached_policy_verified`` then checks
     its recorded fingerprint). Pinned, it is the fetched leaf bytes kept with the
-    entry, re-hashed against the pin. An entry composed from a policy chain has
-    no single leaf to verify, so it is fetched again.
+    entry, re-hashed against the pin. An entry composed from a policy chain or
+    a namespace ancestry has no single leaf to verify, so it is fetched again.
     """
     if expected_hash is None:
         document = read_cache_file(policy_file)
-        return document.decode("utf-8") if document is not None else None
+        if document is None:
+            return None
+        # Written in text mode: read back with universal newlines, as it was hashed.
+        return document.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     from .discovery import _verify_hash_pin
 
     chain = meta.get("chain_refs")
     recorded = meta.get("raw_bytes_hash", "") or ""
-    if not isinstance(chain, list) or len(chain) != 1:
+    if not isinstance(chain, list) or len(chain) != 1 or repo_ref.endswith("#ancestry"):
         return None
     if not _cached_pin_matches(recorded, expected_hash):
         return None

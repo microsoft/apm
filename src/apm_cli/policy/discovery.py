@@ -1966,7 +1966,7 @@ def _read_cache_entry(
             return None  # Past MAX_STALE_TTL, unusable
 
         raw_bytes_hash = meta.get("raw_bytes_hash", "") or ""
-        serialized = cached_document(policy_file, meta, expected_hash)
+        serialized = cached_document(policy_file, meta, expected_hash, repo_ref)
         if not _cached_policy_verified(serialized, meta, expected_hash):
             return None
 

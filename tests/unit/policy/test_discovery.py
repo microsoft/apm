@@ -1287,6 +1287,34 @@ class TestAutoDiscover(unittest.TestCase):
         self.assertIs(result, mismatch)
         fetch.assert_called_once()
 
+    def test_gitlab_ancestry_pinned_never_reads_a_namespace_from_the_cache(self):
+        """A pinned project resolves every namespace from the source, never the cache."""
+        levels = ["acme/dept-a/team-x", "acme/dept-a", "acme"]
+        ancestry_ref = "gitlab.com/acme/dept-a/team-x/apm-policy#ancestry"
+        with (
+            patch(
+                "apm_cli.policy.discovery._extract_org_host_port_from_git_remote",
+                return_value=("acme", "gitlab.com", None),
+            ),
+            patch("apm_cli.policy._gitlab._gitlab_namespace_descending", return_value=levels),
+            patch(
+                "apm_cli.policy._gitlab._fetch_from_gitlab_repo",
+                side_effect=[self._found(level) for level in levels],
+            ) as fetch,
+            tempfile.TemporaryDirectory() as tmpdir,
+        ):
+            root = Path(tmpdir)
+            # Cache entries that say less than the namespaces do.
+            _write_cache(ancestry_ref, ApmPolicy(), root)
+            for level in levels:
+                _write_cache(f"gitlab.com/{level}/apm-policy", ApmPolicy(), root)
+            result = _auto_discover(root, no_cache=False, expected_hash="sha256:" + "a" * 64)
+            cached = _get_cache_dir(root) / f"{_cache_key(ancestry_ref)}.yml"
+            self.assertTrue(cached.exists())
+
+        self.assertEqual(result.source, "org:gitlab.com/acme/dept-a/team-x/apm-policy")
+        self.assertEqual([c.kwargs["no_cache"] for c in fetch.call_args_list], [True] * 3)
+
     def test_gitlab_ancestry_empty_child_does_not_shadow_ancestor(self):
         """An empty team policy is the leaf; the company policy still composes."""
         result, _fetch = self._walk(

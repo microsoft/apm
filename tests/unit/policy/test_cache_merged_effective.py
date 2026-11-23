@@ -1392,12 +1392,11 @@ def test_cache_files_that_are_not_bounded_regular_files_are_fetched_again(
         else:
             path.symlink_to(saved)
     outcome: list[object] = []
-    worker = threading.Thread(
-        target=lambda: outcome.append(
-            _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
-        ),
-        daemon=True,
-    )
+
+    def read() -> None:
+        outcome.append(_read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF)))
+
+    worker = threading.Thread(target=read, daemon=True)
     worker.start()
     worker.join(timeout=20)
 
@@ -1423,8 +1422,31 @@ def test_a_gitlab_leaf_keeps_its_fetched_bytes_for_pinned_reads(tmp_path: Path) 
     _cache_gitlab_leaf_policy(_REF, policy, tmp_path, _pin(_LEAF), warnings, _LEAF)
 
     entry = _read_cache_entry(_REF, tmp_path, expected_hash=_pin(_LEAF))
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw"
     assert entry is not None
     assert entry.policy.dependencies.deny == ("acme/blocked",)
-    assert (_get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.raw").read_text(
-        encoding="utf-8"
-    ) == _LEAF
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+
+def test_a_pinned_namespace_ancestry_entry_is_fetched_again(tmp_path: Path) -> None:
+    ancestry_ref = "gitlab.com/acme/team/apm-policy#ancestry"
+    policy, _warnings = load_policy(_LEAF)
+    # The authentic leaf bytes and a single-entry chain, under a composed key.
+    _write_cache(ancestry_ref, policy, tmp_path, raw_bytes_hash=_pin(_LEAF), raw_content=_LEAF)
+    raw_file = _get_cache_dir(tmp_path) / f"{_cache_key(ancestry_ref)}.raw"
+    assert raw_file.read_text(encoding="utf-8") == _LEAF
+
+    assert _read_cache_entry(ancestry_ref, tmp_path, expected_hash=_pin(_LEAF)) is None
+
+
+def test_an_unpinned_entry_reads_back_with_platform_line_endings(tmp_path: Path) -> None:
+    policy, _warnings = load_policy(_LEAF)
+    _write_cache(_REF, policy, tmp_path)
+    document = _get_cache_dir(tmp_path) / f"{_cache_key(_REF)}.yml"
+    document.write_bytes(document.read_bytes().replace(b"\n", b"\r\n"))
+
+    entry = _read_cache_entry(_REF, tmp_path)
+
+    assert entry is not None
+    assert entry.policy.dependencies.deny == ("acme/blocked",)
+    assert b"\r\n" in document.read_bytes()

@@ -17,11 +17,11 @@ from apm_cli.policy.discovery import (
     _write_cache,
     discover_policy_with_chain,
 )
+from apm_cli.policy.parser import load_policy
 from apm_cli.policy.project_config import (
     ProjectPolicyConfigError,
     read_project_policy_hash_pin,
 )
-from apm_cli.policy.parser import load_policy
 
 pytestmark = [
     pytest.mark.component,

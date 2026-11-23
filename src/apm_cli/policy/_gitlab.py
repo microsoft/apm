@@ -318,6 +318,8 @@ def _fetch_gitlab_ancestry(
         )
 
     ancestry_ref = _gitlab_ancestry_cache_ref(host, port, namespaces[0], candidate_repo)
+    # A pinned project resolves every namespace from the source, never the cache.
+    no_cache = no_cache or expected_hash is not None
     composed = (
         None
         if no_cache
