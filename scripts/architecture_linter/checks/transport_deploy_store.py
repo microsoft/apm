@@ -42,7 +42,7 @@ def _check_deploy_store(provider: FactsProvider) -> tuple[Violation, ...]:
                 "_KEY_RE.fullmatch(key)",
                 "os.O_RDONLY | _NOFOLLOW",
                 "if not stat.S_ISREG(info.st_mode)",
-                "if canonical_digest(data) != key:",
+                "if data is None or canonical_digest(data) != key:",
                 "tempfile.mkstemp(dir=entry.parent",
                 "os.replace(temp, entry)",
             ),
