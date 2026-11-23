@@ -549,3 +549,63 @@ def test_the_unusable_note_is_never_written_through_a_linked_directory(
 
     assert SERVER in _servers(project), "unusable evidence must not remove anything"
     assert not list(elsewhere.rglob("*.unusable")), "nothing is written outside APM_HOME"
+
+
+def test_a_located_rewrite_supersedes_the_key_less_record(project: Path) -> None:
+    """#4861: ``owner/demo`` recorded key-less, then rewritten under ``demo``: one record."""
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        note_mcp_write("copilot", "owner/demo", mcp_native_hash(ENTRY), None)
+    assert [w.key for w in McpWriteReceipts.open(project, user_scope=False).writes.values()] == [
+        None
+    ]
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        _write_entries(project, {"demo": ENTRY})
+        note_mcp_write("copilot", "owner/demo", mcp_native_hash(ENTRY), None)
+    _retire(project, _Logger())
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        set(), project_root=project, user_scope=False, exclude=None, logger=logger, retire=False
+    )
+
+    assert "demo" not in _existing(project), "the proven rewrite retires"
+    assert McpWriteReceipts.open(project, user_scope=False).writes == {}
+    assert not logger.warnings, "no stale key-less record is announced"
+    assert kept_mcp_writes(project, user_scope=False, managed=()) == []
+
+
+def test_announce_only_skips_a_server_redeclared_on_the_same_native_key(project: Path) -> None:
+    """#4861: a kept ``owner/demo`` (key ``demo``) redeclared as self-defined ``demo``."""
+    with journal_mcp_writes(project, user_scope=False, logger=_Logger()):
+        _write_entries(project, {"demo": ENTRY})
+        note_mcp_write("copilot", "owner/demo", mcp_native_hash(ENTRY), None)
+    _write_entries(project, {"demo": {**ENTRY, "args": ["--edited"]}})
+    _retire(project, _Logger())
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    retire_undeclared_mcp_writes(
+        {"demo"}, project_root=project, user_scope=False, exclude=None, logger=logger, retire=False
+    )
+
+    assert _config(project).read_bytes() == before, "announce-only never edits the config"
+    assert not logger.warnings, logger.warnings
+
+
+def test_symlinked_evidence_is_reported_on_a_lockless_install(
+    project: Path, tmp_path: Path
+) -> None:
+    """#4861: unusable evidence that is not McpWriteEvidenceError is still announced."""
+    _install_write(project, _Logger())
+    path = McpWriteReceipts.open(project, user_scope=False).path
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(path.read_text())
+    path.unlink()
+    path.symlink_to(elsewhere)
+    before = _config(project).read_bytes()
+    logger = _Logger()
+
+    _retire(project, logger)
+
+    assert _config(project).read_bytes() == before, "unusable evidence must not remove anything"
+    assert [w for w in logger.warnings if "Kept every MCP entry APM no longer deploys" in w]
