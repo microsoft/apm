@@ -101,3 +101,14 @@ def read_survivor_direct_refs(apm_yml_path, packages_to_remove):
             if ref.get_identity() not in removed_identities:
                 section_refs.append(ref)
     return refs["dependencies"], refs["devDependencies"]
+
+
+def _reintegration_error_detail(
+    dependency: DependencyReference,
+    error: Exception,
+) -> str:
+    """Return verbose failure detail without exposing a local declaration."""
+    error_type = type(error).__name__
+    if dependency.is_local:
+        return error_type
+    return f"{error_type}: {error}"

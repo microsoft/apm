@@ -173,7 +173,7 @@ _CONTEXT = {"SCOPE": "project", "NET": "online", "DEPLOYED": "clean"}
 _UNITS = {
     "p-skill:git": (("git", "skill", "none"),),
     "p-child": (("local-path", "skill", "none"),),
-    # bin/ never deploys at project scope (U-BIN), so no row proves a bin unit.
+    # p-exec's loose bin/ never deploys at project scope (U-BIN), so no row proves a bin unit.
     "p-exec": (
         ("local-path", "hook", "allowed"),
         ("local-path", "mcp", "allowed"),

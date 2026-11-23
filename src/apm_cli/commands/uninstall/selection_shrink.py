@@ -177,7 +177,10 @@ def uninstall_deletion_candidates(
         # A path another shrinking survivor keeps deploying is not deleted.
         retained = BaseIntegrator.normalize_managed_files(retained) or set()
         candidates |= retired - others - set(other_hashes) - retained
-    candidates -= set(lockfile.local_deployed_files)
+    # Neither survivor snapshot covers project-local claims; a local bundle keeps them (#4703).
+    candidates -= (
+        BaseIntegrator.normalize_managed_files(set(lockfile.local_deployed_files)) or set()
+    )
     candidates -= set(preserved or ())
     return sorted(candidates)
 
