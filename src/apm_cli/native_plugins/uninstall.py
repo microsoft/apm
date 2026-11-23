@@ -54,11 +54,16 @@ def reconcile_after_uninstall(
         ) from exc
 
 
+def _named_kinds(entry: object) -> bool:
+    """Whether a hook retirement entry ``(why, kinds)`` names any kind."""
+    return isinstance(entry, tuple) and len(entry) == 2 and bool(entry[1])
+
+
 def retire_disallowed_native_survivors(
     lockfile: Any,
     retirements: Any,
     removed_keys: set[str],
-    hooks: Mapping[str, str],
+    hooks: Mapping[str, object],
     logger: Any,
 ) -> set[str]:
     """Drop the lock record of each surviving native plugin a gate no longer admits.
@@ -74,7 +79,8 @@ def retire_disallowed_native_survivors(
     denied = set(retirements.denied_packages) - removed
     native = {k: why for k, why in retirements.native_packages.items() if k not in removed}
     for key, why in sorted(native.items()):
-        if key not in hooks and key not in denied:
+        # Only a hook retirement that named kinds was already reported (#4567).
+        if not _named_kinds(hooks.get(key)) and key not in denied:
             logger.warning(f"{key} native plugin is no longer allowed ({why}); removing it")
     for key in denied | set(hooks) | set(native):
         lockfile.dependencies[key].native_plugin = None
@@ -111,6 +117,11 @@ def retire_gated_native_plugins(
     hooks = dict(retirements.hook_packages)
     retire_disallowed_native_survivors(lockfile, retirements, set(), hooks, logger)
     retired = before - {k for k, d in lockfile.dependencies.items() if d.native_plugin is not None}
-    for key in sorted(retired & (set(hooks) | set(retirements.denied_packages))):
+    denied = set(retirements.denied_packages)
+    for key in sorted(retired & (set(hooks) | denied)):
+        # The survivor helper already named this one with its reason.
+        if key in retirements.native_packages and not _named_kinds(hooks.get(key)):
+            if key not in denied:
+                continue
         logger.warning(f"{key} native plugin is no longer allowed; removing it")
     return bool(retired)
