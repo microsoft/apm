@@ -49,9 +49,7 @@ from apm_cli.deps.path_anchoring import (
     resolve_local_dep_base,
     resolve_local_dep_dir,
 )
-from apm_cli.install.audit_target_roots import (
-    canvas_deploy_prefixes as _canvas_deploy_prefixes,
-)
+from apm_cli.install.audit_target_roots import canvas_deploy_prefixes as _canvas_deploy_prefixes
 from apm_cli.install.audit_target_roots import (
     governed_root_dirs as _governed_root_dirs,
 )
@@ -127,8 +125,7 @@ class ReplayConfig:
     records: bool = True
     # Cleanup evidence (#3701) also renders targets the lock recorded.
     include_recorded_targets: bool = False
-    # Cleanup evidence replays each dependency on its locked route (#4995).
-    route_from_lock: bool = False
+    route_from_lock: bool = False  # Cleanup replays each locked route (#4995).
 
 
 @dataclass(frozen=True)
@@ -526,18 +523,6 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
     return [t for t in all_targets if t.name in names]
 
 
-def _place_replay_package(package_info: Any, lock_dep: Any, root: Path, modules_dir: Path) -> None:
-    """Deploy the root from *root*, where install read it (#4832); a dependency from its path."""
-    from apm_cli.deps.lockfile import _SELF_KEY
-
-    if lock_dep.local_path == _SELF_KEY:
-        package_info.root_local_project_root = package_info.deployment_package_root = root
-    else:
-        package_info.deployment_package_root = lock_dep.to_dependency_ref().get_install_path(
-            modules_dir
-        )
-
-
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
@@ -554,11 +539,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """
     from apm_cli.claude_plugins.registrar import verify_claude_native_cache
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.audit_target_roots import (
-        replay_deployment_frame,
-        replay_route_manifest,
-        replay_targets,
-    )
+    from apm_cli.install.audit_target_roots import replay_deployment_frame, replay_targets
+    from apm_cli.install.audit_target_roots import replay_route_manifest as route_for
     from apm_cli.install.native_plugin_admission import verify_native_plugin_cache
     from apm_cli.install.package_resolution import effective_dependency_selection
     from apm_cli.install.phases.local_content import (
@@ -621,7 +603,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         config.targets,
     )
     targets = replay_targets(converged_targets, lock=lock)
-    route_manifest = replay_route_manifest(config, lock, converged_targets)
+    route_manifest = route_for(config, lock, converged_targets)
     from apm_cli.install.replay_transport import replay_sources
 
     downloader, registry_resolver, registries, declared_transports = replay_sources(
@@ -718,11 +700,16 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
                     if lock_dep.local_path == _SELF_KEY:
                         package_info = build_project_local_package_info(install_path)
+                        package_info.root_local_project_root = self_source_root
+                        # The root package deploys from where install read it;
+                        # its links render in the live frame like any dependency
+                        # (#4832: a user-root context link from ~/.apm).
+                        package_info.deployment_package_root = self_source_root
                     else:
                         package_info = _build_package_info(lock_dep, install_path)
-                    _place_replay_package(
-                        package_info, lock_dep, self_source_root, deployment_modules_dir
-                    )
+                        package_info.deployment_package_root = (
+                            lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
+                        )
                     package_info.deployment_frame = deployment_frame
                     package_info.route_manifest = route_manifest
                     dep_key = lock_dep.get_unique_key()

@@ -61,8 +61,7 @@ KNOWN_LARGE_MODULES = {
     # and local bundle hash drift through the deployed-hash verifier (#3989).
     # Cleanup evidence renders recorded targets too (#3701).
     # Replay copies ask install's locked content verdict (#4187).
-    # Replay and cleanup evidence decide each dependency's native route (#4995).
-    "drift.py": 1070,
+    "drift.py": 1058,
     # The resolver takes its frozen pin mode from InstallService (#4012).
     "phases/resolve.py": 1001,
 }
