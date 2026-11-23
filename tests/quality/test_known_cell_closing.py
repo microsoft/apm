@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
+
 import pytest
 
 from tests.quality import known_cell_closing
-from tests.quality.known_cell_closing import cells_closed_by, closed_issues
+from tests.quality.known_cell_closing import cells_closed_by, closed_issues, commit_messages
 
 RATCHET_TEST_SCOPE = "repository"
 
@@ -32,6 +34,7 @@ _CELLS = {
         ("<!-- Fixes #4703 -->\n```\nfixes #4742\n```\n`closes #1`", set()),
         ("``closes #1 ` x``\n\n~~~~\nfixes #2\n~~~~\n\n    resolves #3\n", set()),
         ("**Fixes** #4 and [fixes #5](https://example.com)", {4, 5}),
+        ("Fi`example`xes #4703; fix `x` #4742; Fi<b>xes</b> #1", set()),
         ("Issue: Fixes #N | Refs #N", set()),
     ],
 )
@@ -44,44 +47,44 @@ def test_cells_closed_by_names_only_cells_citing_a_closed_issue() -> None:
     assert cells_closed_by({1}, _CELLS) == {}
 
 
-def _run(body: str, tmp_path, monkeypatch, capsys) -> tuple[int, str]:
+@pytest.fixture
+def report(monkeypatch):
     monkeypatch.setattr(known_cell_closing, "known_cells", lambda: dict(_CELLS))
-    path = tmp_path / "body.md"
-    path.write_text(body, encoding="utf-8")
-    code = known_cell_closing.main([str(path)])
-    return code, capsys.readouterr().out
+    return known_cell_closing.report
 
 
-def test_pr_closing_a_cited_issue_fails_naming_the_cell(tmp_path, monkeypatch, capsys) -> None:
-    code, out = _run("Fixes #4742\nRefs #4703", tmp_path, monkeypatch, capsys)
-    assert code == 1
+def test_pr_closing_a_cited_issue_fails_naming_the_cell(report, capsys) -> None:
+    assert report(["Fixes #4742\nRefs #4703"]) == 1
+    out = capsys.readouterr().out
     assert "source:tests/unit/test_x.py:12 -> #4742" in out
     assert "machine:install.fresh" not in out
     assert "python -m tests.quality.known_cell_issues --write" in out
 
 
-def test_pr_closing_an_uncited_issue_passes(tmp_path, monkeypatch, capsys) -> None:
-    code, out = _run("Fixes #99\nRefs #4703", tmp_path, monkeypatch, capsys)
-    assert code == 0
-    assert out.startswith("[+] H4")
+def test_pr_closing_an_uncited_issue_passes(report, capsys) -> None:
+    assert report(["Fixes #99\nRefs #4703"]) == 0
+    assert capsys.readouterr().out.startswith("[+] H4")
 
 
-def test_commit_message_closing_a_cited_issue_fails_despite_refs_body(
-    tmp_path, monkeypatch, capsys
-) -> None:
-    monkeypatch.setattr(known_cell_closing, "known_cells", lambda: dict(_CELLS))
-    body = tmp_path / "body.md"
-    body.write_text("Refs #4703", encoding="utf-8")
-    commits = tmp_path / "commits.txt"
-    commits.write_text("fix: route files\n\nFixes #4703\n", encoding="utf-8")
-    assert known_cell_closing.main([str(body), str(commits)]) == 1
+def test_commit_message_closing_a_cited_issue_fails_despite_refs_body(report, capsys) -> None:
+    assert report(["Refs #4703", "fix: route files\n\nFixes #4703\n"]) == 1
     assert "machine:install.fresh -> #4703" in capsys.readouterr().out
 
 
 def test_gate_reads_the_body_from_stdin(monkeypatch, capsys) -> None:
-    import io
-
     monkeypatch.setattr(known_cell_closing, "known_cells", lambda: dict(_CELLS))
     monkeypatch.setattr("sys.stdin", io.StringIO("closes microsoft/apm#4703"))
     assert known_cell_closing.main([]) == 1
     assert "machine:install.fresh -> #4703" in capsys.readouterr().out
+
+
+def test_each_commit_message_is_scanned_on_its_own(report, capsys) -> None:
+    assert report(["Refs #1", "chore: fix", "#4703 document the repro"]) == 0
+    assert capsys.readouterr().out.startswith("[+] H4")
+
+
+def test_truncated_commit_list_fails_closed() -> None:
+    jsonl = '"chore: one"\n"fix: two\\n\\nFixes #1"\n'
+    with pytest.raises(SystemExit, match="read 2 of the PR's 3 commit messages"):
+        commit_messages(jsonl, 3)
+    assert commit_messages(jsonl, 2) == ["chore: one", "fix: two\n\nFixes #1"]

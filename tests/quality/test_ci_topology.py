@@ -3541,14 +3541,15 @@ def _assert_h4_step(step: WorkflowNode) -> None:
         "PR_COMMITS_API": (
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits"
         ),
+        "PR_COMMIT_COUNT": "${{ github.event.pull_request.commits }}",
         "GH_TOKEN": "${{ github.token }}",
     }
     assert "${{" not in step["run"], "the PR body must never be inlined in run"
     commands = shell_commands(step)
     assert commands[0] == ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"]
     # Fail closed: an API error stops the step instead of checking the body alone.
-    api = ["gh", "api", "$PR_COMMITS_API", "--paginate", "--jq", ".[].commit.message"]
-    assert commands[1][: len(api) + 3] == [*api, ">", "$RUNNER_TEMP/pr-commits.txt", "||"]
+    api = ["gh", "api", "$PR_COMMITS_API", "--paginate", "--jq", ".[].commit.message | @json"]
+    assert commands[1][: len(api) + 3] == [*api, ">", "$RUNNER_TEMP/pr-commits.jsonl", "||"]
     assert commands[1][-2:] == ["1;", "}"]
     assert commands[2] == [
         "uv",
@@ -3560,7 +3561,10 @@ def _assert_h4_step(step: WorkflowNode) -> None:
         "-m",
         "tests.quality.known_cell_closing",
         "$RUNNER_TEMP/pr-body.md",
-        "$RUNNER_TEMP/pr-commits.txt",
+        "--commits",
+        "$RUNNER_TEMP/pr-commits.jsonl",
+        "--commit-count",
+        "$PR_COMMIT_COUNT",
     ]
     assert len(commands) == 3
 

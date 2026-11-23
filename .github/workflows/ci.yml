@@ -63,18 +63,20 @@ jobs:
     # Rule H4 (#4565): a PR that closes an issue a strict known cell cites
     # must flip that cell in the same PR. It reads the PR body and the PR's
     # own commit messages (merge commits land them on main, where their
-    # closing keywords close issues), the latter from the GitHub API. The
-    # body only reaches the step through env, never inlined in the script.
+    # closing keywords close issues), the latter from the GitHub API, one
+    # JSON string each; a truncated list (the API stops at 250) fails closed.
+    # The body only reaches the step through env, never inlined in the script.
     - name: Known cells cite no issue this PR closes
       if: github.event_name == 'pull_request'
       env:
         PR_BODY: ${{ github.event.pull_request.body }}
         PR_COMMITS_API: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits
+        PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
         GH_TOKEN: ${{ github.token }}
       run: |
         printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-        gh api "$PR_COMMITS_API" --paginate --jq '.[].commit.message' > "$RUNNER_TEMP/pr-commits.txt" || { echo "::error::H4: could not read this PR's commit messages from the GitHub API; rerun the job"; exit 1; }
-        uv run --frozen --extra dev python -m tests.quality.known_cell_closing "$RUNNER_TEMP/pr-body.md" "$RUNNER_TEMP/pr-commits.txt"
+        gh api "$PR_COMMITS_API" --paginate --jq '.[].commit.message | @json' > "$RUNNER_TEMP/pr-commits.jsonl" || { echo "::error::H4: could not read this PR's commit messages from the GitHub API; rerun the job"; exit 1; }
+        uv run --frozen --extra dev python -m tests.quality.known_cell_closing "$RUNNER_TEMP/pr-body.md" --commits "$RUNNER_TEMP/pr-commits.jsonl" --commit-count "$PR_COMMIT_COUNT"
 
   # Windows compatibility gate -- runs at PR time (not just post-merge
   # in build-release.yml) so Windows-only path, encoding, process, and
