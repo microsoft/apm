@@ -101,8 +101,8 @@ def author_bundle(root: Path, env: Mapping[str, str]) -> Path:
 def lockless_bin_bundle(archive: Path, root: Path) -> Path:
     """Unpack *archive* under *root* as a bundle directory that ships bin/ and no lockfile.
 
-    Without ``apm.lock.yaml`` install skips the integrity check (with a warning),
-    so an org refusal of this bundle is the policy's, not the manifest's.
+    Without ``apm.lock.yaml`` there is no integrity manifest to fail, so an org
+    refusal of this bundle is the policy's, not the manifest's.
     """
     root.mkdir()
     # ``apm pack --archive`` writes a zip or a gzipped tarball depending on the release.
@@ -254,7 +254,10 @@ class GateBundles(StepRunner):
         try:
             step = self.step(("install", str(bundle)), exits={1}, cells=[_BIN_CELL], mutating=False)
             output = step.result.stdout + step.result.stderr
-            assert "skipping integrity check" in output, output
+            # Org policy runs before the integrity check (install/bundle_admission.py), so
+            # the refusal of this lockless copy is the deny's: no integrity warning yet.
+            assert not (bundle / "apm.lock.yaml").exists()
+            assert f"Policy violation: _local/{MIX} -- denied by pattern" in output, output
             assert "Install blocked by org policy" in output, output
             assert (bundle / _BIN_TOOL).is_file()
             evidence = Evidence(
