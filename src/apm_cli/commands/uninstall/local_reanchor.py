@@ -281,6 +281,7 @@ def _unhashed_files_match(source: Path, copy: Path) -> bool:
     Install copies them through the local copier, so a change there alone still
     makes a fresh install rewrite apm_modules (#4999).
     """
+    import filecmp
     import tempfile
 
     from ...config import get_apm_temp_dir
@@ -289,17 +290,21 @@ def _unhashed_files_match(source: Path, copy: Path) -> bool:
     if not source.is_dir():
         return True
 
-    def unhashed(root: Path) -> dict[str, bytes]:
+    def unhashed(root: Path) -> set[str]:
         return {
-            path.relative_to(root).as_posix(): path.read_bytes()
-            for path in sorted(root.rglob("*"))
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
             if path.is_file() and {".git", "__pycache__"} & set(path.relative_to(root).parts)
         }
 
     with tempfile.TemporaryDirectory(prefix="apm-reanchor-", dir=get_apm_temp_dir()) as stage:
         image = Path(stage) / "package"
         _copy_tree_dereferencing_validated(source, image, source)
-        return unhashed(image) == unhashed(copy)
+        names = unhashed(image)
+        # filecmp streams each pair in bounded chunks: no tree is held in memory.
+        return names == unhashed(copy) and all(
+            filecmp.cmp(image / name, copy / name, shallow=False) for name in sorted(names)
+        )
 
 
 def move_materializations(
