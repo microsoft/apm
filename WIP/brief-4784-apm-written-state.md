@@ -1,7 +1,7 @@
 # Design brief: persisted APM-written MCP/hook state (#4784, #4864, #4867; context #4899)
 
 Owner: P3 lead (9a22ec4b) with QL. Rule 22: hourly steps, each a pushed SHA.
-Status: STEP 2 OPTIONS (Mon 09:40). Steps: S1 outline (09:40) -> S2 options A/B/C/P
+Status: STEP 3 RISKS+COMPAT (Mon 09:50). Steps: S1 outline (09:40) -> S2 options A/B/C/P
 with mechanism and call sites (10:40) -> S3 risks + OpenAPM/compat cells per option (11:40)
 -> S4 QL review folded + recommendation + decision memo for A/B (12:40).
 Any option that changes MCP retirement behavior goes to the Regent as a decision memo.
@@ -75,13 +75,37 @@ server is never retired from a runtime the project dropped. Records are already 
 - #4864 == B's baseline (same field); #4784 can ship as C now and A or B later.
 - #4899 stays narrow (existing fields) per its record; it must not pre-empt B's field.
 
-## 5. Risks to weigh (from ENG-B, to be confirmed by QL)
-transient vs durable skips; auto-detected targets; shared destinations; partial installs;
-COPILOT_HOME profiles; user-held identical entries; test surface.
+## 5. Risks per option (STEP 3; ENG-B risks R1-R7, QL to confirm)
+R1 transient vs durable skip; R2 auto-detected targets; R3 shared destinations;
+R4 partial installs; R5 COPILOT_HOME/user profiles; R6 user-held identical entry;
+R7 test surface.
 
-## 6. OpenAPM / compat
-To list per option: spec reqs touched (lockfile fields: additive only), old-reader and
-new-reader round-trip cells, CHANGELOG.
+| Risk | C report | A destination+skip set | B persistent baseline | P provenance |
+|---|---|---|---|---|
+| R1 | none (keeps) | HIGH: an unlisted skip reason removes a working entry; needs a closed skip-reason enum and retire only after a successful deploy pass | low: per-run skips never retire | none |
+| R2 | none | HIGH: no explicit targets means the machine decides | MED: baseline must record explicit vs detected targets; retire only on explicit | none |
+| R3 | none | MED: keep `_declared_keys` per (config, key) and req-mf-027 file attribution | MED: same | MED: a file shared by two targets is created once; provenance per file, not per target |
+| R4 | none | HIGH unless gated to full-project installs | low | none |
+| R5 | none | keep `_selected` guard | baseline keyed by selected config | provenance keyed by resolved file |
+| R6 | keep+report stays | proof = fingerprint; ambiguous keeps | same | n/a (file-level) |
+| R7 | 1 cell | 5+ cells (retarget, --exclude, unavailable, shared, partial) | 4 cells + round-trip | 3 cells (#4867 record) |
+| Deletes anything new? | no | yes (entries) | yes (entries) | no (only blocks file deletes) |
+
+## 6. OpenAPM / compat per option (STEP 3)
+- C: no spec change; audit kept-mcp-entries already specified behavior. Cell: QL strict
+  cell passes on the "kept AND reported" arm; no compat cell.
+- A: retirement of a declared server's entry is new normative behavior: needs a
+  spec-citation fold (new consumer MUST under Section 4.5 next to req-mf-026/027) or
+  the Mode B gate fails. No lockfile change; compat = none.
+- B: additive lockfile field (per-runtime declaration baseline). Cells: old lockfile
+  loads and round-trips unchanged (req-lk-011 omission rules; req-lk-005 no-op
+  stability: a no-op install must not add the field), older reader tolerates the
+  field (lifecycle cell, #4864 record), lockfile reference page + CHANGELOG. Spec fold
+  for the field and its retirement rule.
+- P: additive receipt-store field (receipts are local state, not the lockfile), so no
+  lockfile schema change; deletion stays under req-lk-024 evidence (tighter). Cells
+  per the #4867 record: user-created empty file kept, APM-created file removed,
+  pre-provenance install unchanged. Spec: optional note under req-lk-024; no new MUST.
 
 ## 7. Recommendation (draft, pending QL)
 - 0.38.x: C for #4784 (report, no removal); #4867 P (additive provenance, delete-guard
