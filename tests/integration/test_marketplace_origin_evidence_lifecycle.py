@@ -452,3 +452,100 @@ def test_noop_update_records_restored_provenance_in_one_lock_write(
         env=environment,
     )
     assert lock_path.read_bytes() == restored_bytes
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_update_refuses_a_locked_plugin_removed_from_its_catalog(
+    tmp_path: Path,
+    apm_binary_path: Path,
+) -> None:
+    """#4967: a plugin the publisher removed fails update without a write or a fetch.
+
+    The plugin lives in its own repository, so a fetch for it would show its
+    remote in the git trace; the refusal must come from re-verifying the
+    catalog before anything is planned.
+    """
+    isolated = IsolatedApmEnvironment.create(
+        tmp_path.resolve() / "isolated", base_env=dict(os.environ)
+    )
+    repositories = LocalGitRepositoryFactory(
+        isolated.repository_root, env=isolated.subprocess_env()
+    )
+    plugin_repo = repositories.create("plugin-source")
+    packages = LocalPackageFactory(plugin_repo.worktree / "plugins")
+    package = packages.create(_PLUGIN, targets=("codex",))
+    packages.add_skill(package, _PLUGIN, _skill_document("separate source"))
+    repositories.commit(plugin_repo, message="publish plugin")
+    catalog_repo = repositories.create("catalog-a")
+    catalog_path = catalog_repo.worktree / ".claude-plugin" / "marketplace.json"
+    catalog_path.parent.mkdir()
+    catalog = {
+        "name": "catalog-a",
+        "owner": {"name": "APM Test"},
+        "plugins": [
+            {
+                "name": _PLUGIN,
+                "source": {
+                    "source": "git-subdir",
+                    "url": _REMOTE_PLUGIN,
+                    "path": _SUBDIR,
+                    "ref": "main",
+                },
+            }
+        ],
+    }
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    repositories.commit(catalog_repo, message="publish catalog")
+    environment = repositories.url_rewrite_subprocess_env_many(
+        ((catalog_repo, _REMOTE_A), (plugin_repo, _REMOTE_PLUGIN))
+    )
+    consumer = LocalPackageFactory(isolated.work_root).create(
+        "consumer",
+        targets=("codex",),
+        dependencies=({"name": _PLUGIN, "marketplace": _ALIAS},),
+    )
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=120)
+    lock_path = consumer.root / "apm.lock.yaml"
+    deployed_root = consumer.root / ".agents"
+    runner.run_sequence(
+        (
+            ("marketplace", "add", _REMOTE_A, "--name", _ALIAS, "--ref", "main"),
+            ("install", *_INSTALL_FLAGS),
+        ),
+        expected_returncodes=(0, 0),
+        scenario_id="removed-plugin-install",
+        cwd=consumer.root,
+        env=environment,
+    )
+    assert _locked_row(lock_path)["marketplace_plugin_name"] == _PLUGIN
+    locked_bytes = lock_path.read_bytes()
+    deployed = _tree_bytes(deployed_root)
+    assert deployed, "install deployed nothing"
+
+    catalog["plugins"] = []
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    repositories.commit(catalog_repo, message="remove the plugin from the catalog")
+    trace = tmp_path / "git-trace.log"
+
+    (failed,) = runner.run_sequence(
+        (("update", "--yes", *_UPDATE_FLAGS),),
+        expected_returncodes=(1,),
+        scenario_id="removed-plugin-update",
+        cwd=consumer.root,
+        env={**environment, "GIT_TRACE": str(trace)},
+    )
+
+    output = _output(failed)
+    assert "Cannot re-verify the marketplace provenance of" in output, output
+    assert f"{_PLUGIN}@{_ALIAS}" in output, output
+    assert lock_path.read_bytes() == locked_bytes, output
+    assert _tree_bytes(deployed_root) == deployed, output
+    git_commands = trace.read_text(encoding="utf-8") if trace.exists() else ""
+    assert "plugin-source" not in git_commands, git_commands

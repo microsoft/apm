@@ -30,8 +30,12 @@ from scripts.architecture_linter.checks.transport_checkout_verify import (
 from scripts.architecture_linter.checks.transport_credential_value_rendering import (
     RULES as _CREDENTIAL_RENDERING_RULES,
 )
+from scripts.architecture_linter.checks.transport_deploy_store import RULES as _DEPLOY_STORE_RULES
 from scripts.architecture_linter.checks.transport_egress_route import (
     RULES as _EGRESS_ROUTE_RULES,
+)
+from scripts.architecture_linter.checks.transport_external_executables import (
+    RULES as _EXTERNAL_EXECUTABLE_RULES,
 )
 from scripts.architecture_linter.checks.transport_github_credential_class import (
     RULES as _GITHUB_CREDENTIAL_CLASS_RULES,
@@ -80,6 +84,7 @@ RULES = (
     + _EGRESS_ROUTE_RULES
     + _CACHE_RULES
     + _CLEANUP_RULES
+    + _DEPLOY_STORE_RULES
     + _CACHED_REPO_GIT_RULES
     + _CHECKOUT_VERIFY_RULES
     + _SPARSE_RULES
@@ -93,6 +98,7 @@ RULES = (
     + _GITHUB_CREDENTIAL_CLASS_RULES
     + _PROXY_HTTP_TOKEN_RULES
     + _CATALOG_CREDENTIAL_RULES
+    + _EXTERNAL_EXECUTABLE_RULES
 )
 COLLECTORS = (
     _AUTH_COLLECTORS

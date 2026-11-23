@@ -1527,6 +1527,34 @@ class TestRunBaselineChecks:
         assert not result.passed
         assert len(result.failed_checks) >= 2
 
+    def test_mcp_config_consistency_off_skips_only_that_check(self, tmp_path):
+        """The fast install hands MCP consistency to the install's MCP phase.
+
+        With the flag off the audit view's drift verdict is not computed, while
+        7b and every later check still run (fail-fast stays on).
+        """
+        _write_apm_yml(tmp_path, mcp=[{"name": "my-server", "transport": "stdio"}])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+                mcp_configs:
+                  my-server:
+                    name: my-server
+            """),
+        )
+        drifted = run_baseline_checks(tmp_path, fail_fast=True)
+        assert [c.name for c in drifted.failed_checks] == ["config-consistency"]
+
+        result = run_baseline_checks(tmp_path, fail_fast=True, mcp_config_consistency=False)
+        names = [check.name for check in result.checks]
+        assert "config-consistency" not in names
+        assert "native-mcp-ownership" in names
+        assert "content-integrity" in names
+        assert result.passed
+
 
 class TestExternalBeforeInternalCheckOrdering:
     """Ordering contract: the external manifest<->lockfile identity check
