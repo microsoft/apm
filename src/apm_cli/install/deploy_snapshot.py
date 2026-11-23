@@ -42,7 +42,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
-from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
+from apm_cli.install.deploy_state import ABSENT as _ABSENT
+from apm_cli.install.deploy_state import OTHER as _OTHER
+from apm_cli.install.deploy_state import entry_state as _entry
+from apm_cli.install.deploy_state import path_state as _state
+from apm_cli.install.deploy_state import tree_hashes as _tree_hashes
+from apm_cli.utils.content_hash import compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -328,56 +333,6 @@ class DeployJournal:
         shutil.rmtree(store, ignore_errors=True)
         with contextlib.suppress(OSError):
             store.parent.rmdir()
-
-
-def _tree_hashes(directory: Path) -> dict[str, str]:
-    """POSIX path -> content hash of every entry below *directory* (a link maps to ``""``)."""
-    hashes: dict[str, str] = {}
-    for path in sorted(directory.rglob("*")):
-        rel = path.relative_to(directory).as_posix()
-        if path.is_symlink() or not (path.is_file() or path.is_dir()):
-            hashes[rel] = ""
-        elif path.is_file():
-            hashes[rel] = compute_file_hash(path)
-    return hashes
-
-
-def _state(path: Path) -> dict[str, Any]:
-    """What is at *path* now: content, modes and entries, as seals record it.
-
-    Broader than the ledger's content hashes: an empty directory or a mode a
-    user added after a kill changes it, so replay keeps that path.
-    """
-    if path.is_dir() and not path.is_symlink():
-        entries = {
-            entry.relative_to(path).as_posix(): _entry(entry) for entry in sorted(path.rglob("*"))
-        }
-        return {"dir": entries, "mode": _mode(path)}
-    if path.is_symlink():
-        return {"link": os.readlink(path)}
-    if path.is_file():
-        # Byte-exact, unlike the ledger: a line-ending-only edit is a user's edit.
-        return {"file": compute_exact_file_hash(path), "mode": _mode(path)}
-    return dict(_OTHER) if os.path.lexists(path) else dict(_ABSENT)
-
-
-def _entry(path: Path) -> str:
-    """One entry below a journaled directory, as a seal and a fingerprint record it."""
-    if path.is_symlink():
-        return f"link:{os.readlink(path)}"
-    if path.is_file():
-        return f"{compute_exact_file_hash(path)}:{_mode(path)}"
-    if path.is_dir():
-        return f"dir:{_mode(path)}"
-    return "absent" if not os.path.lexists(path) else "other"
-
-
-def _mode(path: Path) -> int:
-    return stat.S_IMODE(path.lstat().st_mode)
-
-
-_ABSENT: dict[str, Any] = {"absent": True}
-_OTHER: dict[str, Any] = {"other": True}
 
 
 def lockfile_identity(text: str) -> str:

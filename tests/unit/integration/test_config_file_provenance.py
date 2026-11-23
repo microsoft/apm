@@ -772,3 +772,41 @@ def test_a_malformed_record_file_keeps_the_file_and_vouches_for_nothing(tmp_path
     assert config.read_bytes() == held
     assert vouches_for_current_bytes(config, b"") is False
     assert config_file_origin(config) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a backslash is a separator on Windows")
+def test_a_users_config_under_a_backslash_directory_name_is_never_deleted(
+    tmp_path, apm_home
+) -> None:
+    """On POSIX a backslash is a filename character: the record keyed by it is valid."""
+    project = tmp_path / "project\\name"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_link_to_a_users_config_never_lends_it_apms_record(tmp_path, apm_home) -> None:
+    """APM's config replaced by a link to the user's identical file: APM's next write
+    into the user's file classifies it as the user's, never as APM-created through
+    that link, so retiring APM's entry later keeps the file."""
+    apms = tmp_path / "apm" / ".mcp.json"
+    _apm_writes(apms, _SKELETON)  # APM created it
+    users = tmp_path / "user" / ".mcp.json"
+    users.parent.mkdir()
+    users.write_text(_SKELETON, encoding="utf-8")  # the user's own, same bytes
+    apms.unlink()
+    apms.symlink_to(users)
+
+    _apm_writes(users, _WITH_ENTRY, manifest_root=users.parent)  # APM merges into it
+    users.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert _apm_empties(users, root=tmp_path / "user") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
