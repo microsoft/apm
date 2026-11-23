@@ -182,8 +182,8 @@ def _record(lock_dep: Any, targets: Any, store: Any | None) -> dict | None:
 
 def _source_is_live(root: Path) -> bool:
     """A package with executables, executable-gated or MCP/LSP content replays live."""
-    from apm_cli.models.apm_package import APMPackage
     from apm_cli.core.scope import manifest_file
+    from apm_cli.models.apm_package import APMPackage
 
     manifest = manifest_file(root)
     if manifest.exists():
