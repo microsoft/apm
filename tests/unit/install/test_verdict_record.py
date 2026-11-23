@@ -19,7 +19,6 @@ import pytest
 from apm_cli.install import verdict_record
 
 pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I2")]
-_HITS = pytest.mark.skipif(os.name == "nt", reason="the Windows DACL key check lands in B2")
 
 _REL = ".github/prompts/a.prompt.md"
 _BODY = b"# prompt\n"
@@ -74,7 +73,6 @@ def _home(project: Path) -> Path:
     return project.parent / "home"
 
 
-@_HITS
 def test_a_hit_replays_the_recorded_output_and_writes_nothing(project: Path, capsys) -> None:
     _record()
     capsys.readouterr()
@@ -95,13 +93,15 @@ def test_nothing_is_recorded_without_a_verified_no_op(project: Path) -> None:
     assert not (_home(project) / "verdicts").exists()
 
 
-def test_output_with_another_clock_token_is_never_recorded(project: Path) -> None:
+def test_output_with_another_clock_token_is_never_recorded(project: Path, capsys) -> None:
     _record(_OUTPUT + "[i] Org policy (cached, fetched 3m ago)\n")
+    capsys.readouterr()
 
     assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    assert not (_home(project) / "verdicts").exists()
 
 
-@_HITS
 @pytest.mark.parametrize(
     "change",
     [
@@ -143,7 +143,6 @@ def test_any_verdict_input_change_misses(
     assert capsys.readouterr().out == ""
 
 
-@_HITS
 def test_an_unrelated_environment_variable_still_hits(
     project: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -172,20 +171,40 @@ def test_ci_proxy_or_no_policy_never_hits_or_records(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX key mode")
-def test_a_key_readable_by_others_is_no_key(project: Path) -> None:
+def test_a_key_readable_by_others_is_no_key(project: Path, capsys) -> None:
     _record()
     key = _home(project) / verdict_record.KEY_FILE
     key.chmod(0o644)
+    capsys.readouterr()
     assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
 
 
-@_HITS
-def test_a_record_planted_under_another_key_misses(project: Path) -> None:
+def test_a_record_planted_under_another_key_misses(project: Path, capsys) -> None:
     _record()
     key = _home(project) / verdict_record.KEY_FILE
-    key.chmod(0o600)
     key.write_bytes(b"\x01" * 32)
+    capsys.readouterr()
     assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_the_kill_switch_forces_the_full_path(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """APM_INSTALL_FAST_PATH=0 (the documented fast-path kill switch) never replays or records."""
+    from apm_cli.install import noop_diff
+
+    assert verdict_record._KILL_VALUES == noop_diff._DISABLED
+    _record()
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "0")
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+    records = sorted((_home(project) / "verdicts").iterdir())
+    before = [p.read_bytes() for p in records]
+    _record("changed\n")
+    assert [p.read_bytes() for p in records] == before
 
 
 def _env_names_read(source: str) -> set[str]:
@@ -222,3 +241,25 @@ def test_the_record_module_reads_the_environment_only_through_its_classified_hel
             assert "os.environ" not in ast.unparse(node) or not isinstance(
                 node, (ast.Call, ast.Subscript, ast.Attribute)
             ), f"{func.name} reads os.environ directly"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL")
+def test_a_windows_key_readable_by_everyone_is_no_key(project: Path, capsys) -> None:
+    import subprocess
+
+    _record()
+    key = _home(project) / verdict_record.KEY_FILE
+    subprocess.run(["icacls", str(key), "/grant", "*S-1-1-0:R"], check=True, capture_output=True)
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL")
+def test_a_windows_key_created_by_apm_is_private(project: Path) -> None:
+    from apm_cli.install import verdict_key_windows
+
+    _record()
+    key = _home(project) / verdict_record.KEY_FILE
+    assert verdict_key_windows.private_to_current_user(key)
+    assert key.stat().st_size == 32

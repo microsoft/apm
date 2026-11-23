@@ -153,6 +153,8 @@ _PROJECT_SURFACES = (
 _USER_SURFACES = (".claude.json", ".codex/config.toml")
 
 _VERIFIED_NOOP: list[bool] = []
+# Same values as install/noop_diff.disabled() (APM_INSTALL_FAST_PATH kill switch).
+_KILL_VALUES = frozenset({"0", "false", "no", "off"})
 # O1: the summary's elapsed seconds are templated; any other clock-dependent
 # token (a cache age, a countdown) means the output is not recorded at all.
 _ELAPSED = "\x00elapsed\x00"
@@ -179,6 +181,8 @@ def _served(argv: list[str]) -> bool:
 
 
 def _hits_allowed() -> bool:
+    if (_env("APM_INSTALL_FAST_PATH") or "").strip().lower() in _KILL_VALUES:
+        return False  # the documented fast-path kill switch also disables the record
     return not any((_env(name) or "").strip() for name in _NO_HIT_ENV)
 
 
