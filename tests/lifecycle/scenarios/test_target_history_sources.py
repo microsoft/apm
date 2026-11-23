@@ -22,10 +22,8 @@ import pytest
 from tests.lifecycle import driver
 from tests.lifecycle.scenarios._kit import (
     PROJECT_HOME_ALLOWED,
-    Known,
     Scenario,
     credits,
-    known_defect,
     mcp_server_problems,
 )
 from tests.lifecycle.world import use_policy, use_registry
@@ -104,12 +102,9 @@ def _assert_whole_plugin(scenario: Scenario, targets: tuple[str, ...], output: s
 _REGISTRY = "p-skill:registry"
 
 
-# Narrowing leaves the dropped harness enabling the whole plugin (#4874): those
-# native-plugin units have their own strict Known row (test_a_narrowed_target_...).
+# The narrowed native-plugin units have their own row (test_a_narrowed_target_...),
+# which also proves the dropped harness's enable entry is retired (#4874).
 _NARROWED = ("single-narrowed", "multi-narrowed")
-_STALE_ISSUE = "#4874"
-_STALE_MATCH = r"^an undeclared target keeps \['p-native-claude/native/"
-_STALE_ENABLE = Known(_STALE_ISSUE, _STALE_MATCH)
 
 
 def _kinds_for(tgt: str) -> dict[str, tuple[tuple[str, str], ...]]:
@@ -425,7 +420,7 @@ def test_a_dropped_target_that_still_enables_a_whole_plugin_keeps_it(lifecycle_w
 @pytest.mark.parametrize("tgt", _NARROWED)
 def test_a_narrowed_target_retires_a_whole_plugins_enable_entry(lifecycle_world, tgt) -> None:
     """The first offline install after a narrowing keeps the whole plugin for the
-    remaining harness and drops the dropped harness's enable entry (strict #4874)."""
+    remaining harness and drops the dropped harness's enable entry (#4874)."""
     before, after = TARGET_HISTORIES[tgt]
     use_policy(lifecycle_world, "allow")
     scenario = Scenario(lifecycle_world, (_NATIVE,), targets=before, policy="allow")
@@ -440,9 +435,8 @@ def test_a_narrowed_target_retires_a_whole_plugins_enable_entry(lifecycle_world,
     observed, _, _ = scenario.deployed()
     assert observed == scenario.expected_cells(), sorted(observed)
     _assert_whole_plugin(scenario, after, step.output)
-    with known_defect(_STALE_ISSUE, _STALE_MATCH):
-        left = scenario.undeclared_target_cells()
-        assert not left, f"an undeclared target keeps {sorted(left)}"
+    left = scenario.undeclared_target_cells()
+    assert not left, f"an undeclared target keeps {sorted(left)}"
     scenario.finish()
 
 
@@ -459,9 +453,5 @@ CREDITS = credits(
             ]
             for tgt in _NARROWED
         },
-    },
-    known={
-        f"test_a_narrowed_target_retires_a_whole_plugins_enable_entry[{tgt}]": _STALE_ENABLE
-        for tgt in _NARROWED
     },
 )
