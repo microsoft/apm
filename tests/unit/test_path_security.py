@@ -330,3 +330,54 @@ class TestDependencyParseTraversalRejection:
 # ---------------------------------------------------------------------------
 # DependencyReference.get_install_path containment
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# filesystem_containment(): the filesystem-aware containment calculation
+# ---------------------------------------------------------------------------
+
+
+class TestFilesystemContainment:
+    """Case and Unicode spellings of a root are judged by directory identity."""
+
+    def test_child_of_the_root_is_contained(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project"
+        (root / "bin").mkdir(parents=True)
+        assert filesystem_containment(root / "bin", root) is True
+
+    def test_sibling_of_the_root_is_outside(self, tmp_path):
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project"
+        root.mkdir()
+        (tmp_path / "tools").mkdir()
+        assert filesystem_containment(tmp_path / "tools", root) is False
+
+    def test_unicode_case_variant_of_the_root_is_contained(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project-\u0390"
+        root.mkdir()
+        variant = tmp_path / "PROJECT-\u03aa\u0301"
+        variant.mkdir(exist_ok=True)
+        # Stand in for a case-insensitive volume, where both spellings are one directory.
+        monkeypatch.setattr(os.path, "samefile", lambda *_args: True)
+        assert filesystem_containment(variant / "bin", root) is True
+
+    def test_unverifiable_case_variant_is_unknown(self, tmp_path, monkeypatch):
+        import os
+
+        from apm_cli.utils.path_security import filesystem_containment
+
+        root = tmp_path / "project"
+        root.mkdir()
+
+        def _unverifiable(*_args):
+            raise PermissionError("cannot stat")
+
+        monkeypatch.setattr(os.path, "samefile", _unverifiable)
+        assert filesystem_containment(tmp_path / "PROJECT" / "bin", root) is None
