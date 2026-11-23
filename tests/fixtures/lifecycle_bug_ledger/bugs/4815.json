@@ -1,7 +1,7 @@
 {
   "issue": 4815,
   "fixed_in": "Unreleased",
-  "summary": "apm uninstall --trust-lockfile reported a path-safety rejection as an evidence-based keep when a file consent kept in the preflight had its parent replaced by a symlink before cleanup, so the uninstall succeeded and released the file's ownership; cleanup now records each current safety rejection with its reason, and uninstall always reports it as a failure and keeps the lockfile tracking the file.",
+  "summary": "apm uninstall --trust-lockfile reported a path-safety rejection as an evidence-based keep when a file consent kept in the preflight had its parent replaced by a symlink before cleanup, so the uninstall succeeded and released the file's ownership; it could also unlink a file replaced by a link after preflight, reported a kept final link as a rejection, and named only five kept members of a skill directory. Cleanup now records each current safety rejection with its reason and uninstall always reports it as a failure, keeping the lockfile row; consent keeps any current link and names every kept member.",
   "failure_modes": [
     "cleanup",
     "ownership"
@@ -12,6 +12,11 @@
   ],
   "regression_tests": [
     "tests/integration/test_uninstall_consent_safety_rejection.py::test_safety_rejection_after_consent_fails_and_keeps_ownership",
-    "tests/unit/integration/test_cleanup_helper.py::test_safety_rejection_of_a_consent_kept_file_is_always_a_failure"
+    "tests/unit/integration/test_cleanup_helper.py::test_safety_rejection_of_a_consent_kept_file_is_always_a_failure",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_reports_a_safety_rejection_after_preflight_as_a_failure",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_selected_cleanup_never_releases_a_path_a_safety_gate_rejected",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_keeps_a_file_replaced_by_a_link_after_preflight",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_consent_names_every_kept_member_of_a_skill_directory",
+    "tests/spec_conformance/test_deletion_evidence_reqs.py::test_selected_cleanup_keeps_an_unchanged_consent_kept_link_without_failing"
   ]
 }
