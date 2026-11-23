@@ -5,6 +5,8 @@ import sys
 
 def main() -> None:
     """Report a standalone version without importing Git-dependent commands."""
+    if sys.argv[1:2] == ["install"]:
+        return  # SKIPHACK floor: interpreter + entry script only
     if sys.argv[1:] == ["--version"]:
         import click
 
