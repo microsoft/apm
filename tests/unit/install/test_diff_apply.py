@@ -505,3 +505,100 @@ def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         diff_apply._write(target, b"apm\n", scratch)
     assert target.read_text(encoding="utf-8") == "user\n"
+
+
+@pytest.mark.parametrize("marker", ["deleted", "foreign"])
+def test_a_present_copy_without_its_cache_pin_marker_declines(tmp_path: Path, marker: str) -> None:
+    """A matching content hash does not restore `.apm-pin`: the full run's pin sync does."""
+    from apm_cli.install.cache_pin import MARKER_FILENAME, write_marker
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    lock = _lock(**{"o/p": {_REL: _digest(b"x")}})
+    lock.dependencies["o/p"].to_dependency_ref = lambda: DependencyReference.parse("o/p")
+    copy = tmp_path / "apm_modules" / "o" / "p"
+    copy.mkdir(parents=True)
+    (copy / "apm.yml").write_text("name: p\n", encoding="ascii")
+    if marker == "foreign":
+        write_marker(copy, "c" * 40)
+    before = sorted(p.name for p in copy.iterdir())
+    with pytest.raises(Decline, match="cache pin marker"):
+        diff_apply._plan_packages(tmp_path, lock)
+    assert sorted(p.name for p in copy.iterdir()) == before
+    assert (copy / MARKER_FILENAME).exists() is (marker == "foreign")
+
+
+def _locked_project(tmp_path: Path, row: str = "") -> list[str]:
+    from apm_cli.deps.lockfile import installed_apm_version
+
+    (tmp_path / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - o/p#v1.0.0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "apm.lock.yaml").write_text(
+        "lockfile_version: '1'\n"
+        "generated_at: '2025-01-01T00:00:00Z'\n"
+        f"apm_version: '{installed_apm_version()}'\n"
+        "dependencies:\n"
+        f"- repo_url: o/p\n  host: github.com\n  resolved_ref: v1.0.0\n"
+        f"  resolved_commit: {'a' * 40}\n  content_hash: sha256:{'d' * 64}\n" + row,
+        encoding="utf-8",
+    )
+    return sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+
+
+def _assert_declines_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, before: list[str], reason: str
+) -> None:
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "trace")
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+    applied = diff_apply.try_apply({}, ["install"], tmp_path, frozen_disposition=disposition)
+    assert applied is False
+    assert f"full run ({reason})" in capsys.readouterr().err
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == before
+
+
+def test_apm_owned_codex_registrations_take_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A dropped Codex plugin is retired only by the full run's codex_plugins phase."""
+    journal = tmp_path / ".codex-native" / "ownership.json"
+    journal.parent.mkdir()
+    journal.write_text('{"version": 1, "plugins": {}}', encoding="ascii")
+    before = _locked_project(tmp_path)
+    _assert_declines_with(tmp_path, monkeypatch, capsys, before, "codex native registrations")
+
+
+@pytest.mark.parametrize("package_type", ["marketplace_plugin", "agent_plugin"])
+def test_a_locked_plugin_package_takes_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, package_type: str
+) -> None:
+    """Native admission and registration of a plugin package are full-run phases."""
+    before = _locked_project(tmp_path, f"  package_type: {package_type}\n")
+    _assert_declines_with(tmp_path, monkeypatch, capsys, before, "plugin package")
+
+
+def test_a_locked_native_plugin_record_declines(tmp_path: Path) -> None:
+    """A removed enable declaration or plugin root is restored only by claude_plugins."""
+    lock = _lock(**{"o/p": {}})
+    lock.dependencies["o/p"].native_plugin = SimpleNamespace(name="p")
+    with pytest.raises(Decline, match="native plugin"):
+        diff_apply._refuse_native_plugins(tmp_path, lock)
+    assert not any(tmp_path.iterdir())
+
+
+def test_the_legacy_skill_layout_request_takes_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """APM_LEGACY_SKILL_PATHS changes the layout the deploy record does not key."""
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    before = _locked_project(tmp_path)
+    _assert_declines_with(tmp_path, monkeypatch, capsys, before, "legacy skill paths")
+
+
+def test_a_pending_legacy_skill_migration_takes_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """After a --legacy-skill-paths install, a bare install migrates to .agents/skills/."""
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    before = _locked_project(tmp_path, "  deployed_files:\n  - .github/skills/s/SKILL.md\n")
+    _assert_declines_with(tmp_path, monkeypatch, capsys, before, "legacy skill migration pending")

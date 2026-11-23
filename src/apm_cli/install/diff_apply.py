@@ -219,6 +219,7 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     from apm_cli.cache.paths import get_cache_root
     from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.drift import locked_copy_is_stale
+    from apm_cli.install.cache_pin import CachePinError, verify_marker
     from apm_cli.install.source_helpers import locked_content_mismatch
 
     modules = project_root / APM_MODULES_DIR
@@ -245,6 +246,12 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
             # Not a package copy: APPLY never replaces it, the full run decides.
             raise Decline("non-directory at a package path")
         if install_path.is_dir():
+            try:
+                # A matching content hash does not restore a deleted or foreign
+                # marker; the full run's cache-pin sync does (cache_pin.py).
+                verify_marker(install_path, sha)
+            except CachePinError:
+                raise Decline("cache pin marker") from None
             # A present copy must already prove its locked content: decline before any write.
             if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
                 key, dep, install_path, lockfile=lock
@@ -507,6 +514,38 @@ def _refuse_lifecycle_scripts(project_root: Path) -> None:
         raise Decline("lifecycle scripts")
 
 
+def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
+    """Native plugin registration and retirement run only in the full install's
+    last phases (install/pipeline.py: codex_plugins, claude_plugins), which APPLY omits.
+    """
+    from apm_cli.codex_plugins.registrar import ledger_path_for
+    from apm_cli.constants import APM_MODULES_DIR
+    from apm_cli.models.validation import PackageType
+    from apm_cli.native_plugins.record import lock_native_plugins
+
+    if lock_native_plugins(lock):
+        raise Decline("native plugin")
+    if os.path.lexists(ledger_path_for(project_root / APM_MODULES_DIR)):
+        # Codex registrations APM owns: the full run refreshes or retires them.
+        raise Decline("codex native registrations")
+    plugins = {PackageType.AGENT_PLUGIN.value, PackageType.MARKETPLACE_PLUGIN.value}
+    if any(getattr(dep, "package_type", None) in plugins for dep in lock.dependencies.values()):
+        raise Decline("plugin package")
+
+
+def _refuse_legacy_skill_layout(project_root: Path, lock: Any) -> None:
+    """The skill layout is not in the deploy record: a legacy request or a pending
+    legacy-path migration (install/skill_path_migration.py) takes the full run.
+    """
+    from apm_cli.install.skill_path_migration import detect_legacy_skill_deployments
+    from apm_cli.integration.targets import should_use_legacy_skill_paths
+
+    if should_use_legacy_skill_paths():
+        raise Decline("legacy skill paths")
+    if detect_legacy_skill_deployments(lock, project_root):
+        raise Decline("legacy skill migration pending")
+
+
 def _stage_all(
     project_root: Path, lock: Any, packages: list, stage_root: Path
 ) -> list[tuple[Path, Path]]:
@@ -670,6 +709,8 @@ def try_apply(
             raise Decline("local content or LSP")
         if (project_root / ".apm").exists():
             raise Decline("root project primitives")
+        _refuse_native_plugins(project_root, lock)
+        _refuse_legacy_skill_layout(project_root, lock)
         from apm_cli.core.experimental import is_enabled
 
         if is_enabled("external_scanners"):
