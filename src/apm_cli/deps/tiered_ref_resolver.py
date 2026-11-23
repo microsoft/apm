@@ -271,6 +271,27 @@ def _listed_exactly(
     return True, sha.lower() if _SHA_RE.match(sha or "") else None
 
 
+def _resolve_exactly(resolver: object, dep_ref: DependencyReference, ref: str) -> str | None:
+    """The commit *ref* names at the origin: an exact branch or tag, else an abbreviation.
+
+    The commits API resolves a name like rev-parse, so a branch or tag name
+    resolves from the exact ref listing. A hex name is a branch or tag first,
+    as Git prefers a ref; only with none does the API expand it as an
+    abbreviated commit, which admission then checks like any pin.
+    """
+    available = getattr(resolver, "commits_api_available", None)
+    if available is not None and not available(dep_ref):
+        return None
+    named, sha = _listed_exactly(resolver, dep_ref, ref)
+    if named or not _ABBREVIATED_COMMIT_RE.match(ref):
+        return sha
+    for query in _exact_ref_queries(ref):
+        sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
+        if sha and _SHA_RE.match(sha):
+            return sha.lower()
+    return None
+
+
 class L1CommitsAPI:
     """Resolve via the GitHub-family commits API.
 
@@ -311,21 +332,7 @@ class L1CommitsAPI:
             resolver = getattr(self._host, "_refs", None)
             if resolver is None:
                 return None
-            # The commits API resolves a name like rev-parse, so a branch or tag
-            # name resolves from the exact ref listing. A hex name is a branch or
-            # tag first, as Git prefers a ref; only with none does the API expand
-            # it as an abbreviated commit, which admission then checks like any pin.
-            available = getattr(resolver, "commits_api_available", None)
-            if available is not None and not available(dep_ref):
-                return None
-            named, sha = _listed_exactly(resolver, dep_ref, ref)
-            if named or not _ABBREVIATED_COMMIT_RE.match(ref):
-                return sha
-            for query in _exact_ref_queries(ref):
-                sha = resolver.resolve_commit_sha_for_ref(dep_ref, query)
-                if sha and _SHA_RE.match(sha):
-                    return sha.lower()
-            return None
+            return _resolve_exactly(resolver, dep_ref, ref)
         except Exception as exc:
             _log.debug(
                 "L1 commits API failed for %s@%s (%s)",
