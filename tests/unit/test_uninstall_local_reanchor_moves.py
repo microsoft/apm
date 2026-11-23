@@ -11,7 +11,7 @@ from apm_cli.commands.uninstall.local_reanchor import (
     restore_materializations,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.promise("P-INV-I3", "P-INV-I1")]
+pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I3", "P-INV-I1")]
 
 
 def _package(root: Path, name: str) -> Path:
@@ -362,3 +362,43 @@ def test_an_interrupt_right_after_a_rename_still_moves_it_back(tmp_path: Path) -
 
     assert _tree(modules) == before
     assert not (modules / "_local" / "h1").exists()
+
+
+def test_a_failed_directory_restore_still_restores_the_manifest_and_names_the_directory(
+    tmp_path: Path,
+) -> None:
+    """Moving a directory back fails: apm.yml and the lock are restored, the dir is named."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import _StillNeededRepair, _undo_reanchor
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+
+    modules = tmp_path / "apm_modules"
+    manifest, lock = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(renames={"./vendor/e": "local:vendor/e"}), (manifest, lock)
+    )
+    before = (manifest.read_bytes(), lock.read_bytes())
+    manifest.write_text("name: changed\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\nchanged: true\n", encoding="utf-8")
+    gone = modules / "_local" / "h1" / "e"  # the moved copy vanished: moving it back fails
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _undo_reanchor(
+            KeyboardInterrupt(),
+            ((modules / "_local" / "e", gone, ()),),
+            modules,
+            _StillNeededRepair({}, {}, {}, frozenset(), plan),
+            logger,
+        )
+
+    assert exc.value.code == 1
+    assert (manifest.read_bytes(), lock.read_bytes()) == before
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "_local/h1/e" in message, message

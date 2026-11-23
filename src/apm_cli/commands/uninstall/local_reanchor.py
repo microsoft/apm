@@ -285,7 +285,8 @@ def move_materializations(
                 done.append((current, target, created))
             else:
                 _remove_created(created)
-            restore_materializations(tuple(done), root)
+            if unrestored := restore_materializations(tuple(done), root):
+                raise OSError(f"could not move back {', '.join(unrestored)}") from None
             raise
         done.append((current, target, created))
     return tuple(done)
@@ -300,11 +301,27 @@ def _remove_created(created: tuple[Path, ...]) -> None:
 
 def restore_materializations(
     moved: tuple[tuple[Path, Path, tuple[Path, ...]], ...], modules_dir: Path
-) -> None:
-    """Put each moved directory back and remove only the parents its move created."""
+) -> list[str]:
+    """Put each moved directory back and remove only the parents its move created.
+
+    Every move is attempted; returns the ``apm_modules/...`` directories that
+    could not be moved back (empty when all were), never raising part way.
+    """
+    unrestored: list[str] = []
     for current, target, created in reversed(moved):
-        target.rename(current)
-        _remove_created(created)
+        try:
+            target.rename(current)
+            _remove_created(created)
+        except OSError:
+            unrestored.append(_modules_path(target, modules_dir))
+    return unrestored
+
+
+def _modules_path(path: Path, modules_dir: Path) -> str:
+    try:
+        return f"apm_modules/{path.relative_to(modules_dir).as_posix()}"
+    except ValueError:
+        return str(path)
 
 
 def _rekey_requests(

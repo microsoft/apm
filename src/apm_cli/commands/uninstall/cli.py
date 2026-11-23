@@ -507,7 +507,7 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
             f"The re-anchored package's apm_modules directory could not be moved ({exc})",
         )
     except BaseException as exc:
-        _undo_reanchor(exc, (), modules_dir, repair)
+        _undo_reanchor(exc, (), modules_dir, repair, logger)
         raise
 
 
@@ -524,26 +524,48 @@ def _persist_reanchored_lockfile(
             lockfile, lockfile_path, logger, integration_cleanup, repair
         )
     except BaseException as exc:
-        _undo_reanchor(exc, moved, modules_dir, repair)
+        _undo_reanchor(exc, moved, modules_dir, repair, logger)
         raise
 
 
-def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair) -> None:
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
     """Move the re-anchored directories back; anything but a handled exit also restores
-    apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor."""
-    _restore_reanchored_dirs(moved, modules_dir)
-    if not isinstance(exc, SystemExit) and repair.reanchor:
-        from .local_reanchor import roll_back
+    apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
 
-        roll_back(repair.reanchor)
+    The manifest rollback runs even when a directory cannot be moved back, and
+    anything left unrestored is named and exits 1, never silently.
+    """
+    unrestored: list[str] = []
+    try:
+        unrestored += _restore_reanchored_dirs(moved, modules_dir)
+    finally:
+        if not isinstance(exc, SystemExit) and repair.reanchor:
+            from .local_reanchor import roll_back
+
+            unrestored += roll_back(repair.reanchor) or []
+    _report_unrestored(unrestored, logger)
 
 
-def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:
+def _report_unrestored(unrestored: list[str], logger) -> None:
+    """Name what a re-anchor rollback could not restore and exit 1 (#4999)."""
+    if not unrestored:
+        return
+    from ...core.remediation import RESYNC_DEPLOYED
+
+    logger.error(
+        f"The re-anchor did not complete and these could not be restored: "
+        f"{', '.join(unrestored)}. Every deployed file is kept. {RESYNC_DEPLOYED.sentence()}"
+    )
+    sys.exit(1)
+
+
+def _restore_reanchored_dirs(moved: tuple, modules_dir) -> list[str]:
     """Undo the directory moves of a re-anchor whose transaction did not commit."""
-    if moved:
-        from .local_reanchor import restore_materializations
+    if not moved:
+        return []
+    from .local_reanchor import restore_materializations
 
-        restore_materializations(moved, modules_dir)
+    return restore_materializations(moved, modules_dir)
 
 
 def _persist_lock_then_resync_native(
@@ -581,14 +603,15 @@ def _persist_lock_then_resync_native(
             still_needed_repairs,
         )
     if lock_changed and (saved is None or not saved.saved):
-        _restore_reanchored_dirs(moved, modules_dir)
+        unrestored = _restore_reanchored_dirs(moved, modules_dir)
         _hold_native_registration(native_before, logger)
+        _report_unrestored(unrestored, logger)
         _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
     try:
         _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
     except BaseException as exc:
-        _undo_reanchor(exc, moved, modules_dir, still_needed_repairs)
+        _undo_reanchor(exc, moved, modules_dir, still_needed_repairs, logger)
         raise
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
