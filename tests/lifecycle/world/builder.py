@@ -36,7 +36,7 @@ import yaml
 from tests.lifecycle.world import registry
 from tests.lifecycle.world.clone import remove_tree
 from tests.lifecycle.world.contract import PackageRef, World
-from tests.lifecycle.world.packages import GIT_PUBLISHED, author_packages
+from tests.lifecycle.world.packages import GIT_PACK_ONLY, GIT_PUBLISHED, author_packages
 from tests.lifecycle.world.services import (
     MARKETPLACE_NAME,
     MARKETPLACE_REPO,
@@ -52,7 +52,9 @@ from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 from tests.utils.local_git_repository import LocalGitRepositoryFactory
 
 TAG = "v1.0.0"
-_NATIVE = frozenset({"p-native-claude", "p-native-codex", "p-native-claude-bin"})
+_NATIVE = frozenset(
+    {"p-native-claude", "p-native-codex", "p-native-claude-bin", "p-native-claude-exec"}
+)
 
 
 def _manifest(name: str) -> dict[str, object]:
@@ -82,7 +84,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
         factory.tag(repository, TAG, commit)
         served[f"{owner}/{repo}"] = repository.origin
 
-    for name in GIT_PUBLISHED:
+    for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY):
         publish(ORG, name, packages[name].root)
     trees = shared / "trees"
     for variant, document in policy_documents().items():
@@ -99,7 +101,7 @@ def _publish(shared: Path, env: dict[str, str], packages) -> dict[str, Path]:
             "description": f"Lifecycle world package {name}",
             "source": {"source": "github", "repo": f"{ORG}/{name}", "ref": TAG},
         }
-        for name in GIT_PUBLISHED
+        for name in (*GIT_PUBLISHED, *GIT_PACK_ONLY)
     ]
     document = {"name": MARKETPLACE_NAME, "owner": {"name": "APM Lifecycle"}, "plugins": plugins}
     (catalog / ".claude-plugin" / "marketplace.json").write_text(
@@ -281,6 +283,13 @@ def build_template(base: Path) -> World:
         packages[f"{name}:git"] = PackageRef(name, f"{ORG}/{name}#{TAG}", kinds, "git")
         packages[f"{name}:marketplace"] = PackageRef(
             name, f"{name}@{MARKETPLACE_NAME}", kinds, "marketplace"
+        )
+    for name in GIT_PACK_ONLY:
+        packages[f"{name}:git"] = PackageRef(
+            name, f"{ORG}/{name}#{TAG}", authored[name].kinds, "git"
+        )
+        packages[f"{name}:marketplace"] = PackageRef(
+            name, f"{name}@{MARKETPLACE_NAME}", authored[name].kinds, "marketplace"
         )
     for name in registry.REGISTRY_PUBLISHED:
         version = registry.REGISTRY_PUBLISHED[name][0]

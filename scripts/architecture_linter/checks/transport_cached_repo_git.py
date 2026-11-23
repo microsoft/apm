@@ -40,6 +40,7 @@ _SITES: dict[str, tuple[str, bool]] = {
     _SNAPSHOT: ("inert_git_args", True),
     _LEGACY: ("inert_git_args", False),
     _OWNER: ("inert_git_args", True),
+    "src/apm_cli/cache/checkout_verify.py": ("inert_git_args", True),
 }
 _RUNNERS = frozenset(
     {
@@ -62,7 +63,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
         'raise UntrustedCachedRepoError("active hook present")',
         '"-c", "core.fsmonitor=false"',
         'fenced["GIT_TERMINAL_PROMPT"] = "0"',
-        'fenced["GIT_ALLOW_PROTOCOL"] = _ALLOWED_PROTOCOLS',
+        'fenced["GIT_ALLOW_PROTOCOL"] = "none" if offline else _ALLOWED_PROTOCOLS',
     ),
     _GIT_CACHE: (
         "if bare_dir.is_dir() and not self._bare_trusted(bare_dir):",
@@ -183,7 +184,7 @@ _GATED = ("_bare_has_sha", "_fetch_into_bare_locked", "bare_ref_sha")
 _GATE = "self._bare_trusted"
 # Entry points that open a cached checkout, and the trust check each must call.
 _CHECKOUT_GATES = {
-    "get_checkout": "self._checkout_trusted",
+    "_get_checkout": "self._checkout_trusted",
     "_read_only_checkout": "self._checkout_trusted",
     "_create_checkout": "self._checkout_trusted_or_evicted",
 }

@@ -84,6 +84,24 @@ def _shared_linter_session() -> Iterator[LinterSession]:
             'import zipfile\n_SIDE = zipfile.ZipFile("side.zip")\nfrom ..utils.archive import (',
             id="unlisted-archive-opener",
         ),
+        pytest.param(
+            "src/apm_cli/utils/archive.py",
+            "    problem = portable_name_problem(member_name)\n",
+            "    problem = None\n",
+            id="extract-skips-the-portable-name-check",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/unpacker.py",
+            "            or portable_name_problem(rel_path) is not None\n",
+            "",
+            id="unpack-skips-the-portable-name-check",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/unpacker.py",
+            "                    if portable_name_problem(name) is not None:\n",
+            "                    if False:\n",
+            id="unpack-skips-nested-names",
+        ),
     ],
 )
 def test_archive_member_reads_cannot_bypass_the_limits_owner(
@@ -140,9 +158,15 @@ def test_archive_member_reads_cannot_bypass_the_limits_owner(
         ),
         pytest.param(
             "src/apm_cli/install/drift.py",
-            "and _project_has_root_primitives(project_root)",
-            'and (project_root / ".apm").is_dir()',
+            "else _project_has_root_primitives(project_root)",
+            'else (project_root / ".apm").is_dir()',
             id="replay-root-predicate",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "_root_holds_only_hook_primitives(self_source_root)",
+            "_project_has_root_primitives(self_source_root)",
+            id="replay-user-root-predicate",
         ),
         pytest.param(
             "src/apm_cli/deps/lockfile.py",
@@ -1408,18 +1432,18 @@ def test_deploy_path_allow_map_comes_from_the_trust_owner(path: str, old: str, n
             "src/apm_cli/install/services.py",
             "                hooks_approved=_hooks_approved_bundle,\n"
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             "                canvas_approved=_canvas_ok,\n"
-            "            )\n"
-            "            if _deploy_rel is None:",
+            "                rendering_extension=_renderings.get(_rel_norm),\n",
             id="omitted-hooks-approved",
         ),
         pytest.param(
             "src/apm_cli/install/local_bundle_paths.py",
-            "    hooks_approved: bool,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
-            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n) -> str | None:\n"
+            "    hooks_approved: bool = True,\n    canvas_approved: bool,\n"
+            "    rendering_extension: str | None = None,\n) -> str | None:\n"
             '    """Return a bundle path relative',
             id="fail-open-hooks-approved-default",
         ),
@@ -1763,6 +1787,102 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "        if self._keeps_edited_bundle(planned",
             "        if self._keeps_nothing(planned",
             id="canvas-bundle-not-left-whole",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                if integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                ):\n"
+            "                    files_skipped += 1\n"
+            "                    continue\n",
+            "                integrator.keeps_edited_output(\n"
+            "                    target_path,\n"
+            "                    hook_file,\n"
+            "                    rel_path,\n"
+            "                    force,\n"
+            "                    diagnostics,\n"
+            "                    target_paths,\n"
+            "                    expected_content=rendered,\n"
+            "                )\n",
+            id="gate-result-ignored",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if True or not self.keeps_edited_output(",
+            id="gate-short-circuited",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.copy2(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-writer",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(source_file: Path, target_file: Path) -> None:\n"
+            "    write_seam.rename(source_file, target_file)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-rename",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path, data: dict) -> None:\n"
+            "    write_seam.write_json_config(target_file, data)\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-json-config",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "def hook_containment_root(",
+            "def _refresh_script(target_file: Path) -> None:\n"
+            "    write_seam.open_for_write(target_file).close()\n\n\n"
+            "def hook_containment_root(",
+            id="new-unguarded-executable-open-for-write",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                    target_path,\n                    hook_file,\n                    rel_path,",
+            "                    hook_file,\n                    hook_file,\n                    rel_path,",
+            id="gate-asks-about-another-path",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n",
+            "        write_seam.mkdir(json_path.parent, parents=True, exist_ok=True)\n"
+            "        write_seam.copy2(json_path, target_dir / 'run.sh')\n",
+            id="executable-copy-in-exempt-function",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        write_seam.copy2(source_file, checked)\n",
+            "        checked = source_file\n        write_seam.copy2(source_file, checked)\n",
+            id="destination-rebound-after-gate",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "            write_seam.copyfile(src, dest)\n",
+            "            write_seam.copyfile(dest, src)\n",
+            id="canvas-writes-the-unjudged-slot",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/kiro_hook_integrator.py",
+            "                atomic_write_text(target_path, rendered, new_file_mode=0o600)\n",
+            "                deferred = lambda: atomic_write_text(  # noqa: E731\n"
+            "                    target_path, rendered, new_file_mode=0o600\n"
+            "                )\n"
+            "                deferred()\n",
+            id="write-deferred-in-a-lambda",
         ),
     ],
 )
@@ -2193,6 +2313,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="MCPClientAdapter loses the canonical config-key derivation definition.",
     ),
     MutationCase(
+        guard_id="hooks-integrations-mcp-config-link-policy",
+        rule_id="mutation_writes.mcp_config_link_policy",
+        path="src/apm_cli/adapters/client/codex.py",
+        old="        if self._config_is_linked():\n            raise OSError",
+        new="        if False:\n            raise OSError",
+        intent="The Codex writer drops its link check and replaces a symlinked config.",
+    ),
+    MutationCase(
         guard_id="hooks-integrations-mcp-declaration-scope",
         rule_id="mutation_writes.mcp_declaration_scope",
         path="src/apm_cli/integration/mcp_config_view.py",
@@ -2428,7 +2556,11 @@ MUTATIONS: tuple[MutationCase, ...] = (
         guard_id="install-deployment-command-render-then-adopt",
         rule_id="install-deployment-command-render-then-adopt",
         path="src/apm_cli/integration/command_integrator.py",
-        old="expected_content=self._rendered_command(prompt_file, target_path, mapping),",
+        old=(
+            "expected_content=self._rendered_command(\n"
+            "                    prompt_file, target_path, mapping, target.name\n"
+            "                ),"
+        ),
         new="expected_content=None,",
         intent="Command adoption compares the raw prompt instead of the rendered command.",
     ),
@@ -3629,6 +3761,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A fetch into a cached bare runs Git without the owner's trust check.",
     ),
     MutationCase(
+        guard_id="transport-platform-checkout-verified",
+        rule_id="transport-platform-checkout-verified",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
+        new="if True:",
+        intent="A cached checkout is returned without verifying it against its commit.",
+    ),
+    MutationCase(
         guard_id="transport-platform-clone-connect-retry",
         rule_id="transport-platform-clone-connect-retry",
         path="src/apm_cli/deps/clone_engine.py",
@@ -4300,6 +4440,53 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
         new="",
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="    for line in retired_kinds_warnings(hooks, skip=denied):\n        logger.warning(line)\n",
+        new="    for line in sorted(hooks):\n        logger.warning(line)\n",
+        intent="Uninstall bypasses the kinds owner when it warns about retired kinds (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning(f"{key} hooks are no longer allowed; removing them")\n'
+        ),
+        intent="Uninstall adds a hard-coded hooks label beside the owner's warning (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning("p-mixed hooks are no longer "\n'
+            '                   "allowed; removing them")\n'
+        ),
+        intent="Uninstall splits a hard-coded kinds warning across adjacent literals (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/security/exec_kinds.py",
+        old='f"{key} {exec_kinds_phrase(kinds)} are no longer allowed',
+        new='f"{key} hooks are no longer allowed',
+        intent="The retirement warning hard-codes 'hooks' instead of install's kind labels.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/install/plan_admission.py",
+        old="    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)\n",
+        new="    return tuple(sorted(retired))\n",
+        intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
 )
 
@@ -5009,6 +5196,26 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
             "        refuse_projected_mcp_collisions(\n            [dep],",
             "        unchecked_mcp_collisions(\n            [dep],",
         ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "        retire_mcp_claims(\n",
+            "        unrecorded_retirement(\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "            record_refused_retirement(\n",
+            "            skipped_refusal_record(\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/retirement.py",
+            "        on_refusal(removed, planned)\n",
+            "        pass\n",
+        ),
+        (
+            "src/apm_cli/install/mcp/integration.py",
+            "def _legacy_cleanup_runtimes(",
+            "def retire_mcp_claims(*_args):\n    return None\n\n\ndef _legacy_cleanup_runtimes(",
+        ),
     ],
     ids=[
         "legacy-resolver",
@@ -5027,6 +5234,10 @@ def test_global_mcp_consumer_guards(path: str, rule_id: str, old: str, new: str)
         "rebuild-receipt-routing",
         "direct-entry-preflight-routing",
         "direct-entry-preflight-delegation",
+        "retirement-routing",
+        "refusal-persistence",
+        "refusal-callback",
+        "second-retirement-owner",
     ],
 )
 def test_native_mcp_ownership_boundary_mutations(path: str, old: str, new: str) -> None:

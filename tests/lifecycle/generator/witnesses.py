@@ -89,9 +89,14 @@ GATE_SPINE = (
 GATE_BUNDLE_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bundle_spine_credits_bundle_install_cells"
 )
+MATRIX_RENDER = "G1|compile|other-file|"
 GATE_PACK_SPINE = "tests/lifecycle/machines/test_m_gate.py::test_gate_pack_spine_credits_pack_cells"
 GATE_BIN_SPINE = (
     "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+)
+GATE_PLUGIN_BIN_SPINE = (
+    "tests/lifecycle/machines/test_m_gate.py::"
+    "test_gate_plugin_bin_spine_credits_project_scope_prune_cells"
 )
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
@@ -173,9 +178,10 @@ def _gate_assignment(key: str) -> dict[str, str]:
 def machine_cells() -> list[MachineCell]:
     """Every machine cell id with a factor translation, sorted by id."""
     from tests.lifecycle.machines import test_m_gate, test_m_scope_lock, test_m_source
-    from tests.lifecycle.machines._gate_bin import bin_cells
-    from tests.lifecycle.machines._gate_bundle import bundle_cells, pack_cells
+    from tests.lifecycle.machines._gate_bin import KNOWN_DD, bin_cells
+    from tests.lifecycle.machines._gate_bundle import KNOWN_PACK, bundle_cells, pack_cells
     from tests.lifecycle.machines._gate_matrix import matrix_cells
+    from tests.lifecycle.machines._gate_plugin_bin import deploys_bin, plugin_bin_cells
     from tests.lifecycle.machines.test_m_scope_lock import drift_cells
 
     cells: list[MachineCell] = []
@@ -208,16 +214,40 @@ def machine_cells() -> list[MachineCell]:
         (GATE_BUNDLE_SPINE, bundle_cells()),
         (GATE_PACK_SPINE, pack_cells()),
         (GATE_BIN_SPINE, bin_cells()),
+        (GATE_PLUGIN_BIN_SPINE, plugin_bin_cells()),
     )
     for witness, keys in side_doors:
         for key in sorted(keys):
             assignment = _gate_assignment(key)
-            cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            if witness == GATE_BUNDLE_SPINE:
+                assignment = {**assignment, "SRC": "local-bundle"}
+            tracking = KNOWN_DD.get(key) or KNOWN_PACK.get(key)
+            cells.append(MachineCell(key, witness, "T-1", assignment, tracking, anchor="GATE"))
+            if assignment["GATE"] == "denied-dependency":
+                # A refusal proves its GATE level only, never a success cell.
+                continue
+            if witness == GATE_PACK_SPINE:
+                # A real pack over the primitive also proves the OP x PRIM pair.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, tracking, anchor="PRIM"))
+            if witness == GATE_BUNDLE_SPINE and assignment["GATE"] in ("none", "allowed"):
+                # An install that deploys the primitive proves what it acts on: a
+                # local bundle carrying that primitive (OP x SRC x PRIM and its pairs).
+                source = {"OP": assignment["OP"], "SRC": "local-bundle", "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", source, tracking))
+    for key in sorted(filter(deploys_bin, plugin_bin_cells())):
+        # A whole plugin's bin/ deployed at project scope (#4894): no GATE anchor needed.
+        assignment = {"PRIM": "bin", "SCOPE": "project"}
+        cells.append(MachineCell(key, GATE_PLUGIN_BIN_SPINE, "T-1", assignment))
     for scope in test_m_gate.MATRIX_SCOPES:
         for key in sorted(matrix_cells(scope)):
             witness = GATE_SPINE.format(scope=scope)
             assignment = _gate_assignment(key)
             cells.append(MachineCell(key, witness, "T-1", assignment, anchor="GATE"))
+            if key.startswith(MATRIX_RENDER):
+                # The forced render is the matrix's only compile x instruction step.
+                context = {"OP": assignment["OP"], "PRIM": assignment["PRIM"]}
+                cells.append(MachineCell(key, witness, "T-1", context, anchor="PRIM"))
     return cells
 
 
@@ -254,11 +284,13 @@ class Witness:
 
 
 def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
-    """Obligation id -> its machine witness (the first spine, by node, that implies it).
+    """Obligation id -> its machine witness (the first spine, by node, that passes it).
 
-    Receipts of passing machine ids discharge the obligation; when every
-    implying id of that spine is a strict known cell, the obligation is
-    known-failing with the first owning issue.
+    Receipts of passing machine ids discharge the obligation, so the witness is
+    the first spine with a passing implying id; one spine whose ids are all
+    strict known cells never hides another spine's proof. Only when every
+    implying id of every spine is a strict known cell is the obligation
+    known-failing, with the first spine's first owning issue.
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
@@ -267,12 +299,15 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
-        node = sorted(nodes)[0]
-        cells = nodes[node]
-        passing = tuple(sorted(cell.id for cell in cells if cell.tracking is None))
-        if passing:
-            witnesses[key] = Witness(node, cells[0].lane, passing)
+        for node in sorted(nodes):
+            cells = nodes[node]
+            passing = tuple(sorted(cell.id for cell in cells if cell.tracking is None))
+            if passing:
+                witnesses[key] = Witness(node, cells[0].lane, passing)
+                break
         else:
+            node = sorted(nodes)[0]
+            cells = nodes[node]
             issues = sorted(str(cell.tracking) for cell in cells)
             witnesses[key] = Witness(
                 node, cells[0].lane, tuple(sorted(c.id for c in cells)), issues[0]
@@ -285,15 +320,21 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
 SCENARIO_MODULES = (
     "test_cache_presence",
     "test_concurrency",
+    "test_deployed_absent",
     "test_failure_phase",
     "test_file_routing",
     "test_graph_version",
     "test_history_upgrade",
+    "test_lock_states",
+    "test_mcp_ownership_history",
     "test_mcp_write_receipts",
     "test_network_offline",
     "test_ownership_siblings",
+    "test_pack_lock_states",
     "test_platform",
     "test_policy_pairs",
+    "test_target_history_sources",
+    "test_user_scope",
 )
 
 
