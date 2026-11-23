@@ -899,9 +899,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:\n',
-            '                with open(json_path, "w", encoding="utf-8") as f:\n',
-            id="raw-open-for-write",
+            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            id="raw-write-text",
         ),
         pytest.param(
             "src/apm_cli/integration/cleanup.py",
@@ -930,14 +930,35 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/write_seam.py",
-            "    record_before_write(destination, follow=True)\n"
-            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
-            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    record_before_write(destination, follow=True, expected=_file_hash(source))\n"
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             id="seam-writer-skips-record",
         ),
         pytest.param(
+            "src/apm_cli/integration/write_seam.py",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=False)\n"
+            "    record_after_write(destination, follow=True)\n",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=False)\n",
+            id="seam-writer-skips-seal",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "        writer(path, text)\n        write_seam.record_after_write(path)\n",
+            "        writer(path, text)\n",
+            id="direct-recorder-skips-seal",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n\n"
+            "from apm_cli.integration.write_seam import record_before_write\n\n\n"
+            "def _unlisted(path):\n    record_before_write(path)\n",
+            id="unlisted-direct-recorder",
+        ),
+        pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -3006,6 +3027,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="reconcile_owner_references",
         new="reconcile_owner_references_disabled",
         intent="Prune stops reconciling deployment provenance through the state owner.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-reanchor-receipt-history",
+        rule_id="install-deployment-reanchor-receipt-history",
+        path="src/apm_cli/core/deployment_reanchor.py",
+        old="            self._dirty = True\n        self.flush()\n",
+        new="            self._history.forget(key)\n            self._dirty = True\n        self.flush()\n",
+        intent="A re-anchored owner's receipts lose their hash history (#4889).",
     ),
     MutationCase(
         guard_id="install-deployment-receipt-collection",

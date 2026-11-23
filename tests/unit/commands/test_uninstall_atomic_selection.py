@@ -492,6 +492,9 @@ def test_exact_uninstall_fails_when_multiple_shared_slot_survivors_remain(
         )
         dependencies[dependency.get_unique_key()] = dependency
     LockFile(dependencies=dependencies).write(project / "apm.lock.yaml")
+    # Installed state: without apm_modules/ the offline still-needed check
+    # refuses first, since the survivors' sources cannot prove ../one unused.
+    (project / "apm_modules").mkdir()
     before = ArtifactSnapshot.capture(project)
     monkeypatch.chdir(project)
 

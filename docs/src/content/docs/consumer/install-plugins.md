@@ -59,6 +59,24 @@ apm install -g --target claude review-kit@contoso
 
 APM downloads into `apm_modules/`; harnesses load from `.agents/`.
 
+:::caution[Where native plugins do not load]
+Native plugins are reported not to load in git worktrees, in non-interactive
+`claude -p` runs (including claude-code-action), and in Copilot CLI 1.0.106.
+After upgrading to 0.37 or later, a dependency's skills can disappear there.
+For a Claude-format plugin with skills, installed at project scope, deploy its
+skills loose instead: add `skills: ["*"]` to the dependency in `apm.yml`; every
+skill the package ships is installed, including ones added in later releases.
+This does not apply with `-g` (a `skills:` selection parks the plugin), to Agent
+Plugins (they stay native), or to a plugin without skills:
+
+```yaml
+dependencies:
+  apm:
+    - git: contoso/review-kit
+      skills: ["*"]
+```
+:::
+
 | | Project | User (`-g`) |
 |---|---|---|
 | Plugin folder | `.agents/plugins/<plugin>/` | `~/.agents/plugins/<plugin>/` |

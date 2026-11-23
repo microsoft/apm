@@ -21,7 +21,7 @@ from apm_cli.integration.skill_adoption import (
     skill_tree_baselines,
 )
 from apm_cli.integration.skill_support import skill_dir_has_content
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens, skill_subset_selects_all
 from apm_cli.utils.diagnostics import DiagnosticCollector, printable_ascii_text
 
 if TYPE_CHECKING:
@@ -100,7 +100,9 @@ def preflight_skill_selection(
     # parent's selection that matches nothing (#3735).
     for edge in getattr(dependency, "selection_contributors", ()) or ():
         edge_filter = skill_subset_filter_tokens(edge.skill_subset)
-        if SkillIntegrator._skill_filter_misses_available(edge_filter, available):
+        if SkillIntegrator._skill_filter_misses_available(
+            edge_filter, available, selects_all=skill_subset_selects_all(edge.skill_subset)
+        ):
             SkillIntegrator._error_no_skill_filter_match(
                 available,
                 tuple(edge.skill_subset or ()),
@@ -110,7 +112,9 @@ def preflight_skill_selection(
                 declared_by=edge.declared_by() if edge.parent_chain else None,
             )
             return False
-    if not SkillIntegrator._skill_filter_misses_available(name_filter, available):
+    if not SkillIntegrator._skill_filter_misses_available(
+        name_filter, available, selects_all=skill_subset_selects_all(skill_subset)
+    ):
         return True
     SkillIntegrator._error_no_skill_filter_match(
         available,
