@@ -82,7 +82,7 @@ A stale dependency or owner reference is not
 
 | Option      | Description                                       |
 |-------------|---------------------------------------------------|
-| `--dry-run` | List orphaned packages without removing anything. |
+| `--dry-run` | List orphaned packages, ownership repairs and native plugins that would be removed, without changing anything. |
 
 ## Examples
 
@@ -156,6 +156,14 @@ To clean up hooks left by a target removed from `targets:` in `apm.yml`,
 run `apm install` (or `apm compile` / `apm update`); `apm prune` only
 reconciles hooks for packages and targets still declared.
 
+A native plugin under `.agents/plugins/` that the current approvals or policy
+no longer allow (for example, after its `executables.allow` entry is removed)
+is retired as one unit: prune removes its root and its declarations in the
+harness settings files; a root edited since deploy is kept for you to remove.
+`--dry-run` lists each such plugin with its root and settings files and
+changes nothing, including your personal approvals. If prune cannot evaluate approvals and policy for locked native
+plugins, it exits `1` with an error before removing packages or native plugins.
+
 Notes:
 
 - Manifestless installs containing `SKILL.md` are detected even after `apm install`
@@ -175,7 +183,7 @@ Notes:
 | Code | Meaning                                                                       |
 |------|--------------------------------------------------------------------------------|
 | 0    | Prune completed with no orphan deletion failures (including "nothing to prune"). |
-| 1    | An orphan deletion failed, `apm.yml` is missing, `apm.lock.yaml` was written by a newer APM (refused before any change), parsing or lockfile writing failed, or an unhandled error occurred. |
+| 1    | An orphan deletion failed, the native plugin approval check could not run, `apm.yml` is missing, `apm.lock.yaml` was written by a newer APM (refused before any change), parsing or lockfile writing failed, or an unhandled error occurred. |
 
 Orphan deletion failures are logged without stopping the remaining packages.
 The final error reports how many packages were removed and how many failed.

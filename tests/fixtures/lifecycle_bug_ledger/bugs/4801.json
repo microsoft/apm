@@ -1,0 +1,19 @@
+{
+  "issue": 4801,
+  "fixed_in": "Unreleased",
+  "summary": "MCP write evidence kept one record per runtime and server, so a second COPILOT_HOME profile replaced the first profile's record; local bundle installs recorded no evidence; an entry kept without apm.lock.yaml was announced only while the lockfile was absent; and unusable evidence met then was no longer reported by apm audit --ci once the lockfile was rewritten. Records are now keyed by runtime, config file and native key, local bundle MCP writes are recorded, kept entries are announced on every install, and unusable evidence met without a lockfile stays reported until the evidence file is removed.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_kept_entry_stays_reported_after_the_lockfile_is_rewritten",
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_each_copilot_home_profile_keeps_its_own_evidence",
+    "tests/lifecycle/scenarios/test_mcp_write_receipts.py::test_a_local_bundle_mcp_entry_is_retired_without_the_lockfile",
+    "tests/unit/install/test_mcp_write_receipts.py::test_each_runtime_profile_keeps_its_own_record",
+    "tests/unit/install/test_mcp_write_receipts.py::test_unusable_evidence_met_without_a_lockfile_stays_reported"
+  ]
+}
