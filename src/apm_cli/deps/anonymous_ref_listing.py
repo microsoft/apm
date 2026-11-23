@@ -255,16 +255,42 @@ def _system_ca() -> str:
     return certifi.where()
 
 
+# ssl.SSLContext's Python setters for these call super(SSLContext, SSLContext)
+# through the module global, which APM's truststore injection replaces, so a
+# stdlib context recurses when urllib3 sets them. Write through _ssl instead.
+_C_BACKED_SETTERS = ("options", "minimum_version", "maximum_version", "verify_flags", "verify_mode")
+_context_class = None
+
+
+def _git_context_class() -> type[ssl.SSLContext]:
+    global _context_class
+    if _context_class is None:
+        import _ssl
+
+        from apm_cli.core.tls_trust import _STDLIB_SSL_CONTEXT
+
+        def _passthrough(name: str) -> property:
+            stdlib = getattr(_STDLIB_SSL_CONTEXT, name)
+            native = getattr(_ssl._SSLContext, name)
+            return property(stdlib.fget, lambda self, value: native.__set__(self, value))
+
+        _context_class = type(
+            "_GitTrustContext",
+            (_STDLIB_SSL_CONTEXT,),
+            {name: _passthrough(name) for name in _C_BACKED_SETTERS},
+        )
+    return _context_class
+
+
 def _git_trust_context(ca: str) -> ssl.SSLContext:
     """A stdlib TLS context trusting only *ca*, git's selected trust.
 
     Built from the stdlib class APM captured before installing OS or
     additive trust, so neither the OS store nor ``APM_EXTRA_CA_BUNDLE``
-    widens what this request accepts beyond what git would.
+    widens what this request accepts beyond what git would; its setters stay
+    safe while that injection replaces ``ssl.SSLContext``.
     """
-    from apm_cli.core.tls_trust import _STDLIB_SSL_CONTEXT
-
-    context = _STDLIB_SSL_CONTEXT(ssl.PROTOCOL_TLS_CLIENT)
+    context = _git_context_class()(ssl.PROTOCOL_TLS_CLIENT)
     if os.path.isdir(ca):
         context.load_verify_locations(capath=ca)
     else:

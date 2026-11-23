@@ -458,7 +458,7 @@ def test_trust_context_holds_only_gits_ca():
 
     context = arl._git_trust_context(ca)
 
-    assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
+    assert isinstance(context, tls_trust._STDLIB_SSL_CONTEXT)
     assert context.verify_mode == arl.ssl.CERT_REQUIRED
     assert context.check_hostname is True
     # Exactly the bundle git would use: no OS-store or APM_EXTRA_CA_BUNDLE roots.
@@ -521,7 +521,8 @@ def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkey
         tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION = recorded
 
     assert len(injected.get_ca_certs()) > 1
-    assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
+    assert isinstance(context, tls_trust._STDLIB_SSL_CONTEXT)
+    assert not isinstance(context, type(injected))
     assert len(context.get_ca_certs()) == 1
 
 
@@ -579,3 +580,24 @@ def test_an_insteadof_rewrite_falls_back_only_when_it_applies(monkeypatch):
 
     _eligible(monkeypatch, prefixes=("https://github.com/owner/",))
     assert arl.list_refs_anonymously(url, include_heads=False, env={}) is None
+
+
+def test_trust_context_setters_survive_an_injected_ssl_context(monkeypatch):
+    """truststore replaces ssl.SSLContext; stdlib setters then recurse (red control)."""
+    import certifi
+
+    from apm_cli.core import tls_trust
+
+    injected = type("InjectedSSLContext", (tls_trust._STDLIB_SSL_CONTEXT,), {})
+    monkeypatch.setattr(arl.ssl, "SSLContext", injected)
+    plain = tls_trust._STDLIB_SSL_CONTEXT(arl.ssl.PROTOCOL_TLS_CLIENT)
+    with pytest.raises(RecursionError):
+        plain.verify_mode = arl.ssl.CERT_REQUIRED
+
+    context = arl._git_trust_context(certifi.where())
+    context.verify_mode = arl.ssl.CERT_REQUIRED
+    context.minimum_version = arl.ssl.TLSVersion.TLSv1_2
+    context.options |= arl.ssl.OP_NO_COMPRESSION
+
+    assert context.verify_mode == arl.ssl.CERT_REQUIRED
+    assert context.minimum_version == arl.ssl.TLSVersion.TLSv1_2
