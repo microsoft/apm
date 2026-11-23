@@ -438,8 +438,9 @@ RULES: Mapping[str, tuple[str, tuple[Ev, ...]]] = {
         "False at $APM_HOME and install, lock, update and install --mcp at -g discover no "
         "org policy; the local executables gate still parks bin/ there, and project scope "
         "refuses the denied plugin with exit 1. A user-scope cell whose GATE is "
-        "denied-dependency under one of those commands is removed until #3703 lands; "
-        "PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: "
+        "denied-dependency under one of those commands is removed until #3703 lands; a "
+        "scope-free PRIM=bin cell is not (a whole native plugin carries bin/ at project "
+        "scope, where the org deny refuses it). Self-reinstating: "
         "generator/bin_pin.py hashes the predicate, and when the hash differs from "
         "U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails",
         (
@@ -853,9 +854,10 @@ def u_user_org_policy_applies(cell: Mapping[str, str]) -> bool:
     """A user-scope cell whose promise is that an org dependency deny governs it."""
     if cell.get("GATE") != "denied-dependency":
         return False
-    user = cell.get("SCOPE") == "user" or (cell.get("PRIM") == "bin" and "SCOPE" not in cell)
+    # Only an explicit user-scope cell: a scope-free bin cell is reachable at project
+    # scope too, where a whole native plugin carries bin/ and the org deny refuses it.
     op = cell.get("OP") or ("install" if "FROZEN" in cell else None)
-    return user and op in ORG_DENY_OPS
+    return cell.get("SCOPE") == "user" and op in ORG_DENY_OPS
 
 
 def u_user_org_policy_pinned() -> bool:
