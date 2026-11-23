@@ -67,7 +67,7 @@ def prepare_mcp_integration(  # noqa: PLR0913
     """
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
-    from apm_cli.security.trust import McpAdmission
+    from apm_cli.security.trust import McpAdmission, warn_one_off_trust
 
     # McpAdmission reads grants from the scope's manifest (APM_HOME/apm.yml
     # under -g, #3954) and discovers policy from the deploy root.
@@ -115,23 +115,6 @@ def prepare_mcp_integration(  # noqa: PLR0913
         mcp_deps,
         current_view if should_install else None,
         current_view,
-    )
-
-
-def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: "InstallLogger") -> None:
-    """Say that --trust-transitive-mcp consent lasts for this run only."""
-    if not one_off:
-        return
-    noun = "server" if len(one_off) == 1 else "servers"
-    shown = "; ".join(f"{name}, {package}" for name, package in one_off[:3])
-    more = f"; and {len(one_off) - 3} more" if len(one_off) > 3 else ""
-    first_package = one_off[0][1]
-    logger.warning(
-        f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
-        f"only ({shown}{more})\n"
-        "    It is not saved: the next install without the flag removes it. "
-        f"Keep it: apm approve {first_package}",
-        symbol="warning",
     )
 
 

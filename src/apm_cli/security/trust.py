@@ -569,6 +569,23 @@ def approve_command(argument: str, *, user_scope: bool = False, user_store: bool
     return f"apm approve {flags}{_shell_argument(argument)}"
 
 
+def warn_one_off_trust(one_off: tuple[tuple[str, str], ...], logger: Any) -> None:
+    """Say that --trust-transitive-mcp consent lasts for this run only."""
+    if not one_off:
+        return
+    noun = "server" if len(one_off) == 1 else "servers"
+    shown = "; ".join(f"{name}, {package}" for name, package in one_off[:3])
+    more = f"; and {len(one_off) - 3} more" if len(one_off) > 3 else ""
+    first_package = one_off[0][1]
+    logger.warning(
+        f"--trust-transitive-mcp deployed {len(one_off)} unapproved MCP {noun} for this run "
+        f"only ({shown}{more})\n"
+        "    It is not saved: the next install without the flag removes it. "
+        f"Keep it: apm approve {first_package}",
+        symbol="warning",
+    )
+
+
 def explain_command(package: str, *, user_scope: bool = False) -> str:
     """Return the ``apm policy explain`` command for a parked package's scope."""
     flag = "-g " if user_scope else ""
