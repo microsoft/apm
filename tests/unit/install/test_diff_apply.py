@@ -262,6 +262,31 @@ def test_a_configured_registry_proxy_takes_the_full_pipeline(
     assert sorted(p.name for p in tmp_path.iterdir()) == ["apm.yml"]
 
 
+def test_a_lockfile_the_cli_gate_refuses_takes_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A lockfile declaring apm_version twice is refused by the command's own gate."""
+    from apm_cli.deps.lockfile import installed_apm_version
+
+    for name in ("PROXY_REGISTRY_URL", "PROXY_REGISTRY_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APM_INSTALL_FAST_PATH", "trace")
+    (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    version = installed_apm_version()
+    lock = (
+        f"lockfile_version: '1'\napm_version: '0.0.1'\napm_version: '{version}'\n"
+        "generated_at: '2025-01-01T00:00:00Z'\ndependencies: []\n"
+    )
+    (tmp_path / "apm.lock.yaml").write_text(lock, encoding="utf-8")
+    disposition = SimpleNamespace(replay=False, withhold_lockfile_writes=False)
+
+    applied = diff_apply.try_apply({}, ["install"], tmp_path, frozen_disposition=disposition)
+
+    assert applied is False
+    assert "full run (lockfile generator)" in capsys.readouterr().err
+    assert (tmp_path / "apm.lock.yaml").read_text(encoding="utf-8") == lock
+
+
 def test_a_symlink_in_a_package_copy_takes_the_full_pipeline(tmp_path: Path) -> None:
     """Package hashes skip symlinks and the source plan warns on them: only the full run judges."""
     from apm_cli.install import noop_diff

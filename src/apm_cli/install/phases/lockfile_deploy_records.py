@@ -52,9 +52,15 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
     verified this run, and whose every recorded file the integrators
     produced or claimed and this run hashed, gets one.
     """
-    from apm_cli.cache.deploy_store import package_record_key, stage_record, staged_file
+    from apm_cli.cache.deploy_store import (
+        package_record_key,
+        plain_file_mode,
+        stage_record,
+        staged_file,
+    )
     from apm_cli.version import get_version
 
+    plain_mode = plain_file_mode()
     bodies = _package_bodies()
     previous = getattr(ctx, "existing_lockfile", None)
     version = get_version()
@@ -71,7 +77,7 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
             staged = staged_file(root / rel) if rel in produced else None
             if staged is None or f"sha256:{staged[0]}" != value or staged[1] is None:
                 break
-            if _executable(root / rel):
+            if _file_mode(root / rel) != plain_mode:
                 # A replay writes plain files: a mode it cannot reproduce takes the full run.
                 break
             files[rel] = [staged[0], staged[1]]
@@ -96,11 +102,11 @@ def stage_package_records(ctx: InstallContext, lockfile: LockFile) -> None:
             stage_record(key, record)
 
 
-def _executable(path: Path) -> bool:
+def _file_mode(path: Path) -> int | None:
     try:
-        return bool(path.stat().st_mode & 0o111)
+        return path.stat().st_mode & 0o7777
     except OSError:
-        return True
+        return None
 
 
 def _recorded_body(dep: Any, ctx: Any, version: str, files: dict) -> list[str] | None:

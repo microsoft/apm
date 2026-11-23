@@ -36,7 +36,9 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
+import threading
 from pathlib import Path
 
 from ..core.invocation_memo import invocation_memo
@@ -363,6 +365,25 @@ class DeployStore:
         return clean_cache_buckets((self._root,))
 
 
+_UMASK_LOCK = threading.Lock()
+
+
+def plain_file_mode() -> int:
+    """The permission bits a plain new file gets in this process (``0o666 & ~umask``)."""
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/self/status", encoding="ascii") as status:
+                for line in status:
+                    if line.startswith("Umask:"):
+                        return 0o666 & ~int(line.split()[1], 8)
+        except (OSError, ValueError):
+            pass
+    with _UMASK_LOCK:
+        mask = os.umask(0o022)
+        os.umask(mask)
+    return 0o666 & ~mask
+
+
 def package_record_key(
     repo_url: str,
     resolved_commit: str,
@@ -380,6 +401,8 @@ def package_record_key(
         str(content_hash),
         ",".join(names),
         str(getattr(scope, "value", scope)),
+        # A replay writes plain files: the record holds only under the same mode policy.
+        oct(plain_file_mode()),
     )
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 

@@ -653,6 +653,13 @@ def try_apply(
             # Source routing (and PROXY_REGISTRY_ONLY's lockfile refusal,
             # install/pipeline.py) is the full pipeline's egress decision.
             raise Decline("registry proxy configured")
+        from apm_cli.deps.lockfile_generator import LockfileGeneratorError, check_current_cli
+
+        try:
+            # The command's own gate (commands/install.py): its refusal is the full run's.
+            check_current_cli(project_root, command="apm install")
+        except LockfileGeneratorError:
+            raise Decline("lockfile generator") from None
         lock_path = get_lockfile_path(project_root)
         lock = LockFile.read(lock_path)
         if lock is None:

@@ -93,6 +93,23 @@ def test_a_read_only_decision_never_creates_the_cache_root(
     assert not root.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_record_holds_only_under_the_mode_policy_it_was_written_with() -> None:
+    """A replay writes plain files, so a different umask finds no record."""
+    from apm_cli.cache.deploy_store import package_record_key, plain_file_mode
+
+    ident = ("o/p", "a" * 40, "sha256:" + "b" * 64, ["copilot"], "1.0", "project")
+    previous = os.umask(0o022)
+    try:
+        written = package_record_key(*ident)
+        assert plain_file_mode() == 0o644
+        os.umask(0o077)
+        assert plain_file_mode() == 0o600
+        assert package_record_key(*ident) != written
+    finally:
+        os.umask(previous)
+
+
 def test_bytes_that_do_not_hash_to_the_key_are_never_stored(tmp_path: Path) -> None:
     store, root = _store(tmp_path)
     key = hashlib.sha256(b"something else").hexdigest()
