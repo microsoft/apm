@@ -3437,6 +3437,24 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="apm.yml and transitive marketplace entries skip the #1326 admission.",
     ),
     MutationCase(
+        guard_id="marketplace-integrations-json-envelope",
+        rule_id="marketplace-integrations-json-envelope",
+        path="src/apm_cli/commands/view.py",
+        old="json.dumps(error_envelope(code))",
+        new='json.dumps({"schema_version": 1, "error": code})',
+        intent="View hand-builds a JSON envelope instead of using core/json_envelope.py.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-json-projection",
+        rule_id="marketplace-integrations-json-projection",
+        path="src/apm_cli/commands/view.py",
+        old="def _json_error(code: str) -> NoReturn:",
+        new=(
+            "def safe_local(value):\n    return value\n\n\ndef _json_error(code: str) -> NoReturn:"
+        ),
+        intent="View grows a command-local safe_* projection beside the shared owner.",
+    ),
+    MutationCase(
         guard_id="marketplace-integrations-legacy-skill-membership",
         rule_id="marketplace-integrations-legacy-skill-membership",
         path="src/apm_cli/deps/plugin_parser.py",
