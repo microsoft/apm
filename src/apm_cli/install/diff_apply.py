@@ -66,7 +66,7 @@ class Decline(Exception):
 
 
 def _trace(message: str) -> None:
-    if os.environ.get("APM_INSTALL_FAST_PATH", "").strip().lower() == "trace":
+    if os.environ.get("APM_INSTALL_FAST_PATH", "").strip().lower() in {"trace", "decide"}:
         sys.stderr.write(f"[i] install fast path: {message}\n")
 
 
@@ -352,30 +352,36 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     return plan
 
 
-def _copy_package(checkout: Path, install_path: Path, sha: str) -> None:
+def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str) -> Path:
+    """Copy one locked package OUTSIDE the project and prove its locked content there."""
     from apm_cli.install.cache_pin import write_marker
+    from apm_cli.install.source_helpers import locked_content_mismatch
 
     for dirpath, dirnames, filenames in os.walk(checkout):
         dirnames[:] = [d for d in dirnames if d != ".git"]
         for name in (*dirnames, *filenames):
             if os.path.islink(os.path.join(dirpath, name)):
                 raise Decline("symlink in a package")
-    install_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(dir=install_path.parent, prefix=f".{install_path.name}."))
+    staging = Path(tempfile.mkdtemp(prefix="apm-fast-")) / "pkg"
     try:
-        shutil.copytree(
-            checkout, staging, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git")
-        )
-        os.replace(staging, install_path)
+        shutil.copytree(checkout, staging, ignore=shutil.ignore_patterns(".git"))
+        write_marker(staging, sha)
+        if locked_content_mismatch(key, dep, staging, lockfile=lock):
+            raise Decline("package copy differs from its locked content")
     except BaseException:
         _discard_staging(staging)
         raise
-    write_marker(install_path, sha)
+    return staging
+
+
+def _commit_package(staging: Path, install_path: Path) -> None:
+    install_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(staging), str(install_path))
 
 
 def _discard_staging(staging: Path) -> None:
-    """The only removal on this path: the engine's own fresh ``mkdtemp`` staging dir."""
-    shutil.rmtree(staging, ignore_errors=True)
+    """The only removal on this path: the engine's own ``mkdtemp`` staging, outside the project."""
+    shutil.rmtree(staging.parent, ignore_errors=True)
 
 
 def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> None:
@@ -418,6 +424,37 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
     if failing:
         raise Decline(f"post-apply audit: {failing[0]}")
     return True
+
+
+# Baseline checks that fail before APPLY only because of what APPLY is about to write.
+_FILLED_BY_APPLY = frozenset(
+    {"deployed-files-present", "skill-subset-consistency", "config-consistency"}
+)
+
+
+class _PostWriteFailure(Exception):
+    """The applied state failed re-verification: never silently hand off to the full run."""
+
+
+def _audit_gate(project_root: Path, fetch: Any, *, writes: bool) -> bool:
+    """Decide before any write: every baseline check passes, except ones APPLY fills.
+
+    Returns whether a filled check failed (the applied state is then re-verified).
+    """
+    from apm_cli.install.exec_gate import exec_policy_from_discovery
+    from apm_cli.policy.ci_checks import run_baseline_checks
+
+    result = run_baseline_checks(
+        project_root,
+        fail_fast=False,
+        ci_mode=True,
+        policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
+        content_integrity=False,
+    )
+    failing = {c.name for c in result.checks if not c.passed or getattr(c, "warned", False)}
+    if failing - _FILLED_BY_APPLY or (failing and not writes):
+        raise Decline(f"audit: {sorted(failing - _FILLED_BY_APPLY or failing)[0]}")
+    return bool(failing)
 
 
 def try_apply(
@@ -485,29 +522,57 @@ def try_apply(
         extras = _plan_extras(project_root, lock_path.read_text(encoding="utf-8"), store)
         if not all(data.isascii() for _p, data in extras):
             raise Decline("non-ASCII deployed content")
-        for checkout, install_path, sha in packages:
-            _copy_package(checkout, install_path, sha)
-        for path, data, _d, _o in files:
-            _write(path, data)
-        for path, data in extras:
-            _write(path, data)
         with quiet():
-            verified = (
-                noop_diff._copies_valid(project_root, lock)
-                and _audit_passes(project_root, fetch, content_integrity=False)
-                and noop_diff._policy_checks_pass(project_root, fetch)
-            )
-        if not verified:
-            raise Decline("post-apply audit")
-        by_owner: dict[str, dict[Path, str]] = {}
-        for path, _data, digest, owner in files:
-            by_owner.setdefault(owner, {})[path] = digest
-        for owner, written in by_owner.items():
-            session.record(written, targets, owner)
-        session.flush()
+            recheck = _audit_gate(project_root, fetch, writes=bool(files or extras))
+            if not noop_diff._policy_checks_pass(project_root, fetch):
+                raise Decline("policy checks")
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for checkout, install_path, sha in packages:
+                key = next(
+                    k
+                    for k, d in lock.dependencies.items()
+                    if _install_path(project_root, d) == install_path
+                )
+                staged.append(
+                    (_stage_package(checkout, key, lock.dependencies[key], lock, sha), install_path)
+                )
+        except BaseException:
+            for staging, _ in staged:
+                _discard_staging(staging)
+            raise
+        # The decision is final: nothing above wrote to the project or HOME.
+        try:
+            for staging, install_path in staged:
+                _commit_package(staging, install_path)
+                _discard_staging(staging)
+            for path, data, _d, _o in files:
+                _write(path, data)
+            for path, data in extras:
+                _write(path, data)
+            by_owner: dict[str, dict[Path, str]] = {}
+            for path, _data, digest, owner in files:
+                by_owner.setdefault(owner, {})[path] = digest
+            for owner, written in by_owner.items():
+                session.record(written, targets, owner)
+            session.flush()
+            if recheck:
+                with quiet():
+                    _audit_passes(project_root, fetch, content_integrity=False)
+        except Exception as exc:
+            raise _PostWriteFailure(str(exc)) from exc
     except Decline as exc:
         _trace(f"full run ({exc})")
         return False
+    except _PostWriteFailure as exc:
+        from apm_cli.utils.console import _rich_error
+
+        _rich_error(
+            "The install fast path could not verify the state it wrote "
+            f"({exc}). Re-run with APM_INSTALL_FAST_PATH=0 to run the full install.",
+            symbol="error",
+        )
+        raise SystemExit(1) from exc
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False

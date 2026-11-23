@@ -17,6 +17,22 @@ _FAST_ARGV = (("install",), ("install", "--frozen"))
 _TRACED: list[bool] = []
 
 
+def _decide_only() -> bool:
+    """APM_INSTALL_FAST_PATH=decide: print the decision; a decline stops before the full run."""
+    import os
+
+    return os.environ.get("APM_INSTALL_FAST_PATH", "").strip().lower() == "decide"
+
+
+def _decided() -> click.Command:
+    return click.Command(
+        "install",
+        callback=lambda **_kwargs: None,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+        add_help_option=False,
+    )
+
+
 def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
     """Return a light ``install`` command for a fast-path-eligible argv, else None."""
     from apm_cli.install.noop_diff import disabled
@@ -31,6 +47,8 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
             # click may resolve the command more than once: one decision line per install.
             _TRACED.append(True)
             _trace("full run (options)")
+        if raw[:1] == ("install",) and _decide_only():
+            return _decided()
         return None
 
     def run(frozen: bool) -> Any:
@@ -47,7 +65,7 @@ def fast_install_command(ctx: click.Context, lazy: Any) -> click.Command | None:
         options = {"frozen": disposition.replay}
         with lifecycle_operation():
             done = diff_apply.try_apply(options, argv, root, frozen_disposition=disposition)
-        if done:
+        if done or _decide_only():
             return None
         current.meta[DECLINED] = True
         real = lazy.resolved()
