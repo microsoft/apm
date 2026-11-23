@@ -1932,18 +1932,25 @@ class TestClaudeNativeCommandFrontmatter:
         warnings = [w.message for w in diag.by_category().get("warning", [])]
         assert any("hooks withheld" in w for w in warnings), warnings
 
-    def test_claude_retained_malformed_command_reports_and_continues(self, temp_project):
+    @pytest.mark.parametrize(
+        "bad",
+        [b"---\ndescription: [unclosed\n---\nRun.\n", b"---\ndescription: caf\xe9\n---\nRun.\n"],
+        ids=["malformed-yaml", "non-utf8"],
+    )
+    def test_claude_retained_malformed_command_reports_and_continues(self, temp_project, bad):
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        bad = "---\ndescription: [unclosed\n---\nRun.\n"
         pkg_info = _make_package(
             temp_project,
-            {"bad.prompt.md": bad, "ok.prompt.md": "---\ndescription: d\n---\nRun.\n"},
+            {"bad.prompt.md": "placeholder", "ok.prompt.md": "---\ndescription: d\n---\nRun.\n"},
         )
+        (
+            temp_project / "apm_modules" / "test-pkg" / ".apm" / "prompts" / "bad.prompt.md"
+        ).write_bytes(bad)
         commands = temp_project / ".claude" / "commands"
         commands.mkdir(parents=True)
-        (commands / "bad.md").write_text(bad, encoding="utf-8")
+        (commands / "bad.md").write_bytes(bad)
 
         diag = DiagnosticCollector()
         result = CommandIntegrator().integrate_commands_for_target(
@@ -1951,10 +1958,10 @@ class TestClaudeNativeCommandFrontmatter:
         )
 
         assert (commands / "ok.md").is_file()
-        assert (commands / "bad.md").read_text(encoding="utf-8") == bad
+        assert (commands / "bad.md").read_bytes() == bad
         assert result.files_adopted == 1, result
         warnings = [w.message for w in diag.by_category().get("warning", [])]
-        assert any("bad.prompt.md" in w and "malformed" in w for w in warnings), warnings
+        assert any("bad.prompt.md" in w and "frontmatter" in w for w in warnings), warnings
 
     def test_claude_still_drops_name_and_paths(self, temp_project):
         warnings = self._install(

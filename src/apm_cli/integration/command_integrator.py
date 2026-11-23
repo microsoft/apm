@@ -367,12 +367,13 @@ class CommandIntegrator(BaseIntegrator):
             command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
                 source, target_name
             )
-        except yaml.YAMLError as exc:
+        except (yaml.YAMLError, OSError, ValueError) as exc:
             # Kept by a raw-bytes match; report it per file, never abort the run.
+            # ValueError covers UnicodeDecodeError on a non-UTF-8 source.
             diagnostics.warn(
                 message=(
-                    f"Kept command {source.name} unchanged: malformed or "
-                    f"over-budget YAML frontmatter ({exc})."
+                    f"Kept command {source.name} unchanged: unreadable, malformed "
+                    f"or over-budget frontmatter ({exc})."
                 ),
                 package=pkg_name,
             )
