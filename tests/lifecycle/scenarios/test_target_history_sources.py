@@ -383,6 +383,27 @@ def test_claude_surfaces_count_only_their_own_entries(lifecycle_world) -> None:
         assert written and (cell in observed) == counted, (cell, written, sorted(observed))
 
 
+def test_gemini_hooks_count_only_when_registered_and_owned(lifecycle_world) -> None:
+    """Negative control: Gemini's merged hooks count for a package only when
+    .gemini/settings.json registers an entry its sidecar marks as the package's."""
+    scenario = Scenario(lifecycle_world, ("p-exec",), targets=("gemini",))
+    settings = lifecycle_world.project / ".gemini/settings.json"
+    sidecar = settings.with_name("apm-hooks.json")
+    settings.parent.mkdir(parents=True)
+    cell = "p-exec/hook/gemini"
+    cases = (
+        ({}, _owned("_local/p-exec"), False),
+        ({"hooks": {"SessionStart": [_HOOK]}}, {}, False),
+        ({"hooks": {"SessionStart": [_HOOK]}}, _owned("_local/p-exec"), True),
+    )
+    for registered, owned, counted in cases:
+        settings.write_text(json.dumps(registered), encoding="ascii")
+        sidecar.write_text(json.dumps(owned), encoding="ascii")
+        written = settings.read_text(encoding="ascii")
+        observed, _, _ = scenario.deployed()
+        assert written and (cell in observed) == counted, (written, owned, sorted(observed))
+
+
 def test_a_dropped_target_that_still_enables_a_whole_plugin_keeps_it(lifecycle_world) -> None:
     """Negative control: the plugin root is shared by claude and copilot, but each
     harness's enable entry is its own, so a dropped claude still enabling it counts."""

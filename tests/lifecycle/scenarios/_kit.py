@@ -134,6 +134,9 @@ SURFACE_GLOBS: Mapping[tuple[str, str, str], str | JsonEntry | MergedHooks] = {
     # Claude merges hooks into .claude/settings.json; the apm-hooks.json sidecar marks
     # each entry with its dependency or local bundle (hook_ownership.py).
     ("project", "hook", "claude"): MergedHooks(".claude/settings.json"),
+    # A declared Gemini target merges hooks into .gemini/settings.json the same way,
+    # with its own apm-hooks.json sidecar (hook_integrator.py, "gemini").
+    ("project", "hook", "gemini"): MergedHooks(".gemini/settings.json"),
     # The root half of a whole Claude plugin (#3921); NATIVE_DECLARATIONS is the other.
     ("project", "native", "copilot"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
     ("project", "native", "claude"): ".agents/plugins/{pkg}/.claude-plugin/plugin.json",
