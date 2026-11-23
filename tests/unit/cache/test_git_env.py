@@ -115,6 +115,7 @@ def test_modern_windows_missing_lookup_scales_linearly(
             "os",
             SimpleNamespace(
                 name="nt",
+                path=os.path,
                 pathsep=";",
                 environ={"PATHEXT": ";".join(extensions)},
                 get_exec_path=lambda: [str(trusted_bin)],
