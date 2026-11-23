@@ -666,6 +666,25 @@ class _RevParseCommitsApi:
         return None
 
 
+@pytest.mark.xfail(strict=True, reason="exact branch and tag lookup lands in the next step")
+@pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
+def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(ref: str) -> None:
+    api = _RevParseCommitsApi()
+    del api._REFS["refs/heads/main"]
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
+
+
+def test_a_branch_wins_over_a_tag_named_like_its_namespace() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["refs/tags/heads/main"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "main") == "a" * 40
+
+
 @pytest.mark.parametrize("ref", ["pull/1/head", "refs/pull/1/head"])
 def test_the_commits_api_tier_never_answers_with_a_pull_request_commit(ref: str) -> None:
     api = _RevParseCommitsApi()

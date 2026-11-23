@@ -605,55 +605,24 @@ class GitReferenceResolver:
                         f"{dep_ref.repo_url}: {sanitized_error}"
                     )
             else:
-                try:
-                    clone_kwargs = {"depth": 1}
-                    if ref:
-                        clone_kwargs["branch"] = ref
-                    host._clone_with_fallback(
-                        dep_ref.repo_url,
-                        temp_dir,
-                        progress_reporter=None,
-                        dep_ref=dep_ref,
-                        **clone_kwargs,
-                    )
-                    from ..utils.git_env import git_current_branch, git_worktree_head
-
-                    ref_type = GitReferenceType.BRANCH
-                    resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
-                    ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
-
-                except git_command_error():
+                shallow = None
+                if not (ref or "").startswith("refs/"):
+                    try:
+                        shallow = self._resolve_shallow(dep_ref, ref, temp_dir)
+                    except git_command_error():
+                        shallow = None
+                if shallow is not None:
+                    ref_type, resolved_commit, ref_name = shallow
+                else:
                     try:
                         host._clone_with_fallback(
                             dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref
                         )
-
                         try:
-                            from ..utils.git_env import git_resolve_commit
-
-                            try:
-                                ref_type = GitReferenceType.BRANCH
-                                resolved_commit = git_resolve_commit(
-                                    temp_dir,
-                                    f"refs/remotes/origin/{ref}",
-                                    env=host.git_env,
-                                )
-                                ref_name = ref
-                            except subprocess.CalledProcessError:
-                                try:
-                                    ref_type = GitReferenceType.TAG
-                                    resolved_commit = git_resolve_commit(
-                                        temp_dir,
-                                        f"refs/tags/{ref}",
-                                        env=host.git_env,
-                                    )
-                                    ref_name = ref
-                                except subprocess.CalledProcessError:
-                                    raise ValueError(  # noqa: B904
-                                        f"Reference '{ref}' not found in repository "
-                                        f"{dep_ref.repo_url}"
-                                    )
-
+                            ref_type, resolved_commit = self._resolve_in_clone(
+                                temp_dir, ref, dep_ref
+                            )
+                            ref_name = ref
                         except Exception as e:
                             sanitized_error = host._sanitize_git_error(git_subprocess_error_text(e))
                             raise ValueError(  # noqa: B904
@@ -692,3 +661,38 @@ class GitReferenceResolver:
             resolved_commit=resolved_commit,
             ref_name=ref_name,
         )
+
+    def _resolve_shallow(self, dep_ref, ref, temp_dir):
+        """Resolve a short name (or the default branch) with a shallow ``clone --branch``."""
+        from ..utils.git_env import git_current_branch, git_worktree_head
+
+        host = self._host
+        clone_kwargs = {"depth": 1}
+        if ref:
+            clone_kwargs["branch"] = ref
+        host._clone_with_fallback(
+            dep_ref.repo_url, temp_dir, progress_reporter=None, dep_ref=dep_ref, **clone_kwargs
+        )
+        resolved_commit = git_worktree_head(temp_dir, env=host.git_env)
+        ref_name = ref if ref else git_current_branch(temp_dir, env=host.git_env)
+        return GitReferenceType.BRANCH, resolved_commit, ref_name
+
+    def _resolve_in_clone(self, temp_dir, ref, dep_ref):
+        """Resolve *ref* in a full clone; a fully qualified name only in its own namespace."""
+        from ..utils.git_env import git_resolve_commit
+
+        if ref.startswith("refs/heads/"):
+            candidates = ((GitReferenceType.BRANCH, f"refs/remotes/origin/{ref[11:]}"),)
+        elif ref.startswith("refs/tags/"):
+            candidates = ((GitReferenceType.TAG, ref),)
+        else:
+            candidates = (
+                (GitReferenceType.BRANCH, f"refs/remotes/origin/{ref}"),
+                (GitReferenceType.TAG, f"refs/tags/{ref}"),
+            )
+        for ref_type, name in candidates:
+            try:
+                return ref_type, git_resolve_commit(temp_dir, name, env=self._host.git_env)
+            except subprocess.CalledProcessError:
+                continue
+        raise ValueError(f"Reference '{ref}' not found in repository {dep_ref.repo_url}")

@@ -153,6 +153,12 @@ def _recorded(marker: Path, canonical: str) -> bool:
         return True
     if _linked_dirs(marker):
         return False
+    try:
+        # Without O_NOFOLLOW (Windows) the open below would follow a link.
+        if not stat.S_ISREG(os.lstat(marker).st_mode):
+            return False
+    except OSError:
+        return False
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(marker, flags)
@@ -395,6 +401,25 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
             _record_tip(downloader, dep_ref, sha)
             return
     _require_at_origin(downloader, dep_ref, sha)
+
+
+def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
+    """Admit *ref*'s commit and return what to fetch: a fully qualified ref by its commit.
+
+    ``git clone --branch`` takes only a short name, which the origin's other
+    namespace could also hold, so ``refs/heads/<x>`` and ``refs/tags/<x>``
+    are fetched by the commit they resolve to exactly.
+
+    Raises:
+        CommitNotReachableError: The commit is not admitted.
+    """
+    admit_pinned_commit(downloader, dep_ref, ref)
+    if ref and ref.startswith(("refs/heads/", "refs/tags/")):
+        commit = downloader.resolve_git_reference(dep_ref).resolved_commit
+        if not commit or not _COMMIT_RE.match(commit):
+            raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
+        return commit.lower()
+    return ref
 
 
 def admit_and_resolve(downloader, dep_ref):

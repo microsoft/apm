@@ -726,3 +726,97 @@ class TestResolve:
 
         assert result.ref_name == "main"
         mock_rmtree.assert_not_called()
+
+
+class TestLegacyFullyQualifiedRefs:
+    """A fully qualified ref resolves on the clone-only path, in its own namespace only."""
+
+    @pytest.fixture
+    def origin(self, tmp_path: Path) -> tuple[Path, dict[str, str]]:
+        import os
+
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+        repo = tmp_path / "origin"
+
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(repo), *args], env=env, check=True, capture_output=True, text=True
+            ).stdout.strip()
+
+        repo.mkdir()
+        git("init", "-q", "-b", "main")
+        git(
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "a",
+        )
+        shas = {"a": git("rev-parse", "HEAD")}
+        git("branch", "release")
+        git(
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "b",
+        )
+        shas["b"] = git("rev-parse", "HEAD")
+        git("tag", "release")
+        git("tag", "v1")
+        return repo, {**shas, "env": env}
+
+    def _resolve(self, origin, ref: str):
+        repo, shas = origin
+        host = _make_host()
+        host.git_env = shas["env"]
+
+        def clone(_url, target, *, depth=None, branch=None, **_kwargs):
+            args = ["git", "clone", "-q"]
+            if depth:
+                args += ["--depth", str(depth)]
+            if branch:
+                args += ["--branch", branch]
+            subprocess.run(
+                [*args, repo.as_uri(), str(target)],
+                env=shas["env"],
+                check=True,
+                capture_output=True,
+            )
+
+        host._clone_with_fallback.side_effect = clone
+        return GitReferenceResolver(host).resolve(_make_dep(reference=ref))
+
+    @pytest.mark.parametrize(
+        ("ref", "commit", "ref_type"),
+        [
+            ("refs/heads/release", "a", GitReferenceType.BRANCH),
+            ("refs/tags/release", "b", GitReferenceType.TAG),
+        ],
+    )
+    def test_a_fully_qualified_ref_resolves_in_its_namespace(
+        self, origin, ref: str, commit: str, ref_type: GitReferenceType
+    ) -> None:
+        result = self._resolve(origin, ref)
+
+        assert (result.resolved_commit, result.ref_type, result.ref_name) == (
+            origin[1][commit],
+            ref_type,
+            ref,
+        )
+
+    def test_a_qualified_branch_never_resolves_a_tag_of_that_name(self, origin) -> None:
+        with pytest.raises(ValueError, match="not found"):
+            self._resolve(origin, "refs/heads/v1")

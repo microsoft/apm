@@ -390,6 +390,23 @@ class TestVerdictStorageSafety:
         assert outside.read_text(encoding="utf-8") == "untouched\n"
         assert marker.is_file() and not marker.is_symlink()
 
+    @pytest.mark.parametrize("nofollow", [True, False], ids=["o-nofollow", "no-o-nofollow"])
+    def test_a_linked_verdict_with_matching_contents_never_counts(
+        self, tmp_path: Path, nofollow: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.cache.commit_reachability import _recorded
+
+        if not nofollow:
+            monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+        planted = tmp_path / "planted"
+        planted.write_text("verdict", encoding="utf-8")
+        marker = tmp_path / "reachability" / "shard" / "verdict"
+        marker.parent.mkdir(parents=True)
+        marker.symlink_to(planted)
+
+        assert not _recorded(marker, "verdict")
+        assert planted.read_text(encoding="utf-8") == "verdict"
+
     def test_foreign_config_in_the_reachability_repository_is_discarded(
         self, tmp_path: Path, origin: _Origin, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -458,6 +475,36 @@ def test_a_listed_tip_is_recorded_for_the_destination_that_answered(
     recorded = marker.read_text(encoding="utf-8")
     assert recorded.endswith(origin.url.removesuffix(".git").removesuffix("/"))
     assert "missing" not in recorded
+
+
+class _RevParseRefDownloader(_RefDownloader):
+    """A commits API that resolves a name like ``git rev-parse`` against the origin."""
+
+    def __init__(self, cache_root: Path, origin: _Origin) -> None:
+        super().__init__(cache_root, [origin.url], predicted=origin.url)
+        self._origin = origin
+
+    def _resolve_commit_sha_for_ref(self, _dep_ref, ref: str) -> str | None:
+        for name in (ref, f"refs/{ref}", f"refs/tags/{ref}", f"refs/heads/{ref}"):
+            try:
+                return self._origin.bare("rev-parse", "--verify", "-q", f"{name}^{{commit}}")
+            except subprocess.CalledProcessError:
+                continue
+        return None
+
+
+@pytest.mark.xfail(strict=True, reason="exact branch and tag lookup lands in the next step")
+@pytest.mark.parametrize("ref", ["release", "refs/heads/release"])
+def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(
+    tmp_path: Path, origin: _Origin, ref: str
+) -> None:
+    from apm_cli.cache.commit_reachability import CommitNotReachableError, admit_ref_commit
+
+    origin.bare("tag", "heads/release", origin.m1)
+    downloader = _RevParseRefDownloader(tmp_path / "cache", origin)
+
+    with pytest.raises(CommitNotReachableError):
+        admit_ref_commit(downloader, _RefDep(), ref)
 
 
 class TestRefCacheLinks:

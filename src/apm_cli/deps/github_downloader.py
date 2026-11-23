@@ -1399,9 +1399,9 @@ class GitHubPackageDownloader:
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
-        from ..cache.commit_reachability import admit_pinned_commit
+        from ..cache.commit_reachability import admit_fetch_ref
 
-        admit_pinned_commit(self, dep_ref, ref)  # before any cache, bare or clone fetch
+        ref = admit_fetch_ref(self, dep_ref, ref)  # before any cache, bare or clone fetch
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
         _resolved_sha_for_cache: str | None = None
@@ -1733,8 +1733,8 @@ class GitHubPackageDownloader:
 
         # Get the resolved reference for metadata
         resolved_ref = ResolvedReference(
-            original_ref=ref or "default",
-            ref_name=ref or "default",
+            original_ref=dep_ref.reference or "default",
+            ref_name=dep_ref.reference or "default",
             ref_type=GitReferenceType.BRANCH,
             resolved_commit=resolved_commit,
         )
@@ -1974,8 +1974,10 @@ class GitHubPackageDownloader:
         try:
             # Clone the repository using fallback authentication methods
             # Use shallow clone for performance if we have a specific commit
-            if resolved_ref.ref_type == GitReferenceType.COMMIT:
-                # For commits, we need to clone and checkout the specific commit
+            if resolved_ref.ref_type == GitReferenceType.COMMIT or resolved_ref.ref_name.startswith(
+                "refs/"
+            ):
+                # Commits and fully qualified refs: clone, then check out the resolved commit
                 progress_reporter = (
                     _git_progress_reporter_class()(
                         progress_task_id, progress_obj, package_display_name
