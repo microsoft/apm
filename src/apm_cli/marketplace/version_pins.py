@@ -62,6 +62,17 @@ class RefPinStoreError(MarketplaceError):
         )
 
 
+class RefPinWriteError(RefPinStoreError):
+    """The version-pins file could not be written; its recorded pins are kept."""
+
+    def __init__(self, path: str, reason: str):
+        MarketplaceError.__init__(
+            self,
+            f"Cannot write the marketplace version pins at {path} ({reason}): "
+            "fix its permissions or free space and retry. Nothing was changed.",
+        )
+
+
 class RefPinMismatchError(MarketplaceError):
     """A marketplace plugin version resolved to a ref other than its recorded pin."""
 
@@ -165,7 +176,7 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = Fal
     Writes to a temporary file first, then uses ``os.replace`` to move
     it into place so readers never see a partial write.  Errors are
     logged and swallowed (advisory system), unless *strict*, which raises
-    :class:`RefPinStoreError`. A preview writes nothing.
+    :class:`RefPinWriteError`. A preview writes nothing.
     """
     from apm_cli.config import user_state_writes_suppressed
 
@@ -180,7 +191,7 @@ def save_ref_pins(pins: dict, pins_dir: str | None = None, *, strict: bool = Fal
         os.replace(tmp_path, path)
     except OSError as exc:
         if strict:
-            raise RefPinStoreError(path, f"cannot be written ({type(exc).__name__})") from exc
+            raise RefPinWriteError(path, type(exc).__name__) from exc
         logger.debug("Failed to save version-pins: %s", exc)
 
 
@@ -273,7 +284,7 @@ def adopt_alias_ref_pins(alias: str, catalog: str, pins_dir: str | None = None) 
     Called before an alias is re-registered or removed, so its pins stay with
     that catalog and are never read for another one (#4966). A pin already
     recorded for the catalog wins over a legacy one. A failed write raises
-    :class:`RefPinStoreError`, so the registry change does not happen.
+    :class:`RefPinWriteError`, so the registry change does not happen.
     """
     prefix = f"{alias.lower()}/"
     pins = load_ref_pins(pins_dir)

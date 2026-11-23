@@ -347,18 +347,22 @@ class TestCatalogScopedRefPins:
         }
 
     def test_a_failed_pin_write_leaves_the_registration_unchanged(self):
-        from apm_cli.marketplace.version_pins import RefPinStoreError
+        from apm_cli.marketplace.version_pins import RefPinWriteError
 
         self._write({"team/tool/1.0.0": "v1"})
         registry_mod.add_marketplace(MarketplaceSource(name="team", owner="a", repo="catalog"))
+        registry = Path(registry_mod._marketplaces_path())
+        before = (self.pins.read_bytes(), registry.read_bytes())
         Path(str(self.pins) + ".tmp").mkdir()
 
-        with pytest.raises(RefPinStoreError):
+        with pytest.raises(RefPinWriteError) as refused:
             registry_mod.remove_marketplace("team")
 
-        assert json.loads(self.pins.read_text()) == {"team/tool/1.0.0": "v1"}
-        registry = json.loads(Path(registry_mod._marketplaces_path()).read_text())
-        assert [entry["name"] for entry in registry["marketplaces"]] == ["team"]
+        message = str(refused.value)
+        assert f"Cannot write the marketplace version pins at {self.pins}" in message
+        assert "fix its permissions or free space and retry" in message
+        assert "delete" not in message.lower()
+        assert (self.pins.read_bytes(), registry.read_bytes()) == before
 
 
 class TestCatalogPinIdentity:
