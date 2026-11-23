@@ -239,6 +239,20 @@ class TestCacheReadWrite(unittest.TestCase):
             meta_file.write_text(json.dumps(meta), encoding="utf-8")
             self.assertIsNone(_read_cache(repo_ref, root))
 
+    def test_a_pre_trust_transitive_cache_entry_is_not_read(self):
+        """Schema 6 serialized an omitted mcp.trust_transitive as false (req-sc-016)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            _write_cache(repo_ref, _make_test_policy(), root)
+            meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["schema_version"] = "6"
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+            self.assertIsNone(_read_cache(repo_ref, root))
+            # The stale entry is dropped from disk, so the next run fetches afresh.
+            self.assertFalse(meta_file.exists())
+
     def test_project_local_policy_cache_is_not_read(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

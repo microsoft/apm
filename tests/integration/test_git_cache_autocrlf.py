@@ -192,7 +192,10 @@ def test_unremovable_unpinned_checkout_is_not_returned(
 
     with (
         patch.object(cache, "_evict_checkout"),
-        pytest.raises(RuntimeError, match=r"Failed to rematerialize unpinned git checkout"),
+        pytest.raises(
+            RuntimeError,
+            match=r"Failed to rematerialize unpinned git checkout|concurrent checkout failed integrity",
+        ),
     ):
         cache.get_checkout(str(origin), sha, locked_sha=sha)
 

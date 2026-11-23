@@ -24,6 +24,7 @@ from apm_cli.cache.git_cache import (
 )
 from apm_cli.cache.url_normalize import cache_shard_key
 from apm_cli.utils.git_env import _GitConfigSnapshot
+from tests.utils.cached_repo_trust import trust_cached_repos
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
 
 _REAL_RUN = subprocess.run
@@ -95,6 +96,7 @@ class TestGitCacheInit:
         assert cache._checkouts_root == checkouts_root
 
 
+@trust_cached_repos()
 class TestGetCheckout:
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"
@@ -401,6 +403,7 @@ class TestLsRemoteResolve:
             cache._ls_remote_resolve("https://example.com/repo.git", "main")
 
 
+@trust_cached_repos()
 class TestEnsureBareRepo:
     def test_existing_bare_repo_with_sha_is_reused(self, cache: GitCache) -> None:
         shard_key = cache_shard_key("https://example.com/repo.git")
@@ -495,6 +498,7 @@ class TestEnsureBareRepo:
         )
 
 
+@trust_cached_repos()
 class TestCreateCheckout:
     @pytest.fixture(autouse=True)
     def _validated_rewrites(self):
@@ -659,6 +663,7 @@ class TestCreateCheckout:
         mock_evict.assert_called_once_with(final_dir)
 
 
+@trust_cached_repos()
 class TestBareHasSha:
     def test_returns_true_when_commit_exists(self, cache: GitCache, remote: _Remote) -> None:
         assert cache._bare_has_sha(remote.path, remote.main) is True
