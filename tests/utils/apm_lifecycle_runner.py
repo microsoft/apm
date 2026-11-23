@@ -248,14 +248,18 @@ def _audit_parity_applies(args: Sequence[str], env: Mapping[str, str]) -> bool:
     )
 
 
-# Per-run noise inside diagnostic lines: fresh temp directory names.
-_TEMP_NAME = re.compile(r"\btmp[A-Za-z0-9_]{8}\b")
+# Per-run noise: fresh temp and replay scratch directory names.
+_TEMP_NAME = re.compile(r"\b(?:tmp|apm_drift_)[A-Za-z0-9_]{8}\b")
+
+
+def _without_temp_names(text: str) -> str:
+    return _TEMP_NAME.sub("tmpXXXXXXXX", text)
 
 
 def _diagnostics(stderr: str) -> list[str]:
     """The status-symbol lines of *stderr*, without the served/live summary."""
     return [
-        _TEMP_NAME.sub("tmpXXXXXXXX", line)
+        _without_temp_names(line)
         for line in _RECORDS_SUMMARY.sub("", stderr).splitlines()
         if line.startswith("[")
     ]
@@ -264,7 +268,7 @@ def _diagnostics(stderr: str) -> list[str]:
 def _assert_audit_parity(served: CommandResult, live: CommandResult) -> None:
     pairs = (
         ("exit", served.returncode, live.returncode),
-        ("stdout", served.stdout, live.stdout),
+        ("stdout", _without_temp_names(served.stdout), _without_temp_names(live.stdout)),
         ("diagnostics", _diagnostics(served.stderr), _diagnostics(live.stderr)),
     )
     for name, with_records, without in pairs:
