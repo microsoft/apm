@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture_linter.diagnostics import render_violations_and_failures
 from scripts.architecture_linter.inventory import build_inventory
 from scripts.architecture_linter.models import Rule
 from scripts.architecture_linter.registry import load_registry
@@ -7904,6 +7905,12 @@ def test_bundle_policy_and_canvas_gate_routes_are_guarded(
     )
 
 
+def _assert_no_diagnostics(report: object) -> None:
+    """The linter prints no diagnostic line for the run."""
+    rendered = render_violations_and_failures(report.violations, report.failures)
+    assert rendered == "", rendered
+
+
 @pytest.mark.parametrize(
     "new",
     [
@@ -7929,5 +7936,4 @@ def test_helper_guard_ignores_calls_that_launch_nothing(new: str) -> None:
     mutated = source.replace(old, new + old, 1)
     ast.parse(mutated, filename=path)
     report = run_selected_rules(ROOT, (rule_id,), source_overrides={path: mutated})
-    assert report.failures == ()
-    assert report.violations == ()
+    _assert_no_diagnostics(report)
