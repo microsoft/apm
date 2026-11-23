@@ -22,7 +22,8 @@ overhead <= 1%").
    the paired new/base CPU ratio p50 with its 95% band. Report base and new CPU
    p50 in seconds beside it. No dropped pairs or outliers; every cell of the bar
    comes from the same run.
-4. **Pass, fail or inconclusive.** A cell passes at paired p50 <= 1.010. If any
+4. **Pass, fail or inconclusive.** A cell passes at paired p50 <= 1.010; p50 above
+   1.010 on any cell is a FAIL. If any
    cell's 95% upper bound is above 1.020 the run is INCONCLUSIVE, not a pass:
    rerun once with 30 pairs (`PAIRS=10`), and that result is final.
 5. **Pre-register.** This method is merged (or at the merge desk) before a PR
