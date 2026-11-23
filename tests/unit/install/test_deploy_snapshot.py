@@ -1988,3 +1988,33 @@ def test_a_file_mode_is_never_applied_through_a_link(tmp_path: Path) -> None:
 
     assert outside.stat().st_mode & 0o7777 == 0o400
     assert staged.is_symlink()
+
+
+def test_a_rollback_keeps_a_path_whose_parent_became_a_link(tmp_path: Path, apm_home: Path) -> None:
+    """A deploy path whose parent directory is now a symbolic link is kept and reported:
+    the rollback never removes or writes through that link."""
+    import shutil
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    deployed = project / "agents" / "a.md"
+    deployed.parent.mkdir(parents=True)
+    deployed.write_bytes(b"prior\n")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(deployed)
+    deployed.write_bytes(b"installed\n")
+    journal.after_write(deployed)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.md").write_bytes(b"outside\n")
+    shutil.rmtree(project / "agents")
+    try:
+        (project / "agents").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    issues = journal.restore()
+
+    assert (outside / "a.md").read_bytes() == b"outside\n"
+    assert deployed in [path for path, _reason in issues]
