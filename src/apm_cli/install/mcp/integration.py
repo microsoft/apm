@@ -532,6 +532,15 @@ def run_mcp_integration(  # noqa: PLR0913
             target_decision=target_decision,
             logger=logger,
         )
+        from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
+
+        announce_kept_mcp_writes(
+            lock_path,
+            project_root=project_root,
+            user_scope=user_scope,
+            exclude=exclude,
+            logger=logger,
+        )
         return mcp_count, {"scripts": apm_package.scripts or {}}
 
     previous_lock = LockFile.read(lock_path) if lockfile_exists(lock_path) else None

@@ -218,20 +218,51 @@ def kept_edit_message(entry: str, *, user_scope: bool, proven_edit: bool) -> str
     """
     from apm_cli.core import remediation
 
-    reason = (
-        "it was modified since APM deployed it"
-        if proven_edit
-        else "it differs from what APM renders and there is no local deployment "
-        "receipt or locked render proving APM wrote it, so it may hold local edits"
-    )
     # Restore, or keep the edit by exporting it; never a --force overwrite,
     # which would also deploy despite critical security findings (RA-008).
     if user_scope:
         # export-patch reads the project lock only; user scope can only restore.
         restore = remediation.KEPT_FILE_RESTORE.with_command("apm install -g")
-        return remediation.kept_file_message(entry, reason, restore)
+        return remediation.kept_file_message(entry, _kept_reason(proven_edit), restore)
     return remediation.kept_file_message(
-        entry, reason, remediation.KEPT_FILE_RESTORE, remediation.LOCAL_EDITS_EXPORT
+        entry,
+        _kept_reason(proven_edit),
+        remediation.KEPT_FILE_RESTORE,
+        remediation.LOCAL_EDITS_EXPORT,
+    )
+
+
+def edit_kind(recorded: object, rendered: object) -> str:
+    """Classify a proven user edit of an output APM recorded deploying as *recorded*.
+
+    ``"drift"`` when the package still renders *recorded* (nothing new to
+    deploy: kept, reported, exit 0); ``"blocked"`` when it renders something
+    new that the kept edit holds back (exit 1). Files compare hashes, LSP
+    server entries compare rendered entries (#4398, RA-012, #4626).
+    """
+    return "drift" if rendered == recorded else "blocked"
+
+
+def kept_entry_message(subject: str, *, user_scope: bool, proven_edit: bool) -> str:
+    """Name a managed config entry install kept (an LSP server, #4626).
+
+    Same reasons as :func:`kept_edit_message`; the restore removes the entry,
+    since an entry inside a shared file cannot be moved aside.
+    """
+    from apm_cli.core import remediation
+
+    restore = remediation.KEPT_ENTRY_RESTORE
+    if user_scope:
+        restore = restore.with_command("apm install -g")
+    return remediation.kept_file_message(subject, _kept_reason(proven_edit), restore)
+
+
+def _kept_reason(proven_edit: bool) -> str:
+    if proven_edit:
+        return "it was modified since APM deployed it"
+    return (
+        "it differs from what APM renders and there is no local deployment "
+        "receipt or locked render proving APM wrote it, so it may hold local edits"
     )
 
 
@@ -431,7 +462,7 @@ class BaseIntegrator:
         receipted = self._receipted_hash(path)
         if receipted is None or self._file_hash(path) in (None, receipted):
             return None
-        return "drift" if rendered_hash == receipted else "blocked"
+        return edit_kind(receipted, rendered_hash)
 
     def _rendered_hash(self, source_file: Path, expected_content: str | None) -> str:
         """Content hash of the bytes this integrator would deploy for one file."""
@@ -472,7 +503,7 @@ class BaseIntegrator:
         incoming = compute_file_hash(source_file)
         if incoming == disk:
             return None
-        return "drift" if incoming == expected else "blocked"
+        return edit_kind(expected, incoming)
 
     def copy_directory_files(
         self,
@@ -864,20 +895,91 @@ class BaseIntegrator:
             target_path, rel_path, managed_files, force, diagnostics=diagnostics
         ):
             return True, False
-        # A managed file that differs from the render is replaced only with
-        # deployment evidence; the lockfile hash alone never authorizes it (#4360).
+        kept = self.keeps_unproven_file(
+            target_path,
+            source_file,
+            rel_path,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=expected_content,
+        )
+        return kept, False
+
+    def keeps_edited_output(
+        self,
+        target_path: Path,
+        source_file: Path,
+        rel_path: str,
+        force: bool,
+        diagnostics,
+        target_paths: list,
+        *,
+        expected_content: str | None = None,
+        held_back: bool = False,
+    ) -> bool:
+        """Gate one executable output (hook file or script, canvas file) like any file (#4626).
+
+        A file already holding the render is not an overwrite. Outside an
+        install session (a local bundle, hook re-integration) no overwrite
+        gate is bound and the caller's own evidence applies.
+        """
+        if self._overwrite_gate is None or not target_path.is_file():
+            return False
+        identical = (
+            self.is_content_identical_to_text(target_path, expected_content)
+            if expected_content is not None
+            else self.is_content_identical_to_source(target_path, source_file)
+        )
+        if identical:
+            return False
+        return self.keeps_unproven_file(
+            target_path,
+            source_file,
+            rel_path,
+            force,
+            diagnostics,
+            target_paths,
+            expected_content=expected_content,
+            held_back=held_back,
+        )
+
+    def keeps_unproven_file(
+        self,
+        target_path: Path,
+        source_file: Path,
+        rel_path: str,
+        force: bool,
+        diagnostics,
+        target_paths: list,
+        *,
+        expected_content: str | None = None,
+        held_back: bool = False,
+    ) -> bool:
+        """Whether install keeps an existing managed file that differs from the render.
+
+        The one overwrite gate (#4360, #4626): the file is replaced only with
+        deployment evidence that APM wrote its current bytes (a matching
+        receipt, legacy ownership or the locked render); the lockfile hash
+        alone never authorizes it. A kept file stays in *target_paths* with its
+        prior lock entry and finalize names it. While planning (#4381) nothing
+        is written and every blocking keep goes to the plan. *held_back*: keeping
+        this file holds back other new content, so even a drift edit blocks.
+        """
         gate = self._overwrite_gate
+        plan = self._overwrite_plan
         if force or not target_path.is_file() or (gate and gate.authorizes(target_path, rel_path)):
-            if plan is not None:
-                return True, False
-            return False, False
+            # One literal write-permitting return (install-deployment-overwrite-evidence).
+            if plan is not None:  # noqa: SIM103
+                return True
+            return False
         if gate is not None and (
             gate.legacy_adoptable(target_path, rel_path)
             if plan is not None
             else gate.adopt_legacy(target_path, rel_path)
         ):
             target_paths.append(target_path)
-            return True, False
+            return True
         rendered = self._rendered_hash(source_file, expected_content)
         edit = (
             gate.legacy_edit(target_path, rel_path, rendered)
@@ -885,6 +987,8 @@ class BaseIntegrator:
             if gate is not None
             else None
         )
+        if held_back and edit == "drift":
+            edit = "blocked"
         if plan is not None:
             # Planning writes nothing; a blocking keep refuses the whole plan (#4381).
             if edit != "drift":
@@ -893,8 +997,7 @@ class BaseIntegrator:
             # The claim stays with its prior lock entry; finalize names the file.
             target_paths.append(target_path)
         else:
-            # A proven edit the gate cannot keep (the project's own local content)
-            # still names the true reason (RA-012).
+            # A proven edit no session can keep still names the true reason (RA-012).
             message = kept_edit_message(
                 rel_path, user_scope=bool(gate and gate.user_scope), proven_edit=edit is not None
             )
@@ -902,7 +1005,7 @@ class BaseIntegrator:
                 diagnostics.error(message, package=gate.owner if gate else "")
             else:
                 _rich_warning(message)
-        return True, False
+        return True
 
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
@@ -1292,6 +1395,9 @@ class BaseIntegrator:
             for root in scan_roots:
                 primitives = discover_primitives(root)
                 self.link_resolver.register_contexts(primitives)
+            # Context and memory links render in live deployment coordinates
+            # for every package, the $HOME user root included (#4832).
+            self.link_resolver.deployment_frame = getattr(package_info, "deployment_frame", None)
 
             # Generalized in-package asset link rewriting (#1147) needs the
             # authoritative source-package root. Use install_path directly:
