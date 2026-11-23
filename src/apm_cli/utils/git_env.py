@@ -294,6 +294,29 @@ def _executable_exclusion_root() -> Path:
     return cwd
 
 
+def _within(path: Path, root: Path) -> bool:
+    """Whether *path* is *root* or lies under it, under the file system's case rules.
+
+    ``normcase`` folds case where the platform does (Windows). Elsewhere a
+    case-insensitive volume (default macOS) gives one directory several
+    spellings, so the ancestor spelled like *root* up to case is asked whether
+    it is the same directory.
+    """
+    if path == root or path.is_relative_to(root):
+        return True
+    folded, base = os.path.normcase(path), os.path.normcase(root)
+    if folded == base or folded.startswith(os.path.join(base, "")):
+        return True
+    spelled = str(root).casefold()
+    for ancestor in (path, *path.parents):
+        if str(ancestor).casefold() == spelled:
+            try:
+                return os.path.samefile(ancestor, root)
+            except OSError:
+                return False
+    return False
+
+
 def _resolve_trusted_executable(name: str) -> str:
     """Resolve an executable from PATH directories outside the project."""
     exclusion_root = _executable_exclusion_root()
@@ -302,7 +325,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         directory = Path(entry).expanduser().resolve()
         try:
-            if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+            if _within(directory, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -323,7 +346,7 @@ def _resolve_trusted_executable(name: str) -> str:
             continue
         resolved = Path(candidate).resolve()
         try:
-            if resolved == exclusion_root or resolved.is_relative_to(exclusion_root):
+            if _within(resolved, exclusion_root):
                 continue
         except (OSError, ValueError):
             continue
@@ -384,7 +407,7 @@ def _links_into(directory: Path, root: Path) -> bool:
             target = entry.resolve()
         except (OSError, RuntimeError):
             continue
-        if target == root or target.is_relative_to(root):
+        if _within(target, root):
             return True
     return False
 
@@ -413,7 +436,7 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
                 continue
             try:
                 directory = Path(entry).expanduser().resolve()
-                if directory == exclusion_root or directory.is_relative_to(exclusion_root):
+                if _within(directory, exclusion_root):
                     continue
                 if _links_into(directory, exclusion_root):
                     continue
