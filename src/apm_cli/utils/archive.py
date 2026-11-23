@@ -14,7 +14,7 @@ import shutil
 import tarfile
 import uuid
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PureWindowsPath
 from typing import IO, TypeVar
 from urllib.parse import urlparse
@@ -32,6 +32,8 @@ MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024
 SUPPORTED_ARCHIVE_FORMATS = frozenset({"zip", "tar.gz"})
 
 _MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED
+# A pax or GNU long-name/long-link header is read whole at its declared size.
+_MAX_TAR_HEADER_BYTES = 1024 * 1024
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -43,6 +45,56 @@ _ErrorT = TypeVar("_ErrorT", bound=Exception)
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
+
+
+class _OversizedTarHeader(tarfile.ReadError):
+    """A tar metadata header declares more bytes than extraction will read."""
+
+
+class _BoundedTarInfo(tarfile.TarInfo):
+    """``TarInfo`` that refuses an oversized metadata header before reading it.
+
+    ``tarfile`` reads a pax header and a GNU long-name or long-link block into
+    memory at the size the header declares, before any member reaches the
+    extraction limits.
+    """
+
+    def _refuse_oversized_header(self) -> None:
+        if self.size > _MAX_TAR_HEADER_BYTES:
+            raise _OversizedTarHeader(
+                f"Archive tar header exceeds size limit: {self.size} bytes > "
+                f"{_MAX_TAR_HEADER_BYTES} bytes"
+            )
+
+    def _proc_pax(self, tar_file):
+        self._refuse_oversized_header()
+        return super()._proc_pax(tar_file)
+
+    def _proc_gnulong(self, tar_file):
+        self._refuse_oversized_header()
+        return super()._proc_gnulong(tar_file)
+
+
+def open_tar_gz(
+    *,
+    path: Path | None = None,
+    fileobj: IO[bytes] | None = None,
+    error_type: type[_ErrorT] = ArchiveError,
+) -> tarfile.TarFile:
+    """Open a gzip-compressed tar for reading with bounded metadata headers."""
+    try:
+        return tarfile.open(name=path, fileobj=fileobj, mode="r:gz", tarinfo=_BoundedTarInfo)
+    except _OversizedTarHeader as exc:
+        raise error_type(str(exc)) from exc
+
+
+def _bounded_members(tar: tarfile.TarFile, error_type: type[_ErrorT]) -> Iterator[tarfile.TarInfo]:
+    """Iterate *tar*, refusing an oversized metadata header before it is read."""
+    tar.tarinfo = _BoundedTarInfo
+    try:
+        yield from tar
+    except _OversizedTarHeader as exc:
+        _raise(error_type, str(exc))
 
 
 def validate_archive_format(archive_format: str) -> None:
@@ -286,7 +338,7 @@ def safe_extract_tar(
     plan: list[tuple[Path, str, Callable[[], IO[bytes] | None], int]] = []
     # Advancing a compressed tar to the next header decompresses the current
     # member's data, so the declared sizes are capped before each advance.
-    for count, member in enumerate(tar, start=1):
+    for count, member in enumerate(_bounded_members(tar, error_type), start=1):
         if count > entry_limit:
             _raise(error_type, f"Archive has more than {entry_limit} entries (limit {entry_limit})")
         if member.issym() or member.islnk():
@@ -399,7 +451,7 @@ def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
 def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        with open_tar_gz(fileobj=io.BytesIO(data)) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
@@ -408,7 +460,7 @@ def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
 def _extract_tar_gz_file(path: Path, dest_dir: str) -> list[str]:
     """Extract a tar.gz archive file into *dest_dir* with safety checks."""
     try:
-        with tarfile.open(path, mode="r:gz") as archive:
+        with open_tar_gz(path=path) as archive:
             return _extract_tar_archive(archive, dest_dir)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc

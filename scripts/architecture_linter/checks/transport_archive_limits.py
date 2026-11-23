@@ -4,7 +4,8 @@
 ``safe_extract_zip`` apply the same limits to every format: an entry-count
 cap, an uncompressed-size cap, and refusal of links, special files, absolute
 or traversing paths and duplicate or conflicting entries. ``read_zip_member``
-is the single in-memory member reader under the same cap.
+is the single in-memory member reader under the same cap. ``open_tar_gz``
+opens every tar read with size-bounded pax and GNU long-name headers.
 
 Closed world, keyed on call shape rather than variable names:
 
@@ -86,6 +87,41 @@ def _check_archive_extraction_limits(provider: FactsProvider) -> tuple[Violation
                 ("sub", "safe_extract_zip(zf, dest_root, error_type=UnsafeTarballError)", 1, "eq"),
             ),
             "registry archives must extract through the archive-limits owner for every format",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inventory,
+            _RULE_ID,
+            _OWNER,
+            (
+                ("re", r"^def open_tar_gz\(", 1, "eq"),
+                ("sub", "tarinfo=_BoundedTarInfo", 1, "eq"),
+                ("sub", "tar.tarinfo = _BoundedTarInfo", 1, "eq"),
+                ("sub", "_bounded_members(tar, error_type)", 1, "eq"),
+                ("sub", "tarfile.open(path", 0, "eq"),
+                ("sub", "tarfile.open(fileobj", 0, "eq"),
+            ),
+            "tar archives are read only through open_tar_gz, whose headers are size-bounded",
+        )
+    )
+    findings.extend(
+        _count_checks(
+            provider,
+            inventory,
+            _RULE_ID,
+            _REGISTRY_EXTRACTOR,
+            (
+                (
+                    "sub",
+                    "open_tar_gz(fileobj=io.BytesIO(data), error_type=UnsafeTarballError)",
+                    1,
+                    "eq",
+                ),
+                ("sub", "tarfile.open(", 0, "eq"),
+            ),
+            "registry tarballs open through the bounded-header owner",
         )
     )
     others = _src_python(provider, exclude={_OWNER})

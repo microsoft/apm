@@ -67,6 +67,18 @@ def _shared_linter_session() -> Iterator[LinterSession]:
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/utils/archive.py",
+            "tarinfo=_BoundedTarInfo)",
+            "tarinfo=tarfile.TarInfo)",
+            id="tar-headers-unbounded",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/registry/extractor.py",
+            "open_tar_gz(fileobj=io.BytesIO(data), error_type=UnsafeTarballError)",
+            'tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")',
+            id="registry-tar-opened-raw",
+        ),
+        pytest.param(
             "src/apm_cli/deps/registry/extractor.py",
             "    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
             "    tar.extractall(dest_root)",
