@@ -105,6 +105,16 @@ def _outcomes(lock: Any, files: list, records: dict[str, dict]) -> list[PackageO
     return out
 
 
+# CI definitions live under the .github target root, but APM never deploys there.
+_CI_DIRS = (".github/workflows/", ".github/actions/")
+
+
+def _is_git_dir_name(part: str) -> bool:
+    """``.git`` in any case, and its Windows aliases (trailing dots/spaces, 8.3 name)."""
+    name = part.lower()
+    return name.rstrip(". ") == ".git" or name == "git~1"
+
+
 def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Path:
     """The project path of a lock-named file, only inside an active target's deploy root.
 
@@ -115,7 +125,7 @@ def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Pa
     parts = rel.split("/") if rel else []
     if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in parts):
         raise Decline(f"unsafe path {rel!r}")
-    if any(p.lower() == ".git" for p in parts):
+    if any(_is_git_dir_name(p) for p in parts) or rel.lower().startswith(_CI_DIRS):
         raise Decline(f"unsafe path {rel!r}")
     if prefixes is not None:
         from apm_cli.integration.base_integrator import BaseIntegrator

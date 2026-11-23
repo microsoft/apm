@@ -89,7 +89,18 @@ _REL = ".github/prompts/a.prompt.md"
 
 
 @pytest.mark.parametrize(
-    "rel", [".git/hooks/pre-commit", ".github/.GIT/config", ".vscode/settings.json", "notes.md"]
+    "rel",
+    [
+        ".git/hooks/pre-commit",
+        ".github/.GIT/config",
+        ".github/.git./config",
+        ".github/.git /config",
+        ".github/GIT~1/config",
+        ".github/workflows/ci.yml",
+        ".github/Actions/setup/action.yml",
+        ".vscode/settings.json",
+        "notes.md",
+    ],
 )
 def test_a_lock_path_outside_the_target_roots_declines_before_any_write(
     tmp_path: Path, rel: str
