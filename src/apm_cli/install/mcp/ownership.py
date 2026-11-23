@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import Enum
@@ -117,6 +117,21 @@ def _native_config_key(
     if info is None and isinstance(stored_config, dict) and stored_config.get("registry") is False:
         info = {"name": name, "is_self_defined": True}
     return client.determine_config_key(name, None, info)
+
+
+def declarations_share_native_key(
+    runtimes: Iterable[str], name: str, first: dict | None, second: dict | None
+) -> bool:
+    """Whether declarations *first* and *second* key *name* to one native entry on every runtime."""
+    from apm_cli.factory import ClientFactory
+
+    for runtime in runtimes:
+        adapter = ClientFactory.adapter_class(runtime)
+        if adapter is not None and _native_config_key(
+            adapter, name, stored_config=first
+        ) != _native_config_key(adapter, name, stored_config=second):
+            return False
+    return True
 
 
 def written_native_hash(

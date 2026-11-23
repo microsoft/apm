@@ -341,7 +341,7 @@ def test_a_killed_install_is_reported_by_audit_and_converged_by_the_next_install
     assert world.lockfile_bytes() != lock
 
 
-def test_the_next_install_reaps_a_killed_installs_deploy_snapshot(
+def test_the_next_install_replays_a_killed_installs_deploy_snapshot(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
     world = build_world(tmp_path, apm_binary_path)
@@ -356,7 +356,7 @@ def test_the_next_install_reaps_a_killed_installs_deploy_snapshot(
         )
     assert killed.returncode == 137, evidence(killed)
     snapshots = world.isolated.config_root / "install-snapshots"
-    assert any(snapshots.glob("deploy-*")), "the killed install left no snapshot to reap"
+    assert any(snapshots.glob("deploy-*")), "the killed install left no snapshot to replay"
 
     world.assert_converges()
     assert not any(snapshots.glob("deploy-*")), sorted(snapshots.iterdir())

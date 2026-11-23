@@ -58,7 +58,7 @@ def _stand_in_codex(directory: Path, version_line: str, app_server: str = "") ->
 @pytest.mark.parametrize("version", _ADMITTED)
 def test_native_client_admits_minimum_and_later_versions(monkeypatch, tmp_path, version):
     """Self-updating Codex installs stay admitted at or above the qualified floor."""
-    monkeypatch.setattr("shutil.which", lambda name: "/owned/codex")
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lambda name: "/owned/codex")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, f"codex-cli {version}\n", ""))
     monkeypatch.setattr(subprocess, "run", run)
     client = CodexNativeClient.for_scope(InstallScope.USER, tmp_path)
@@ -68,7 +68,7 @@ def test_native_client_admits_minimum_and_later_versions(monkeypatch, tmp_path, 
 @pytest.mark.parametrize("version", _REFUSED)
 def test_native_client_refuses_older_or_unparseable_versions(monkeypatch, tmp_path, version):
     """Older or unrecognized clients are refused with the minimum named."""
-    monkeypatch.setattr("shutil.which", lambda name: "/owned/codex")
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lambda name: "/owned/codex")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, f"codex-cli {version}\n", ""))
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(CodexNativeError, match=r"0\.163\.0 or later"):
@@ -76,7 +76,7 @@ def test_native_client_refuses_older_or_unparseable_versions(monkeypatch, tmp_pa
 
 
 def test_native_client_refuses_failed_version_probe(monkeypatch, tmp_path):
-    monkeypatch.setattr("shutil.which", lambda name: "/owned/codex")
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lambda name: "/owned/codex")
     run = Mock(return_value=subprocess.CompletedProcess([], 1, "codex-cli 0.164.0\n", ""))
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(CodexNativeError, match=r"0\.163\.0 or later"):
@@ -84,7 +84,7 @@ def test_native_client_refuses_failed_version_probe(monkeypatch, tmp_path):
 
 
 def test_missing_native_client_names_minimum(monkeypatch, tmp_path):
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lambda name: None)
     with pytest.raises(CodexNativeError, match=r"0\.163\.0 or later on PATH"):
         CodexNativeClient.for_scope(InstallScope.USER, tmp_path)
 
@@ -129,7 +129,7 @@ def test_admitted_client_fails_closed_on_malformed_app_server(monkeypatch, tmp_p
 def test_project_scope_refusal_does_not_probe_or_write(monkeypatch, tmp_path):
     """Unsupported project intent must not leak into the user's native configuration."""
     lookup = Mock(side_effect=AssertionError("native binary must not be probed"))
-    monkeypatch.setattr("shutil.which", lookup)
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lookup)
     with pytest.raises(CodexNativeError, match="user scope"):
         CodexNativeClient.for_scope(InstallScope.PROJECT, tmp_path)
     assert not list(tmp_path.iterdir())
@@ -139,7 +139,7 @@ def test_project_scope_refusal_does_not_probe_or_write(monkeypatch, tmp_path):
 def test_qualified_client_uses_resolved_executable(monkeypatch, tmp_path):
     """The qualified binary is resolved once and used without a shell."""
     binary = tmp_path / "native client"
-    monkeypatch.setattr("shutil.which", lambda name: str(binary))
+    monkeypatch.setattr("apm_cli.utils.git_env.trusted_executable", lambda name: str(binary))
     run = Mock(return_value=subprocess.CompletedProcess([], 0, "codex-cli 0.163.0\n", ""))
     monkeypatch.setattr(subprocess, "run", run)
     client = CodexNativeClient.for_scope(InstallScope.USER, tmp_path)

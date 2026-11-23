@@ -648,6 +648,7 @@ install-deployment-bundle-user-scope-root
 install-deployment-bundle-native-layout
 install-deployment-base-integrator
 install-deployment-cleanup-ownership-release
+install-deployment-cleanup-spelling-aliases
 install-deployment-cleanup-target-roots
 install-deployment-cleanup-retains-kept-members
 install-deployment-cached-claude-skill-metadata
@@ -682,12 +683,14 @@ install-deployment-locked-copy-validity
 install-deployment-lockfile-required
 install-deployment-locked-source-cache
 install-deployment-package-content-hash
+install-deployment-reanchor-receipt-history
 install-deployment-receipt-collection
 install-deployment-skill-layout
 install-deployment-skill-preflight
 install-deployment-skill-adoption-baseline
 install-deployment-skill-adoption-trusted-receipt
 install-deployment-selection-merge
+install-deployment-server-name-rule
 install-deployment-locked-skill-subset-reconstruction
 install-deployment-lsp-capability-gate
 install-deployment-lsp-lifecycle
@@ -852,6 +855,7 @@ transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
 transport-platform-deploy-store-verified-reads
 transport-platform-egress-route-policy
+transport-platform-external-executable-owner
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight

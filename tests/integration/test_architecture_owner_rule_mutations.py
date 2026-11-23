@@ -67,6 +67,18 @@ def _shared_linter_session() -> Iterator[LinterSession]:
     ("path", "original", "replacement"),
     [
         pytest.param(
+            "src/apm_cli/utils/archive.py",
+            "stream = _BoundedStream(compressed, cap)",
+            "stream = compressed",
+            id="tar-stream-unbounded",
+        ),
+        pytest.param(
+            "src/apm_cli/deps/registry/extractor.py",
+            "open_tar_gz(fileobj=io.BytesIO(data), error_type=UnsafeTarballError)",
+            'tarfile.open(fileobj=io.BytesIO(data), mode="r:gz")',
+            id="registry-tar-opened-raw",
+        ),
+        pytest.param(
             "src/apm_cli/deps/registry/extractor.py",
             "    safe_extract_tar(tar, dest_root, error_type=UnsafeTarballError)",
             "    tar.extractall(dest_root)",
@@ -887,9 +899,9 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/hook_integrator.py",
-            '                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:\n',
-            '                with open(json_path, "w", encoding="utf-8") as f:\n',
-            id="raw-open-for-write",
+            '                write_seam.write_text(json_path, json.dumps(data, indent=2) + "\\n")\n',
+            '                json_path.write_text(json.dumps(data, indent=2) + "\\n")\n',
+            id="raw-write-text",
         ),
         pytest.param(
             "src/apm_cli/integration/cleanup.py",
@@ -918,14 +930,35 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
         ),
         pytest.param(
             "src/apm_cli/integration/write_seam.py",
-            "    record_before_write(destination, follow=True)\n"
-            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
-            "    return atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    record_before_write(destination, follow=True, expected=_file_hash(source))\n"
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=True)",
             id="seam-writer-skips-record",
         ),
         pytest.param(
+            "src/apm_cli/integration/write_seam.py",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=False)\n"
+            "    record_after_write(destination, follow=True)\n",
+            "    copied = atomic_io.atomic_copy(source, destination, metadata=False)\n",
+            id="seam-writer-skips-seal",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "        writer(path, text)\n        write_seam.record_after_write(path)\n",
+            "        writer(path, text)\n",
+            id="direct-recorder-skips-seal",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift.py",
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n\n"
+            "from apm_cli.integration.write_seam import record_before_write\n\n\n"
+            "def _unlisted(path):\n    record_before_write(path)\n",
+            id="unlisted-direct-recorder",
+        ),
+        pytest.param(
             "src/apm_cli/install/transaction.py",
-            "            write_seam.listen(self._record_deploy_write)\n",
+            "            write_seam.listen(self._record_deploy_write, self._seal_deploy_write)\n",
             "            pass\n",
             id="transaction-not-listening",
         ),
@@ -2537,6 +2570,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Cleanup drops the integrate phase's skip set and deletes a kept member.",
     ),
     MutationCase(
+        guard_id="install-deployment-cleanup-spelling-aliases",
+        rule_id="install-deployment-cleanup-spelling-aliases",
+        path="src/apm_cli/integration/cleanup.py",
+        old="        return (key, *self._spellings.aliases(key, self._deploy_root))\n",
+        new="        return (key,)\n",
+        intent="Consent stops pooling case-variant spellings, so one file reads as two claims.",
+    ),
+    MutationCase(
         guard_id="install-deployment-cleanup-target-roots",
         rule_id="install-deployment-cleanup-target-roots",
         path="src/apm_cli/integration/base_integrator.py",
@@ -2988,6 +3029,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Prune stops reconciling deployment provenance through the state owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-reanchor-receipt-history",
+        rule_id="install-deployment-reanchor-receipt-history",
+        path="src/apm_cli/core/deployment_reanchor.py",
+        old="            self._dirty = True\n        self.flush()\n",
+        new="            self._history.forget(key)\n            self._dirty = True\n        self.flush()\n",
+        intent="A re-anchored owner's receipts lose their hash history (#4889).",
+    ),
+    MutationCase(
         guard_id="install-deployment-receipt-collection",
         rule_id="install-deployment-receipt-collection",
         path="src/apm_cli/install/pipeline.py",
@@ -3036,6 +3085,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="                        self._record_edge_selection(sub_dep, node)\n",
         new="                        self._note_edge(sub_dep, node)\n",
         intent="A transitive edge reaches queue dedup without being recorded for the merge.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-server-name-rule",
+        rule_id="install-deployment-server-name-rule",
+        path="src/apm_cli/models/dependency/lsp.py",
+        old='        validate_server_name(self.name, "LSP")\n',
+        new='        if not self.name.isprintable():\n            raise ValueError("bad LSP name")\n',
+        intent="LSP server names stop using the shared server-name rule.",
     ),
     MutationCase(
         guard_id="install-deployment-single-file-materialization",
@@ -3823,6 +3880,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The update auth preflight probes source hosts without asking the egress-route owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/utils/git_env.py",
+        old="        return _resolve_trusted_executable(name)\n",
+        new="        return shutil.which(name)\n",
+        intent="The helper owner searches PATH, working directory included, itself.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -4453,6 +4518,92 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="self._az_command = trusted_executable(az_command)",
+        new="self._az_command = shutil.which(az_command)",
+        intent="The az bearer lookup locates az with shutil.which outside the helper owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/install/audit_replay.py",
+        old='(get_git_executable(), "-C", str(project_root)',
+        new='("git", "-C", str(project_root)',
+        intent="The audit tracked-files probe launches a bare git program name.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            '        argv = ["git", *inert_git_args(), *args]\n'
+            "        return subprocess.run(\n            argv,"
+        ),
+        intent="The lock evidence probe launches a bare git name held in a local argv.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launch\n\n"
+            '        return launch(\n            ["git", *inert_git_args(), *args],'
+        ),
+        intent="The lock evidence probe launches a bare git name through an aliased import.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/codex_plugins/client.py",
+        old='                [executable, "--version"],',
+        new='                [executable, "--version"],\n                executable="codex",',
+        intent="The codex version probe overrides its resolved path with a literal executable.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="            self._az_command = trusted_executable(az_command)",
+        new="            from shutil import which as find\n\n            self._az_command = find(az_command)",
+        intent="The az bearer lookup calls shutil.which through a from-import alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="            self._az_command = trusted_executable(az_command)",
+        new="            import shutil as sh\n\n            self._az_command = sh.which(az_command)",
+        intent="The az bearer lookup calls shutil.which through a module alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/install/audit_replay.py",
+        old='        completed = subprocess.run(\n            (get_git_executable(), "-C"',
+        new='        completed = subprocess.run(\n            args=("git", "-C"',
+        intent="The audit tracked-files probe passes a bare git name as the args keyword.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        argv: list[str] = ["git", *inert_git_args(), *args]\n        return subprocess.run(\n            argv,',
+        intent="The lock evidence probe holds a bare git name in an annotated local argv.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import functools\n\n        return functools.partial(subprocess.run, executable="git")(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches through functools.partial with a literal executable.",
+    ),
+    MutationCase(
         guard_id="install-deployment-gate-retirement",
         rule_id="install-deployment-gate-retirement",
         path="src/apm_cli/commands/uninstall/engine.py",
@@ -4643,6 +4794,34 @@ def test_owner_rules_report_nothing_before_mutation(
             "claude_project_enabled = project_mcp_cleanup_reachable(",
             'claude_project_enabled = (project_root_path / ".claude").is_dir() or bool(',
             id="claude-mcp-cleanup-regates-on-opt-in-dir-3664",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/integration/mcp_integrator.py",
+            "if delete_emptied and delete_emptied_config(config_path, root=config_path.parent, empty=empty):",
+            "if delete_emptied and empty and not write_seam.unlink(config_path):",
+            id="mcp-cleanup-deletes-an-emptied-file-without-provenance-4867",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/integration/hook_ownership.py",
+            "return delete_emptied_config(json_path, root=root, empty=hook_file_emptied(data, defaults))",
+            "return hook_file_emptied(data, defaults) and not json_path.unlink()",
+            id="hook-cleanup-deletes-an-emptied-file-without-provenance-4867",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/integration/hook_integrator.py",
+            "if modified and remove_emptied_hook_file(json_path, data, defaults or {}, root):",
+            "if modified and not write_seam.unlink(json_path):",
+            id="hook-reconcile-deletes-an-emptied-file-without-provenance-4867",
+        ),
+        pytest.param(
+            "install-deployment-mcp-ownership-migration",
+            "src/apm_cli/install/mcp/retired_destinations.py",
+            "if delete_emptied_config(path, root=project_root, empty=emptied):",
+            "if emptied and not path.unlink():",
+            id="retired-heal-deletes-an-emptied-file-without-provenance-4867",
         ),
         pytest.param(
             "install-deployment-outcome",

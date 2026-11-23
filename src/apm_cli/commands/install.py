@@ -131,7 +131,7 @@ from apm_cli.install.services import (
     _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
 from apm_cli.install.summary import render_post_install_summary as _post_install_summary
-from apm_cli.install.transaction import InstallTransaction
+from apm_cli.install.transaction import InstallTransaction, replay_before_install_entry
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -851,6 +851,8 @@ def _handle_mcp_install(  # noqa: PLR0913
         retry_args=builtins.tuple(retry_args),
         no_policy=no_policy,
     )
+    # Policy warnings this entry collected render as the pipeline's do (#4957).
+    logger.render_summary()
 
 
 @click.command(
@@ -1236,7 +1238,7 @@ def install(  # noqa: PLR0913
     )
     _source_root = Path.cwd()
     _root_redirect = install_root_redirect(root, dry_run=dry_run)
-    _root_redirect.__enter__()
+    _created_root = _root_redirect.__enter__()
     try:
         check_current_cli(
             _get_apm_dir(_InstallScope.USER if global_ else _InstallScope.PROJECT),
@@ -1259,6 +1261,10 @@ def install(  # noqa: PLR0913
             no_policy=no_policy,
             dry_run=dry_run,
             logger=logger,
+        )
+        # Every entry, before it writes: replay what a killed install left (#4863).
+        replay_before_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT, dry_run=dry_run, logger=logger
         )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
@@ -1703,7 +1709,7 @@ def install(  # noqa: PLR0913
     finally:
         # Restore cwd before summary rendering, regardless of the exit path.
         # Always close the transaction even if root restoration fails.
-        close_install_contexts(_root_redirect, transaction)
+        close_install_contexts(_root_redirect, transaction, _created_root, command_result)
         if dry_run_manifest_tmp is not None:
             dry_run_manifest_tmp.cleanup()
         # F5 (#1116): render minimal elapsed-time line on exit paths that

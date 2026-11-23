@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 
 from tests.lifecycle.generator import covering
-from tests.lifecycle.generator.bin_pin import predicate_digest
+from tests.lifecycle.generator.bin_pin import predicate_digest, user_org_policy_digest
 from tests.lifecycle.generator.factors import (
     EXCEPTION_FACTORS,
     FACTORS,
@@ -282,7 +282,10 @@ def _build() -> tuple[dict[str, Any], dict[str, object], dict[str, str]]:
             for key, (target, chain) in sorted(space.mapped.items())
         },
         "removed": {key: list(rules) for key, rules in sorted(space.removed.items())},
-        "pins": {"U-BIN": predicate_digest()},
+        "pins": {
+            "U-BIN": predicate_digest(),
+            "U-USER-SCOPE-ORG-POLICY": user_org_policy_digest(),
+        },
     }
     return document, _counts(space, statuses, lanes, rows), rendered
 

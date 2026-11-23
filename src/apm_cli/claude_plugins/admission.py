@@ -23,7 +23,8 @@ from apm_cli.deps.plugin_parser import (
     parse_plugin_manifest,
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.server_names import is_reserved_server_name
+from apm_cli.models.dependency.subsets import has_skill_selection
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.native_plugins.scopes import CLAUDE, COPILOT, plugin_harnesses, record_harnesses
 from apm_cli.security.trust_fingerprint import native_plugin_fingerprint
@@ -376,7 +377,7 @@ def _intact_source(
             "it has no .claude-plugin/plugin.json, so Claude cannot load it intact",
             f"Ask the publisher to add .claude-plugin/plugin.json, {_EXCLUDE_CLAUDE}",
         )
-    if skill_subset_filter_tokens(skill_subset) is not None:
+    if has_skill_selection(skill_subset):
         return _Ineligible(
             "Claude loads whole plugins, so its skills: selection cannot be honored",
             f"Remove the skills: selection to install the complete plugin, {_EXCLUDE_CLAUDE}",
@@ -428,7 +429,34 @@ def _unsupported_capability(root: Path, manifest: dict[str, Any]) -> _Ineligible
     escaping = _escaping_component_path(root, manifest)
     if escaping is not None:
         return _Ineligible(escaping, f"Ask the publisher to fix the manifest, {_EXCLUDE_CLAUDE}")
+    reserved = _reserved_server_name(root, manifest)
+    if reserved is not None:
+        return _Ineligible(
+            f"its server name '{reserved}' is a reserved object key "
+            "(__proto__, constructor, prototype)",
+            f"Ask the publisher to rename the server, {_EXCLUDE_CLAUDE}",
+        )
     return None
+
+
+def _reserved_server_name(root: Path, manifest: dict[str, Any]) -> str | None:
+    """The first MCP or LSP server key Claude could load that is a reserved key.
+
+    Reads raw keys from every source: all MCP declarations whatever their
+    transport, the manifest's ``lspServers`` and every LSP file at the root.
+    """
+    import logging
+
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers, _read_lsp_file
+
+    names: list[str] = []
+    claude_native_mcp_servers(root, manifest, keys=names)
+    names.extend(str(name) for name in _extract_lsp_servers(root, manifest))
+    quiet = logging.getLogger("apm.native-admission")
+    for candidate in ("com.microsoft.apm/lsp.json", "lsp.json", ".lsp.json"):
+        if (root / candidate).is_file():
+            names.extend(str(name) for name in _read_lsp_file(root, candidate, quiet))
+    return next((name for name in names if is_reserved_server_name(name)), None)
 
 
 def plan_native_claude_plugin(
@@ -484,8 +512,7 @@ def plan_native_claude_plugin(
     if (package_type is not PackageType.MARKETPLACE_PLUGIN and not normalized_virtual) or (
         not user_scope
         and (
-            not (root / ".claude-plugin/plugin.json").is_file()
-            or skill_subset_filter_tokens(skill_subset) is not None
+            not (root / ".claude-plugin/plugin.json").is_file() or has_skill_selection(skill_subset)
         )
     ):
         return None
