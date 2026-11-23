@@ -38,23 +38,91 @@ def _is_literal(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-def _launch_names(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], set[str]]:
-    """Return local spellings of subprocess launchers, the subprocess module and os."""
+_ASYNC_LAUNCHERS = frozenset({"create_subprocess_exec", "create_subprocess_shell"})
+_BINDERS = frozenset({"partial", "partialmethod"})
+_Names = tuple[set[str], set[str], set[str], set[str]]
+
+
+def _dotted(node: ast.AST) -> str | None:
+    """Return ``a.b.c`` for a Name/Attribute chain, else ``None``."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _launch_names(nodes: tuple[ast.AST, ...]) -> _Names:
+    """Return local spellings of launch functions and of the subprocess, os and asyncio modules.
+
+    Asyncio modules include ``asyncio.subprocess`` under any import spelling;
+    launch functions include from-imports and every name or attribute
+    assigned a launcher, directly or through another alias.
+    """
     functions: set[str] = set()
     subprocess_modules = {"subprocess"}
     os_modules = {"os"}
+    asyncio_modules = {"asyncio", "asyncio.subprocess"}
     for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
+                local = alias.asname or alias.name
                 if alias.name == "subprocess":
-                    subprocess_modules.add(alias.asname or alias.name)
+                    subprocess_modules.add(local)
                 elif alias.name == "os":
-                    os_modules.add(alias.asname or alias.name)
+                    os_modules.add(local)
+                elif alias.name in {"asyncio", "asyncio.subprocess"}:
+                    asyncio_modules.add(local)
         elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
             functions.update(
                 alias.asname or alias.name for alias in node.names if alias.name in _LAUNCHERS
             )
-    return functions, subprocess_modules, os_modules
+        elif isinstance(node, ast.ImportFrom) and node.module in {"asyncio", "asyncio.subprocess"}:
+            for alias in node.names:
+                if alias.name in _ASYNC_LAUNCHERS:
+                    functions.add(alias.asname or alias.name)
+                elif alias.name == "subprocess":
+                    asyncio_modules.add(alias.asname or alias.name)
+    names = (functions, subprocess_modules, os_modules, asyncio_modules)
+    # Aliases may be annotated, target an attribute (``self.run = ...``) or
+    # chain through other aliases in any order, so resolve to a fixpoint.
+    assignments = [
+        (node.targets if isinstance(node, ast.Assign) else [node.target], node.value)
+        for node in nodes
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for targets, value in assignments:
+            if not _is_launcher_ref(value, names):
+                continue
+            for target in targets:
+                spelled = _dotted(target)
+                if spelled is not None and spelled not in functions:
+                    functions.add(spelled)
+                    changed = True
+    return names
+
+
+def _is_launcher_ref(expr: ast.AST, names: _Names) -> bool:
+    """Whether *expr* names a program launcher under the file's import spellings."""
+    functions, subprocess_modules, os_modules, asyncio_modules = names
+    if isinstance(expr, ast.Name):
+        return expr.id in functions
+    if not isinstance(expr, ast.Attribute):
+        return False
+    if _dotted(expr) in functions:
+        return True
+    owner, attr = _dotted(expr.value), expr.attr
+    return (
+        (owner in subprocess_modules and attr in _LAUNCHERS)
+        or (owner in asyncio_modules and attr in _ASYNC_LAUNCHERS)
+        or (owner in os_modules and attr.startswith(("exec", "spawn", "posix_spawn")))
+    )
 
 
 def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
@@ -85,27 +153,23 @@ def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
     return lines
 
 
-def _program_arg(node: ast.Call, names: tuple[set[str], set[str], set[str]]) -> ast.AST | None:
-    """Return the argument naming the program if *node* launches one, else ``None``."""
-    functions, subprocess_modules, os_modules = names
-    func = node.func
-    first = node.args[0] if node.args else None
-    if first is None:
-        first = next((kw.value for kw in node.keywords if kw.arg in {"args", "program"}), None)
-    if isinstance(func, ast.Name):
-        return first if func.id in functions else None
-    if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+def _program_arg(node: ast.Call, names: _Names) -> ast.AST | None:
+    """Return the argument naming the program if *node* launches one, else ``None``.
+
+    ``partial(<launcher>, ...)`` and ``partialmethod(<launcher>, ...)`` count as
+    launches with their bound arguments.
+    """
+    func, args = node.func, list(node.args)
+    binder = (_dotted(func) or "").rpartition(".")[2]
+    if binder in _BINDERS and args and _is_launcher_ref(args[0], names):
+        func, args = args[0], args[1:]
+    elif not _is_launcher_ref(func, names):
         return None
-    owner, attr = func.value.id, func.attr
-    if owner in subprocess_modules and attr in _LAUNCHERS:
-        return first
-    if owner == "asyncio" and attr == "create_subprocess_exec":
-        return first
-    if owner in os_modules and attr.startswith(("exec", "posix_spawn")):
-        return first
-    if owner in os_modules and attr.startswith("spawn"):
-        return node.args[1] if len(node.args) > 1 else None
-    return None
+    if isinstance(func, ast.Attribute) and func.attr.startswith("spawn"):
+        return args[1] if len(args) > 1 else None
+    if args:
+        return args[0]
+    return next((kw.value for kw in node.keywords if kw.arg in {"args", "program", "cmd"}), None)
 
 
 def _bare_launch_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
@@ -146,17 +210,24 @@ def _may_launch(facts: object) -> bool:
     """Cheap fact prefilter: only files that can launch or look up a program get a tree scan.
 
     Call facts keep the written spelling, so any call whose final attribute is
-    a launcher or ``which`` qualifies whatever its module alias; a ``from``
-    import of a launch module covers bare-name calls.
+    a launcher, ``which`` or a ``partial`` binder qualifies whatever its module
+    alias; a ``from`` import of a launch module covers bare-name calls.
     """
     for call in getattr(facts, "calls", ()):
         attr = call.qualname.rpartition(".")[2]
-        if attr in _LAUNCHERS or attr in {"which", "create_subprocess_exec"}:
+        if attr in _LAUNCHERS or attr in _ASYNC_LAUNCHERS or attr in _BINDERS or attr == "which":
             return True
         if attr.startswith(("exec", "spawn", "posix_spawn")):
             return True
+    # A plain ``import subprocess`` / ``import asyncio`` can feed a local
+    # launcher alias whose calls carry no launcher fact; ``os`` is left out
+    # because nearly every module imports it and its launchers keep facts.
     return any(
-        fact.module is not None and fact.module.split(".")[0] in _LAUNCH_MODULES
+        (fact.module is not None and fact.module.split(".")[0] in _LAUNCH_MODULES)
+        or (
+            fact.module is None
+            and any(name.split(".")[0] in {"subprocess", "asyncio"} for name in fact.names)
+        )
         for fact in getattr(facts, "imports", ())
     )
 

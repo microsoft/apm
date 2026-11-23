@@ -248,14 +248,15 @@
     },
     {
       "id": "file-level-deploy-sync-cleanup",
-      "decision": "File-level deploy / sync / cleanup",
+      "decision": "File-level deploy / sync / cleanup; after an aborted uninstall hook sync, a removed file drops its claim only when commands/uninstall/hook_absence.py proves it absent under the pinned deploy root (#4851)",
       "owner": "BaseIntegrator (successful source-member inventory and skip outcomes via copy_directory_files; SkillIntegrationResult completion after rewrite/hash; services consumes positive public completion into owner-scoped receipts; install-time package-relative link rewriting via resolve_links, including Codex agent conversion; content adoption via _check_adopt_or_skip(expected_content=rendered) for every transforming agent writer (render, then adopt, then write the same text) and for command writers (CommandIntegrator._rendered_command); a differing managed file is replaced only with this checkout's trusted receipt or bytes equal to the locked render (OverwriteGate bound by recorded_writes, #4360), never on a lockfile hash, decided by keeps_unproven_file for file primitives (_check_adopt_or_skip) and for hook files, copied hook scripts and canvas bundles (keeps_edited_output; a bundle with a kept member is left whole, #4626); case/normalization-only spellings of a live deployed path resolve through utils/paths (stored_alias in check_collision, a SpellingAliasIndex built once per inventory in remove_stale_deployed_files, physical_alias for one-shot queries); a stale skill directory left only for user content is released (CleanupResult.released), never retained; a member the install declared but left unwritten (DeploymentEvidence.kept, fed by the skill integrator's skip channel) is retained before any deletion gate, never stale; see integrators.instructions.md)",
       "selectors": [
         "src/apm_cli/integration/base_integrator.py",
         "src/apm_cli/integration/cleanup.py",
         "src/apm_cli/integration/command_integrator.py",
         "src/apm_cli/install/services.py",
-        "src/apm_cli/install/phases/cleanup.py"
+        "src/apm_cli/install/phases/cleanup.py",
+        "src/apm_cli/commands/uninstall/hook_absence.py"
       ],
       "guards": [
         "install-deployment-base-integrator",
@@ -477,10 +478,11 @@
     {
       "id": "local-bundle-hook-trust",
       "decision": "Whether a deployed local bundle's hooks and canvas extensions are still admitted by the approval key that admitted them, under the current project, user and org trust (#4027)",
-      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; consumers: commands/install.py, commands/update.py, commands/prune.py, policy/ci_checks.py",
+      "owner": "install/local_bundle_hook_trust.py (deployed_bundle_hook_keys, unadmitted_bundle_hooks, retire_unadmitted_bundle_hooks, reconcile_scope_bundle_hooks); the approval record is written and read only by integration/hook_ownership.py (local_bundle_hook_source_marker, parse_local_bundle_hook_source); retirement, including a bundle reinstall (retire_bundle_hooks, #4216), goes through HookIntegrator.retire_local_bundle_hooks from this owner only; install/local_bundle_canvas.py gate_bundle_canvas gates a bundle's canvas extensions and retires them with this owner's helpers; 'apm uninstall <bundle>' selects a bundle in commands/uninstall/local_bundle.py and retires its deployed hooks through retire_bundle_hooks (#3700); consumers: commands/install.py, commands/update.py, commands/prune.py, commands/uninstall/local_bundle.py, policy/ci_checks.py",
       "selectors": [
         "src/apm_cli/install/local_bundle_hook_trust.py",
-        "src/apm_cli/install/local_bundle_canvas.py"
+        "src/apm_cli/install/local_bundle_canvas.py",
+        "src/apm_cli/commands/uninstall/local_bundle.py"
       ],
       "guards": [
         "install-deployment-local-bundle-hook-trust",

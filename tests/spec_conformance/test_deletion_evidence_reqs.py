@@ -1310,3 +1310,63 @@ def test_consent_keeps_a_member_replaced_by_a_link_after_the_scan(tmp_path: Path
     assert (outside / "notes.md").read_text(encoding="utf-8") == "outside\n"
     assert linked not in result.rejected and linked in evidence.kept_under_consent()
     assert nested in result.rejected
+
+
+@pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_cowork_member_replaced_by_a_link_after_the_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cowork member swapped for an outward link after the scan is kept, not failed (#5022)."""
+    cowork = tmp_path / "cowork-skills"
+    skill = "cowork://skills/alpha"
+    edited, linked = f"{skill}/SKILL.md", f"{skill}/notes.md"
+    files = {edited: "skill\n", linked: "notes\n"}
+    for claim, text in files.items():
+        path = cowork / claim.removeprefix("cowork://skills/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    hashes = {
+        claim: compute_file_hash(cowork / claim.removeprefix("cowork://skills/")) for claim in files
+    }
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path / "project",
+        receipts={},
+        render=_no_render,
+        owners={skill: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={claim: frozenset({value}) for claim, value in hashes.items()},
+    )
+    evidence.consent_to_lockfile_hashes()
+    (cowork / "alpha/SKILL.md").write_text("my edit\n", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside\n", encoding="utf-8")
+    member = cowork / "alpha/notes.md"
+    proven = evidence.verdict
+
+    def scan_then_user_relinks(claim: str, physical: Path, **kwargs) -> str:
+        verdict = proven(claim, physical, **kwargs)
+        if claim == linked and not member.is_symlink():
+            try:
+                member.unlink()
+                os.symlink(outside, member)
+            except (OSError, NotImplementedError):
+                pytest.skip("symbolic links are unavailable")
+        return verdict
+
+    evidence.verdict = scan_then_user_relinks
+
+    result = remove_stale_deployed_files(
+        [skill],
+        tmp_path / "project",
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes=hashes,
+        receipt_retirements=[],
+    )
+
+    assert member.is_symlink() and outside.read_text(encoding="utf-8") == "outside\n"
+    assert linked not in result.failed and skill not in result.failed, result.failed
+    assert linked not in result.rejected and linked in evidence.kept_under_consent()
