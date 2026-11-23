@@ -11,6 +11,9 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+# Bind audit_replay's run_replay before any test patches drift.run_replay, so a
+# first import inside that patch cannot capture the mock (state-leak guard).
+import apm_cli.install.audit_replay  # noqa: F401
 from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
