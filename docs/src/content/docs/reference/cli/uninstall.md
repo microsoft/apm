@@ -231,6 +231,11 @@ still on disk. Direct and orphan directories run first and may already be gone;
 declarations remain. Resolve the listed files and retry the same uninstall
 command.
 
+A file the removed package shares with your project's own content or a local
+bundle (`apm install <bundle>`) stays on disk and in `apm.lock.yaml` under that
+owner. If uninstall reports a package failure, it exits nonzero instead of
+printing `Uninstall complete`.
+
 If a managed hook changes after the initial check or is beneath a symlinked
 parent, uninstall preserves and lists the path. Package removal finishes, but the
 command exits nonzero because hook cleanup is incomplete. Inspect or repair the

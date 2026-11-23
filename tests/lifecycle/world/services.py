@@ -171,15 +171,19 @@ def policy_documents() -> dict[str, dict[str, object] | str]:
                 "deny": ["**/p-native-claude", "**/p-native-codex", "**/p-native-claude-bin"]
             },
         },
-        # Every package the M-GATE matrix declares (machines/_gate_matrix.py).
+        # Every dependency the M-GATE matrix declares (machines/_gate_matrix.py):
+        # its packages and, through ``**`` (``*`` stays in one segment), the
+        # namespaced registry server ``install --mcp`` requests.
         "deny-all-deps": {
             "name": "deny-all-deps",
             **base,
             "dependencies": {
                 "deny": [
-                    f"**/{name}" for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed")
+                    f"**/{name}"
+                    for name in ("p-skill", "p-exec", "p-lsp", "p-canvas", "p-mixed", "p-bmix")
                 ]
             },
+            "mcp": {"deny": ["**"]},
         },
         "scripts-deny": {"name": "scripts-deny", **base, "manifest": {"scripts": "deny"}},
         "unmanaged-deny": {

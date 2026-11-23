@@ -38,13 +38,20 @@ from ..utils.archive import (
     write_zip_archive,
 )
 from ..utils.atomic_io import write_text_lf
-from ..utils.console import _rich_warning
+from ..utils.console import _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
 from .credential_files import refuse_credential_files
 from .packer import PackResult
-from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
+from .plugin_layout import (
+    PLUGIN_ROOT_DIRS,
+    deployed_rendering_extension,
+    deployed_rendering_rank,
+    deployed_rendering_suffix,
+    find_plugin_root_sources,
+    superseded_plugin_renderings,
+)
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -699,7 +706,14 @@ def _plugin_rel_for_deployed_path(
     else:
         return None
 
-    if plugin_parts[0] == "commands" and plugin_parts[-1].endswith(".prompt.md"):
+    # Only a .prompt.md rendering renames; a target's native Markdown command
+    # or prompt (Claude commands/, Kiro prompts/) keeps its stem.
+    native_suffix = deployed_rendering_suffix(PurePosixPath(*parts).as_posix())
+    if (
+        native_suffix in (None, ".prompt.md")
+        and plugin_parts[0] == "commands"
+        and plugin_parts[-1].endswith(".prompt.md")
+    ):
         plugin_parts[-1] = _rename_prompt(plugin_parts[-1])
     return PurePosixPath(*plugin_parts).as_posix()
 
@@ -808,17 +822,30 @@ def _append_deployed_component(
     components: list[tuple[Path, str]],
     source: Path,
     output_rel: str,
-    seen_outputs: set[str],
+    seen_outputs: dict[str, set[Path]],
     project_root: Path,
     dep: LockedDependency,
 ) -> None:
-    """Append one deployed component unless it is unsafe or already mapped."""
-    if output_rel in seen_outputs or not _validate_output_rel(output_rel):
+    """Append one deployed component unless it is unsafe or already mapped.
+
+    A repeated output path is dropped, except a further target rendering of a
+    primitive (``.claude/commands/x.md`` and ``.github/prompts/x.prompt.md``):
+    every rendering stays a candidate for ``_drop_same_path_renderings``
+    (#3686).
+    """
+    if not _validate_output_rel(output_rel):
+        return
+    seen = seen_outputs.get(output_rel)
+    if seen is not None and (
+        source in seen
+        or deployed_rendering_rank(portable_relpath(source, project_root)) is None
+        or any(deployed_rendering_rank(portable_relpath(p, project_root)) is None for p in seen)
+    ):
         return
     if source.is_file() and not source.is_symlink():
         _verify_attested_hash(source, project_root, dep)
         components.append((source, output_rel))
-        seen_outputs.add(output_rel)
+        seen_outputs.setdefault(output_rel, set()).add(source)
 
 
 def _collect_deployed_components(
@@ -828,7 +855,7 @@ def _collect_deployed_components(
     """Collect dependency components from lockfile deployed_files entries."""
     components: list[tuple[Path, str]] = []
     missing: list[str] = []
-    seen_outputs: set[str] = set()
+    seen_outputs: dict[str, set[Path]] = {}
     skill_subset = skill_subset_filter_tokens(dep.skill_subset)
 
     for rel_path in dep.deployed_files:
@@ -1088,8 +1115,21 @@ def _collect_lsp_servers(
     return dict(sorted(servers.items())), sorted(names - servers.keys())
 
 
+def _deployed_path(source: Path, project_root: Path, rendered: dict[Path, str]) -> str | None:
+    """Return the deployed (project-relative) path a packed source was read from.
+
+    Rules rendered into a pack temp root (*rendered*) keep their deployed path.
+    """
+    if source in rendered:
+        return rendered[source]
+    try:
+        return portable_relpath(source, project_root)
+    except ValueError:
+        return None
+
+
 def _routed_rule_components(
-    lockfile, project_root: Path, dependency_keys: set[str]
+    lockfile, project_root: Path, dependency_keys: set[str], rendered: dict[Path, str]
 ) -> dict[str, list[tuple[Path, str]]]:
     """Render Claude rules #3939 routed to AGENTS.md as plugin instructions.
 
@@ -1112,6 +1152,7 @@ def _routed_rule_components(
     for dep_key, rules in routed.items():
         dep_root = rendered_root / hashlib.sha256(dep_key.encode()).hexdigest()[:16]
         write_routed_claude_rules(dep_root, rules)
+        rendered.update({dep_root / rel: rel for rel in rules})
         components[dep_key] = [
             (dep_root / rel, plugin_rel)
             for rel in sorted(rules)
@@ -1196,6 +1237,7 @@ def export_plugin_bundle(
     #    file_map: output_rel_posix -> (source_abs, owner_name)
     file_map: dict[str, tuple[Path, str]] = {}
     collisions: list[str] = []
+    dropped_renderings: list[str] = []
     merged_hooks: dict = {}
     merged_mcp: dict = {}
 
@@ -1211,8 +1253,9 @@ def export_plugin_bundle(
             or (dep.repo_url, getattr(dep, "virtual_path", "") or "") in dev_dep_urls
         )
     ]
+    rendered_rules: dict[Path, str] = {}
     routed_rules = _routed_rule_components(
-        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}
+        lockfile, project_root, {dep.get_unique_key() for dep in packed_deps}, rendered_rules
     )
     if lockfile:
         for dep in packed_deps:
@@ -1257,7 +1300,10 @@ def export_plugin_bundle(
             # shared settings is not surprised by the exclusion.
             _warn_unpacked_dependency_config(dep, install_path, dep_components, logger)
 
-            _merge_file_map(file_map, dep_components + dep_routed, dep_name, force, collisions)
+            dep_components = _drop_duplicate_renderings(
+                dep_components + dep_routed, project_root, rendered_rules, dropped_renderings
+            )
+            _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
     # 6. Collect own components according to the local source authority.
     from ..core.plugin_manifest import PLUGIN_ECOSYSTEM_PATHS
@@ -1304,6 +1350,9 @@ def export_plugin_bundle(
     ):
         _warn_no_local_primitives(logger)
 
+    own_components = _drop_duplicate_renderings(
+        own_components, project_root, rendered_rules, dropped_renderings
+    )
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
     hook_resources.validate_outputs(
         file_map,
@@ -1338,7 +1387,8 @@ def export_plugin_bundle(
         else:
             _rich_warning(message, symbol="warning")
 
-    # 7. Emit collision warnings
+    # 7. Name the dropped renderings, then emit collision warnings
+    _report_dropped_renderings(dropped_renderings, logger)
     for msg in collisions:
         if logger:
             logger.warning(msg)
@@ -1439,6 +1489,7 @@ def export_plugin_bundle(
         "plugin",
         target or "all",
         bundle_files=bundle_files,
+        renderings=_packed_renderings(file_map, project_root, rendered_rules),
     )
     write_text_lf(bundle_dir / "apm.lock.yaml", enriched_yaml)
 
@@ -1459,8 +1510,58 @@ def export_plugin_bundle(
 
 
 # ---------------------------------------------------------------------------
-# Collision handling
+# Rendering selection and collision handling
 # ---------------------------------------------------------------------------
+
+
+def _drop_duplicate_renderings(
+    components: list[tuple[Path, str]],
+    project_root: Path,
+    rendered: dict[Path, str],
+    dropped: list[str],
+) -> list[tuple[Path, str]]:
+    """Keep one rendering per primitive of one package (#3686).
+
+    A multi-target install deploys a primitive once per target (for example
+    ``.claude/agents/rv.md`` and ``.github/agents/rv.agent.md``); the bundle
+    carries only the rendering :mod:`.plugin_layout` prefers, and each dropped
+    one is named by its deployed path. Distinct primitives that share a plugin
+    path stay a collision for :func:`_merge_file_map` to report.
+    """
+    deployed = [_deployed_path(source, project_root, rendered) for source, _rel in components]
+    superseded = superseded_plugin_renderings(deployed)
+    dropped.extend(deployed[index] or "" for index in sorted(superseded))
+    return [component for index, component in enumerate(components) if index not in superseded]
+
+
+def _packed_renderings(
+    file_map: dict[str, tuple[Path, str]], project_root: Path, rendered: dict[Path, str]
+) -> dict[str, str]:
+    """Record the deploying target's extension of every packed file (#3686).
+
+    Taken from the final *file_map* winner, after rendering deduplication and
+    collision resolution, so a consumer never lowers a file by the provenance
+    of a dropped or displaced one. Own sources carry no entry.
+    """
+    renderings: dict[str, str] = {}
+    for rel, (source, _owner) in file_map.items():
+        deployed = _deployed_path(source, project_root, rendered)
+        if deployed and (extension := deployed_rendering_extension(deployed)):
+            renderings[rel] = extension
+    return renderings
+
+
+def _report_dropped_renderings(dropped: list[str], logger=None) -> None:
+    """Name every per-target duplicate rendering pack left out, on one line."""
+    if not dropped:
+        return
+    message = "Packed one rendering per primitive; dropped per-target duplicates: " + ", ".join(
+        dict.fromkeys(dropped)
+    )
+    if logger:
+        logger.info(message)
+    else:
+        _rich_info(message, symbol="info")
 
 
 def _merge_file_map(
