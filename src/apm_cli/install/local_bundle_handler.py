@@ -174,26 +174,14 @@ def install_local_bundle(
             # approve its content (RA-035). admit_bundle reuses this verdict.
             integrity_check(False)
 
-        bundle_mcp_deps: list[MCPDependency] = []
-        bundle_mcp_declared = False
-        if bundle_info.lockfile is not None:
-            pack = bundle_info.lockfile.get("pack") or {}
-            bundle_files = pack.get("bundle_files") or {}
-            if isinstance(bundle_files, dict):
-                bundle_mcp_declared = any(
-                    str(path).lower() in {".mcp.json", "mcp.json"} for path in bundle_files
-                )
-        elif bundle_info.source_dir is not None:
-            bundle_mcp_declared = any(
-                path.is_file() and path.name.lower() in {".mcp.json", "mcp.json"}
-                for path in bundle_info.source_dir.iterdir()
-            )
-        bundle_mcp_deps = (
+        from ..bundle.local_bundle import bundle_declares_mcp
+
+        bundle_mcp_deps: list[MCPDependency] = (
             _parse_legacy_bundle_mcp_servers(
                 bundle_info.source_dir,
                 bundle_format=bundle_info.format,
             )
-            if bundle_mcp_declared and bundle_info.source_dir is not None
+            if bundle_declares_mcp(bundle_info) and bundle_info.source_dir is not None
             else []
         )
         bundle_lsp_deps = (
