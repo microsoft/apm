@@ -272,19 +272,21 @@ def test_a_windows_key_created_by_apm_is_private(project: Path) -> None:
     assert key.stat().st_size == 32
 
 
-def test_an_expired_record_misses(project: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
-    """A record is valid for a day at most, so a new org policy always reaches a hit."""
-    monkeypatch.setattr(verdict_record, "_RECORD_MAX_AGE", -1)
+def test_a_record_expires_with_its_oldest_cached_policy(project: Path, capsys) -> None:
+    """Valid at most for the code-capped policy TTL, so a new org policy always reaches a hit."""
+    import json
+    import time
+
+    from apm_cli.policy import discovery
+
+    assert verdict_record._POLICY_TTL_CAP == discovery.DEFAULT_CACHE_TTL
+    meta = project.parent / "cache" / "policy_v1" / "k" / "src.meta.json"
+    meta.parent.mkdir(parents=True)
+    meta.write_text(json.dumps({"cached_at": time.time() - 2 * 3600}), encoding="utf-8")
     _record()
     capsys.readouterr()
     assert verdict_record.replay(["install"]) is False
     assert capsys.readouterr().out == ""
-
-
-def test_the_policy_ttl_cap_is_the_policy_owner_s() -> None:
-    from apm_cli.policy import discovery
-
-    assert verdict_record._POLICY_TTL_CAP == discovery.DEFAULT_CACHE_TTL
 
 
 def test_a_home_inside_the_project_never_records_or_hits(
