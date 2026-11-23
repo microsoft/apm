@@ -1120,3 +1120,36 @@ def test_hook_bundle_link_leaving_the_package_cannot_be_pinned(tmp_path: Path) -
     with pytest.raises(ValueError, match=r"escapes|outside"):
         hook_file_fingerprint(tmp_path / "pkg", hook)
     assert outside.read_text(encoding="utf-8") == "export const x = 1;\n"
+
+
+@pytest.mark.parametrize(
+    ("allow", "deny", "refused"),
+    [
+        (None, ("other",), True),
+        (("srv",), (), False),
+        (("srv",), ("srv",), False),
+        (("other",), (), True),
+    ],
+    ids=["no-allow", "listed", "listed-and-denied", "unlisted"],
+)
+def test_transitive_eligibility_reads_mcp_allow_alone_on_both_paths(
+    allow: tuple[str, ...] | None, deny: tuple[str, ...], refused: bool
+) -> None:
+    """Admission and the policy check agree; mcp.deny is left to the deny check (req-sc-016)."""
+    from dataclasses import replace
+
+    from apm_cli.policy.policy_checks import mcp_policy_checks
+    from apm_cli.policy.schema import McpPolicy
+
+    policy = ApmPolicy(
+        enforcement="block", mcp=McpPolicy(allow=allow, deny=deny, trust_transitive=False)
+    )
+    admission = McpAdmission(None, one_off=True, org_policy=lambda: policy)
+    server = MCPDependency.from_dict(
+        {"name": "srv", "registry": False, "transport": "stdio", "command": "x"}
+    )
+    transitive = replace(server, resolved_by="leaf", declared_depth=2)
+    verdicts = {check.name: check.passed for check in mcp_policy_checks([transitive], policy)}
+    assert admission.refuses_transitive("srv") is refused
+    assert verdicts["mcp-trust-transitive"] is not refused
+    assert verdicts["mcp-denylist"] is ("srv" not in deny)

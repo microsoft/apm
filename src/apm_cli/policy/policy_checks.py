@@ -798,18 +798,14 @@ def _check_mcp_trust_transitive(mcp_deps: list, policy: McpPolicy) -> CheckResul
     re-declared by the root apm.yml) passes only when ``mcp.allow`` lists it
     (req-sc-016). A direct dependency's server is not transitive.
     """
-    from .matcher import check_mcp_allowed
+    from ..security.trust import transitive_server_listed
 
     if policy.trust_transitive:
         return _trust_transitive_result(())
     root = {m.name for m in mcp_deps if not getattr(m, "resolved_by", None)}
     transitive = sorted({m.name for m in mcp_deps if getattr(m, "declared_depth", 0) > 1} - root)
     return _trust_transitive_result(
-        [
-            name
-            for name in transitive
-            if policy.allow is None or not check_mcp_allowed(name, policy)[0]
-        ]
+        [name for name in transitive if not transitive_server_listed(name, policy)]
     )
 
 

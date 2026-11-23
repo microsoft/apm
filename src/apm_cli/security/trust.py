@@ -248,6 +248,18 @@ def resolve_registry_entry(dependency: Any) -> dict[str, Any] | None:
     }
 
 
+def transitive_server_listed(name: str, mcp: Any) -> bool:
+    """Whether org ``mcp.allow`` lists transitive server *name* (req-sc-016).
+
+    The one eligibility decision under ``mcp.trust_transitive: false``, for
+    admission and the policy check alike. Only the allow list decides it;
+    ``mcp.deny`` is judged by its own check.
+    """
+    from apm_cli.policy.matcher import first_matching_pattern
+
+    return mcp.allow is not None and first_matching_pattern(name, mcp.allow) is not None
+
+
 class McpAdmission:
     """MCP admission inputs for one command run.
 
@@ -425,9 +437,7 @@ class McpAdmission:
         # preflight warns, as for mcp.deny (policy_checks.mcp_policy_checks).
         if mcp is None or mcp.trust_transitive or getattr(policy, "enforcement", None) != "block":
             return False
-        from apm_cli.policy.matcher import check_mcp_allowed
-
-        return mcp.allow is None or not check_mcp_allowed(name, mcp)[0]
+        return not transitive_server_listed(name, mcp)
 
     def _fingerprint(self, declaration: Any, package_keys: tuple[str, ...], needs_trust: bool):
         registry_entry = None
