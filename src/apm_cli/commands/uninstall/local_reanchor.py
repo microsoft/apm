@@ -215,8 +215,17 @@ def reparent_rows(
         if parent_row is not None:
             resolved_by[key] = lockfile_parent_identity(parent_row, lockfile.replacements)
         row = lockfile.get_dependency(key)
-        if row is not None and row.source == "local" and key not in skip and row.declaring_parent:
-            first = nearest[0]
+        # A legacy local row (no declaring_parent) re-parented by prune takes
+        # the new parent's local_path too, or it would resolve elsewhere.
+        if (
+            row is not None
+            and row.source == "local"
+            and key not in skip
+            and (row.declaring_parent or locked_identity)
+        ):
+            # A legacy row resolves local_path against resolved_by, so it takes
+            # that parent's edge; others keep install's first shallowest edge.
+            first = nearest[0] if row.declaring_parent else parent_key
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
     return declaring_parents, resolved_by
 
