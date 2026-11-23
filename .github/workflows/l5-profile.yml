@@ -101,3 +101,28 @@ jobs:
         echo "== dlopen of yaml/_yaml in the frozen process"
         grep -E "file=.*yaml/_yaml[^ ]*\.so" "$proj/ld.txt" | head -3
         grep -qE "file=.*yaml/_yaml[^ ]*\.so" "$proj/ld.txt"
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: harness
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: '3.12'
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        enable-cache: false
+    - name: Checkout CLI under test
+      run: |
+        set -euo pipefail
+        sha=$(cat harness/scripts/perf/l5_target_sha)
+        git -C harness fetch --quiet --no-tags origin "$sha"
+        git -C harness worktree add --quiet --detach ../new FETCH_HEAD
+    - name: Unit and quality suites
+      working-directory: new
+      run: |
+        uv sync --frozen --extra dev --quiet
+        uv run --frozen pytest tests/unit tests/quality/test_quality_baselines.py -n 4 -q -p no:cacheprovider 2>&1 | grep -E "^(FAILED|ERROR)|passed|failed" | tail -60
+        exit ${PIPESTATUS[0]}
