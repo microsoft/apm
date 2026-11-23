@@ -609,8 +609,9 @@ class Cell:
             return "BLOCKED", f"harness auth failed ({auth}); partial: " + ", ".join(
                 k for k, v in sig.items() if v
             )
-        if self.evidence.get("blocked") and not any(runtime):
-            return "BLOCKED", self.evidence["blocked"]
+        if self.evidence.get("blocked"):
+            partial = ", ".join(k for k, v in sig.items() if v) or "none"
+            return "BLOCKED", f"{self.evidence['blocked']}; partial: {partial}"
         missing = "missing: " + ", ".join(k for k, v in sig.items() if not v)
         return ("PARTIAL" if any(runtime) else "DOES NOT LOAD"), missing
 
