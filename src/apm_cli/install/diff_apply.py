@@ -34,6 +34,8 @@ from pathlib import Path
 from typing import Any
 
 # Escapes a JSON/TOML/YAML reader decodes into codepoints the ASCII guard cannot see.
+# The destination name the commit reserves a scratch slot for; never published.
+_SCRATCH = ".apm-fast-apply"
 _ESCAPE = re.compile(rb"\\(?:u|U|x|N\{)")
 
 
@@ -256,9 +258,9 @@ def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, stag
     return staging
 
 
-def _commit_package(staging: Path, install_path: Path) -> None:
-    install_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(staging), str(install_path))
+def _publish(staging: Any, replacement: Path) -> None:
+    """Activate one complete package copy: a rename inside ``apm_modules``."""
+    staging.publish_replacement(replacement)
 
 
 def _discard_staging(staging: Path) -> None:
@@ -277,14 +279,25 @@ def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> 
         raise Decline("orphaned output")
 
 
-def _write(path: Path, data: bytes) -> None:
-    """Create *path* with *data* (never replaces), with the mode a normal write gets."""
+def _write(path: Path, data: bytes, scratch: Path) -> None:
+    """Create *path* with *data*, all or nothing, never replacing an existing file.
+
+    The bytes go to a scratch file on the same filesystem first; a hard link
+    (a rename on Windows, which never replaces) then makes the whole file
+    appear at once, so an interrupted apply leaves no partial file behind.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     mask = os.umask(0)
     os.umask(mask)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 & ~mask)
+    # The scratch file goes with the staging root the commit or rollback removes.
+    fd, temp = tempfile.mkstemp(dir=scratch)
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
+    os.chmod(temp, 0o666 & ~mask)
+    if os.name == "nt":
+        os.rename(temp, path)
+    else:
+        os.link(temp, path)
 
 
 def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) -> bool:
@@ -446,20 +459,34 @@ def _commit(
     restores every path and drops the output, so the full pipeline runs from
     the pre-run tree and prints its own outcome once.
     """
+    from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.deps.lockfile import get_lockfile_path
     from apm_cli.install.fast_output import held_output, quiet
+    from apm_cli.install.resolution_staging import ResolutionStagingSession
     from apm_cli.install.transaction import ApplyRestoreIncomplete, journaled_apply
 
+    modules = project_root / APM_MODULES_DIR
+    # Package copies and file bytes are staged inside apm_modules, on the
+    # project's filesystem, so each one appears by a single rename or link.
+    # An interrupted run leaves only an inactive staging root the next
+    # install removes (install/resolution_staging.py).
+    staging = ResolutionStagingSession(modules)
     try:
         with held_output() as held, journaled_apply() as journal:
             # The services phase may rewrite the lock outside the write seam.
             journal.record(get_lockfile_path(project_root))
-            for staging, install_path in staged:
-                journal.record(install_path)
-                _commit_package(staging, install_path)
+            scratch = staging.prepare_replacement(modules / _SCRATCH)
+            scratch.mkdir()
+            replacements = []
+            for source, install_path in staged:
+                replacement = staging.prepare_replacement(install_path)
+                shutil.copytree(source, replacement, symlinks=True)
+                replacements.append(replacement)
+            for replacement in replacements:
+                _publish(staging, replacement)
             for path, data, _digest, _owner in files:
                 journal.record(path)
-                _write(path, data)
+                _write(path, data, scratch)
             if recheck:
                 with quiet():
                     _audit_passes(project_root, fetch, content_integrity=False)
@@ -470,10 +497,16 @@ def _commit(
                 session.record(written, targets, owner)
             session.flush()
             render()
-    except (Decline, ApplyRestoreIncomplete):
-        raise
-    except Exception as exc:  # an interrupt still restores, then propagates
+    except BaseException as exc:
+        # The journal has put every deployed path back; the packages go next.
+        prior = exc.issues if isinstance(exc, ApplyRestoreIncomplete) else []
+        issues = [*prior, *staging.rollback()]
+        if issues:
+            raise ApplyRestoreIncomplete(issues) from exc
+        if isinstance(exc, Decline) or not isinstance(exc, Exception):
+            raise  # an interrupt is restored, then propagates
         raise Decline(f"write failed ({type(exc).__name__})") from exc
+    staging.commit()
     held.release()
 
 
@@ -487,6 +520,7 @@ def try_apply(
 ) -> bool:
     """Apply the verified diff and return True; False (with a trace reason) runs the full pipeline."""
     from apm_cli.install import noop_diff
+    from apm_cli.install.transaction import ApplyRestoreIncomplete
 
     if not noop_diff.eligible(options, argv):
         _trace("full run (options)")
@@ -573,6 +607,8 @@ def try_apply(
     except Decline as exc:
         _trace(f"full run ({exc})")
         return False
+    except ApplyRestoreIncomplete:
+        raise  # the tree is not the pre-run tree: never run the full pipeline on it
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False

@@ -76,3 +76,38 @@ def test_a_plain_fast_run_may_write_the_lockfile(project: Path, capsys) -> None:
     assert code == 0
     assert _NOTICE not in output
     assert "added-by-the-fast-run" in (project / "apm.lock.yaml").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("restored", [True, False], ids=["restored", "restore-incomplete"])
+def test_a_failed_restore_stops_and_never_runs_the_full_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, restored: bool
+) -> None:
+    """The real engine: an incomplete restore exits 1 and names it; only a clean one falls back."""
+    from apm_cli.commands.install import install as real_install
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.transaction import ApplyRestoreIncomplete
+
+    (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
+    (tmp_path / "apm.lock.yaml").write_text(_LOCK, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for name in ("CI", "APM_INSTALL_FAST_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    stuck = tmp_path / ".github" / "prompts" / "a.prompt.md"
+
+    def failing_read(path):
+        raise OSError("disk full") if restored else ApplyRestoreIncomplete([(stuck, "in use")])
+
+    full_runs: list[dict] = []
+    monkeypatch.setattr(LockFile, "read", staticmethod(failing_read))
+    monkeypatch.setattr(real_install, "callback", lambda **kwargs: full_runs.append(kwargs))
+
+    code, output = _run(["install"], capsys)
+
+    if restored:
+        assert code == 0
+        assert len(full_runs) == 1, "a clean restore falls back to the full pipeline"
+    else:
+        assert code == 1
+        assert full_runs == [], "the full pipeline never runs on a partly restored tree"
+        assert "could not be restored" in output
+        assert f"Deploy restore path {stuck}: in use" in output

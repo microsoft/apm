@@ -61,6 +61,9 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
             removals = calls & _REMOVALS
             if func.name == "_discard_staging":
                 assert removals == {"rmtree"}
+            elif func.name == "_write":
+                # Windows only: a rename there fails on an existing file (never replaces).
+                assert removals == {"rename"}
             else:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
@@ -233,6 +236,7 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert not (project / ".github").exists()
     assert keep.read_text(encoding="utf-8") == "user\n"
     assert lock.read_text(encoding="utf-8") == "locked\n"
+    assert not (project / "apm_modules").exists(), "the staging root goes with the rollback"
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
@@ -260,6 +264,8 @@ def test_an_incomplete_restore_stops_instead_of_falling_back(
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
     target = tmp_path / "x.md"
     target.write_text("user\n", encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
     with pytest.raises(FileExistsError):
-        diff_apply._write(target, b"apm\n")
+        diff_apply._write(target, b"apm\n", scratch)
     assert target.read_text(encoding="utf-8") == "user\n"
