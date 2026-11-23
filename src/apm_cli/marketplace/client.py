@@ -791,10 +791,11 @@ def _fetch_git(
     target = Path(checkout_dir) / file_path
     if not target.exists():
         return None
+    from ..cache.checkout_verify import read_verified_file
+
     try:
-        with open(target, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError, RecursionError, MemoryError) as exc:
+        return json.loads(read_verified_file(Path(checkout_dir), file_path))
+    except (OSError, ValueError, RecursionError, MemoryError, RuntimeError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
 
 

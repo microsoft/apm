@@ -1110,8 +1110,8 @@ def integrate_local_bundle(
             else:
                 desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
 
-            # Skip an existing file with different content unless --force.
-            if not dry_run and dest.exists() and not force:
+            # Skip an existing file with different content unless --force (a dry run too).
+            if dest.exists() and not force:
                 try:
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
                 except OSError:
