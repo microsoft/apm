@@ -550,6 +550,17 @@ class TestMCPDependencyHardening:
         dep = MCPDependency.from_string("valid-name")
         assert dep.name == "valid-name"
 
+    @pytest.mark.parametrize(
+        "name", ["__proto__", "constructor", "prototype", "__PROTO__", "Constructor", "PROTOTYPE"]
+    )
+    def test_reserved_object_key_name_rejected(self, name):
+        with pytest.raises(ValueError, match=rf"Invalid MCP dependency name '{name}': reserved"):
+            MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    @pytest.mark.parametrize("name", ["proto", "my-constructor", "prototype-server", "_proto_"])
+    def test_name_containing_reserved_word_accepted(self, name):
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
     def test_from_string_fails_for_invalid_name(self):
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
             MCPDependency.from_string("bad name with space")
