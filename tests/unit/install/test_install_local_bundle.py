@@ -1177,6 +1177,21 @@ class TestLocalBundlePathRouting:
         assert not (project / ".claude/rules/evil.md").exists()
         assert result["deployed_files"] == [".claude/rules/good.md"]
 
+    def test_hidden_character_in_a_yaml_set_is_still_scanned(self, tmp_path: Path) -> None:
+        """#3686: a decoded override character inside a !!set member is not hidden by repr."""
+        project, result, _diagnostics = self._install_bundle_files(
+            tmp_path,
+            {
+                "instructions/evil.instructions.md": (
+                    "---\napplyTo: '**/*.py'\nextra: !!set {\"x\\u202ey\": null}\n---\nbody\n"
+                ),
+                "instructions/good.instructions.md": "---\napplyTo: '**/*.py'\n---\nbody\n",
+            },
+            "claude",
+        )
+        assert not (project / ".claude/rules/evil.md").exists()
+        assert result["deployed_files"] == [".claude/rules/good.md"]
+
     def test_hidden_character_in_decoded_frontmatter_rejects_the_rule(self, tmp_path: Path) -> None:
         """#3686: packed rules pass the instruction owner's decoded-frontmatter preflight."""
         from apm_cli.utils.diagnostics import CATEGORY_WARNING
