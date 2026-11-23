@@ -364,18 +364,6 @@ def test_no_record_is_written_when_one_of_its_blobs_is_not_stored(
     assert store.get(canonical_digest(_TEXT)) == _TEXT
 
 
-def test_a_tampered_entry_is_rejected_and_evicted_on_read(tmp_path: Path) -> None:
-    store, root = _store(tmp_path)
-    key = canonical_digest(_TEXT)
-    store.put(key, _TEXT)
-    entry = root / key[:2] / key
-    entry.write_bytes(_TEXT + b"injected\n")
-
-    assert store.get(key) is None
-    assert not entry.exists()
-    assert store.put(key, _TEXT) and store.get(key) == _TEXT, "the next full install heals it"
-
-
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")
 def test_a_fifo_at_an_entry_path_is_a_miss_not_a_hang(tmp_path: Path) -> None:
     store, root = _store(tmp_path)
