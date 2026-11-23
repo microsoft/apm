@@ -507,7 +507,16 @@ def test_a_wrong_kind_object_larger_than_a_pipe_never_hangs_the_reader(tmp_path:
 
 
 @pytest.mark.parametrize(
-    "where", [".git", "pkg/.git", ".GIT", "pkg/.Git", ".git.", "GIT~1", "pkg/.git "]
+    "where",
+    [
+        ".git",
+        "pkg/.git",
+        ".GIT",
+        "pkg/.Git",
+        ".git.",
+        "GIT~1",
+        pytest.param("pkg/.git ", marks=_POSIX_ONLY),  # Win32 cannot create the name
+    ],
 )
 def test_a_copy_holding_a_git_entry_is_refused(tmp_path: Path, where: str) -> None:
     repo, sha = _plain_repo(tmp_path)
@@ -529,3 +538,33 @@ def test_nested_attribute_macros_expand_as_git_expands_them(tmp_path: Path) -> N
     (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
 
     assert verify_checkout(repo, sha, env=neutral_git_env())
+
+
+def _within(seconds: float, call):
+    import threading
+
+    outcome: list[object] = []
+    worker = threading.Thread(target=lambda: outcome.append(call()), daemon=True)
+    worker.start()
+    worker.join(timeout=seconds)
+    assert not worker.is_alive(), "attribute expansion did not finish"
+    return outcome[0]
+
+
+def test_widely_shared_macros_expand_once_each(tmp_path: Path) -> None:
+    levels = b"".join(b"[attr]m%d" % k + b" m%d" % (k + 1) * 4 + b"\n" for k in range(16))
+    attributes = levels + b"[attr]m16 text eol=crlf\npkg/*.md m0\n"
+    repo, sha = _attributes_repo(tmp_path, attributes)
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
+
+    assert _within(30, lambda: verify_checkout(repo, sha, env=neutral_git_env()))
+
+
+def test_a_macro_that_names_itself_is_not_verified(tmp_path: Path) -> None:
+    repo, sha = _attributes_repo(
+        tmp_path, b"[attr]loop loop loop loop loop\npkg/*.md loop text eol=crlf\n"
+    )
+    (repo / "pkg" / "AGENTS.md").write_bytes(b"Package instructions\r\n")
+
+    assert not _within(30, lambda: verify_checkout(repo, sha, env=neutral_git_env()))
+    assert (repo / "pkg" / "AGENTS.md").read_bytes() == b"Package instructions\r\n"

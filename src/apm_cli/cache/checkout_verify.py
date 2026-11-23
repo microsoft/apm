@@ -267,7 +267,6 @@ def _unquote(line: str) -> tuple[str, str] | None:
     return None
 
 
-_MACRO_DEPTH = 16
 # Names some file systems resolve to ".git": any case, trailing dots or spaces, 8.3 short names.
 _GIT_DIR_ALIAS = re.compile(r"(?:\.git|git~[0-9]+)[. ]*", re.IGNORECASE | re.ASCII)
 
@@ -285,6 +284,9 @@ class _Attributes:
         self._rules: dict[str, list[tuple[bool, re.Pattern[str], list[tuple[str, object]]]]] = {}
         self._unknown: set[str] = set()
         self._macros: dict[str, tuple[tuple[str, object], ...]] = dict(_BUILTIN_MACROS)
+        self._expanded: dict[str, tuple[tuple[str, object], ...]] = {}
+        self._expanding: set[str] = set()
+        self._cyclic = False
         self._load("")
 
     def _load(self, directory: str) -> None:
@@ -318,12 +320,31 @@ class _Attributes:
                 )
         self._rules[directory] = rules
 
-    def _apply(self, state: dict[str, object], name: str, value: object, depth: int = 0) -> None:
+    def _expansion(self, name: str) -> tuple[tuple[str, object], ...]:
+        """What macro *name* sets, nested macros included; each macro is expanded once."""
+        done = self._expanded.get(name)
+        if done is not None:
+            return done
+        if name in self._expanding:
+            self._cyclic = True  # a macro that names itself is not verified
+            return ()
+        self._expanding.add(name)
+        sequence: dict[str, object] = {}
+        for macro_name, macro_value in self._macros[name]:
+            steps = ((macro_name, macro_value),)
+            if macro_value is True and macro_name in self._macros:
+                steps += self._expansion(macro_name)
+            for step_name, step_value in steps:
+                sequence.pop(step_name, None)  # the last assignment wins, as in order
+                sequence[step_name] = step_value
+        self._expanding.discard(name)
+        self._expanded[name] = tuple(sequence.items())
+        return self._expanded[name]
+
+    def _apply(self, state: dict[str, object], name: str, value: object) -> None:
         state[name] = value
-        # Macros may name other macros; Git expands them in turn (bounded here).
-        if value is True and name in self._macros and depth < _MACRO_DEPTH:
-            for macro_name, macro_value in self._macros[name]:
-                self._apply(state, macro_name, macro_value, depth + 1)
+        if value is True and name in self._macros:
+            state.update(self._expansion(name))
 
     def state(self, path: str) -> dict[str, object] | None:
         """The attributes of *path*, or None when a ``.gitattributes`` cannot be read here."""
@@ -339,7 +360,7 @@ class _Attributes:
                 if regex.fullmatch(relative if anchored else parts[-1]):
                     for name, value in attributes:
                         self._apply(state, name, value)
-        return state
+        return None if self._cyclic else state
 
 
 def _accepted(attributes: _Attributes, attribute_path: str, blob: bytes) -> tuple[bytes, ...]:
