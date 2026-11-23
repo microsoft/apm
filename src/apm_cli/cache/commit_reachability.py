@@ -30,8 +30,13 @@ _REACH_REFSPECS = (
 )
 
 
+# Versioned: verdicts an earlier namespace recorded are never read, so a commit
+# an older build admitted without a check is verified again.
+_VERDICTS = "verified-v2"
+
+
 def _marker(cache_root: Path, shard_key: str, sha: str) -> Path:
-    return Path(cache_root) / "reachability" / shard_key / "verified" / sha
+    return Path(cache_root) / "reachability" / shard_key / _VERDICTS / sha
 
 
 class VerdictStage:
@@ -117,7 +122,7 @@ def _linked_dirs(path: Path, depth: int = 3) -> bool:
 def _write_marker(marker: Path, canonical: str) -> None:
     """Write a verdict as a new regular file, never through a planted link.
 
-    A linked ``verified``, shard or ``reachability`` directory records
+    A linked verdict, shard or ``reachability`` directory records
     nothing; the marker itself is replaced atomically, so a link at its
     path is replaced, never followed.
     """
@@ -387,9 +392,10 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
     Any other ref, including a hex-like name (a branch or tag first, else a
     commit abbreviation), is judged by the full commit *resolved* (or
     ``downloader.resolve_git_reference``) names: a commit this run read from
-    the origin's current branch or tag is a tip, so it is recorded as
-    reachable without a check; an expanded abbreviation or a commit replayed
-    from the lockfile is checked like any pin. Runs under the credentials the
+    the origin's current branch or tag listing is a tip, so it is recorded as
+    reachable without a check; a hex-like name (which the commits API may
+    have expanded), or a commit replayed from the lockfile, is checked at the
+    Git destination like any pin. Runs under the credentials the
     fetch would use.
 
     Raises:
@@ -399,11 +405,14 @@ def admit_pinned_commit(downloader, dep_ref, sha: str | None, resolved=None) -> 
         _require_at_origin(downloader, dep_ref, sha.lower())
         return
     commit, fresh_tip = _resolved_commit(downloader, dep_ref, resolved)
+    hex_name = bool(sha) and bool(_COMMIT_RE.match(sha))
     if commit is None:
-        if sha and _COMMIT_RE.match(sha):
+        if hex_name:
             raise CommitNotReachableError(f"Could not resolve {sha!r} to an origin commit.")
         return
-    if fresh_tip:
+    # A hex-like name may have been expanded by the hosting service's commits API,
+    # which observes no Git destination: its commit is verified where Git fetches.
+    if fresh_tip and not hex_name:
         _record_tip(downloader, dep_ref, commit)
         return
     _require_at_origin(downloader, dep_ref, commit.lower())

@@ -171,7 +171,7 @@ def test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused(
 ) -> None:
     """A rewritten lockfile pinning a commit only refs/pull/* reaches is refused."""
     _run_pull_only_replay(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch, None, no_cache)
-    assert not list((tmp_path / "cache2").rglob("verified/*"))
+    assert not list((tmp_path / "cache2").rglob("verified-v2/*"))
 
 
 @pytest.mark.req("req-rs-015")
@@ -195,7 +195,7 @@ def test_an_unverified_locked_replay_fails_closed_and_keeps_the_lockfile(
     assert replay.exit_code == 1, replay.output
     assert "needs network access once" in output
     assert (project / "apm.lock.yaml").read_bytes() == lock
-    assert not list((tmp_path / "c2").rglob("verified/*"))
+    assert not list((tmp_path / "c2").rglob("verified-v2/*"))
 
 
 @pytest.mark.req("req-rs-002")
