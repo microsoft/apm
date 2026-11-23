@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -1197,3 +1198,109 @@ def test_a_legacy_lockfile_migrated_by_the_attempt_follows_its_outcome(
     kept, gone = (legacy, current) if outcome == "rollback" else (current, legacy)
     assert kept.read_bytes() == b"lockfile_version: '1'\n"
     assert not gone.exists()
+
+
+# -- replay never takes a journal copy's mode bits (#5111) -----------------------------
+#
+# A copy is authenticated by its content hash only; its permission bits are not
+# evidence. Replay restores the mode the journal recorded when the path was first
+# touched, and only when that mode is valid permission bits and the identity and
+# content checks pass; anything else is kept and reported.
+
+_CONFIG_BYTES = b'{"mcpServers": {"s": {"command": "c"}}}\n'
+
+
+def _private_config(project: Path) -> tuple[Path, dict[str, str]]:
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(_CONFIG_BYTES)
+    config.chmod(0o600)
+    return config, {".mcp.json": compute_file_hash(config)}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_replay_never_takes_a_journal_copys_mode(tmp_path: Path, apm_home: Path) -> None:
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    (store / "0").chmod(0o666)  # the copy's bytes are unchanged; only its mode widened
+
+    restored = _replay(apm_home, project, lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert config.read_bytes() == _CONFIG_BYTES
+    assert config.stat().st_mode & 0o7777 == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_replay_never_takes_the_modes_inside_a_journal_copy_directory(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.utils.content_hash import compute_file_hash
+
+    project = tmp_path / "project"
+    skill = project / ".kiro" / "skills" / "s"
+    skill.mkdir(parents=True)
+    skill.chmod(0o750)
+    (skill / "SKILL.md").write_bytes(b"prior\n")
+    (skill / "SKILL.md").chmod(0o600)
+    (skill / "run.sh").write_bytes(b"#!/bin/sh\n")
+    (skill / "run.sh").chmod(0o700)
+    ledger = {
+        f".kiro/skills/s/{name}": compute_file_hash(skill / name) for name in ("SKILL.md", "run.sh")
+    }
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(skill)
+    (skill / "SKILL.md").write_bytes(b"killed\n")
+    journal.after_write(skill / "SKILL.md")
+    assert journal.store is not None
+    (journal.store / "0" / "SKILL.md").chmod(0o666)
+    (journal.store / "0" / "run.sh").chmod(0o777)
+    (journal.store / "0").chmod(0o777)
+
+    restored = _replay(apm_home, project, lambda: ledger)
+
+    assert (restored.restored, restored.kept) == (1, ())
+    assert (skill / "SKILL.md").read_bytes() == b"prior\n"
+    assert (skill / "SKILL.md").stat().st_mode & 0o7777 == 0o600
+    assert (skill / "run.sh").stat().st_mode & 0o7777 == 0o700
+    assert skill.stat().st_mode & 0o7777 == 0o750
+
+
+def _rewrite_unit_mode(store: Path, mode: object) -> None:
+    """Set (or, with ``...``, drop) the recorded mode of the journal's first unit."""
+    manifest = store / "journal.jsonl"
+    lines = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
+    unit = next(line for line in lines[1:] if "kind" in line)
+    unit.pop("mode", None)
+    if mode is not ...:
+        unit["mode"] = mode
+    manifest.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+@pytest.mark.parametrize(
+    "mode",
+    [..., "0600", -1, 0o10000, 0o4600, True],
+    ids=["older-apm-no-mode", "text", "negative", "out-of-range", "setuid", "bool"],
+)
+def test_a_unit_without_a_verifiable_mode_is_kept_and_reported(
+    tmp_path: Path, apm_home: Path, mode: object
+) -> None:
+    """Downgrade safety: a unit line an older apm wrote (no mode), or one whose mode is
+    not valid permission bits, is never restored with guessed permissions."""
+    from apm_cli.install.deploy_snapshot import JournalReplayError
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    store = _killed_journal(apm_home, project, config)
+    _rewrite_unit_mode(store, mode)
+
+    with pytest.raises(JournalReplayError) as kept:
+        _replay(apm_home, project, lambda: ledger)
+
+    assert kept.value.issues == [(".mcp.json", "the journal does not record a verifiable mode")]
+    assert config.read_bytes() == b"killed\n"
