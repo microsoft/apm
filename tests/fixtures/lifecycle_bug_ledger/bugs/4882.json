@@ -11,7 +11,7 @@
     "transaction.failed_command_preserves_state"
   ],
   "regression_tests": [
-    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_uninstall_refuses_a_local_dependency_another_package_still_needs",
-    "tests/integration/test_uninstall_shared_direct_dependency_lifecycle.py::test_still_needed_local_refusal_runs_before_pre_uninstall_scripts"
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_uninstall_reanchors_a_still_needed_local_dependency",
+    "tests/integration/test_uninstall_local_reanchor_lifecycle.py::test_a_forged_receipt_binding_refuses_the_reanchor"
   ]
 }
