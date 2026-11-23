@@ -55,8 +55,6 @@ def test_apply_path_never_deletes_outside_its_own_staging() -> None:
             removals = calls & _REMOVALS
             if func.name == "_discard_staging":
                 assert removals == {"rmtree"}
-            elif func.name == "_rollback_created":
-                assert removals <= {"rmtree", "unlink"}
             else:
                 assert not removals, f"{name}:{func.name} removes {removals}"
 
@@ -159,14 +157,29 @@ def test_escape_sequences_in_deployed_bytes_take_the_full_run(tmp_path: Path) ->
         diff_apply._plan_files(tmp_path, lock, records, deploy, {})
 
 
-def test_rollback_removes_exactly_what_apply_created(tmp_path: Path) -> None:
-    keep = tmp_path / "keep.md"
+def test_a_failure_while_rendering_restores_the_pre_run_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kill-mid-commit: the journal puts back every path the apply touched, then declines."""
+    project = tmp_path / "project"
+    keep = project / ".gitignore"
+    keep.parent.mkdir()
     keep.write_text("user\n", encoding="utf-8")
-    created: list[Path] = []
-    diff_apply._write(tmp_path / "a" / "b" / "new.md", b"x\n", created)
-    assert (tmp_path / "a" / "b" / "new.md").read_bytes() == b"x\n"
-    diff_apply._rollback_created(created)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.md"]
+    monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+    target = project / ".github" / "prompts" / "a.prompt.md"
+    session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
+
+    def render() -> None:
+        from apm_cli.integration import write_seam
+
+        write_seam.write_text(keep, "apm_modules/\n")
+        raise OSError("disk full")
+
+    files = [(target, b"x\n", _digest(b"x\n"), "o/p")]
+    with pytest.raises(Decline, match="write failed"):
+        diff_apply._commit(project, None, [], files, [], session, False, render)
+    assert not target.exists()
+    assert not (project / ".github").exists()
     assert keep.read_text(encoding="utf-8") == "user\n"
 
 
@@ -174,5 +187,5 @@ def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:
     target = tmp_path / "x.md"
     target.write_text("user\n", encoding="utf-8")
     with pytest.raises(FileExistsError):
-        diff_apply._write(target, b"apm\n", [])
+        diff_apply._write(target, b"apm\n")
     assert target.read_text(encoding="utf-8") == "user\n"

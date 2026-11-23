@@ -14,7 +14,8 @@ between that desired state and the disk, and fills it from the caches:
 The decision is final before the first write: the org policy gate is discovered
 live and the ``apm audit --ci`` baseline owner must pass (only the checks this
 apply fills may fail). APPLY only creates files; it never deletes or replaces
-anything, and a failure while writing rolls back exactly what it created.
+anything. The writes, the receipts and the rendered output's own writes share one
+journal: any failure restores the pre-run tree.
 Anything uncertain (a store miss, an edited deployed file, a symlink, an escape
 sequence, a lifecycle script, local or registry sources, any option) declines,
 and the full pipeline runs untouched. ``APM_INSTALL_FAST_PATH=0`` turns it off;
@@ -235,36 +236,14 @@ def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, stag
     return staging
 
 
-def _make_dirs(path: Path, created: list[Path]) -> None:
-    """``mkdir -p`` that journals every directory it creates."""
-    missing = []
-    current = path
-    while not current.exists():
-        missing.append(current)
-        current = current.parent
-    for directory in reversed(missing):
-        directory.mkdir()
-        created.append(directory)
-
-
-def _commit_package(staging: Path, install_path: Path, created: list[Path]) -> None:
-    _make_dirs(install_path.parent, created)
+def _commit_package(staging: Path, install_path: Path) -> None:
+    install_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(staging), str(install_path))
-    created.append(install_path)
 
 
 def _discard_staging(staging: Path) -> None:
     """Remove the engine's own ``mkdtemp`` staging root, outside the project."""
     shutil.rmtree(staging, ignore_errors=True)
-
-
-def _rollback_created(created: list[Path]) -> None:
-    """Undo exactly what this apply created (files, package copies, then empty dirs)."""
-    for path in reversed(created):
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            path.unlink(missing_ok=True)
 
 
 def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> None:
@@ -278,13 +257,12 @@ def _refuse_orphans(project_root: Path, lock: Any, receipts: dict[str, str]) -> 
         raise Decline("orphaned output")
 
 
-def _write(path: Path, data: bytes, created: list[Path]) -> None:
+def _write(path: Path, data: bytes) -> None:
     """Create *path* with *data* (never replaces), with the mode a normal write gets."""
-    _make_dirs(path.parent, created)
+    path.parent.mkdir(parents=True, exist_ok=True)
     mask = os.umask(0)
     os.umask(mask)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 & ~mask)
-    created.append(path)
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
 
@@ -438,20 +416,33 @@ def _commit(
     targets: Any,
     session: Any,
     recheck: bool,
+    render: Any,
 ) -> None:
-    """Create the decided state; on any failure remove exactly what was created and decline."""
-    from apm_cli.install.fast_output import quiet
+    """Create the decided state and print it inside one journal.
 
-    created: list[Path] = []
-    identity = Path(session.identity_path)
-    identity_files = [
-        p for p in (identity.parent / ".gitignore", identity, identity.parent) if not p.exists()
-    ]
+    The journal records every path this apply creates and, at the write seam,
+    every path the receipts, ``.gitignore`` and service owners write while the
+    output renders. Any failure restores all of it, so the tree returns to its
+    pre-run state, and the full pipeline runs.
+    """
+    from apm_cli.core.scope import get_apm_home
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.fast_output import quiet
+    from apm_cli.integration import write_seam
+
+    journal = DeployJournal(get_apm_home() / "install-snapshots")
+
+    def seam(path: Path, contents: bool) -> None:
+        journal.record(path, contents=contents)
+
+    write_seam.listen(seam)
     try:
         for staging, install_path in staged:
-            _commit_package(staging, install_path, created)
+            journal.record(install_path)
+            _commit_package(staging, install_path)
         for path, data, _digest, _owner in files:
-            _write(path, data, created)
+            journal.record(path)
+            _write(path, data)
         if recheck:
             with quiet():
                 _audit_passes(project_root, fetch, content_integrity=False)
@@ -461,12 +452,15 @@ def _commit(
         for owner, written in by_owner.items():
             session.record(written, targets, owner)
         session.flush()
+        render()
     except BaseException as exc:
-        # The receipts file is written atomically last; a fresh identity this run made goes too.
-        _rollback_created([*reversed(identity_files), *created])
+        write_seam.stop_listening(seam)
+        journal.restore()
         if isinstance(exc, Decline):
             raise
         raise Decline(f"write failed ({type(exc).__name__})") from exc
+    write_seam.stop_listening(seam)
+    journal.discard()
 
 
 def try_apply(
@@ -549,8 +543,17 @@ def try_apply(
                     else "no-op (desired state already deployed)"
                 )
                 return True
+
+            def render() -> None:
+                _render(project_root, lock, outcomes, packages, files, started, frozen_disposition)
+
             # The decision is final: nothing above wrote to the project or HOME.
-            _commit(project_root, fetch, staged, files, targets, session, recheck)
+            _commit(project_root, fetch, staged, files, targets, session, recheck, render)
+            _trace(
+                f"applied a verified diff ({len(files)} files)"
+                if files or packages
+                else "no-op (desired state already deployed)"
+            )
         finally:
             _discard_staging(stage_root)
     except Decline as exc:
@@ -559,35 +562,37 @@ def try_apply(
     except Exception as exc:
         _trace(f"full run (error: {type(exc).__name__})")
         return False
-    count = len(files)
-    _trace(
-        f"applied a verified diff ({count} files)"
-        if count or packages
-        else "no-op (desired state already deployed)"
-    )
+    return True
+
+
+def _render(
+    project_root: Path,
+    lock: Any,
+    outcomes: list,
+    packages: list,
+    files: list,
+    started: float,
+    frozen_disposition: Any,
+) -> None:
+    """Print the full run's lines through its own owners (install/fast_output.py)."""
     from apm_cli.core.scope import manifest_file
     from apm_cli.install import fast_output
     from apm_cli.models.apm_package import APMPackage
 
-    # The full run's own owners print the same lines (install/fast_output.py).
     copied = {str(install_path) for _c, install_path, _s in packages}
-    bodies = {o.key: _body_printer(o.body) for o in outcomes}
-    installed = sum(
-        1 for o in outcomes if o.files_written or str(_install_path(project_root, o.dep)) in copied
+    fetched = frozenset(
+        o.key for o in outcomes if str(_install_path(project_root, o.dep)) in copied
     )
     fast_output.render(
         project_root,
         lock,
         APMPackage.from_apm_yml(manifest_file(project_root)),
         started=started,
-        bodies=bodies if (count or packages) else None,
-        installed=installed,
+        bodies={o.key: _body_printer(o.body) for o in outcomes} if (files or packages) else None,
+        installed=sum(1 for o in outcomes if o.files_written or o.key in fetched),
         frozen_disposition=frozen_disposition,
-        fetched=frozenset(
-            o.key for o in outcomes if str(_install_path(project_root, o.dep)) in copied
-        ),
+        fetched=fetched,
     )
-    return True
 
 
 def _body_printer(body: tuple[str, ...]) -> Any:
