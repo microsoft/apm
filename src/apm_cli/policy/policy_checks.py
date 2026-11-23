@@ -562,15 +562,6 @@ def _check_required_package_version(
     )
 
 
-def depth_limit_check(chains: Sequence[str], max_depth: int) -> CheckResult:
-    """The ``transitive-depth`` verdict for chains resolution cut at *max_depth* (#4826)."""
-    return _subjects_result(
-        "transitive-depth",
-        f"{len(chains)} dependency chain(s) exceed max depth {max_depth}",
-        [PolicySubject(chain, f"exceeds limit {max_depth}", remedy=None) for chain in chains],
-    )
-
-
 def _check_transitive_depth(
     lock: LockFile | None,
     policy: DependencyPolicy,

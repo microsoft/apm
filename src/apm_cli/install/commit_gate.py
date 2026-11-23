@@ -459,7 +459,7 @@ def refuse_policy_depth_limit(ctx: InstallContext, policy: Any, chains: Sequence
     """Refuse the chains resolution cut at the policy's ``max_depth``, before any deploy."""
     if not chains:
         return
-    from apm_cli.policy.policy_checks import depth_limit_check
+    from apm_cli.policy.depth_check import depth_limit_check
 
     _enforce_install_policy_checks(
         ctx, policy, [depth_limit_check(chains, policy.dependencies.max_depth)]
