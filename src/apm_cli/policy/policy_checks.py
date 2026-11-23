@@ -2040,17 +2040,17 @@ def run_policy_checks(
     from ..models.apm_package import package_target_selection
 
     manifest_decision = EffectiveTargetDecision(package_target_selection(manifest), "apm.yml")
-    if _run(
-        _check_compilation_target(
-            manifest_decision.canonical_targets,
-            policy.compilation,
-            source=manifest_decision.source,
+    if (
+        _run(
+            _check_compilation_target(
+                manifest_decision.canonical_targets,
+                policy.compilation,
+                source=manifest_decision.source,
+            )
         )
+        or _run(_check_compilation_strategy(raw_yml, policy.compilation))
+        or _run(_check_source_attribution(raw_yml, policy.compilation))
     ):
-        return result
-    if _run(_check_compilation_strategy(raw_yml, policy.compilation)):
-        return result
-    if _run(_check_source_attribution(raw_yml, policy.compilation)):
         return result
 
     # Manifest checks (14-15)
