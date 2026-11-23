@@ -701,7 +701,7 @@ def test_native_comparison_distinguishes_json_types():
     assert MCPClientAdapter.json_identical({"a": 1, "b": 2}, {"b": 2, "a": 1})
 
 
-def _recorded_user_claude(tmp_path, monkeypatch, *, recorded_hash: bool):
+def _recorded_user_claude(tmp_path, monkeypatch, *, recorded_hash: bool, registry: bool = False):
     """A self-defined server APM wrote to ~/.claude.json, as the lockfile records it."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.deps.lockfile import LockFile
@@ -709,10 +709,10 @@ def _recorded_user_claude(tmp_path, monkeypatch, *, recorded_hash: bool):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     stored = {"name": "srv", "registry": False, "transport": "stdio", "command": "srv-bin"}
+    if registry:
+        stored = {"name": "srv"}
     client = ClaudeClientAdapter(project_root=tmp_path / "project", user_scope=True)
-    native = client.render_server_config(
-        MCPIntegrator._build_self_defined_info(MCPDependency.from_dict(stored))
-    )
+    native = {"type": "stdio", "command": "srv-bin"}
     path = Path(client.get_config_path())
     path.write_text(json.dumps({"mcpServers": {"srv": native}}), encoding="utf-8")
     lock = LockFile()
@@ -748,6 +748,37 @@ def test_a_hand_edited_recorded_user_claude_entry_is_reported(tmp_path, monkeypa
 def test_a_recorded_entry_without_a_fingerprint_is_not_reported(tmp_path, monkeypatch) -> None:
     """Without a recorded fingerprint there is nothing APM recorded to compare against."""
     lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=False)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    assert _edited_entries(lock, tmp_path) == []
+    assert path.read_bytes() == before
+
+
+def test_a_hand_edited_user_entry_advises_the_user_scope_install(tmp_path, monkeypatch) -> None:
+    """The audit remedy for a user-scope entry runs the user-scope install."""
+    from apm_cli.policy.ci_checks import _edited_native_mcp_entries
+
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True)
+    path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
+    before = path.read_bytes()
+
+    (check,) = _edited_native_mcp_entries(
+        tmp_path / "project", lock, [SimpleNamespace(name="claude")], user_scope=True
+    )
+
+    assert check.name == "native-mcp-drift" and not check.passed
+    assert "then run 'apm install -g'" in check.message, check.message
+    assert check.details == [
+        f"MCP server 'srv' in {path.absolute().as_posix()} (claude): the entry differs "
+        "from what APM recorded writing"
+    ]
+    assert path.read_bytes() == before
+
+
+def test_an_edited_registry_entry_is_not_compared(tmp_path, monkeypatch) -> None:
+    """A registry render needs its payload to verify a --frozen heal, so audit never guesses."""
+    lock, path = _recorded_user_claude(tmp_path, monkeypatch, recorded_hash=True, registry=True)
     path.write_text(json.dumps({"mcpServers": {"srv": {"command": "personal"}}}), encoding="utf-8")
     before = path.read_bytes()
 

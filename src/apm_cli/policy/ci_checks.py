@@ -860,14 +860,17 @@ def _edited_native_mcp_entries(
     )
     if not edited:
         return ()
+    fix = remediation.NATIVE_MCP_ENTRY_EDITED
+    if user_scope:
+        fix = fix.with_command("apm install -g")
     check = CheckResult(
         name="native-mcp-drift",
         passed=False,
         message=(
             f"{len(edited)} native MCP entr(ies) recorded in apm.lock.yaml changed since "
-            f"APM wrote them -- {remediation.NATIVE_MCP_ENTRY_EDITED.clause()}"
+            f"APM wrote them -- {fix.clause()}"
         ),
-        remediations=(remediation.NATIVE_MCP_ENTRY_EDITED,),
+        remediations=(fix,),
         details=[
             f"MCP server {name!a} in {config} ({runtime}): the entry differs from what "
             "APM recorded writing"

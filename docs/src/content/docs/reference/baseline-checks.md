@@ -42,7 +42,7 @@ first failure to skip expensive I/O.
 | `skill-subset-consistency` | block | `ci_checks.py` | yes |
 | `config-consistency` | block | `ci_checks.py` | yes |
 | `native-mcp-ownership` | block | `ci_checks.py` | yes |
-| `native-mcp-drift` | block | `ci_checks.py` | only when a recorded native MCP entry was edited |
+| `native-mcp-drift` | block | `ci_checks.py` | only when a recorded self-defined native MCP entry was edited |
 | `kept-mcp-entries` | block | `ci_checks.py` | only when install kept an MCP entry it could not confirm |
 | `content-integrity` | block | `ci_checks.py` | yes |
 | `hook-approval-pins` | block | `ci_checks.py` | yes |
@@ -176,9 +176,9 @@ the [policy schema](../policy-schema/).
 
 ### `native-mcp-drift`
 
-- **What it verifies.** That every native MCP entry the lockfile records APM writing, with its recorded fingerprint, still matches that write (for example a self-defined server in `.mcp.json` or `~/.claude.json`). It appears only when such an entry changed. Entries the lockfile does not record are covered by `native-mcp-ownership`.
+- **What it verifies.** That every native MCP entry the lockfile records APM writing for a self-defined server, with its recorded fingerprint, still matches that write (for example in `.mcp.json` or `~/.claude.json`). It appears only when such an entry changed. Entries the lockfile does not record are covered by `native-mcp-ownership`; registry servers are not compared.
 - **Fails when.** A recorded entry was edited by hand. The detail names the server, the config file and the runtime. `apm install` preserves the same entry and refuses to overwrite it.
-- **Remediation.** Undo your edit to the entry or remove it, then run `apm install`. Audit does not change the native configuration.
+- **Remediation.** Undo your edit to the entry or remove it, then run `apm install` (`apm install -g` for a user-scope entry). Audit does not change the native configuration.
 
 ### `kept-mcp-entries`
 

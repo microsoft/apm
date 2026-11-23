@@ -153,11 +153,14 @@ def edited_recorded_native_mcp_entries(
 ) -> list[tuple[str, str, str]]:
     """Return ``(server, runtime, config)`` for recorded native MCP entries edited since.
 
-    A server the lock records for a runtime, with a recorded fingerprint, whose
-    native entry no longer proves APM's write: the comparator's CONFLICT, the
-    same verdict uninstall refuses on and ``install`` preserves (#4757).
-    Entries without a recorded fingerprint, absent or unreadable entries are
-    not reported. Read-only.
+    A self-defined server the lock records for a runtime, with a recorded
+    fingerprint, whose native entry no longer proves APM's write: the
+    comparator's CONFLICT, the same verdict uninstall refuses on and
+    ``install`` preserves (#4757). Its declaration is in the lock, so every
+    shape APM may have written is verifiable read-only. Registry servers need
+    their registry payload to recognize a ``--frozen`` heal and are not
+    compared. Entries without a recorded fingerprint, absent or unreadable
+    entries are not reported. Read-only.
     """
     from apm_cli.core.conflict_detector import MCPConflictDetector
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -167,9 +170,15 @@ def edited_recorded_native_mcp_entries(
         native_comparison_clients,
     )
 
+    stored_configs = lockfile.mcp_configs or {}
+    self_defined = {
+        name
+        for name, stored in stored_configs.items()
+        if isinstance(stored, dict) and stored.get("registry") is False
+    }
     hashes = DeploymentLedgerCodec.mcp_native_hashes(lockfile)
     recorded = {
-        runtime: set(names) & set(hashes.get(runtime, {}))
+        runtime: set(names) & set(hashes.get(runtime, {})) & self_defined
         for runtime, names in (lockfile.mcp_target_servers or {}).items()
         if runtime in target_runtimes
     }
@@ -181,7 +190,6 @@ def edited_recorded_native_mcp_entries(
         project_root=project_root,
         user_scope=user_scope,
     )
-    stored_configs = lockfile.mcp_configs or {}
     found: dict[tuple[str, str], str] = {}
     for runtime, client in sorted(clients.items()):
         try:
