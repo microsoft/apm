@@ -197,6 +197,44 @@ def unadmitted_bundle_hooks(
     return result
 
 
+def _markers(entries_by_event: Any) -> list[str]:
+    return [
+        entry["_apm_source"]
+        for entries in (entries_by_event.values() if isinstance(entries_by_event, dict) else ())
+        for entry in (entries if isinstance(entries, list) else ())
+        if isinstance(entry, dict) and isinstance(entry.get("_apm_source"), str)
+    ]
+
+
+def modified_bundle_hooks(project_root: Path, targets: Any) -> list[str]:
+    """Slugs of local bundles whose merged hook entries no longer match APM's record (#5078).
+
+    A merged config holds no ownership marker; the sidecar restores it onto
+    each entry whose content still matches. An entry the user edited (or
+    removed) matches nothing, so its bundle would otherwise drop out of trust
+    discovery and audit silently; it is reported here instead.
+    """
+    import copy
+    from collections import Counter
+
+    from apm_cli.integration.hook_ownership import (
+        parse_local_bundle_hook_source,
+        reinject_apm_source_from_sidecar,
+    )
+
+    slugs: set[str] = set()
+    for data, sidecar, container in _merged_hook_documents(project_root, targets):
+        if not isinstance(sidecar, dict):
+            continue
+        hooks = copy.deepcopy(data.get(container)) if isinstance(data, dict) else None
+        hooks = hooks if isinstance(hooks, dict) else {}
+        reinject_apm_source_from_sidecar(hooks, sidecar)
+        for marker in Counter(_markers(sidecar)) - Counter(_markers(hooks)):
+            if (parsed := parse_local_bundle_hook_source(marker)) is not None:
+                slugs.add(parsed[0])
+    return sorted(slugs)
+
+
 def contained_bundle_path(project_root: Path, value: str, prefixes: Collection[str]) -> Path | None:
     """Return the in-project path a bundle record or lock row names, or ``None``.
 
