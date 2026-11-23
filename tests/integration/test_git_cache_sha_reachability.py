@@ -546,6 +546,48 @@ def test_resolving_a_branch_name_never_answers_with_a_tag_in_another_namespace(
     assert git_resolve_commit(origin.path, origin.m1[:10], bare=True) == origin.m1
 
 
+@pytest.mark.parametrize("namespace", ["tags", "heads"])
+def test_a_hex_named_ref_wins_over_a_commit_it_abbreviates(origin: _Origin, namespace: str) -> None:
+    from apm_cli.utils.git_env import git_resolve_commit
+
+    name = origin.f1[:8]
+    origin.bare("update-ref", f"refs/{namespace}/{name}", origin.m1)
+
+    assert git_resolve_commit(origin.path, name, bare=True) == origin.m1
+    assert git_resolve_commit(origin.path, origin.f1[:12], bare=True) == origin.f1
+
+
+class _CommitFirstDownloader(_RefDownloader):
+    """A commits API that expands any hex name as a commit abbreviation first."""
+
+    def __init__(self, cache_root: Path, origin: _Origin, expands_to: str) -> None:
+        super().__init__(cache_root, [origin.url], predicted=origin.url)
+        self._expands_to = expands_to
+
+    def _resolve_commit_sha_for_ref(self, _dep_ref, _ref: str) -> str:
+        return self._expands_to
+
+
+def test_admission_binds_a_hex_named_tag_before_any_commit_abbreviation(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    from apm_cli.cache.commit_reachability import admit_ref_commit
+
+    name = origin.f1[:8]
+    origin.bare("tag", name, origin.m1)
+    downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.f1)
+
+    assert admit_ref_commit(downloader, _RefDep(), name) == (origin.m1, origin.m1)
+
+
+def test_admission_expands_a_hex_name_no_ref_holds(tmp_path: Path, origin: _Origin) -> None:
+    from apm_cli.cache.commit_reachability import admit_ref_commit
+
+    downloader = _CommitFirstDownloader(tmp_path / "cache", origin, expands_to=origin.m1)
+
+    assert admit_ref_commit(downloader, _RefDep(), origin.m1[:10]) == (origin.m1, origin.m1)
+
+
 class TestRefCacheLinks:
     """The ref cache never follows a link."""
 

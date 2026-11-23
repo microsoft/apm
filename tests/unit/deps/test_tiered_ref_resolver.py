@@ -697,6 +697,25 @@ def test_a_tag_named_like_a_branch_namespace_never_answers_for_the_branch(ref: s
     assert tier.try_resolve(DependencyReference.parse("acme/pkg"), ref) is None
 
 
+@pytest.mark.parametrize("namespace", ["tags", "heads"])
+def test_a_hex_named_ref_wins_over_a_commit_abbreviation(namespace: str) -> None:
+    api = _RevParseCommitsApi()
+    api._REFS[f"refs/{namespace}/20241201"] = "d" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "20241201") == "d" * 40
+    assert (api.queries, api.listings) == ([], 1)
+
+
+def test_a_hex_name_no_ref_holds_expands_through_the_commits_api() -> None:
+    api = _RevParseCommitsApi()
+    api._REFS["f00dfeed1"] = "9" * 40
+    tier = L1CommitsAPI(types.SimpleNamespace(_refs=api))
+
+    assert tier.try_resolve(DependencyReference.parse("acme/pkg"), "f00dfeed1") == "9" * 40
+    assert (api.queries, api.listings) == (["f00dfeed1"], 1)
+
+
 def test_a_branch_wins_over_a_tag_named_like_its_namespace() -> None:
     api = _RevParseCommitsApi()
     api._REFS["refs/tags/heads/main"] = "d" * 40

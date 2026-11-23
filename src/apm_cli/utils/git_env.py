@@ -1881,29 +1881,27 @@ def _listed_commit(git: Sequence[str], names: Sequence[str], env: dict[str, str]
 def exact_named_commit(git: Sequence[str], ref: str, env: dict[str, str]) -> str | None:
     """Resolve *ref* exactly in the repository *git* (a command prefix) addresses.
 
-    A hex name is a commit or a unique commit abbreviation; otherwise
-    ``refs/heads/<ref>`` then ``refs/tags/<ref>``, or a fully spelled
-    ``refs/heads/`` or ``refs/tags/`` name. Never a ``rev-parse`` name
-    expansion, so a ref in another namespace cannot answer for *ref*.
+    A full commit resolves as itself. Any other name resolves as
+    ``refs/heads/<ref>`` then ``refs/tags/<ref>`` (or a fully spelled
+    ``refs/heads/`` or ``refs/tags/`` name), as Git prefers a ref; only when
+    no such ref exists does a hex name expand as a unique commit
+    abbreviation. Never a ``rev-parse`` name expansion, so a ref in another
+    namespace cannot answer for *ref*.
     """
-    if _HEX_RE.match(ref):
-        if len(ref) == 40:
-            commit = _peeled_commit(git, env, ref.lower())
-        else:
-            matches = _git_out(git, env, "rev-parse", f"--disambiguate={ref.lower()}").split()
-            commits = [
-                oid for oid in matches if _git_out(git, env, "cat-file", "-t", oid) == "commit"
-            ]
-            commit = commits[0].lower() if len(commits) == 1 else None
-        if commit:
-            return commit
-    if ref.startswith(("refs/heads/", "refs/tags/")):
-        names: tuple[str, ...] = (ref,)
-    elif ref.startswith("refs/") or not ref:
+    if not ref:
         return None
-    else:
-        names = (f"refs/heads/{ref}", f"refs/tags/{ref}")
-    return _listed_commit(git, names, env)
+    if _HEX_RE.match(ref) and len(ref) == 40:
+        return _peeled_commit(git, env, ref.lower())
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return _listed_commit(git, (ref,), env)
+    if ref.startswith("refs/"):
+        return None
+    commit = _listed_commit(git, (f"refs/heads/{ref}", f"refs/tags/{ref}"), env)
+    if commit is not None or not _HEX_RE.match(ref):
+        return commit
+    matches = _git_out(git, env, "rev-parse", f"--disambiguate={ref.lower()}").split()
+    commits = [oid for oid in matches if _git_out(git, env, "cat-file", "-t", oid) == "commit"]
+    return commits[0].lower() if len(commits) == 1 else None
 
 
 def git_current_branch(

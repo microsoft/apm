@@ -472,16 +472,31 @@ def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
     if full:
         _require_at_origin(downloader, dep_ref, ref.lower())
         return ref.lower(), ref.lower()
-    # The commits API resolves names like ``git rev-parse``: it only expands an
-    # abbreviated commit, admitted as a pin. A branch or tag name is listed exactly.
-    for query in _exact_ref_queries(ref) if _ABBREVIATED_COMMIT_RE.match(ref) else ():
-        try:
-            sha = downloader._resolve_commit_sha_for_ref(dep_ref, query)
-        except Exception:
-            sha = None
-        if sha and len(sha) == 40 and _COMMIT_RE.match(sha):
-            _require_at_origin(downloader, dep_ref, sha.lower())
-            return sha.lower(), sha.lower()
+    # A name is an exact origin branch or tag first, as Git prefers a ref. Only a
+    # hex name no ref holds expands, through the commits API, as an abbreviated
+    # commit, which is then admitted as a pin.
+    try:
+        return _listed_tip(downloader, dep_ref, ref)
+    except _NoSuchRef:
+        if not _ABBREVIATED_COMMIT_RE.match(ref):
+            raise
+        for query in _exact_ref_queries(ref):
+            try:
+                sha = downloader._resolve_commit_sha_for_ref(dep_ref, query)
+            except Exception:
+                sha = None
+            if sha and len(sha) == 40 and _COMMIT_RE.match(sha):
+                _require_at_origin(downloader, dep_ref, sha.lower())
+                return sha.lower(), sha.lower()
+        raise
+
+
+class _NoSuchRef(CommitNotReachableError):
+    """The origin has no branch or tag of that name."""
+
+
+def _listed_tip(downloader, dep_ref, ref: str) -> tuple[str, str]:
+    """Resolve *ref* to an exact origin branch or tag over the dependency's transport."""
     found: list[tuple[str, str, dict]] = []
     _at_origin(
         downloader,
@@ -516,10 +531,13 @@ def _exact_tip(url: str, ref: str, env) -> str:
     for line in (listing.stdout or "").splitlines():
         tip, _, name = line.partition("\t")
         records.append((tip.strip().lower(), name.strip()))
+    wanted = {ref} if ref.startswith("refs/") else {f"refs/heads/{ref}", f"refs/tags/{ref}"}
     try:
         return exact_branch_or_tag_sha(records, ref, where)
     except RuntimeError as exc:
-        raise CommitNotReachableError(str(exc)) from exc
+        if wanted & {name for _tip, name in records}:
+            raise CommitNotReachableError(str(exc)) from exc
+        raise _NoSuchRef(str(exc)) from exc
 
 
 def _resolved_commit(downloader, dep_ref, resolved) -> tuple[str | None, bool]:
