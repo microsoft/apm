@@ -4,10 +4,11 @@ This module must NOT import from any command module.
 """
 
 import builtins
+import contextlib
 import functools
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import click
@@ -556,6 +557,85 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
         if manifest.is_file():
             return manifest
     return None
+
+
+def resolve_cli_packages_for_project_root(
+    packages: tuple[str, ...],
+    invoking_dir: Path,
+    project_root: Path,
+) -> tuple[str, ...]:
+    """Resolve relative CLI package paths from invoking_dir relative to project_root (#4545)."""
+    if invoking_dir.resolve() == project_root.resolve():
+        return packages
+    resolved: list[str] = []
+    for pkg in packages:
+        is_rel_prefix = pkg.startswith(("./", "../", ".\\", "..\\"))
+        is_local_in_cwd = "/" not in pkg and "\\" not in pkg and (invoking_dir / pkg).exists()
+        if is_rel_prefix or is_local_in_cwd:
+            target_path = (invoking_dir / pkg).resolve()
+            try:
+                rel = target_path.relative_to(project_root.resolve()).as_posix()
+                if not rel.startswith("."):
+                    rel = f"./{rel}"
+            except ValueError:
+                rel = os.path.relpath(target_path, project_root).replace("\\", "/")
+            resolved.append(rel)
+        else:
+            resolved.append(pkg)
+    return tuple(resolved)
+
+
+@contextlib.contextmanager
+def discover_project_root(
+    packages: tuple[str, ...] = (),
+    *,
+    enabled: bool = True,
+) -> Iterator[tuple[Path | None, tuple[str, ...]]]:
+    """Discover nearest ancestor apm.yml for project-scope install (#4545).
+
+    When *enabled*, walks parent directories from cwd looking for ``apm.yml``.
+    If cwd has no ``apm.yml`` and an ancestor does, prints the discovery notice,
+    resolves relative CLI package paths from the invoking directory against the
+    discovered project root, anchors sources and deploy paths by changing working
+    directory to that project root, and restores the original working directory on exit.
+    """
+    if not enabled:
+        yield None, packages
+        return
+
+    manifest_path = _find_apm_yml()
+    if manifest_path is None:
+        yield None, packages
+        return
+
+    project_root = manifest_path.parent
+    original = Path.cwd()
+    if project_root != original.resolve():
+        resolved_packages = resolve_cli_packages_for_project_root(packages, original, project_root)
+        _rich_info(
+            f"Using apm.yml at {manifest_path} (project root: {project_root})",
+            symbol="info",
+        )
+        os.chdir(project_root)
+        try:
+            yield project_root, resolved_packages
+        finally:
+            with contextlib.suppress(OSError):
+                os.chdir(original)
+    else:
+        yield project_root, packages
+
+
+def setup_project_root_discovery(
+    ctx: click.Context,
+    packages: tuple[str, ...],
+    *,
+    enabled: bool,
+) -> tuple[str, ...]:
+    """Register project root discovery with Click context if enabled (#4545)."""
+    if enabled:
+        _, packages = ctx.with_resource(discover_project_root(packages, enabled=True))
+    return packages
 
 
 # Shared by ``apm install`` and ``apm update`` so both commands expose the same
