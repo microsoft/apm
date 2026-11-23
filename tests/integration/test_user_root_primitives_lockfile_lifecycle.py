@@ -336,11 +336,21 @@ def test_install_g_then_audit_accepts_a_user_root_context_link(scene: HarnessSce
     )
     _install(scene)
     deployed = (scene.home / _DEPLOYED).read_text(encoding="utf-8")
-    assert "[the notes](" in deployed, deployed
+    assert "[the notes](../../.apm/context/notes.context.md)" in deployed, deployed
 
-    audit = scene.runner.run(
-        ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
-    )
+    def audit() -> CommandResult:
+        return scene.runner.run(
+            ("audit", "--ci", "--no-fail-fast"), cwd=scene.isolated.config_root, env=scene.env
+        )
 
-    assert audit.returncode == 0, describe(audit)
+    clean = audit()
+
+    assert clean.returncode == 0, describe(clean)
     assert (scene.home / _DEPLOYED).read_text(encoding="utf-8") == deployed
+
+    # Control: a real edit to the deployed agent still reports drift.
+    (scene.home / _DEPLOYED).write_text(deployed + "Hand edit.\n", encoding="utf-8")
+    edited = audit()
+
+    assert edited.returncode == 1, describe(edited)
+    assert "research.agent.md" in flat(edited.stdout + edited.stderr), describe(edited)
