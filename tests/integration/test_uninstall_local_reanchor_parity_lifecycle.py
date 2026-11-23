@@ -487,10 +487,18 @@ def _docs_world(tmp_path: Path, apm_binary_path: Path, extra=None) -> ReplayWorl
 
 
 def _assert_link_resolves(world: ReplayWorld, where: str) -> None:
-    """The uninstall may keep the copy or refuse, but the link must still resolve."""
+    """The uninstall may keep the copy or refuse, but the link must still resolve.
+
+    The file that names the link keeps its bytes: dropping the reference is no fix.
+    """
+    referencing = world.project / where
+    kept = referencing.read_bytes()
     result = world.apm("uninstall", "./vendor/e", expect=None)
     output = " ".join((result.stdout + result.stderr).split())
     assert result.returncode in (0, 1) and "Traceback" not in output, output
+    assert referencing.is_file() and referencing.read_bytes() == kept, (
+        f"the uninstall rewrote or removed {where}, which names {_LINK}\n{output}"
+    )
     assert (world.project / _LINK).is_file(), (
         f"{where} names {_LINK}, which dangles after the re-anchor\n{output}"
     )
@@ -574,6 +582,5 @@ def test_a_reanchored_copy_whose_excluded_files_changed_needs_no_rewrite(
     changed = sorted(
         key for key in modules.keys() | after.keys() if modules.get(key) != after.get(key)
     )
-    assert lock_bytes(world.project) == lock and not changed, (
-        f"the next install rewrote the re-anchored copy: {changed}"
-    )
+    assert lock_bytes(world.project) == lock, "the next install rewrote the lockfile"
+    assert not changed, f"the next install rewrote the re-anchored copy: {changed}"
