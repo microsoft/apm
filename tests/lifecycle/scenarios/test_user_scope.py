@@ -81,6 +81,10 @@ def test_a_first_install_from_each_source_deploys_under_home(lifecycle_world, sr
         assert (lifecycle_world.home / _SKILL).is_file(), step.output
     if src == "native-plugin":
         assert scenario.lock_names(), "the user lock records the native plugin"
+        # Claude loads the plugin from disk: an enable entry without files is empty.
+        plugin = lifecycle_world.home / ".agents/plugins" / name
+        for part in (".claude-plugin/plugin.json", f"skills/{name}/SKILL.md"):
+            assert (plugin / part).is_file(), f"{name}/{part} is not deployed\n{step.output}"
         path = lifecycle_world.home / ".claude/settings.json"
         claude = sorted(
             entry.relative_to(lifecycle_world.home).as_posix()
@@ -133,7 +137,10 @@ def test_approved_executables_deploy_under_home(lifecycle_world) -> None:
     scenario.run("install p-exec p-lsp")
     scenario.run("approve p-exec p-lsp")
     credit = [{**_FIRST, "OP": "install", "PRIM": p, "GATE": "allowed"} for p in _EXEC_PRIMS]
-    scenario.run("install", credit=credit)
+    step = scenario.run("install", credit=credit)
+    # The shared LSP/MCP JSON files hold no managed path, so pin both lock rows here.
+    rows = {url.rstrip("/").rsplit("/", 1)[-1] for url in scenario.lock_names()}
+    assert {"p-exec", "p-lsp"} <= rows, f"{sorted(rows)}\n{step.output}"
     scenario.assert_deployed()
     scenario.finish()
 

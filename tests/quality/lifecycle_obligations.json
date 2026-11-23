@@ -4899,9 +4899,8 @@
    "rules": [
     "U7"
    ],
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e-evidence",
-   "tracking": "#3703",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
@@ -17929,18 +17928,14 @@
   },
   "pair|OP=mcp-install|GATE=denied-dependency": {
    "credited_by": [
-    "G1|mcp-install|canvas|denied-dependency|project",
-    "G1|mcp-install|hook|denied-dependency|project",
-    "G1|mcp-install|lsp|denied-dependency|project",
-    "G1|mcp-install|mcp|denied-dependency|project",
-    "G1|mcp-install|skill|denied-dependency|project"
+    "G1|mcp-install|bin|denied-dependency|user"
    ],
    "family": "pair",
    "issue": "#4095",
    "lane": "T-1",
    "status": "required",
    "strength": "e2e",
-   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
   },
   "pair|OP=mcp-install|GATE=denied-executable": {
    "credited_by": [
@@ -20022,6 +20017,7 @@
    "credited_by": [
     "G1|approve|bin|denied-dependency|user",
     "G1|compile|bin|denied-dependency|user",
+    "G1|mcp-install|bin|denied-dependency|user",
     "G1|uninstall|bin|denied-dependency|user"
    ],
    "family": "pair",
@@ -21903,6 +21899,7 @@
    "credited_by": [
     "G1|approve|bin|denied-dependency|user",
     "G1|compile|bin|denied-dependency|user",
+    "G1|mcp-install|bin|denied-dependency|user",
     "G1|uninstall|bin|denied-dependency|user"
    ],
    "family": "pair",
