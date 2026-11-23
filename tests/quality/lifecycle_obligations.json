@@ -11764,9 +11764,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|DEPLOYED=edited|GATE=denied-dependency": {
@@ -19250,9 +19249,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=canvas|DEPLOYED=present-provenance-unknown": {
@@ -19777,9 +19775,8 @@
    "family": "pair",
    "issue": "#4101",
    "lane": "T-6b",
-   "status": "known-failing",
+   "status": "required",
    "strength": "e2e",
-   "tracking": "#4626",
    "witness": "tests/lifecycle/scenarios/test_ownership_siblings.py::test_edited_executable_files_are_kept"
   },
   "pair|PRIM=lsp|DEPLOYED=present-provenance-unknown": {

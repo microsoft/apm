@@ -851,6 +851,72 @@ class TestReplayFrameTranslation:
         assert "(../../../../y/apm/apm_modules/_local/package/MANIFESTO.md)" in installed
         assert render(scratch_root, (scratch_root, live_home)) == installed
 
+    def test_replay_renders_context_links_in_live_deployment_frame(self, tmp_path):
+        """A user-root context link replays as install -g wrote it (#4832)."""
+        home = tmp_path / "home"
+        context = home / ".apm" / "context" / "notes.context.md"
+        context.parent.mkdir(parents=True)
+        context.write_text("Notes.\n", encoding="utf-8")
+        source_file = home / ".apm" / "agents" / "research.agent.md"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_text("placeholder", encoding="utf-8")
+        scratch_root = tmp_path / "scratch"
+        content = "Read [the notes](../context/notes.context.md) first."
+
+        def render(deploy_root: Path, frame: tuple[Path, Path] | None) -> str:
+            resolver = UnifiedLinkResolver(deploy_root)
+            resolver.deployment_frame = frame
+            target_file = deploy_root / ".copilot" / "agents" / "research.agent.md"
+            return resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        installed = render(home, None)
+        assert "[the notes](../../.apm/context/notes.context.md)" in installed
+        assert render(scratch_root, (scratch_root, home)) == installed
+        # The frame only shapes link text: nothing is written in either root.
+        assert not scratch_root.exists()
+        assert context.read_text(encoding="utf-8") == "Notes.\n"
+
+    @pytest.mark.parametrize("symlinked_root", [False, True], ids=["plain", "symlinked"])
+    def test_replay_projects_a_scratch_dependency_context_link_to_its_live_package(
+        self, tmp_path, symlinked_root
+    ):
+        """A dependency read from scratch or live replays the context link install wrote."""
+        live_root = tmp_path / "project"
+        if symlinked_root:
+            (tmp_path / "physical").mkdir()
+            try:
+                live_root.symlink_to(tmp_path / "physical", target_is_directory=True)
+            except OSError:
+                pytest.skip("symlinks unavailable")
+        scratch_root = tmp_path / "scratch"
+        relative_package = Path("apm_modules") / "_local" / "lp"
+        content = "Read [the notes](../context/notes.context.md) first."
+
+        def render(package_base: Path, deploy_root: Path, frame) -> str:
+            package = package_base / relative_package
+            context = package / ".apm" / "context" / "notes.context.md"
+            context.parent.mkdir(parents=True, exist_ok=True)
+            context.write_text("Notes.\n", encoding="utf-8")
+            source_file = package / ".apm" / "agents" / "research.agent.md"
+            source_file.parent.mkdir(parents=True, exist_ok=True)
+            source_file.write_text("placeholder", encoding="utf-8")
+            resolver = UnifiedLinkResolver(deploy_root)
+            resolver.package_root = package
+            resolver.deployment_package_root = live_root / relative_package
+            resolver.deployment_frame = frame
+            target_file = deploy_root / ".github" / "agents" / "research.agent.md"
+            return resolver.resolve_links_for_installation(content, source_file, target_file)
+
+        installed = render(live_root, live_root, None)
+        if not symlinked_root:
+            assert "(../../apm_modules/_local/lp/.apm/context/notes.context.md)" in installed
+        frame = (scratch_root, live_root)
+        assert render(scratch_root, scratch_root, frame) == installed
+        assert render(live_root, scratch_root, frame) == installed
+        # The frame only shapes link text: nothing is deployed in either root.
+        assert not (live_root / ".github").exists()
+        assert not (scratch_root / ".github").exists()
+
     def test_dependency_replay_keeps_link_when_live_frame_has_no_relpath(
         self, tmp_path, monkeypatch
     ):

@@ -1018,7 +1018,7 @@ def routed_claude_rule_renders(
         install_path = dep_ref.get_install_path(modules_root)
         attested = bool(getattr(dep, "content_hash", None))
         if not install_path.is_dir():
-            if verified and attested and not _lock_proves_claude_excluded(dep_ref):
+            if verified and attested and not _lock_proves_claude_excluded(dep, dep_ref):
                 _refuse_missing_source(dep, install_path, project_root)
             continue
         if verified and attested:
@@ -1063,18 +1063,25 @@ def routed_claude_rule_renders(
     return rules
 
 
-def _lock_proves_claude_excluded(dep_ref) -> bool:
-    """Return True when the lock records that *dep*'s edge excludes Claude.
+def _lock_proves_claude_excluded(dep, dep_ref) -> bool:
+    """Return True when the lock records that *dep* excludes Claude.
 
     Without its cached copy, pack cannot read the dependency's ``targets:``
-    or instructions, so only a recorded edge exclusion is authoritative. A
-    missing Claude deployment proves nothing: a collision can block one
-    target while another deploys, and Claude lacks some primitives.
+    or instructions, so only a recorded exclusion is authoritative: the
+    edge's target subset, or the package's own ``targets:`` install recorded
+    (#4850), judged by the same rule install applies. A missing Claude
+    deployment proves nothing: a collision can block one target while another
+    deploys, and Claude lacks some primitives.
     """
     from apm_cli.install.package_resolution import effective_dependency_selection
+    from apm_cli.install.target_filter import recorded_targets_exclude
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
     subset = effective_dependency_selection(dep_ref).target_subset
-    return bool(subset) and "claude" not in subset
+    if subset and "claude" not in subset:
+        return True
+    recorded = getattr(dep, "package_targets", None) or ()
+    return recorded_targets_exclude(KNOWN_TARGETS["claude"], recorded)
 
 
 def _refuse_missing_source(dep, install_path: Path, project_root: Path) -> None:
