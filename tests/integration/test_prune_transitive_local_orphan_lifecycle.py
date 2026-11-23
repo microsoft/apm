@@ -765,3 +765,42 @@ def test_prune_keeps_the_parent_chain_of_a_survivor_now_declared_directly(
     lock_bytes = (world.project / "apm.lock.yaml").read_bytes()
     world.apm("prune")
     assert (world.project / "apm.lock.yaml").read_bytes() == lock_bytes
+
+
+def test_prune_keeps_the_parent_chain_when_equally_near_parents_disagree(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """f is reached at one depth from sub/z (../../f) and m (../f): prune keeps e's chain.
+
+    A path from one parent paired with the other would point outside vendor,
+    so prune changes no lock bytes. Install itself cannot yet resolve this
+    graph once d is dropped (with or without --frozen, with or without
+    prune); the multi-path rule is tracked in #5126.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    for path, name, deps in (
+        ("f", "f", ()),
+        ("e", "e", ("../f",)),
+        ("d", "d", ("../e",)),
+        ("sub/z", "z", ("../../f",)),
+        ("a", "a", ("../sub/z",)),
+        ("m", "m", ("../f",)),
+        ("b", "b", ("../m",)),
+    ):
+        _skill_package(vendor / path, name, deps)
+    _manifest(world, ["./vendor/d", "./vendor/a", "./vendor/b"])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    _manifest(world, ["./vendor/a", "./vendor/b"])
+    before = lock_bytes(world.project)
+
+    pruned = _output(world.apm("prune"))
+
+    rows = _rows(world)
+    assert "Retained _local/e:" in pruned, pruned
+    assert {"_local/d", "_local/e", "_local/f"} <= set(rows), sorted(rows)
+    assert _row_named(world, "f")[1]["resolved_by"] == "_local/e"
+    assert (world.project / _F_SKILL / "SKILL.md").is_file()
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
+    assert lock_bytes(world.project) == before
