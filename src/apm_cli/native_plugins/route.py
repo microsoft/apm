@@ -72,10 +72,24 @@ def _misspelled(text: str, node: Any) -> str | None:
     return None if text[node.start_mark.index :].startswith("!") else node.value
 
 
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
 def _mapping_items(node: Any) -> list:
+    """A mapping's items, including those a ``<<`` merge key brings in."""
     import yaml
 
-    return node.value if isinstance(node, yaml.MappingNode) else []
+    if not isinstance(node, yaml.MappingNode):
+        return []
+    items = []
+    for key, value in node.value:
+        if key.tag != _MERGE_TAG:
+            items.append((key, value))
+            continue
+        merged = value.value if isinstance(value, yaml.SequenceNode) else [value]
+        for source in merged:
+            items += _mapping_items(source)
+    return items
 
 
 def route_boolean_spelling_errors(text: str) -> list[str]:

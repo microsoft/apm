@@ -385,3 +385,21 @@ def test_conflicting_declarations_keep_the_plugin_loose(
 
     assert result.returncode == 0, _evidence(result)
     _assert_loose(world, "dn")
+
+
+@pytest.mark.req("req-mf-030")
+def test_audit_fails_closed_on_a_misspelled_opt_out(tmp_path: Path, apm_binary_path: Path) -> None:
+    """A refused native value fails audit with the named field; it never replays native."""
+    world = _World(tmp_path, apm_binary_path)
+    plugin = world.plugin("dn")
+    world.manifest([{"path": plugin.as_posix(), "native": "false"}])
+    world.ok("install", "--no-policy")
+    world.manifest([{"path": plugin.as_posix(), "native": "no"}])
+    before = (world.project / "apm.lock.yaml").read_bytes()
+
+    result = world.run("audit", "--ci", "--no-policy")
+
+    assert result.returncode != 0, _evidence(result)
+    assert "'native' field must be true or false, got 'no'" in result.stdout + result.stderr
+    assert (world.project / "apm.lock.yaml").read_bytes() == before
+    _assert_loose(world, "dn")

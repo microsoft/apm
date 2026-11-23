@@ -176,3 +176,25 @@ def test_an_explicit_bool_tag_is_accepted_on_load(tmp_path: Path) -> None:
     )
 
     assert effective_native_route(DependencyReference.parse("./pkg"), manifest) is False
+
+
+@pytest.mark.req("req-mf-030")
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (
+            "dependencies:\n  apm:\n    - <<: {native: no}\n      path: ./pkg\n",
+            "'native' field must be true or false, got 'no'",
+        ),
+        (
+            "<<: {native_plugins: off}\n",
+            "'native_plugins' must be true or false, got 'off'",
+        ),
+    ],
+    ids=["dependency-merge", "top-level-merge"],
+)
+def test_a_misspelled_boolean_behind_a_merge_key_is_rejected(
+    tmp_path: Path, body: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _manifest(tmp_path, body)
