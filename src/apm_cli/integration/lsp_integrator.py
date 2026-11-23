@@ -169,7 +169,8 @@ class _PreparedTargetConfig:
     """Validated target config ready for one atomic file write."""
 
     path: Path
-    content: str
+    # None leaves the file as it is: a target that joined a hold and changes no server (#4871).
+    content: str | None
     changed: builtins.set
     created_servers_key: bool = False
     owner_only: bool = False
@@ -181,6 +182,9 @@ class _PreparedTargetConfig:
     kept: dict[str, str] = field(default_factory=dict)
     # Servers held at a locked render this target cannot express: not written (#4626).
     withheld: tuple[str, ...] = ()
+    # Managed servers the new config cannot express here, held at the locked
+    # render on this target so its claim survives the blocked upgrade (#4871).
+    joined: tuple[str, ...] = ()
 
 
 @dataclass
@@ -192,12 +196,16 @@ class LspInstallRecord:
     *kept_unowned* (out) maps runtime -> server names left as the user wrote
     them, never to be recorded as APM-owned (#4628). *kept_edits* (out) maps a
     managed server whose edit install kept to ``"drift"``, ``"blocked"`` or
-    ``"unproven"``; the caller keeps its locked config (#4626).
+    ``"unproven"``; the caller keeps its locked config (#4626). *held_claims*
+    (out) maps runtime -> managed server names held at their locked render on
+    a target the new config cannot reach; the caller keeps that target claim
+    so stale cleanup leaves the entry (#4871).
     """
 
     locked_configs: dict[str, dict] | None = None
     kept_unowned: dict[str, builtins.set] = field(default_factory=dict)
     kept_edits: dict[str, str] = field(default_factory=dict)
+    held_claims: dict[str, builtins.set] = field(default_factory=dict)
 
 
 _LSP_TARGET_SPECS: dict[str, _LSPTargetSpec] = {
@@ -953,23 +961,50 @@ class LSPIntegrator:
 
         The lock records one config per server: writing a new render to one
         target while another keeps an edit would leave that target past the
-        recorded baseline.
+        recorded baseline. A previously managed target the new config cannot
+        reach (a stdio server upgraded to socket on OpenCode) joins the hold at
+        its locked render, so a blocked upgrade removes no entry (#4871).
         """
         kept = builtins.set().union(*(prepared.kept for _r, _s, prepared in prepared_targets))
         if not kept:
             return prepared_targets
+        by_runtime = {runtime: prepared for runtime, _spec, prepared in prepared_targets}
         held = []
-        for runtime, spec, prepared in prepared_targets:
-            servers, options = inputs[runtime]
-            if kept & (builtins.set(servers) - builtins.set(prepared.kept)):
+        for runtime, (servers, options) in inputs.items():
+            spec = _LSP_TARGET_SPECS[runtime]
+            prepared = by_runtime.get(runtime)
+            own_kept = prepared.kept if prepared is not None else {}
+            joined = LSPIntegrator._held_joiners(kept, servers, options)
+            if kept & (builtins.set(servers) - builtins.set(own_kept)) or joined:
                 # A target's own keeps are re-judged, never withheld: that drops their claim.
+                # A joining target that cannot be prepared fails like any other (#4871).
                 rebuilt = LSPIntegrator._prepare_target_config(
-                    spec, servers, **options, held=frozenset(kept - builtins.set(prepared.kept))
+                    spec,
+                    {**servers, **joined},
+                    **options,
+                    held=frozenset(kept - builtins.set(own_kept)),
                 )
                 # The held render is the locked one: keep the original kinds.
-                prepared = replace(rebuilt, kept={**rebuilt.kept, **prepared.kept})
-            held.append((runtime, spec, prepared))
+                prepared = replace(
+                    rebuilt,
+                    kept={**rebuilt.kept, **own_kept},
+                    joined=tuple(sorted(joined)),
+                    content=rebuilt.content if rebuilt.changed or not joined else None,
+                )
+            if prepared is not None:
+                held.append((runtime, spec, prepared))
         return held
+
+    @staticmethod
+    def _held_joiners(kept: builtins.set, servers: dict, options: dict) -> dict[str, dict]:
+        """Held servers this target managed but the new config cannot express (#4871)."""
+        locked = options.get("locked_servers") or {}
+        managed = options.get("managed_server_names") or builtins.set()
+        return {
+            name: locked[name]
+            for name in sorted(kept & managed)
+            if name not in servers and name in locked
+        }
 
     @staticmethod
     def _report_kept_entries(
@@ -985,7 +1020,8 @@ class LSPIntegrator:
 
         for _runtime, spec, prepared in prepared_targets:
             for name, kind in sorted(prepared.kept.items()):
-                if kept_edits is not None:
+                if kept_edits is not None and (kind != "drift" or name not in kept_edits):
+                    # A held target's drift never hides another target's block (#4871).
                     kept_edits[name] = kind
                 message = kept_entry_message(
                     f"LSP server '{name}' in {spec.label(user_scope=user_scope)}",
@@ -1018,6 +1054,8 @@ class LSPIntegrator:
     @staticmethod
     def _write_prepared_target_config(prepared: _PreparedTargetConfig) -> builtins.set:
         """Write one config after every target in the install has validated."""
+        if prepared.content is None:
+            return prepared.changed
         write_seam.mkdir(prepared.path.parent, parents=True, exist_ok=True)
         LSPIntegrator._atomic_write_config(
             prepared.path, prepared.content, owner_only=prepared.owner_only
@@ -1287,8 +1325,6 @@ class LSPIntegrator:
                 spec,
                 warn=diagnostics.warn if diagnostics is not None else logger.warning,
             )
-            if not servers:
-                continue
             servers = LSPIntegrator._render_plugin_roots(
                 servers,
                 runtime_deps,
@@ -1314,8 +1350,10 @@ class LSPIntegrator:
                         user_scope=user_scope,
                     ),
                 }
-                prepared = LSPIntegrator._prepare_target_config(spec, servers, **options)
-                prepared_targets.append((runtime, spec, prepared))
+                if servers:
+                    prepared = LSPIntegrator._prepare_target_config(spec, servers, **options)
+                    prepared_targets.append((runtime, spec, prepared))
+                # A target with nothing new to write can still join a hold (#4871).
                 inputs[runtime] = (servers, options)
             except Exception as exc:
                 _log.debug(
@@ -1353,6 +1391,8 @@ class LSPIntegrator:
             unwritten = {*prepared.preserved, *prepared.matching, *prepared.withheld}
             if record is not None and unwritten:
                 record.kept_unowned.setdefault(runtime, builtins.set()).update(unwritten)
+            if record is not None and prepared.joined:
+                record.held_claims.setdefault(runtime, builtins.set()).update(prepared.joined)
             for name in prepared.matching:
                 logger.verbose_detail(
                     f"LSP server '{name}' already matches the {runtime} entry in "
