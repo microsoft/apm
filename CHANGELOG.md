@@ -11,12 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- Upgrade notes: plain `apm audit` stops on an unresolvable required org policy, and org policies now gate transitive MCP servers by default. (#4920, #4827)
+- Upgrade notes: plain `apm audit` exits 1 on drift when a required org policy cannot be resolved; org policies now gate transitive MCP servers. (#4920, #4827)
 - `apm install` cleans up emptied MCP and Claude config files and narrowed Claude plugins; `apm audit --ci` flags edited MCP entries. (#4862, #4895, #4905)
 
 ### Breaking changes and upgrade notes
 
-- Plain `apm audit` exits 1 on drift, naming the cause, when a required org policy cannot be resolved; restore access to the org policy. (#4920)
+- Plain `apm audit` exits 1 on drift when a required org policy cannot be resolved, naming the cause; restore access to the org policy. (#4920)
 - Any non-empty org policy now requires an `mcp.allow` entry per transitive MCP server unless it sets `mcp.trust_transitive: true`; add entries or opt in. (#4827)
 
 ### Fixed
