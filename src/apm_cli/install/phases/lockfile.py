@@ -146,11 +146,9 @@ class LockfileBuilder:
             and not self._has_orphan_lockfile_entries()
             and not self._replacement_table_changed()
         ):
-            # Even with nothing newly installed, a pre-existing
-            # lockfile may need its cache pin markers refreshed --
-            # e.g. user upgraded APM and their cache pre-dates the
-            # marker contract. Sync best-effort against the on-disk
-            # lockfile.
+            # Even with nothing newly installed, a pre-existing lockfile may need
+            # its cache pin markers refreshed (e.g. a cache that pre-dates the
+            # marker contract after an upgrade): sync best-effort against it.
             #
             # In lockfile_only mode (``apm lock``) we deliberately fall
             # through even with zero dependencies: the command's core
