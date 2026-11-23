@@ -56,6 +56,20 @@ class LinkResolutionContext:
     deployment_frame: tuple[Path, Path] | None = None
 
 
+def is_external_url(path: str) -> bool:
+    """Whether a link target is an external URL the resolver never rewrites.
+
+    Security: only http/https URLs with a host are external. Every other
+    scheme (javascript:, data:, file:, ...) and ``http:relative/path`` is an
+    internal path.
+    """
+    try:
+        parsed = urlparse(path.strip())
+    except Exception:
+        return False
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
 class UnifiedLinkResolver:
     """Resolves markdown links across all APM operations.
 
@@ -399,37 +413,8 @@ class UnifiedLinkResolver:
         return None
 
     def _is_external_url(self, path: str) -> bool:
-        """Check if path is an external URL.
-
-        Security: Only http/https URLs with valid netloc are considered external.
-        All other schemes (javascript:, data:, file:, etc.) are treated as internal
-        paths to prevent potential security issues.
-
-        Args:
-            path: Path to check
-
-        Returns:
-            True if external URL (http/https with valid netloc)
-        """
-        try:
-            # Strip whitespace to prevent bypass attempts
-            path = path.strip()
-
-            # Parse the URL
-            parsed = urlparse(path)
-
-            # Only allow http/https schemes
-            if parsed.scheme not in ("http", "https"):
-                return False
-
-            # Must have a netloc (domain) to be a valid external URL
-            # This prevents URLs like "http:relative/path" from being treated as external
-            if not parsed.netloc:  # noqa: SIM103
-                return False
-
-            return True
-        except Exception:
-            return False
+        """Check if path is an external URL (see :func:`is_external_url`)."""
+        return is_external_url(path)
 
     def _is_context_file(self, path: str) -> bool:
         """Check if path is a context or memory file.
