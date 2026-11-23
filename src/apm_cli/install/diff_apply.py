@@ -273,17 +273,15 @@ def _plan_files(
             path = _within(project_root, rel)
             if path.is_symlink():
                 raise Decline("symlinked deployed file")
-            current = None
             if path.exists():
                 data = path.read_bytes() if path.is_file() else b""
-                current = f"sha256:{canonical_digest(data)}" if path.is_file() else None
-                receipted = receipts.get(path.resolve().as_posix())
-                if current is None or current not in (digest, receipted):
-                    # Not what the lock records and not what APM last wrote: a user edit.
+                if not path.is_file() or f"sha256:{canonical_digest(data)}" != digest:
+                    # The full run keeps bytes that differ from the lock as a
+                    # local edit (it reports them), so only the full run decides.
                     raise Decline("edited deployed file")
-                if current == digest and receipted != digest:
+                if receipts.get(path.resolve().as_posix()) != digest:
                     raise Decline("deployed file without a receipt")
-            if current != digest:
+            else:
                 hexd, raw = records[owner]["files"][rel]
                 data = deploy.get(hexd, raw_sha256=raw)
                 if data is None:
@@ -525,6 +523,9 @@ def try_apply(
         bodies=bodies if (count or packages) else None,
         installed=installed,
         frozen_disposition=frozen_disposition,
+        fetched=frozenset(
+            o.key for o in outcomes if str(_install_path(project_root, o.dep)) in copied
+        ),
     )
     return True
 
