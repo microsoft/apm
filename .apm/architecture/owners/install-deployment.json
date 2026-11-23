@@ -43,12 +43,13 @@
     {
       "id": "legacy-mcp-ownership-key-migration",
       "decision": "MCP native connection baseline comparison, actual-write fingerprints, exact-key safe removal and deferred claim preservation, plus legacy target ownership migration and adoption; machine-local per-entry MCP write evidence and its use when apm.lock.yaml is absent",
-      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries)",
+      "owner": "install/mcp/ownership.py (native_comparison_clients selects compared runtimes; written_native_hash records fingerprints) + install/mcp/write_receipts.py (per-entry write evidence bound like the deployment receipts through DeploymentMaterializationSession.binds/binding; without a lockfile it retires only entries it proves unchanged and keeps and reports the rest, read by apm audit --ci kept-mcp-entries) + integration/config_file_provenance.py (single owner of deleting a native MCP or hook config file APM emptied: delete_emptied_config deletes only a file this machine recorded APM creating, still a bare skeleton, with the record outside any VCS tree; recorded_config_write records creation at each write, #4867)",
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
         "src/apm_cli/install/mcp/native_entry.py",
         "src/apm_cli/install/mcp/retirement.py",
-        "src/apm_cli/install/mcp/write_receipts.py"
+        "src/apm_cli/install/mcp/write_receipts.py",
+        "src/apm_cli/integration/config_file_provenance.py"
       ],
       "guards": [
         "install-deployment-mcp-ownership-migration",
@@ -257,6 +258,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-spelling-aliases",
         "install-deployment-cleanup-target-roots",
         "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
@@ -490,6 +492,13 @@
       "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
       "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
+    },
+    {
+      "id": "mcp-lsp-server-name-rule",
+      "decision": "Which MCP and LSP server names are valid: one character allowlist and the reserved object keys __proto__, constructor and prototype (any case), checked before any config write (#4984)",
+      "owner": "models/dependency/server_names.py (validate_server_name, RESERVED_OBJECT_KEYS); consumers: models/dependency/mcp.py MCPDependency.validate, models/dependency/lsp.py LSPDependency.validate",
+      "selectors": ["src/apm_cli/models/dependency/server_names.py"],
+      "guards": ["install-deployment-server-name-rule"]
     }
   ]
 }
