@@ -240,6 +240,9 @@ def test_every_environment_variable_the_cli_reads_is_classified() -> None:
     for path in src.rglob("*.py"):
         read |= _env_names_read(path.read_text(encoding="utf-8"))
     classified = set(verdict_record.ENV_ALLOWLIST) | set(verdict_record.ENV_NOT_VERDICT)
+    # Read only by core/scope.py::get_apm_home: the key and records live there, so
+    # another home holds no valid record; a run that reads it also keys it (_env_log).
+    classified.add("APM_HOME")
     assert sorted(read - classified) == []
 
 

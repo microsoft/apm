@@ -37,9 +37,11 @@ KEY_FILE = "verdict.key"
 SERVED_ARGV = (("install",), ("install", "--frozen"))
 
 # Environment that can change an install verdict or its output. A hit keys on
-# exactly these (their values, or their absence); the static guard in
-# tests/unit/install/test_verdict_record.py fails when ``src/apm_cli`` reads an
-# environment variable that is neither here nor in ENV_NOT_VERDICT.
+# these (their values, or their absence) plus every name the recorded run read
+# (_env_log); the static guard in tests/unit/install/test_verdict_record.py fails
+# when ``src/apm_cli`` reads an environment variable that is neither here nor in
+# ENV_NOT_VERDICT. Owner-read roots (the APM home, harness user roots) are
+# named only by their owners and keyed through the run's own reads.
 ENV_ALLOWLIST = (
     "ADO_APM_PAT",
     "ADO_HOST",
@@ -52,7 +54,6 @@ ENV_ALLOWLIST = (
     "APM_GITLAB_HOSTS",
     "APM_GITLAB_POLICY_REPO",
     "APM_GIT_CREDENTIAL_TIMEOUT",
-    "APM_HOME",
     "APM_LEGACY_SKILL_PATHS",
     "APM_LOG_LEVEL",
     "APM_MCP_REGISTRY_SOURCE",
@@ -73,8 +74,6 @@ ENV_ALLOWLIST = (
     "ARTIFACTORY_MAX_ARCHIVE_MB",
     "ARTIFACTORY_ONLY",
     "CI",
-    "CLAUDE_CONFIG_DIR",
-    "CODEX_HOME",
     "COLUMNS",
     "FORCE_COLOR",
     "GH_HOST",
@@ -86,7 +85,6 @@ ENV_ALLOWLIST = (
     "GITHUB_URL",
     "GITLAB_HOST",
     "GIT_SSH_COMMAND",
-    "HERMES_HOME",
     "HOME",
     "HOMEDRIVE",
     "HOMEPATH",
