@@ -106,6 +106,9 @@ def record_refused_retirement(
     from apm_cli.install.mcp.ownership import retain_deferred_mcp_claims
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
+    planned, old_target_servers, removed = _concrete_retirements(
+        planned, old_target_servers, removed
+    )
     new_servers, old_servers = servers
     retained = {
         target: set(names) - removed.get(target, set())
@@ -165,6 +168,35 @@ def record_refused_retirement(
         fail_on_write_error=True,
         stamp_version=stamp_version,
     )
+
+
+def _concrete_retirements(
+    planned: list[Retirement],
+    owners: dict,
+    removed: dict,
+) -> tuple[list[Retirement], dict[str, builtins.set], dict[str, builtins.set]]:
+    """Expand an untargeted legacy cleanup (runtime ``None``) into each runtime it reaches.
+
+    ``remove_stale`` with no runtime cleans every supported client but the
+    excluded one; claims are recorded per concrete runtime, never under ``None``.
+    """
+    from apm_cli.factory import ClientFactory
+
+    exclude = next((ex for runtime, _names, ex in planned if runtime is None), None)
+    every = sorted(set(ClientFactory.supported_clients()) - {exclude})
+
+    def expand(mapping: dict) -> dict[str, builtins.set]:
+        out = {k: set(v) for k, v in mapping.items() if k is not None}
+        for runtime in every if None in mapping else ():
+            out.setdefault(runtime, set()).update(mapping[None])
+        return out
+
+    concrete = [
+        (target, names, ex)
+        for runtime, names, ex in planned
+        for target in ([runtime] if runtime is not None else every)
+    ]
+    return concrete, expand(owners), expand(removed)
 
 
 def removed_names(removed: dict[str | None, builtins.set]) -> builtins.set:
