@@ -806,6 +806,7 @@ def _spy(ctx: Context, journey: Journey, launch: list[str], prof: Path) -> None:
             started = time.perf_counter()
             result = subprocess.run(
                 ["py-spy", "record", "--nonblocking", "--rate", str(rate), "--format", "raw",
+                 *(["--subprocesses"] if os.name == "nt" else []),
                  "--output", str(raw), "--", *launch, *argv],
                 cwd=cwd, env=ctx.world.env, capture_output=True, text=True,
                 timeout=_COMMAND_TIMEOUT_S, check=False,
