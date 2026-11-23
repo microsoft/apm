@@ -800,16 +800,32 @@ def run_replay(config: ReplayConfig, logger: CheckLogger, *, records: bool = Tru
 
 def _replay_all_live(config: ReplayConfig, logger: CheckLogger, scratch_root: Path) -> Path:
     keep = config.modules_root.resolve() if config.modules_root is not None else None
-    if config.scratch_root is None:
-        rmtree(scratch_root, ignore_errors=True)
-    else:
+    # Without a caller's scratch root the restart takes a fresh one; the first
+    # is removed at exit like any replay scratch.
+    if config.scratch_root is not None:
         for child in scratch_root.iterdir():
             if child.resolve() != keep:
                 if child.is_dir() and not child.is_symlink():
                     rmtree(child, ignore_errors=True)
                 else:
                     child.unlink(missing_ok=True)
-    return run_replay(config, logger, records=False)
+    return run_replay(config, _Restarted(logger), records=False)
+
+
+class _Restarted:
+    """The replay's logger for an all-live restart: the start lines already printed."""
+
+    def __init__(self, logger: CheckLogger) -> None:
+        self._logger = logger
+
+    def replay_start(self) -> None:
+        return None
+
+    def scratch_root(self, _path: Path) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._logger, name)
 
 
 # Diff engine
