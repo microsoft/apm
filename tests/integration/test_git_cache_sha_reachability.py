@@ -735,6 +735,79 @@ def test_a_verdict_an_earlier_build_recorded_is_not_trusted(
     assert stale.read_text(encoding="utf-8") == recorded.read_text(encoding="utf-8")
 
 
+_FETCH_FAILED = subprocess.CalledProcessError(128, ["git", "fetch"], stderr=b"fatal: not our ref")
+_INVALID = RuntimeError("Invalid APM package: missing apm.yml")
+
+
+@pytest.mark.parametrize(
+    ("admitted", "repo_ref", "error", "named"),
+    [
+        ("m1", _RefDep(), _FETCH_FAILED, False),
+        ("f1", _RefDep(), _FETCH_FAILED, True),
+        ("f1", "acme/repo#main", _FETCH_FAILED, True),
+        ("f1", _RefDep(), _INVALID, False),
+    ],
+    ids=[
+        "still-reachable-keeps-the-error",
+        "gone-is-named",
+        "gone-is-named-for-a-string-ref",
+        "a-validation-error-is-never-renamed",
+    ],
+)
+def test_a_failed_download_names_a_lost_admitted_commit_only_when_it_is_gone(
+    tmp_path: Path, origin: _Origin, admitted: str, repo_ref, error, named: bool
+) -> None:
+    """#5138: only a commit no branch or tag reaches any more is reported as lost."""
+    from apm_cli.cache.commit_reachability import (
+        AdmittedCommitGoneError,
+        _note_admitted,
+        name_a_lost_admitted_commit,
+    )
+
+    commit = getattr(origin, admitted)
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    @name_a_lost_admitted_commit
+    def _download(_downloader, _repo_ref):
+        _note_admitted("main", commit)
+        raise error
+
+    expected = AdmittedCommitGoneError if named else type(error)
+    with pytest.raises(expected) as failed:
+        _download(downloader, repo_ref)
+
+    assert isinstance(failed.value, AdmittedCommitGoneError) is named
+    if named:
+        assert f"'main' was admitted at commit {commit[:12]}" in str(failed.value)
+        assert f"now points to {origin.m2[:12]}" in str(failed.value)
+    else:
+        assert failed.value is error
+    assert not list((tmp_path / "cache" / "reachability").rglob("verified*/*"))
+
+
+def test_a_lost_admitted_commit_message_stays_ascii_for_a_unicode_ref(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    from apm_cli.cache.commit_reachability import (
+        AdmittedCommitGoneError,
+        _note_admitted,
+        name_a_lost_admitted_commit,
+    )
+
+    downloader = _RefDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    @name_a_lost_admitted_commit
+    def _download(_downloader, _repo_ref):
+        _note_admitted("rel\u00e9ase", origin.f1)
+        raise _FETCH_FAILED
+
+    with pytest.raises(AdmittedCommitGoneError) as failed:
+        _download(downloader, _RefDep())
+
+    assert str(failed.value).isascii()
+    assert f"admitted at commit {origin.f1[:12]}" in str(failed.value)
+
+
 class TestRefCacheLinks:
     """The ref cache never follows a link."""
 

@@ -121,6 +121,19 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
         )
 
 
+# Protocol v0 servers refuse a want for an unadvertised commit; under v2 a
+# "not our ref" means the commit is gone, which must fail, not clone in full.
+_WANT_REFUSED = ("does not allow request for unadvertised object",)
+
+
+def _refuses_want_by_commit(exc: subprocess.CalledProcessError) -> bool:
+    """Whether git failed because the server refuses to serve a commit by its id."""
+    detail = exc.stderr
+    if isinstance(detail, bytes):
+        detail = detail.decode("utf-8", "replace")
+    return any(marker in (detail or "").lower() for marker in _WANT_REFUSED)
+
+
 def fetch_commit_worktree(
     execute_transport_plan: Callable[..., None],
     repo_url_base: str,
@@ -166,7 +179,11 @@ def fetch_commit_worktree(
                 capture_output=True,
                 timeout=300,
             )
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
+            # Only a server that refuses a want by commit gets the full clone; a
+            # missing commit or an auth failure fails here, at depth-1 cost.
+            if not _refuses_want_by_commit(exc):
+                raise
             if verbose_callback:
                 verbose_callback(
                     f"Fetch by commit refused; cloning in full to check out {sha[:12]}"

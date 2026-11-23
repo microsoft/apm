@@ -337,12 +337,18 @@ def test_a_policy_denied_install_of_a_verified_commit_leaves_no_reachability_sta
 
 
 @pytest.mark.parametrize(
-    ("path", "no_cache"),
-    [(None, False), (None, True), ("skills/tool", False), ("skills/tool", True)],
-    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache"],
+    ("path", "no_cache", "tiered"),
+    [
+        (None, False, True),
+        (None, True, True),
+        ("skills/tool", False, True),
+        ("skills/tool", True, True),
+        ("skills/tool", False, False),
+    ],
+    ids=["repo-cached", "repo-no-cache", "subdir-cached", "subdir-no-cache", "subdir-untiered"],
 )
 def test_a_branch_that_moves_after_admission_installs_the_admitted_commit(
-    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, path, no_cache, tiered
 ) -> None:
     """#5138: a named ref is fetched by the commit it was admitted at, never by name."""
     # The verdict recorder is the hook between admission and fetch.
@@ -362,6 +368,8 @@ def test_a_branch_that_moves_after_admission_installs_the_admitted_commit(
 
     project = _project(tmp_path, "main", path)
     env = {"APM_NO_CACHE": "1"} if no_cache else {"APM_CACHE_DIR": str(tmp_path / "cache")}
+    if not tiered:
+        env["APM_TIERED_RESOLVER"] = "0"
     monkeypatch.setattr(f"{_ADMISSION}._record_tip", _admit_then_move)
 
     result = _install(project, origin, monkeypatch, **env)
@@ -415,6 +423,34 @@ def test_an_admitted_commit_force_pushed_away_fails_closed(
     assert f"now points to {rewritten[0][:12]}" in output
     assert _installed(project) == []
     assert not (project / "apm.lock.yaml").exists()
+
+
+def test_a_commit_the_server_no_longer_has_fails_without_a_full_clone(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5138: a gone commit fails at depth-1 cost; only a refused want clones in full."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    notes: list[str] = []
+    target = tmp_path / "checkout"
+    gone = "1" * 40
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(origin.path.as_uri(), {}, path)
+
+    with pytest.raises(subprocess.CalledProcessError) as failed:
+        fetch_commit_worktree(
+            _plan,
+            "acme/platform/pkg",
+            target,
+            dep_ref=None,
+            sha=gone,
+            verbose_callback=notes.append,
+        )
+
+    assert "not our ref" in failed.value.stderr.decode()
+    assert notes == []
+    assert not (target / ".apm").exists()
 
 
 @pytest.mark.parametrize("protocol", ["2", "0"], ids=["fetch-by-commit", "server-refuses-want"])

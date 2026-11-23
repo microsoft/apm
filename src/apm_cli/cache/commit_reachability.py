@@ -15,6 +15,8 @@ record for one origin never admits the same commit from another.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
 import os
 import re
@@ -440,7 +442,20 @@ def admit_fetch_ref(downloader, dep_ref, ref: str | None) -> str | None:
     if not commit or len(commit) not in (40, 64) or not _COMMIT_RE.match(commit):
         raise CommitNotReachableError(f"Could not resolve {ref!r} to an origin commit.")
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    _note_admitted(ref, commit)
     return commit.lower()
+
+
+# The named refs the running download admitted, as ``(ref, commit)`` (#5138).
+_ADMITTED: contextvars.ContextVar[list[tuple[str, str]] | None] = contextvars.ContextVar(
+    "apm_admitted_named_refs", default=None
+)
+
+
+def _note_admitted(ref: str | None, commit: str | None) -> None:
+    admitted = _ADMITTED.get()
+    if admitted is not None and ref and commit:
+        admitted.append((ref, commit.lower()))
 
 
 class AdmittedCommitGoneError(CommitNotReachableError):
@@ -451,52 +466,98 @@ def name_a_lost_admitted_commit(download):
     """Make a download of a named ref whose admitted commit is gone fail by name (#5138).
 
     A named ref is fetched by the commit it was admitted at, never by name.
-    When that fetch fails because the ref was rewritten and the commit is no
-    longer on the origin, the failure says so instead of a git error.
+    When the download fails and that commit is no longer reachable from any
+    branch or tag of the origin (the ref was rewritten), the failure says so
+    instead of a git error. Any other failure is raised unchanged.
     """
 
     @functools.wraps(download)
     def _download(downloader, repo_ref, *args, **kwargs):
+        token = _ADMITTED.set([])
         try:
             return download(downloader, repo_ref, *args, **kwargs)
         except CommitNotReachableError:
             raise
         except Exception as exc:
-            lost = _lost_admitted_commit(downloader, repo_ref)
+            lost = None
+            if _is_git_failure(exc):
+                lost = _lost_admitted_commit(downloader, repo_ref, _ADMITTED.get() or [])
             if lost is None:
                 raise
+            from ..utils.diagnostics import printable_ascii_text
+
             ref, admitted, now = lost
+            ref = printable_ascii_text(repr(ref))
             raise AdmittedCommitGoneError(
-                f"{ref!r} was admitted at commit {admitted[:12]}, which can no longer be "
-                f"fetched from the origin ({ref!r} now points to {now}). Run the install "
+                f"{ref} was admitted at commit {admitted[:12]}, which can no longer be "
+                f"fetched from the origin ({ref} now points to {now}). Run the install "
                 "again to admit its current commit, or 'apm update' when the lockfile "
                 "pins it."
             ) from exc
+        finally:
+            _ADMITTED.reset(token)
 
     return _download
 
 
-def _lost_admitted_commit(downloader, dep_ref) -> tuple[str, str, str] | None:
-    """``(ref, admitted, now)`` when *dep_ref* names a ref that moved off its admitted commit."""
-    ref = getattr(dep_ref, "reference", None)
-    if not ref or (len(ref) in (40, 64) and _COMMIT_RE.match(ref)):
+def _is_git_failure(exc: BaseException) -> bool:
+    """Whether *exc* (or what it wraps) is a git fetch, clone or checkout failure.
+
+    Validation and filesystem errors after a successful fetch are not.
+    """
+    from ..deps.git_lazy import git_command_error
+
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, (subprocess.CalledProcessError, git_command_error())):
+            return True
+        if isinstance(seen, RuntimeError) and str(seen).startswith(
+            ("Failed to clone repository", "Failed to checkout commit")
+        ):
+            return True
+        seen = seen.__cause__
+    return False
+
+
+def _lost_admitted_commit(downloader, repo_ref, admitted) -> tuple[str, str, str] | None:
+    """``(ref, commit, now)`` when a named ref's admitted commit left the origin."""
+    if not admitted:
         return None
+    ref, commit = admitted[-1]
     try:
-        if dep_ref.is_artifactory():
+        from ..models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse(repo_ref) if isinstance(repo_ref, str) else repo_ref
+        if _reachable_now(downloader, dep_ref, commit) is not False:
             return None
-        admitted = (downloader.resolve_git_reference(dep_ref).resolved_commit or "").lower()
         found: list[str] = []
-        try:
+        with contextlib.suppress(CommitNotReachableError):
             _at_origin(
                 downloader, dep_ref, lambda url, env: found.append(_exact_tip(url, ref, env))
             )
-        except _NoSuchRef:
-            found.append("")
     except Exception:
         return None
-    if len(admitted) not in (40, 64) or not found or found[0] == admitted:
-        return None
-    return ref, admitted, found[0][:12] or "no branch or tag"
+    return ref, commit, found[0][:12] if found else "no branch or tag"
+
+
+def _reachable_now(downloader, dep_ref, sha: str) -> bool | None:
+    """Whether an origin branch or tag reaches *sha* now, ignoring recorded verdicts."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="apm-reach-check-") as scratch:
+        try:
+            _at_origin(
+                downloader,
+                dep_ref,
+                lambda url, env: require_reachable_commit(
+                    Path(scratch), url, "check", sha, env=env, persist=False
+                ),
+            )
+        except _Unverified:
+            return None
+        except CommitNotReachableError:
+            return False
+    return True
 
 
 def admit_and_resolve(downloader, dep_ref):
@@ -514,6 +575,7 @@ def admit_and_resolve(downloader, dep_ref):
         return downloader.resolve_git_reference(dep_ref)
     resolved = downloader.resolve_git_reference(dep_ref)
     admit_pinned_commit(downloader, dep_ref, ref, resolved=resolved)
+    _note_admitted(ref, getattr(resolved, "resolved_commit", None))
     return resolved
 
 

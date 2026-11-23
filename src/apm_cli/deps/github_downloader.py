@@ -1414,9 +1414,9 @@ class GitHubPackageDownloader:
                 # calling get_checkout so the cache skips its internal
                 # ls-remote. Same pattern as the non-subdir path at
                 # line ~1604 which passes locked_sha=resolved.
-                try:
-                    _resolved = self.resolve_git_reference(dep_ref)
-                    _resolved_sha_for_cache = _resolved.resolved_commit
+                try:  # A declared ref is already its admitted commit; never resolve it again.
+                    _resolved = None if dep_ref.reference else self.resolve_git_reference(dep_ref)
+                    _resolved_sha_for_cache = _resolved.resolved_commit if _resolved else ref
                 except Exception:
                     _resolved_sha_for_cache = None
                 # Sparse-cone (#1433): keying the persistent shard by
