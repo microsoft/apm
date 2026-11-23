@@ -387,6 +387,17 @@ def _scan_claimed_files(
         and not profile.user_root_resolver
     ] + list(reversed(targets))
     surfaces = primitive_surfaces(project_root, profiles, user_scope=user_scope)
+    # PERF FALSIFICATION HACK (F5): indexed candidate lookup, same set and order.
+    _by_path: dict[Path, list[tuple[int, PrimitiveSurface]]] = {}
+    for _index, _surface in enumerate(surfaces):
+        _by_path.setdefault(_surface.path, []).append((_index, _surface))
+
+    def _candidates(path: Path) -> list[PrimitiveSurface]:
+        hits = list(_by_path.get(path, ()))
+        for ancestor in path.parents:
+            hits.extend(hit for hit in _by_path.get(ancestor, ()) if hit[1].pattern is not None)
+        return [surface for _, surface in sorted(hits, key=lambda hit: hit[0])]
+
     results: list[FileScanResult] = []
     cache = {} if cache is None else cache
     for rel_path, owner in claims.items():
@@ -408,11 +419,7 @@ def _scan_claimed_files(
             if decoded is None:
                 continue
             abs_path = decoded
-        candidates = [
-            s
-            for s in surfaces
-            if s.contains(abs_path) or (s.pattern is not None and abs_path.is_relative_to(s.path))
-        ]
+        candidates = _candidates(abs_path)
         try:
             if candidates and not safe_surface_path(candidates[0], abs_path):
                 continue
