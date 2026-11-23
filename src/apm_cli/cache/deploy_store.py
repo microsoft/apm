@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import stat
@@ -43,6 +44,8 @@ from .paths import get_cache_root
 DEPLOY_BUCKET = "deploy_v1"
 MAX_DEPLOY_STORE_BYTES = 256 * 1024 * 1024
 MAX_DEPLOY_ENTRY_BYTES = 4 * 1024 * 1024
+RECORDS_DIR = "records"
+_RECORD_VERSION = 1
 
 _KEY_RE = re.compile(r"[0-9a-f]{64}")
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -186,6 +189,80 @@ class DeployStore:
             return False
         return self.put(key, data)
 
+    def _record_path(self, key: str) -> Path | None:
+        if not isinstance(key, str) or not _KEY_RE.fullmatch(key):
+            return None
+        return self._root / RECORDS_DIR / key[:2] / f"{key}.json"
+
+    def put_record(self, key: str, record: dict) -> bool:
+        """Write a package-bound render record (atomic, owner-only); return success."""
+        path = self._record_path(key)
+        if path is None or _valid_record(record) is None:
+            return False
+        data = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii")
+        try:
+            for directory in (self._root, path.parent.parent, path.parent):
+                if not os.path.lexists(directory):
+                    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if not self._real_dir(directory):
+                    return False
+            fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".part")
+        except OSError:
+            return False
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+            os.replace(temp, path)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.unlink(temp)
+            return False
+        return True
+
+    def package_record(
+        self,
+        repo_url: str,
+        resolved_commit: str,
+        content_hash: str,
+        targets: object,
+        version: str,
+        scope: object,
+    ) -> dict | None:
+        """Return the validated render record bound to this exact package and setup, or ``None``.
+
+        The record names, per deployed path, the canonical digest (the
+        lockfile value) and the raw sha256 of the exact bytes this machine
+        deployed for that verified package. A linked, non-regular, oversized
+        or malformed record is ``None``.
+        """
+        path = self._record_path(
+            package_record_key(repo_url, resolved_commit, content_hash, targets, version, scope)
+        )
+        if path is None or not all(
+            self._real_dir(d) for d in (self._root, path.parent.parent, path.parent)
+        ):
+            return None
+        try:
+            fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _BINARY)
+        except OSError:
+            return None
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_DEPLOY_ENTRY_BYTES:
+                return None
+            if os.path.islink(path) or _is_reparse(os.lstat(path)):
+                return None
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                raw = handle.read()
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+        try:
+            return _valid_record(json.loads(raw.decode("ascii")))
+        except (UnicodeDecodeError, ValueError):
+            return None
+
     def enforce_size_cap(self, limit: int = MAX_DEPLOY_STORE_BYTES) -> int:
         """Evict least recently used entries above *limit*, down to 80% of it; return count."""
         if not self._real_dir(self._root):
@@ -224,40 +301,116 @@ class DeployStore:
         return clean_cache_buckets((self._root,))
 
 
+def package_record_key(
+    repo_url: str,
+    resolved_commit: str,
+    content_hash: str,
+    targets: object,
+    version: str,
+    scope: object,
+) -> str:
+    """The record key both the writer and the reader derive for one package and setup."""
+    names = sorted(str(getattr(target, "name", target)) for target in (targets or ()))
+    parts = (
+        str(version),
+        str(repo_url),
+        str(resolved_commit),
+        str(content_hash),
+        ",".join(names),
+        str(getattr(scope, "value", scope)),
+    )
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def _valid_record(obj: object) -> dict | None:
+    """Return a normalized record, or ``None`` for any malformed shape."""
+    if not isinstance(obj, dict) or obj.get("v") != _RECORD_VERSION:
+        return None
+    files, ascii_only, body = obj.get("files"), obj.get("ascii_only"), obj.get("body")
+    if not isinstance(files, dict) or not files or not isinstance(ascii_only, bool):
+        return None
+    for rel, pair in files.items():
+        if not (isinstance(rel, str) and rel and isinstance(pair, list) and len(pair) == 2):
+            return None
+        if not all(isinstance(x, str) and _KEY_RE.fullmatch(x) for x in pair):
+            return None
+    if body is not None and not (isinstance(body, list) and all(isinstance(x, str) for x in body)):
+        return None
+    return {
+        "v": _RECORD_VERSION,
+        "files": {rel: list(pair) for rel, pair in files.items()},
+        "ascii_only": ascii_only,
+        "body": list(body) if body is not None else None,
+    }
+
+
+def record_matches(record: dict | None, lock_hashes: dict[str, str]) -> bool:
+    """Whether *record* binds exactly the lockfile's ``deployed_file_hashes`` for a package.
+
+    The lockfile authorizes nothing by itself: a hand-edited row pointing a
+    path at any other digest (even one cached on this machine) does not match.
+    """
+    if not record or not lock_hashes:
+        return False
+    recorded = {rel: f"sha256:{pair[0]}" for rel, pair in record["files"].items()}
+    return recorded == dict(lock_hashes)
+
+
 # Deployed files hashed during an install wait here, per command run, until
 # the install commits: a refused or failed install never reaches the store.
 _STAGED = "deploy-store-staged"
+_STAGED_RECORDS = "deploy-store-records"
 
 
-def stage(path: Path, key: str) -> None:
+def stage(path: Path, key: str, raw_sha256: str | None = None, ascii_only: bool = False) -> None:
     """Remember a deployed file for :func:`commit_staged` (no-op outside a command run)."""
     staged = invocation_memo(_STAGED)
     if staged is not None:
-        staged[str(path)] = key
+        staged[str(path)] = (key, raw_sha256, ascii_only)
+
+
+def staged_file(path: Path) -> tuple[str, str | None, bool] | None:
+    """Return ``(digest, raw sha256, ascii)`` staged for *path* this command run, if any."""
+    staged = invocation_memo(_STAGED)
+    return staged.get(str(path)) if staged else None
+
+
+def stage_record(key: str, record: dict) -> None:
+    """Remember a package-bound render record for :func:`commit_staged`."""
+    staged = invocation_memo(_STAGED_RECORDS)
+    if staged is not None and _valid_record(record) is not None:
+        staged[key] = record
 
 
 def discard_staged() -> None:
-    """Forget every staged file without storing it."""
-    staged = invocation_memo(_STAGED)
-    if staged:
-        staged.clear()
+    """Forget every staged file and record without storing them."""
+    for name in (_STAGED, _STAGED_RECORDS):
+        staged = invocation_memo(name)
+        if staged:
+            staged.clear()
 
 
 def commit_staged() -> int:
     """Store every staged file now that the install committed; return how many are present.
 
     Each file is re-read and must still hash to its staged key, so bytes that
-    changed after hashing are never stored under the old digest.
+    changed after hashing are never stored under the old digest. A record is
+    written only when every blob it names is present.
     """
     staged = invocation_memo(_STAGED)
-    if not staged:
+    records = invocation_memo(_STAGED_RECORDS)
+    items = list(staged.items()) if staged else []
+    pending = list(records.items()) if records else []
+    discard_staged()
+    if not items:
         return 0
-    items = list(staged.items())
-    staged.clear()
     store = DeployStore.open_default()
     if store is None:
         return 0
-    present = sum(store.put_file(key, Path(path)) for path, key in items)
+    present = {key for path, (key, _raw, _ascii) in items if store.put_file(key, Path(path))}
+    for key, record in pending:
+        if all(pair[0] in present for pair in record["files"].values()):
+            store.put_record(key, record)
     if store.written:
         store.enforce_size_cap()
-    return present
+    return len(present)

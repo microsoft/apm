@@ -8,6 +8,7 @@ lockfile alone. A tampered entry is a miss, and the next full install heals it.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -102,3 +103,36 @@ def test_an_empty_or_deleted_store_changes_nothing(apm_binary_path: Path, tmp_pa
         _install(apm_binary_path, without_store, world.env)
 
         assert _tree(without_store) == _tree(with_store)
+
+
+def test_every_installed_package_gets_a_record_binding_its_lockfile_hashes(
+    apm_binary_path: Path, tmp_path: Path
+) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        project = tmp_path / "project"
+        shutil.copytree(tree.project, project)
+        _install(apm_binary_path, project, world.env)
+
+        lock = load_yaml(project / "apm.lock.yaml")
+        locked = [
+            {
+                rel: value.removeprefix("sha256:")
+                for rel, value in dep["deployed_file_hashes"].items()
+            }
+            for dep in lock["dependencies"]
+            if dep.get("deployed_file_hashes")
+        ]
+        records = [
+            load_yaml(path)
+            for path in sorted((world.cache_dir / _BUCKET / "records").rglob("*.json"))
+        ]
+
+        assert locked and len(records) == len(locked)
+        recorded = [{rel: pair[0] for rel, pair in rec["files"].items()} for rec in records]
+        assert sorted(map(sorted, map(dict.items, recorded))) == sorted(
+            map(sorted, map(dict.items, locked))
+        )
+        for rec in records:
+            for rel, (_digest, raw) in rec["files"].items():
+                assert hashlib.sha256((project / rel).read_bytes()).hexdigest() == raw

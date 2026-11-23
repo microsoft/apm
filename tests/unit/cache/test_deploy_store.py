@@ -220,3 +220,145 @@ def test_cache_clean_empties_the_store(tmp_path: Path) -> None:
     assert store.clean_all() == []
     assert list(root.iterdir()) == []
     assert DeployStore(tmp_path / "never-used").clean_all() == []
+
+
+def _record_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, files: dict[str, bytes]):
+    from apm_cli.cache.deploy_store import (
+        commit_staged,
+        package_record_key,
+        stage,
+        stage_record,
+    )
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "c"))
+    ident = (
+        "https://github.com/o/r",
+        "a" * 40,
+        "sha256:" + "b" * 64,
+        ["copilot"],
+        "9.9",
+        "project",
+    )
+    record_files = {}
+    with invocation_scope():
+        for rel, data in files.items():
+            path = tmp_path / "project" / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            digest, raw = canonical_digest(data), hashlib.sha256(data).hexdigest()
+            stage(path, digest, raw, data.isascii())
+            record_files[rel] = [digest, raw]
+        record = {"v": 1, "files": record_files, "ascii_only": True, "body": ["  pkg"]}
+        stage_record(package_record_key(*ident), record)
+        commit_staged()
+    return DeployStore(tmp_path / "c"), ident, record_files
+
+
+def test_a_package_record_binds_exactly_the_bytes_deployed_for_that_package(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from apm_cli.cache.deploy_store import record_matches
+
+    store, ident, files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT, "b.md": b"two\n"})
+    record = store.package_record(*ident)
+
+    assert record is not None and record["files"] == files and record["body"] == ["  pkg"]
+    lock = {rel: f"sha256:{digest}" for rel, (digest, _raw) in files.items()}
+    assert record_matches(record, lock)
+    for rel, (digest, raw) in files.items():
+        assert store.get(digest, raw_sha256=raw) == (tmp_path / "project" / rel).read_bytes()
+
+
+def test_a_lock_edit_pointing_a_path_at_another_cached_blob_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from apm_cli.cache.deploy_store import record_matches
+
+    other = b"bytes cached from another project\n"
+    store, ident, _files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    store.put(canonical_digest(other), other)
+    edited = {"a.md": f"sha256:{canonical_digest(other)}"}
+
+    assert store.get(canonical_digest(other)) == other, "the other blob is in the cache"
+    assert not record_matches(store.package_record(*ident), edited)
+    assert not record_matches(None, edited)
+
+
+def test_a_crlf_image_is_refused_by_the_recorded_raw_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store, _ident, files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    digest, raw = files["a.md"]
+    entry = tmp_path / "c" / DEPLOY_BUCKET / digest[:2] / digest
+    entry.write_bytes(_TEXT.replace(b"\n", b"\r\n"))  # same canonical digest
+
+    assert store.get(digest) is not None
+    assert store.get(digest, raw_sha256=raw) is None
+
+
+def test_another_setup_never_reads_the_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store, ident, _files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    repo, commit, content, targets, version, scope = ident
+
+    assert store.package_record(*ident) is not None
+    for changed in (
+        (repo, "c" * 40, content, targets, version, scope),
+        (repo, commit, "sha256:" + "d" * 64, targets, version, scope),
+        (repo, commit, content, ["copilot", "claude"], version, scope),
+        (repo, commit, content, targets, "9.10", scope),
+        (repo, commit, content, targets, version, "user"),
+    ):
+        assert store.package_record(*changed) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"not json",
+        b'{"v": 2, "files": {}, "ascii_only": true, "body": null}',
+        b'{"v": 1, "files": {"a.md": ["../x", "y"]}, "ascii_only": true, "body": null}',
+        b'{"v": 1, "files": {"a.md": ["' + b"a" * 64 + b'"]}, "ascii_only": true, "body": null}',
+        b'{"v": 1, "files": {"a.md": ["' + b"a" * 64 + b'", "' + b"b" * 64 + b'"]}, '
+        b'"ascii_only": "yes", "body": null}',
+    ],
+)
+def test_a_malformed_record_reads_as_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, payload: bytes
+) -> None:
+    from apm_cli.cache.deploy_store import RECORDS_DIR, package_record_key
+
+    store, ident, _files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    key = package_record_key(*ident)
+    path = tmp_path / "c" / DEPLOY_BUCKET / RECORDS_DIR / key[:2] / f"{key}.json"
+    path.write_bytes(payload)
+
+    assert store.package_record(*ident) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_linked_record_is_never_followed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from apm_cli.cache.deploy_store import RECORDS_DIR, package_record_key
+
+    store, ident, _files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    key = package_record_key(*ident)
+    path = tmp_path / "c" / DEPLOY_BUCKET / RECORDS_DIR / key[:2] / f"{key}.json"
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(path.read_bytes())
+    path.unlink()
+    path.symlink_to(outside)
+
+    assert store.package_record(*ident) is None
+    assert outside.exists()
+
+
+def test_no_record_is_written_when_one_of_its_blobs_is_not_stored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    big = b"x" * (MAX_DEPLOY_ENTRY_BYTES + 1)
+    store, ident, _files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT, "big.bin": big})
+
+    assert store.package_record(*ident) is None
+    assert store.get(canonical_digest(_TEXT)) == _TEXT
