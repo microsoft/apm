@@ -354,7 +354,9 @@ class DeploymentMaterializationSession:
 
     def _locator(self, path: Path, targets: Sequence[TargetProfile]) -> DeploymentLocator | None:
         candidate = resolve_for_containment(path)
-        for target in (target for target in targets if target.supports("skills")):
+        for target in targets:
+            if not target.supports("skills"):
+                continue
             skills_root = resolve_for_containment(target.skills_deploy_path(self.root))
             if resolved_relative_within(candidate, skills_root) is not None:
                 return self._encode(candidate, target)
