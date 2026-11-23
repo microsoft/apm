@@ -43,6 +43,12 @@ ORIGIN = "https://github.com/rh-probe/consumer.git"
 DEAD_ANTHROPIC = "http://127.0.0.1:9"
 DUMMY_KEY = "sk-ant-api03-" + "x" * 80 + "RHPROBE0000000000000"
 ENVS = ("normal", "worktree", "headless")
+# Diagnostic variants: a second headless session in the same project, and the
+# project marketplace path rewritten to an absolute path.
+DIAG_ENVS = ("headless-rerun", "headless-abspath")
+TOOL_PROMPT = (
+    "Call the MCP tool rh_probe_tool exactly once, then reply with the exact text it returned."
+)
 SCOPES = ("user", "project")
 HARNESSES = ("claude", "copilot")
 SESSION_SECONDS = 45
@@ -75,6 +81,9 @@ process.stdin.on('data', (chunk) => {
       process.stdout.write(JSON.stringify({jsonrpc: '2.0', id: message.id,
         result: {tools: [{name: 'rh_probe_tool', description: 'probe',
         inputSchema: {type: 'object', properties: {}}}]}}) + '\n');
+    } else if (message.method === 'tools/call') {
+      process.stdout.write(JSON.stringify({jsonrpc: '2.0', id: message.id,
+        result: {content: [{type: 'text', text: 'RH_PROBE_TOOL_OK'}]}}) + '\n');
     } else if (message.id !== undefined && message.method) {
       process.stdout.write(JSON.stringify({jsonrpc: '2.0', id: message.id, result: {}}) + '\n');
     }
@@ -146,6 +155,7 @@ class Cell:
             "GIT_COMMITTER_EMAIL": "rh@example.com",
             "GIT_CONFIG_NOSYSTEM": "1",
             "NO_UPDATE_NOTIFIER": "1",
+            "CI": "true",
         }
         if self.harness == "claude":
             env.update(
@@ -155,6 +165,9 @@ class Cell:
                 DISABLE_TELEMETRY="1",
                 DISABLE_ERROR_REPORTING="1",
             )
+        else:
+            # Pin the npm-installed version: never run a newer downloaded CLI.
+            env["COPILOT_AUTO_UPDATE"] = "false"
         return env
 
     def run(
@@ -294,6 +307,13 @@ class Cell:
                 f"dependencies:\n  apm:\n    - {plugin}\n",
             )
             argv = [apm, "install", "--no-policy"]
+        elif self.agent_plugin:
+            # Agent Plugins refuse the imperative local-bundle route; declare them.
+            _write(
+                self.home / ".apm" / "apm.yml",
+                f"name: user\nversion: 1.0.0\ndependencies:\n  apm:\n    - {plugin}\n",
+            )
+            argv = [apm, "install", "-g", "--no-policy", "--target", self.harness]
         else:
             argv = [apm, "install", "-g", "--no-policy", "--target", self.harness, str(plugin)]
         proc = self.run("apm-install", argv, self.project)
@@ -321,6 +341,18 @@ class Cell:
     def run_dir(self) -> Path:
         return self.worktree if self.env == "worktree" else self.project
 
+    def marketplace(self) -> str:
+        lock = _read(self.project / "apm.lock.yaml") + _read(self.home / ".apm" / "apm.lock.yaml")
+        match = re.search(r"name: (apm-[pu]-[0-9a-f]+)", lock)
+        return match.group(1) if match else ""
+
+    def absolutize_project_marketplace(self) -> None:
+        settings = self.project / ".claude" / "settings.json"
+        data = json.loads(_read(settings))
+        for entry in data.get("extraKnownMarketplaces", {}).values():
+            entry["source"]["path"] = str(self.project / ".agents" / "plugins")
+        _json(settings, data)
+
     def session_env(self) -> dict[str, str]:
         if self.harness == "copilot":
             env = {"COPILOT_ALLOW_ALL": "true"}
@@ -338,6 +370,7 @@ class Cell:
                 "plugin_list": ["claude", "plugin", "list"],
                 "marketplace_list": ["claude", "plugin", "marketplace", "list"],
                 "mcp_list": ["claude", "mcp", "list"],
+                "plugin_details": ["claude", "plugin", "details", f"{PLUGIN}@{self.marketplace()}"],
             }
         else:
             cmds = {
@@ -351,19 +384,22 @@ class Cell:
         self.evidence["lists"] = out
 
     def interactive(self, cwd: Path) -> None:
-        """Start the TUI under a pty for SESSION_SECONDS, sending no input."""
+        """Start the TUI under a pty; Claude gets no input, Copilot gets one prompt."""
         typescript = self.logs / "interactive.typescript"
         if self.harness == "copilot" and not os.environ.get("COPILOT_GITHUB_TOKEN"):
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for a Copilot session"
+        limit = SESSION_SECONDS
+        feed = f"sleep {limit + 15}"
+        if self.harness == "copilot":
+            limit = SESSION_SECONDS * 2
+            # Copilot starts the session (and its hooks) on the first prompt.
+            feed = f"{{ sleep 15; printf '%s\\r' '{TOOL_PROMPT}'; sleep {limit}; }}"
         wrapped = [
             "bash",
             "-c",
-            f"sleep {SESSION_SECONDS + 15} | timeout -s INT {SESSION_SECONDS} "
-            f"script -qfec '{self.harness}' '{typescript}'",
+            f"{feed} | timeout -s INT {limit} script -qfec '{self.harness}' '{typescript}'",
         ]
-        self.run(
-            "interactive", wrapped, cwd, extra_env=self.session_env(), timeout=SESSION_SECONDS + 60
-        )
+        self.run("interactive", wrapped, cwd, extra_env=self.session_env(), timeout=limit + 60)
         self.evidence["screen_tail"] = _tail(_ANSI.sub("", _read(typescript)), 3000)
 
     def headless(self, cwd: Path) -> None:
@@ -378,7 +414,15 @@ class Cell:
                 "--max-turns",
                 "1",
             ]
+            if self.env == "headless-abspath" and self.scope == "project":
+                self.absolutize_project_marketplace()
             proc = self.run("headless", argv, cwd, timeout=SESSION_SECONDS + 30)
+            if self.env == "headless-rerun":
+                self.evidence["first_session_hook"] = _read(self.hook_marker)
+                self.evidence["first_session_init_has_skill"] = SKILL in proc.stdout
+                self.hook_marker.unlink(missing_ok=True)
+                self.mcp_marker.unlink(missing_ok=True)
+                proc = self.run("headless-2", argv, cwd, timeout=SESSION_SECONDS + 30)
             init = None
             for line in proc.stdout.splitlines():
                 try:
@@ -397,13 +441,7 @@ class Cell:
         if not os.environ.get("COPILOT_GITHUB_TOKEN"):
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for copilot -p"
             return
-        argv = [
-            "copilot",
-            "-p",
-            "Reply with the single word OK.",
-            "--allow-all-tools",
-            "--no-color",
-        ]
+        argv = ["copilot", "-p", TOOL_PROMPT, "--allow-all-tools", "--no-color"]
         proc = self.run("headless", argv, cwd, extra_env=self.session_env(), timeout=180)
         self.evidence["headless_tail"] = _tail(proc.stdout + proc.stderr, 2000)
 
@@ -416,10 +454,15 @@ class Cell:
             "hook_fired": "SessionStart" in _read(self.hook_marker),
             "mcp_initialized": "initialize" in mcp,
             "mcp_tools_listed": "tools/list" in mcp,
+            "mcp_tool_called": "tools/call" in mcp,
             "plugin_listed": PLUGIN in lists.get("plugin_list", ""),
         }
+        if self.harness == "claude":
+            sig["details_listed"] = SKILL in lists.get("plugin_details", "")
         if self.harness == "copilot":
             sig["skill_listed"] = SKILL in lists.get("skill_list", "")
+            reply = self.evidence.get("headless_tail", "") + self.evidence.get("screen_tail", "")
+            sig["model_reply_tool_ok"] = "RH_PROBE_TOOL_OK" in reply
             sig["mcp_listed"] = MCP in lists.get("mcp_list", "")
         init = self.evidence.get("init")
         if init:
@@ -435,7 +478,7 @@ class Cell:
         runtime = [sig["mcp_initialized"]]
         if not self.agent_plugin:
             runtime.append(sig["hook_fired"])
-        if self.env == "headless" and self.harness == "claude":
+        if self.env.startswith("headless") and self.harness == "claude":
             runtime.append(bool(sig.get("init_skill")))
         if self.harness == "copilot":
             runtime.append(sig["skill_listed"])
@@ -445,6 +488,12 @@ class Cell:
             return "BLOCKED", self.evidence["blocked"]
         missing = "missing: " + ", ".join(k for k, v in sig.items() if not v)
         return ("PARTIAL" if any(runtime) else "DOES NOT LOAD"), missing
+
+    def harness_version(self) -> str:
+        """The version the cell's own environment runs, read after the session."""
+        proc = self.run("version", [self.harness, "--version"], self.project, timeout=60)
+        text = (proc.stdout or proc.stderr).strip()
+        return text.splitlines()[0] if text else "?"
 
     # -- driver -------------------------------------------------------------
 
@@ -463,7 +512,7 @@ class Cell:
                 self.git("worktree", "add", "-q", "-b", "wt", str(self.worktree))
             cwd = self.run_dir()
             self.list_probes(cwd)
-            if self.env == "headless":
+            if self.env.startswith("headless"):
                 self.headless(cwd)
             else:
                 self.interactive(cwd)
@@ -475,7 +524,7 @@ class Cell:
             "env": self.env,
             "scope": self.scope,
             "fixture": "agent-plugin" if self.agent_plugin else "claude-plugin",
-            "harness_version": harness_version(self.harness),
+            "harness_version": self.harness_version(),
             "verdict": verdict,
             "reason": reason,
             "signals": sig,
@@ -486,17 +535,6 @@ class Cell:
         }
         _json(self.root / "cell.json", result)
         return result
-
-
-def harness_version(harness: str) -> str:
-    try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv
-            [harness, "--version"], capture_output=True, text=True, timeout=60, check=False
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return "unavailable"
-    text = (proc.stdout or proc.stderr).strip()
-    return text.splitlines()[0] if text else "?"
 
 
 def summarize(out: Path) -> str:
@@ -516,7 +554,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--harness", choices=HARNESSES, required=True)
-    run.add_argument("--env", choices=ENVS, action="append")
+    run.add_argument("--env", choices=ENVS + DIAG_ENVS, action="append")
     run.add_argument("--scope", choices=SCOPES, action="append")
     run.add_argument("--out", type=Path, required=True)
     summ = sub.add_parser("summarize")

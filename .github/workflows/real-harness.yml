@@ -75,7 +75,12 @@ jobs:
         env:
           HARNESS: ${{ matrix.harness }}
           COPILOT_GITHUB_TOKEN: ${{ matrix.harness == 'copilot' && secrets.COPILOT_GITHUB_TOKEN || '' }}
-        run: python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
+        run: |
+          python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
+          if [ "$HARNESS" = claude ]; then
+            python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
+              --env headless-rerun --env headless-abspath --scope project
+          fi
 
       - name: Summary
         if: always()
