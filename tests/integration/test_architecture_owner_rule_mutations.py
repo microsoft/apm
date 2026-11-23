@@ -84,6 +84,24 @@ def _shared_linter_session() -> Iterator[LinterSession]:
             'import zipfile\n_SIDE = zipfile.ZipFile("side.zip")\nfrom ..utils.archive import (',
             id="unlisted-archive-opener",
         ),
+        pytest.param(
+            "src/apm_cli/utils/archive.py",
+            "    problem = portable_name_problem(member_name)\n",
+            "    problem = None\n",
+            id="extract-skips-the-portable-name-check",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/unpacker.py",
+            "            or portable_name_problem(rel_path) is not None\n",
+            "",
+            id="unpack-skips-the-portable-name-check",
+        ),
+        pytest.param(
+            "src/apm_cli/bundle/unpacker.py",
+            "                    if portable_name_problem(name) is not None:\n",
+            "                    if False:\n",
+            id="unpack-skips-nested-names",
+        ),
     ],
 )
 def test_archive_member_reads_cannot_bypass_the_limits_owner(
@@ -2191,6 +2209,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def determine_config_key(",
         new="def _derive_config_key(",
         intent="MCPClientAdapter loses the canonical config-key derivation definition.",
+    ),
+    MutationCase(
+        guard_id="hooks-integrations-mcp-config-link-policy",
+        rule_id="mutation_writes.mcp_config_link_policy",
+        path="src/apm_cli/adapters/client/codex.py",
+        old="        if self._config_is_linked():\n            raise OSError",
+        new="        if False:\n            raise OSError",
+        intent="The Codex writer drops its link check and replaces a symlinked config.",
     ),
     MutationCase(
         guard_id="hooks-integrations-mcp-declaration-scope",
@@ -4362,6 +4388,53 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old='                [executable, "--version"],',
         new='                [executable, "--version"],\n                executable="codex",',
         intent="The codex version probe overrides its resolved path with a literal executable.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="    for line in retired_kinds_warnings(hooks, skip=denied):\n        logger.warning(line)\n",
+        new="    for line in sorted(hooks):\n        logger.warning(line)\n",
+        intent="Uninstall bypasses the kinds owner when it warns about retired kinds (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning(f"{key} hooks are no longer allowed; removing them")\n'
+        ),
+        intent="Uninstall adds a hard-coded hooks label beside the owner's warning (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/commands/uninstall/engine.py",
+        old="        logger.warning(line)\n",
+        new=(
+            "        logger.warning(line)\n"
+            '    logger.warning("p-mixed hooks are no longer "\n'
+            '                   "allowed; removing them")\n'
+        ),
+        intent="Uninstall splits a hard-coded kinds warning across adjacent literals (#4816).",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/security/exec_kinds.py",
+        old='f"{key} {exec_kinds_phrase(kinds)} are no longer allowed',
+        new='f"{key} hooks are no longer allowed',
+        intent="The retirement warning hard-codes 'hooks' instead of install's kind labels.",
+    ),
+    MutationCase(
+        guard_id="install-deployment-gate-retirement",
+        rule_id="install-deployment-gate-retirement",
+        path="src/apm_cli/install/plan_admission.py",
+        old="    return rebuild_retired_kinds(deployed, retired, dep.deployed_files)\n",
+        new="    return tuple(sorted(retired))\n",
+        intent="Retired kinds skip the deployment-evidence filter and name undeployed canvas.",
     ),
 )
 

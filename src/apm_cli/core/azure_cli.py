@@ -85,14 +85,14 @@ class AzureCliBearerProvider:
         # Azure CLI ships as az.cmd (a batch wrapper), and Python's
         # subprocess.run -> CreateProcessW does NOT honor PATHEXT for
         # non-.exe executables, so a bare "az" token fails with
-        # FileNotFoundError even though `shutil.which("az")` resolves it.
-        # See microsoft/apm#1430. Resolving via shutil.which here (which
-        # DOES honor PATHEXT) and storing the absolute path keeps every
-        # downstream subprocess.run call portable across platforms.
+        # FileNotFoundError even though a PATHEXT-aware lookup resolves it.
+        # See microsoft/apm#1430. Resolving via trusted_executable here
+        # (PATHEXT-aware, PATH outside the project only) and storing the
+        # absolute path keeps every downstream subprocess.run call portable.
         #
         # Edge case: callers (notably tests) may pass an explicit absolute
         # path. We trust absolute paths verbatim and skip re-resolution.
-        # Relative tokens always flow through shutil.which so a
+        # Relative tokens always flow through trusted_executable so a
         # CWD-relative form like "subdir/az" cannot bypass resolution.
         #
         # PATH changes mid-process won't be detected; restart the CLI.

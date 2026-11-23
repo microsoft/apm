@@ -785,6 +785,7 @@ mutation_writes.hook_command_vocabulary
 mutation_writes.hook_containment_root
 mutation_writes.jetbrains_mcp_path
 mutation_writes.mcp_config_key_derivation
+mutation_writes.mcp_config_link_policy
 mutation_writes.mcp_declaration_scope
 mutation_writes.mcp_json_config_write
 mutation_writes.mcp_json_config_writer

@@ -2,6 +2,7 @@
 
 import os  # noqa: F401
 import shutil
+import sys
 from pathlib import Path
 from typing import Union  # noqa: F401
 
@@ -187,6 +188,61 @@ class TestUnpackDestinationContainment:
         output.mkdir()
 
         with pytest.raises(ValueError, match="outside managed integration directories"):
+            unpack_bundle(bundle, output)
+
+        assert not any(output.rglob("*"))
+
+    @pytest.mark.parametrize(
+        "unportable",
+        [
+            ".github/instructions/a. /x.md",
+            ".github/instructions/x.md:y",
+            ".github/instructions/aux.md",
+        ],
+        ids=["trailing-space-segment", "colon", "device-name"],
+    )
+    def test_unportable_lockfile_names_refused_before_any_write(self, tmp_path, unportable):
+        bundle = _build_bundle_dir(tmp_path, {".github/instructions/ok.md": "ok\n"})
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".github/instructions/ok.md", unportable],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        output = tmp_path / "project"
+        (output / ".github" / "instructions").mkdir(parents=True)
+        (output / ".github" / "instructions" / "mine.md").write_bytes(b"mine\n")
+        tree = sorted(output.rglob("*"))
+        before = {p: p.read_bytes() for p in tree if p.is_file()}
+
+        with pytest.raises(ValueError, match="unsafe path"):
+            unpack_bundle(bundle, output, skip_verify=True)
+
+        assert sorted(output.rglob("*")) == tree
+        assert {p: p.read_bytes() for p in tree if p.is_file()} == before
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold such a name")
+    def test_unportable_name_inside_a_directory_entry_is_refused(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {".agents/skills/review/SKILL.md": "x\n", ".agents/skills/review/aux.md": "x\n"},
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".agents/skills/review"],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        output = tmp_path / "project"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match="unsafe path"):
             unpack_bundle(bundle, output)
 
         assert not any(output.rglob("*"))

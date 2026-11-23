@@ -580,8 +580,8 @@ class ScriptRunner:
         # Resolve the runtime binary to the APM-managed path (or fallback to PATH).
         # This must happen here, not in _generate_runtime_command, so the command
         # string stays parseable (bare names) by _detect_runtime / _transform_runtime_command.
-        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then shutil.which(),
-        # which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
+        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then PATH outside
+        # the project, which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
         if actual_command_args:
             resolved = find_runtime_binary(actual_command_args[0])
             if resolved:
