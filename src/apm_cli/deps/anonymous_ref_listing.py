@@ -65,7 +65,7 @@ _FALLBACK_ENV = (
 
 _session_lock = threading.Lock()
 _sessions: dict[str, object] = {}
-_config_cache: dict[tuple, tuple[dict[str, str], dict[str, str]] | None] = {}
+_config_cache: dict[tuple, tuple[dict[str, str], dict[str, str], tuple[str, ...]] | None] = {}
 
 
 class _Fallback(Exception):
@@ -135,6 +135,8 @@ def _classify(entries) -> dict[str, str] | None:
             lists[list_key] = [*live, entry.value] if entry.value else []
         elif key in (_CA_KEY, _BACKEND_KEY):
             values[key] = entry.value
+        elif key.startswith("url.") and key.endswith((".insteadof", ".pushinsteadof")):
+            continue  # judged per URL (_rewrite_prefixes); push rewrites never apply to a fetch
         elif key.startswith(("url.", "http.", "protocol.https.")) or key in (
             "protocol.allow",
             "core.gitproxy",
@@ -144,11 +146,23 @@ def _classify(entries) -> dict[str, str] | None:
     return None if any(lists.values()) else values
 
 
-def _effective_config(env: Mapping[str, str]) -> tuple[dict[str, str], dict[str, str]]:
-    """``(config, child_env)`` git's ls-remote would run with for *env*, read once per env.
+def _rewrite_prefixes(entries) -> tuple[str, ...]:
+    """Every ``url.<base>.insteadOf`` value: a URL starting with one is rewritten by git."""
+    return tuple(
+        entry.value
+        for entry in entries
+        if entry.key.lower().startswith("url.") and entry.key.lower().endswith(".insteadof")
+    )
 
-    The child env comes from the same builder as ``git_remote_refs``. Any
-    ``url.*`` rule falls back, so the probe URL cannot change the verdict.
+
+def _effective_config(
+    env: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, str], tuple[str, ...]]:
+    """``(config, child_env, insteadOf prefixes)`` for git's ls-remote under *env*, once per env.
+
+    The child env comes from the same builder as ``git_remote_refs``. The
+    verdict does not depend on the probe URL: rewrites are checked per URL by
+    the caller, and every other URL-dependent key falls back.
     """
     from apm_cli.utils.git_env import _read_effective_git_config, git_network_env
 
@@ -156,11 +170,12 @@ def _effective_config(env: Mapping[str, str]) -> tuple[dict[str, str], dict[str,
     if fingerprint not in _config_cache:
         try:
             child_env = git_network_env(f"https://{_GITHUB_HOST}/apm/probe", dict(env))
-            config = _classify(_read_effective_git_config(child_env).entries)
+            entries = _read_effective_git_config(child_env).entries
+            config, prefixes = _classify(entries), _rewrite_prefixes(entries)
         except Exception:
             # A probe failure is git's to report: the caller runs git as today.
-            config, child_env = None, {}
-        _config_cache[fingerprint] = None if config is None else (config, child_env)
+            config, child_env, prefixes = None, {}, ()
+        _config_cache[fingerprint] = None if config is None else (config, child_env, prefixes)
     cached = _config_cache[fingerprint]
     if cached is None:
         raise _Fallback("git config changes how git would fetch this URL")
@@ -488,7 +503,9 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         for name in _FALLBACK_ENV:
             if env.get(name):
                 raise _Fallback(f"{name} is set")
-        config, child_env = _effective_config(env)
+        config, child_env, prefixes = _effective_config(env)
+        if any(url.lower().startswith(prefix.lower()) for prefix in prefixes):
+            raise _Fallback("a url.insteadOf rewrite applies to this URL")
         allow = child_env.get("GIT_ALLOW_PROTOCOL")
         if allow is not None and "https" not in allow.split(":"):
             raise _Fallback("https is not an allowed git protocol")

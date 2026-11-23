@@ -261,7 +261,7 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
 @pytest.mark.parametrize(
     "pair",
     [
-        ("url.https://mirror/.insteadof", "https://github.com/"),
+        ("url.https://mirror/.pushurl", "https://github.com/"),
         ("http.proxy", "http://p:1"),
         ("http.sslverify", "false"),
         ("protocol.https.allow", "never"),
@@ -283,7 +283,7 @@ def test_config_that_changes_gits_request_falls_back(pair):
 
 @pytest.mark.parametrize("allowed", ["file", "file:ssh", ""])
 def test_https_not_allowed_in_gits_child_env_falls_back(allowed, monkeypatch):
-    monkeypatch.setitem(arl._config_cache, (), ({}, {"GIT_ALLOW_PROTOCOL": allowed}))
+    monkeypatch.setitem(arl._config_cache, (), ({}, {"GIT_ALLOW_PROTOCOL": allowed}, ()))
     monkeypatch.setattr(_REQUEST, lambda *_a, **_k: pytest.fail("no request expected"))
 
     listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=False, env={})
@@ -385,11 +385,12 @@ def test_a_body_without_single_reads_falls_back():
         arl._read_body(response, deadline=1e9)
 
 
-def _eligible(monkeypatch) -> str:
+def _eligible(monkeypatch, prefixes: tuple[str, ...] = ()) -> str:
     """Seed the env-keyed config verdict for ``env={}``: eligible, trusting certifi."""
     import certifi
 
-    monkeypatch.setitem(arl._config_cache, (), ({}, {"GIT_SSL_CAINFO": certifi.where()}))
+    child_env = {"GIT_SSL_CAINFO": certifi.where()}
+    monkeypatch.setitem(arl._config_cache, (), ({}, child_env, prefixes))
     return certifi.where()
 
 
@@ -522,3 +523,59 @@ def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkey
     assert len(injected.get_ca_certs()) > 1
     assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
     assert len(context.get_ca_certs()) == 1
+
+
+class _AdvertisingRaw:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def read1(self, _amt: int, decode_content: bool) -> bytes:
+        body, self.body = self.body, b""
+        return body
+
+
+def _capture_requests(monkeypatch) -> list[dict]:
+    captured: list[dict] = []
+
+    def request(session, method, url, **kwargs):
+        captured.append({"session": session, "method": method, "url": url, **kwargs})
+        return _Response(_AdvertisingRaw(_advertisement(f"{_A} refs/tags/v1")))
+
+    monkeypatch.setattr(_REQUEST, request)
+    return captured
+
+
+def test_credential_usernames_stay_eligible_and_send_no_credentials(monkeypatch):
+    entries = _entries(
+        ("credential.helper", ""),
+        ("credential.username", "u"),
+        ("credential.https://github.com.username", "u"),
+    )
+    assert arl._classify(entries) == {}
+    _eligible(monkeypatch)
+    captured = _capture_requests(monkeypatch)
+
+    listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=False, env={})
+
+    assert listed == f"{_A}\trefs/tags/v1\n"
+    (sent,) = captured
+    headers = {**sent["session"].headers, **(sent.get("headers") or {})}
+    assert not any(name.lower() == "authorization" for name in headers)
+    assert sent["ambient_credentials"] is False
+
+
+def test_an_insteadof_rewrite_falls_back_only_when_it_applies(monkeypatch):
+    entries = _entries(
+        ("url.git@gitlab.example.com:.insteadof", "https://gitlab.example.com/"),
+        ("url.ssh://git@github.com/.pushinsteadof", "https://github.com/"),
+    )
+    assert arl._classify(entries) == {}
+    assert arl._rewrite_prefixes(entries) == ("https://gitlab.example.com/",)
+
+    _eligible(monkeypatch, prefixes=("https://gitlab.example.com/",))
+    _capture_requests(monkeypatch)
+    url = "https://github.com/owner/repo"
+    assert arl.list_refs_anonymously(url, include_heads=False, env={}) is not None
+
+    _eligible(monkeypatch, prefixes=("https://github.com/owner/",))
+    assert arl.list_refs_anonymously(url, include_heads=False, env={}) is None
