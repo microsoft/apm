@@ -18,6 +18,7 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -1442,6 +1443,23 @@ def _flag_gated(profile: TargetProfile, *, create_config: bool = True) -> bool:
     return _is_flag_enabled(profile.requires_flag, create_config=create_config)
 
 
+def _root_prefixes(profile: TargetProfile) -> tuple[str, ...]:
+    """Return the allow-list prefixes a target's own root contributes.
+
+    A user root equal to the deploy root (``CLAUDE_CONFIG_DIR=$HOME``) scopes
+    to ``.``, and its paths record without a ``./`` segment (#5096). The root
+    itself would then admit every path under it, so only the directories its
+    primitives deploy into are allowed; anything else stays refused.
+    """
+    if posixpath.normpath(profile.root_dir.replace("\\", "/")) != ".":
+        return (profile.prefix,)
+    return tuple(
+        f"{posixpath.normpath(mapping.subdir)}/"
+        for mapping in profile.primitives.values()
+        if mapping.deploy_root is None and posixpath.normpath(mapping.subdir or ".") != "."
+    )
+
+
 def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple:
     """Return all known target root prefixes as a tuple.
 
@@ -1463,9 +1481,10 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
     seen: set[str] = set()
     if targets is None and user_scope:
         for profile in selected_user_profiles().values():
-            if profile.prefix not in seen:
-                seen.add(profile.prefix)
-                prefixes.append(profile.prefix)
+            for prefix in _root_prefixes(profile):
+                if prefix not in seen:
+                    seen.add(prefix)
+                    prefixes.append(prefix)
     for t in source:
         # Dynamic-root targets (cowork) use cowork:// prefix in lockfile.
         # Check the *capability* (user_root_resolver is not None) rather
@@ -1482,9 +1501,10 @@ def get_integration_prefixes(targets=None, *, user_scope: bool = False) -> tuple
                 seen.add(COWORK_LOCKFILE_PREFIX)
                 prefixes.append(COWORK_LOCKFILE_PREFIX)
             continue
-        if t.prefix not in seen:
-            seen.add(t.prefix)
-            prefixes.append(t.prefix)
+        for prefix in _root_prefixes(t):
+            if prefix not in seen:
+                seen.add(prefix)
+                prefixes.append(prefix)
         if targets is None and user_scope and t.user_root_dir is not None:
             user_prefix = f"{t.user_root_dir}/"
             if user_prefix not in seen:
