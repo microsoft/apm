@@ -126,3 +126,45 @@ def test_an_unreadable_survivor_manifest_keeps_the_shared_server(
     uninstall = CliRunner().invoke(cli, ["uninstall", "../b"])
 
     assert "shared-srv" in _servers(project), uninstall.output
+
+
+def test_an_undeclared_package_a_survivor_still_needs_keeps_its_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name, server, deps in (
+        ("a", "a-srv", ""),
+        ("b", "b-srv", ""),
+        ("c", None, "  apm:\n    - path: ../a\n"),
+    ):
+        root = tmp_path / name
+        (root / ".apm" / "instructions").mkdir(parents=True)
+        mcp = (
+            f"  mcp:\n    - name: {server}\n      registry: false\n"
+            "      transport: stdio\n      command: echo\n"
+            if server
+            else ""
+        )
+        (root / "apm.yml").write_text(
+            f"name: pkg{name}\nversion: 1.0.0\ndependencies:\n{deps}{mcp}", encoding="ascii"
+        )
+        (root / ".apm" / "instructions" / f"{name}.instructions.md").write_text(
+            f"---\napplyTo: '**'\n---\n# {name}\n", encoding="ascii"
+        )
+    project = tmp_path / "app"
+    project.mkdir()
+    _manifest(project, "../a", "../b", "../c")
+    monkeypatch.chdir(project)
+    install = CliRunner().invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    assert {"a-srv", "b-srv"} <= _servers(project)
+    _manifest(project, "../b", "../c")
+    clear_apm_yml_cache()
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "../b"])
+
+    assert uninstall.exit_code == 0, uninstall.output
+    lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+    assert "a-srv" in lock["mcp_servers"]
+    assert "a-srv" in config["mcpServers"]
+    assert "b-srv" not in _servers(project)
