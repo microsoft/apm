@@ -47,6 +47,7 @@
       "selectors": [
         "src/apm_cli/install/mcp/ownership.py",
         "src/apm_cli/install/mcp/native_entry.py",
+        "src/apm_cli/install/mcp/retirement.py",
         "src/apm_cli/install/mcp/write_receipts.py"
       ],
       "guards": [
