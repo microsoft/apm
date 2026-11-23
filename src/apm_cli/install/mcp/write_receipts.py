@@ -504,6 +504,8 @@ def retire_undeclared_mcp_writes(
     logger: Any,
     retire: bool = True,
     targeted: set[str] | None = None,
+    manifest: Any = None,
+    runtime: str | None = None,
 ) -> None:
     """Without a lockfile, retire the entries APM wrote for servers it no longer deploys.
 
@@ -518,8 +520,13 @@ def retire_undeclared_mcp_writes(
 
     *targeted* is the set of runtimes the manifest's ``targets:`` select (None
     when it selects none); a declared server's entry outside it is kept and
-    reported (#4784).
+    reported (#4784). Without *targeted*, it is read from *manifest* unless an
+    explicit *runtime* narrows this run (not the project).
     """
+    if targeted is None and manifest is not None and runtime is None:
+        from apm_cli.install.mcp.integration import _declared_manifest_runtimes
+
+        targeted = _declared_manifest_runtimes(manifest, user_scope=user_scope)
     try:
         store = McpWriteReceipts.open(project_root, user_scope=user_scope)
     except (OSError, ValueError):
