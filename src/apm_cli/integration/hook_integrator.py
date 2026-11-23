@@ -67,6 +67,7 @@ from apm_cli.integration.hook_ownership import (
     dependency_hook_sources,
     drop_dependency_owned_entries,
     drop_source_entries,
+    hook_file_emptied,
     legacy_source_marker_is_unambiguous,
     local_bundle_hook_source_marker,
     read_hook_object,
@@ -369,11 +370,6 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         require_dir=True,
     ),
 }
-
-
-def _only_target_defaults(data: dict, defaults: dict[str, Any]) -> bool:
-    """Whether cleaned hook JSON holds only the target's injected defaults (#4852)."""
-    return all(defaults.get(key, ...) == value for key, value in data.items())
 
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
@@ -1842,7 +1838,7 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                if _only_target_defaults(data, defaults or {}):
+                if hook_file_emptied(json_path, data, defaults or {}):
                     write_seam.unlink(json_path)  # a fresh deploy writes no file
                 else:
                     write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
@@ -2082,7 +2078,7 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified and _only_target_defaults(data, defaults or {}):
+            if modified and hook_file_emptied(json_path, data, defaults or {}):
                 write_seam.unlink(json_path)  # a fresh deploy writes no file
                 stats["files_removed"] += 1
             elif modified:

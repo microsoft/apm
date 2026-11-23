@@ -213,7 +213,8 @@ def test_retiring_apm_entries_keeps_a_config_file_with_user_content(
 
     converge(world, spec.start)
     deployed = json.loads(config.read_text(encoding="utf-8"))
-    assert deployed.get(container), f"{relative}: APM's entry was never deployed: {deployed}"
+    managed = deployed.get(container) or {}
+    assert (entry in managed) if entry else managed, f"{relative}: APM's entry not deployed"
     spec.apply(world)
     result = _install(world)
     output = f"{result.stdout}{result.stderr}"

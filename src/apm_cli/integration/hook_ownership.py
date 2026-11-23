@@ -660,3 +660,15 @@ def write_per_file_bundle_record(
         write_seam.write_text(sidecar_path, json.dumps(data, indent=2) + "\n")
     elif sidecar_path.exists():
         write_seam.unlink(sidecar_path)
+
+
+def hook_file_emptied(json_path: Path, data: dict, defaults: dict[str, Any]) -> bool:
+    """Whether a cleaned hook file holds only its target's injected defaults (#4852).
+
+    Such a file is deleted, as a fresh deploy never writes it. A file reached
+    through a symlinked target directory or file is never deleted; the cleanup
+    rewrites it in place instead.
+    """
+    if has_symlink_component(json_path.parent.parent, json_path):
+        return False
+    return all(defaults.get(key, ...) == value for key, value in data.items())

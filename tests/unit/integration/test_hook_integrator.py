@@ -1701,6 +1701,21 @@ class TestSyncIntegration:
 
         assert not settings_path.exists()
 
+    def test_sync_never_deletes_through_a_symlinked_target_dir(self, temp_project, tmp_path):
+        """An emptied settings.json behind a symlinked .claude is rewritten, not deleted."""
+        outside = tmp_path / "outside-claude"
+        outside.mkdir()
+        settings_path = outside / "settings.json"
+        settings_path.write_text(
+            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+        )
+        (temp_project / ".claude").symlink_to(outside, target_is_directory=True)
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert settings_path.is_file()
+        assert "hooks" not in json.loads(settings_path.read_text())
+
     @pytest.mark.parametrize(
         "user_keys",
         [{"permissions": {"allow": ["Bash(ls)"]}}, {"version": 1}],
