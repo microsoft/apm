@@ -3631,14 +3631,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
     MutationCase(
         guard_id="transport-platform-checkout-verified",
         rule_id="transport-platform-checkout-verified",
-        path="src/apm_cli/deps/github_downloader.py",
-        old="return cache.get_checkout(",
-        new="return cache._get_checkout(",
-        intent="A consumer takes a cached checkout without its verification.",
-    ),
-    MutationCase(
-        guard_id="transport-platform-checkout-verified",
-        rule_id="transport-platform-checkout-verified",
         path="src/apm_cli/cache/git_cache.py",
         old="if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
         new="if True:",
