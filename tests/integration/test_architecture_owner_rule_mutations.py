@@ -3058,6 +3058,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="A transitive edge reaches queue dedup without being recorded for the merge.",
     ),
     MutationCase(
+        guard_id="install-deployment-server-name-rule",
+        rule_id="install-deployment-server-name-rule",
+        path="src/apm_cli/models/dependency/lsp.py",
+        old='        validate_server_name(self.name, "LSP")\n',
+        new='        if not self.name.isprintable():\n            raise ValueError("bad LSP name")\n',
+        intent="LSP server names stop using the shared server-name rule.",
+    ),
+    MutationCase(
         guard_id="install-deployment-single-file-materialization",
         rule_id="install-deployment-single-file-materialization",
         path="src/apm_cli/install/phases/local_content.py",

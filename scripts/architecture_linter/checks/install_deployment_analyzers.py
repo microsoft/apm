@@ -202,6 +202,10 @@ from scripts.architecture_linter.checks.install_selection_merge import (
     GUARD_SELECTION_MERGE,
     check_selection_merge,
 )
+from scripts.architecture_linter.checks.install_server_name_rule import (
+    GUARD_SERVER_NAME_RULE,
+    check_server_name_rule,
+)
 from scripts.architecture_linter.checks.install_single_file import (
     GUARD as _GUARD_SINGLE_FILE,
 )
@@ -318,6 +322,11 @@ RULES: tuple[Rule, ...] = (
         GUARD_POLICY_OUTCOME_ROUTING,
         "Every policy-discovery outcome routes through one closed-world owner.",
         check_policy_outcome_routing,
+    ),
+    _rule(
+        GUARD_SERVER_NAME_RULE,
+        "MCP and LSP server names are validated by models/dependency/server_names.py.",
+        check_server_name_rule,
     ),
     _rule(
         GUARD_POLICY_FIELD_TYPES,
