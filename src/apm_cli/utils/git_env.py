@@ -372,8 +372,9 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
 
     For scripts APM itself authors and launches (runtime setup, self-update):
     the programs they call by name resolve the way :func:`trusted_executable`
-    resolves APM's own helpers. ``.``, empty and relative entries and every
-    entry inside the project are dropped; user-authored scripts never use this.
+    resolves APM's own helpers. ``.``, empty, relative and unresolvable entries
+    and every entry inside the project are dropped, and each kept entry is the
+    resolved directory that passed the check; user-authored scripts never use this.
     Raises ``FileNotFoundError`` when no entry remains, rather than launching
     with an empty PATH.
     """
@@ -389,13 +390,14 @@ def trusted_path_environment(env: dict[str, str]) -> dict[str, str]:
             if expanded is None or not expanded.is_absolute():
                 continue
             try:
-                directory = expanded.resolve()
+                directory = expanded.resolve(strict=True)
                 if directory == exclusion_root or directory.is_relative_to(exclusion_root):
                     continue
-            except (OSError, ValueError):
+            except (OSError, RuntimeError, ValueError):
                 continue
-            # The shell would read a literal ``~`` as a directory under the cwd.
-            kept.append(str(expanded))
+            # Hand on the directory that passed the check: a ``~`` or a link in
+            # the written spelling would be read again when the shell searches.
+            kept.append(str(directory))
         if not kept:
             # An empty PATH makes POSIX shells search the working directory.
             raise FileNotFoundError(
