@@ -149,3 +149,63 @@ def test_a_save_that_raises_after_the_move_rolls_everything_back(tmp_path: Path)
 
     assert exc.value.code == 1
     assert (_tree(modules), manifest.read_bytes(), lock.read_bytes()) == before
+
+
+def test_a_receipt_rename_that_raises_leaves_the_tree_as_it_was(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The lock commits, then the receipt rename raises RuntimeError: everything goes back."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import (
+        _persist_lock_then_resync_native,
+        _StillNeededRepair,
+    )
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.commands.uninstall.local_reanchor import (
+        LocalReanchorPlan,
+        snapshot_for_rollback,
+    )
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+    modules = tmp_path / "apm_modules"
+    current = _package(modules, "e")
+    manifest, lock_path = tmp_path / "apm.yml", tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    lock_path.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    lock = LockFile()
+    lock.add_dependency(LockedDependency(repo_url="acme/e", depth=2))
+    (new_key,) = lock.dependencies
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(
+            renames={"./vendor/e": new_key},
+            moves=((current, modules / "_local" / "h1" / "e"),),
+        ),
+        (manifest, lock_path),
+    )
+    before = (_tree(modules), manifest.read_bytes(), lock_path.read_bytes())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("receipt store unavailable")
+
+    monkeypatch.setattr("apm_cli.core.deployment_reanchor.rename_receipt_owners", _boom)
+
+    with pytest.raises(SystemExit) as exc:
+        _persist_lock_then_resync_native(
+            lock_changed=True,
+            persist_allowed=True,
+            lockfile=lock,
+            lockfile_path=lock_path,
+            logger=MagicMock(),
+            integration_cleanup=IntegrationCleanupOutcome(
+                counts={}, deployed_files={}, failed_paths=[], error_count=0
+            ),
+            deploy_root=tmp_path,
+            modules_dir=modules,
+            scope=None,
+            native_before=None,
+            still_needed_repairs=_StillNeededRepair({}, {}, {}, frozenset(), plan),
+        )
+
+    assert exc.value.code == 1
+    assert (_tree(modules), manifest.read_bytes(), lock_path.read_bytes()) == before
