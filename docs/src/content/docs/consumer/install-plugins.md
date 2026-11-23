@@ -247,8 +247,8 @@ Work down this list:
    are reported not to load in git worktrees, in non-interactive `claude -p`
    runs (including claude-code-action) and in Copilot CLI 1.0.106. `apm install`
    prints `[!] <package> installed as a native plugin ...` for each dependency
-   it installs this way. To deploy its skills loose instead, set
-   `skills: ["*"]` on that dependency in `apm.yml`.
+   it installs this way. To deploy it loose instead, set `native: false` on
+   that dependency in `apm.yml` ([Keep a plugin loose](#keep-a-plugin-loose)).
 
 :::tip[Other options]
 Packaging your own plugin: [Build a plugin](../../producer/build-a-plugin/).

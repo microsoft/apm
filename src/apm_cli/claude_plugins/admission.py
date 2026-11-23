@@ -40,8 +40,8 @@ class ClaudeNativePluginError(RuntimeError):
 NATIVE_ROUTE_NOTICE = (
     "installed as a native plugin. Native plugins are reported not to load in "
     "git worktrees, in non-interactive claude -p runs (including "
-    "claude-code-action) and in Copilot CLI 1.0.106. To deploy its skills loose "
-    'instead, set skills: ["*"] on this dependency in apm.yml.'
+    "claude-code-action) and in Copilot CLI 1.0.106. To deploy it loose instead, "
+    "set native: false on this dependency in apm.yml."
 )
 
 
