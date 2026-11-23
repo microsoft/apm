@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from apm_cli.install.local_bundle_hook_trust import (
     REASON_NOT_GRANTED,
     REASON_UNRECORDED,
@@ -77,3 +79,53 @@ def test_no_deployed_bundle_hooks_never_resolves_trust(tmp_path: Path) -> None:
     targets = [SimpleNamespace(name="claude", root_dir=".claude")]
     assert unadmitted_bundle_hooks(tmp_path, targets, lambda: calls.append(1)) == []
     assert calls == []
+
+
+_SCRIPT = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+
+
+@pytest.mark.parametrize(
+    ("command", "runs"),
+    [
+        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/hookpkg/hooks/scripts/x.sh"', True),
+        ('sh "$(pwd)/.claude/hooks/hookpkg/hooks/scripts/./x.sh"', True),
+        ("cd -- .claude/hooks/hookpkg/hooks && sh scripts/./x.sh", True),
+        ("bash -c 'cd .claude/hooks/hookpkg/hooks/scripts && ./x.sh'", True),
+        ("sh 'unterminated x.sh", True),
+        ('"${CLAUDE_PROJECT_DIR}/.claude/hooks/otherpkg/hooks/scripts/x.sh"', False),
+        ('cd "$HOME" && sh /opt/tools/x.sh', False),
+        ("cd . && " * 20 + "true", False),
+        ("./tools/lint.sh", False),
+    ],
+    ids=[
+        "project-dir-anchor",
+        "command-substitution",
+        "cd-terminator",
+        "nested-shell",
+        "unparsable",
+        "sibling-package",
+        "same-name-absolute",
+        "many-cd",
+        "unrelated",
+    ],
+)
+def test_script_references_resolve_under_any_spelling(command: str, runs: bool) -> None:
+    """#5106: a hook command runs a bundle script exactly when it may name it."""
+    from apm_cli.install.local_bundle_hook_trust import _runs_script, _script_refs
+
+    root = Path("/project")
+    refs = _script_refs(root, [_SCRIPT])
+
+    assert _runs_script(command, refs, (root, root / ".claude"), root) is runs
+
+
+def test_script_references_keep_a_quoted_root_with_spaces_and_a_drive_path() -> None:
+    from apm_cli.install.local_bundle_hook_trust import _runs_script, _script_refs
+
+    spaced = Path("/tmp/my project")
+    assert _runs_script(
+        f'sh "{spaced.as_posix()}/{_SCRIPT}"', _script_refs(spaced, [_SCRIPT]), (spaced,), spaced
+    )
+    drive = "C:/project"
+    refs = (frozenset({"x.sh"}), frozenset({f"c:/project/{_SCRIPT}"}))
+    assert _runs_script(f"{drive}/.claude/hooks/hookpkg/hooks/scripts/./x.sh", refs, (), Path("/"))

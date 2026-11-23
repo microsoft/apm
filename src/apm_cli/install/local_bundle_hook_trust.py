@@ -527,9 +527,13 @@ def _script_tails(project_root: Path, target_root: Path, scripts: Collection[str
     return tails
 
 
-# A command token that may name a path: shell punctuation, quotes and "="
-# (``--script=path``) separate tokens.
-_COMMAND_TOKEN = re.compile(r"[^\s'\"`;&|()<>=]+")
+# Variables a deployed hook command anchors its paths at, and their values.
+_ANCHOR_VARIABLES = re.compile(
+    r"\$\{(CLAUDE_PROJECT_DIR|HOME)\}|\$env:(CLAUDE_PROJECT_DIR|HOME)\b|\$(CLAUDE_PROJECT_DIR|HOME)\b"
+)
+_DRIVE = re.compile(r"^[A-Za-z]:/")
+# A working directory is tracked through at most this many distinct roots.
+_MAX_ROOTS = 16
 
 
 def _script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozenset, frozenset]:
@@ -539,36 +543,85 @@ def _script_refs(project_root: Path, scripts: Collection[str]) -> tuple[frozense
     }
     return (
         frozenset(path.name for path in paths),
-        frozenset(posixpath.normpath(path.as_posix()) for path in paths),
+        frozenset(_normalized(path.as_posix()) for path in paths),
     )
 
 
-def _runs_script(command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path]) -> bool:
+def _normalized(path: str) -> str:
+    normal = posixpath.normpath(path)
+    return normal.casefold() if _DRIVE.match(normal) else normal
+
+
+def _words(command: str) -> list[str] | None:
+    """Shell words of *command*, quoted words kept whole; ``None`` when unparsable."""
+    import shlex
+
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>")
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return None
+
+
+def _runs_script(
+    command: str, refs: tuple[frozenset, frozenset], bases: Collection[Path], project_root: Path
+) -> bool:
     """Whether *command* may run a bundle script under any spelling, in any target (#5106).
 
-    A path word runs the script when it normalizes to it (``/./``, ``..``):
-    an absolute one as written, a relative one from any of *bases* (the
-    project root, the hook's target root) or a ``cd <dir>`` in the command.
-    A bare file name (``x.sh``, ``./x.sh``) or a variable path whose name
-    matches may run it from a working directory that is not certain, so it
-    counts (fail closed).
+    ``${CLAUDE_PROJECT_DIR}`` and ``$HOME`` anchors are resolved first. A
+    path word runs the script when it normalizes to it (``/./``, ``..``): an
+    absolute one (``/``, ``C:/``) as written, a relative one from any of
+    *bases* (the project root, the hook's target root) or a ``cd <dir>`` in
+    the command. A bare file name (``./x.sh``), a word with another
+    expansion, or a relative word under a working directory that cannot be
+    determined counts when its name matches (fail closed); so does any
+    command that cannot be parsed.
     """
     names, paths = refs
-    words = _COMMAND_TOKEN.findall(command)
-    roots = [posixpath.normpath(base.as_posix()) for base in bases]
-    for index, word in enumerate(words[:-1]):
+    home = Path.home().as_posix()
+
+    def anchor(match: re.Match) -> str:
+        name = next(group for group in match.groups() if group)
+        return project_root.as_posix() if name == "CLAUDE_PROJECT_DIR" else home
+
+    text = _ANCHOR_VARIABLES.sub(anchor, command)
+    words = _words(text)
+    if words is None:
+        return any(name in text for name in names)
+    roots = {_normalized(base.as_posix()) for base in bases}
+    certain = True
+    for index, word in enumerate(words):
         if word == "cd":
-            target = words[index + 1]
-            if "$" in target or target.startswith("~"):
-                return any(name in command for name in names)
-            roots += [posixpath.normpath(posixpath.join(root, target)) for root in list(roots)]
-    for word in words:
+            rest = [w for w in words[index + 1 :] if w not in ("--",) and not w.startswith("-")]
+            target = rest[0] if rest else None
+            if target is None or target in ";&|()<>" or "$" in target or target.startswith("~"):
+                certain = False
+                continue
+            if target.startswith("/") or _DRIVE.match(target):
+                roots = {_normalized(target)}
+            else:
+                roots |= {_normalized(posixpath.join(root, target)) for root in roots}
+            if len(roots) > _MAX_ROOTS:
+                certain = False
+            continue
+        if any(space in word for space in " \t\n") and _runs_script(
+            word, refs, bases, project_root
+        ):
+            return True
         if word.rstrip("/").rsplit("/", 1)[-1] not in names:
             continue
-        if "$" in word or word.startswith("~") or "/" not in word.removeprefix("./"):
+        if word.startswith("/") or _DRIVE.match(word):
+            if "$" not in word and _normalized(word) in paths:
+                return True
+            if "$" not in word:
+                continue
             return True
-        candidates = [word] if word.startswith("/") else [f"{root}/{word}" for root in roots]
-        if any(posixpath.normpath(candidate) in paths for candidate in candidates):
+        if not certain or "$" in word or word.startswith("~"):
+            return True
+        if "/" not in word.removeprefix("./"):
+            return True
+        if any(_normalized(f"{root}/{word}") in paths for root in roots):
             return True
     return False
 
@@ -620,7 +673,8 @@ def _per_file_configs_running(
                 continue
             texts = list(_hook_commands(document))
             if any(tail in text for text in texts for tail in tails) or any(
-                _runs_script(text, refs, (project_root, target_root)) for text in texts
+                _runs_script(text, refs, (project_root, target_root), project_root)
+                for text in texts
             ):
                 found.add(value)
     return found
@@ -689,7 +743,7 @@ def _configs_still_running(
         ]
         texts = [text for entry in foreign for text in commands(entry)]
         if any(tail in text for text in texts for tail in tails) or any(
-            _runs_script(text, refs, (project_root, target_root)) for text in texts
+            _runs_script(text, refs, (project_root, target_root), project_root) for text in texts
         ):
             found.add(_record_value(json_path, project_root))
     return found
