@@ -231,6 +231,11 @@ def install_local_bundle(
             fetch_result=policy_fetch_result,
             bundled_deps=bundle_policy_subjects(bundle_info),
         )
+        from .commit_gate import judge_bundle_manifest_scripts
+
+        judge_bundle_manifest_scripts(
+            bundle_policy, get_manifest_path(scope), dry_run=dry_run, logger=logger
+        )
 
         # Warn on bundle/install target mismatch.
         warning = check_target_mismatch(
@@ -406,6 +411,8 @@ def install_local_bundle(
         if skipped:
             msg += f" ({skipped} skipped)"
         log_bundle_deployed(logger, msg, deployed, targets)
+        # Policy warnings this entry collected render as the pipeline's do (#4957).
+        logger.render_summary()
         from apm_cli.install.mcp.write_receipts import announce_kept_mcp_writes
 
         lock_path = get_lockfile_path(_bundle_lock_root(global_))

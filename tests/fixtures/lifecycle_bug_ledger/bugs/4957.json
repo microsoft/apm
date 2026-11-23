@@ -1,0 +1,17 @@
+{
+  "issue": 4957,
+  "fixed_in": "Unreleased",
+  "summary": "Under enforcement: warn, apm install --mcp and local-bundle installs printed no manifest.scripts or unmanaged_files warning, --dry-run previewed neither on those entries, and a refused --root install left the directories it created.",
+  "failure_modes": [
+    "cleanup",
+    "outcome"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_warn_policy_warns_on_every_install_entry",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_dry_run_previews_every_entry_verdict",
+    "tests/integration/test_install_policy_fields_lifecycle.py::test_a_refused_root_install_leaves_no_directory_it_created"
+  ]
+}
