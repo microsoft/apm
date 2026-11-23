@@ -130,6 +130,8 @@ def test_a_symlinked_skills_dir_under_a_home_claude_root_is_refused(
 
     result = world.install()
 
-    assert result.returncode != 0, _evidence(result)
-    assert "refusing deployment" in (result.stdout + result.stderr).lower(), _evidence(result)
+    # The escape is refused before any write: nothing lands outside the root
+    # and no lockfile records it.
+    assert result.returncode == 1, _evidence(result)
     assert list(outside.rglob("*")) == [], _evidence(result)
+    assert not (world.manifest.parent / "apm.lock.yaml").exists(), _evidence(result)
