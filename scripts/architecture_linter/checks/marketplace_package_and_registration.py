@@ -542,6 +542,7 @@ def _check_copilot_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
 
 
 _RID_CLAUDE = "marketplace-integrations-claude-ownership"
+_RID_NATIVE_ROUTE = "marketplace-integrations-native-route-owner"
 _NATIVE_ROUTE_CONSUMERS = (
     "src/apm_cli/agent_plugins/errors.py",
     "src/apm_cli/claude_plugins/admission.py",
@@ -595,18 +596,6 @@ def _check_claude_ownership(provider: FactsProvider) -> tuple[Violation, ...]:
             "Claude declarations must derive ownership from the lockfile and verify approved bytes",
         )
     )
-    # Every native planner asks the one route owner before trust work (#4995).
-    for consumer in _NATIVE_ROUTE_CONSUMERS:
-        findings.extend(
-            _require_subs(
-                provider,
-                inv,
-                _RID_CLAUDE,
-                consumer,
-                ("effective_native_route(",),
-                "native planners must decide native or loose through native_plugins/route.py",
-            )
-        )
     findings.extend(
         _require_subs(
             provider,
@@ -882,6 +871,39 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
     return tuple(findings)
 
 
+def _check_native_route_owner(provider: FactsProvider) -> tuple[Violation, ...]:
+    """Every native planner asks native_plugins/route.py before activating (#4995)."""
+    inv = frozenset(provider.inventory)
+    findings: list[Violation] = []
+    count = _count_across(
+        provider,
+        inv,
+        _RID_NATIVE_ROUTE,
+        _src_python(provider),
+        re.compile(r"^def effective_native_route\("),
+    )
+    if count != 1:
+        findings.append(
+            violation(
+                _RID_NATIVE_ROUTE,
+                "src/apm_cli/native_plugins/route.py",
+                f"effective_native_route must have exactly one owner, found {count}",
+            )
+        )
+    for consumer in _NATIVE_ROUTE_CONSUMERS:
+        findings.extend(
+            _require_subs(
+                provider,
+                inv,
+                _RID_NATIVE_ROUTE,
+                consumer,
+                ("effective_native_route(",),
+                "native planners must decide native or loose through native_plugins/route.py",
+            )
+        )
+    return tuple(findings)
+
+
 RULES: tuple[Rule, ...] = (
     Rule(
         id=_RID_CONSTRUCTION,
@@ -941,6 +963,13 @@ RULES: tuple[Rule, ...] = (
         guard_ids=(_RID_CLAUDE,),
         description="Native Claude registration has one owner and never auto-enables plugins.",
         check=_check_claude_ownership,
+    ),
+    Rule(
+        id=_RID_NATIVE_ROUTE,
+        group=GROUP,
+        guard_ids=(_RID_NATIVE_ROUTE,),
+        description="Native or loose per dependency stays owned by native_plugins/route.py.",
+        check=_check_native_route_owner,
     ),
 )
 

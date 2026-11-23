@@ -761,6 +761,7 @@ marketplace-integrations-local-audit-resolution
 marketplace-integrations-locked-evidence
 marketplace-integrations-metadata-enrichment
 marketplace-integrations-native-registration
+marketplace-integrations-native-route-owner
 marketplace-integrations-output-path
 marketplace-integrations-pack-credential-files
 marketplace-integrations-pack-plugin-manifests

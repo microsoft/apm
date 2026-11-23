@@ -205,7 +205,10 @@
         "src/apm_cli/native_plugins/settings.py",
         "src/apm_cli/native_plugins/uninstall.py"
       ],
-      "guards": ["marketplace-integrations-claude-ownership"]
+      "guards": [
+        "marketplace-integrations-claude-ownership",
+        "marketplace-integrations-native-route-owner"
+      ]
     },
     {
       "id": "codex-native-plugin-lifecycle",

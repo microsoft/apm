@@ -3256,15 +3256,6 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Retiring a native plugin deletes the user's explicit enabledPlugins false.",
     ),
     MutationCase(
-        guard_id="marketplace-integrations-claude-ownership",
-        rule_id="marketplace-integrations-claude-ownership",
-        path="src/apm_cli/codex_plugins/admission.py",
-        old="effective_native_route(",
-        new="automatic_native_route(",
-        intent="The Codex planner stops asking the route owner and ignores native: false.",
-        replace_all=True,
-    ),
-    MutationCase(
         guard_id="marketplace-integrations-codex-native-lifecycle",
         rule_id="marketplace-integrations-codex-native-lifecycle",
         path="src/apm_cli/codex_plugins/client.py",
@@ -3341,6 +3332,15 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="def resolve_native_registration_capability(",
         new="def resolve_native_registration_capability_X(",
         intent="Native agent-plugin registration admission loses its capability resolver.",
+    ),
+    MutationCase(
+        guard_id="marketplace-integrations-native-route-owner",
+        rule_id="marketplace-integrations-native-route-owner",
+        path="src/apm_cli/codex_plugins/admission.py",
+        old="effective_native_route(",
+        new="automatic_native_route(",
+        intent="The Codex planner stops asking the route owner and ignores native: false.",
+        replace_all=True,
     ),
     MutationCase(
         guard_id="marketplace-integrations-output-path",
