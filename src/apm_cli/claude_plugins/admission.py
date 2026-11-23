@@ -23,6 +23,7 @@ from apm_cli.deps.plugin_parser import (
     parse_plugin_manifest,
 )
 from apm_cli.models.apm_package import PackageInfo, PackageType
+from apm_cli.models.dependency.server_names import is_reserved_server_name
 from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.native_plugins.record import is_safe_plugin_name
 from apm_cli.native_plugins.scopes import CLAUDE, COPILOT, plugin_harnesses, record_harnesses
@@ -428,7 +429,24 @@ def _unsupported_capability(root: Path, manifest: dict[str, Any]) -> _Ineligible
     escaping = _escaping_component_path(root, manifest)
     if escaping is not None:
         return _Ineligible(escaping, f"Ask the publisher to fix the manifest, {_EXCLUDE_CLAUDE}")
+    reserved = _reserved_server_name(root, manifest)
+    if reserved is not None:
+        return _Ineligible(
+            f"its server name '{reserved}' is a reserved object key "
+            "(__proto__, constructor, prototype)",
+            f"Ask the publisher to rename the server, {_EXCLUDE_CLAUDE}",
+        )
     return None
+
+
+def _reserved_server_name(root: Path, manifest: dict[str, Any]) -> str | None:
+    """The first MCP or LSP server name Claude would load that is a reserved key."""
+    from apm_cli.deps.plugin_parser import _extract_lsp_servers
+
+    servers, _unmodeled = claude_native_mcp_servers(root, manifest)
+    names = [server["name"] for server in servers]
+    names.extend(str(name) for name in _extract_lsp_servers(root, manifest))
+    return next((name for name in names if is_reserved_server_name(name)), None)
 
 
 def plan_native_claude_plugin(

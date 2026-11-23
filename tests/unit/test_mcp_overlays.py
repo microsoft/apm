@@ -561,10 +561,16 @@ class TestMCPDependencyHardening:
     def test_name_containing_reserved_word_accepted(self, name):
         MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
 
-    @pytest.mark.parametrize("name", ["__proto__\n", "ok-name\n"])
-    def test_trailing_newline_name_rejected(self, name):
-        with pytest.raises(ValueError, match="Invalid MCP dependency name"):
+    @pytest.mark.parametrize(
+        "name", ["__proto__\n", "io.github.acme/constructor", "acme/__PROTO__", "x/Prototype"]
+    )
+    def test_reserved_key_variant_rejected(self, name):
+        with pytest.raises(ValueError, match=r"(?s)Invalid MCP dependency name .*: reserved"):
             MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
+
+    def test_trailing_newline_ordinary_name_still_accepted(self):
+        name = "ok-name\n"
+        MCPDependency(name=name, url="https://example.com/mcp").validate(strict=False)
 
     def test_from_string_fails_for_invalid_name(self):
         with pytest.raises(ValueError, match="Invalid MCP dependency name"):
