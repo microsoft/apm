@@ -794,6 +794,31 @@ def _timed(ctx: Context, journey: Journey) -> tuple[Sample, str]:
     return sample, output
 
 
+def _spy(ctx: Context, journey: Journey, python: str, apm: Path, prof: Path) -> None:
+    """RESEARCH: py-spy (idle off, nonblocking) phase attribution, printed to the log."""
+    from tests.benchmarks.spy_phases import summarize
+
+    rate = 250
+    for attempt in range(3):
+        journey.setup(ctx)
+        for index, (argv, cwd) in enumerate(journey.steps(ctx)):
+            raw = prof.with_suffix(f".spy{attempt}.{index}.txt")
+            started = time.perf_counter()
+            result = subprocess.run(
+                ["py-spy", "record", "--nonblocking", "--rate", str(rate), "--format", "raw",
+                 "--output", str(raw), "--", python, str(apm), *argv],
+                cwd=cwd, env=ctx.world.env, capture_output=True, text=True,
+                timeout=_COMMAND_TIMEOUT_S, check=False,
+            )  # fmt: skip
+            print(f"[SPY] {journey.name} attempt {attempt} step {index} rc={result.returncode} "
+                  f"wall={time.perf_counter() - started:.2f}")  # fmt: skip
+            if raw.is_file():
+                for line in summarize(raw.read_text(encoding="utf-8"), rate):
+                    print(f"[SPY] {line}")
+            else:
+                print(f"[SPY] no output: {result.stderr[-600:]}")
+
+
 def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
     """One extra run under cProfile; only for a Python console-script ``apm``."""
     apm = Path(ctx.apm[-1])
@@ -817,6 +842,7 @@ def _profile(ctx: Context, journey: Journey, out: Path) -> str | None:
         if result.returncode != 0 or not target.is_file():
             print(f"[!] cProfile run failed for {journey.name}: {result.stderr[-500:]}")
             return None
+    _spy(ctx, journey, python, apm, prof)
     if prof.exists():
         with prof.with_suffix(".txt").open("w", encoding="utf-8") as handle:
             stats = pstats.Stats(str(prof), stream=handle)

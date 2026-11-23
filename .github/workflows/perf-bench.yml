@@ -162,6 +162,8 @@ jobs:
     - name: Install harness
       working-directory: harness
       run: uv sync --frozen --extra dev --quiet
+    - name: Install py-spy (research)
+      run: uv tool install py-spy==0.4.0 && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
     - name: Interleaved runs
       working-directory: harness
       env:
