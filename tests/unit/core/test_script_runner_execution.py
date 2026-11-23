@@ -410,7 +410,10 @@ class TestExecuteRuntimeCommandRuntimes:
         self.runner = ScriptRunner()
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    @patch(
+        "apm_cli.core.script_runner.find_runtime_binary",
+        side_effect=lambda name: f"/resolved/{name}",
+    )
     def test_copilot_uses_p_flag(self, _mock_bin: MagicMock, mock_run: MagicMock) -> None:
         mock_run.return_value.returncode = 0
         self.runner._execute_runtime_command("copilot", "my prompt", {})
@@ -419,7 +422,10 @@ class TestExecuteRuntimeCommandRuntimes:
         assert "my prompt" in args
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    @patch(
+        "apm_cli.core.script_runner.find_runtime_binary",
+        side_effect=lambda name: f"/resolved/{name}",
+    )
     def test_codex_appends_content(self, _mock_bin: MagicMock, mock_run: MagicMock) -> None:
         mock_run.return_value.returncode = 0
         self.runner._execute_runtime_command("codex exec", "my prompt", {})
@@ -427,7 +433,10 @@ class TestExecuteRuntimeCommandRuntimes:
         assert args[-1] == "my prompt"
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    @patch(
+        "apm_cli.core.script_runner.find_runtime_binary",
+        side_effect=lambda name: f"/resolved/{name}",
+    )
     def test_llm_appends_content(self, _mock_bin: MagicMock, mock_run: MagicMock) -> None:
         mock_run.return_value.returncode = 0
         self.runner._execute_runtime_command("llm", "my prompt", {})
@@ -435,7 +444,10 @@ class TestExecuteRuntimeCommandRuntimes:
         assert args[-1] == "my prompt"
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    @patch(
+        "apm_cli.core.script_runner.find_runtime_binary",
+        side_effect=lambda name: f"/resolved/{name}",
+    )
     def test_gemini_uses_p_flag(self, _mock_bin: MagicMock, mock_run: MagicMock) -> None:
         mock_run.return_value.returncode = 0
         self.runner._execute_runtime_command("gemini", "my prompt", {})
