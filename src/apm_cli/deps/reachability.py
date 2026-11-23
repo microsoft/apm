@@ -308,6 +308,17 @@ def _build_local_dir_index(
     return index
 
 
+def _rejected_local_file(ref: DependencyReference, anchor: Path) -> str | None:
+    """Why install would reject *ref*'s local file, or ``None`` when it admits it."""
+    from apm_cli.install.phases.local_content import read_local_package_source
+
+    try:
+        read_local_package_source(ref, anchor)
+    except (ValueError, OSError) as exc:
+        return str(exc)
+    return None
+
+
 def _read_node(manifest_dir: Path, *, local: bool) -> APMPackage | None:
     """Read one node's manifest as install does; ``None`` is a declared-nothing leaf.
 
@@ -618,7 +629,11 @@ def compute_forward_reachable_keys(
             node_key = visit_key
 
         if ref.is_local and manifest_dir.is_file():
-            continue  # a standalone primitive file declares no dependencies
+            # An admitted primitive file declares no dependencies; any other
+            # file is not a package, so its subtree is unknown.
+            if (reason := _rejected_local_file(ref, anchor)) is not None:
+                unverifiable.append((visit_key, reason))
+            continue
         try:
             package = _read_node(manifest_dir, local=ref.is_local)
             if package is None:
