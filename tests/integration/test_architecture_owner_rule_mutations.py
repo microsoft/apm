@@ -1739,10 +1739,35 @@ def test_native_plugin_pin_is_portable_and_owned(path: str, old: str, new: str) 
             "if trusted is not None:",
             id="receipt-binding-without-bytes",
         ),
+        pytest.param(
+            "src/apm_cli/integration/base_integrator.py",
+            "        kept = self.keeps_unproven_file(",
+            "        kept = self.keeps_nothing(",
+            id="adopt-adapter-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_integrator.py",
+            "            if not self.keeps_edited_output(",
+            "            if not self.keeps_nothing(",
+            id="hook-file-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/hook_bundle.py",
+            "        # An edited copied script is kept like any managed file (#4626).\n"
+            "        if integrator.keeps_edited_output(",
+            "        if integrator.keeps_nothing(",
+            id="hook-script-bypasses-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/integration/canvas_integrator.py",
+            "        if self._keeps_edited_bundle(planned",
+            "        if self._keeps_nothing(planned",
+            id="canvas-bundle-not-left-whole",
+        ),
     ],
 )
 def test_overwrite_evidence_guard_is_closed_world(path: str, old: str, new: str) -> None:
-    """No write path replaces a managed file without receipt or render evidence (#4360)."""
+    """No write path replaces a managed file without receipt or render evidence (#4360, #4626)."""
     rule_id = "install-deployment-overwrite-evidence"
     source = (ROOT / path).read_text(encoding="utf-8")
     assert source.count(old) == 1
@@ -3598,6 +3623,22 @@ MUTATIONS: tuple[MutationCase, ...] = (
         old="return clean_cache_buckets((self._db_root, self._checkouts_root))",
         new="return [str(entry) for entry in self._db_root.iterdir()]",
         intent="GitCache reintroduces its own traversal and outcome authority.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-cached-repo-git",
+        rule_id="transport-platform-cached-repo-git",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if not self._bare_trusted(bare_dir):\n            raise RuntimeError(",
+        new="if False:\n            raise RuntimeError(",
+        intent="A fetch into a cached bare runs Git without the owner's trust check.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-checkout-verified",
+        rule_id="transport-platform-checkout-verified",
+        path="src/apm_cli/cache/git_cache.py",
+        old="if verify_checkout(checkout, sha, paths=sparse_paths, cone=cone, env=verify_env):",
+        new="if True:",
+        intent="A cached checkout is returned without verifying it against its commit.",
     ),
     MutationCase(
         guard_id="transport-platform-clone-connect-retry",

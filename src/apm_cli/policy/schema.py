@@ -72,7 +72,8 @@ class McpPolicy:
     deny: tuple[str, ...] = ()
     transport: McpTransportPolicy = field(default_factory=McpTransportPolicy)
     self_defined: str = "warn"  # deny | warn | allow
-    trust_transitive: bool = False
+    # None: not set (effective false); an explicit value makes the policy non-empty.
+    trust_transitive: bool | None = None
 
 
 @dataclass(frozen=True)

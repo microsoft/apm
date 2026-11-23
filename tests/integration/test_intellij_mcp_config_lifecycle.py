@@ -580,8 +580,8 @@ def test_uninstall_does_not_touch_unowned_intellij_jsonc(
 
     assert uninstall.returncode == 0, uninstall.stderr + uninstall.stdout
     assert canonical.read_bytes() == original
-    claude_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-    assert "managed-server" not in claude_config["mcpServers"]
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    assert not (project / ".mcp.json").exists()
 
 
 def test_uninstall_cleans_owned_intellij_jsonc_without_corrupting_url(
@@ -681,8 +681,8 @@ def test_uninstall_continues_after_intellij_cleanup_failure(
     )
 
     assert uninstall.returncode == 1
-    copilot_servers = json.loads(copilot_path.read_text(encoding="utf-8")).get("mcpServers", {})
-    assert "managed-server" not in copilot_servers
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    assert not copilot_path.exists()
     output = uninstall.stderr + uninstall.stdout
     assert "Uninstall incomplete" in output
     assert "run 'apm install'" in " ".join(output.split())

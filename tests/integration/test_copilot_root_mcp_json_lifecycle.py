@@ -663,7 +663,8 @@ def test_frozen_upgrade_keeps_the_root_entry_apm_wrote(
 
     project.manifest(targets=["copilot"])
     project.install()
-    assert project.read_json(".mcp.json")["mcpServers"] == {}
+    # APM created the file and its last entry left: a fresh deploy writes none (#4852).
+    assert not (project.root / ".mcp.json").exists()
 
 
 def test_frozen_upgrade_then_a_changed_declaration_updates_the_root_entry(
@@ -756,7 +757,10 @@ def test_frozen_upgrade_then_removing_the_server_removes_its_root_entry(
     project.manifest(targets=["copilot"], dependencies={"mcp": declared})
     project.install()
 
-    assert set(project.read_json(".mcp.json")["mcpServers"]) == set(kept)
+    if kept:
+        assert set(project.read_json(".mcp.json")["mcpServers"]) == set(kept)
+    else:
+        assert not (project.root / ".mcp.json").exists()
 
 
 def test_frozen_upgrade_keeps_an_edited_root_entry_of_a_removed_server(

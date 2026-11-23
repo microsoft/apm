@@ -14,6 +14,7 @@ import pytest
 
 from apm_cli.cache.git_cache import GitCache
 from apm_cli.utils.git_env import git_subprocess_env
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
@@ -35,6 +36,7 @@ class TestProxyEnvPreserved:
             assert env[var] == value
 
 
+@trust_checkout_contents()
 class TestInsteadOfRewrite:
     """Verify cache key stability across insteadOf rewrites.
 
@@ -81,6 +83,8 @@ class TestInsteadOfRewrite:
         git_dir = checkout_dir / ".git"
         git_dir.mkdir()
         (git_dir / "HEAD").write_text(f"{sha}\n", encoding="utf-8")
+        (git_dir / "objects").mkdir()
+        (git_dir / "refs").mkdir()
         (git_dir / "config").write_text(
             "[core]\n\tautocrlf = false\n\teol = lf\n\tsymlinks = false\n"
             "[apm]\n\tlinkMaterialization = git-objects-checkout\n",

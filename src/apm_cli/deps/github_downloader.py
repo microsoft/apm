@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Union
 
 import requests
 
+from ..cache.cached_repo import validate_cached_links
+from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -42,7 +44,6 @@ from ..utils.git_sparse import (
     apply_sparse_cone,
     materialize_tracked_symlinks,
     sparse_checkout_active,
-    validate_materialized_symlinks,
 )
 from ..utils.github_host import (
     default_host,
@@ -54,7 +55,7 @@ from .bare_cache import (
     fetch_sha_into_bare,
     materialize_from_bare,
 )
-from .carried_license import carry_licenses, read_repository_license
+from .carried_license import carry_licenses, checked_license
 from .download_strategies import DownloadDelegate
 from .git_lazy import bind_git_name, git_command_error
 from .git_remote_ops import (
@@ -1437,15 +1438,15 @@ class GitHubPackageDownloader:
 
         temp_dir = None
         shared_bare_path: Path | None = None
-        # WS2 path resolves the SHA from the BARE so we don't pay
-        # rev-parse twice (or open the working-tree Repo unnecessarily).
-        # See design.md sec 5.5: _ws2_resolved_commit threads the SHA past
-        # the generic Repo(temp_clone_path).head.commit.hexsha block below.
+        # WS2 resolves the SHA from the bare and a persistent hit from its
+        # verified shard, so neither re-reads the working tree's mutable HEAD
+        # (design.md sec 5.5: this threads the SHA past the block below).
         _ws2_resolved_commit: str | None = None
         try:
             if _persistent_checkout is not None:
                 # WS3: persistent cache hit -- use the cached checkout directly.
                 temp_clone_path = _persistent_checkout
+                _ws2_resolved_commit = _persistent_checkout.parent.name
                 if _perf_logger is not None and getattr(_perf_logger, "verbose", False):
                     _sha_short = (
                         (ref or "")[:12] if ref and re.match(r"^[a-f0-9]{7,40}$", ref) else ""
@@ -1650,12 +1651,8 @@ class GitHubPackageDownloader:
 
             if not source_subdir.is_dir():
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
-            validate_materialized_symlinks(
-                "git",
-                temp_clone_path,
-                [subdir_path],
-                env=self._git_env_dict(),
-            )
+            _env, _scope = self._git_env_dict(), [subdir_path]
+            validate_cached_links(temp_clone_path, _scope, _env)
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
@@ -1667,18 +1664,16 @@ class GitHubPackageDownloader:
 
             # Copy subdirectory contents to target (retry on transient
             # file-lock errors caused by antivirus scanning on Windows).
-            from ..utils.file_ops import robust_copy2, robust_copytree
+            from ..utils.file_ops import robust_copy_entry
 
             for item in source_subdir.iterdir():
-                src = source_subdir / item.name
-                dst = target_path / item.name
-                if src.is_dir():
-                    robust_copytree(src, dst)
-                else:
-                    robust_copy2(src, dst)
+                robust_copy_entry(source_subdir / item.name, target_path / item.name)
+            require_verified_copy(
+                target_path, temp_clone_path, _ws2_resolved_commit, subdir_path, _env
+            )
             # Sparse cones keep ancestor-directory files, so read the repository
             # licence before cleanup; it is written after validation (#3556).
-            repository_license = read_repository_license(temp_clone_path, subdir_path)
+            repository_license = checked_license(temp_clone_path, subdir_path, _ws2_resolved_commit)
 
             # Capture commit SHA; close the Repo object immediately so its file
             # handles are released before _rmtree() runs in the finally block.
@@ -1913,18 +1908,14 @@ class GitHubPackageDownloader:
                 )
                 # A shard keeps unresolvable links as text; the clone path
                 # below then raises the strict diagnostic (#3457).
-                validate_materialized_symlinks("git", _cached, None, env=self._git_env_dict())
-                from ..utils.file_ops import robust_copy2, robust_copytree
+                validate_cached_links(_cached, None, self._git_env_dict())
+                from ..utils.file_ops import robust_copy_entry
 
                 for item in _cached.iterdir():
                     if item.name == ".git":
                         continue
-                    src = _cached / item.name
-                    dst = target_path / item.name
-                    if src.is_dir():
-                        robust_copytree(src, dst)
-                    else:
-                        robust_copy2(src, dst)
+                    robust_copy_entry(_cached / item.name, target_path / item.name)
+                require_verified_copy(target_path, _cached, _cached.parent.name)
 
                 # Validate, then return without cloning.
                 route_agent_plugin_package(target_path)
@@ -2018,6 +2009,7 @@ class GitHubPackageDownloader:
 
             # Links become their Git-object content while .git exists (#3457).
             materialize_tracked_symlinks("git", target_path, None, env=self._git_env_dict())
+            require_verified_checkout(target_path, resolved_ref.resolved_commit)
 
             # Remove .git directory to save space and prevent treating as a Git repository
             git_dir = target_path / ".git"
