@@ -2,6 +2,7 @@
 
 import os  # noqa: F401
 import shutil
+import sys
 from pathlib import Path
 from typing import Union  # noqa: F401
 
@@ -222,6 +223,29 @@ class TestUnpackDestinationContainment:
 
         assert sorted(output.rglob("*")) == tree
         assert {p: p.read_bytes() for p in tree if p.is_file()} == before
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot hold such a name")
+    def test_unportable_name_inside_a_directory_entry_is_refused(self, tmp_path):
+        bundle = _build_bundle_dir(
+            tmp_path,
+            {".agents/skills/review/SKILL.md": "x\n", ".agents/skills/review/aux.md": "x\n"},
+        )
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                resolved_commit="abc123",
+                deployed_files=[".agents/skills/review"],
+            )
+        )
+        lockfile.write(bundle / "apm.lock.yaml")
+        output = tmp_path / "project"
+        output.mkdir()
+
+        with pytest.raises(ValueError, match="unsafe path"):
+            unpack_bundle(bundle, output)
+
+        assert not any(output.rglob("*"))
 
     def test_linked_bundle_directory_is_not_read(self, tmp_path):
         bundle = _build_bundle_dir(
