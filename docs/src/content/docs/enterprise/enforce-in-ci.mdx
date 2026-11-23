@@ -175,7 +175,8 @@ access to every `apm-policy` project in the group path.
 |---|---|
 | `lockfile-exists`, `ref-consistency`, `--frozen` refused | Run `apm install`, commit `apm.yml` and `apm.lock.yaml` |
 | `content-integrity`, `drift` | A deployed file was edited: run `apm export-patch` to keep the edit upstream, then delete the file and run `apm install` to restore the locked file (a plain `apm install` keeps an edited file and names it, exiting 1 when the edit blocks new content or install cannot prove it wrote the current bytes). `content-integrity` also fails on critical hidden Unicode; review the file before you strip or replace it |
-| `dependency-allowlist`, `dependency-denylist` | Run the `apm uninstall` the check prints, use an allowed package, or open a pull request against the policy repository |
+| `dependency-allowlist` | If the check prints an `apm uninstall` command, run it. Otherwise use an allowed package, or open a pull request against the policy repository |
+| `dependency-denylist` | Use an allowed package, or open a pull request against the policy repository |
 | `apm policy status --check` | Discovery failed; see [Debug a policy failure](../apm-policy/#debug-a-policy-failure) |
 
 There is no per-pull-request override. An exception is a change to `apm-policy.yml`,
