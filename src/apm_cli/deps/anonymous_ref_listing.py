@@ -227,7 +227,15 @@ def _proxy(env: Mapping[str, str]) -> str | None:
         raise _Fallback("proxy is not a plain http proxy")
     if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
         raise _Fallback("proxy URL carries a path")
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    try:
+        host, port = parsed.hostname, parsed.port
+    except ValueError:
+        raise _Fallback("proxy port is not a number") from None
+    if not host:
+        raise _Fallback("proxy has no host")
+    host = f"[{host}]" if ":" in host else host
+    # libcurl's default proxy port is 1080; requests would assume the scheme's 80.
+    return f"http://{host}:{port or 1080}"
 
 
 def _verify(env: Mapping[str, str], config: Mapping[str, str]) -> str:

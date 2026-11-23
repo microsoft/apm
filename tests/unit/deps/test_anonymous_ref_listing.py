@@ -179,6 +179,8 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
     assert arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://p:1"}) == "http://p:1"
     assert arl._proxy({"HTTPS_PROXY": "http://q:2"}) == "http://q:2"
     assert arl._proxy({"HTTP_PROXY": "http://q:2"}) is None
+    assert arl._proxy({"HTTPS_PROXY": "http://proxy"}) == "http://proxy:1080"
+    assert arl._proxy({"HTTPS_PROXY": "proxy.example:3128"}) == "http://proxy.example:3128"
     assert arl._proxy({"https_proxy": "", "HTTPS_PROXY": "http://q:2"}) == "http://q:2"
     no_proxy_upper = {"HTTPS_PROXY": "http://q:2", "no_proxy": "", "NO_PROXY": "github.com"}
     assert arl._proxy(no_proxy_upper) is None
