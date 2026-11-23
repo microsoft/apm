@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.deps.shared_clone_cache import SharedCloneCache
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = [
     pytest.mark.component,
@@ -266,6 +267,7 @@ class TestSharedCloneCache:
 # ---------------------------------------------------------------------------
 
 
+@trust_checkout_contents()
 class TestDownloaderSharedCloneIntegration:
     """Test that the downloader uses shared_clone_cache when set."""
 

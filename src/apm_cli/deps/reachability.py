@@ -297,16 +297,51 @@ def _build_local_dir_index(
     return index
 
 
+def _read_node(manifest_dir: Path, *, local: bool) -> APMPackage | None:
+    """Read one node's manifest as install does; ``None`` is a declared-nothing leaf.
+
+    A local Claude plugin is normalized; a directory without ``apm.yml`` that
+    is not a leaf format raises ``FileNotFoundError`` (unverifiable).
+    """
+    package = _normalized_local_plugin(manifest_dir) if local else None
+    if package is None:
+        if _is_manifestless_leaf(manifest_dir):
+            return None
+        package = APMPackage.from_apm_yml(manifest_file(manifest_dir), source_path=manifest_dir)
+    return package
+
+
+def _directory_identities(path: Path) -> set[tuple]:
+    """Identities two spellings of one directory share: inode, else a normalized path.
+
+    Case-insensitive and normalizing filesystems (macOS, Windows) give one
+    directory several spellings; the stat identity sees through them.
+    """
+    import os
+    import unicodedata
+
+    identities: set[tuple] = {
+        ("path", unicodedata.normalize("NFC", os.path.normcase(os.path.abspath(path))))
+    }
+    try:
+        stat = path.stat()
+    except (OSError, RuntimeError):
+        return identities
+    identities.add(("inode", stat.st_dev, stat.st_ino))
+    return identities
+
+
 def local_sources_reach(
     roots: Sequence[DependencyReference], project_root: Path, targets: set[Path]
 ) -> bool:
     """Whether the local edges of *roots*' own sources reach a directory in *targets*.
 
     Offline and without ``apm_modules``: a remote package cannot declare the
-    consumer's local directories, so only local edges are followed. An
-    unreadable manifest or unresolvable path counts as reaching, because it
-    cannot prove the target unused (#4889).
+    consumer's local directories, so only local edges are followed. Each node
+    is read as the main walk reads it; an unverifiable node or unresolvable
+    path counts as reaching, because it cannot prove the target unused (#4889).
     """
+    wanted = set().union(*(_directory_identities(target) for target in targets))
     queue = [
         (Path(project_root), ref.local_path) for ref in roots if ref.is_local and ref.local_path
     ]
@@ -317,17 +352,17 @@ def local_sources_reach(
             directory = _join_local(anchor, local_path)
         except (OSError, RuntimeError):
             return True
-        if directory in targets:
+        if _directory_identities(directory) & wanted:
             return True
         if directory in seen:
             continue
         seen.add(directory)
         try:
-            package = APMPackage.from_apm_yml(manifest_file(directory), source_path=directory)
-        except FileNotFoundError:
-            continue  # a manifest-less leaf declares nothing
-        except (OSError, ValueError):
+            package = _read_node(directory, local=True)
+        except (OSError, ValueError, RuntimeError):
             return True
+        if package is None:
+            continue
         queue.extend(
             (directory, dep.local_path)
             for dep in package.get_apm_dependencies()
@@ -564,13 +599,9 @@ def compute_forward_reachable_keys(
             node_key = visit_key
 
         try:
-            package = _normalized_local_plugin(manifest_dir) if ref.is_local else None
+            package = _read_node(manifest_dir, local=ref.is_local)
             if package is None:
-                if _is_manifestless_leaf(manifest_dir):
-                    continue
-                package = APMPackage.from_apm_yml(
-                    manifest_file(manifest_dir), source_path=manifest_dir
-                )
+                continue
         except (FileNotFoundError, ValueError) as exc:
             # Missing or malformed manifest: this subtree's true children
             # are unknown. Do NOT treat it as childless -- record it and

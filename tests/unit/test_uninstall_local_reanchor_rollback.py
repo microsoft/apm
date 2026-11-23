@@ -9,6 +9,7 @@ import pytest
 
 from apm_cli.commands.uninstall.cli import (
     _persist_lock_then_resync_native,
+    _refuse_reanchor_refresh,
     _StillNeededRepair,
 )
 from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
@@ -50,3 +51,54 @@ def test_an_unsaved_reanchor_lock_restores_the_manifest_and_exits_nonzero(tmp_pa
     assert (manifest.read_bytes(), lock.read_bytes()) == original
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "apm.yml and apm.lock.yaml were restored" in message
+
+
+def _planned(tmp_path: Path):
+    manifest = tmp_path / "apm.yml"
+    lock = tmp_path / "apm.lock.yaml"
+    manifest.write_text("name: proj\ndependencies:\n  apm:\n    - ./vendor/e\n", encoding="utf-8")
+    lock.write_text("lockfile_version: '4'\n", encoding="utf-8")
+    plan = snapshot_for_rollback(
+        LocalReanchorPlan(renames={"./vendor/e": "local:vendor/e"}), (manifest, lock)
+    )
+    manifest.write_text("name: proj\n", encoding="utf-8")
+    return manifest, lock, _StillNeededRepair({}, {}, {}, frozenset(), plan)
+
+
+def test_a_survivor_refresh_during_a_reanchor_rolls_back(tmp_path: Path) -> None:
+    manifest, _lock, repair = _planned(tmp_path)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _refuse_reanchor_refresh(repair, {"local:vendor/f"}, logger)
+
+    assert exc.value.code == 1
+    assert "./vendor/e" in manifest.read_text(encoding="utf-8")
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "must be redeployed" in message and "were restored" in message
+
+
+def test_a_failed_rollback_names_what_it_kept_and_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, _lock, repair = _planned(tmp_path)
+    real = __import__("apm_cli.integration.write_seam", fromlist=["x"]).atomic_write_text
+
+    def refuse_manifest(path, *args, **kwargs):
+        if Path(path).name == "apm.yml":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr("apm_cli.integration.write_seam.atomic_write_text", refuse_manifest)
+    logger = MagicMock()
+
+    with pytest.raises(SystemExit) as exc:
+        _refuse_reanchor_refresh(repair, {"local:vendor/f"}, logger)
+
+    assert exc.value.code == 1
+    backup = tmp_path / "apm.yml.apm-reanchor-backup"
+    assert "./vendor/e" in backup.read_text(encoding="utf-8")
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "could not be restored" in message and str(backup) in message, message
+    assert "were restored" not in message
+    assert manifest.read_text(encoding="utf-8") == "name: proj\n"

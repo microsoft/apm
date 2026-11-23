@@ -613,3 +613,127 @@ def test_a_reparented_replacement_request_takes_the_new_dev_status(
     ]
     assert [request["dev"] for request in requests] == [True], lock
     _assert_reanchored_like_a_full_install(world)
+
+
+def test_a_stale_receipt_outside_the_owner_transition_is_untouched(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: only receipts the validated rename covers move; a stale one keeps its bytes."""
+    world = _local_world(tmp_path, apm_binary_path)
+    directory = world.isolated.home / ".apm" / "deployment-receipts"
+    (path,) = [p for p in directory.glob("*.json") if "f-skill" in p.read_text(encoding="utf-8")]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    (key,) = [key for key in data["bindings"] if key.endswith(".claude/skills/f-skill/SKILL.md")]
+    for record in data["records"]:
+        if record["value"] == ".claude/skills/f-skill/SKILL.md":
+            record["owners"], record["active_owner"] = ["./vendor/e"], "./vendor/e"
+    data["bindings"][key][0] = "./vendor/e"
+    path.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    stale = (data["bindings"][key], data["destinations"][key])
+
+    world.apm("uninstall", "./vendor/e")
+
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert (after["bindings"][key], after["destinations"][key]) == stale
+    (record,) = [r for r in after["records"] if r["value"] == ".claude/skills/f-skill/SKILL.md"]
+    assert record["active_owner"] == "./vendor/e"
+
+
+def test_without_apm_modules_an_unreached_local_removal_still_runs(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: the offline refusal needs a surviving local source that reaches the package."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "x", "x")
+    _manifest(world, ["./vendor/e", "./vendor/x"], [])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    shutil.rmtree(world.project / "apm_modules")
+
+    preview = world.apm("uninstall", "./vendor/e", "--dry-run")
+    result = world.apm("uninstall", "./vendor/e")
+
+    assert "apm_modules/ is missing" not in preview.stdout + preview.stderr
+    assert "_local/e" not in _rows(world)
+    assert "Removed ./vendor/e" in result.stdout + result.stderr
+
+
+def test_without_apm_modules_an_unreadable_survivor_source_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a survivor directory that is not a leaf and has no manifest proves nothing."""
+    world = _local_world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "apm_modules")
+    (world.project / "vendor" / "d" / "apm.yml").unlink()
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+@pytest.mark.windows_compat
+def test_without_apm_modules_a_case_variant_survivor_edge_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: on a case-insensitive filesystem d's ../E reaches ./vendor/e by identity."""
+    probe = tmp_path / "Case-Probe"
+    probe.mkdir()
+    if not (tmp_path / "case-probe").exists():
+        pytest.skip("case-sensitive filesystem: the spellings name different directories")
+    world = _local_world(tmp_path / "w2", apm_binary_path)
+    _skill_package(world.project / "vendor" / "d", "d", ("../E",))
+    shutil.rmtree(world.project / "apm_modules")
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_a_reanchor_refuses_when_a_descendant_selection_shrinks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: any survivor whose selection shrinks would lose files; the re-anchor refuses."""
+    world = _local_world(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    write(
+        vendor / "f/.apm/skills/g-skill/SKILL.md", "---\nname: g-skill\ndescription: g\n---\n# g\n"
+    )
+    world.apm("install")
+    assert (world.project / ".claude/skills/g-skill/SKILL.md").is_file()
+    write(
+        vendor / "e/apm.yml",
+        "name: e\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../f\n      skills: [f-skill]\n",
+    )
+    write(vendor / "a/apm.yml", "name: a\nversion: 1.0.0\n")
+
+    _assert_refused_before_any_write(world, "select fewer skills or targets of")
+
+
+def _modules_digest(world: ReplayWorld) -> dict[str, bytes]:
+    root = world.project / "apm_modules"
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_a_reanchor_refuses_when_a_local_source_changed_since_install(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: re-copying an edited source cannot be rolled back; refuse before activation."""
+    world = _local_world(tmp_path, apm_binary_path)
+    _skill_package(world.project / "vendor" / "e", "e", ("../f",), body=" edited")
+    modules = _modules_digest(world)
+
+    _assert_refused_before_any_write(world, "changed since it was installed")
+    assert _modules_digest(world) == modules
+
+
+def test_without_apm_modules_a_missing_survivor_source_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: a surviving local source that is gone proves nothing; it never counts as a leaf."""
+    world = _local_world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "apm_modules")
+    shutil.rmtree(world.project / "vendor" / "d")
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
