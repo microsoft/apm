@@ -16,6 +16,7 @@ from ..utils.archive import (
     MAX_ZIP_UNCOMPRESSED,
     ArchiveError,
     _extract_tar_gz_file,
+    portable_name_problem,
     safe_extract_zip,
 )
 
@@ -359,7 +360,12 @@ def _validated_unpack_destinations(
     destinations: list[tuple[str, Path]] = []
     for rel_path in rel_paths:
         p = Path(rel_path)
-        if p.is_absolute() or rel_path.startswith("/") or ".." in p.parts:
+        if (
+            p.is_absolute()
+            or rel_path.startswith("/")
+            or ".." in p.parts
+            or portable_name_problem(rel_path) is not None
+        ):
             raise ValueError(f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r}")
         dest = output_dir / rel_path
         if dest.is_symlink() or not BaseIntegrator.validate_deploy_path(
@@ -376,6 +382,11 @@ def _validated_unpack_destinations(
         if src.is_dir() and not has_symlink_component(source_dir, src):
             for walk_root, dirs, files in os.walk(src):
                 for name in (*dirs, *files):
+                    if portable_name_problem(name) is not None:
+                        raise ValueError(
+                            f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r} "
+                            f"holds {name!r}"
+                        )
                     dest_file = dest / Path(walk_root).relative_to(src) / name
                     if has_symlink_component(output_dir, dest_file):
                         raise ValueError(

@@ -198,6 +198,14 @@ class HermesClientAdapter(CopilotClientAdapter):
         untouched (returns ``False``) rather than overwritten.
         """
         path = self._config_path()
+        from ...integration.targets import resolve_user_root
+        from .base import _warn_symlinked_mcp_config
+
+        # Check the configured path: resolving it first would erase the link.
+        user_root = resolve_user_root("hermes")
+        if self._is_linked_config(user_root / "config.yaml", user_root=user_root):
+            _warn_symlinked_mcp_config(path)
+            return False
         try:
             data = self._load_document()
         except _MalformedHermesConfig:

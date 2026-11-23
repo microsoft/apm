@@ -24,6 +24,7 @@ from apm_cli.models.apm_package import (
     ResolvedReference,
     ValidationResult,
 )
+from tests.utils.checkout_trust import trust_checkout_contents
 
 pytestmark = pytest.mark.component
 
@@ -44,6 +45,7 @@ _CRED_FILL_PATCH = patch(
 )
 
 
+@trust_checkout_contents()
 class TestGitHubPackageDownloader:
     """Test cases for GitHubPackageDownloader."""
 
@@ -1147,6 +1149,7 @@ class TestMixedSourceTokenSelection:
             assert "ado-token" not in url
 
 
+@trust_checkout_contents()
 class TestSubdirectoryPackageCommitSHA:
     """Test commit SHA handling in download_subdirectory_package."""
 
@@ -1378,6 +1381,7 @@ class TestWindowsCleanupHelpers:
         repo.close.assert_called_once()
 
 
+@trust_checkout_contents()
 class TestDownloadSubdirectoryPackageWindowsCleanup:
     """Verify that WinError 32 file-lock races don't surface to the caller.
 
