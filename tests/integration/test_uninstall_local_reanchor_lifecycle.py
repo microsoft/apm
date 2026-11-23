@@ -885,3 +885,74 @@ def test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks(
 
     _assert_refused_before_any_write(world, "ships hooks")
     assert (settings.read_bytes() if settings.exists() else None) == hooks_before
+
+
+_SHARED_SKILL = ".claude/skills/shared/SKILL.md"
+
+
+def _shared_skill_world(
+    tmp_path: Path, apm_binary_path: Path, *, same: bool, e_first: bool = True
+) -> ReplayWorld:
+    """e and z both ship skill ``shared``; z declares ``../e`` (#5048).
+
+    Skills are last-installed-wins, so the re-anchor's new install order can
+    change the final writer of ``shared``.
+    """
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "z", "z", ("../e",))
+    for name, body in (("e", "E"), ("z", "E" if same else "Z")):
+        write(
+            vendor / name / ".apm/skills/shared/SKILL.md",
+            f"---\nname: shared\ndescription: Shared skill\n---\n# {body}\n",
+        )
+    if e_first:
+        _manifest(world, ["./vendor/e"], ["./vendor/z"])
+    else:
+        _manifest(world, ["./vendor/z", "./vendor/e"], [])
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    return world
+
+
+@pytest.mark.parametrize("e_first", [True, False], ids=["e-installed-first", "z-installed-first"])
+def test_a_reanchor_records_the_shared_skill_writer_a_fresh_install_records(
+    tmp_path: Path, apm_binary_path: Path, e_first: bool
+) -> None:
+    """#5048 cell 1: identical shared bytes re-anchor; --no-frozen keeps owner and bytes."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True, e_first=e_first)
+    deployed = (world.project / _SHARED_SKILL).read_bytes()
+
+    result = world.apm("uninstall", "./vendor/e")
+
+    output = " ".join((result.stdout + result.stderr).split())
+    assert "./vendor/e stays installed because" in output, output
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+    _assert_reanchored_like_a_full_install(world)
+    assert (world.project / _SHARED_SKILL).read_bytes() == deployed
+
+
+def test_a_reanchor_that_changes_a_shared_skill_writer_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 cell 2: the next install would write e's different bytes; refuse first."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=False)
+
+    _assert_refused_before_any_write(world, ".claude/skills/shared", "would change its writer")
+
+
+def test_a_reanchor_without_a_receipt_for_a_carried_shared_skill_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#5048 cell 3: ownership moves only with a receipt APM can verify."""
+    world = _shared_skill_world(tmp_path, apm_binary_path, same=True)
+    (receipt,) = (world.isolated.home / ".apm" / "deployment-receipts").glob("*.json")
+    data = json.loads(receipt.read_text(encoding="utf-8"))
+    data["records"] = [row for row in data["records"] if row["value"] != _SHARED_SKILL]
+    for section in ("bindings", "destinations", "history"):
+        for key in [key for key in data.get(section) or {} if key.endswith(_SHARED_SKILL)]:
+            del data[section][key]
+    receipt.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    _assert_refused_before_any_write(world, "cannot prove it wrote", _SHARED_SKILL)
