@@ -57,6 +57,8 @@ COMPONENT_ONLY: dict[str, str] = {
     "cannot be verified",
     "content-hashes-missing": _POLICY,
     "deployment-ownership-missing": _FAULT,
+    "dependency-not-allowed": "executed by journey cell J|E01|4|O8 "
+    "(tests/lifecycle/journeys/enterprise/E01-org-policy-rollout.yaml step 4, #4570)",
     "drift-cache-unpopulated": "audit replay re-fetches a missing remote package; only a "
     "missing local source misses, and install cannot restore that",
     "frozen-native-route-changed": "executed by test_native_plugin_opt_out_lifecycle::"

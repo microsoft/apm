@@ -332,7 +332,7 @@ class TestPromptDiscovery:
 class TestRuntimeDetection:
     """Test runtime detection logic."""
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_detect_installed_runtime_copilot(self, mock_which):
         """Test runtime detection when copilot is installed."""
         mock_which.side_effect = lambda cmd: "/path/to/copilot" if cmd == "copilot" else None
@@ -342,7 +342,7 @@ class TestRuntimeDetection:
 
         assert result == "copilot"
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_detect_installed_runtime_codex_fallback(self, mock_which):
         """Test runtime detection falls back to codex."""
 
@@ -360,7 +360,7 @@ class TestRuntimeDetection:
 
         assert result == "codex"
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_detect_installed_runtime_none(self, mock_which):
         """Test error when no runtime found."""
         mock_which.return_value = None
@@ -432,7 +432,7 @@ scripts:
             call_args = mock_exec.call_args[0]
             assert call_args[0] == "echo 'explicit script'"
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_run_script_auto_discovery_fallback(self, mock_which, tmp_path):
         """Test auto-discovery when script not in apm.yml."""
         mock_which.side_effect = lambda cmd: "/path/to/copilot" if cmd == "copilot" else None

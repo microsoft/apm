@@ -70,7 +70,7 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("shutil.which", return_value="powershell.exe")
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value="powershell.exe")
     @patch("os.chmod")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_update_uses_powershell_installer_on_windows(
@@ -113,7 +113,7 @@ class TestUpdateCommand(unittest.TestCase):
     @patch("requests.get")
     @patch("subprocess.run")
     @patch("apm_cli.commands.self_update.get_version", return_value="0.6.3")
-    @patch("shutil.which", return_value="powershell.exe")
+    @patch("apm_cli.utils.git_env.trusted_executable", return_value="powershell.exe")
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value="0.7.0")
     def test_windows_update_does_not_forward_parent_psmodulepath(
         self,
@@ -163,7 +163,7 @@ class TestUpdateCommand(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "darwin"),
-            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
+            patch.object(update_module.git_env, "trusted_executable", return_value="/usr/bin/bash"),
         ):
             result = self.runner.invoke(cli, ["self-update"])
 

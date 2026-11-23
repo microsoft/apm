@@ -522,7 +522,7 @@ def _admitted_names(lockfile: LockFile) -> set[str]:
     )
 
 
-class _DirectDependencyIndex:
+class DirectDependencyIndex:
     """Trace locked packages through their recorded parents to apm.yml entries.
 
     ``resolved_by`` holds the parent's lock key (replacement-enabled locks) or
@@ -948,7 +948,7 @@ def _collect_locked_dependencies(
     refusable = result.refusable
     pending_packages = result.pending_packages
     direct_roots: dict[str, set[str] | None] = {}
-    direct_index = _DirectDependencyIndex(lockfile)
+    direct_index = DirectDependencyIndex(lockfile)
     parent_index = build_local_parent_index(lockfile)
     resolved_cache: dict[str, Path] = {}
     native_ownership_cache: dict[Path, frozenset[str]] = {}

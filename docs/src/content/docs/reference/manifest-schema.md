@@ -620,7 +620,7 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$`; excludes exactly `.` and `..` | Names the destination directory, not the source; local `../` paths remain supported. Valid: `.safe`, `safe.`, `foo..bar`, `my-skill.v2`. [Migration](../../getting-started/coming-from/). |
 | `type` | `string` | OPTIONAL (remote Git only) | `gitlab` | Treat a bespoke hostname as self-managed GitLab. |
 | `allow_insecure` | `boolean` | OPTIONAL (remote Git only) | `true` or `false` | Manifest-side approval for an `http://` dependency; the install command still requires its separate insecure-host opt-in. |
-| `skills` | `list<string>` | OPTIONAL | Non-empty skill names or `["*"]` | Installs only the selected skills from a dependency that exposes selectable skills. |
+| `skills` | `list<string>` | OPTIONAL | Non-empty skill names, or `["*"]` alone (`"*"` cannot be mixed with names; no globs) | Installs only the selected skills from a dependency that exposes selectable skills. `["*"]` installs every skill the package ships, including skills added in later releases. At project scope a selection deploys a Claude-format plugin's skills loose instead of as a [native plugin](../../consumer/install-plugins/#native-plugins); with `-g` it parks the plugin, and an Agent Plugin stays native. |
 | `native` | `boolean` | OPTIONAL | `true` or `false` | `false` installs this plugin loose on every harness, never as a native plugin; every primitive it ships deploys, including skills a later version adds. `true` keeps the automatic native route even under `native_plugins: false`; omitted follows the [`native_plugins`](#316-native_plugins) default, else the automatic route. |
 | `targets` | `list<string>` | OPTIONAL | Target slugs. Stable: `copilot`, `claude`, `grok-build`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `hermes`, `grok-bot`. Experimental: `grok-cloud`, `openclaw`, `copilot-cowork`, `copilot-app`. `vscode` is accepted as a deprecated alias and recorded as `copilot`. | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list; `agent-skills` is also accepted by the `grok-bot` target. |
 
@@ -802,7 +802,7 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
-| `name` | `string` | REQUIRED | Non-empty | Server identifier (registry name or custom name). |
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; neither the name nor the config key it is written under (a registry name `owner/server` writes under `server`) may be `__proto__`, `constructor` or `prototype` (any case) | Server identifier (registry name or custom name). |
 | `transport` | `enum<string>` | Conditional | `stdio`, `sse`, `http`, `streamable-http` | Transport protocol. REQUIRED when `registry: false`. Values are MCP transport names, not URL schemes; remote variants connect over HTTPS. |
 | `env` | `map<string, string>` | OPTIONAL | | Environment variable overrides. Values may contain `${VAR}` or `${env:VAR}` references; see Section 4.2.4. |
 | `args` | `dict` or `list` | OPTIONAL | | Dict for overlay variable overrides (registry); list for positional args (self-defined). |
@@ -927,7 +927,7 @@ A plain server name reference: `gopls`. String-form entries carry only a name an
 
 | Field | Type | Required | Constraint | Description |
 |---|---|---|---|---|
-| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments | Server identifier. |
+| `name` | `string` | REQUIRED | `^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$`; no `..` segments; not `__proto__`, `constructor` or `prototype` (any case) | Server identifier. |
 | `command` | `string` | REQUIRED | No `..` path segments | Binary to execute (must be on `$PATH` or a relative path). |
 | `extensionToLanguage` | `map<string, string>` | REQUIRED | Non-empty dict | Maps file extensions to LSP language identifiers (e.g. `".go": "go"`). |
 | `args` | `list<string>` | OPTIONAL | | Command-line arguments for the server. |

@@ -22,8 +22,8 @@
     {
       "id": "orphan-package-selection",
       "decision": "Every command's orphan removal decision: install cleanup and --dry-run, targeted install, prune, uninstall and their dry runs, apm audit --ci no-orphans, and deps list / compile inspection",
-      "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner)",
-      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py"],
+      "owner": "install/orphans.py (decide_orphan_removal: keyword-only, no-default inputs; command differences are inputs; consumes deps/reachability.py; file deletion stays with the cleanup owner); a still-needed local root re-keys through commands/uninstall/local_reanchor.py from the same walk (#4889)",
+      "selectors": ["src/apm_cli/install/orphans.py", "src/apm_cli/commands/_helpers.py", "src/apm_cli/commands/uninstall/mcp_survivors.py", "src/apm_cli/commands/uninstall/local_reanchor.py"],
       "guards": ["install-deployment-orphan-selection"]
     },
     {
@@ -59,16 +59,17 @@
     {
       "id": "deployment-provenance-state",
       "decision": "Deployment provenance / state",
-      "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; each receipt key keeps a short history of earlier hashes this installation wrote (core/receipt_history.py, read only by the session's trusted-baseline decision, never deletion evidence; #4428); cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
+      "owner": "deployment_ledger.py (DeploymentLedgerCodec and installation-bound DeploymentMaterializationSession); receipt claim keys route through install/deployed_paths.py (deployed_path_entry) and retain the admitted key through postcommit binding; authenticated same-writer target handoffs require a guarded actual copy, never adopted-receipt rebinding; live install and uninstall survivor sessions persist actual final-rendered skill writes, with final-lock-success binding; each receipt key keeps a short history of earlier hashes this installation wrote (core/receipt_history.py, read only by the session's trusted-baseline decision, never deletion evidence; #4428); a re-anchored local owner moves its receipts to the new key with that history (core/deployment_reanchor.py, #4889); cleanup retires confirmed outcomes once per phase before survivor copies; read-only index: skill_support.build_skill_ownership_maps, exposed by SkillIntegrator._build_ownership_maps with integrate-phase snapshot lifetime",
       "selectors": [
         "src/apm_cli/core/deployment_ledger.py",
         "src/apm_cli/core/_deployment_queries.py",
         "src/apm_cli/core/legacy_lock_evidence.py",
         "src/apm_cli/core/receipt_history.py",
+        "src/apm_cli/core/deployment_reanchor.py",
         "src/apm_cli/integration/skill_support.py",
         "src/apm_cli/install/pipeline.py"
       ],
-      "guards": ["install-deployment-provenance-state", "install-deployment-receipt-collection"]
+      "guards": ["install-deployment-provenance-state", "install-deployment-receipt-collection", "install-deployment-reanchor-receipt-history"]
     },
     {
       "id": "target-scoped-deployed-file-contraction",
@@ -147,10 +148,11 @@
     {
       "id": "install-commit-order",
       "decision": "Every install check completes before the lockfile and deployed files are committed; a failing check leaves no committed state (req-pl-002)",
-      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the lazy deploy journal (#4282): from InstallTransaction.journal_deploy_writes before the integrate phase it listens at the integrator write seam (integration/write_seam.py, which every integrator file write calls first) and records the prior bytes or absence of each path the first time it is written (install/deploy_snapshot.py stores the units under the APM home install-snapshots directory); rollback restores them and discards the staged lockfile; release_deploy_targets after the install-time audit keeps the journal only until the staged lockfile commits; the next install reaps a journal a killed install left; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159); check_before_deploy also plans the gated file writes (prompts, agents, commands, instructions) of every package through the write seam's planning mode and refuses before any write when OverwriteGate would keep a managed file without deployment evidence (#4381); a failed MCP or LSP reconciliation (install/phases/services.py, while the lockfile is still staged) rolls the transaction back, except an MCP collision, and then registers no native plugin (#4594); check_before_deploy also refuses an MCP collision before any write: install/mcp/collision_preflight.py projects each self-defined server the lockfile never recorded through compare_native_mcp_connection as unmanaged (#4268), and each registry server whose render needs no prompted value and each recorded server against every recorded baseline (#4741), reporting a conflict with _report_native_conflict; run_mcp_integration runs the same projection for service-only installs, and the MCP write path keeps the same comparison as its backstop",
+      "owner": "install/commit_gate.py (check_before_deploy before the first integrator write in phases/integrate.py; check_before_lockfile on the staged lockfile in install/pipeline.py before its writer scope commits it (#4086); merged MCP policy via enforce_mcp_policy from a closed list of preflight sites; install --mcp and apm mcp install judge their server, with its target projection, through enforce_mcp_policy and refuse it through refuse_blocked_mcp, as apm install does); the frozen pre-deploy hash check runs in InstallService.run before the pipeline; install/transaction.py (InstallTransaction) owns completion and rollback of the attempt, including the lazy deploy journal (#4282): from InstallTransaction.journal_deploy_writes before the integrate phase it listens at the integrator write seam (integration/write_seam.py, which every integrator file write calls first) and records the prior bytes or absence of each path the first time it is written (install/deploy_snapshot.py stores the units under the APM home install-snapshots directory); rollback restores them and discards the staged lockfile; release_deploy_targets after the install-time audit keeps the journal only until the staged lockfile commits; the next install, under the lifecycle lock and before it changes anything, replays a journal a killed install left (deploy_snapshot.replay_abandoned_journals, #4863): every unit must stay inside its deploy root and re-hash to the journal's hash and the deployment ledger's hash for its path, otherwise the journal is kept and reported and nothing is applied; every write through the seam (and each closed-list direct recorder) reports a pending event with the expected content hash before it writes and a post-write seal after it, and replay restores a path only while it holds nothing, its prior state, the sealed bytes, or the expected bytes of an unsealed write, keeping anything else with a warning; every rollback also removes the target roots the attempt created (track_created_target_roots) when they are left empty (#4159); check_before_deploy also plans the gated file writes (prompts, agents, commands, instructions) of every package through the write seam's planning mode and refuses before any write when OverwriteGate would keep a managed file without deployment evidence (#4381); a failed MCP or LSP reconciliation (install/phases/services.py, while the lockfile is still staged) rolls the transaction back, except an MCP collision, and then registers no native plugin (#4594); check_before_deploy also refuses an MCP collision before any write: install/mcp/collision_preflight.py projects each self-defined server the lockfile never recorded through compare_native_mcp_connection as unmanaged (#4268), and each registry server whose render needs no prompted value and each recorded server against every recorded baseline (#4741), reporting a conflict with _report_native_conflict; run_mcp_integration runs the same projection for service-only installs, and the MCP write path keeps the same comparison as its backstop",
       "selectors": [
         "src/apm_cli/install/commit_gate.py",
         "src/apm_cli/install/deploy_snapshot.py",
+        "src/apm_cli/adapters/client/config_journal.py",
         "src/apm_cli/install/mcp/collision_preflight.py",
         "src/apm_cli/install/transaction.py",
         "src/apm_cli/integration/write_seam.py",
@@ -258,6 +260,7 @@
       "guards": [
         "install-deployment-base-integrator",
         "install-deployment-cleanup-ownership-release",
+        "install-deployment-cleanup-spelling-aliases",
         "install-deployment-cleanup-target-roots",
         "install-deployment-cleanup-retains-kept-members",
         "install-deployment-codex-agent-link-resolution",
@@ -490,6 +493,13 @@
       "owner": "compilation/claude_agents_md.py (routes_to_agents_md, claude_agents_md_blocker, which validates managed-section markers through compilation/managed_section.py; compiled coverage: record_compiled_instructions at compile and CompiledCoverage, one per install root, compare each routed instruction's scope and body fingerprint #4787); consumers: InstructionIntegrator._claude_rule_sources at install, AgentsCompiler._compile_agents_md (without_claude_rule_instructions) and AgentsCompiler._compile_claude_md (ClaudeFormatter.format_agents_md_imports) at compile",
       "selectors": ["src/apm_cli/compilation/claude_agents_md.py", "src/apm_cli/compilation/claude_formatter.py", "src/apm_cli/bundle/claude_routed_rules.py", "src/apm_cli/core/agents_md_compile_record.py"],
       "guards": ["install-deployment-claude-agents-md-routing"]
+    },
+    {
+      "id": "mcp-lsp-server-name-rule",
+      "decision": "Which MCP and LSP server names are valid: one character allowlist and the reserved object keys __proto__, constructor and prototype (any case), checked before any config write (#4984)",
+      "owner": "models/dependency/server_names.py (validate_server_name, RESERVED_OBJECT_KEYS); consumers: models/dependency/mcp.py MCPDependency.validate, models/dependency/lsp.py LSPDependency.validate",
+      "selectors": ["src/apm_cli/models/dependency/server_names.py"],
+      "guards": ["install-deployment-server-name-rule"]
     }
   ]
 }

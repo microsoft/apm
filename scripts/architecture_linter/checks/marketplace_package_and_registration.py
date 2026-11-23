@@ -758,7 +758,7 @@ def _check_codex_lifecycle(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         _CODEX_PREFIX + "admission.py": (
             "record_native_exec_status(",
-            "skill_subset_filter_tokens(skill_subset)",
+            "has_skill_selection(skill_subset)",
             # Unapproved executables park the whole bundle: never registered (#4154).
             "parked = any(not approvals.get(kind, False) for kind in types)",
             "    if plugin.parked:",

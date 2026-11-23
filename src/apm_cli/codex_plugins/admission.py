@@ -16,7 +16,7 @@ from apm_cli.install.native_plugin_admission import (
     plugin_root_exec_types,
     record_native_exec_status,
 )
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import has_skill_selection
 from apm_cli.security.executables import EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, scan_package_executables
 from apm_cli.utils.content_hash import compute_native_bundle_hash
 
@@ -172,7 +172,7 @@ def plan_native_codex_plugin(
             "Codex compatibility plugins require the codex target; other harnesses "
             "cannot load this native bundle. Select '--target codex' and retry."
         )
-    if skill_subset_filter_tokens(skill_subset) is not None:
+    if has_skill_selection(skill_subset):
         raise CodexNativeError(
             "Codex native registration requires the complete bundle. "
             "Remove the skill subset and retry; no loose skills were registered."
