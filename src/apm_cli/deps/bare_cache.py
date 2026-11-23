@@ -121,17 +121,50 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
         )
 
 
-# Protocol v0 servers refuse a want for an unadvertised commit; under v2 a
-# "not our ref" means the commit is gone, which must fail, not clone in full.
+# Protocol v0 servers refuse a want for an unadvertised commit. Under v2 a
+# "not our ref" means the commit is gone on stock git, but some hosts answer
+# so for any unadvertised commit; neither may clone the history in full.
 _WANT_REFUSED = ("does not allow request for unadvertised object",)
+_NOT_OUR_REF = "not our ref"
+# git translates its own messages; the fetch runs untranslated so they match.
+_UNTRANSLATED = {"LC_ALL": "C", "LANGUAGE": "C"}
 
 
 def _refuses_want_by_commit(exc: subprocess.CalledProcessError) -> bool:
     """Whether git failed because the server refuses to serve a commit by its id."""
+    return any(marker in _stderr_text(exc) for marker in _WANT_REFUSED)
+
+
+def _stderr_text(exc: subprocess.CalledProcessError) -> str:
     detail = exc.stderr
     if isinstance(detail, bytes):
         detail = detail.decode("utf-8", "replace")
-    return any(marker in (detail or "").lower() for marker in _WANT_REFUSED)
+    return (detail or "").lower()
+
+
+def _fetch_admitted_tip_by_name(
+    git_exe: str, path: Path, url: str, ref: str, sha: str, envs: tuple[dict, dict]
+) -> bool:
+    """Fetch *ref* by name when it still points at *sha*; ``False`` if unknown.
+
+    *envs* is the transport env and the validated clone env of *path*.
+
+    Raises:
+        AdmittedCommitGoneError: *ref* no longer points at *sha*.
+    """
+    from ..cache.commit_reachability import admitted_tip_name
+
+    name = admitted_tip_name(url, ref, sha, envs[0])
+    if name is None:
+        return False
+    subprocess.run(
+        [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, name],
+        env={**envs[1], **_UNTRANSLATED},
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    return True
 
 
 def fetch_commit_worktree(
@@ -147,13 +180,16 @@ def fetch_commit_worktree(
 
     Shallow: ``git init``, ``git fetch --depth=1 --no-tags <url> <sha>`` and a
     detached checkout. A server that refuses a want by commit falls back to a
-    full clone and a checkout of *sha*. Runs over the clone transport plan.
+    full clone and a checkout of *sha*. A server that answers "not our ref"
+    gets the ref fetched by name, only while it still points at *sha*, and the
+    checkout is verified against *sha*. Runs over the clone transport plan.
     """
+    from ..cache.checkout_verify import require_verified_checkout
     from ..utils.git_env import (
         checkout_git_worktree,
         clone_git_worktree,
         get_git_executable,
-        git_network_env,
+        git_clone_env,
         git_no_templates_args,
         git_subprocess_env,
     )
@@ -164,17 +200,18 @@ def fetch_commit_worktree(
         env = git_subprocess_env(env)
         if path.exists():
             _rmtree(path)
+        # The env a clone would get, with remote-activated config applied.
+        fetch_env = git_clone_env(url, env, path)
         try:
-            init_env = git_network_env(url, env)
             subprocess.run(
                 [git_exe, "init", "-q", *git_no_templates_args(), str(path)],
-                env=init_env,
+                env=fetch_env,
                 check=True,
                 capture_output=True,
             )
             subprocess.run(
                 [git_exe, "-C", str(path), "fetch", "-q", "--depth=1", "--no-tags", url, sha],
-                env=git_network_env(url, env, worktree=path),
+                env={**fetch_env, **_UNTRANSLATED},
                 check=True,
                 capture_output=True,
                 timeout=300,
@@ -182,6 +219,13 @@ def fetch_commit_worktree(
         except subprocess.CalledProcessError as exc:
             # Only a server that refuses a want by commit gets the full clone; a
             # missing commit or an auth failure fails here, at depth-1 cost.
+            ref = getattr(dep_ref, "reference", None)
+            if ref and _NOT_OUR_REF in _stderr_text(exc):
+                if not _fetch_admitted_tip_by_name(git_exe, path, url, ref, sha, (env, fetch_env)):
+                    raise
+                checkout_git_worktree(path, sha, env=env)
+                require_verified_checkout(path, sha, env=env)
+                return
             if not _refuses_want_by_commit(exc):
                 raise
             if verbose_callback:

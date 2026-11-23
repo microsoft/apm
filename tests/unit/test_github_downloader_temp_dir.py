@@ -34,8 +34,12 @@ def _make_downloader():
         return GitHubPackageDownloader()
 
 
-def _make_virtual_dep_ref(subdir="src/agent", ref="main"):
-    """Return a MagicMock dep_ref that passes is_virtual subdirectory checks."""
+def _make_virtual_dep_ref(subdir="src/agent", ref=None):
+    """Return a MagicMock dep_ref that passes is_virtual subdirectory checks.
+
+    The default branch: a named ref is resolved to its commit before any
+    temp directory exists (#5138), which a mock cannot do.
+    """
     dep_ref = MagicMock()
     dep_ref.is_virtual = True
     dep_ref.virtual_path = subdir

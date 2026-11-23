@@ -256,7 +256,8 @@ def _at_origin(downloader, dep_ref, fn) -> None:
         except Exception as exc:
             if verdicts:
                 raise verdicts[-1] from None
-            raise (contact[-1] if contact else CommitNotReachableError(str(exc))) from exc
+            # No verdict was reached: admission still refuses, never "gone".
+            raise (contact[-1] if contact else _Unverified(str(exc))) from exc
     if verdicts:
         raise verdicts[-1]
 
@@ -484,20 +485,50 @@ def name_a_lost_admitted_commit(download):
                 lost = _lost_admitted_commit(downloader, repo_ref, _ADMITTED.get() or [])
             if lost is None:
                 raise
-            from ..utils.diagnostics import printable_ascii_text
-
-            ref, admitted, now = lost
-            ref = printable_ascii_text(repr(ref))
-            raise AdmittedCommitGoneError(
-                f"{ref} was admitted at commit {admitted[:12]}, which can no longer be "
-                f"fetched from the origin ({ref} now points to {now}). Run the install "
-                "again to admit its current commit, or 'apm update' when the lockfile "
-                "pins it."
-            ) from exc
+            raise _commit_gone(*lost) from exc
         finally:
             _ADMITTED.reset(token)
 
     return _download
+
+
+def _commit_gone(ref: str, admitted: str, now: str) -> AdmittedCommitGoneError:
+    from ..utils.diagnostics import printable_ascii_text
+
+    ref = printable_ascii_text(repr(ref))
+    return AdmittedCommitGoneError(
+        f"{ref} was admitted at commit {admitted[:12]}, which can no longer be "
+        f"fetched from the origin ({ref} now points to {now}). Run the install "
+        "again to admit its current commit, or 'apm update' when the lockfile "
+        "pins it."
+    )
+
+
+def admitted_tip_name(url: str, ref: str, admitted: str, env) -> str | None:
+    """The full name of *ref* at the origin when it still points at *admitted*.
+
+    For a server that will not serve a commit by its id (#5138): the ref is
+    then fetched by this name. ``None`` when the origin cannot be listed.
+
+    Raises:
+        AdmittedCommitGoneError: *ref* no longer points at *admitted*.
+    """
+    try:
+        records = _branch_and_tag_records(url, env)
+    except _Unverified:
+        return None
+    from ..deps.git_remote_ops import exact_branch_or_tag_sha
+
+    try:
+        tip = exact_branch_or_tag_sha(records, ref, _sanitize_origin(url))
+    except RuntimeError:
+        tip = None
+    if tip != admitted.lower():
+        raise _commit_gone(ref, admitted, tip[:12] if tip else "no branch or tag")
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return ref
+    names = {name for _tip, name in records}
+    return f"refs/heads/{ref}" if f"refs/heads/{ref}" in names else f"refs/tags/{ref}"
 
 
 def _is_git_failure(exc: BaseException) -> bool:
@@ -647,17 +678,18 @@ def _listed_tip(downloader, dep_ref, ref: str) -> tuple[str, str]:
     return sha, sha
 
 
-def _exact_tip(url: str, ref: str, env) -> str:
-    """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
-    from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
-    from ..utils.git_env import git_remote_refs
-    from .git_cache import _safe_git_args, _sanitize_url
+def _sanitize_origin(url: str) -> str:
+    from .git_cache import _sanitize_url
 
-    where = _sanitize_url(url)
-    try:
-        refuse_non_branch_ref(ref, where)
-    except RuntimeError as exc:
-        raise CommitNotReachableError(str(exc)) from exc
+    return _sanitize_url(url)
+
+
+def _branch_and_tag_records(url: str, env) -> list[tuple[str, str]]:
+    """The origin's ``(commit, name)`` branch and tag records, from ``git ls-remote``."""
+    from ..utils.git_env import git_remote_refs
+    from .git_cache import _safe_git_args
+
+    where = _sanitize_origin(url)
     try:
         listing = git_remote_refs(
             url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
@@ -670,6 +702,19 @@ def _exact_tip(url: str, ref: str, env) -> str:
     for line in (listing.stdout or "").splitlines():
         tip, _, name = line.partition("\t")
         records.append((tip.strip().lower(), name.strip()))
+    return records
+
+
+def _exact_tip(url: str, ref: str, env) -> str:
+    """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
+    from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
+
+    where = _sanitize_origin(url)
+    try:
+        refuse_non_branch_ref(ref, where)
+    except RuntimeError as exc:
+        raise CommitNotReachableError(str(exc)) from exc
+    records = _branch_and_tag_records(url, env)
     wanted = {ref} if ref.startswith("refs/") else {f"refs/heads/{ref}", f"refs/tags/{ref}"}
     try:
         return exact_branch_or_tag_sha(records, ref, where)

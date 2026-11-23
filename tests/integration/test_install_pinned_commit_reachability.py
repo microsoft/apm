@@ -12,7 +12,9 @@ import importlib
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -480,3 +482,151 @@ def test_a_named_ref_is_checked_out_at_its_commit_even_when_a_want_by_commit_is_
     assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m1"
     assert _git("rev-parse", "HEAD", cwd=target) == origin.m1
     assert bool(notes) is (protocol == "0")
+
+
+def _wrapped_git(root: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    """Run every git call through a script that may rewrite what the server says."""
+    script = root / "git-wrapper"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import os, re, subprocess, sys\n"
+        f"REAL = {shutil.which('git')!r}\n"
+        "args = sys.argv[1:]\n"
+        f"{body}\n"
+        "sys.exit(subprocess.run([REAL, *args]).returncode)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.setattr("apm_cli.utils.git_env._git_executable", str(script))
+
+
+# gettext translates git's messages in any locale but C.
+_TRANSLATING = """
+if os.environ.get("LC_ALL") != "C":
+    done = subprocess.run([REAL, *args], stderr=subprocess.PIPE)
+    sys.stderr.buffer.write(done.stderr.replace(
+        b"does not allow request for unadvertised object",
+        b"erlaubt keine Anfrage nach einem nicht angebotenen Objekt"))
+    sys.exit(done.returncode)
+"""
+
+# A host that answers "not our ref" for every commit it did not advertise.
+_NOT_OUR_REF = """
+if "fetch" in args and re.fullmatch("[0-9a-f]{40}", args[-1]):
+    sys.stderr.write("fatal: remote error: upload-pack: not our ref " + args[-1] + "\\n")
+    sys.exit(128)
+"""
+
+
+def test_a_refused_want_by_commit_falls_back_under_a_non_english_locale(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: the refusal is recognized whatever language git speaks."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    _wrapped_git(tmp_path, monkeypatch, _TRANSLATING)
+    for name, value in {"LANG": "de_DE.UTF-8", "LANGUAGE": "de", "LC_ALL": "de_DE.UTF-8"}.items():
+        monkeypatch.setenv(name, value)
+    notes: list[str] = []
+    target = tmp_path / "checkout"
+    env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.version"}
+    env["GIT_CONFIG_VALUE_0"] = "0"
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(origin.path.as_uri(), env, path)
+
+    fetch_commit_worktree(
+        _plan,
+        "acme/platform/pkg",
+        target,
+        dep_ref=None,
+        sha=origin.m1,
+        verbose_callback=notes.append,
+    )
+
+    assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m1"
+    assert _git("rev-parse", "HEAD", cwd=target) == origin.m1
+    assert len(notes) == 1
+
+
+@pytest.mark.parametrize("ref", ["main", "refs/heads/main"])
+def test_a_host_that_will_not_serve_a_commit_by_id_gets_the_admitted_tip_by_name(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch, ref: str
+) -> None:
+    """#5138: "not our ref" for a still-admitted tip fetches it by name, shallow."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    _wrapped_git(tmp_path, monkeypatch, _NOT_OUR_REF)
+    notes: list[str] = []
+    target = tmp_path / "checkout"
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(origin.path.as_uri(), {}, path)
+
+    fetch_commit_worktree(
+        _plan,
+        "acme/platform/pkg",
+        target,
+        dep_ref=SimpleNamespace(reference=ref),
+        sha=origin.m2,
+        verbose_callback=notes.append,
+    )
+
+    assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m2"
+    assert _git("rev-parse", "HEAD", cwd=target) == origin.m2
+    assert _git("rev-parse", "--is-shallow-repository", cwd=target) == "true"
+    assert notes == []
+
+
+def test_a_host_that_will_not_serve_a_moved_admitted_commit_names_it(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: when the ref moved off the admitted commit, nothing is fetched by name."""
+    from apm_cli.cache.commit_reachability import AdmittedCommitGoneError
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    _wrapped_git(tmp_path, monkeypatch, _NOT_OUR_REF)
+    target = tmp_path / "checkout"
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(origin.path.as_uri(), {}, path)
+
+    with pytest.raises(AdmittedCommitGoneError) as failed:
+        fetch_commit_worktree(
+            _plan,
+            "acme/platform/pkg",
+            target,
+            dep_ref=SimpleNamespace(reference="main"),
+            sha=origin.m1,
+        )
+
+    assert f"'main' was admitted at commit {origin.m1[:12]}" in str(failed.value)
+    assert f"now points to {origin.m2[:12]}" in str(failed.value)
+    assert not (target / ".apm").exists()
+
+
+def test_a_fetch_by_commit_applies_a_remote_activated_mirror_rewrite(
+    tmp_path: Path, origin: _Origin, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#5138: config a clone activates by its remote URL also reaches the fetch by commit."""
+    from apm_cli.deps.bare_cache import fetch_commit_worktree
+
+    mirror = tmp_path / "mirror.gitconfig"
+    mirror.write_text(
+        f'[url "{origin.path.as_uri()}"]\n\tinsteadOf = {_REMOTE}.git\n', encoding="ascii"
+    )
+    config = tmp_path / "global.gitconfig"
+    config.write_text(
+        f'[includeIf "hasconfig:remote.*.url:{_REMOTE}.git"]\n\tpath = {mirror.as_posix()}\n',
+        encoding="ascii",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    target = tmp_path / "checkout"
+
+    def _plan(_base, path, *, dep_ref, clone_action, **_kwargs) -> None:
+        clone_action(f"{_REMOTE}.git", {"GIT_TERMINAL_PROMPT": "0"}, path)
+
+    fetch_commit_worktree(_plan, "acme/platform/pkg", target, dep_ref=None, sha=origin.m1)
+
+    assert (target / ".apm" / "instructions" / "pkg.instructions.md").read_text() == "m1"
+    assert _git("rev-parse", "HEAD", cwd=target) == origin.m1

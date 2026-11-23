@@ -785,6 +785,33 @@ def test_a_failed_download_names_a_lost_admitted_commit_only_when_it_is_gone(
     assert not list((tmp_path / "cache" / "reachability").rglob("verified*/*"))
 
 
+class _NoTransportDownloader(_RefDownloader):
+    """A downloader whose transport plan fails before it contacts the origin."""
+
+    def _execute_transport_plan(self, *_args, **_kwargs) -> None:
+        raise RuntimeError("no transport could be prepared")
+
+
+def test_a_failed_download_is_not_called_lost_when_the_origin_was_never_checked(
+    tmp_path: Path, origin: _Origin
+) -> None:
+    """#5138: without a reachability verdict, the original failure is kept."""
+    from apm_cli.cache.commit_reachability import _note_admitted, name_a_lost_admitted_commit
+
+    downloader = _NoTransportDownloader(tmp_path / "cache", [origin.url], predicted=origin.url)
+
+    @name_a_lost_admitted_commit
+    def _download(_downloader, _repo_ref):
+        _note_admitted("main", origin.f1)
+        raise _FETCH_FAILED
+
+    with pytest.raises(subprocess.CalledProcessError) as failed:
+        _download(downloader, _RefDep())
+
+    assert failed.value is _FETCH_FAILED
+    assert not (tmp_path / "cache" / "reachability").exists()
+
+
 def test_a_lost_admitted_commit_message_stays_ascii_for_a_unicode_ref(
     tmp_path: Path, origin: _Origin
 ) -> None:
