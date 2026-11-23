@@ -1337,6 +1337,7 @@ def _check_drift(
     verbose: bool = False,
     prepared_replay: PreparedCiAuditReplay | None = None,
     policy_provider: Callable[[], Any] | None = None,
+    policy_fetch: Callable[[], Any] | None = None,
 ) -> tuple[CheckResult, list[DriftFinding]]:
     """Replay the install in a scratch dir and diff against the project.
 
@@ -1379,6 +1380,7 @@ def _check_drift(
             cache_only=cache_only,
             user_scope=user_scope,
             policy_provider=policy_provider,
+            policy_fetch=policy_fetch,
         )
 
         try:

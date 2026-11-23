@@ -26,6 +26,7 @@ from apm_cli.integration.skill_adoption import (
     skill_tree_baselines,
     tree_equals_install_output,
 )
+from apm_cli.integration.skill_bundle_routes import promoted_skill_name
 from apm_cli.integration.skill_package_routing import (
     get_effective_type,
 )
@@ -571,6 +572,14 @@ class SkillIntegrator(BaseIntegrator):
             )
         return copied
 
+    def verbatim_destinations(
+        self, package_info, project_root: Path, targets, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """See :func:`apm_cli.integration.skill_bundle_routes.verbatim_destinations`."""
+        from apm_cli.integration.skill_bundle_routes import verbatim_destinations
+
+        return verbatim_destinations(self, package_info, project_root, targets, source_plan)
+
     def _ownership_maps(self, lockfile_root: Path) -> tuple[Mapping[str, str], Mapping[str, str]]:
         """Read durable ownership once per used root in the current integration phase."""
         if self._ownership_snapshots is None:
@@ -955,8 +964,7 @@ class SkillIntegrator(BaseIntegrator):
             # --skill filter: skip skills not in the requested subset
             if name_filter is not None and raw_sub_name not in name_filter:
                 continue
-            is_valid, _ = validate_skill_name(raw_sub_name)
-            sub_name = raw_sub_name if is_valid else normalize_skill_name(raw_sub_name)
+            sub_name = promoted_skill_name(raw_sub_name)
             target = target_skills_root / sub_name
             rewriter = link_rewriter or SkillIntegrator()
             rel_path = rewriter._skill_path_entry(target, materialization_root)

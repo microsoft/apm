@@ -186,6 +186,18 @@ def test_archive_member_reads_cannot_bypass_the_limits_owner(
             'lock.dependencies[_SELF_KEY] = LockedDependency(repo_url="<self>", local_path=".")',
             id="load-inline-self-entry",
         ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        served = served_outputs(\n",
+            "        served = _served_without_owner(\n",
+            id="records-serve-without-owner",
+        ),
+        pytest.param(
+            "src/apm_cli/install/drift_records.py",
+            "        not is_external_url(match.group(2))\n",
+            '        not match.group(2).startswith("http")\n',
+            id="records-link-rule-without-owner",
+        ),
     ],
 )
 def test_audit_replay_scope_projection_cannot_bypass_owner(
@@ -988,6 +1000,25 @@ def test_deploy_journal_is_owned_by_the_transaction(path: str, old: str, new: st
             "from apm_cli.integration import write_seam\n"
             "from apm_cli.integration.write_seam import private_scratch\n",
             id="scratch-imported-directly",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.copy2(src, dest)\n",
+            "                    shutil.copy2(src, dest, follow_symlinks=False)\n",
+            id="bundle-raw-copy",
+        ),
+        pytest.param(
+            "src/apm_cli/install/services.py",
+            "                    write_seam.write_text_lf(dest, normalized_text)\n",
+            "                    from apm_cli.utils.atomic_io import write_text_lf\n\n"
+            "                    write_text_lf(dest, normalized_text)\n",
+            id="bundle-raw-helper",
+        ),
+        pytest.param(
+            "src/apm_cli/commands/install.py",
+            "(journaled_local_bundle(_install_lb))(",
+            "(_install_lb)(",
+            id="bundle-entry-unjournaled",
         ),
     ],
 )
@@ -4719,6 +4750,30 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
         new='        import asyncio.subprocess\n\n        asyncio.subprocess.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
         intent="The lock evidence probe launches git through the asyncio.subprocess attribute chain.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        launcher: object = subprocess.run\n        return launcher(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through an annotated launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        git.run = subprocess.run\n        return git.run(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through an attribute launcher alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        second = first\n        first = subprocess.run\n        return second(\n            ["git", *inert_git_args(), *args],',
+        intent="The lock evidence probe launches a bare git name through a chained launcher alias.",
     ),
     MutationCase(
         guard_id="install-deployment-gate-retirement",

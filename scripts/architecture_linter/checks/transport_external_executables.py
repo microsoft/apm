@@ -59,7 +59,8 @@ def _launch_names(nodes: tuple[ast.AST, ...]) -> _Names:
     """Return local spellings of launch functions and of the subprocess, os and asyncio modules.
 
     Asyncio modules include ``asyncio.subprocess`` under any import spelling;
-    launch functions include from-imports and local names assigned a launcher.
+    launch functions include from-imports and every name or attribute
+    assigned a launcher, directly or through another alias.
     """
     functions: set[str] = set()
     subprocess_modules = {"subprocess"}
@@ -86,9 +87,24 @@ def _launch_names(nodes: tuple[ast.AST, ...]) -> _Names:
                 elif alias.name == "subprocess":
                     asyncio_modules.add(alias.asname or alias.name)
     names = (functions, subprocess_modules, os_modules, asyncio_modules)
-    for node in nodes:
-        if isinstance(node, ast.Assign) and _is_launcher_ref(node.value, names):
-            functions.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    # Aliases may be annotated, target an attribute (``self.run = ...``) or
+    # chain through other aliases in any order, so resolve to a fixpoint.
+    assignments = [
+        (node.targets if isinstance(node, ast.Assign) else [node.target], node.value)
+        for node in nodes
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for targets, value in assignments:
+            if not _is_launcher_ref(value, names):
+                continue
+            for target in targets:
+                spelled = _dotted(target)
+                if spelled is not None and spelled not in functions:
+                    functions.add(spelled)
+                    changed = True
     return names
 
 
@@ -99,6 +115,8 @@ def _is_launcher_ref(expr: ast.AST, names: _Names) -> bool:
         return expr.id in functions
     if not isinstance(expr, ast.Attribute):
         return False
+    if _dotted(expr) in functions:
+        return True
     owner, attr = _dotted(expr.value), expr.attr
     return (
         (owner in subprocess_modules and attr in _LAUNCHERS)
