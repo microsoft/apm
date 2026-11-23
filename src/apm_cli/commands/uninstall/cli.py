@@ -1193,6 +1193,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         if not dry_run:
             _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
+        # A still-needed local dependency refuses before scripts run (#4882);
+        # the split repeats after them, since scripts may edit apm.yml.
+        _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.

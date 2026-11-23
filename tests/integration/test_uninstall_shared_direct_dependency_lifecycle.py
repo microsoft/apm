@@ -13,6 +13,7 @@ A dependency no other package reaches is still removed in full.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -393,3 +394,36 @@ def test_uninstall_refuses_a_local_dependency_another_package_still_needs(
     assert "Uninstall the package that still needs it first" in output
     assert tree_digest(world.project) == before
     world.apm("install", "--frozen")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX sh lifecycle script")
+def test_still_needed_local_refusal_runs_before_pre_uninstall_scripts(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4882: the refusal fires before a trusted pre-uninstall script can write."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "d", "d", ("../e",))
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+            "lifecycle": {"pre-uninstall": [{"type": "command", "run": "sh ./hook.sh"}]},
+        },
+        world.project / "apm.yml",
+    )
+    write(world.project / "hook.sh", "echo ran > hook-ran.txt\n")
+    world.apm("install")
+    world.apm("lifecycle", "trust")
+    before = tree_digest(world.project)
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "./vendor/e stays: ./vendor/d still needs it" in output
+    assert not (world.project / "hook-ran.txt").exists()
+    assert tree_digest(world.project) == before
