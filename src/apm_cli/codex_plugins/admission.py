@@ -116,13 +116,14 @@ def _meet_trust_transitive(
     unlisted = unlisted_transitive_servers(manifest.mcp_server_names, policy)
     if not unlisted:
         return
+    names = ", ".join(f"'{name}'" for name in unlisted)
     message = (
-        f"Codex native plugin {dependency_key}: transitive MCP server '{unlisted[0]}' "
-        "is not in org mcp.allow (mcp.trust_transitive: false)"
+        f"Codex native plugin {dependency_key}: transitive MCP server(s) {names} "
+        "not in org mcp.allow (mcp.trust_transitive: false)"
     )
     if policy.enforcement == "block":
         raise CodexNativeError(
-            f"{message}. Ask your org policy owner to allow the server, or remove this dependency."
+            f"{message}. Ask your org policy owner to allow them, or remove this dependency."
         )
     diagnostics = getattr(ctx, "diagnostics", None)
     if diagnostics is not None:

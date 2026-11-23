@@ -292,3 +292,32 @@ def test_parked_bundle_already_reported_gets_no_second_notice(tmp_path):
     # Replay still refuses the same bundle outright, reported or not.
     with pytest.raises(CodexNativeError, match=r"executables\.allow"):
         _admit(tmp_path, approvals={}, read_only=True, parked_reported=True)
+
+
+@pytest.mark.parametrize("enforcement", ["warn", "block"])
+def test_every_unlisted_transitive_codex_server_is_named(tmp_path, enforcement):
+    """Each server org mcp.allow does not list is named, not only the first (req-sc-016)."""
+    from apm_cli.policy.schema import ApmPolicy, McpPolicy
+
+    package = SimpleNamespace(
+        codex_plugin=CodexCompatibilityPlugin("example", "1", True, False, ("alpha", "beta"))
+    )
+    info = SimpleNamespace(package=package, install_path=tmp_path)
+    policy = ApmPolicy(enforcement=enforcement, mcp=McpPolicy(deny=("x",), trust_transitive=False))
+    warnings: list[str] = []
+    ctx = SimpleNamespace(diagnostics=SimpleNamespace(warn=lambda m, **_: warnings.append(m)))
+    options = {
+        "scope": InstallScope.USER,
+        "skill_subset": None,
+        "approvals": {"mcp": True},
+        "ctx": ctx,
+        "policy": policy,
+        "transitive": True,
+    }
+    targets = [SimpleNamespace(name="codex")]
+    if enforcement == "block":
+        with pytest.raises(CodexNativeError, match=r"'alpha', 'beta'"):
+            plan_native_codex_plugin(info, "owner/example", targets, **options)
+        return
+    plan_native_codex_plugin(info, "owner/example", targets, **options)
+    assert len(warnings) == 1 and "'alpha', 'beta'" in warnings[0], warnings
