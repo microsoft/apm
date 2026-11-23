@@ -29,6 +29,7 @@ import re
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -171,11 +172,17 @@ def _plan_files(
     lock: Any,
     records: dict[str, dict],
     deploy: Any,
-    receipts: dict[str, str],
+    receipted: Callable[[Path], str | None],
     *,
     targets: Any,
 ) -> list[tuple[Path, bytes, str, str]]:
-    """Missing deployed files with their exact recorded bytes; present ones must be untouched."""
+    """Missing deployed files with their exact recorded bytes; present ones must be untouched.
+
+    A present file is APM's only when *receipted* (the ledger's trusted,
+    owner- and claim-bound hash, ``DeploymentMaterializationSession.receipted_hash``)
+    vouches for its locked digest; a raw receipt of the same bytes under
+    another owner or claim (after a branch switch) does not.
+    """
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import canonical_digest
 
@@ -192,7 +199,7 @@ def _plan_files(
                     # The full run keeps bytes that differ from the lock as a
                     # local edit (it reports them), so only the full run decides.
                     raise Decline("edited deployed file")
-                if receipts.get(path.resolve().as_posix()) != digest:
+                if receipted(path) != digest:
                     raise Decline("deployed file without a receipt")
             else:
                 hexd, raw = records[owner]["files"][rel]
@@ -595,7 +602,14 @@ def try_apply(
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
         records = _package_records(lock, targets, deploy)
-        files = _plan_files(project_root, lock, records, deploy, receipts, targets=targets)
+        files = _plan_files(
+            project_root,
+            lock,
+            records,
+            deploy,
+            lambda path: session.receipted_hash(path, targets),
+            targets=targets,
+        )
         outcomes = _outcomes(lock, files, records)
         _refuse_lifecycle_scripts(project_root)
         _refuse_unsilent_executables(lock)
@@ -606,6 +620,7 @@ def try_apply(
         stage_root = Path(tempfile.mkdtemp(prefix="apm-fast-"))
         try:
             staged = _stage_all(project_root, lock, packages, stage_root)
+            _refuse_unproven_edges(project_root, lock, staged)
             _verify_staged(project_root, lock, stage_root, targets, fetch, bool(packages))
             if decide_only:
                 # Test seam (APM_INSTALL_FAST_PATH=decide): report the decision, write nothing.
@@ -678,6 +693,63 @@ def _body_printer(body: tuple[str, ...]) -> Any:
             logger.tree_item(line)
 
     return emit
+
+
+def _refuse_unproven_edges(project_root: Path, lock: Any, staged: list[tuple[Path, Path]]) -> None:
+    """Every declared dependency edge must be satisfied by the lock, as the frozen resolver proves.
+
+    Walks the root manifest (prod and dev) and each locked package's manifest
+    (its verified copy: present, or staged this run) and admits each edge
+    through the resolver's owner, ``ImmutableRequirements`` in frozen mode,
+    without a remote resolver: a ref the lock cannot prove declines.
+    """
+    from apm_cli.core.scope import manifest_file
+    from apm_cli.deps.dependency_graph import DependencyNode
+    from apm_cli.deps.immutable_requirements import (
+        ImmutableRequirementError,
+        ImmutableRequirements,
+    )
+    from apm_cli.models.apm_package import APMPackage
+
+    root = APMPackage.from_apm_yml(manifest_file(project_root))
+    if root.replace_rules:
+        raise Decline("replacement rules")
+    requirements = ImmutableRequirements(root.name, None, lock, frozen=True)
+    copies = {install_path: copy for copy, install_path in staged}
+    queue = [
+        (dep, None) for dep in (*root.get_apm_dependencies(), *root.get_dev_apm_dependencies())
+    ]
+    visited: set[str] = set()
+    while queue:
+        dep, parent = queue.pop(0)
+        if dep.is_parent_repo_inheritance or dep.is_marketplace or dep.is_local:
+            raise Decline("unproven dependency edge")
+        node = DependencyNode(
+            package=APMPackage(name=dep.get_display_name(), version="unknown"),
+            dependency_ref=dep,
+            depth=1 if parent is None else parent.depth + 1,
+            parent=parent,
+        )
+        try:
+            requirements.add(node)
+        except ImmutableRequirementError:
+            raise Decline("immutable requirement not proven by the lock") from None
+        key = dep.get_resolution_key()
+        if key in visited:
+            continue
+        visited.add(key)
+        locked = lock.get_dependency(dep.get_unique_key())
+        if locked is None:
+            raise Decline("unlocked dependency edge")
+        install_path = _install_path(project_root, locked)
+        package_dir = copies.get(install_path, install_path)
+        if not manifest_file(package_dir).is_file():
+            continue
+        try:
+            package = APMPackage.from_apm_yml(manifest_file(package_dir), source_path=package_dir)
+        except (OSError, ValueError):
+            raise Decline("unreadable package manifest") from None
+        queue.extend((child, node) for child in package.get_apm_dependencies())
 
 
 def _install_path(project_root: Path, dep: Any) -> Path:
