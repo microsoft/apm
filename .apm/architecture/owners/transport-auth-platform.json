@@ -35,7 +35,11 @@
       "decision": "Removing a tree never changes a mode through a link: a link root or failing link is removed itself",
       "owner": "utils/file_ops.py (robust_rmtree, _on_readonly_retry)",
       "selectors": ["src/apm_cli/utils/file_ops.py"],
-      "guards": ["transport-platform-rmtree-callback-no-follow-chmod"]
+      "guards": [
+        "transport-platform-rmtree-callback-fallback-attempt",
+        "transport-platform-rmtree-callback-fallback-follow",
+        "transport-platform-rmtree-callback-no-follow-chmod"
+      ]
     },
     {
       "id": "cache-cleanup-outcome",

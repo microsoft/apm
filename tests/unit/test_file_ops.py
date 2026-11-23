@@ -589,6 +589,21 @@ class TestRmtreeNeverFollowsALink:
             target.chmod(stat.S_IRWXU)
 
     @_SYMLINKS
+    def test_a_link_root_named_with_a_trailing_separator_is_removed_itself(self, tmp_path):
+        target = tmp_path / "target"
+        mode = _read_only_dir(target)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        try:
+            robust_rmtree(str(link) + os.sep)
+
+            assert not link.is_symlink() and not link.exists()
+            assert stat.S_IMODE(target.stat().st_mode) == mode
+            assert (target / "keep.txt").read_text(encoding="utf-8") == "kept"
+        finally:
+            target.chmod(stat.S_IRWXU)
+
+    @_SYMLINKS
     def test_a_link_whose_removal_failed_is_removed_not_made_writable(self, tmp_path):
         target = tmp_path / "target.txt"
         target.write_text("kept", encoding="utf-8")

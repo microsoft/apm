@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 
 from scripts.architecture_linter.checks.transport_platform_shared import (
     GROUP,
@@ -14,6 +15,9 @@ from scripts.architecture_linter.groups.common import source_text, violation
 from scripts.architecture_linter.models import Rule, Violation
 
 _RULE_ID = "transport-platform-rmtree-callback-no-follow-chmod"
+# The NotImplementedError fallback: it must follow a no-follow attempt and never follow.
+_ATTEMPT_GUARD_ID = "transport-platform-rmtree-callback-fallback-attempt"
+_FOLLOW_GUARD_ID = "transport-platform-rmtree-callback-fallback-follow"
 _OWNER = "src/apm_cli/utils/file_ops.py"
 _CALLBACK_KEYWORDS = frozenset({"onerror", "onexc"})
 
@@ -71,40 +75,56 @@ def _is_os_chmod(node: ast.AST) -> bool:
     )
 
 
-def _no_follow(call: ast.Call) -> bool:
+def _follow_symlinks(call: ast.Call) -> object:
+    """The ``follow_symlinks`` keyword's literal value, or ``...`` when it is absent."""
+    for keyword in call.keywords:
+        if keyword.arg == "follow_symlinks":
+            return keyword.value.value if isinstance(keyword.value, ast.Constant) else None
+    return ...
+
+
+def _no_follow_attempt(body: list[ast.stmt]) -> bool:
     return any(
-        keyword.arg == "follow_symlinks"
-        and isinstance(keyword.value, ast.Constant)
-        and keyword.value.value is False
-        for keyword in call.keywords
+        _is_os_chmod(node) and _follow_symlinks(node) is False
+        for statement in body
+        for node in ast.walk(statement)
     )
 
 
 def _unsafe_chmod_lines(function: ast.AST) -> list[int]:
     """``os.chmod`` calls that may follow a link.
 
-    A plain call is allowed only in the ``except NotImplementedError`` handler
-    of a no-follow attempt (a platform without no-follow ``chmod``).
+    Only ``follow_symlinks=False`` is safe, except one plain call (no
+    ``follow_symlinks``) in the ``except NotImplementedError`` handler of a
+    ``try`` whose body attempts that no-follow ``chmod``: the fallback for a
+    platform without it.
     """
     lines: list[int] = []
 
     def visit(node: ast.AST, in_fallback: bool) -> None:
-        if _is_os_chmod(node) and not in_fallback and not _no_follow(node):
-            lines.append(node.lineno)
+        if _is_os_chmod(node):
+            follow = _follow_symlinks(node)
+            if follow is not False and not (in_fallback and follow is ...):
+                lines.append(node.lineno)
+        fallbacks: set[int] = set()
+        if isinstance(node, ast.Try) and _no_follow_attempt(node.body):
+            fallbacks = {
+                id(handler)
+                for handler in node.handlers
+                if isinstance(handler.type, ast.Name) and handler.type.id == "NotImplementedError"
+            }
         for child in ast.iter_child_nodes(node):
-            fallback = in_fallback or (
-                isinstance(child, ast.ExceptHandler)
-                and isinstance(child.type, ast.Name)
-                and child.type.id == "NotImplementedError"
-            )
-            visit(child, fallback)
+            visit(child, in_fallback or id(child) in fallbacks)
 
     visit(function, False)
     return lines
 
 
+_CALLBACK_KEYWORD = re.compile(r"\bon(?:error|exc)\s*=")
+
+
 def _passes_callback(text: str | None) -> bool:
-    return bool(text) and "rmtree(" in text and ("onerror=" in text or "onexc=" in text)
+    return bool(text) and "rmtree" in text and bool(_CALLBACK_KEYWORD.search(text))
 
 
 def _check_rmtree_callbacks(provider: FactsProvider) -> tuple[Violation, ...]:
@@ -153,7 +173,7 @@ RULES = (
     Rule(
         id=_RULE_ID,
         group=GROUP,
-        guard_ids=(_RULE_ID,),
+        guard_ids=(_RULE_ID, _ATTEMPT_GUARD_ID, _FOLLOW_GUARD_ID),
         description="An rmtree error callback never changes a mode through a link.",
         check=_check_rmtree_callbacks,
     ),

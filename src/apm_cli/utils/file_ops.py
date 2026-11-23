@@ -226,6 +226,18 @@ def _is_link(path: str) -> bool:
     return os.path.islink(path) or bool(isjunction and isjunction(path))
 
 
+def _without_trailing_separators(path: str) -> str:
+    """*path* without trailing separators, so ``"link/"`` names the link itself.
+
+    A filesystem root (``/``, ``C:\\``) is kept as given.
+    """
+    separators = os.sep + (os.altsep or "")
+    stripped = path.rstrip(separators)
+    if not stripped or not os.path.splitdrive(stripped)[1]:
+        return path
+    return stripped
+
+
 def _remove_link(path: str) -> None:
     """Remove the link at *path* itself; its target is never touched."""
     try:
@@ -287,7 +299,7 @@ def robust_rmtree(
     max_retries:
         Maximum retry attempts for transient lock errors.
     """
-    path_s = str(path)
+    path_s = _without_trailing_separators(str(path))
 
     def _do_rmtree() -> None:
         if _is_link(path_s):
