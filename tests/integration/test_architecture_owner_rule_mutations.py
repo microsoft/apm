@@ -1314,8 +1314,8 @@ def test_trust_owner_reads_the_scope_manifest_closed_world(path: str, old: str, 
         (
             "install-deployment-local-bundle-hook-trust",
             "src/apm_cli/install/local_bundle_hook_trust.py",
-            '    _retire_per_file(project_root, targets, UnadmittedBundleHooks(slug, reason or "", configs))\n',
-            "",
+            "    kept, unwritten = _retire_per_file(project_root, targets, item)\n",
+            "    kept, unwritten = set(), set()\n",
         ),
         (
             "install-deployment-local-bundle-hook-trust",
@@ -4611,6 +4611,22 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
         new='        import functools\n\n        return functools.partial(subprocess.run, executable="git")(\n            [get_git_executable(), *inert_git_args(), *args],',
         intent="The lock evidence probe launches through functools.partial with a literal executable.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        from asyncio import create_subprocess_exec as spawn\n\n        spawn("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through a from-imported asyncio alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        import asyncio as aio\n\n        aio.create_subprocess_exec("git")\n        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],',
+        intent="The lock evidence probe launches git through an aliased asyncio module.",
     ),
     MutationCase(
         guard_id="install-deployment-gate-retirement",

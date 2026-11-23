@@ -101,7 +101,12 @@ in `.claude/settings.json` and `.github/copilot/settings.json`
 Commit `.agents/plugins/`, those settings files and `apm.lock.yaml` so a fresh
 clone loads the plugins without APM. APM never runs the `claude` or `copilot`
 CLI. A plugin is enabled only when its executables are approved; otherwise it
-is parked with a warning naming the next step, without loose-file fallback. See
+is parked with a warning naming the next step, without loose-file fallback. If
+an earlier install deployed that dependency's files loose for the same harness
+(for example `~/.claude/skills/<skill>/`), a parked replacement keeps them as they
+were, names them in a `Kept` warning, and the install exits 0. They are not
+updated until the plugin is admitted, and `apm audit --ci` still checks their
+recorded hashes. See
 [Native plugins](../../../consumer/install-plugins/#native-plugins).
 
 ### Policy and trust
@@ -491,8 +496,9 @@ judges the bundle only by the packages its `apm.lock.yaml` records, never by its
 name; under an allow list, a bundle that records no packages is a violation.
 With `enforcement: block` a violating bundle is refused before any file is
 written; `warn` reports it and installs. A bundle whose
-`apm.lock.yaml` cannot be read is refused; repack it with `apm pack`. `apm uninstall` does not
-remove local-bundle content. A
+`apm.lock.yaml` cannot be read is refused; repack it with `apm pack`.
+`apm uninstall <bundle>` (or the bundle name) removes the bundle's deployed
+hooks, their scripts and lockfile claims; its other files stay. A
 portable Agent Plugins v1 package installs declaratively instead:
 declare it in `apm.yml` and run `apm install --target copilot`, which deploys
 it whole to `.agents/plugins/` without locating or executing Copilot. Stable

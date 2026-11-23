@@ -38,11 +38,14 @@ def _is_literal(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-def _launch_names(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], set[str]]:
-    """Return local spellings of subprocess launchers, the subprocess module and os."""
+def _launch_names(
+    nodes: tuple[ast.AST, ...],
+) -> tuple[set[str], set[str], set[str], set[str]]:
+    """Return local spellings of launch functions and of the subprocess, os and asyncio modules."""
     functions: set[str] = set()
     subprocess_modules = {"subprocess"}
     os_modules = {"os"}
+    asyncio_modules = {"asyncio"}
     for node in nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -50,11 +53,19 @@ def _launch_names(nodes: tuple[ast.AST, ...]) -> tuple[set[str], set[str], set[s
                     subprocess_modules.add(alias.asname or alias.name)
                 elif alias.name == "os":
                     os_modules.add(alias.asname or alias.name)
+                elif alias.name == "asyncio":
+                    asyncio_modules.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
             functions.update(
                 alias.asname or alias.name for alias in node.names if alias.name in _LAUNCHERS
             )
-    return functions, subprocess_modules, os_modules
+        elif isinstance(node, ast.ImportFrom) and node.module == "asyncio":
+            functions.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "create_subprocess_exec"
+            )
+    return functions, subprocess_modules, os_modules, asyncio_modules
 
 
 def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
@@ -85,9 +96,11 @@ def _which_lines(nodes: tuple[ast.AST, ...]) -> list[int]:
     return lines
 
 
-def _program_arg(node: ast.Call, names: tuple[set[str], set[str], set[str]]) -> ast.AST | None:
+def _program_arg(
+    node: ast.Call, names: tuple[set[str], set[str], set[str], set[str]]
+) -> ast.AST | None:
     """Return the argument naming the program if *node* launches one, else ``None``."""
-    functions, subprocess_modules, os_modules = names
+    functions, subprocess_modules, os_modules, asyncio_modules = names
     func = node.func
     first = node.args[0] if node.args else None
     if first is None:
@@ -99,7 +112,7 @@ def _program_arg(node: ast.Call, names: tuple[set[str], set[str], set[str]]) -> 
     owner, attr = func.value.id, func.attr
     if owner in subprocess_modules and attr in _LAUNCHERS:
         return first
-    if owner == "asyncio" and attr == "create_subprocess_exec":
+    if owner in asyncio_modules and attr == "create_subprocess_exec":
         return first
     if owner in os_modules and attr.startswith(("exec", "posix_spawn")):
         return first

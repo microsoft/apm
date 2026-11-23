@@ -4238,6 +4238,18 @@
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
   },
+  "T1|OP=install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|install-frozen|bin|denied-dependency|project",
+    "G1|install|bin|denied-dependency|project"
+   ],
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
+  },
   "T1|OP=install|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
    "issue": "#4099",
@@ -4539,6 +4551,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T1|OP=lock|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|lock|bin|denied-dependency|project"
+   ],
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=lock|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -4913,6 +4936,21 @@
    "status": "required",
    "strength": "e2e-evidence",
    "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_bin_spine_credits_user_scope_bin_cells"
+  },
+  "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|mcp-install|bin|denied-dependency|project"
+   ],
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "must_cover": true,
+   "rules": [
+    "U7"
+   ],
+   "status": "required",
+   "strength": "e2e-evidence",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=mcp-install|PRIM=bin|GATE=denied-executable": {
    "credited_by": [
@@ -6260,6 +6298,17 @@
    "status": "required",
    "strength": "e2e",
    "witness": "tests/lifecycle/replay/test_covering_replay.py::test_covering_row[cover-01-skill-exec-lsp-canvas-git-single-approve-mcp]"
+  },
+  "T1|OP=update|PRIM=bin|GATE=denied-dependency": {
+   "credited_by": [
+    "G1|update|bin|denied-dependency|project"
+   ],
+   "family": "T1",
+   "issue": "#4095",
+   "lane": "T-1",
+   "status": "required",
+   "strength": "e2e",
+   "witness": "tests/lifecycle/machines/test_m_gate.py::test_gate_matrix_credits_op_prim_gate_cells[project]"
   },
   "T1|OP=update|PRIM=bin|GATE=denied-executable": {
    "family": "T1",
@@ -27128,12 +27177,6 @@
   "T1|OP=bundle-install|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
   ],
-  "T1|OP=install|PRIM=bin|GATE=denied-dependency": [
-   "U-USER-SCOPE-ORG-POLICY"
-  ],
-  "T1|OP=lock|PRIM=bin|GATE=denied-dependency": [
-   "U-USER-SCOPE-ORG-POLICY"
-  ],
   "T1|OP=marketplace|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
   ],
@@ -27149,9 +27192,6 @@
   "T1|OP=marketplace|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
   ],
-  "T1|OP=mcp-install|PRIM=bin|GATE=denied-dependency": [
-   "U-USER-SCOPE-ORG-POLICY"
-  ],
   "T1|OP=pack|PRIM=bin|GATE=allowed": [
    "U-BIN-OPS"
   ],
@@ -27166,9 +27206,6 @@
   ],
   "T1|OP=pack|PRIM=bin|GATE=unapproved-exec": [
    "U-BIN-OPS"
-  ],
-  "T1|OP=update|PRIM=bin|GATE=denied-dependency": [
-   "U-USER-SCOPE-ORG-POLICY"
   ],
   "T2|SCOPE=user|GATE=denied-dependency|FROZEN=on": [
    "U-USER-SCOPE-ORG-POLICY"
@@ -28367,7 +28404,7 @@
   "generated_cover-14-refusals.yaml": "2668f5641e39462b11e3f3366c0d1681113945255df1cad9a6e65d4bc2cccba0",
   "generated_cover-15-refusals.yaml": "bb74265dd38bb0ef66bfcf59bcc51f2a30addd6ca53890071624e80b8e439a6f",
   "generated_cover-16-source-refusals.yaml": "fabd22682df6432c232782f937512c1644f8f89e15734ea4cab3c3da24fdcfc2",
-  "generated_cover-17-local-bundle-refusals.yaml": "db88b18bb7af9c0adb424dc06ee2e1d159ae8dd520124411ac49b93b3ae31eae"
+  "generated_cover-17-local-bundle-refusals.yaml": "7934f647d22a5d8a4f72b7bc63fafc9fb215ffa59e176c6160398a8acc626d49"
  },
  "rules": {
   "E1": {
@@ -28437,7 +28474,7 @@
     "docs/src/content/docs/enterprise/security.md::Threat model",
     "docs/src/content/docs/reference/cli/policy.md::`apm policy status`"
    ],
-   "text": "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not a defect): user scope has no git remote, so policy_discovery_uses_git_remote is False at $APM_HOME and install, lock, update and install --mcp at -g discover no org policy; the local executables gate still parks bin/ there, and project scope refuses the denied plugin with exit 1. A user-scope cell whose GATE is denied-dependency under one of those commands is removed until #3703 lands; PRIM=bin with no SCOPE counts as user scope (U-BIN). Self-reinstating: generator/bin_pin.py hashes the predicate, and when the hash differs from U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails"
+   "text": "org policy does not govern user-scope (-g) installs (#3703, a 0.39 design gap, not a defect): user scope has no git remote, so policy_discovery_uses_git_remote is False at $APM_HOME and install, lock, update and install --mcp at -g discover no org policy; the local executables gate still parks bin/ there, and project scope refuses the denied plugin with exit 1. A user-scope cell whose GATE is denied-dependency under one of those commands is removed until #3703 lands; a scope-free PRIM=bin cell is not (a whole native plugin carries bin/ at project scope, where the org deny refuses it). Self-reinstating: generator/bin_pin.py hashes the predicate, and when the hash differs from U_USER_ORG_POLICY_PIN the cells return as must-cover and --check fails"
   },
   "U1": {
    "evidence": [],
@@ -28501,11 +28538,12 @@
     "src/apm_cli/marketplace/registration.py::MarketplaceManifestNotFoundError.__init__",
     "src/apm_cli/commands/uninstall/engine.py::_mcp_server_hint",
     "src/apm_cli/commands/uninstall/engine.py::_validate_uninstall_packages",
+    "src/apm_cli/commands/uninstall/local_bundle.py::uninstall_local_bundles",
     "src/apm_cli/commands/update.py::_handle_service_only_update",
     "src/apm_cli/core/command_logger.py::CommandLogger.nothing_to_prune",
     "src/apm_cli/integration/canvas_integrator.py"
    ],
-   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall refuses it; update and prune leave it untouched). A native plugin carries no canvas primitive"
+   "text": "the source decides the command: bundle-install is install of a local bundle (install x local-bundle maps to it; no other source can state it); install --mcp takes an MCP registry name or an inline server (--url, or a command after --), never a package source, and an MCP source delivers only MCP; a package registry delivers whole packages. Parsed-then-refused shapes are refusal cells, one per message class: marketplace add of a source without a catalog, uninstall of an MCP server (a registry name is not found in apm.yml; an inline name is an MCP server), and a local bundle, which writes no manifest entry (uninstall removes only its deployed hooks and refuses a bundle with none; update and prune leave it untouched). A native plugin carries no canvas primitive"
   },
   "U9": {
    "evidence": [

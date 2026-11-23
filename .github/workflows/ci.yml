@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      issues: read
       pull-requests: read
 
     steps:
@@ -403,7 +404,9 @@ jobs:
   test-architecture-scaling:
     name: Architecture Scaling (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The job takes about 250 s at p50 and 296 s at p90 (2026-11-23), so a
+    # 5-minute cap cancelled it on slow runners; 10 minutes is headroom only.
+    timeout-minutes: 10
     permissions:
       contents: read
 

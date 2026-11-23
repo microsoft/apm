@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.scope import is_user_scope
+from apm_cli.utils.path_security import (
+    PathTraversalError,
+    ensure_path_within,
+    has_symlink_component,
+    validate_path_segments,
+)
 
 from .exec_gate import check_executable_approval, plugin_bin_deployable, resolve_bin_skip
 from .plan_admission import _is_transitive
@@ -22,6 +29,13 @@ if TYPE_CHECKING:
     from apm_cli.install.target_filter import EffectivePackageTargets
     from apm_cli.integration.targets import TargetProfile
     from apm_cli.utils.diagnostics import DiagnosticCollector
+
+
+# Primitive kinds whose loose files run nothing; a parked plan may keep them.
+_INERT_PRIMITIVES = ("skills", "instructions", "agents", "commands", "prompts")
+# Plugin binaries and their activation descriptor deploy inside a skill dir;
+# they are executable members, never kept as inert files.
+_EXECUTABLE_SEGMENTS = frozenset({"bin", ".claude-plugin"})
 
 
 @dataclass(frozen=True)
@@ -44,6 +58,90 @@ class PackageDeploymentPlan:
         targets = list(self.target_selection.targets)
         native_target_names = self.claude_native.harnesses if self.claude_native else set()
         return [target for target in targets if target.name not in native_target_names]
+
+    def kept_loose_values(
+        self, prior_values: Iterable[str], *, user_scope: bool
+    ) -> tuple[str, ...]:
+        """Prior loose values a parked native Claude plan keeps in place (#5036).
+
+        The native route takes its harnesses out of the loose projection. When
+        the native plugin is parked nothing replaces the loose files there, so
+        they stay installed (and keep their lock claims) instead of being
+        cleaned as stale. Nothing new is deployed loose for those harnesses.
+        """
+        native = self.claude_native
+        if self.codex_native is not None or native is None or not native.parked:
+            return ()
+        targets = self.target_selection.targets
+        kept = _inert_prefixes(t for t in targets if t.name in native.harnesses)
+        # A root a loose target still serves (Codex shares .agents/skills with
+        # Copilot) is rewritten by this install, so it is not kept as it was.
+        loose = _inert_prefixes(t for t in targets if t.name not in native.harnesses)
+        prefixes = tuple(
+            p for p in kept if not any(p.startswith(o) or o.startswith(p) for o in loose)
+        )
+        return tuple(
+            value
+            for value in prior_values
+            if prefixes
+            and value.startswith(prefixes)
+            and _EXECUTABLE_SEGMENTS.isdisjoint(value.split("/"))
+        )
+
+
+def _inert_prefixes(targets: Iterable[TargetProfile]) -> tuple[str, ...]:
+    """Root-relative directory prefixes of the inert primitives a target deploys."""
+    prefixes: list[str] = []
+    for target in targets:
+        for kind in _INERT_PRIMITIVES:
+            mapping = target.primitives.get(kind)
+            if mapping is not None:
+                base = (
+                    f"{mapping.deploy_root.rstrip('/')}/" if mapping.deploy_root else target.prefix
+                )
+                prefixes.append(f"{base}{mapping.subdir}/")
+    return tuple(prefixes)
+
+
+def keep_loose_for_parked_native(
+    plan: PackageDeploymentPlan,
+    ctx: InstallContext | None,
+    package_name: str,
+    *,
+    diagnostics: DiagnosticCollector | None,
+    logger: InstallLogger | None,
+) -> tuple[str, ...]:
+    """Keep and name a package's loose files a parked native replacement leaves usable (#5036)."""
+    if plan.claude_native is None or not plan.claude_native.parked:
+        return ()
+    lockfile = getattr(ctx, "existing_lockfile", None)
+    prior = lockfile.get_dependency(package_name) if lockfile is not None else None
+    if ctx is None or prior is None:
+        return ()
+    user_scope = is_user_scope(getattr(ctx, "scope", None))
+    kept = plan.kept_loose_values(prior.deployed_files, user_scope=user_scope)
+    if not kept:
+        return ()
+    ctx.parked_native_kept_values = ctx.parked_native_kept_values | frozenset(kept)
+    from apm_cli.core.remediation import kept_note
+
+    roots = sorted(
+        value
+        for value in kept
+        if not any(value.startswith(f"{other}/") for other in kept if other != value)
+    )
+    shown = ", ".join(f"{'~/' if user_scope else ''}{value}" for value in roots)
+    message = kept_note(
+        shown,
+        f"the native plugin that replaces it was parked, so the previous install of "
+        f"{package_name} stays as it was and is not updated",
+        "Resolve the parked plugin as its warning says; the next install then replaces it.",
+    )
+    if diagnostics is not None:
+        diagnostics.warn(message)
+    elif logger is not None:
+        logger.warning(message)
+    return kept
 
 
 def _native_skill_selection(
@@ -261,3 +359,33 @@ def prepare_package_deployment(  # noqa: PLR0913
     return PackageDeploymentPlan(
         selection, approvals, skip_bin, reason, codex_native, source_plan, native_claude_plugin
     )
+
+
+def carry_kept_loose_into_replay(
+    result: dict, lock_dep: Any, deploy_root: Path, scratch_root: Path, user_scope: bool
+) -> None:
+    """Carry the loose files a parked native replacement keeps into a drift replay (#5036).
+
+    Install keeps them as they were; the replay renders no loose copy for a
+    natively routed harness, so their live bytes stand in for it. Their lock
+    hashes still bind them through content-integrity.
+    """
+    import shutil
+
+    plan = result.get("deployment_plan")
+    if not isinstance(plan, PackageDeploymentPlan):
+        return
+    hashed = getattr(lock_dep, "deployed_file_hashes", None) or {}
+    for value in plan.kept_loose_values(lock_dep.deployed_files, user_scope=user_scope):
+        if value not in hashed:
+            continue  # only bytes the lock binds by hash stand in for the replay
+        try:
+            validate_path_segments(value, context="kept lock claim", reject_empty=True)
+            live = ensure_path_within(deploy_root / value, deploy_root)
+            replayed = ensure_path_within(scratch_root / value, scratch_root)
+        except PathTraversalError:
+            continue  # a claim outside its root is never carried; drift reports it
+        if has_symlink_component(deploy_root, deploy_root / value) or not live.is_file():
+            continue
+        replayed.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(live, replayed)
