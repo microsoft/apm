@@ -852,3 +852,61 @@ def _rename_reanchored_receipts(repair, lockfile_path, deploy_root, scope, logge
             logger,
             f"Deployment receipts could not be moved to the re-anchored package ({exc})",
         )
+
+
+def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
+    """Move re-anchored roots' apm_modules directories before the lock commits (#4999)."""
+    plan = repair.reanchor
+    if not plan or not plan.moves:
+        return ()
+    try:
+        return move_materializations(plan.moves, modules_dir)
+    except (OSError, ValueError) as exc:
+        _roll_back_and_exit(
+            plan,
+            logger,
+            f"The re-anchored package's apm_modules directory could not be moved ({exc})",
+        )
+    except BaseException as exc:
+        _undo_reanchor(exc, (), modules_dir, repair, logger)
+        raise
+
+
+# The lock was not saved: the re-anchor rolls back, as for any non-exit failure.
+_UNSAVED_LOCK = RuntimeError("the lockfile was not saved")
+
+
+def _undo_reanchor(exc: BaseException, moved: tuple, modules_dir, repair, logger) -> None:
+    """Move the re-anchored directories back; anything but a handled exit also restores
+    apm.yml and the lock, so an interrupt (Ctrl-C) never leaves half a re-anchor.
+
+    The manifest rollback runs even when a directory cannot be moved back, and
+    anything left unrestored is named and exits 1, never silently.
+    """
+    unrestored: list[str] = []
+    try:
+        unrestored += _restore_reanchored_dirs(moved, modules_dir)
+    finally:
+        if not isinstance(exc, SystemExit) and repair.reanchor:
+            unrestored += roll_back(repair.reanchor) or []
+    _report_unrestored(unrestored, logger)
+
+
+def _report_unrestored(unrestored: list[str], logger) -> None:
+    """Name what a re-anchor rollback could not restore and exit 1 (#4999)."""
+    if not unrestored:
+        return
+    from ...core.remediation import RESYNC_DEPLOYED
+
+    logger.error(
+        f"The re-anchor did not complete and these could not be restored: "
+        f"{', '.join(unrestored)}. Every deployed file is kept. {RESYNC_DEPLOYED.sentence()}"
+    )
+    sys.exit(1)
+
+
+def _restore_reanchored_dirs(moved: tuple, modules_dir) -> list[str]:
+    """Undo the directory moves of a re-anchor whose transaction did not commit."""
+    if not moved:
+        return []
+    return restore_materializations(moved, modules_dir)

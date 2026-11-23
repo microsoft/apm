@@ -370,9 +370,10 @@ def test_a_failed_directory_restore_still_restores_the_manifest_and_names_the_di
     """Moving a directory back fails: apm.yml and the lock are restored, the dir is named."""
     from unittest.mock import MagicMock
 
-    from apm_cli.commands.uninstall.cli import _StillNeededRepair, _undo_reanchor
+    from apm_cli.commands.uninstall.cli import _StillNeededRepair
     from apm_cli.commands.uninstall.local_reanchor import (
         LocalReanchorPlan,
+        _undo_reanchor,
         snapshot_for_rollback,
     )
 
