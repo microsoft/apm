@@ -353,9 +353,10 @@ def retire_unadmitted_bundle_hooks(
     )
     if not unadmitted:
         return []
+    failed: dict[str, tuple[str, ...]] = {}
     for item in unadmitted:
         if not dry_run:
-            retire_bundle_hooks(
+            retired = retire_bundle_hooks(
                 project_root,
                 targets,
                 item.slug,
@@ -363,11 +364,15 @@ def retire_unadmitted_bundle_hooks(
                 reason=item.reason,
                 logger=logger,
             )
+            if retired.failed_paths:
+                failed[item.slug] = retired.failed_paths
         elif logger is not None:
             logger.warning(
                 f"Would retire hooks from local bundle '{item.slug}' ({item.reason}). "
                 f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
             )
+    if failed:
+        raise BundleHookRetirementIncomplete(failed)
     return unadmitted
 
 
@@ -378,6 +383,18 @@ def retire_merged_bundle_entries(project_root: Path, targets: Any, slug: str) ->
     hook_targets = [target for target in targets if target.supports("hooks")]
     stats = HookIntegrator().retire_local_bundle_hooks(slug, project_root, hook_targets)
     return list(stats["failed_paths"])
+
+
+class BundleHookRetirementIncomplete(RuntimeError):
+    """Hooks trust no longer admits could not all be retired; the rest stays for a retry."""
+
+    def __init__(self, failed: dict[str, Collection[str]]):
+        self.failed = {slug: tuple(paths) for slug, paths in failed.items()}
+        detail = "; ".join(f"{slug}: {', '.join(paths)}" for slug, paths in self.failed.items())
+        super().__init__(
+            f"Could not retire local bundle hooks ({detail}). They were kept; "
+            "fix the file permissions, then re-run the command."
+        )
 
 
 @dataclass(frozen=True)
@@ -457,21 +474,29 @@ def _relative_value(value: str, project_root: Path) -> str:
 
 def _remove_unedited(
     project_root: Path, rows: Collection[str], recorded: dict[str, str], prefixes: Collection[str]
-) -> None:
-    """Remove deployed files under *prefixes* whose bytes still match the lock; edits are kept."""
+) -> set[str]:
+    """Remove deployed files under *prefixes* whose bytes still match the lock; edits are kept.
+
+    Returns the rows whose file could not be removed; their claims must stay.
+    """
     from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import compute_file_hash
 
     removed: list[Path] = []
+    failed: set[str] = set()
     for value in rows:
         path = contained_bundle_path(project_root, value, prefixes)
         if path is None or not path.is_file():
             continue
-        digest = recorded.get(value)
-        if digest is None or digest == compute_file_hash(path):
-            path.unlink()
-            removed.append(path)
+        try:
+            digest = recorded.get(value)
+            if digest is None or digest == compute_file_hash(path):
+                path.unlink()
+                removed.append(path)
+        except OSError:
+            failed.add(value)
     BaseIntegrator.cleanup_empty_parents(removed, project_root)
+    return failed
 
 
 def retire_bundle_hooks(
@@ -491,7 +516,8 @@ def retire_bundle_hooks(
     announces the retirement; ``None`` retires silently (the new bundle ships
     no hooks). The result is truthy when anything was deployed and names the
     merged configs that could not be rewritten; then nothing else is removed,
-    so the bundle's scripts, records and lock rows stay for a retry.
+    so the bundle's scripts, records and lock rows stay for a retry. A script
+    that cannot be deleted is named too and keeps its lock row.
     """
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -516,17 +542,19 @@ def retire_bundle_hooks(
     item = UnadmittedBundleHooks(slug, reason or "", configs)
     kept = _retire_per_file(project_root, targets, item)
     kept = {_relative_value(value, project_root) for value in kept}
+    undeleted: set[str] = set()
     if kept:
         # A retained hook config still points at the scripts: they and every
         # retained claim stay until the config itself can be removed.
         rows -= scripts
     else:
         recorded = dict(lockfile.local_deployed_file_hashes) if lockfile is not None else {}
-        _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
+        undeleted = _remove_unedited(project_root, scripts, recorded, _hooks_prefixes(targets))
+        rows -= undeleted
     rows -= {value for value in rows if _relative_value(value, project_root) in kept}
     if rows and lock_dir is not None:
         _drop_lock_rows(lock_dir, rows)
-    if reason is not None:
+    if reason is not None and not undeleted:
         message = (
             f"Retired hooks from local bundle '{slug}' ({reason}). "
             f"To keep them, {BUNDLE_HOOKS_RETIRED.clause()}."
@@ -535,7 +563,7 @@ def retire_bundle_hooks(
             diagnostics.warn(message=message, package=slug)
         elif logger is not None:
             logger.warning(message)
-    return BundleHookRetirement(True)
+    return BundleHookRetirement(True, tuple(sorted(undeleted)))
 
 
 def local_bundle_paths(lock_dir: Path | None) -> frozenset[str]:

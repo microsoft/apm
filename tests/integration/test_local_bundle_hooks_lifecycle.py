@@ -952,3 +952,52 @@ def test_uninstall_bundle_retains_a_hook_file_it_cannot_delete(
     assert "local-bundle::hookpkg" in (consumer / ".github" / "apm-hooks.json").read_text()
     scripts = [c for c in claims if c.endswith("/x.sh")]
     assert scripts and all((consumer / c).is_file() for c in scripts), claims
+
+
+def test_bundle_hook_retirement_keeps_a_script_it_cannot_delete(
+    tmp_path: Path, apm_binary_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#3700 review: an undeletable script keeps its claim and fails the retirement closed.
+
+    The trust re-check raises instead of reporting success, and a reinstall's
+    retirement records an error instead of claiming the hooks were retired.
+    """
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.local_bundle_hook_trust import (
+        BundleHookRetirementIncomplete,
+        retire_unadmitted_bundle_hooks,
+    )
+    from apm_cli.install.local_bundle_hooks import _retire_bundle_hooks
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "undeletable-script-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, *args, **kwargs) -> None:
+        if self.name == "x.sh":
+            raise PermissionError(13, "Permission denied", str(self))
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    targets = [KNOWN_TARGETS["claude"]]
+
+    with pytest.raises(BundleHookRetirementIncomplete, match=r"hookpkg: .*x\.sh"):
+        retire_unadmitted_bundle_hooks(consumer, targets, dict, lock_dir=consumer)
+    assert _hook_entries(consumer) == {}
+    assert (consumer / script).is_file()
+    assert script in _claims(world, consumer)
+
+    diagnostics = DiagnosticCollector()
+    retired = _retire_bundle_hooks(
+        consumer, targets, "hookpkg", scope=InstallScope.PROJECT, diagnostics=diagnostics
+    )
+    assert retired is False
+    assert diagnostics.error_count == 1
+    assert (consumer / script).is_file()
+    assert script in _claims(world, consumer)
