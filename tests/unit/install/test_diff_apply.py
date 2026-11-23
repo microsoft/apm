@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -254,25 +255,32 @@ def test_a_failure_while_rendering_restores_the_pre_run_tree(
     assert "rendered before the failure" not in capsys.readouterr().out, "fallback prints once"
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or os.geteuid() == 0, reason="needs POSIX directory permissions"
+)
 def test_an_incomplete_restore_stops_instead_of_falling_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from apm_cli.install.deploy_snapshot import DeployJournal
+    """A path the journal cannot put back is reported; it never becomes a fallback."""
     from apm_cli.install.transaction import ApplyRestoreIncomplete
 
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
-    stuck = project / "locked.md"
-    monkeypatch.setattr(DeployJournal, "restore", lambda self: [(stuck, "in use")])
+    target = project / ".github" / "prompts" / "a.prompt.md"
     session = SimpleNamespace(record=lambda *a: None, flush=lambda: None)
 
     def render() -> None:
+        target.parent.chmod(0o555)  # the created file can no longer be removed
         raise OSError("disk full")
 
-    with pytest.raises(ApplyRestoreIncomplete) as caught:
-        diff_apply._commit(project, None, [], [], [], session, False, render)
-    assert caught.value.issues == [(stuck, "in use")]
+    files = [(target, b"x\n", _digest(b"x\n"), "o/p")]
+    try:
+        with pytest.raises(ApplyRestoreIncomplete) as caught:
+            diff_apply._commit(project, None, [], files, [], session, False, render)
+    finally:
+        target.parent.chmod(0o755)
+    assert [p.name for p, _reason in caught.value.issues][:1] == ["a.prompt.md"]
 
 
 def test_apply_never_replaces_an_existing_file(tmp_path: Path) -> None:

@@ -42,12 +42,16 @@ def journaled_apply() -> Iterator[DeployJournal]:
     integrator write seam inside the block is recorded too. If the block
     raises, every recorded path is restored before the exception propagates;
     a restore that leaves any path behind raises :class:`ApplyRestoreIncomplete`.
+    Call it under the lifecycle lock: the journals of killed installs are
+    reclaimed first, as :meth:`InstallTransaction.journal_deploy_writes` does.
     """
     from apm_cli.core.scope import get_apm_home
-    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
     from apm_cli.integration import write_seam
 
-    journal = DeployJournal(get_apm_home() / "install-snapshots")
+    store_parent = get_apm_home() / "install-snapshots"
+    reap_abandoned_journals(store_parent)
+    journal = DeployJournal(store_parent)
 
     def seam(path: Path, contents: bool) -> None:
         journal.record(path, contents=contents)

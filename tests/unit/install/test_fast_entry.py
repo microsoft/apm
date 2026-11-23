@@ -82,9 +82,11 @@ def test_a_plain_fast_run_may_write_the_lockfile(project: Path, capsys) -> None:
 def test_a_failed_restore_stops_and_never_runs_the_full_pipeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, restored: bool
 ) -> None:
-    """The real engine: an incomplete restore exits 1 and names it; only a clean one falls back."""
-    from apm_cli.commands.install import install as real_install
-    from apm_cli.deps.lockfile import LockFile
+    """The real engine and entry: an incomplete restore exits 1 and names each path.
+
+    Only a clean restore falls back; the full pipeline announces itself with
+    its "Installing dependencies" header, which the failed restore never prints.
+    """
     from apm_cli.install.transaction import ApplyRestoreIncomplete
 
     (tmp_path / "apm.yml").write_text("name: demo\nversion: 1.0.0\n", encoding="utf-8")
@@ -94,20 +96,29 @@ def test_a_failed_restore_stops_and_never_runs_the_full_pipeline(
         monkeypatch.delenv(name, raising=False)
     stuck = tmp_path / ".github" / "prompts" / "a.prompt.md"
 
-    def failing_read(path):
-        raise OSError("disk full") if restored else ApplyRestoreIncomplete([(stuck, "in use")])
+    import importlib
 
-    full_runs: list[dict] = []
-    monkeypatch.setattr(LockFile, "read", staticmethod(failing_read))
-    monkeypatch.setattr(real_install, "callback", lambda **kwargs: full_runs.append(kwargs))
+    # The engine's first I/O inside its decision is the lockfile read's staged-write
+    # probe; it fails once, and every later reader gets the real probe.
+    authority = importlib.import_module("apm_cli.deps.lockfile_write_authority")
+    real_probe = authority.has_staged_lockfile
+    calls: list[Path] = []
+
+    def failing_once(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError("disk full") if restored else ApplyRestoreIncomplete([(stuck, "in use")])
+        return real_probe(path)
+
+    monkeypatch.setattr(authority, "has_staged_lockfile", failing_once)
 
     code, output = _run(["install"], capsys)
 
     if restored:
         assert code == 0
-        assert len(full_runs) == 1, "a clean restore falls back to the full pipeline"
+        assert "Installing dependencies from apm.yml" in output
     else:
         assert code == 1
-        assert full_runs == [], "the full pipeline never runs on a partly restored tree"
+        assert "Installing dependencies from apm.yml" not in output
         assert "could not be restored" in output
         assert f"Deploy restore path {stuck}: in use" in output
