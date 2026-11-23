@@ -588,6 +588,32 @@ def _hold_native_registration(native_before, logger: CommandLogger) -> None:
         )
 
 
+def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
+    """Move re-anchored roots' apm_modules directories before the lock commits (#4999)."""
+    plan = repair.reanchor
+    if not plan or not plan.moves:
+        return ()
+    from .local_reanchor import move_materializations, roll_back
+
+    try:
+        return move_materializations(plan.moves, modules_dir)
+    except (OSError, ValueError) as exc:
+        roll_back(plan)
+        logger.error(
+            f"The re-anchored package's apm_modules directory could not be moved ({exc}); "
+            "apm.yml and apm.lock.yaml were restored and every file is kept."
+        )
+        sys.exit(1)
+
+
+def _restore_reanchored_dirs(moved: tuple, modules_dir) -> None:
+    """Undo the directory moves of a re-anchor whose transaction did not commit."""
+    if moved:
+        from .local_reanchor import restore_materializations
+
+        restore_materializations(moved, modules_dir)
+
+
 def _persist_lock_then_resync_native(
     *,
     lock_changed: bool,
@@ -610,13 +636,20 @@ def _persist_lock_then_resync_native(
     save leaves registrations unchanged; an unchanged lock still reconciles.
     """
     saved = None
+    moved = ()
     if lock_changed and persist_allowed:
+        moved = _move_reanchored_dirs(still_needed_repairs, modules_dir, logger)
         saved = _persist_uninstall_lockfile(lockfile, lockfile_path, logger, integration_cleanup)
     if lock_changed and (saved is None or not saved.saved):
+        _restore_reanchored_dirs(moved, modules_dir)
         _hold_native_registration(native_before, logger)
         _abort_unsaved_reanchor(still_needed_repairs, logger)
         return
-    _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
+    try:
+        _rename_reanchored_receipts(still_needed_repairs, lockfile_path, deploy_root, scope, logger)
+    except SystemExit:
+        _restore_reanchored_dirs(moved, modules_dir)
+        raise
     _resync_native_registration_after_uninstall(
         deploy_root=deploy_root,
         modules_dir=modules_dir,

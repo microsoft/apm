@@ -47,6 +47,10 @@ class LocalReanchorPlan:
     resolved_by: dict[str, str | None] = field(default_factory=dict)
     # apm.yml and apm.lock.yaml as the command found them, for rollback.
     snapshot: tuple[tuple[Path, str], ...] = ()
+    # (current, re-anchored) install directory of each re-keyed root (#4999).
+    moves: tuple[tuple[Path, Path], ...] = ()
+    # Lock key -> install's breadth-first visit rank, for request order (#4999).
+    visit_order: dict[str, int] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.renames or self.declaring_parents)
@@ -171,6 +175,7 @@ def plan_local_reanchor(
         )
         for key, node in nodes.items()
     }
+    moves = _materialization_moves(lockfile, nodes, modules_dir, label)
     declaring_parents: dict[str, tuple[str, str | None]] = {}
     resolved_by: dict[str, str | None] = {}
     for key in decision.rescued_parents:
@@ -184,27 +189,107 @@ def plan_local_reanchor(
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
-    return LocalReanchorPlan(renames, identities, declaring_parents, resolved_by)
+    return LocalReanchorPlan(
+        renames,
+        identities,
+        declaring_parents,
+        resolved_by,
+        moves=moves,
+        visit_order=dict(getattr(walk, "visit_order", {}) or {}),
+    )
 
 
-def _rekey_requests(binding: Any, renames: dict[str, str], dev: dict[str, bool]) -> bool:
+def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
+    """Each re-keyed root's current install directory and the one install now uses.
+
+    A re-anchored directory that already exists refuses before any write.
+    """
+    moves = []
+    for key, node in nodes.items():
+        current = lockfile.get_dependency(key).to_dependency_ref().get_install_path(modules_dir)
+        target = node.get_install_path(modules_dir)
+        if current == target or not current.is_dir():
+            continue
+        if target.exists():
+            raise LocalReanchorRefused(
+                f"{label(key)} stays, but its re-anchored directory "
+                f"{target.relative_to(modules_dir).as_posix()} in apm_modules already exists"
+            )
+        moves.append((current, target))
+    return tuple(moves)
+
+
+def move_materializations(
+    moves: tuple[tuple[Path, Path], ...], modules_dir: Path
+) -> tuple[tuple[Path, Path], ...]:
+    """Move each install directory to its re-anchored path inside *modules_dir*.
+
+    Every path is checked before the first move; a failed move undoes the
+    ones already made and re-raises, so nothing outside apm_modules changes.
+    """
+    from ...utils.path_security import PathTraversalError, ensure_path_within
+
+    root = Path(modules_dir)
+    for path in (path for move in moves for path in move):
+        try:
+            ensure_path_within(path, root)
+        except PathTraversalError as exc:
+            raise ValueError(f"{path} is outside apm_modules") from exc
+    done: list[tuple[Path, Path]] = []
+    try:
+        for current, target in moves:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            current.rename(target)
+            done.append((current, target))
+    except OSError:
+        restore_materializations(tuple(done), root)
+        raise
+    return tuple(done)
+
+
+def restore_materializations(moved: tuple[tuple[Path, Path], ...], modules_dir: Path) -> None:
+    """Put each moved directory back and drop the parents the move created."""
+    root = Path(modules_dir)
+    for current, target in reversed(moved):
+        current.parent.mkdir(parents=True, exist_ok=True)
+        target.rename(current)
+        parent = target.parent
+        while parent != root and root in parent.parents and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
+
+
+def _rekey_requests(
+    binding: Any,
+    renames: dict[str, str],
+    dev: dict[str, bool],
+    visit_order: dict[str, int] | None = None,
+) -> bool:
     """Name each replacement request's parent by its re-anchored key (req-rpl-003).
 
     A re-anchored parent's request also takes the parent's new dev status,
-    as install records the edge.
+    as install records the edge. Requests follow the post-uninstall resolver
+    order (*visit_order*, keyed by the old parent keys): a root request first,
+    then each parent as install visits it (#4999).
     """
-    if binding is None or not any(
-        request.parent in renames or request.parent in dev for request in binding.requests
-    ):
+    if binding is None or not binding.requests:
         return False
-    binding.requests = {
+    rank = visit_order or {}
+    ordered = sorted(
+        binding.requests,
+        key=lambda request: -1 if request.parent is None else rank.get(request.parent, len(rank)),
+    )
+    rekeyed = {
         replace(
             request,
             parent=renames.get(request.parent, request.parent),
             dev=dev.get(request.parent, request.dev),
         ): None
-        for request in binding.requests
+        for request in ordered
     }
+    if list(rekeyed) == list(binding.requests):
+        return False
+    binding.requests = rekeyed
     return True
 
 
@@ -260,7 +345,7 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
     for row in lockfile.dependencies.values():
-        _rekey_requests(row.replacement, renames, dev or {})
+        _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
 
 
