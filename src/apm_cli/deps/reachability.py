@@ -261,11 +261,14 @@ def _join_local(anchor: Path, local_path: str) -> Path:
 
 def _dir_identity(path: Path) -> tuple[int, int] | None:
     """Return the ``(device, inode)`` of an existing directory, else None."""
+    import stat as stat_module
+
     try:
         stat = path.stat()
     except (OSError, ValueError):
         return None
-    if not stat.st_ino:
+    # Files keep path identities: two hard-linked primitive files are distinct.
+    if not stat.st_ino or not stat_module.S_ISDIR(stat.st_mode):
         return None
     return stat.st_dev, stat.st_ino
 
@@ -546,7 +549,15 @@ def compute_forward_reachable_keys(
     expander = APMDependencyResolver(read_only=True, apm_modules_dir=apm_modules_dir)
 
     marketplace_index = lockfile.marketplace_index()
-    root_local_dirs = collect_root_local_dirs((*direct_refs, *dev_refs), project_root)
+    try:
+        root_local_dirs = collect_root_local_dirs((*direct_refs, *dev_refs), project_root)
+    except (OSError, RuntimeError) as exc:
+        # A surviving root that cannot be resolved (a symlink loop): nothing is proven.
+        return ReachabilityResult(
+            reachable=frozenset(),
+            complete=False,
+            unverifiable=(*unverifiable, ("root local dependencies", str(exc))),
+        )
 
     while queue or dev_queue:
         ref, anchor, parent_repo_url, is_dev, chain, parent_key = (queue or dev_queue).popleft()
@@ -810,6 +821,13 @@ def retained_lock_keys(
             candidates.discard(key)
             retained.add(key)
             reasons[key] = str(exc)
+    if reasons:
+        # A kept local row whose source cannot be resolved has an unknown
+        # subtree: any other candidate may be its child, so all stay.
+        detail = "; ".join(f"{key}: {reason}" for key, reason in sorted(reasons.items()))
+        reasons.update(dict.fromkeys(candidates, f"a kept local source cannot be read ({detail})"))
+        retained |= candidates
+        candidates = set()
     if candidates:
         walk = compute_forward_reachable_keys(
             lockfile, project_root, apm_modules_dir, declared_refs, frozenset(candidates)

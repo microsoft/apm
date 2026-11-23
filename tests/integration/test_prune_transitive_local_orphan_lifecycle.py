@@ -246,10 +246,10 @@ def test_prune_with_a_partial_graph_keeps_the_orphan_and_reports(
     assert pruned.count("Retained _local/e:") == 1, pruned
 
 
-def test_prune_keeps_only_the_local_row_whose_anchor_cannot_resolve(
+def test_prune_keeps_local_rows_when_an_anchor_cannot_resolve(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A lock row whose declaring parent is already gone is kept and named; the rest is pruned."""
+    """A lock row whose declaring parent is gone has an unknown subtree: local rows stay, named."""
     world = _world(tmp_path, apm_binary_path)
     lock_path = world.project / "apm.lock.yaml"
     lock = LockFile.read(lock_path)
@@ -261,7 +261,7 @@ def test_prune_keeps_only_the_local_row_whose_anchor_cannot_resolve(
     pruned = _output(world.apm("prune"))
 
     assert "Retained _local/e: the dependency graph could not be read completely" in pruned, pruned
-    assert "Retained _local/f:" not in pruned, pruned
+    assert pruned.count("Retained _local/e:") == 1, pruned
     rows = _rows(world)
     assert {"_local/a", "_local/e", "_local/f"} == set(rows), sorted(rows)
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
@@ -379,7 +379,11 @@ def test_prune_reparents_a_survivor_whose_recorded_parent_goes(
 def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:
-    """A source directory that cannot resolve keeps its row and is named, not a crash."""
+    """A source directory that cannot resolve keeps its row and is named, not a crash.
+
+    Its subtree is unknown, so the graph is partial: every other local
+    candidate is kept and named too; nothing is deleted.
+    """
     world = _world(tmp_path, apm_binary_path)
     source = world.project / "vendor" / "e"
     shutil.rmtree(source)
@@ -389,10 +393,10 @@ def test_prune_keeps_a_local_row_whose_source_is_a_symlink_loop(
 
     assert "Retained _local/e:" in pruned, pruned
     assert "Traceback" not in pruned and "Failed to parse" not in pruned, pruned
-    assert "_local/e" in _rows(world)
-    assert "_local/d" not in _rows(world)
+    assert "Retained _local/d: the dependency graph could not be read completely" in pruned, pruned
+    assert {"_local/d", "_local/e"} <= set(_rows(world))
     assert (world.project / _E_SKILL / "SKILL.md").is_file()
-    assert not (world.project / ".claude/skills/d-skill").exists()
+    assert (world.project / ".claude/skills/d-skill/SKILL.md").is_file()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")

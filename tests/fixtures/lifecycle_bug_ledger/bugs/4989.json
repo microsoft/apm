@@ -15,6 +15,6 @@
     "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_an_edited_file_of_the_orphan_and_names_it",
     "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_an_orphan_file_without_deployment_evidence",
     "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_with_a_partial_graph_keeps_the_orphan_and_reports",
-    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_only_the_local_row_whose_anchor_cannot_resolve"
+    "tests/integration/test_prune_transitive_local_orphan_lifecycle.py::test_prune_keeps_local_rows_when_an_anchor_cannot_resolve"
   ]
 }
