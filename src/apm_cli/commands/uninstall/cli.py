@@ -779,10 +779,9 @@ def _absence_proven(deploy_root: Path, relative: str) -> bool:
 def _absence_proven_by_handle(deploy_root: Path, parts: tuple[str, ...]) -> bool:
     """:func:`_absence_proven` through no-follow directory handles."""
     try:
-        # The resolved root is opened without following a symlink swapped in since.
-        root = Path(deploy_root).resolve()
-        handle = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    except (OSError, RuntimeError):
+        # The root as given, never resolved: a root that is (or became) a link proves nothing.
+        handle = os.open(deploy_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
         return False
     try:
         for part in parts[:-1]:

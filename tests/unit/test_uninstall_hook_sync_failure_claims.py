@@ -548,20 +548,20 @@ def test_a_unc_style_claim_is_never_proven_absent(tmp_path: Path, relative: str)
     assert not (tmp_path / "server" / "share" / "h.json").exists()
 
 
-def test_a_root_swapped_for_a_symlink_after_resolving_is_not_proven_absent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_root_replaced_by_a_link_to_an_empty_directory_is_not_proven_absent(
+    tmp_path: Path,
 ) -> None:
+    """The deploy root itself became a link to an empty directory: nothing is proven."""
     from apm_cli.commands.uninstall.cli import _absence_proven
 
     root = tmp_path / "root"
     (root / ".github" / "hooks").mkdir(parents=True)
-    link = tmp_path / "link"
-    link.symlink_to(root, target_is_directory=True)
-    # resolve() returns a path that a symlink replaced after it was resolved.
-    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: link)
+    (root / ".github" / "hooks" / "h.json").write_text("{}", encoding="ascii")
+    moved = tmp_path / "root-moved"
+    root.rename(moved)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    root.symlink_to(empty, target_is_directory=True)
 
-    proven = _absence_proven(root, ".github/hooks/h.json")
-
-    monkeypatch.undo()
-    assert not proven
-    assert link.is_symlink() and not (root / ".github" / "hooks" / "h.json").exists()
+    assert not _absence_proven(root, ".github/hooks/h.json")
+    assert (moved / ".github" / "hooks" / "h.json").is_file()
