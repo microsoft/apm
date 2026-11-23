@@ -155,7 +155,7 @@ class TestRuntimeFiltering(unittest.TestCase):
 
         # Mock missing RuntimeManager to trigger fallback
         with patch("apm_cli.runtime.manager.RuntimeManager", side_effect=ImportError):
-            with patch("shutil.which") as mock_which:
+            with patch("apm_cli.utils.git_env.trusted_executable") as mock_which:
                 mock_which.side_effect = lambda cmd: cmd in ["copilot", "codex"]
 
                 detected = ["copilot", "codex", "unsupported"]
@@ -214,7 +214,7 @@ class TestVSCodeRuntimeDetection(unittest.TestCase):
         from apm_cli.integration.mcp_integrator import _is_vscode_available
 
         which_result = "/usr/local/bin/code" if code_on_path else None
-        with patch(f"{self.MODULE}.shutil.which", return_value=which_result):
+        with patch("apm_cli.utils.git_env.trusted_executable", return_value=which_result):
             with patch(f"{self.MODULE}.Path.cwd") as mock_cwd:
                 mock_vscode = MagicMock()
                 mock_vscode.__truediv__ = lambda self, other: mock_vscode
@@ -229,7 +229,7 @@ class TestVSCodeRuntimeDetection(unittest.TestCase):
         root = Path("/tmp/project-root")
 
         with (
-            patch(f"{self.MODULE}.shutil.which", return_value=None),
+            patch("apm_cli.utils.git_env.trusted_executable", return_value=None),
             patch(f"{self.MODULE}.Path.cwd", return_value=Path("/tmp/other-cwd")),
             patch.object(Path, "is_dir", autospec=True) as mock_is_dir,
         ):

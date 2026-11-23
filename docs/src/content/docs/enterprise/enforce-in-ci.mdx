@@ -88,9 +88,16 @@ apm audit --ci --policy ./apm-policy.yml
 
   dependency-allowlist details:
     - github.com/github/awesome-copilot/skills/review-and-refactor: not in allowed sources
+    Run 'apm uninstall microsoft/apm-sample-package' to remove the dependency outside the org allow list, or ask your org admin to allow it (policy source: file:apm-policy.yml).
 
 [x] 1 of 11 check(s) failed
 ```
+
+The last line names the policy that denied the dependency and the `apm.yml` entry to
+remove (for a transitive dependency, the direct dependency that brings it in). APM
+offers the `apm uninstall` only when it removes every denied dependency without
+dropping a required package; otherwise the line says to ask your org admin. SARIF
+results carry the same sentence.
 
 Under `enforcement: warn` the same row reads `[!] ... (enforcement: warn)` and the job
 passes. Until you switch to block, a green check does not mean the policy holds.
@@ -168,7 +175,8 @@ access to every `apm-policy` project in the group path.
 |---|---|
 | `lockfile-exists`, `ref-consistency`, `--frozen` refused | Run `apm install`, commit `apm.yml` and `apm.lock.yaml` |
 | `content-integrity`, `drift` | A deployed file was edited: run `apm export-patch` to keep the edit upstream, then delete the file and run `apm install` to restore the locked file (a plain `apm install` keeps an edited file and names it, exiting 1 when the edit blocks new content or install cannot prove it wrote the current bytes). `content-integrity` also fails on critical hidden Unicode; review the file before you strip or replace it |
-| `dependency-allowlist`, `dependency-denylist` | Use an allowed package, or open a pull request against the policy repository |
+| `dependency-allowlist` | If the check prints an `apm uninstall` command, run it. Otherwise use an allowed package, or open a pull request against the policy repository |
+| `dependency-denylist` | Use an allowed package, or open a pull request against the policy repository |
 | `apm policy status --check` | Discovery failed; see [Debug a policy failure](../apm-policy/#debug-a-policy-failure) |
 
 There is no per-pull-request override. An exception is a change to `apm-policy.yml`,

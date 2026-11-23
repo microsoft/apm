@@ -208,10 +208,11 @@ def detect_shadowing_helper(host: str) -> bool:
     """
     if sys.platform != "darwin":
         return False
-    import shutil
     import subprocess
 
-    helper = shutil.which("git-credential-osxkeychain") or next(
+    from apm_cli.utils.git_env import trusted_executable
+
+    helper = trusted_executable("git-credential-osxkeychain") or next(
         (
             path
             for path in (
