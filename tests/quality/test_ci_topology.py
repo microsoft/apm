@@ -107,10 +107,15 @@ LIFECYCLE_SMOKE_SHARDS = tuple(range(1, len(LIFECYCLE_SMOKE_SHARD_JOBS) + 1))
 LIFECYCLE_SMOKE_GATE_COVERAGE_JOB = "gate-cell-coverage"
 LIFECYCLE_SMOKE_AGGREGATE_NEEDS = (*LIFECYCLE_SMOKE_SHARD_JOBS, LIFECYCLE_SMOKE_GATE_COVERAGE_JOB)
 LIFECYCLE_SMOKE_AGGREGATE_STEP = "Require every lifecycle shard"
-LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/linux-x86_64.json"
+LIFECYCLE_SMOKE_DURATIONS = ".github/ci-durations/lifecycle-smoke.json"
 LIFECYCLE_SMOKE_CHECK = "Lifecycle Smoke (Linux)"
 LIFECYCLE_SMOKE_RUN_STEP = "Run required lifecycle smoke subset"
-LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 15
+LIFECYCLE_SMOKE_TIMEOUT_MINUTES = 20
+# A balanced shard must expect to finish within this fraction of its cap (#4943):
+# its measured serial seconds over four workers plus the measured job overhead.
+LIFECYCLE_SMOKE_CAP_FRACTION = 0.6
+LIFECYCLE_SMOKE_WORKERS = 4
+LIFECYCLE_SMOKE_OVERHEAD_SECONDS = 75
 LIFECYCLE_SMOKE_MARKER = "lifecycle_smoke"
 # The lifecycle family core (#4093) runs beside the integration lifecycle modules.
 LIFECYCLE_SMOKE_ROOTS = ("tests/integration", "tests/lifecycle")
@@ -1281,7 +1286,7 @@ def _assert_lifecycle_smoke_timeout(job: WorkflowNode) -> None:
     timeout = job.get("timeout-minutes")
     assert isinstance(timeout, int)
     assert timeout == LIFECYCLE_SMOKE_TIMEOUT_MINUTES, (
-        "lifecycle-smoke needs its measured 15-minute whole-job budget, "
+        "lifecycle-smoke needs its measured 20-minute whole-job budget, "
         "without an inadequate deadline or an unbounded increase"
     )
 
@@ -1337,6 +1342,45 @@ def test_lifecycle_shards_collect_exact_required_union() -> None:
         _collect_lifecycle_nodes(expression),
         [_collect_lifecycle_nodes(expression, shard) for shard in LIFECYCLE_SMOKE_SHARDS],
     )
+
+
+def _assert_lifecycle_shard_budget(shard_seconds: Sequence[float], timeout_minutes: int) -> None:
+    """Every balanced shard must expect to finish well inside its job timeout."""
+    budget = LIFECYCLE_SMOKE_CAP_FRACTION * timeout_minutes * 60
+    expected = [
+        seconds / LIFECYCLE_SMOKE_WORKERS + LIFECYCLE_SMOKE_OVERHEAD_SECONDS
+        for seconds in shard_seconds
+    ]
+    assert max(expected) <= budget, (
+        f"the largest lifecycle smoke shard is expected to take {max(expected):.0f}s, over "
+        f"{budget:.0f}s ({LIFECYCLE_SMOKE_CAP_FRACTION:.0%} of {timeout_minutes} minutes); "
+        f"re-measure {LIFECYCLE_SMOKE_DURATIONS} or add a shard"
+    )
+
+
+def test_lifecycle_shards_fit_their_timeout() -> None:
+    plan = ci_sharding.shard_test_files(
+        list(LIFECYCLE_SMOKE_ROOTS),
+        LIFECYCLE_SMOKE_REQUIRED_EXPRESSION,
+        len(LIFECYCLE_SMOKE_SHARD_JOBS),
+        ci_sharding.load_durations(REPO_ROOT / LIFECYCLE_SMOKE_DURATIONS),
+        REPO_ROOT,
+    )
+    _assert_lifecycle_shard_budget(plan.seconds, LIFECYCLE_SMOKE_TIMEOUT_MINUTES)
+
+
+@pytest.mark.parametrize(
+    ("shard_seconds", "timeout_minutes"),
+    [
+        ([2400.0, 2400.0, 2400.0, 2400.0], 15),
+        ([1600.0, 1600.0, 1600.0, 4000.0], 20),
+    ],
+)
+def test_lifecycle_shard_budget_overrun_fails(
+    shard_seconds: list[float], timeout_minutes: int
+) -> None:
+    with pytest.raises(AssertionError):
+        _assert_lifecycle_shard_budget(shard_seconds, timeout_minutes)
 
 
 @pytest.mark.parametrize(
@@ -1480,7 +1524,7 @@ def provisional_lifecycle_job(
     return workflow_job(provisional_ci, request.param)
 
 
-@pytest.mark.parametrize("timeout", [None, 0, 8, 11])
+@pytest.mark.parametrize("timeout", [None, 0, 8, 15, 30])
 def test_lifecycle_smoke_timeout_drift_fails(
     provisional_lifecycle_job: WorkflowNode, timeout: int | None
 ) -> None:
