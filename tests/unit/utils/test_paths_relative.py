@@ -152,6 +152,24 @@ def test_a_sibling_sharing_a_name_prefix_is_not_within(no_pathlib_containment: N
     assert paths.relative_posix(PurePosixPath("/w/ab"), PurePosixPath("/w/a")) is None
 
 
+class _StrictPath(PurePosixPath):
+    """A subclass with its own containment rules, which the helpers must honour."""
+
+    def relative_to(self, other, *args, **kwargs):
+        raise ValueError("strict containment")
+
+    def is_relative_to(self, other, *args, **kwargs):
+        return False
+
+
+def test_a_path_subclass_keeps_its_own_containment() -> None:
+    inner, outer = _StrictPath("/w/a/b"), _StrictPath("/w/a")
+    with pytest.raises(ValueError, match="strict containment"):
+        paths.relative_to(inner, outer)
+    assert paths.relative_posix(inner, outer) is None
+    assert paths.is_within(inner, outer) is False
+
+
 def test_the_same_path_is_dot() -> None:
     assert paths.relative_posix(PurePosixPath("/w/a"), PurePosixPath("/w/a")) == "."
     same = paths.relative_to(PureWindowsPath("C:\\A"), PureWindowsPath("c:\\a"))

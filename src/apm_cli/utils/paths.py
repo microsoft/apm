@@ -9,10 +9,12 @@ from __future__ import annotations
 import os
 import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
-from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from pathlib import Path, PosixPath, PurePath, PurePosixPath, PureWindowsPath, WindowsPath
 
 # Marks an input the string comparison does not decide; pathlib decides it.
 _UNDECIDED = object()
+# Only pathlib's own classes: a subclass may override relative_to/is_relative_to.
+_STANDARD_CLASSES = frozenset({PurePosixPath, PureWindowsPath, PosixPath, WindowsPath})
 
 
 def _comparable(text: str, base_text: str, windows: bool) -> tuple[str, str, str] | None:
@@ -35,16 +37,17 @@ def _comparable(text: str, base_text: str, windows: bool) -> tuple[str, str, str
 def _remainder(path: PurePath, base: PurePath) -> object:
     """Text of *path* below *base*, ``None`` when it is not below, or ``_UNDECIDED``.
 
-    Decides only the common shape: both paths the same class and absolute,
-    rooted at ``/`` (POSIX) or at ``X:\\`` (Windows). Their ``str`` forms are
-    already normalized, so containment is a prefix test on whole components,
-    case-insensitive on Windows as pathlib compares. Every other shape
-    (UNC, ``\\\\?\\``, ``//``, drive-relative, relative, mixed classes) and
-    any input whose lowercase changes length is ``_UNDECIDED``.
+    Decides only the common shape: both paths the same standard pathlib class
+    and absolute, rooted at ``/`` (POSIX) or at ``X:\\`` (Windows). Their
+    ``str`` forms are already normalized, so containment is a prefix test on
+    whole components, case-insensitive on Windows as pathlib compares. Every
+    other shape (UNC, ``\\\\?\\``, ``//``, drive-relative, relative, mixed or
+    subclassed classes) and any input whose lowercase changes length is
+    ``_UNDECIDED``.
     """
-    windows = isinstance(path, PureWindowsPath)
-    if type(path) is not type(base) or not (windows or isinstance(path, PurePosixPath)):
+    if type(path) is not type(base) or type(path) not in _STANDARD_CLASSES:
         return _UNDECIDED
+    windows = isinstance(path, PureWindowsPath)
     text = str(path)
     compared = _comparable(text, str(base), windows)
     if compared is None:
