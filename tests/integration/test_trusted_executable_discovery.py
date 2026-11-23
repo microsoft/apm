@@ -648,8 +648,49 @@ def test_apm_script_path_expands_a_home_relative_entry(
         ("/bin/sh", "-c", "probe"), cwd=project, env=env, capture_output=True, check=False
     )
 
-    assert env["PATH"].split(os.pathsep) == [str(home / "bin")]
+    assert env["PATH"].split(os.pathsep) == [str((home / "bin").resolve())]
     assert not marker.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+def test_apm_script_path_names_the_resolved_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH entry reached through a link is handed on as the directory that passed the check."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    link = tmp_path / "tools-link"
+    link.symlink_to(tools, target_is_directory=True)
+    monkeypatch.chdir(project)
+
+    env = trusted_path_environment({"PATH": str(link)})
+
+    assert env["PATH"].split(os.pathsep) == [str(tools.resolve())]
+
+
+def test_apm_script_path_drops_an_unresolvable_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH entry that does not resolve to a directory never reaches an APM script."""
+    from apm_cli.utils.git_env import trusted_path_environment
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: consumer\nversion: 1.0.0\n", encoding="utf-8")
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    monkeypatch.chdir(project)
+
+    env = trusted_path_environment(
+        {"PATH": os.pathsep.join([str(tmp_path / "missing"), str(safe)])}
+    )
+
+    assert env["PATH"].split(os.pathsep) == [str(safe.resolve())]
 
 
 def test_apm_script_env_without_path_is_refused(
