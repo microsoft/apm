@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -246,3 +247,98 @@ def test_a_parent_swapped_for_a_symlink_keeps_the_hook_claim(
     assert (moved / hook.name).is_file()
     assert (outside / hook.name).read_text(encoding="ascii") == "outside bytes"
     assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)
+
+
+def _swap_hooks_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, deny_inspection: bool
+) -> tuple[Path, list[str], Path]:
+    _hook_package(tmp_path / "pkg")
+    project = tmp_path / "app"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: app\nversion: 1.0.0\ntargets: [copilot]\n"
+        "dependencies:\n  apm:\n    - path: ../pkg\n",
+        encoding="ascii",
+    )
+    monkeypatch.chdir(project)
+    install = CliRunner().invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    hooks = [path for path in _claims(project)["hooked"] if "/hooks/" in path]
+    hook = project / hooks[0]
+    hooks_dir = hook.parent
+    moved = hooks_dir.with_name("hooks-moved")
+    empty = tmp_path / "empty-outside"
+    empty.mkdir()
+    unlink, lstat = Path.unlink, os.lstat
+    target = hook.resolve()
+
+    def swap_parent(self: Path, *args, **kwargs) -> None:
+        if self.resolve() == target and not moved.exists():
+            hooks_dir.rename(moved)
+            hooks_dir.symlink_to(empty, target_is_directory=True)
+            return
+        unlink(self, *args, **kwargs)
+
+    def denied(path, *args, **kwargs):
+        if moved.exists() and str(path).startswith(str(hooks_dir)):
+            raise PermissionError(13, "Permission denied", str(path))
+        return lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", swap_parent)
+    if deny_inspection:
+        monkeypatch.setattr(os, "lstat", denied)
+    return project, hooks, moved
+
+
+@pytest.mark.parametrize("deny_inspection", [False, True], ids=["empty-target", "denied"])
+def test_an_aborted_sync_keeps_a_claim_whose_absence_is_unproven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deny_inspection: bool
+) -> None:
+    project, hooks, moved = _swap_hooks_parent(
+        tmp_path, monkeypatch, deny_inspection=deny_inspection
+    )
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "../pkg"])
+
+    monkeypatch.undo()
+    assert moved.is_dir(), uninstall.output
+    assert uninstall.exit_code == 1, uninstall.output
+    assert (moved / Path(hooks[0]).name).is_file()
+    assert set(hooks) <= set(_claims(project).get("hooked", [])), _claims(project)
+
+
+def test_a_retained_local_claim_keeps_naming_its_source_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.deps.path_anchoring import resolve_local_dep_dir
+
+    project = tmp_path / "app"
+    parent = project / "packages" / "parent"
+    parent.mkdir(parents=True)
+    (parent / "apm.yml").write_text(
+        "name: parent\nversion: 1.0.0\ndependencies:\n  apm:\n    - path: ../sibling\n",
+        encoding="ascii",
+    )
+    _hook_package(project / "packages" / "sibling")
+    (project / "apm.yml").write_text(
+        "name: app\nversion: 1.0.0\ntargets: [copilot]\n"
+        "dependencies:\n  apm:\n    - path: ./packages/parent\n",
+        encoding="ascii",
+    )
+    monkeypatch.chdir(project)
+    install = CliRunner().invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    hooks = [path for path in _claims(project)["hooked"] if "/hooks/" in path]
+    attempts = _fail_second_unlink(monkeypatch, {(project / path).resolve() for path in hooks})
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "./packages/parent"])
+
+    monkeypatch.undo()
+    assert len(attempts) >= 2, uninstall.output
+    assert uninstall.exit_code == 1, uninstall.output
+    lock = LockFile.from_yaml((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    (row,) = [dep for dep in lock.dependencies.values() if set(hooks) <= set(dep.deployed_files)]
+    assert row.resolved_by is None
+    resolved = resolve_local_dep_dir(row, lock, project)
+    assert resolved == (project / "packages" / "sibling").resolve()

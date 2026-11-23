@@ -15,6 +15,8 @@
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_claim_keeps_the_canonical_hash_baseline",
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_claim_whose_parent_was_also_removed_still_persists",
     "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_parent_swapped_for_a_symlink_keeps_the_hook_claim",
-    "tests/unit/deps/test_replacement_binding.py::test_retain_parents_or_root_keeps_surviving_requests_and_root_anchors_orphans"
+    "tests/unit/deps/test_replacement_binding.py::test_retain_parents_or_root_keeps_surviving_requests_and_root_anchors_orphans",
+    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_an_aborted_sync_keeps_a_claim_whose_absence_is_unproven",
+    "tests/unit/test_uninstall_hook_sync_failure_claims.py::test_a_retained_local_claim_keeps_naming_its_source_directory"
   ]
 }

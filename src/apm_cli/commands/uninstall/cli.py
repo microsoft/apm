@@ -3,6 +3,7 @@
 import builtins
 import contextlib
 import os
+import stat
 import sys
 import traceback
 from dataclasses import dataclass
@@ -601,30 +602,55 @@ def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
     return popped
 
 
+def _absence_proven(deploy_root: Path, relative: str) -> bool:
+    """Return whether *relative* is provably gone under *deploy_root* (#4851).
+
+    Absence counts only through real directories: a symlinked or
+    non-directory parent, or one that cannot be inspected, leaves the file's
+    fate unknown, so its claim stays.
+    """
+    current = deploy_root
+    parts = Path(relative).parts
+    try:
+        for part in parts[:-1]:
+            current = current / part
+            mode = os.lstat(current).st_mode
+            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+                return False
+        os.lstat(current / parts[-1])
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _retain_failed_claims(
-    lockfile, removed_rows: dict, sync: tuple, removed_hashes: dict, deploy_root, logger
+    lockfile, removed_rows: dict, sync: tuple, removed_hashes: dict, roots: tuple, logger
 ) -> bool:
     """Restore claims sync could not remove (#4851); return whether the lock may persist.
 
     *sync* is ``(integration_cleanup, integration_cleanup_error)``. A sync that
     aborted (a path-safety refusal, for one) reports no per-path result, so
-    every removed path still on disk keeps its claim.
+    every removed path keeps its claim unless its absence is proven safely.
+    *roots* is ``(deploy_root, project_root)``.
     """
     integration_cleanup, sync_error = sync
+    deploy_root, project_root = roots
     failed = list(integration_cleanup.failed_paths)
     if sync_error is not None:
         failed.extend(
             path
             for row in removed_rows.values()
             for path in row.deployed_files
-            if os.path.lexists(Path(deploy_root) / path)
+            if not _absence_proven(Path(deploy_root), path)
         )
     if not removed_rows or not failed:
         return True
     from .lockfile_state import retain_failed_claims
 
     try:
-        retain_failed_claims(lockfile, removed_rows, failed, removed_hashes)
+        retain_failed_claims(lockfile, removed_rows, failed, removed_hashes, Path(project_root))
     except Exception as state_err:
         logger.warning(
             f"Lockfile state could not be reconciled. {LOCKFILE_STATE_UNRECONCILED.sentence()}"
@@ -1630,7 +1656,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             removed_rows,
             (integration_cleanup, integration_cleanup_error),
             all_deployed_file_hashes,
-            deploy_root,
+            (deploy_root, manifest_path.parent),
             logger,
         )
 
