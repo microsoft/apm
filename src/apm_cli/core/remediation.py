@@ -254,6 +254,12 @@ HOOK_PLUGIN_ROOT_UNRESOLVED = _entry(
     before="ensure the quote marks match and wrap the complete reference and path in "
     "balanced double quotes",
 )
+HOOK_EVENT_MALFORMED = _entry(
+    "hook-event-malformed",
+    "apm install",
+    "merge the package's hooks into it",
+    before="fix or remove the event",
+)
 HOOK_PATH_ESCAPES_PACKAGE = _entry(
     "hook-path-escapes-package",
     "apm install",
@@ -385,6 +391,14 @@ UNINSTALL_EVIDENCE_TRUST_LOCKFILE = _entry(
     "apm uninstall {packages} --trust-lockfile",
     "delete the files marked deletable and keep the rest",
     before="if the source is gone for good",
+)
+# A kept local descendant whose source changed since install refuses the
+# re-anchor (#5058); reinstalling recopies it, then the uninstall can proceed.
+UNINSTALL_REANCHOR_STALE_COPY = _entry(
+    "uninstall-reanchor-stale-copy",
+    "apm install --no-frozen",
+    "recopy the edited local source into apm_modules",
+    then="retry the uninstall",
 )
 # -- end W2 integration --
 # -- W2 marketplace --

@@ -25,6 +25,9 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 
 from __future__ import annotations
 
+import contextlib
+import os
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -34,7 +37,14 @@ from .engine import _dependency_public_label, _removed_lock_key
 
 
 class LocalReanchorRefused(ValueError):
-    """A still-needed local dependency cannot be re-anchored; nothing was written."""
+    """A still-needed local dependency cannot be re-anchored; nothing was written.
+
+    *next_step* replaces the generic advice when the refusal has its own fix.
+    """
+
+    def __init__(self, message: str, next_step: str | None = None) -> None:
+        super().__init__(message)
+        self.next_step = next_step
 
 
 @dataclass(frozen=True)
@@ -204,7 +214,7 @@ def plan_local_reanchor(
             _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
             copy = row.to_dependency_ref().get_install_path(modules_dir)
             _require_copy(copy, key, label, modules_dir)
-            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label)
+            _require_fresh_copy(row, walk.local_dirs.get(key), copy, key, label, modules_dir)
         if row is not None and row.source == "local" and key not in nodes and row.declaring_parent:
             first = nearest[0]
             declaring_parents[key] = (renames.get(first, first), edges[first][1])
@@ -250,28 +260,32 @@ def _require_copy(path: Path, key: str, label, modules_dir: Path) -> None:
         )
 
 
-def _require_fresh_copy(row, source: Path | None, copy: Path, key: str, label) -> None:
+def _require_fresh_copy(
+    row, source: Path | None, copy: Path, key: str, label, modules_dir: Path
+) -> None:
     """Refuse a kept descendant whose local source no longer matches its copy (#4999).
 
     Install recopies a changed local source, so keeping the old copy would not
     leave apm_modules as a fresh install does. An unreadable source refuses too.
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
-    framed = row.content_hash_framed
     try:
         fresh = (
             source is not None
-            and compute_local_package_hash(source, framed=framed)
-            == compute_local_package_hash(copy, framed=framed)
+            and local_source_matches_copy(row, source, copy)
             and _unhashed_files_match(source, copy)
         )
     except (OSError, ValueError, TypeError):
         fresh = False
     if not fresh:
+        from ...core.remediation import UNINSTALL_REANCHOR_STALE_COPY
+
         raise LocalReanchorRefused(
-            f"{label(key)} stays, but its local source differs from its apm_modules copy, "
-            "so the re-anchor cannot keep it as a fresh install would"
+            f"{label(key)} stays, but its local source differs from its apm_modules copy "
+            f"{copy.relative_to(modules_dir).as_posix()}, so the re-anchor cannot keep it as "
+            "a fresh install would",
+            next_step=UNINSTALL_REANCHOR_STALE_COPY.sentence(),
         )
 
 
@@ -505,7 +519,7 @@ def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> L
 
 
 def roll_back(plan: LocalReanchorPlan) -> list[str]:
-    """Restore apm.yml and apm.lock.yaml to the snapshot; return what could not be restored.
+    """Restore apm.yml, apm.lock.yaml and the receipts to the snapshot; return what was not.
 
     Every path is attempted. One that cannot be restored keeps its snapshot
     beside it (``<name>.apm-reanchor-backup``) and is named in the result, so
@@ -515,6 +529,11 @@ def roll_back(plan: LocalReanchorPlan) -> list[str]:
 
     failures: list[str] = []
     for path, text in plan.snapshot:
+        # A file still holding its snapshot is not rewritten: a read-only
+        # receipt directory must not fail a rollback that changed nothing.
+        with contextlib.suppress(OSError):
+            if path.is_file() and path.read_bytes() == text.encode("utf-8"):
+                continue
         try:
             atomic_write_text(path, text, normalize_line_endings=False)
         except OSError as exc:
@@ -543,7 +562,7 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
     Uninstall re-copies those before it rebuilds survivors, which a re-anchor
     rollback could not undo, so the re-anchor refuses them first (read-only).
     """
-    from ...install.phases.local_content import compute_local_package_hash
+    from ...install.phases.local_content import local_source_matches_copy
 
     stale = []
     for key, row in sorted(lockfile.dependencies.items()):
@@ -552,10 +571,8 @@ def refreshed_local_sources(lockfile, modules_dir: Path, source_root: Path) -> l
         try:
             ref = row.to_dependency_ref()
             copy = ref.get_install_path(modules_dir)
-            framed = row.content_hash_framed
-            if copy.is_dir() and compute_local_package_hash(
-                (source_root / ref.local_path).resolve(), framed=framed
-            ) != compute_local_package_hash(copy, framed=framed):
+            source = (source_root / ref.local_path).resolve()
+            if copy.is_dir() and not local_source_matches_copy(row, source, copy):
                 stale.append(key)
         except (OSError, ValueError, TypeError):
             stale.append(key)
@@ -698,11 +715,19 @@ def _plan_reanchor_or_exit(
     except LocalReanchorRefused as exc:
         logger.error(f"{exc}; apm.yml and apm.lock.yaml were not changed.")
         logger.progress(
-            "Uninstall the package that still needs it first, or keep the local "
+            exc.next_step
+            or "Uninstall the package that still needs it first, or keep the local "
             "declaration in apm.yml."
         )
         sys.exit(1)
-    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root)))
+    if not plan.renames:
+        return plan
+    from ...core.deployment_ledger import materialization_evidence_paths
+
+    # The receipts go back with the lock: an interrupt after their rename never
+    # leaves lock and receipts naming different owners (#5077).
+    receipts, _identity = materialization_evidence_paths(project_root, InstallScope.PROJECT)
+    return snapshot_for_rollback(plan, (apm_yml_path, get_lockfile_path(project_root), receipts))
 
 
 def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
@@ -739,8 +764,6 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     leave them dangling until the next install rewrites them. Only paths the
     deploy-path gate accepts are read; any other claim refuses too.
     """
-    import re
-
     from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...utils.paths import portable_relpath
 
@@ -751,9 +774,15 @@ def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
     if not spellings:
         return None
     # The copy's own path, not a longer sibling name such as ``_local/e2``.
-    names = re.compile(
+    literal = re.compile(
         b"(?:" + b"|".join(re.escape(s.encode()) for s in sorted(spellings)) + b")(?![\\w.-])"
     )
+    dirs = _moving_dirs(plan.moves)
+
+    def names(member: Path) -> bool:
+        data = member.read_bytes()
+        return bool(literal.search(data)) or _names_moving_dir(data, member, project_root, dirs)
+
     for deployed in sorted(DeploymentLedgerCodec.legacy_deployed_file_claims(lockfile)):
         if "://" not in deployed and _claim_names_copy(deployed, project_root, names):
             return deployed
@@ -780,11 +809,65 @@ def _claim_names_copy(deployed: str, project_root: Path, names) -> bool:
             else [(deployed, path)]
         )
         return any(
-            not gated(claim) or (member.is_file() and names.search(member.read_bytes()))
-            for claim, member in members
+            not gated(claim) or (member.is_file() and names(member)) for claim, member in members
         )
     except OSError:
         return True  # an unreadable file cannot be cleared
+
+
+# A path-like token: anything between whitespace, brackets, quotes and separators.
+_PATH_TOKEN = re.compile(r"[^\s()<>\[\]\"'`|,;*]+")
+# A whole Markdown link destination: ``<...>`` may hold spaces; a bare one may
+# hold punctuation such as commas and balanced parentheses, so neither is split
+# like prose. One level of nesting keeps the match linear.
+_MARKDOWN_DESTINATION = re.compile(r"\]\(\s*(?:<([^<>\n]+)>|((?:[^\s()<>]|\([^\s()<>]*\))+))")
+
+
+def _moving_dirs(moves) -> tuple[str, ...]:
+    """Each moving copy as written and as resolved (a symlinked apm_modules root)."""
+    dirs = set()
+    for current, _target in moves:
+        dirs.add(os.path.normcase(os.path.normpath(os.fspath(current))))
+        dirs.add(os.path.normcase(os.path.realpath(current)))
+    return tuple(sorted(dirs))
+
+
+def _names_moving_dir(data: bytes, member: Path, project_root: Path, dirs) -> bool:
+    """Whether a path token in *data* names a moving copy once normalized (#5133).
+
+    Whole Markdown link destinations are checked first, then prose tokens. Each
+    token resolves against the file's directory and the project root:
+    ``.`` and ``..`` segments are folded, and the result is compared both as
+    written and through symlinks, so ``_local/./e`` or a link through a
+    symlinked apm_modules root counts as the copy itself.
+    """
+
+    def under(candidate: str) -> bool:
+        candidate = os.path.normcase(candidate)
+        return any(candidate == d or candidate.startswith(d + os.sep) for d in dirs)
+
+    text = data.decode("utf-8", "replace")
+    destinations = [bracketed or bare for bracketed, bare in _MARKDOWN_DESTINATION.findall(text)]
+    seen: set[str] = set()
+    for token in (*destinations, *_PATH_TOKEN.findall(text)):
+        path = token.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+        # A bare destination is also a prose token: resolve each spelling once.
+        if path in seen:
+            continue
+        seen.add(path)
+        # A binary asset can hold a NUL, which no filesystem path accepts.
+        if "/" not in path or "://" in path or "\x00" in path:
+            continue
+        # Sentence punctuation after a link ("see _local/./e.") is not part of it.
+        while path.endswith((".", ":")) and not path.endswith(".."):
+            path = path[:-1]
+        for base in (member.parent, project_root):
+            joined = os.path.join(base, path)
+            # Lexical folding and symlink resolution are separate views: folding
+            # ``..`` first would skip a symlinked apm_modules root.
+            if under(os.path.normpath(joined)) or under(os.path.realpath(joined)):
+                return True
+    return False
 
 
 def _native_owned(lockfile) -> bool:

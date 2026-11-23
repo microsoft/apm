@@ -364,12 +364,18 @@ def _require_credential_binding(name: str | None, url: str, *, is_direct_url: bo
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 @click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Replace an alias already registered to another catalog without prompting",
+)
+@click.option(
     "--offline",
     is_flag=True,
     help="Read local apm.yml without network (remote entries need commit SHAs)",
 )
 @serialized_lifecycle
-def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
+def add(source, name, ref, branch, host, catalog_path, verbose, yes=False, offline=False):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
@@ -429,6 +435,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
         is_direct_url = parsed.is_direct_url
         # Without a #ref fragment the source is the argument itself.
         source_arg = source.strip()
+        _confirm_alias_replacement(logger, name, url, yes)
 
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
@@ -583,6 +590,7 @@ def add(source, name, ref, branch, host, catalog_path, verbose, offline=False):
             logger.verbose_detail("    Detected path: direct local file")
         logger.verbose_detail(f"    Alias source: {alias_source}")
 
+        _confirm_alias_replacement(logger, None if name else display_name, url, yes)
         final_source = MarketplaceSource(
             name=display_name,
             url=url,
@@ -638,6 +646,41 @@ def _should_warn_unpinned_git_url(
     from ...marketplace.source_identity import parse_marketplace_source
 
     return parse_marketplace_source(source).transport in {"https", "ssh", "scp"}
+
+
+def _confirm_alias_replacement(
+    logger: CommandLogger, alias: str | None, url: str, yes: bool
+) -> None:
+    """Confirm before an alias moves to another catalog; refuse when nobody can answer.
+
+    Re-registering the same catalog needs no confirmation. ``--yes`` replaces
+    without a prompt; a non-interactive run without it is refused, so an
+    alias never silently changes the catalog it names. ``None`` (no alias
+    known yet) checks nothing.
+    """
+    from ...marketplace.registry import get_registered_marketplaces
+    from ...marketplace.source_identity import same_marketplace_origin
+
+    if alias is None:
+        return
+    lower = alias.lower()
+    existing = next((s for s in get_registered_marketplaces() if s.name.lower() == lower), None)
+    if existing is None or existing.url == url or same_marketplace_origin(existing.url, url):
+        return
+    where = existing.display_source
+    if yes:
+        logger.warning(f"Replacing marketplace '{existing.name}' ({where}).", symbol="warning")
+        return
+    if sys.stdin.isatty() and click.confirm(
+        f"Marketplace '{existing.name}' is registered to {where}. Replace it?", default=False
+    ):
+        return
+    logger.error(
+        f"Marketplace '{existing.name}' is already registered to {where}. "
+        "Re-run with --yes to replace it, or use --name to keep both.",
+        symbol="error",
+    )
+    sys.exit(1)
 
 
 def _warn_if_replacing_catalog(

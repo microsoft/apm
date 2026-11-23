@@ -17,6 +17,7 @@ from apm_cli.deps.tiered_ref_resolver import RefFreshnessPolicy, build_tiered_re
 from apm_cli.models.apm_package import (
     DependencyReference,
     GitReferenceType,
+    RemoteRef,
     ResolvedReference,
 )
 from tests.utils.checkout_trust import trust_checkout_contents
@@ -183,14 +184,14 @@ class TestDownloadVirtualFilePackageErrors:
     def test_raises_if_not_valid_file_extension(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="skills/foo")  # not a file
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="skills/foo")  # not a file
         with pytest.raises(ValueError, match="not a valid individual file"):
             downloader.download_virtual_file_package(dep, tmp_path / "out")
 
     def test_runtime_error_on_download_failure(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="prompts/test.prompt.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(side_effect=RuntimeError("404"))
@@ -203,7 +204,7 @@ class TestDownloadVirtualFilePackageErrors:
     def test_progress_updates_when_provided(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="prompts/test.prompt.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# Test\n")
@@ -217,7 +218,7 @@ class TestDownloadVirtualFilePackageErrors:
     def test_frontmatter_description_parsed(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="prompts/test.prompt.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         content = b'---\ndescription: "My great prompt"\n---\n\n# Content\n'
@@ -229,7 +230,7 @@ class TestDownloadVirtualFilePackageErrors:
     def test_fallback_description_when_no_frontmatter(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="prompts/test.prompt.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="prompts/test.prompt.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# No FM\n")
@@ -252,7 +253,9 @@ class TestDownloadVirtualFilePackageErrors:
     def test_instructions_subdir_mapping(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="instructions/code.instructions.md")
+        dep = _make_dep(
+            is_virtual=True, reference=None, virtual_path="instructions/code.instructions.md"
+        )
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# Instructions\n")
@@ -263,7 +266,7 @@ class TestDownloadVirtualFilePackageErrors:
     def test_chatmode_subdir_mapping(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="agents/mymode.agent.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="agents/mymode.agent.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# Chat\n")
@@ -274,7 +277,7 @@ class TestDownloadVirtualFilePackageErrors:
     def test_agent_subdir_mapping(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="agents/myagent.agent.md")
+        dep = _make_dep(is_virtual=True, reference=None, virtual_path="agents/myagent.agent.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# Agent\n")
@@ -1163,8 +1166,10 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
     )
     downloader._cache_git_env = MagicMock(return_value={})
     downloader._refs = MagicMock()
-    downloader._refs.resolve_commit_sha_for_ref.return_value = (
-        None if case in {"current-legacy", "failed-resolution"} else current_sha
+    downloader._refs.list_remote_refs.return_value = (
+        []
+        if case in {"current-legacy", "failed-resolution"}
+        else [RemoteRef("main", GitReferenceType.BRANCH, current_sha)]
     )
     downloader._refs.resolve.return_value = _make_resolved(commit=current_sha)
     if case == "failed-resolution":
@@ -1210,14 +1215,14 @@ def test_scoped_lock_seeds_and_current_remote_receipts_remain_distinct(
     expected_sha = old_sha if case in {"locked-match", "sha-passthrough"} else current_sha
     assert resolved.resolved_commit == expected_sha
     if case == "locked-match":
-        downloader._refs.resolve_commit_sha_for_ref.assert_not_called()
+        downloader._refs.list_remote_refs.assert_not_called()
         downloader._refs.resolve.assert_not_called()
     if case == "locked-sibling":
-        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.list_remote_refs.assert_called_once_with(dependency)
         assert resolver.resolve(seeded).resolved_commit == old_sha
         assert resolver.remotely_resolved(seeded, old_sha) is False
     if stale_provider:
-        downloader._refs.resolve_commit_sha_for_ref.assert_called_once_with(dependency, "main")
+        downloader._refs.list_remote_refs.assert_called_once_with(dependency)
         downloader._refs.resolve.assert_not_called()
     if case == "mismatched-repository":
         dependency = _make_dep(repo_url="other/repository")

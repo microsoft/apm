@@ -223,3 +223,58 @@ def test_dependency_sections_never_creates_the_other_section() -> None:
     data: dict = {}
     dependency_sections(data, dev=False)
     assert data == {"dependencies": {"apm": []}}
+
+
+_OBJECT = {
+    "git": "owner/repo",
+    "ref": "v1",
+    "skills": ["alpha"],
+    "targets": ["copilot"],
+    "alias": "kit",
+}
+_INLINE = {"git": "owner/repo#v1", "skills": ["alpha"]}
+_SUBDIR = {"git": "gitlab.com/group/repo", "path": "subdir", "skills": ["alpha"], "alias": "kit"}
+
+
+@pytest.mark.parametrize(
+    ("existing", "requested", "ref_only", "expected"),
+    [
+        pytest.param(_OBJECT, "owner/repo#v2", True, {**_OBJECT, "ref": "v2"}, id="new-ref"),
+        pytest.param(_OBJECT, "owner/repo#v1", True, _OBJECT, id="same-ref"),
+        pytest.param(_INLINE, "owner/repo#v2", True, {**_INLINE, "ref": "v2"}, id="inline-new"),
+        pytest.param(_INLINE, "owner/repo#v1", True, _INLINE, id="inline-same"),
+        pytest.param(
+            _SUBDIR,
+            {"git": "gitlab.com/group/repo", "path": "subdir", "ref": "v2"},
+            True,
+            {**_SUBDIR, "ref": "v2"},
+            id="probed-subdir",
+        ),
+        pytest.param(_OBJECT, "owner/repo#v2", False, "owner/repo#v2", id="skill-reset"),
+    ],
+)
+def test_a_ref_only_request_keeps_the_other_fields_of_an_object_entry(
+    existing, requested, ref_only: bool, expected
+) -> None:
+    """``install <pkg>#<ref>`` alone changes only the ref of an object entry (#5154);
+    with other intent (``--skill '*'``) the request still replaces the entry."""
+    dep_ref = (
+        DependencyReference.parse(requested)
+        if isinstance(requested, str)
+        else DependencyReference.parse_from_dict(requested)
+    )
+    current_deps = [dict(existing)]
+
+    changed = update_existing_dependency_entry_if_needed(
+        current_deps,
+        already_in_deps=True,
+        apm_yml_entries={dep_ref.to_canonical(): requested},
+        canonical=dep_ref.to_canonical(),
+        dep_ref=dep_ref,
+        identity=dep_ref.get_identity(),
+        dependency_reference_cls=DependencyReference,
+        ref_only=ref_only,
+    )
+
+    assert changed is (expected != existing)
+    assert current_deps == [expected]

@@ -66,7 +66,7 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
         'fenced["GIT_ALLOW_PROTOCOL"] = "none" if offline else _ALLOWED_PROTOCOLS',
     ),
     _GIT_CACHE: (
-        "if bare_dir.is_dir() and not self._bare_trusted(bare_dir):",
+        "if bare_dir.is_dir() and not self._bare_trusted(bare_dir, url=url, env=env):",
         "and self._checkout_trusted_or_evicted(final_dir)",
         "and self._checkout_trusted(checkout_dir)",
         "self._checkout_trusted(final_dir)",

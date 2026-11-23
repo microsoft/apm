@@ -140,6 +140,51 @@ def credits_bin(node: str, cell: Mapping[str, str]) -> bool:
     return scope is not None and cell.get("SCOPE", scope) == scope
 
 
+# (OP, SRC, PRIM) source-spine steps whose primitive the spine never observed on a
+# surface (dimension audit, lifecycle-journeys run 45258714621): a registry or local
+# bundle package's executable at a non-install step. The spine records no gate level
+# there, so neither a deploy nor a parked decision is proven (#4981 generalized).
+SOURCE_SPINE_UNOBSERVED: frozenset[tuple[str, str, str]] = frozenset(
+    {
+        *(
+            (op, "pkg-registry", prim)
+            for op in ("audit", "lock", "prune", "uninstall", "update")
+            for prim in ("hook", "lsp", "canvas")
+        ),
+        ("compile", "pkg-registry", "canvas"),
+        *((op, "local-bundle", "canvas") for op in ("approve-deny", "audit", "compile", "lock")),
+        *((op, "local-bundle", "hook") for op in ("audit", "lock")),
+        *((op, "local-bundle", "lsp") for op in ("approve-deny", "audit", "lock")),
+    }
+)
+
+
+def deployable_prims(scope: str) -> frozenset[str]:
+    """Primitives a lifecycle world can deploy at *scope*: the kinds of that scope's
+    surface table (``rows._SURFACE_GLOBS``, ``machines._kit.USER_SURFACE_GLOBS``),
+    plus skills and project instructions. bin/ is decided by ``BIN_WITNESSES``."""
+    from tests.lifecycle.machines._kit import USER_SURFACE_GLOBS
+    from tests.lifecycle.rows import _SURFACE_GLOBS
+
+    table = _SURFACE_GLOBS if scope == "project" else USER_SURFACE_GLOBS
+    extra = {"skill", "other-file"} if scope == "project" else {"skill"}
+    return frozenset({kind for kind, _ in table} | extra) - {"bin"}
+
+
+def credits_dimension(node: str, cell: Mapping[str, str]) -> bool:
+    """Whether *node* exercises *cell*'s primitive: it deploys (or the gate decides) that
+    primitive at the cell's scope. A witness that never does proves nothing about it."""
+    prim = cell.get("PRIM")
+    if prim is None:
+        return True
+    if prim == "bin":
+        return credits_bin(node, cell)
+    if "SCOPE" in cell and prim not in deployable_prims(cell["SCOPE"]):
+        return False
+    step = (cell.get("OP"), cell.get("SRC"), prim)
+    return not (node == SOURCE_SPINE and step in SOURCE_SPINE_UNOBSERVED)
+
+
 # M-GATE matrix and side-door spine op -> (OP, modifiers).
 GATE_OPS: Mapping[str, tuple[str, tuple[str, ...]]] = {
     "bundle": ("bundle-install", ()),
@@ -336,8 +381,11 @@ def machine_witnesses(obligations: Mapping[str, object]) -> dict[str, Witness]:
     """
     by_node: dict[str, dict[str, list[MachineCell]]] = {}
     for cell in machine_cells():
+        # The whole step, not only the projected id: an unexercised step credits no pair.
+        if not credits_dimension(cell.witness, cell.assignment):
+            continue
         for key in credits(cell):
-            if key in obligations and credits_bin(cell.witness, parse_cell(key)[1]):
+            if key in obligations and credits_dimension(cell.witness, parse_cell(key)[1]):
                 by_node.setdefault(key, {}).setdefault(cell.witness, []).append(cell)
     witnesses: dict[str, Witness] = {}
     for key, nodes in sorted(by_node.items()):
@@ -412,7 +460,7 @@ def scenario_witnesses(
             if (
                 key in obligations
                 and lanes.get(key) in SCENARIO_LANES
-                and credits_bin(credit.node, parse_cell(key)[1])
+                and credits_dimension(credit.node, parse_cell(key)[1])
             ):
                 by_key.setdefault(key, []).append(credit)
     witnesses: dict[str, Witness] = {}

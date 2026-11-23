@@ -520,3 +520,126 @@ def test_a_new_config_never_probes_unrelated_records(
     assert calls == []
     assert config_file_origin(config) is Origin.CREATED
     assert config.is_file()
+
+
+def test_a_record_of_a_file_linked_for_now_survives_other_saves(tmp_path, apm_home) -> None:
+    """A stored key is checked as written, never re-resolved: project A's config, a
+    link for a while, keeps its record through project B's saves."""
+    a_config = tmp_path / "a" / ".mcp.json"
+    a_config.parent.mkdir()
+    a_config.write_text(_SKELETON, encoding="utf-8")
+    _apm_writes(a_config, _WITH_ENTRY, manifest_root=tmp_path / "a")
+    held = a_config.read_bytes()
+    a_config.unlink()
+    a_config.symlink_to(tmp_path / "elsewhere.json")
+    _apm_writes(tmp_path / "b" / ".mcp.json", _WITH_ENTRY)  # project B saves the store
+    a_config.unlink()
+    a_config.write_bytes(held)
+
+    assert config_file_origin(a_config) is Origin.PREEXISTING
+    assert _apm_empties(a_config, root=tmp_path / "a") is False
+    assert a_config.read_bytes() == held
+
+
+# -- a Windows UNC key survives a reload (#5016 review) ---------------------------------
+
+_UNC_KEY = "//server/share/project/.mcp.json"
+
+
+def test_a_unc_record_survives_another_projects_save(tmp_path, apm_home) -> None:
+    """A record keyed by a UNC path (how a share's file is keyed on Windows) is valid:
+    it is kept when another project's write saves the store, never dropped as malformed."""
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    row = {"path": _UNC_KEY, "origin": "preexisting", "hash": "sha256:" + "0" * 64}
+    store.write_text(json.dumps({"version": 1, "files": [row]}), encoding="utf-8")
+
+    _apm_writes(tmp_path / "other" / ".mcp.json", _WITH_ENTRY)
+
+    rows = json.loads(store.read_text(encoding="utf-8"))["files"]
+    assert row in rows, rows
+
+
+def _unc(path: Path) -> Path | None:
+    """*path* through this machine's administrative share, when one is reachable."""
+    drive = path.drive.rstrip(":")
+    if not drive:
+        return None
+    unc = Path(f"\\\\localhost\\{drive}$") / path.relative_to(path.anchor)
+    try:
+        return unc if unc.exists() else None
+    except OSError:
+        return None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows UNC paths")
+def test_a_users_config_on_a_unc_path_is_never_deleted(tmp_path, apm_home) -> None:
+    project = _unc(tmp_path)
+    if project is None:
+        pytest.skip("no administrative share on this machine")
+    config = project / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=config.parent)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=config.parent) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a backslash is a separator on Windows")
+def test_a_users_config_under_a_backslash_directory_name_is_never_deleted(
+    tmp_path, apm_home
+) -> None:
+    """On POSIX a backslash is a filename character: the record keyed by it is valid."""
+    project = tmp_path / "project\\name"
+    config = project / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_SKELETON, encoding="utf-8")  # the user's own skeleton
+    _apm_writes(config, _WITH_ENTRY, manifest_root=project)
+    config.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(config) is Origin.PREEXISTING
+    assert _apm_empties(config, root=project) is False
+    assert config.read_text(encoding="utf-8") == _SKELETON
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
+def test_a_link_to_a_users_config_never_lends_it_apms_record(tmp_path, apm_home) -> None:
+    """APM's config replaced by a link to the user's identical file: APM's next write
+    into the user's file classifies it as the user's, never as APM-created through
+    that link, so retiring APM's entry later keeps the file."""
+    apms = tmp_path / "apm" / ".mcp.json"
+    _apm_writes(apms, _SKELETON)  # APM created it
+    users = tmp_path / "user" / ".mcp.json"
+    users.parent.mkdir()
+    users.write_text(_SKELETON, encoding="utf-8")  # the user's own, same bytes
+    apms.unlink()
+    apms.symlink_to(users)
+
+    _apm_writes(users, _WITH_ENTRY, manifest_root=users.parent)  # APM merges into it
+    users.write_text(_SKELETON, encoding="utf-8")  # APM's entry retired again
+
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert _apm_empties(users, root=tmp_path / "user") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+def test_a_record_turned_into_a_symlink_loop_never_breaks_another_lookup(
+    tmp_path, apm_home
+) -> None:
+    """Project A's recorded config becoming a link loop leaves project B's lookup alone."""
+    recorded = tmp_path / "a" / ".mcp.json"
+    _apm_writes(recorded, _WITH_ENTRY)
+    recorded.unlink()
+    try:
+        recorded.symlink_to(recorded)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    other = tmp_path / "b" / ".mcp.json"
+    other.parent.mkdir(parents=True)
+    other.write_text(_WITH_ENTRY, encoding="utf-8")
+
+    assert config_file_origin(other) is not Origin.CREATED
+    assert recorded.is_symlink() and other.read_text(encoding="utf-8") == _WITH_ENTRY

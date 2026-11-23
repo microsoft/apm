@@ -40,6 +40,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -155,6 +156,39 @@ def compute_local_package_hash(source: Path, *, framed: bool = True) -> str:
                 dependency, snapshot, admitted.path.name, admitted.content
             )
         return compute_package_hash(snapshot, framed=framed)
+
+
+def local_source_matches_copy(
+    lock_dep: Any, source: Path, copy: Path, *, source_hash: str | None = None
+) -> bool:
+    """Whether *source* still yields the image install materialized at *copy*.
+
+    Install validates a legacy plugin's copy in place (a synthesized
+    ``apm.yml`` and ``.apm/``), so an unchanged plugin source is compared
+    through the same normalization rather than as raw bytes. A source that
+    cannot be normalized does not match.
+    """
+    from apm_cli.config import get_apm_temp_dir
+    from apm_cli.install.drift import _normalize_legacy_local_plugin_for_replay
+    from apm_cli.utils.content_hash import verify_package_hash
+
+    framed = lock_dep.content_hash_framed
+    expected = compute_local_package_hash(copy, framed=framed)
+    if source_hash is None:
+        source_hash = compute_local_package_hash(source, framed=framed)
+    if source_hash == expected:
+        return True
+    if not source.is_dir():
+        return False
+    with tempfile.TemporaryDirectory(prefix="apm-local-image-", dir=get_apm_temp_dir()) as stage:
+        # The synthesized manifest may take its name from the directory.
+        image = Path(stage) / copy.name
+        _copy_tree_dereferencing_validated(source, image, source)
+        try:
+            _normalize_legacy_local_plugin_for_replay(lock_dep, image)
+        except (OSError, ValueError, TypeError):
+            return False
+        return verify_package_hash(image, expected, framed=framed)
 
 
 class LocalPackageError(ValueError):

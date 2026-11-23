@@ -432,51 +432,6 @@ def test_a_source_a_text_read_would_change_replays_live(tmp_path: Path, skill: b
     _assert_live(world)
 
 
-@pytest.mark.parametrize(
-    "unread",
-    [b"# broken \xff context\n", b"# context\r\nwith crlf\r\n"],
-    ids=["not-utf8", "crlf"],
-)
-def test_an_unmapped_markdown_file_a_text_read_would_change_replays_live(
-    tmp_path: Path, unread: bytes
-) -> None:
-    # Live primitive discovery parses it (and warns) though nothing deploys it.
-    world = _world(tmp_path)
-    (world["root"] / ".apm/context").mkdir(parents=True)
-    (world["root"] / ".apm/context/broken.context.md").write_bytes(unread)
-
-    _assert_live(world)
-
-
-def _assert_prompt_mapping(root: Path, expected: set[str] | None) -> None:
-    """The prompt integrator's verbatim mapping for Copilot, and no write into *root*."""
-    from apm_cli.integration.prompt_integrator import PromptIntegrator
-    from apm_cli.integration.targets import KNOWN_TARGETS
-
-    before = _package_state(root)
-    package_info = SimpleNamespace(install_path=root, package=SimpleNamespace(name="pkg"))
-    planned = PromptIntegrator().verbatim_destinations(
-        package_info, root.parent / "proj", KNOWN_TARGETS["copilot"]
-    )
-    found = (
-        None
-        if planned is None
-        else {source.relative_to(root).as_posix() for source in planned.values()}
-    )
-    assert found == expected
-    assert _package_state(root) == before
-
-
-def test_two_prompts_for_one_destination_replay_live(tmp_path: Path) -> None:
-    (tmp_path / "pkg/.apm/prompts").mkdir(parents=True)
-    root = (tmp_path / "pkg").resolve()
-    (root / ".apm/prompts/dup.prompt.md").write_bytes(b"# from .apm\n")
-    _assert_prompt_mapping(root, {".apm/prompts/dup.prompt.md"})
-
-    (root / "dup.prompt.md").write_bytes(b"# from the root\n")
-    _assert_prompt_mapping(root, None)
-
-
 # -- intact() reads served scratch files without following them (#5103) -----------
 
 _SERVED = b"served bytes\n"
@@ -566,3 +521,48 @@ def test_a_served_destination_that_is_no_regular_file_is_not_intact(
     assert verdict is False, (
         f"a served destination that is no regular file counts as intact ({kind}): {verdict}"
     )
+
+
+@pytest.mark.parametrize(
+    "unread",
+    [b"# broken \xff context\n", b"# context\r\nwith crlf\r\n"],
+    ids=["not-utf8", "crlf"],
+)
+def test_an_unmapped_markdown_file_a_text_read_would_change_replays_live(
+    tmp_path: Path, unread: bytes
+) -> None:
+    # Live primitive discovery parses it (and warns) though nothing deploys it.
+    world = _world(tmp_path)
+    (world["root"] / ".apm/context").mkdir(parents=True)
+    (world["root"] / ".apm/context/broken.context.md").write_bytes(unread)
+
+    _assert_live(world)
+
+
+def _assert_prompt_mapping(root: Path, expected: set[str] | None) -> None:
+    """The prompt integrator's verbatim mapping for Copilot, and no write into *root*."""
+    from apm_cli.integration.prompt_integrator import PromptIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    before = _package_state(root)
+    package_info = SimpleNamespace(install_path=root, package=SimpleNamespace(name="pkg"))
+    planned = PromptIntegrator().verbatim_destinations(
+        package_info, root.parent / "proj", KNOWN_TARGETS["copilot"]
+    )
+    found = (
+        None
+        if planned is None
+        else {source.relative_to(root).as_posix() for source in planned.values()}
+    )
+    assert found == expected
+    assert _package_state(root) == before
+
+
+def test_two_prompts_for_one_destination_replay_live(tmp_path: Path) -> None:
+    (tmp_path / "pkg/.apm/prompts").mkdir(parents=True)
+    root = (tmp_path / "pkg").resolve()
+    (root / ".apm/prompts/dup.prompt.md").write_bytes(b"# from .apm\n")
+    _assert_prompt_mapping(root, {".apm/prompts/dup.prompt.md"})
+
+    (root / "dup.prompt.md").write_bytes(b"# from the root\n")
+    _assert_prompt_mapping(root, None)

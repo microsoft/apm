@@ -110,6 +110,17 @@ def test_governed_root_dirs_includes_primitive_deploy_root():
     assert ".agents" in roots
 
 
+def test_governed_root_dirs_walks_the_converged_skills_root_of_a_legacy_layout_target():
+    """A lock can mix skill layouts (a parked native replacement keeps its
+    legacy claims, #5092), so a legacy-layout target still walks .agents."""
+    from apm_cli.integration.targets import KNOWN_TARGETS, apply_legacy_skill_paths
+
+    (legacy,) = apply_legacy_skill_paths([KNOWN_TARGETS["copilot"]])
+    roots = _governed_root_dirs([legacy])
+    assert ".github" in roots
+    assert ".agents" in roots
+
+
 def test_governed_root_dirs_collapses_nested_deploy_root_to_first_segment():
     roots = _governed_root_dirs([_target_with_skill_deploy_root(deploy_root=".agents/nested")])
     assert ".agents" in roots
