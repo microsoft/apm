@@ -3,6 +3,8 @@
 These tests run in the NORMAL test suite (no ``@pytest.mark.benchmark``).
 They compare execution time at two input sizes and assert the ratio stays
 below a threshold, catching O(n^2) regressions without full benchmarking.
+Guards whose timings are too small to survive shared-runner noise count
+the work done instead of timing it (#4753, #4857).
 
 Threshold rationale
 -------------------
@@ -268,38 +270,63 @@ class TestDiscoveryScaling:
 # ---------------------------------------------------------------------------
 
 
+def _console_operation_counts(get_console) -> tuple[dict[int, int], dict[int, int]]:
+    """Count Rich console constructions for 50 and 500 calls (#4857).
+
+    Returns the construction count and the number of distinct consoles
+    handed out per call count. Only the Rich ``Console`` collaborator is
+    replaced, by a counting factory returning a cheap sentinel, so the real
+    singleton and ``_ascii_console`` run but Rich construction time does not.
+    """
+    from apm_cli.utils import console
+
+    counts: dict[int, int] = {}
+    instances: dict[int, int] = {}
+    for n in (50, 500):
+        console._reset_console()
+        ops = [0]
+
+        def build(*_args, _ops=ops, **_kwargs):
+            _ops[0] += 1
+            return object()
+
+        with patch.object(console, "Console", build):
+            consoles = [get_console() for _ in range(n)]
+        instances[n] = len({id(c) for c in consoles})
+        console._reset_console()
+        counts[n] = ops[0]
+    assert counts[50] > 0
+    return counts, instances
+
+
+def _seeded_quadratic_get_console():
+    """Same singleton, rebuilt once per prior call."""
+    from apm_cli.utils import console
+
+    _seeded_quadratic_get_console.calls += 1
+    for _ in range(_seeded_quadratic_get_console.calls):
+        built = console._ascii_console(console.Console)
+    return built
+
+
 class TestConsoleSingletonScaling:
-    """Repeated _get_console() calls must be O(1) per call after init."""
+    """_get_console() must build once and stay O(1) per call, counted not timed (#4857)."""
 
-    def setup_method(self):
-        from apm_cli.utils.console import _reset_console
-
-        _reset_console()
-
-    def teardown_method(self):
-        from apm_cli.utils.console import _reset_console
-
-        _reset_console()
-
-    def test_scaling_ratio(self):
+    def test_operation_count_grows_linearly(self):
         from apm_cli.utils.console import _get_console
 
-        def call_n(n):
-            for _ in range(n):
-                _get_console()
-
-        t_small = _median_time(lambda: call_n(1000))
-        t_large = _median_time(lambda: call_n(10000))
-
-        if t_small < 1e-7:
-            pytest.skip("below measurement threshold -- too fast to measure reliably")
-
-        ratio = t_large / t_small
-        assert ratio < 15, (
-            f"Scaling ratio {ratio:.1f}x for 10x calls suggests "
-            f"caching regression (t_small={t_small:.6f}s, "
-            f"t_large={t_large:.6f}s)"
+        counts, instances = _console_operation_counts(_get_console)
+        assert instances == {50: 1, 500: 1}, (
+            f"_get_console handed out {instances} distinct consoles, a caching regression"
         )
+        assert _grows_linearly(counts), (
+            f"_get_console built {counts[500]} consoles for 500 calls and "
+            f"{counts[50]} for 50, a super-linear regression"
+        )
+        # Negative control: the same singleton rebuilt quadratically fails the guard.
+        _seeded_quadratic_get_console.calls = 0
+        seeded, _ = _console_operation_counts(_seeded_quadratic_get_console)
+        assert not _grows_linearly(seeded), seeded
 
 
 # ---------------------------------------------------------------------------
