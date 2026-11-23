@@ -1,7 +1,7 @@
 {
   "issue": 4945,
   "fixed_in": "Unreleased",
-  "summary": "With apm install -g and an absolute CLAUDE_CONFIG_DIR outside HOME, retiring the last hook left an empty {} settings.json APM had created, because hook cleanup checked symlinks from HOME; both cleanup paths now take the Claude root from hook_containment_root.",
+  "summary": "With apm install -g and an absolute CLAUDE_CONFIG_DIR outside HOME, retiring the last hook left an empty {} settings.json APM had created, because hook cleanup checked symlinks from HOME; both cleanup paths now take the Claude root from hook_containment_root; a Claude root that is itself a symlink is only rewritten, never deleted from.",
   "failure_modes": [
     "cleanup"
   ],

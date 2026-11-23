@@ -39,11 +39,18 @@ def test_containment_root_is_an_absolute_claude_root_outside_home_only(
     assert hook_containment_root(target, home) == expected
 
 
-@pytest.mark.parametrize("user_key", [False, True], ids=["apm-created", "user-file"])
+@pytest.mark.parametrize(
+    ("user_key", "swapped"),
+    [(False, False), (True, False), (False, True)],
+    ids=["apm-created", "user-file", "profile-swapped-for-a-symlink"],
+)
 def test_retiring_hooks_under_an_outside_home_claude_root_deletes_an_emptied_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_key: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_key: bool, swapped: bool
 ) -> None:
-    """Retirement checks symlinks from the Claude root, not HOME (#4945)."""
+    """Retirement checks symlinks from the Claude root, not HOME (#4945).
+
+    A profile redirected through a symlink is only rewritten, never deleted from.
+    """
     import json
     from dataclasses import replace
 
@@ -55,7 +62,12 @@ def test_retiring_hooks_under_an_outside_home_claude_root_deletes_an_emptied_fil
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     profile = tmp_path / "claude-profile"
-    profile.mkdir()
+    if swapped:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        profile.symlink_to(elsewhere, target_is_directory=True)
+    else:
+        profile.mkdir()
     target = replace(KNOWN_TARGETS["claude"], root_dir=str(profile))
     entry = {
         "matcher": "Bash",
@@ -73,5 +85,7 @@ def test_retiring_hooks_under_an_outside_home_claude_root_deletes_an_emptied_fil
     assert stats["errors"] == 0
     if user_key:
         assert json.loads(settings.read_text(encoding="utf-8")) == {"theme": "dark"}
+    elif swapped:
+        assert json.loads((tmp_path / "elsewhere" / "settings.json").read_text("utf-8")) == {}
     else:
         assert not settings.exists(), settings.read_text(encoding="utf-8")

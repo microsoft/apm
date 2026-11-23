@@ -206,6 +206,17 @@ def hook_containment_root(target, project_root: Path) -> Path:
     return root
 
 
+def hook_cleanup_root(target, project_root: Path) -> Path | None:
+    """Return the root an emptied hook file may be deleted under (#4945).
+
+    The :func:`hook_containment_root` of *target*. An outside-HOME Claude root
+    that is itself a symlink may have been redirected since install, so it
+    yields ``None``: the cleanup rewrites the file in place, never deletes it.
+    """
+    root = hook_containment_root(target, project_root)
+    return None if root != project_root and root.is_symlink() else root
+
+
 def copy_deployed_hook_bundle(
     integrator: BaseIntegrator,
     *,
