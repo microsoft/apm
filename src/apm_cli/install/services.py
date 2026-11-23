@@ -432,6 +432,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
+        if _prim_name != "hooks":
+            continue  # PERF FALSIFICATION HACK (per-kind ceiling) -- NEVER SHIP
         # Executable approval gate: skip hooks if not approved, and retire
         # the hooks this package deployed before it was gated (#3924).
         if _prim_name == "hooks" and not _hooks_approved:
@@ -616,7 +618,15 @@ def integrate_package_primitives(  # noqa: PLR0913
             )
         _emit_integration_hints(_prim_name, _info, _log_integration)
 
-    with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
+    from types import SimpleNamespace as _HackNS  # PERF FALSIFICATION HACK -- NEVER SHIP
+
+    skill_result = _HackNS(
+        target_paths=[], skill_created=False, sub_skills_promoted=0, skills_changed=0,
+        sub_skills_adopted=0, bin_deployed=0, bin_skipped_reason=None, deployed_files=[],
+        complete=False, skill_path=None,
+    )
+    if False:  # noqa: SIM108
+      with recorded_writes(integrators.skill, integrators.skill, projection_targets, package_info):
         skill_result = integrators.skill.integrate_package_skill(
             package_info,
             project_root,
