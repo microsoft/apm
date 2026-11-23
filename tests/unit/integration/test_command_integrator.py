@@ -1736,7 +1736,12 @@ class TestCursorCommandPanelFindings:
 class TestNonStringFrontmatterKeys:
     """A non-string frontmatter key skips that command only (#4922)."""
 
-    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("key", "label"),
+        [("1: x", "1"), ("? 0x" + "f" * 5000 + "\n: x", "<int>")],
+        ids=["int", "int-too-large-to-render"],
+    )
+    def test_non_string_key_skips_the_file_and_the_batch_continues(self, tmp_path, key, label):
         from apm_cli.integration.targets import KNOWN_TARGETS
         from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -1744,7 +1749,7 @@ class TestNonStringFrontmatterKeys:
         pkg_info = _make_package(
             tmp_path,
             {
-                "bad.prompt.md": "---\n1: x\ndescription: Bad\n---\nBad body\n",
+                "bad.prompt.md": f"---\n{key}\ndescription: Bad\n---\nBad body\n",
                 "good.prompt.md": "---\ndescription: Good\n---\nGood body\n",
             },
         )
@@ -1760,5 +1765,6 @@ class TestNonStringFrontmatterKeys:
         assert result.files_skipped == 1
         warnings = [d.message for d in diag.by_category().get("warning", [])]
         assert any(
-            "bad.prompt.md" in m and "non-string frontmatter key(s): 1" in m for m in warnings
+            "bad.prompt.md" in m and f"non-string frontmatter key(s): {label})" in m
+            for m in warnings
         ), warnings
