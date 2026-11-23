@@ -62,8 +62,8 @@ jobs:
     # Rule H4 (#4565): a PR that closes an issue a strict known cell cites
     # must flip that cell in the same PR. It reads the PR body and the PR's
     # own commit messages (merge commits land them on main, where their
-    # closing keywords close issues). The body only reaches the step through
-    # env, never inlined in the script.
+    # closing keywords close issues); a treeless fetch gives the exact range.
+    # The body only reaches the step through env, never inlined in the script.
     - name: Known cells cite no issue this PR closes
       if: github.event_name == 'pull_request'
       env:
@@ -72,8 +72,8 @@ jobs:
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-        git fetch --no-tags --quiet --shallow-exclude="$BASE_REF" origin "$HEAD_SHA"
-        git log --format=%B "$HEAD_SHA" > "$RUNNER_TEMP/pr-commits.txt"
+        git fetch --no-tags --quiet --filter=tree:0 --unshallow origin "$HEAD_SHA" "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+        git log --format=%B "origin/$BASE_REF..$HEAD_SHA" > "$RUNNER_TEMP/pr-commits.txt"
         uv run --frozen --extra dev python -m tests.quality.known_cell_closing "$RUNNER_TEMP/pr-body.md" "$RUNNER_TEMP/pr-commits.txt"
 
   # Windows compatibility gate -- runs at PR time (not just post-merge
