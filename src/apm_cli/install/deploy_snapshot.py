@@ -889,6 +889,16 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     return None
 
 
+def has_abandoned_journals(store_parent: Path) -> bool:
+    """Whether a killed install left a journal the next full install must handle."""
+    with contextlib.suppress(OSError):
+        return any(
+            store.is_dir() and not os.path.lexists(store / _RETAINED_MARKER)
+            for store in store_parent.glob(f"{_STORE_PREFIX}*")
+        )
+    return False
+
+
 def replay_abandoned_journals(
     store_parent: Path,
     root: Path,
@@ -925,6 +935,11 @@ def replay_abandoned_journals(
     for store in stores:
         if not store.is_dir() or store.is_symlink() or os.path.lexists(store / _RETAINED_MARKER):
             continue
+        if not os.path.lexists(store / _MANIFEST):
+            # An in-memory journal (a fast apply, or an older APM) recorded
+            # nothing replay can prove: reclaim it, as every install did before.
+            shutil.rmtree(store, ignore_errors=True)
+            continue
         named = _store_identity(store)
         if named is not None and named != identity:
             continue
@@ -932,4 +947,7 @@ def replay_abandoned_journals(
         restored += outcome.restored
         kept += outcome.kept
         retained += outcome.retained
+    # Leave no empty store parent behind, as a settled journal does.
+    with contextlib.suppress(OSError):
+        store_parent.rmdir()
     return ReplayOutcome(restored, tuple(kept), tuple(retained))

@@ -40,24 +40,24 @@ def journaled_apply() -> Iterator[DeployJournal]:
     """Journal one verified fast apply (install/diff_apply.py) like an install's deploys.
 
     The caller records each path it creates; every path written at the
-    integrator write seam inside the block is recorded too. If the block
-    raises, every recorded path is restored before the exception propagates;
-    a restore that leaves any path behind raises :class:`ApplyRestoreIncomplete`.
-    Call it under the lifecycle lock: the journals of killed installs are
-    reclaimed first, as :meth:`InstallTransaction.journal_deploy_writes` does.
+    integrator write seam inside the block is recorded, with its expected
+    bytes and its post-write seal, too. If the block raises, every recorded
+    path is restored before the exception propagates; a restore that leaves
+    any path behind raises :class:`ApplyRestoreIncomplete`. Call it under the
+    lifecycle lock, after the install entry replayed any journal a killed
+    install left (#4863).
     """
     from apm_cli.core.scope import get_apm_home
-    from apm_cli.install.deploy_snapshot import DeployJournal, reap_abandoned_journals
+    from apm_cli.install.deploy_snapshot import DeployJournal
     from apm_cli.integration import write_seam
 
     store_parent = get_apm_home() / "install-snapshots"
-    reap_abandoned_journals(store_parent)
     journal = DeployJournal(store_parent)
 
-    def seam(path: Path, contents: bool) -> None:
-        journal.record(path, contents=contents)
+    def seam(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
 
-    write_seam.listen(seam)
+    write_seam.listen(seam, journal.after_write)
     try:
         yield journal
     except BaseException as exc:
@@ -282,8 +282,8 @@ class InstallTransaction:
     ) -> None:
         """Capture the manifest and create one resolution staging session.
 
-        *recover_deploys* is ``False`` for a lock-only run (``apm lock``),
-        which never changes deployed files, not even to replay a journal.
+        *recover_deploys* is ``False`` for a lock-only run (``apm lock``) or a
+        dry run, which never change deployed files, not even to replay a journal.
         """
         from apm_cli.cache.deploy_store import process_umask
 
@@ -720,8 +720,8 @@ def transactional_pipeline(
                 apm_modules_dir=modules_dir,
                 validation=None,
                 logger=kwargs.get("logger"),
-                # apm lock never touches deployed files (#4863).
-                recover_deploys=not kwargs.get("lockfile_only", False),
+                # apm lock and a dry run never touch deployed files (#4863).
+                recover_deploys=not (kwargs.get("lockfile_only") or kwargs.get("dry_run")),
             )
             kwargs["transaction"] = transaction
         try:

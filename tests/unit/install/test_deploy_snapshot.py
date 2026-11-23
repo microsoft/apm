@@ -677,6 +677,42 @@ def test_a_lock_only_transaction_never_replays_a_journal(tmp_path: Path, apm_hom
     assert store.is_dir()
 
 
+@pytest.mark.parametrize("flag", ["dry_run", "lockfile_only"])
+def test_a_preview_or_lock_only_pipeline_never_replays_a_journal(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """A direct preview or lock-only pipeline call changes no deployed file (#4863)."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.transaction import transactional_pipeline
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    store = _killed_journal(apm_home, project, created)
+    monkeypatch.chdir(project)
+
+    transactional_pipeline(lambda **_kwargs: None)(
+        scope=InstallScope.PROJECT, logger=None, **{flag: True}
+    )
+
+    assert created.read_bytes() == b"killed\n"
+    assert store.is_dir()
+
+
+def test_a_journal_without_a_manifest_is_reclaimed(tmp_path: Path, apm_home: Path) -> None:
+    """A fast apply's in-memory journal records nothing to replay: reclaimed, as before."""
+    from apm_cli.install.deploy_snapshot import has_abandoned_journals
+
+    store = apm_home / "install-snapshots" / "deploy-fast"
+    store.mkdir(parents=True)
+    (store / "0").write_bytes(b"prior lockfile\n")
+    assert has_abandoned_journals(store.parent)
+
+    outcome = _replay(apm_home, tmp_path)
+
+    assert outcome.restored == 0
+    assert not store.parent.exists()
+
+
 def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
     import json
 
@@ -842,7 +878,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     assert (restored.restored, restored.kept) == (1, ())
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
     assert hook.stat().st_mode & 0o777 == 0o755
-    assert not any((apm_home / "install-snapshots").iterdir())
+    assert not (apm_home / "install-snapshots").exists()
 
 
 def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: Path) -> None:
