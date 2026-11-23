@@ -218,50 +218,78 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
     from apm_cli.cache.git_cache import GitCache
     from apm_cli.cache.paths import get_cache_root
     from apm_cli.constants import APM_MODULES_DIR
+
+    modules = project_root / APM_MODULES_DIR
+    cache = GitCache(get_cache_root(), read_only=True)
+    wanted: list[tuple[Any, str | None, Path, str]] = []
+    try:
+        for key, dep in lock.dependencies.items():
+            _plan_package(key, dep, modules, lock, wanted)
+    except Decline as declined:
+        # Every earlier package's cache lookup still outranks this decline, as in lock order.
+        _checkouts(cache, wanted)
+        raise declined from None
+    return _checkouts(cache, wanted)
+
+
+def _plan_package(
+    key: str, dep: Any, modules: Path, lock: Any, wanted: list[tuple[Any, str | None, Path, str]]
+) -> None:
     from apm_cli.drift import locked_copy_is_stale
     from apm_cli.install.cache_pin import marker_is_current
     from apm_cli.install.source_helpers import locked_content_mismatch
 
-    modules = project_root / APM_MODULES_DIR
-    cache = GitCache(get_cache_root(), read_only=True)
-    plan: list[tuple[Path, Path, str]] = []
-    for key, dep in lock.dependencies.items():
-        if key == "." or getattr(dep, "source", None) is not None:
-            raise Decline("non-git source")
-        if getattr(dep, "discovered_via", None) or getattr(dep, "marketplace_plugin_name", None):
-            raise Decline("marketplace source")
-        sha = getattr(dep, "resolved_commit", None)
-        if not sha:
-            raise Decline("unpinned dependency")
-        if not getattr(dep, "content_hash", None):
-            # locked_content_mismatch proves nothing without one: the full run decides.
-            raise Decline("no locked content hash")
-        ref = dep.to_dependency_ref()
-        if getattr(ref, "is_virtual", False) or getattr(ref, "virtual_path", None):
-            raise Decline("virtual package")
-        install_path = ref.get_install_path(modules)
-        if os.path.lexists(install_path) and (
-            install_path.is_symlink() or not install_path.is_dir()
+    if key == "." or getattr(dep, "source", None) is not None:
+        raise Decline("non-git source")
+    if getattr(dep, "discovered_via", None) or getattr(dep, "marketplace_plugin_name", None):
+        raise Decline("marketplace source")
+    sha = getattr(dep, "resolved_commit", None)
+    if not sha:
+        raise Decline("unpinned dependency")
+    if not getattr(dep, "content_hash", None):
+        # locked_content_mismatch proves nothing without one: the full run decides.
+        raise Decline("no locked content hash")
+    ref = dep.to_dependency_ref()
+    if getattr(ref, "is_virtual", False) or getattr(ref, "virtual_path", None):
+        raise Decline("virtual package")
+    install_path = ref.get_install_path(modules)
+    if os.path.lexists(install_path) and (install_path.is_symlink() or not install_path.is_dir()):
+        # Not a package copy: APPLY never replaces it, the full run decides.
+        raise Decline("non-directory at a package path")
+    if install_path.is_dir():
+        if not marker_is_current(install_path, sha):
+            # A matching content hash does not restore a deleted or foreign
+            # marker; the full run's cache-pin sync does (cache_pin.py).
+            raise Decline("cache pin marker")
+        # A present copy must already prove its locked content: decline before any write.
+        if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
+            key, dep, install_path, lockfile=lock
         ):
-            # Not a package copy: APPLY never replaces it, the full run decides.
-            raise Decline("non-directory at a package path")
-        if install_path.is_dir():
-            if not marker_is_current(install_path, sha):
-                # A matching content hash does not restore a deleted or foreign
-                # marker; the full run's cache-pin sync does (cache_pin.py).
-                raise Decline("cache pin marker")
-            # A present copy must already prove its locked content: decline before any write.
-            if locked_copy_is_stale(dep, install_path) or locked_content_mismatch(
-                key, dep, install_path, lockfile=lock
-            ):
-                raise Decline("stale package copy")
-            continue
-        try:
-            checkout = cache.get_checkout(ref.to_github_url(), dep.resolved_ref, locked_sha=sha)
-        except Exception:
-            raise Decline("package not in the git cache") from None
-        plan.append((checkout, install_path, sha))
-    return plan
+            raise Decline("stale package copy")
+        return
+    wanted.append((ref, dep.resolved_ref, install_path, sha))
+
+
+def _checkouts(
+    cache: Any, wanted: list[tuple[Any, str | None, Path, str]]
+) -> list[tuple[Path, Path, str]]:
+    """Verified cache checkouts, in lock order; each lookup is independent and read-only."""
+
+    def checkout(item: tuple[Any, str | None, Path, str]) -> Path:
+        ref, resolved_ref, _, sha = item
+        return cache.get_checkout(ref.to_github_url(), resolved_ref, locked_sha=sha)
+
+    try:
+        if len(wanted) < 2:
+            found = [checkout(item) for item in wanted]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(8, len(wanted))) as pool:
+                found = list(pool.map(checkout, wanted))
+    except Exception:
+        raise Decline("package not in the git cache") from None
+    return [(path, item[2], item[3]) for path, item in zip(found, wanted, strict=True)]
 
 
 def _stage_package(checkout: Path, key: str, dep: Any, lock: Any, sha: str, staging: Path) -> Path:
@@ -515,7 +543,7 @@ def _refuse_native_plugins(project_root: Path, lock: Any) -> None:
     """Native plugin registration and retirement run only in the full install's
     last phases (install/pipeline.py: codex_plugins, claude_plugins), which APPLY omits.
     """
-    from apm_cli.codex_plugins.registrar import ledger_path_for
+    from apm_cli.codex_plugins.ledger_path import ledger_path_for
     from apm_cli.constants import APM_MODULES_DIR
     from apm_cli.models.validation import PackageType
     from apm_cli.native_plugins.record import lock_native_plugins

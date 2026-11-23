@@ -213,6 +213,7 @@
       "selectors": [
         "src/apm_cli/codex_plugins/admission.py",
         "src/apm_cli/codex_plugins/client.py",
+        "src/apm_cli/codex_plugins/ledger_path.py",
         "src/apm_cli/codex_plugins/manifest.py",
         "src/apm_cli/codex_plugins/registrar.py",
         "src/apm_cli/codex_plugins/snapshot.py",

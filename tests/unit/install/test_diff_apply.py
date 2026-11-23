@@ -5,6 +5,9 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -169,6 +172,84 @@ def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> 
     with pytest.raises(Decline, match="no locked content hash"):
         diff_apply._plan_packages(tmp_path, lock)
     assert not any(tmp_path.iterdir())
+
+
+def _cache_lookups(monkeypatch: pytest.MonkeyPatch, lookup) -> None:
+    from apm_cli.cache import git_cache
+
+    monkeypatch.setattr(
+        git_cache, "GitCache", lambda *_a, **_k: SimpleNamespace(get_checkout=lookup)
+    )
+
+
+def _git_lock(*keys: str) -> SimpleNamespace:
+    from apm_cli.models.dependency.reference import DependencyReference
+
+    lock = _lock(**{key: {} for key in keys})
+    for key, dep in lock.dependencies.items():
+        dep.resolved_ref = None
+        dep.to_dependency_ref = lambda key=key: DependencyReference.parse(key)
+    return lock
+
+
+def test_independent_cache_lookups_run_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each lookup verifies its checkout through its own git reader: none waits on another."""
+    both_waiting = threading.Barrier(2, timeout=5)
+
+    def lookup(url: str, _ref: object, *, locked_sha: str) -> Path:
+        both_waiting.wait()
+        return tmp_path / "cache" / url.rsplit("/", 1)[-1] / locked_sha
+
+    _cache_lookups(monkeypatch, lookup)
+    plan = diff_apply._plan_packages(tmp_path, _git_lock("o/a", "o/b"))
+    assert [(checkout.parent.name, install.name) for checkout, install, _ in plan] == [
+        ("a", "a"),
+        ("b", "b"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("order", "reason"),
+    [
+        (("o/miss", "o/virtual"), "package not in the git cache"),
+        (("o/virtual", "o/miss"), "virtual package"),
+    ],
+)
+def test_the_first_package_in_lock_order_names_the_decline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str], reason: str
+) -> None:
+    """Concurrent lookups keep the sequential verdict: the earliest failing package wins."""
+
+    def lookup(url: str, _ref: object, *, locked_sha: str) -> Path:
+        raise LookupError(url)
+
+    _cache_lookups(monkeypatch, lookup)
+    lock = _git_lock(*order)
+    lock.dependencies["o/virtual"].to_dependency_ref = lambda: SimpleNamespace(is_virtual=True)
+    with pytest.raises(Decline, match=reason):
+        diff_apply._plan_packages(tmp_path, lock)
+    assert not any(tmp_path.iterdir())
+
+
+def test_the_native_plugin_decline_never_imports_the_codex_registrar(tmp_path: Path) -> None:
+    """The bare-install check needs only the ownership journal's path, not registration code."""
+    probe = (
+        "import sys; from pathlib import Path; from types import SimpleNamespace; "
+        "from apm_cli.install import diff_apply; "
+        "diff_apply._refuse_native_plugins(Path(sys.argv[1]), SimpleNamespace(dependencies={})); "
+        "print(sorted(m for m in sys.modules if m.startswith('apm_cli.codex_plugins.')))"
+    )
+    src = str(Path(diff_apply.__file__).resolve().parents[2])
+    loaded = subprocess.run(
+        [sys.executable, "-c", probe, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONPATH": src},
+    ).stdout.strip()
+    assert loaded == "['apm_cli.codex_plugins.ledger_path']"
 
 
 @pytest.mark.parametrize("kind", ["file", "symlink"])
