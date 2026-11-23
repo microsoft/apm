@@ -12,12 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Highlights
 
 - Upgrade notes: plain `apm audit` exits 1 on drift when a required org policy cannot be resolved; org policies now gate transitive MCP servers. (#4920, #4827)
+- Upgrade notes: blocking org policies now stop `apm install` on `manifest.scripts`, `unmanaged_files` and `dependencies.max_depth` violations. (#4853)
 - `apm install` cleans up emptied MCP and Claude config files and narrowed Claude plugins; `apm audit --ci` flags edited MCP entries. (#4862, #4895, #4905)
 
 ### Breaking changes and upgrade notes
 
 - Plain `apm audit` exits 1 on drift when a required org policy cannot be resolved, naming the cause; restore access to the org policy. (#4920)
 - Any non-empty org policy now requires an `mcp.allow` entry per transitive MCP server unless it sets `mcp.trust_transitive: true`; add entries or opt in. (#4827)
+- **BREAKING:** Under a blocking org policy, `apm install` now refuses `manifest.scripts: deny`, `unmanaged_files.action: deny` and `dependencies.max_depth` violations; fix the named field. (#4853)
 
 ### Fixed
 
