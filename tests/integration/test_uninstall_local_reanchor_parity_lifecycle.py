@@ -453,11 +453,22 @@ def _case_insensitive(path: Path) -> bool:
         probe.rmdir()
 
 
-def _respelled_world(tmp_path: Path, apm_binary_path: Path, link_f) -> ReplayWorld:
-    """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f."""
+def _respelled_world(
+    tmp_path: Path, apm_binary_path: Path, link_f, f_deps: tuple[str, ...] = (), prod_chain=False
+) -> ReplayWorld:
+    """e -> ../F direct, dev d -> e and a -> ../f; *link_f* makes vendor/f.
+
+    *prod_chain* adds production p -> q -> ../F, which the walk reaches first
+    although a's shallower dev edge wins F's spelling.
+    """
     world = ReplayWorld.create(tmp_path, apm_binary_path)
     vendor = world.project / "vendor"
-    _skill_package(vendor / "F", "F")
+    _skill_package(vendor / "F", "F", f_deps)
+    if f_deps:
+        _skill_package(vendor / "g", "g")
+    if prod_chain:
+        _skill_package(vendor / "q", "q", ("../F",))
+        _skill_package(vendor / "p", "p", ("../q",))
     link_f(vendor)
     _skill_package(vendor / "e", "e", ("../F",))
     _skill_package(vendor / "d", "d", ("../e",))
@@ -467,7 +478,7 @@ def _respelled_world(tmp_path: Path, apm_binary_path: Path, link_f) -> ReplayWor
             "name": "proj",
             "version": "1.0.0",
             "targets": ["claude"],
-            "dependencies": {"apm": ["./vendor/e"]},
+            "dependencies": {"apm": ["./vendor/e", *(["./vendor/p"] if prod_chain else [])]},
             "devDependencies": {"apm": ["./vendor/d", "./vendor/a"]},
         },
         world.project / "apm.yml",
@@ -478,14 +489,24 @@ def _respelled_world(tmp_path: Path, apm_binary_path: Path, link_f) -> ReplayWor
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+@pytest.mark.parametrize(
+    ("f_deps", "prod_chain"),
+    [((), False), (("../g",), False), (("../g",), True)],
+    ids=["leaf", "with-child", "cross-root-child"],
+)
 def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
-    tmp_path: Path, apm_binary_path: Path
+    tmp_path: Path, apm_binary_path: Path, f_deps: tuple[str, ...], prod_chain: bool
 ) -> None:
-    """vendor/f links to vendor/F: a's ../f wins after e goes, so F takes that spelling."""
+    """vendor/f links to vendor/F: a's ../f wins after e goes, so F takes that spelling;
+    a child g beneath F then names F by that spelling too."""
+    if _case_insensitive(tmp_path):
+        pytest.skip("vendor/f and vendor/F are one name here; the case-only cell covers it")
     world = _respelled_world(
         tmp_path,
         apm_binary_path,
         lambda vendor: (vendor / "f").symlink_to(vendor / "F", target_is_directory=True),
+        f_deps,
+        prod_chain,
     )
 
     world.apm("uninstall", "./vendor/e")

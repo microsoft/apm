@@ -26,6 +26,7 @@ their hash history (:mod:`apm_cli.core.deployment_reanchor`).
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -272,7 +273,8 @@ def _materialization_moves(lockfile, nodes, modules_dir: Path, label):
         if target.exists() and _same_directory(current, target):
             # A case-only rename goes through a temporary name, which every
             # case-insensitive filesystem honors (#5091).
-            step = current.with_name(f".apm-reanchor-case-{current.name}")
+            # A short name: the package name may already be near the length limit.
+            step = current.with_name(f".apm-case-{secrets.token_hex(4)}")
             if step.exists():
                 raise LocalReanchorRefused(
                     f"{label(key)} stays, but {_modules_path(step, modules_dir)} is in the way"
@@ -512,7 +514,14 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
     """
     if not plan:
         return False
+    from ...deps.lockfile import lockfile_parent_identity
+
     renames = {old: new for old, new in plan.renames.items() if old != new}
+    replacements = getattr(lockfile, "replacements", None)
+    old_identity = {
+        key: lockfile_parent_identity(lockfile.dependencies[key], replacements)
+        for key in plan.identities
+    }
     for key, (local_path, parent_key, anchored, repo_url) in plan.identities.items():
         row = lockfile.dependencies[key]
         row.local_path, row.declaring_parent, row.anchored_local_path = (
@@ -539,9 +548,30 @@ def apply_local_reanchor(lockfile, plan: LocalReanchorPlan, dev: dict | None = N
             if row.resolved_by in renames:
                 row.resolved_by = renames[row.resolved_by]
             lockfile.dependencies[renames.get(key, key)] = row
+    _reidentify_children(lockfile, old_identity, renames, replacements)
     for row in lockfile.dependencies.values():
         _rekey_requests(row.replacement, renames, dev or {}, plan.visit_order)
     return True
+
+
+def _reidentify_children(lockfile, old_identity: dict, renames: dict, replacements) -> None:
+    """Point children at a re-identified parent's new identity (#5091).
+
+    Without replacements a child names its parent by repository identity, not
+    by lock key, so a respelled parent (``_local/F`` -> ``_local/f``) would
+    leave its children naming a parent that no longer exists.
+    """
+    from ...deps.lockfile import lockfile_parent_identity
+
+    moved = {}
+    for key, before in old_identity.items():
+        row = lockfile.dependencies.get(renames.get(key, key))
+        after = lockfile_parent_identity(row, replacements) if row is not None else before
+        if after != before:
+            moved[before] = after
+    for row in lockfile.dependencies.values():
+        if row.resolved_by in moved:
+            row.resolved_by = moved[row.resolved_by]
 
 
 def snapshot_for_rollback(plan: LocalReanchorPlan, paths: tuple[Path, ...]) -> LocalReanchorPlan:
