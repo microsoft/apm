@@ -18,6 +18,7 @@ import requests
 
 from ..cache.cached_repo import validate_cached_links
 from ..cache.checkout_verify import require_verified_checkout, require_verified_copy
+from ..cache.git_cache import dir_size, raise_if_tampered
 from ..core.auth import AuthContext, AuthResolver
 from ..models.apm_package import (
     DependencyReference,
@@ -110,31 +111,6 @@ def _rmtree(path) -> None:
     from ..utils.file_ops import robust_rmtree
 
     robust_rmtree(path, ignore_errors=True)
-
-
-def _dir_size_bytes(path: Path) -> int:
-    """Return the total on-disk size of a directory tree in bytes.
-
-    Best-effort: silently skips files that disappear or cannot be
-    stat-ed mid-walk (e.g. transient .git lock files). Uses ``lstat``
-    so symlinks contribute the size of the link itself, never the
-    target -- this keeps the measurement bounded to the directory
-    tree and matches :func:`apm_cli.cache.git_cache._dir_size`. Used
-    only for verbose-mode perf diagnostics (#1433) -- never gates
-    behavior.
-    """
-    total = 0
-    try:
-        for dirpath, _dirnames, filenames in os.walk(str(path)):
-            for fname in filenames:
-                fpath = os.path.join(dirpath, fname)
-                try:
-                    total += os.lstat(fpath).st_size
-                except OSError:
-                    continue
-    except OSError:
-        return 0
-    return total
 
 
 def _git_progress_reporter_class() -> type:
@@ -1434,8 +1410,6 @@ class GitHubPackageDownloader:
                     sparse_paths=[subdir_path],
                 )
             except Exception as exc:
-                from ..cache.git_cache import raise_if_tampered
-
                 # A read-only reader reports a tampered cache instead of cloning past it.
                 raise_if_tampered(exc)
                 # Cache miss or failure -- fall through to normal clone path.
@@ -1475,7 +1449,7 @@ class GitHubPackageDownloader:
                             _persistent_checkout,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(_persistent_checkout),
+                        consumer_size_bytes=dir_size(_persistent_checkout),
                     )
             elif use_shared:
                 # WS2 (#1126): shared cache holds BARE clones keyed by
@@ -1572,7 +1546,7 @@ class GitHubPackageDownloader:
                             temp_clone_path,
                             env=self._git_env_dict(),
                         ),
-                        consumer_size_bytes=_dir_size_bytes(temp_clone_path),
+                        consumer_size_bytes=dir_size(temp_clone_path),
                     )
             else:
                 # Legacy per-dep clone path (no shared cache).
@@ -1967,8 +1941,6 @@ class GitHubPackageDownloader:
                     _rmtree(target_path)
                 raise
             except Exception as exc:
-                from ..cache.git_cache import raise_if_tampered
-
                 raise_if_tampered(exc)
                 # Any cache failure -> fall back to network clone.
                 if target_path.exists() and any(target_path.iterdir()):

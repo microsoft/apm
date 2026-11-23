@@ -389,11 +389,12 @@ class GitCache:
                 return checkout
             copy = _cached_copy_name(label, url, sha)
             if self._read_only:
+                from ..core.remediation import CACHED_CHECKOUT_TAMPERED
+
                 # A read-only reader (audit) reports a tampered cache; it never repairs it.
                 raise CachedCheckoutTamperedError(
                     f"Cached copy of {copy} does not match its commit; a read-only command "
-                    "does not repair the cache. Run 'apm install' to rebuild it from the "
-                    "locked commit."
+                    f"does not repair the cache. {CACHED_CHECKOUT_TAMPERED.sentence()}"
                 )
             if attempt == 0:
                 from ..utils.console import _rich_warning
@@ -1320,7 +1321,7 @@ class GitCache:
             for entry in os.scandir(str(self._db_root)):
                 if entry.is_dir(follow_symlinks=False) and not entry.name.endswith(".lock"):
                     db_count += 1
-                    total_size += _dir_size(Path(entry.path))
+                    total_size += dir_size(Path(entry.path))
                 elif entry.name.endswith(".ref") and entry.is_file(follow_symlinks=False):
                     total_size += entry.stat(follow_symlinks=False).st_size
 
@@ -1330,7 +1331,7 @@ class GitCache:
                     for sha_entry in os.scandir(shard_entry.path):
                         if sha_entry.is_dir(follow_symlinks=False):
                             checkout_count += 1
-                            total_size += _dir_size(Path(sha_entry.path))
+                            total_size += dir_size(Path(sha_entry.path))
 
         return {
             "db_count": db_count,
@@ -1411,7 +1412,7 @@ def _same_path(value: str, path: Path) -> bool:
         return False
 
 
-def _dir_size(path: Path) -> int:
+def dir_size(path: Path) -> int:
     """Calculate total size of a directory (non-recursive symlink-safe)."""
     total = 0
     try:
