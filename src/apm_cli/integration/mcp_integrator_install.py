@@ -31,6 +31,10 @@ from apm_cli.install.errors import (
     MCPNativeConflictError,
     RequiredIntegrationError,
 )
+from apm_cli.integration.mcp_install_summary import (
+    _mark_unknown_noop_forms,
+    _print_mcp_summary,
+)
 from apm_cli.integration.mcp_registry_hints import (
     CHOOSING_MCP_REGISTRY_DOCS_URL,  # noqa: F401 -- re-exported for tests
     _emit_registry_choice_hint,
@@ -1495,7 +1499,12 @@ def _install_self_defined_deps(
         name for name in already_configured_candidates_sd if name not in servers_to_update
     ]
 
-    _mark_unknown_noop_forms(servers_to_update, already_configured_self_defined)
+    _mark_unknown_noop_forms(
+        servers_to_update,
+        already_configured_self_defined,
+        configuring=self_defined_to_install,
+        uncompared=[rt for rt in target_runtimes if rt not in protected_clients],
+    )
     if already_configured_self_defined:
         if console:
             for name in already_configured_self_defined:
@@ -1714,47 +1723,6 @@ def _install_self_defined_deps(
         raise MCPNativeConflictError(message, wrote_connections=bool(written_connections))
     _raise_strict_config_failures(failed_installations, console=console, logger=logger)
     return configured_count
-
-
-def _print_mcp_summary(
-    console,
-    configured_count: int,
-    successful_updates: builtins.set,
-) -> None:
-    """Print the MCP install summary footer panel."""
-    if not console:
-        return
-    if configured_count == 0:
-        _print_servers_up_to_date(console)
-        return
-    if verdict_record.recording_active():
-        # The no-op form of this footer, for the verified-state record (#4977).
-        with verdict_record.noop_only():
-            _print_servers_up_to_date(console)
-    # Use successful_updates (not servers_to_update) for accurate counts.
-    # servers_to_update = all drift-detected servers (some may have failed).
-    # successful_updates = servers that were re-applied AND succeeded.
-    update_count = builtins.len(successful_updates)
-    new_count = configured_count - update_count
-    parts = []
-    if new_count > 0:
-        parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
-    if update_count > 0:
-        parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
-    with verdict_record.change_only():
-        console.print(f"[green]{STATUS_SYMBOLS['success']} {', '.join(parts).capitalize()}[/green]")
-
-
-def _mark_unknown_noop_forms(updates: Any, already_configured: Any) -> None:
-    """Outputs whose no-op form is not known: the verified-state record records nothing."""
-    if updates:
-        verdict_record.unknown("mcp update")
-    if already_configured:
-        verdict_record.unknown("mcp already-configured listing")
-
-
-def _print_servers_up_to_date(console: Any) -> None:
-    console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
 def run_mcp_install(  # noqa: PLR0913

@@ -140,7 +140,8 @@
         "src/apm_cli/install/pipeline_entry.py",
         "src/apm_cli/install/verdict_key.py",
         "src/apm_cli/install/verdict_key_windows.py",
-        "src/apm_cli/install/verdict_record.py"
+        "src/apm_cli/install/verdict_record.py",
+        "src/apm_cli/integration/mcp_install_summary.py"
       ],
       "guards": ["install-deployment-install-entry-routing"]
     },

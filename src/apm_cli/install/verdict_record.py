@@ -297,9 +297,21 @@ def _env_log() -> Iterator[None]:
             os.environ = original  # type: ignore[assignment]  # noqa: B003
 
 
+_PROVEN_LOCK: list[bytes | None] = []
+
+
+def _note_proven_lock() -> None:
+    """The lock bytes the proving install held its lifecycle lock over."""
+    try:
+        _PROVEN_LOCK.append(_read_nofollow(Path.cwd() / "apm.lock.yaml"))
+    except OSError:
+        _PROVEN_LOCK.append(None)
+
+
 def note_verified_noop() -> None:
-    """The install engine proved this run a no-op: its output may be recorded."""
+    """The install engine proved this run a no-op (under its lifecycle lock)."""
     _VERIFIED_NOOP.append(True)
+    _note_proven_lock()
 
 
 def _served(argv: list[str]) -> bool:
@@ -322,7 +334,15 @@ def _hits_allowed() -> bool:
     mode = _fast_path_mode()
     if mode in _KILL_VALUES or mode == "decide":
         return False  # the kill switch disables the record; deciding never replays
-    return not any((_env(name) or "").strip() for name in _NO_HIT_ENV)
+    if any((_env(name) or "").strip() for name in _NO_HIT_ENV):
+        return False
+    from apm_cli.core.experimental import is_enabled
+
+    try:
+        # The opt-in install-time audit scans every install (diff_apply declines too).
+        return not is_enabled("external_scanners", create_config=False)
+    except Exception:
+        return False
 
 
 def _apm_home() -> Path:
@@ -627,6 +647,8 @@ def _inputs(
     deployed: frozenset[str],
 ) -> None:
     """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
+    if os.path.lexists(os.path.join(root, ".apm")):
+        raise ValueError("root .apm sources")  # not verdict inputs: never recorded, never a hit
     digest.put("version", str(RECORD_VERSION).encode())
     digest.put("build", str(getattr(sys.modules.get("apm_cli"), "__version__", "")).encode())
     digest.put("argv", "\x00".join(argv).encode())
@@ -700,6 +722,9 @@ def _inputs(
 # for discovery (cached_at + capped_ttl(cache.ttl)), so a refetch is never
 # replayed past (W3d R2).
 _RECORD_MAX_AGE = 24 * 3600
+# deps/lockfile.FRAMED_CONTENT_HASH_VERSION (asserted equal in the cells): importing
+# the lockfile owner costs a hit more than the whole replay.
+_FRAMED_LOCKFILE_VERSION = "4"
 _CLOCK_SKEW = 300
 
 
@@ -714,7 +739,11 @@ def _policy_fresh_until(meta_path: Path) -> float:
         policy, _warnings = load_policy(document.read_text(encoding="utf-8"))
         ttl = capped_ttl(int(policy.cache.ttl))
     except Exception:  # an unreadable policy is never fresh: the record is born expired
-        ttl = 0
+        return 0.0
+    governed = policy.unmanaged_files.directories or ()
+    if any(str(d).strip("/").split("/")[0] not in _GOVERNED_DIRS for d in governed):
+        # The commit gate scans these directories; the record keys only target roots.
+        raise ValueError("policy governs unmanaged files outside the target roots")
     return float(meta.get("cached_at", 0)) + ttl
 
 
@@ -779,6 +808,20 @@ def _render_ages(text: str) -> str:
     return _AGE_TOKEN_RE.sub(age, text)
 
 
+def _policy_absence_unproven(root: Path) -> bool:
+    """Discovery re-checks an org without a cached policy on every run (it caches no
+    absence), so a record cannot stand in for that check."""
+    if _policy_metas():
+        return False
+    from apm_cli.policy._remote import (
+        _extract_org_host_port_from_git_remote,
+        reuse_remote_reads,
+    )
+
+    with reuse_remote_reads():  # this run already read the remote
+        return _extract_org_host_port_from_git_remote(root) is not None
+
+
 def _expiry(issued: float) -> float:
     expiry = issued + _RECORD_MAX_AGE
     cache = _cache_root()
@@ -814,6 +857,8 @@ def _provable_row(field: Any) -> bool:
 
 
 def _provable(lock: dict) -> bool:
+    if lock.get("local_deployed_files") or lock.get("local_staged_files"):
+        return False  # root-local content: its sources are not verdict inputs
     rows = lock.get("dependencies") or []
     return all(isinstance(row, dict) and _provable_row(row.get) for row in rows)
 
@@ -845,13 +890,16 @@ def _deployed_intact(root: Path, lock: dict) -> bool:
         package = root / "apm_modules" / Path(*repo.split("/"))
         if package.is_symlink() or not package.is_dir():
             return False
-        from apm_cli.deps.carried_license import carried_license_paths
-        from apm_cli.utils.content_hash import verify_package_hash
+        from apm_cli.deps.carried_license import verify_locked_package
 
-        exclude = carried_license_paths([_Row(item) for item in dep.get("carried_licenses") or ()])
-        framed = bool(dep.get("content_hash_framed", True))
-        if not verify_package_hash(package, str(expected), exclude=exclude, framed=framed):
-            return False
+        # The lock owner's hash-stream selection: framed only at lockfile version 4.
+        framed = lock.get("lockfile_version") == _FRAMED_LOCKFILE_VERSION
+        records = [_Row(item) for item in dep.get("carried_licenses") or ()]
+        if not verify_locked_package(package, str(expected), records, framed=framed):
+            return False  # the package bytes and its carried licence copies (W3d R3)
+        for _rel, files, _dirs in _tree(str(package)):
+            if any(entry.is_symlink() for entry in files):
+                return False  # hashing skips links; sources_scan_clean refuses them
     return True
 
 
@@ -928,17 +976,37 @@ def replay(argv: list[str]) -> bool:
     if not _served(argv) or not _hits_allowed():
         return False
     try:
+        if not os.path.lexists(_record_path(Path.cwd())):
+            return False
+    except (OSError, ValueError):
+        return False
+    lock = None
+    try:
+        from apm_cli.install.locking import acquire_lifecycle_lock
+
+        lock = acquire_lifecycle_lock()  # never over a concurrent install's partial state
         record, stdout_text = _verified_stdout(argv, Path.cwd())
-    except _Miss as miss:
-        if str(miss):
-            _trace(f"miss ({miss})")
+        stderr_text = str(record.get("stderr", ""))
+        for stream, text in ((sys.stdout, stdout_text), (sys.stderr, stderr_text)):
+            text.encode(getattr(stream, "encoding", None) or "utf-8")
+    except Exception as exc:  # a miss, a busy lock, an unencodable record: run the CLI
+        if lock is not None:
+            lock.release()
+        if not isinstance(exc, _Miss):
+            _trace(f"miss ({type(exc).__name__})")
+        elif str(exc):
+            _trace(f"miss ({exc})")
         return False
-    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
-        _trace(f"miss ({type(exc).__name__})")
-        return False
+    try:
+        return _print_hit(started, stdout_text, stderr_text)
+    finally:
+        lock.release()
+
+
+def _print_hit(started: float, stdout_text: str, stderr_text: str) -> bool:
     elapsed = f"{time.perf_counter() - started:.1f}"
     sys.stdout.write(stdout_text.replace(_ELAPSED, elapsed))
-    sys.stderr.write(str(record.get("stderr", "")))
+    sys.stderr.write(stderr_text)
     sys.stdout.flush()
     if _fast_path_mode() == "trace":  # the one decision line of the fast-path trace contract
         sys.stderr.write("[i] install fast path: no-op (verified-state record)\n")
@@ -1030,8 +1098,9 @@ def unknown(reason: str) -> None:
 
 
 def note_full_success() -> None:
-    """A full (or applied) install finished: its no-op form may be recorded."""
+    """A full install finished (under its lifecycle lock): its no-op form may be recorded."""
     _FULL_SUCCESS.append(True)
+    _note_proven_lock()
 
 
 @contextmanager
@@ -1040,7 +1109,7 @@ def recording(argv: list[str]) -> Iterator[None]:
     if not _served(argv) or not _hits_allowed():
         yield
         return
-    for state in (_VERIFIED_NOOP, _UNKNOWN, _FULL_SUCCESS):
+    for state in (_VERIFIED_NOOP, _UNKNOWN, _FULL_SUCCESS, _PROVEN_LOCK):
         state.clear()
     _SEGMENTS.clear()
     _ENV_READS.clear()
@@ -1060,9 +1129,35 @@ def recording(argv: list[str]) -> Iterator[None]:
         _ACTIVE.remove(out)
         sys.stdout, sys.stderr = out.stream, err.stream
         if code == 0 and not _UNKNOWN:
-            _record_after(argv, entry, out, err)
+            _record_locked(argv, entry, out, err)
         elif _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
+
+
+def _record_locked(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
+    """Record under the lifecycle lock, only if the lock is still what the run proved.
+
+    The CLI released its lock when it returned: a concurrent install may have
+    changed the state since, so the record is written only while no one else
+    can, and only over the lock bytes the proving install held its lock over.
+    """
+    try:
+        from apm_cli.install.locking import acquire_lifecycle_lock
+
+        lock = acquire_lifecycle_lock()
+    except Exception as exc:  # busy: the install succeeded, only the record is lost
+        _trace(f"no record (lock: {type(exc).__name__})")
+        return
+    try:
+        current = _read_nofollow(Path.cwd() / "apm.lock.yaml")
+        if not _PROVEN_LOCK or _PROVEN_LOCK[-1] is None or current != _PROVEN_LOCK[-1]:
+            _trace("no record (the lock changed after the run proved it)")
+            return
+        _record_after(argv, entry, out, err)
+    except OSError as exc:
+        _trace(f"no record ({type(exc).__name__})")
+    finally:
+        lock.release()
 
 
 def _record_after(argv: list[str], entry: Any, out: _Tee, err: _Tee) -> None:
@@ -1112,10 +1207,13 @@ def _committed_lock() -> Any:
     if lock is None:
         _trace("no record (no lockfile)")
         return None
+    unprovable = lock.local_deployed_files or lock.local_staged_files
     for key, dep in lock.dependencies.items():
         if key != "." and not _provable_row(lambda name, dep=dep: getattr(dep, name, None)):
-            _trace("no record (a package copy a hit cannot prove)")
-            return None
+            unprovable = True
+    if unprovable:
+        _trace("no record (content a hit cannot prove)")
+        return None
     return lock
 
 
@@ -1195,6 +1293,9 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
         if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
             _trace("no record (clock-dependent output)")
             return  # O1: only the elapsed seconds may depend on the clock
+        if _policy_absence_unproven(root):
+            _trace("no record (no cached policy for a discoverable org)")
+            return
         key = _key(create=True)
         if key is None:
             _trace("no record (no private key)")

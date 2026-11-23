@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -47,7 +49,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     digest = "sha256:" + hashlib.sha256(_BODY).hexdigest()
     package_hash = compute_package_hash(root / "apm_modules" / "o" / "p", framed=True)
     (root / "apm.lock.yaml").write_text(
-        "lockfile_version: '1'\ndependencies:\n- repo_url: o/p\n"
+        "lockfile_version: '4'\ndependencies:\n- repo_url: o/p\n"
         f"  content_hash: {package_hash}\n  content_hash_framed: true\n"
         f"  deployed_file_hashes:\n    {_REL}: {digest}\n",
         encoding="utf-8",
@@ -605,3 +607,91 @@ def test_a_policy_script_added_after_the_record_misses(
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert capsys.readouterr().out == ""
+
+
+def test_the_hash_stream_follows_the_lock_owner(project: Path, capsys) -> None:
+    """A version 1-3 lock verifies legacy package hashes, as the lock owner selects."""
+    from apm_cli.deps.lockfile import FRAMED_CONTENT_HASH_VERSION
+    from apm_cli.utils.content_hash import compute_package_hash
+
+    assert verdict_record._FRAMED_LOCKFILE_VERSION == FRAMED_CONTENT_HASH_VERSION
+    legacy = compute_package_hash(project / "apm_modules" / "o" / "p", framed=False)
+    lock = (project / "apm.lock.yaml").read_text(encoding="utf-8")
+    lock = re.sub(r"content_hash: \S+", f"content_hash: {legacy}", lock)
+    lock = lock.replace("lockfile_version: '4'", "lockfile_version: '1'")
+    lock = re.sub(r"\n\s*content_hash_framed: true", "", lock)
+    (project / "apm.lock.yaml").write_text(lock, encoding="utf-8")
+    _record()
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "up to date in " in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need a privilege on Windows")
+def test_a_symlink_inside_a_package_copy_misses(project: Path, capsys) -> None:
+    """Package hashing skips links; the engine's source scan refuses them, so no hit."""
+    _record()
+    package = project / "apm_modules" / "o" / "p"
+    (package / "link.md").symlink_to(package / "apm.yml")
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert capsys.readouterr().out == ""
+
+
+def test_root_apm_sources_are_never_recorded(project: Path) -> None:
+    """Root .apm/ primitives are not verdict inputs: such a project never records."""
+    (project / ".apm" / "prompts").mkdir(parents=True)
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_lock_changed_after_the_proof_is_never_recorded(project: Path) -> None:
+    """The record is written under the lifecycle lock only over the lock the run proved."""
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+        with (project / "apm.lock.yaml").open("a", encoding="utf-8") as handle:
+            handle.write("# a concurrent install\n")
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_a_policy_governing_another_directory_is_never_recorded(project: Path) -> None:
+    """policy.unmanaged_files.directories outside the keyed target roots: no record."""
+    import json
+    import time
+
+    cache = project.parent / "cache" / "policy_v1"
+    cache.mkdir(parents=True)
+    (cache / "k.yml").write_text(
+        "enforcement: warn\ncache:\n  ttl: 3600\nunmanaged_files:\n  action: deny\n"
+        "  directories: [docs]\n",
+        encoding="utf-8",
+    )
+    (cache / "k.meta.json").write_text(json.dumps({"cached_at": time.time()}), "utf-8")
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_an_org_without_a_cached_policy_is_never_recorded(project: Path) -> None:
+    """Discovery re-checks an uncached org every run; a record cannot stand in for it."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "add", "origin", "https://github.com/acme/app.git"],
+        check=True,
+    )
+    _record()
+    assert not (_home(project) / "verdicts").exists()
+
+
+def test_configuring_a_client_without_native_comparison_records_nothing(project: Path) -> None:
+    """IntelliJ lists the server as already configured next time: an unknown no-op form."""
+    from apm_cli.integration.mcp_install_summary import _mark_unknown_noop_forms
+
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        _mark_unknown_noop_forms((), (), configuring=["srv"], uncompared=["intellij"])
+        verdict_record.note_verified_noop()
+    assert not (_home(project) / "verdicts").exists()
