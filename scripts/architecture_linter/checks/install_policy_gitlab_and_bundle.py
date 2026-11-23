@@ -44,6 +44,7 @@ RULE_WINNER_SELECTION = "install-deployment-dependency-winner-selection"
 
 
 RULE_REMOTE_ORIGIN_OWNER = "install-deployment-policy-remote-origin-owner"
+RULE_REMOTE_READ_REUSE = "install-deployment-remote-read-reuse"
 
 
 def _count_text(lines: Sequence[tuple[int, str]], needle: str) -> int:
@@ -191,28 +192,6 @@ def check_policy_remote_origin_owner(provider: FactsProvider) -> tuple[Violation
             message="Read the git remote origin only via _remote.py::_git_remote_origin_url",
             configured=False,
             respect_exempt=True,
-        )
-    )
-    if _count_re(owner, _REUSE_EPOCH) < 1:
-        findings.append(
-            _report(
-                rule_id,
-                _REMOTE_MODULE,
-                "policy/_remote.py must drop a reused remote read once user code ran "
-                "(core/invocation_memo.forget_epoch)",
-            )
-        )
-    findings.extend(
-        _banned(
-            provider,
-            rule_id=rule_id,
-            paths=_tree_python_paths(
-                provider, "src/apm_cli/", excluded=(_REMOTE_MODULE, _REUSE_CALLER)
-            ),
-            pattern=_REUSE_CALL,
-            message="Only install/verdict_record.py's no-op render may reuse a remote read",
-            configured=False,
-            respect_exempt=False,
         )
     )
     findings.extend(
@@ -404,4 +383,41 @@ def check_dependency_winner_selection(provider: FactsProvider) -> tuple[Violatio
                 _first_line(lines, _WINNER_SELECTOR_CALL),
             )
         )
+    return tuple(findings)
+
+
+def check_remote_read_reuse(provider: FactsProvider) -> tuple[Violation, ...]:
+    """The process-scoped remote-read reuse is a closed seam (#4977).
+
+    Only the verified-state record's write-time render (install/verdict_record.py)
+    may enter ``reuse_remote_reads``, and the owner must drop an answer read
+    before user code ran (``core/invocation_memo.forget_epoch``).
+    """
+    rule_id = RULE_REMOTE_READ_REUSE
+    owner, owner_fail = _configured(provider, _REMOTE_MODULE, rule_id)
+    if owner_fail:
+        return tuple(owner_fail)
+    findings: list[Violation] = []
+    if _count_re(owner, _REUSE_EPOCH) < 1:
+        findings.append(
+            _report(
+                rule_id,
+                _REMOTE_MODULE,
+                "policy/_remote.py must drop a reused remote read once user code ran "
+                "(core/invocation_memo.forget_epoch)",
+            )
+        )
+    findings.extend(
+        _banned(
+            provider,
+            rule_id=rule_id,
+            paths=_tree_python_paths(
+                provider, "src/apm_cli/", excluded=(_REMOTE_MODULE, _REUSE_CALLER)
+            ),
+            pattern=_REUSE_CALL,
+            message="Only install/verdict_record.py's no-op render may reuse a remote read",
+            configured=False,
+            respect_exempt=False,
+        )
+    )
     return tuple(findings)
