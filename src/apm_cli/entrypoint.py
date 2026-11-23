@@ -273,8 +273,11 @@ def _vh_mac(root: str, key: bytes, lock_text: bytes):
         for directory, dirnames, filenames in os.walk(base):
             dirnames.sort()
             put(directory, "\0".join(sorted(filenames) + ["/"] + dirnames).encode())
-    for key_name in sorted(
-        k for k in os.environ if k.startswith(("APM_", "PROXY_REGISTRY", "GITHUB_HOST", "GH_HOST"))
+    for key_name in sorted(  # apm-read env only: harness/trace vars never change a verdict
+        k
+        for k in os.environ
+        if k.startswith(("APM_", "PROXY_REGISTRY", "GITHUB_HOST", "GH_HOST"))
+        and not k.startswith(("APM_PERF_", "APM_INSTALL_FAST_PATH"))
     ):
         put("env", f"{key_name}={os.environ[key_name]}".encode())
     return mac
