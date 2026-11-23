@@ -97,7 +97,8 @@ def test_pruning_a_replaced_packages_parent_completes_or_changes_nothing(
 
     evidence = f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
     if result.returncode != 0:
-        # A refusal changes nothing.
+        # A refusal says so, and changes nothing.
+        assert "Nothing was changed" in result.stdout + result.stderr, evidence
         assert _modules(world.project) == modules, evidence
         assert lock_bytes(world.project) == lock, evidence
         assert tree_digest(world.project) == tree, evidence

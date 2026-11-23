@@ -50,6 +50,31 @@ from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
 
+def _refuse_broken_lock_graph(lockfile: LockFile | None, removed: set[str], logger) -> None:
+    """Refuse, before anything changes, a prune whose lockfile would not write (#5140).
+
+    Removing a replaced package's only parent leaves its row pointing at an
+    absent parent: the lockfile owner rejects that graph, so prune must not
+    delete anything first.
+    """
+    import copy
+
+    if lockfile is None or not removed:
+        return
+    remaining = copy.deepcopy(lockfile)
+    for key in removed:
+        remaining.dependencies.pop(key, None)
+    try:
+        remaining.to_yaml()
+    except LockfileFormatError as exc:
+        logger.error(f"Cannot prune {', '.join(sorted(removed))}: {exc}. Nothing was changed.")
+        logger.error_detail(
+            "Keep the package that declares the replaced dependency in apm.yml, "
+            "or remove that dependency's replace entry."
+        )
+        sys.exit(1)
+
+
 def _preflight_prune_survivors(
     apm_package: APMPackage,
     project_root: Path,
@@ -251,6 +276,9 @@ def prune(ctx, dry_run):
             return
 
         planned_pruned_keys = set(decision.removed_keys)
+        _refuse_broken_lock_graph(
+            lockfile, planned_pruned_keys | set(missing_orphaned_keys), logger
+        )
         if planned_pruned_keys and not dry_run:
             _preflight_prune_survivors(
                 apm_package,
