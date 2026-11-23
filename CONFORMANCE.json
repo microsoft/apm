@@ -2578,8 +2578,11 @@
     },
     {
       "behavioral_tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused[repo-cached]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused[repo-no-cache]",
         "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable",
         "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact",
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_replay_fails_closed_and_keeps_the_lockfile",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[False]",
@@ -2590,10 +2593,13 @@
       "keyword": "MUST",
       "section": "7.5",
       "status": "active",
-      "test_count": 7,
+      "test_count": 10,
       "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused[repo-cached]",
+        "tests/spec_conformance/test_resolution_reqs.py::test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused[repo-no-cache]",
         "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable",
         "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_commit_is_verified_once_then_replays_without_contact",
+        "tests/spec_conformance/test_resolution_reqs.py::test_an_unverified_locked_replay_fails_closed_and_keeps_the_lockfile",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[False]",
         "tests/spec_conformance/test_resolution_reqs.py::test_frozen_short_pin_checks_recorded_commit_without_discovery[True]",
         "tests/spec_conformance/test_resolution_reqs.py::test_locked_literal_equivalence_requires_no_remote_discovery[False]",

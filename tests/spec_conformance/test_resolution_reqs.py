@@ -63,6 +63,9 @@ from tests.integration.test_install_pinned_commit_reachability import (
 from tests.integration.test_install_pinned_commit_reachability import (
     test_a_locked_commit_is_verified_once_then_replays_without_contact as _run_verified_once,
 )
+from tests.integration.test_install_pinned_commit_reachability import (
+    test_a_locked_commit_only_a_pull_ref_reaches_is_refused_on_replay as _run_pull_only_replay,
+)
 from tests.integration.test_install_subdir_dedup_e2e import (
     test_nested_gitlab_identity_survives_cache_lock_and_deployment as _run_nested_install_contract,
 )
@@ -178,6 +181,44 @@ def test_an_unverified_locked_commit_fails_closed_when_the_origin_is_unreachable
     assert result.exit_code == 1, result.output
     assert "needs network access once" in output
     assert not (project / "apm.lock.yaml").exists()
+
+
+@pytest.mark.req("req-rs-015")
+@pytest.mark.parametrize(
+    ("path", "no_cache"),
+    [(None, False), (None, True)],
+    ids=["repo-cached", "repo-no-cache"],
+)
+def test_a_replayed_commit_no_origin_branch_or_tag_reaches_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path, no_cache: bool
+) -> None:
+    """A rewritten lockfile pinning a commit only refs/pull/* reaches is refused."""
+    _run_pull_only_replay(tmp_path, _PinnedOrigin(tmp_path / "remote"), monkeypatch, path, no_cache)
+    assert not list((tmp_path / "cache2").rglob("verified/*"))
+
+
+@pytest.mark.req("req-rs-015")
+def test_an_unverified_locked_replay_fails_closed_and_keeps_the_lockfile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replay with no recorded outcome and no reachable origin refuses, lockfile intact."""
+    import shutil
+
+    origin = _PinnedOrigin(tmp_path / "remote")
+    project = _pinned_project(tmp_path, origin.m1)
+    first = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c1"))
+    assert first.exit_code == 0, first.output
+    lock = (project / "apm.lock.yaml").read_bytes()
+    shutil.rmtree(project / "apm_modules")
+    shutil.rmtree(origin.path)
+
+    replay = _install_pinned(project, origin, monkeypatch, APM_CACHE_DIR=str(tmp_path / "c2"))
+
+    output = " ".join(replay.output.split())
+    assert replay.exit_code == 1, replay.output
+    assert "needs network access once" in output
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+    assert not list((tmp_path / "c2").rglob("verified/*"))
 
 
 @pytest.mark.req("req-rs-002")
@@ -446,6 +487,9 @@ def test_resolver_replays_locked_commit_without_network():
         "non-update install",
         "WITHOUT issuing a network ref-resolution",
         "network-free at the resolution step",
+        "reachable from a branch or tag",
+        "MUST refuse the entry (fail closed)",
+        "consumer-local state",
     )
 
 

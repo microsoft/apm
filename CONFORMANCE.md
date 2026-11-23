@@ -167,7 +167,7 @@ APM implements the proposed staged-replacement recovery capability (req-lk-023).
 | [req-rs-012](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-012) | MUST | 7.7 | consumer | active | 8 / 9 | - |
 | [req-rs-013](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-013) | MUST | 7.2 | consumer | active | 1 / 2 | - |
 | [req-rs-014](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-014) | MUST | 7.3.1 | consumer | active | 10 / 11 | - |
-| [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 6 / 7 | - |
+| [req-rs-015](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-015) | MUST | 7.5 | consumer | active | 9 / 10 | - |
 | [req-rs-016](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-016) | MUST | 7.2 | consumer | active | 10 / 10 | - |
 | [req-rs-017](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-017) | MUST | 7.7 | consumer | active | 16 / 17 | - |
 | [req-rs-018](docs/src/content/docs/specs/openapm-v0.1.md#req-rs-018) | MUST | 7.4.1 | consumer | active | 15 / 21 | - |
