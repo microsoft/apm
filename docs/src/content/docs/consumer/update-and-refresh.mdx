@@ -158,7 +158,12 @@ nothing: `apm install` keeps every instruction in `.claude/rules/` and warns
 once. To opt in, add a line `@AGENTS.md` to it, then rerun `apm install` and
 `apm compile`. A hand-authored root `AGENTS.md` also keeps every instruction in
 `.claude/rules/`; to opt in, set `compilation.agents_md.mode: managed_section`
-in `apm.yml`. APM never overwrites either file.
+in `apm.yml` and add the `<!-- apm:start -->` and `<!-- apm:end -->` markers to
+the file once each. APM never overwrites either file.
+
+The `apm compile` reminder clears once a compile has written each routed
+instruction as it is now. Changing an instruction's `applyTo` or body brings
+the reminder back until you compile again.
 
 In projects that target Claude plus Copilot or Codex, the shared `AGENTS.md`
 keeps the optimizer's placement, so a directory or file-type instruction can

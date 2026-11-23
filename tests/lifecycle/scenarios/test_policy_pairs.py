@@ -397,6 +397,10 @@ def test_no_policy_adds_an_mcp_server_and_says_so(lifecycle_world, src) -> None:
 # -- a plugin's bin/ (user scope only) ---------------------------------------------
 
 
+# #3703: a user-scope install discovers no org policy.
+_USER_SCOPE_DENY_KNOWN = Known("#3703", r"exited 0, expected \[1\]")
+
+
 def test_a_denied_plugin_with_bin_is_refused_at_user_scope(lifecycle_world) -> None:
     """#3703: a user-scope install discovers no org policy, so the deny never applies."""
     use_policy(lifecycle_world, "deny-native")
@@ -411,7 +415,7 @@ def test_a_denied_plugin_with_bin_is_refused_at_user_scope(lifecycle_world) -> N
     scenario.model = scenario.model.with_policy("deny-native", ["p-native-claude-bin"])
     step = scenario.run(
         "install p-native-claude-bin --trust-bin",
-        known={"R": Known("#3703", r"exited 0, expected \[1\]")},
+        known={"R": _USER_SCOPE_DENY_KNOWN},
     )
     with known_defect("#3703", r"^a user-scope install ignored the org deny"):
         assert step.result.returncode == 1, "a user-scope install ignored the org deny"
@@ -477,5 +481,5 @@ CREDITS = credits(
             _pair(PRIM="bin", GATE=_DD, SCOPE="user")
         ],
     },
-    known={"test_a_denied_plugin_with_bin_is_refused_at_user_scope": "#3703"},
+    known={"test_a_denied_plugin_with_bin_is_refused_at_user_scope": _USER_SCOPE_DENY_KNOWN},
 )

@@ -41,7 +41,7 @@ from ..models.dependency.replacement import (
     project_effective_reference,
 )
 from ..models.dependency.subsets import SkillTargetSelection, canonical_target_subset
-from ..native_plugins.record import NativePluginRecord, NativePluginRecordError
+from ..native_plugins import record as native_rec
 from .carried_license import CarriedLicense, records_from_lock_data, records_to_lock_data
 from .lockfile_container import parse_lockfile_text
 from .lockfile_container import validate_lockfile_container as _validate_lockfile_container
@@ -207,16 +207,6 @@ def _keeps_untranslated_mcp_stamp(lock: LockFile, existing: LockFile | None) -> 
         for runtime, names in existing.mcp_target_servers.items()
     }
     return lock_holds_untranslated_mcp_claims(existing.apm_version, carried)
-
-
-def _same_document(current: str | None, serialized: str) -> bool:
-    """Whether *current* holds the data *serialized* would write; only formatting may differ."""
-    from ..utils.yaml_io import load_yaml_str
-
-    try:
-        return current is not None and load_yaml_str(current) == load_yaml_str(serialized)
-    except (UnicodeError, yaml.YAMLError, ValueError):
-        return False
 
 
 def recorded_generator(data: Mapping[str, Any]) -> object:
@@ -542,7 +532,9 @@ class LockedDependency:
     extensions: dict[str, Any] = field(default_factory=dict)
     # Intact native plugin APM deployed and declared for this dependency; the
     # only ownership evidence for native settings keys and deployed roots.
-    native_plugin: NativePluginRecord | None = None
+    native_plugin: native_rec.NativePluginRecord | None = None
+    # Harnesses whose settings held APM's true when written (tells hand edits apart).
+    native_declared: list[str] | None = None
     replacement: ReplacementBinding | None = field(default=None, repr=False)
     # Stream ``content_hash`` was recorded in; set from the owning lockfile's
     # version, never serialized per row (see ``FRAMED_CONTENT_HASH_VERSION``).
@@ -709,8 +701,7 @@ class LockedDependency:
             result["extensions"] = dict(self.extensions)
         if self.exec_status:
             result["exec_status"] = self.exec_status
-        if self.native_plugin is not None:
-            result["native_plugin"] = self.native_plugin.to_lock_data()
+        result.update(native_rec.native_lock_fields(self.native_plugin, self.native_declared))
         if self.exec_allowed_types:
             result["exec_allowed_types"] = list(self.exec_allowed_types)
         if self.replacement is not None:
@@ -801,6 +792,7 @@ class LockedDependency:
             "exec_allowed_types",
             "name",
             "native_plugin",
+            "native_declared",
             "replacement",
             # legacy migration key handled above
             "deployed_skills",
@@ -858,11 +850,11 @@ class LockedDependency:
             extensions=_copy_extension_map(data.get("extensions")),
             _unknown_fields=unknown_fields,
         )
-        if "native_plugin" in data:
-            try:
-                locked.native_plugin = NativePluginRecord.from_lock_data(data["native_plugin"])
-            except NativePluginRecordError as exc:
-                raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
+        try:
+            native = native_rec.native_fields_from_lock_data(data)
+            locked.native_plugin, locked.native_declared = native
+        except native_rec.NativePluginRecordError as exc:
+            raise LockfileFormatError(f"Invalid native_plugin record: {exc}") from exc
         if "replacement" in data:
             try:
                 locked.replacement = ReplacementBinding.from_dict(
@@ -1761,9 +1753,11 @@ class LockFile:
         from ..utils.atomic_io import atomic_write_text, umask_file_mode
         from ..utils.staging_guard import assert_no_staging_paths
         from ..utils.yaml_io import load_yaml_str
+        from .lockfile_document import document_snapshot, same_document
         from .lockfile_write_authority import stage_lockfile, staged_lockfile_text
 
         existing: LockFile | None
+        existing_document: dict[str, Any] | None = None
         legacy_timestamp_present = False
         existing_text = staged_lockfile_text(path)
         if isinstance(existing_lockfile, _ExistingLockfileUnset) and existing_text is not None:
@@ -1774,6 +1768,8 @@ class LockFile:
             existing = None
             if isinstance(existing_data, dict):
                 legacy_timestamp_present = existing_data.get("generated_at") is not None
+                # Construction shares nested objects; snapshot for the no-op check.
+                existing_document = document_snapshot(existing_data)
                 try:
                     existing = type(self)._from_validated_data(
                         _validate_lockfile_container(existing_data)
@@ -1822,7 +1818,7 @@ class LockFile:
             self.apm_version = installed_apm_version()
         serialized = self.to_yaml(user_scope=user_scope)
         assert_no_staging_paths(serialized, path.name)
-        if unchanged and _same_document(existing_text, serialized):
+        if unchanged and same_document(existing_text, serialized, existing_document):
             # A proven no-op keeps the file's own bytes (comments, key style).
             return True
         if not stage_lockfile(path, serialized):
