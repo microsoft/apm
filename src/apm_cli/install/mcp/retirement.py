@@ -92,6 +92,12 @@ def record_refused_retirement(
             managed_target_servers.setdefault(runtime, set()).add(name)
             if name in old_hashes.get(runtime, {}):
                 new_hashes.setdefault(runtime, {})[name] = old_hashes[runtime][name]
+        # Also undo a claim retain_deferred_mcp_claims restored for an inactive runtime.
+        for name in names - keep_baseline:
+            managed_target_servers.get(runtime, set()).discard(name)
+            new_hashes.get(runtime, {}).pop(name, None)
+        if runtime in managed_target_servers and not managed_target_servers[runtime]:
+            del managed_target_servers[runtime]
     claimed = set().union(*managed_target_servers.values())
     gone = removed_names(removed) - claimed
     kept_old = {name for name in old_servers if name not in gone}

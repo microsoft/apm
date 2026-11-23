@@ -605,15 +605,18 @@ def test_a_refused_deselection_keeps_its_baseline_across_a_declaration_change(
     assert scenario.servers("codex")["notes"]["url"] == updated
 
 
+@pytest.mark.parametrize("targets", ["claude,codex", "codex"])
 def test_a_refused_deselection_never_vouches_for_a_newly_targeted_runtime(
     scenario_factory: Callable[[ApmLifecycleRunner], _Scenario],
     apm_binary_path: Path,
+    targets: str,
 ) -> None:
     """The URL changes and the server moves to codex for the first time (#4792).
 
     APM never wrote the old URL in codex, so the refused claude baseline must
     not vouch for it there: the edited claude entry stays (unowned) and a
-    later user edit to codex is still refused, never overwritten.
+    later user edit to codex is still refused, never overwritten. With
+    ``--target codex`` claude is not active, and its claim is still dropped.
     """
     scenario = scenario_factory(ApmLifecycleRunner((str(apm_binary_path),)))
     scenario.declare([{**_http(), "targets": ["claude"]}])
@@ -625,7 +628,7 @@ def test_a_refused_deselection_never_vouches_for_a_newly_targeted_runtime(
     scenario.edit("claude", "notes", edited)
     scenario.declare([{**_http(updated), "targets": ["codex"]}])
 
-    refused = scenario.install()
+    refused = scenario.install(targets=targets)
 
     output = " ".join((refused.stdout + refused.stderr).split())
     assert refused.returncode == 1, output
@@ -635,7 +638,7 @@ def test_a_refused_deselection_never_vouches_for_a_newly_targeted_runtime(
 
     codex_edit = {**scenario.servers("codex")["notes"], "url": original["url"]}
     scenario.edit("codex", "notes", codex_edit)
-    retried = scenario.install()
+    retried = scenario.install(targets=targets)
     assert retried.returncode == 1, retried.stdout + retried.stderr
     assert scenario.servers("codex")["notes"] == codex_edit
     assert scenario.servers("claude")["notes"] == edited
