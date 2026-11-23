@@ -15,9 +15,7 @@
       "selectors": [
         "src/apm_cli/deps/virtual_file.py",
         "src/apm_cli/deps/github_downloader.py",
-        "src/apm_cli/install/phases/local_content.py",
-        "src/apm_cli/commands/uninstall/engine.py",
-        "src/apm_cli/commands/uninstall/local_reanchor.py"
+        "src/apm_cli/install/phases/local_content.py"
       ],
       "guards": ["install-deployment-single-file-materialization"]
     },
