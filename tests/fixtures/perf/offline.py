@@ -111,6 +111,29 @@ def isolated_environment(
     return isolated, env
 
 
+# A developer's global gitconfig: Git Credential Manager and gh helpers,
+# non-interactive prompts, a URL-scoped useHttpPath and an SSH rewrite for a
+# host the fixtures never use.
+USER_GITCONFIG = """\
+[user]
+\tname = Dev User
+\temail = dev@example.invalid
+[init]
+\tdefaultBranch = main
+[pull]
+\trebase = true
+[credential]
+\thelper = manager
+\tinteractive = never
+[credential "https://github.com"]
+\thelper =
+\thelper = !gh auth git-credential
+[credential "https://dev.azure.com"]
+\tuseHttpPath = true
+[url "git@gitlab.example.invalid:"]
+\tinsteadOf = https://gitlab.example.invalid/
+"""
+
 @contextlib.contextmanager
 def serve_offline(
     fixtures: TreeFixture | Iterable[TreeFixture],
@@ -124,8 +147,7 @@ def serve_offline(
 
     ``policy`` also serves ``POLICY_DOCUMENT`` as org ``POLICY_ORG``'s policy.
     """
-    if isinstance(fixtures, TreeFixture):
-        fixtures = (fixtures,)
+    fixtures = (fixtures,) if isinstance(fixtures, TreeFixture) else tuple(fixtures)
     repositories: dict[str, Path] = {}
     for fixture in fixtures:
         published = publish_repositories(fixture, directory / "repositories")
@@ -146,6 +168,9 @@ def serve_offline(
         commit_bare(bare, tree, tag=None)
         repositories[f"{POLICY_ORG}/.github"] = bare
     isolated, env = isolated_environment(directory / "env", base_env)
+    if any(fixture.recipe.user_gitconfig for fixture in fixtures):
+        with open(env["GIT_CONFIG_GLOBAL"], "a", encoding="utf-8", newline="\n") as config:
+            config.write(USER_GITCONFIG)
     if sys.platform == "win32":
         # Git for Windows' default schannel backend refuses the mirror's local CA
         # (no CRL or OCSP endpoint: "revocation status is unknown"). APM carries

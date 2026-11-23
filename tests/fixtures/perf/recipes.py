@@ -57,6 +57,10 @@ class TreeRecipe:
     # that is no longer the branch tip). Transitive edges keep "tag" except
     # under "tip"; the tag names the same commit as the "sha" pin.
     pin: str = "tag"
+    # Serve the world with a developer-style global gitconfig (credential
+    # helpers, credential.interactive, scoped useHttpPath, an SSH rewrite for
+    # another host): the config real users carry, which a fast path must handle.
+    user_gitconfig: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,7 +89,8 @@ class MonorepoRecipe:
 # Enterprise shapes: the same trees referenced across GitHub, GHE Cloud, GitLab
 # and Azure DevOps (``-multi``), and with a stdio MCP server in every package
 # (``-mcp``). Pin shapes: branch-tip (``-tip``) and non-tip commit SHA (``-sha``)
-# direct dependencies. Same seeds, so only the variant's axis differs.
+# direct dependencies. ``-usercfg`` serves the world with a developer-style
+# global gitconfig. Same seeds, so only the variant's axis differs.
 _MULTI_HOSTS = ("github", "ghe", "gitlab", "ado")
 _MCP_HEAVY = PrimitiveMix(mcp_every=1)
 _BASE_TREES = (
@@ -103,6 +108,7 @@ TREE_RECIPES: dict[str, TreeRecipe] = {
         replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
         replace(base, name=f"{base.name}-tip", pin="tip"),
         replace(base, name=f"{base.name}-sha", pin="sha"),
+        replace(base, name=f"{base.name}-usercfg", user_gitconfig=True),
     )
 }
 
