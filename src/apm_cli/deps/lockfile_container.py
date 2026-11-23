@@ -7,6 +7,7 @@ Checks the version and the shape of every top-level list and mapping before
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -77,7 +78,10 @@ def parse_lockfile_text(yaml_str: str) -> object:
 
 
 _NOT_PLAIN = object()
-_YAML_LINE_BREAKS = ("\x85", "\u2028", "\u2029")
+# Strings the safe dumper cannot round-trip: a raw NEL is normalized on load
+# (LS and PS are refused too, conservatively), and a lone surrogate is dumped
+# as an escape a fresh read refuses. Pinned by a code-point sweep cell.
+_UNSAFE_STR = re.compile("[\x85\u2028\u2029\ud800-\udfff]")
 _PLAIN_SCALARS = (str, int, bool, type(None))
 
 
@@ -85,9 +89,12 @@ def _plain_copy(value: object) -> object:
     """A private copy of *value* when it holds only what a safe dump round-trips.
 
     Exact ``dict`` (``str`` keys), ``list``, ``str``, ``int``, ``bool`` and
-    ``None``; anything else (floats, subclasses, tuples) is ``_NOT_PLAIN``.
+    ``None``; anything else (floats, subclasses, tuples, strings matching
+    ``_UNSAFE_STR``) is ``_NOT_PLAIN``.
     """
     kind = type(value)
+    if kind is str:
+        return _NOT_PLAIN if _UNSAFE_STR.search(value) else value
     if kind in _PLAIN_SCALARS:
         return value
     if kind is list:
@@ -96,7 +103,7 @@ def _plain_copy(value: object) -> object:
     if kind is dict:
         copied = {}
         for key, item in value.items():
-            if type(key) is not str:
+            if type(key) is not str or _UNSAFE_STR.search(key):
                 return _NOT_PLAIN
             item = _plain_copy(item)
             if item is _NOT_PLAIN:
@@ -118,10 +125,6 @@ def remember_lockfile_text(yaml_str: str, document: object) -> None:
 
     if not yaml_io.machine_yaml_admits(yaml_str):
         return  # a read must refuse it exactly as a fresh parse would
-    if any(brk in yaml_str for brk in _YAML_LINE_BREAKS):
-        # allow_unicode emits NEL, LS and PS raw inside scalars and a load
-        # normalizes them, so such text would not read back as the document.
-        return
     plain = _plain_copy(document)
     if plain is _NOT_PLAIN:
         return

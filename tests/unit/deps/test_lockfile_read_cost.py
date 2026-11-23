@@ -186,8 +186,8 @@ class TestLockFileReadCost:
             assert chain["k0"] == ["leaf"]
 
 
-def _rich_lock(tag: str) -> LockFile:
-    """A lockfile whose strings stress the dumper: quoting, folding, unicode."""
+def _rich_lock(tag: str, *, unicode: bool = False) -> LockFile:
+    """A lockfile whose strings stress the dumper: quoting, folding (and unicode)."""
     lock = LockFile()
     lock.add_dependency(
         LockedDependency(
@@ -202,7 +202,8 @@ def _rich_lock(tag: str) -> LockFile:
             "name": "kb",
             "registry": False,
             "transport": "stdio",
-            "args": ["yes", "null", "0123", "a: b", "#c", " lead", "x\ny", "caf\u00e9"],
+            "args": ["yes", "null", "0123", "a: b", "#c", " lead", "x\ny", "\r\n", "\t"]
+            + (["caf\u00e9"] if unicode else []),
             "lookalikes": [
                 "true",
                 "False",
@@ -402,3 +403,114 @@ def test_a_text_with_a_yaml_line_break_reads_like_a_fresh_parse(where, brk):
     remember_lockfile_text(text, document)
 
     assert parse_lockfile_text(text) == yaml_io.load_machine_yaml_str(text)
+
+
+_ASCII_SCALARS = [chr(code) for code in range(128)] + [
+    "\r\n",
+    "a\rb",
+    "<<",
+    "=",
+    ".inf",
+    "1_000",
+    "+1",
+    "-.5",
+    "0b101",
+    "1:30:00",
+    "y",
+    "No",
+    "OFF",
+    "~ x",
+    "a #b",
+    "a\\b",
+    "%x",
+    "@x",
+    "`x",
+    "|",
+    ">",
+    "? x",
+    "!!str",
+]
+
+
+@pytest.mark.parametrize("as_key", [False, True], ids=["values", "keys"])
+def test_every_ascii_scalar_seeds_a_document_equal_to_a_fresh_load(as_key):
+    from apm_cli.deps.lockfile_container import _parsed_texts, parse_key, remember_lockfile_text
+
+    tag = uuid.uuid4().hex
+    if as_key:
+        document = {"lockfile_version": "1", **{f"{s}{tag}": "v" for s in _ASCII_SCALARS}}
+    else:
+        document = {"lockfile_version": "1", "x": [*_ASCII_SCALARS, tag]}
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert text.isascii()
+    assert parse_key(text) in _parsed_texts
+    fresh = yaml_io.load_machine_yaml_str(text)
+    assert _parsed_texts[parse_key(text)] == fresh
+    assert json.dumps(_parsed_texts[parse_key(text)]) == json.dumps(fresh)
+
+
+def test_a_non_ascii_lockfile_needs_no_parse_and_reads_back_equal(tmp_path):
+    path = tmp_path / "apm.lock.yaml"
+    _rich_lock(uuid.uuid4().hex, unicode=True).write(path)
+
+    parses = _yaml_frames(lambda: LockFile.read(path))
+    read = LockFile.read(path)
+
+    assert parses == 0
+    assert read is not None
+    assert read.to_yaml() == path.read_text(encoding="utf-8")
+
+
+def _round_trips(value: str) -> bool:
+    try:
+        return yaml_io.load_machine_yaml_str(yaml_io.yaml_to_str({"x": value})) == {"x": value}
+    except yaml.YAMLError:
+        return False
+
+
+def test_every_bmp_code_point_round_trips_except_the_refused_class():
+    """Pins _UNSAFE_STR: the dump/load mismatches are exactly NEL and lone surrogates."""
+    from apm_cli.deps.lockfile_container import _UNSAFE_STR
+
+    plain = [chr(cp) for cp in range(0x10000) if not 0xD800 <= cp <= 0xDFFF]
+    loaded = yaml_io.load_machine_yaml_str(yaml_io.yaml_to_str({"x": plain}))["x"]
+    mismatched = {ord(a) for a, b in zip(plain, loaded, strict=True) if a != b}
+    surrogates = {cp for cp in range(0xD800, 0xE000) if not _round_trips(chr(cp))}
+
+    assert mismatched == {0x85}
+    assert surrogates == set(range(0xD800, 0xE000))
+    refused = {cp for cp in range(0x10000) if _UNSAFE_STR.search(chr(cp))}
+    assert mismatched | surrogates <= refused
+    assert refused - (mismatched | surrogates) == {0x2028, 0x2029}
+
+
+@pytest.mark.parametrize("where", ["value", "key"])
+def test_a_lone_surrogate_is_never_seeded_and_reads_like_a_fresh_read(where):
+    from apm_cli.deps.lockfile_container import (
+        _parsed_texts,
+        parse_key,
+        parse_lockfile_text,
+        remember_lockfile_text,
+    )
+
+    odd = f"p\udcff-{uuid.uuid4().hex}"
+    document = (
+        {"lockfile_version": "1", "x": odd}
+        if where == "value"
+        else {
+            "lockfile_version": "1",
+            odd: "v",
+        }
+    )
+    text = yaml_io.yaml_to_str(document)
+
+    remember_lockfile_text(text, document)
+
+    assert parse_key(text) not in _parsed_texts
+    with pytest.raises(yaml.YAMLError) as fresh:
+        yaml_io.load_machine_yaml_str(text)
+    with pytest.raises(type(fresh.value)):
+        parse_lockfile_text(text)
