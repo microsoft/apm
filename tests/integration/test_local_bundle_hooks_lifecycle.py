@@ -569,6 +569,33 @@ def test_bundle_sidecar_writes_keep_the_config_file_records_current(
         assert row["hash"] == digest, (row, sidecar.read_text(encoding="utf-8"))
 
 
+@pytest.mark.parametrize("outside", ["dangling", "json"])
+def test_bundle_sidecar_link_is_replaced_and_its_target_left_alone(
+    tmp_path: Path, apm_binary_path: Path, outside: str
+) -> None:
+    """A linked hook record file is replaced by a regular file; what it linked to is untouched."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    bundle, key = _named_bundle(world, tmp_path, "pkga")
+    consumer = world.consumer("linked-sidecar", targets=("copilot",))
+    _allow(consumer, key)
+    target = tmp_path / "outside" / "hooks.json"
+    target.parent.mkdir()
+    if outside == "json":
+        target.write_text('{"keep": true}\n', encoding="utf-8")
+    before = target.read_bytes() if target.exists() else None
+    sidecar = consumer / _SIDECAR
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        sidecar.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+
+    world.apm(consumer, "install", str(bundle), "--no-policy")
+
+    assert (target.read_bytes() if target.exists() else None) == before
+    assert sidecar.is_file() and not sidecar.is_symlink()
+
+
 def _bundle_hook_claims(world: MarketplacePackWorld, project: Path) -> list[str]:
     lock = world.lock(project)
     return [p for p in lock.get("local_deployed_files") or [] if "/hooks/" in p]
