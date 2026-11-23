@@ -35,9 +35,10 @@ def candidate_refs(org: str, host: str, candidates: Sequence[str]) -> list[str]:
 
 def record(result: PolicyFetchResult, refs: Sequence[str], index: int, project_root: Path) -> None:
     """Record a fresh resolution: the source, and the candidates absent above it."""
+    from apm_cli.cache.paths import cache_writes_allowed
     from apm_cli.policy import discovery
 
-    if result.policy is None or result.cached or result.cache_stale:
+    if result.policy is None or result.cached or result.cache_stale or not cache_writes_allowed():
         return
     path = discovery._resolution_record_path(list(refs), project_root)
     data = {"source": refs[index], "absent": list(refs[:index])}

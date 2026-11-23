@@ -677,6 +677,42 @@ def test_a_lock_only_transaction_never_replays_a_journal(tmp_path: Path, apm_hom
     assert store.is_dir()
 
 
+@pytest.mark.parametrize("flag", ["dry_run", "lockfile_only"])
+def test_a_preview_or_lock_only_pipeline_never_replays_a_journal(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """A direct preview or lock-only pipeline call changes no deployed file (#4863)."""
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.install.transaction import transactional_pipeline
+
+    project = tmp_path / "project"
+    created = project / "a.md"
+    store = _killed_journal(apm_home, project, created)
+    monkeypatch.chdir(project)
+
+    transactional_pipeline(lambda **_kwargs: None)(
+        scope=InstallScope.PROJECT, logger=None, **{flag: True}
+    )
+
+    assert created.read_bytes() == b"killed\n"
+    assert store.is_dir()
+
+
+def test_a_journal_without_a_manifest_is_reclaimed(tmp_path: Path, apm_home: Path) -> None:
+    """A fast apply's in-memory journal records nothing to replay: reclaimed, as before."""
+    from apm_cli.install.deploy_snapshot import has_abandoned_journals
+
+    store = apm_home / "install-snapshots" / "deploy-fast"
+    store.mkdir(parents=True)
+    (store / "0").write_bytes(b"prior lockfile\n")
+    assert has_abandoned_journals(store.parent)
+
+    outcome = _replay(apm_home, tmp_path)
+
+    assert outcome.restored == 0
+    assert not store.parent.exists()
+
+
 def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
     import json
 
@@ -842,7 +878,7 @@ def test_replay_restores_a_file_with_its_mode(tmp_path: Path, apm_home: Path) ->
     assert (restored.restored, restored.kept) == (1, ())
     assert hook.read_bytes() == b"#!/bin/sh\necho prior\n"
     assert hook.stat().st_mode & 0o777 == 0o755
-    assert not any((apm_home / "install-snapshots").iterdir())
+    assert not (apm_home / "install-snapshots").exists()
 
 
 def test_rollback_removes_only_empty_target_roots_the_attempt_created(tmp_path: Path) -> None:
@@ -974,6 +1010,62 @@ def test_a_rolled_back_install_restores_an_mcp_config_it_wrote(
 
     assert config.read_bytes() == b'{"mcpServers": {"mine": {"command": "x"}}}\n'
     assert not (project / ".gemini").exists()
+
+
+def _staging_install(project: Path, deployed: Path, key: str):
+    """One InstallService run whose pipeline stages *deployed* for the deploy store."""
+    from unittest.mock import MagicMock, patch
+
+    from apm_cli.cache.deploy_store import stage
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.results import InstallResult
+
+    transaction = _transaction(project)
+    package = MagicMock()
+    package.dependencies = {"apm": []}
+    request = InstallRequest(
+        apm_package=package, transaction=transaction, post_install_after_services=True
+    )
+
+    def pipeline(*_args, **_kwargs) -> InstallResult:
+        stage(deployed, key)
+        return InstallResult()
+
+    with patch("apm_cli.install.pipeline.run_install_pipeline", side_effect=pipeline):
+        result = InstallService().run(request)
+    return transaction, result
+
+
+@pytest.mark.parametrize("outcome", ["rolled-back", "committed", "committed-after-a-script"])
+def test_deploy_store_evidence_waits_for_the_install_transaction(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from apm_cli.cache.deploy_store import DEPLOY_BUCKET, commit_staged
+    from apm_cli.core.invocation_memo import forget_invocation_memos, invocation_scope
+    from apm_cli.utils.content_hash import canonical_digest
+
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("APM_NO_SCRIPTS", "1")
+    deployed = tmp_path / "AGENTS.md"
+    deployed.write_bytes(b"Deployed instructions\n")
+    key = canonical_digest(deployed.read_bytes())
+    entry = tmp_path / "cache" / DEPLOY_BUCKET / key[:2] / key
+
+    with invocation_scope():
+        transaction, result = _staging_install(tmp_path / "project", deployed, key)
+        assert not entry.exists(), "stored before the install transaction completed"
+        if outcome == "rolled-back":
+            # e.g. frozen service reconciliation or a deferred hook fails after the pipeline
+            transaction.fail(RuntimeError("service reconciliation failed"))
+            assert commit_staged() == 0, "a rolled-back attempt left evidence to publish"
+        else:
+            if outcome == "committed-after-a-script":
+                # A deferred post-install command script drops every invocation memo.
+                forget_invocation_memos()
+            transaction.complete(result)
+
+    assert entry.exists() is (outcome != "rolled-back")
 
 
 @pytest.mark.parametrize("outcome", ["rollback", "commit"])

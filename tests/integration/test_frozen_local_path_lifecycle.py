@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
+from apm_cli.utils.content_hash import canonical_digest
 from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 from tests.utils.apm_lifecycle_runner import ApmLifecycleRunner
 from tests.utils.isolated_apm_environment import IsolatedApmEnvironment
@@ -130,11 +132,22 @@ def test_frozen_local_path_refuses_changed_snapshot_without_mutation(
     assert accepted_lock != locked_bytes
     accepted_deployment = deployed.read_bytes()
     assert b"accepted change" in accepted_deployment
+    accepted_cache = _snapshot(isolated.cache_root)
     replay = run(consumer.root, "install", "--frozen", "--no-policy")
     assert replay.returncode == 0, replay.stdout + replay.stderr
     assert lockfile.read_bytes() == accepted_lock
     assert deployed.read_bytes() == accepted_deployment
-    assert _snapshot(isolated.cache_root) == before_cache
+    after_cache = _snapshot(isolated.cache_root)
+    assert after_cache == accepted_cache, "a no-op frozen replay stores nothing new"
+    added = {path: data for path, data in after_cache.items() if path not in before_cache}
+    assert {path: after_cache[path] for path in before_cache} == before_cache
+    # Only the committed accepted install may add cache content: deploy-store
+    # entries named by the digest of the bytes they hold, among them the new
+    # deployment, and the package records that name them.
+    assert all(
+        path == _store_path(data) or _RECORD_PATH.fullmatch(path) for path, data in added.items()
+    ), sorted(added)
+    assert _store_path(accepted_deployment) in added
 
 
 @pytest.mark.parametrize("transitive", [False, True], ids=["direct", "transitive"])
@@ -192,6 +205,14 @@ def test_frozen_local_declared_deleted_source_is_rejected_without_mutation(
     assert _snapshot(root) == before_files
     assert _snapshot(isolated.cache_root) == before_cache
     assert not list(isolated.temp_root.iterdir())
+
+
+_RECORD_PATH = re.compile(r"deploy_v1/records/([0-9a-f]{2})/\1[0-9a-f]{62}\.json")
+
+
+def _store_path(data: bytes) -> str:
+    digest = canonical_digest(data)
+    return f"deploy_v1/{digest[:2]}/{digest}"
 
 
 def _snapshot(root: Path) -> dict[str, bytes]:
