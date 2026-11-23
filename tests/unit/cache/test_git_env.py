@@ -1728,3 +1728,10 @@ class TestUncachedFallbackLineEndings:
         ).stdout.strip()
         assert head == old_sha
         assert (target / "f.txt").read_bytes() == b"a\nb\n"
+
+
+def test_project_path_keys_agree_across_unicode_case_and_composition() -> None:
+    """A case variant whose folding undoes composition still keys like the project."""
+    from apm_cli.utils.git_env import _caseless
+
+    assert _caseless(Path("/w/project-\u0390")) == _caseless(Path("/w/PROJECT-\u03aa\u0301"))

@@ -320,8 +320,12 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def _caseless(path: Path) -> str:
-    """Return *path* folded for a caseless compare (NFC and NFD spellings agree)."""
-    return unicodedata.normalize("NFC", str(path)).casefold()
+    """Return *path* folded for a caseless compare (NFC and NFD spellings agree).
+
+    Decomposing first and recomposing after matches Unicode canonical caseless
+    matching: folding can undo a composition the input had.
+    """
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFD", str(path)).casefold())
 
 
 def _resolve_trusted_executable(name: str) -> str:
