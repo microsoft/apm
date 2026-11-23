@@ -512,6 +512,50 @@ def test_consent_keeps_a_skill_directory_that_gained_a_link_after_the_scan(
 
 
 @pytest.mark.req("req-lk-024")
+def test_consent_keeps_a_cowork_final_symlink_and_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Cowork claim whose final component is a link is never consented through it."""
+    cowork = tmp_path / "cowork-skills"
+    target = cowork / "untracked.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Notes\n", encoding="utf-8")
+    link = cowork / "alpha" / "SKILL.md"
+    link.parent.mkdir()
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are unavailable")
+    monkeypatch.setenv("APM_COPILOT_COWORK_SKILLS_DIR", str(cowork))
+    claim = "cowork://skills/alpha/SKILL.md"
+    evidence = DeploymentEvidence(
+        deploy_root=tmp_path / "project",
+        receipts={},
+        render=_no_render,
+        owners={claim: ("owner/pkg",)},
+        kept=(),
+        recorded_hashes={claim: frozenset({compute_file_hash(target)})},
+    )
+    evidence.consent_to_lockfile_hashes()
+
+    assert evidence.consent_preview([claim]) == frozenset()
+    result = remove_stale_deployed_files(
+        [claim],
+        tmp_path / "project",
+        dep_key="owner/pkg",
+        targets=None,
+        diagnostics=DiagnosticCollector(),
+        evidence=evidence,
+        recorded_hashes={claim: compute_file_hash(target)},
+        receipt_retirements=[],
+        allow_final_symlink=True,
+    )
+
+    assert link.is_symlink() and result.deleted == []
+    assert target.read_text(encoding="utf-8") == "# Notes\n"
+
+
+@pytest.mark.req("req-lk-024")
 def test_consent_never_unlinks_a_link_it_classified_as_kept(tmp_path: Path) -> None:
     """The final-symlink rule does not override consent's kept classification."""
     target = tmp_path / "elsewhere.md"

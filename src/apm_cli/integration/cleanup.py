@@ -353,14 +353,15 @@ class DeploymentEvidence:
     def _physical(self, claim: str) -> Path | None:
         from .copilot_cowork_paths import (
             COWORK_URI_SCHEME,
-            from_lockfile_path,
+            cowork_locator,
             resolve_copilot_cowork_skills_dir,
         )
 
         if claim.startswith(COWORK_URI_SCHEME):
             try:
                 root = resolve_copilot_cowork_skills_dir()
-                return from_lockfile_path(claim, root) if root is not None else None
+                # The locator itself: a final symlink is judged as a link.
+                return cowork_locator(claim, root) if root is not None else None
             except Exception:
                 return None
         if "://" in claim:
@@ -1416,9 +1417,10 @@ def remove_stale_deployed_files(
                     _cowork_orphans_skipped += 1
                     result.failed.append(stale_path)
                     continue
-                from .copilot_cowork_paths import from_lockfile_path
+                from .copilot_cowork_paths import cowork_locator
 
-                stale_target = from_lockfile_path(stale_path, _cowork_root_cached)
+                # Never follow a final symlink to the file it points at.
+                stale_target = cowork_locator(stale_path, _cowork_root_cached)
             except Exception:
                 # Containment violation or malformed path -- retain in
                 # lockfile for manual inspection.
