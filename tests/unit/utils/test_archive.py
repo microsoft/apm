@@ -203,12 +203,13 @@ def test_extract_tar_gz_rejects_decompression_bomb(
         _extract_tar_gz(archive, str(tmp_path / "out"))
 
 
-# -- Tar metadata headers are bounded before tarfile reads them (#4973) ---------
+# -- Tar decompression is bounded, headers included (#4973) ----------------------
 # tarfile reads a pax or GNU long-name header into memory at the size the header
-# declares, before APM sees a member. A crafted header declares far more than
-# it carries; the refusal must come before that allocation.
+# declares, before APM sees a member. The decompressed stream is bounded by the
+# uncompressed cap plus a small header allowance; past it, the existing size
+# error is raised before the read.
 
-_DECLARED_HEADER_BYTES = 128 * 1024 * 1024
+_DECLARED_HEADER_BYTES = 4 * 1024 * 1024 * 1024
 _HEADER_TYPES = {
     "pax": tarfile.XHDTYPE,
     "pax-global": tarfile.XGLTYPE,
@@ -217,17 +218,39 @@ _HEADER_TYPES = {
 }
 
 
-def _oversized_header_tar_gz(kind: str) -> bytes:
+def _gzip(raw: bytes) -> bytes:
     import gzip
 
-    info = tarfile.TarInfo("././@Header")
-    info.type = _HEADER_TYPES[kind]
-    info.size = _DECLARED_HEADER_BYTES
-    raw = info.tobuf(format=tarfile.USTAR_FORMAT) + b"x" * 512
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
         gz.write(raw)
     return buf.getvalue()
+
+
+def _oversized_header_tar_gz(kind: str) -> bytes:
+    info = tarfile.TarInfo("././@Header")
+    info.type = _HEADER_TYPES[kind]
+    info.size = _DECLARED_HEADER_BYTES
+    return _gzip(info.tobuf(format=tarfile.USTAR_FORMAT) + b"x" * 512)
+
+
+def _with_checksum(block: bytearray) -> bytes:
+    block[148:156] = b" " * 8
+    block[148:156] = b"%06o\0 " % sum(block)
+    return bytes(block)
+
+
+def _endless_sparse_tar_gz(extension_blocks: int) -> bytes:
+    """An old-GNU sparse member followed by *extension_blocks* empty extension headers."""
+    info = tarfile.TarInfo("sparse.bin")
+    info.type = tarfile.GNUTYPE_SPARSE
+    header = bytearray(info.tobuf(format=tarfile.GNU_FORMAT))
+    header[482] = 1
+    extension = bytearray(512)
+    extension[504] = 1
+    blocks = [_with_checksum(header)] + [bytes(extension)] * (extension_blocks - 1)
+    blocks.append(bytes(512))
+    return _gzip(b"".join(blocks) + bytes(1024))
 
 
 def _peak_while(action) -> tuple[BaseException | None, int]:
@@ -252,7 +275,7 @@ def test_oversized_tar_header_is_refused_before_it_is_read(tmp_path: Path, kind:
     error, peak = _peak_while(lambda: _extract_tar_gz(data, str(tmp_path / "out")))
 
     assert isinstance(error, ArchiveError), error
-    assert "header exceeds" in str(error)
+    assert "exceeds size limit" in str(error)
     assert peak < 32 * 1024 * 1024
     assert not (tmp_path / "out").exists()
 
@@ -266,7 +289,7 @@ def test_oversized_tar_header_is_refused_for_a_tar_gz_file(tmp_path: Path) -> No
     )
 
     assert isinstance(error, ArchiveError), error
-    assert "header exceeds" in str(error)
+    assert "exceeds size limit" in str(error)
     assert peak < 32 * 1024 * 1024
     assert not (tmp_path / "out").exists()
 
@@ -282,24 +305,60 @@ def test_oversized_tar_header_is_refused_for_a_registry_tarball(tmp_path: Path) 
     error, peak = _peak_while(lambda: extract_tarball(data, digest, tmp_path / "out"))
 
     assert isinstance(error, UnsafeTarballError), error
-    assert "header exceeds" in str(error)
+    assert "exceeds size limit" in str(error)
     assert peak < 32 * 1024 * 1024
     assert not (tmp_path / "out").exists()
 
 
-def test_tar_header_just_under_the_limit_extracts(tmp_path: Path) -> None:
-    limit = getattr(archive_mod, "_MAX_TAR_HEADER_BYTES", 1024 * 1024)
+def test_endless_sparse_headers_are_refused_within_the_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+    data = _endless_sparse_tar_gz(40 * 1024)
+
+    with pytest.raises(ArchiveError, match="exceeds size limit"):
+        _extract_tar_gz(data, str(tmp_path / "out"))
+    assert not (tmp_path / "out").exists()
+
+
+def test_many_small_global_headers_are_refused_within_the_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+    header = tarfile.TarInfo._create_pax_generic_header(
+        {"comment": "c" * (1024 * 1024)}, tarfile.XGLTYPE, "utf-8"
+    )
+    member = tarfile.TarInfo("ok.md")
+    raw = header * 40 + member.tobuf(format=tarfile.USTAR_FORMAT) + bytes(1024)
+
+    with pytest.raises(ArchiveError, match="exceeds size limit"):
+        _extract_tar_gz(_gzip(raw), str(tmp_path / "out"))
+    assert not (tmp_path / "out").exists()
+
+
+def test_large_pax_header_within_the_caps_extracts(tmp_path: Path) -> None:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.PAX_FORMAT) as tf:
         info = tarfile.TarInfo("plugin/SKILL.md")
         info.size = 7
-        info.pax_headers = {"comment": "c" * (limit - 64)}
+        info.pax_headers = {"comment": "c" * (2 * 1024 * 1024)}
         tf.addfile(info, io.BytesIO(b"content"))
 
     extracted = _extract_tar_gz(buf.getvalue(), str(tmp_path / "out"))
 
     assert extracted == ["plugin/SKILL.md"]
     assert (tmp_path / "out" / "plugin" / "SKILL.md").read_bytes() == b"content"
+
+
+def test_archive_near_the_cap_extracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 64 * 1024)
+    entries = {f"plugin/f{i}.md": b"x" for i in range(30)}
+    entries["plugin/big.bin"] = b"x" * (64 * 1024 - 30)
+
+    extracted = _extract_tar_gz(_tar_gz_bytes(entries), str(tmp_path / "out"))
+
+    assert len(extracted) == 31
+    assert (tmp_path / "out" / "plugin" / "big.bin").stat().st_size == 64 * 1024 - 30
 
 
 def test_extract_zip_writes_safe_members(tmp_path: Path) -> None:
