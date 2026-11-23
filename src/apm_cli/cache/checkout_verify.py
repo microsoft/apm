@@ -268,6 +268,12 @@ def _unquote(line: str) -> tuple[str, str] | None:
 
 
 _MACRO_DEPTH = 16
+# Names some file systems resolve to ".git": any case, trailing dots or spaces, 8.3 short names.
+_GIT_DIR_ALIAS = re.compile(r"(?:\.git|git~[0-9]+)[. ]*", re.IGNORECASE | re.ASCII)
+
+
+def _names_git_dir(name: str) -> bool:
+    return _GIT_DIR_ALIAS.fullmatch(name) is not None
 
 
 class _Attributes:
@@ -605,7 +611,7 @@ def require_verified_copy(
     manifest = _manifest(repo, sha, [prefix] if prefix else None, env)
     # A commit never holds a .git entry; one in a copy would make it a repository.
     for _directory, subdirs, names in os.walk(dest):
-        if any(entry.lower() == ".git" for entry in (*subdirs, *names)):
+        if any(_names_git_dir(entry) for entry in (*subdirs, *names)):
             raise CheckoutVerificationError("the copy holds a .git entry")
     copied: set[str] = set()
     for rel, path in _worktree_files(Path(dest)):

@@ -506,7 +506,9 @@ def test_a_wrong_kind_object_larger_than_a_pipe_never_hangs_the_reader(tmp_path:
     assert big.stat().st_size == 4 << 20
 
 
-@pytest.mark.parametrize("where", [".git", "pkg/.git"])
+@pytest.mark.parametrize(
+    "where", [".git", "pkg/.git", ".GIT", "pkg/.Git", ".git.", "GIT~1", "pkg/.git "]
+)
 def test_a_copy_holding_a_git_entry_is_refused(tmp_path: Path, where: str) -> None:
     repo, sha = _plain_repo(tmp_path)
     require_verified_checkout(repo, sha, env=neutral_git_env())
