@@ -101,6 +101,31 @@ class PromptIntegrator(BaseIntegrator):
         write_text_lf(target, content)
         return links_resolved
 
+    @staticmethod
+    def _prompts_dir(target, mapping, project_root: Path) -> Path:
+        return project_root / (mapping.deploy_root or target.root_dir) / mapping.subdir
+
+    def verbatim_destinations(
+        self, package_info, project_root: Path, target, source_plan=None
+    ) -> dict[Path, Path] | None:
+        """``{target_path: source}`` this integrator copies for *target*, or ``None`` if it renders.
+
+        The same directory and ``get_target_filename`` the file-based prompt
+        path uses; Kiro prompts and the Copilot App workflow surface are not
+        byte copies, so they are ``None``.
+        """
+        mapping = target.primitives.get("prompts")
+        if not mapping:
+            return {}
+        if target.name == "copilot-app" or mapping.format_id == "kiro_prompt":
+            return None
+        prompts_dir = self._prompts_dir(target, mapping, project_root)
+        name = getattr(getattr(package_info, "package", None), "name", "")
+        files = self.find_prompt_files(package_info.install_path, source_plan)
+        return self.unique_destinations(
+            (prompts_dir / self.get_target_filename(f, name), f) for f in files
+        )
+
     def get_target_filename(self, source_file: Path, package_name: str) -> str:
         """Generate target filename (clean, no suffix).
 
@@ -314,7 +339,7 @@ class PromptIntegrator(BaseIntegrator):
             )
 
         effective_root = mapping.deploy_root or target.root_dir
-        prompts_dir = project_root / effective_root / mapping.subdir
+        prompts_dir = self._prompts_dir(target, mapping, project_root)
         is_kiro_prompt = mapping.format_id == "kiro_prompt"
 
         # Process each prompt file
