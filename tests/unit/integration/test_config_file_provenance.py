@@ -16,6 +16,8 @@ import json
 import os
 import sys
 import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -295,7 +297,7 @@ def test_a_tampered_record_with_a_relative_or_traversing_path_is_ignored(
     config.parent.mkdir(parents=True)
     config.write_text(_SKELETON, encoding="utf-8")
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)  # recorded as the user's
-    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store = _holding(apm_home, config)
     data = json.loads(store.read_text(encoding="utf-8"))
     created = {"origin": "created"}
     data["files"] += [
@@ -365,12 +367,12 @@ def test_a_converged_write_leaves_the_record_store_untouched(tmp_path, apm_home)
     project = tmp_path / "project"
     config = project / ".mcp.json"
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)
-    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
-    before = (store.stat().st_ino, store.read_bytes())
+    before = _store_files(apm_home)
 
     _apm_writes(config, _WITH_ENTRY, manifest_root=project)
 
-    assert (store.stat().st_ino, store.read_bytes()) == before
+    assert _store_files(apm_home) == before
+    assert [path.read_bytes() for path in before] == [state[2] for state in before.values()]
     assert config_file_origin(config) is Origin.CREATED
 
 
@@ -551,6 +553,14 @@ def _store_files(apm_home: Path) -> dict[Path, tuple[int, int, bytes]]:
     return {p: (p.stat().st_ino, p.stat().st_mtime_ns, p.read_bytes()) for p in found}
 
 
+def _holding(apm_home: Path, config: Path) -> Path:
+    """The one store file holding *config*'s record."""
+    key = config_file_key(config).encode()
+    found = [path for path, state in _store_files(apm_home).items() if key in state[2]]
+    assert len(found) == 1, found
+    return found[0]
+
+
 def test_a_write_does_not_rewrite_unrelated_records(tmp_path, apm_home) -> None:
     """Project B's write leaves the store file holding project A's record untouched."""
     a_config = tmp_path / "a" / ".mcp.json"
@@ -565,6 +575,7 @@ def test_a_write_does_not_rewrite_unrelated_records(tmp_path, apm_home) -> None:
 
     after = _store_files(apm_home)
     assert {path: after.get(path) for path in holding_a} == holding_a
+    assert all(path.read_bytes() == state[2] for path, state in holding_a.items())
     assert config_file_origin(tmp_path / "b" / ".mcp.json") is Origin.CREATED
     assert config_file_origin(a_config) is Origin.CREATED
 
@@ -613,3 +624,86 @@ def test_a_version_1_store_is_read_without_losing_a_record(tmp_path, apm_home) -
     assert config_file_origin(tmp_path / "new" / ".mcp.json") is Origin.CREATED
     assert _apm_empties(users, root=tmp_path / "users") is False
     assert users.read_text(encoding="utf-8") == _SKELETON
+
+
+@contextmanager
+def _killed_at_write(apm_home: Path, after: int) -> Iterator[None]:
+    """The process dies at record store replace number *after* + 1 (nothing of it lands)."""
+    real = os.replace
+    store = apm_home / "deployment-receipts" / "config-files"
+    calls = {"n": 0}
+
+    def replace(source, destination, *args, **kwargs):
+        if Path(destination).parent == store:
+            calls["n"] += 1
+            if calls["n"] > after:
+                raise OSError("killed")
+        return real(source, destination, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "replace", replace)
+        yield
+
+
+def test_a_kill_mid_write_loses_no_saved_record(tmp_path, apm_home) -> None:
+    """Per-write durability: a record already saved survives a kill in a later save."""
+    first = tmp_path / "project" / ".mcp.json"
+    _apm_writes(first, _WITH_ENTRY)
+    second = tmp_path / "project" / "other.json"
+    with _killed_at_write(apm_home, after=0):  # the config write lands, its record does not
+        _apm_writes(second, _WITH_ENTRY)
+
+    assert second.read_text(encoding="utf-8") == _WITH_ENTRY
+    assert config_file_origin(first) is Origin.CREATED
+    assert _apm_empties(first, root=tmp_path / "project") is True
+    assert not first.exists()
+
+
+def _version_1_store(tmp_path: Path, apm_home: Path) -> tuple[Path, Path]:
+    """A layout 1 store recording a user's file and an APM file in two projects."""
+    users = tmp_path / "users" / ".mcp.json"
+    apms = tmp_path / "apms" / ".mcp.json"
+    for config, text in ((users, _SKELETON), (apms, _WITH_ENTRY)):
+        config.parent.mkdir()
+        config.write_text(text, encoding="utf-8")
+    rows = [
+        {"path": config_file_key(users), "origin": "preexisting", "hash": "sha256:" + "0" * 64},
+        {"path": config_file_key(apms), "origin": "created", "hash": _sha(_WITH_ENTRY)},
+    ]
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    store.parent.mkdir(parents=True)
+    store.write_text(json.dumps({"version": 1, "files": rows}), encoding="utf-8")
+    return users, apms
+
+
+def _sha(text: str) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("after", [0, 1, 2, 3])
+def test_an_interrupted_migration_leaves_the_old_store_whole(tmp_path, apm_home, after) -> None:
+    """Killed after *after* store writes of the migration: the layout 1 store is still
+    the whole store (a version 1 reader reads it), and the next write migrates it."""
+    users, apms = _version_1_store(tmp_path, apm_home)
+    old = (apm_home / "deployment-receipts" / "config-files" / "records.json").read_bytes()
+    with _killed_at_write(apm_home, after=after):
+        _apm_writes(tmp_path / "new" / ".mcp.json", _WITH_ENTRY)
+
+    store = apm_home / "deployment-receipts" / "config-files" / "records.json"
+    # Three record files, then the marker: every kill point lands before the marker.
+    assert store.read_bytes() == old
+    assert len(_v1_reader(apm_home)["files"]) == 2
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert config_file_origin(apms) is Origin.CREATED
+
+    _apm_writes(tmp_path / "later" / ".mcp.json", _WITH_ENTRY)
+
+    with pytest.raises(ValueError, match="unknown version or layout"):
+        _v1_reader(apm_home)
+    assert config_file_origin(users) is Origin.PREEXISTING
+    assert _apm_empties(users, root=tmp_path / "users") is False
+    assert users.read_text(encoding="utf-8") == _SKELETON
+    assert _apm_empties(apms, root=tmp_path / "apms") is True
+    assert not apms.exists()
