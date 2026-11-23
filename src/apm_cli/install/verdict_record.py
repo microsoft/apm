@@ -207,17 +207,45 @@ _CLOCK_RE = re.compile(
 )
 
 
+# The recorded run's entry state. The CLI changes its own process as it runs
+# (on Windows it sets PYTHONIOENCODING and reconfigures stdout to UTF-8), and a
+# hit sees the state before the CLI runs, so a writer keys the entry state.
+_ENTRY_ENV: dict[str, str] | None = None
+_ENTRY_PRESENTATION: bytes | None = None
+
+
 def _env(name: str, *, read_by_run: bool = False) -> str | None:
     """The one environment read of this module: classified names, or names the
     recorded run itself read (see :func:`_env_log`)."""
     if not read_by_run and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT:
         raise KeyError(name)
+    if _ENTRY_ENV is not None:
+        return _ENTRY_ENV.get(name.upper() if os.name == "nt" else name)
     return os.environ.get(name)
 
 
 def _env_prefixed(prefix: str) -> list[tuple[str, str]]:
     """Every variable a child git process reads by its documented prefix (``GIT_``)."""
-    return sorted((name, value) for name, value in os.environ.items() if name.startswith(prefix))
+    source = os.environ if _ENTRY_ENV is None else _ENTRY_ENV
+    return sorted((name, value) for name, value in source.items() if name.startswith(prefix))
+
+
+def _env_snapshot() -> dict[str, str]:
+    return dict(os.environ)
+
+
+def _presentation() -> bytes:
+    """O3: how this process presents output (ttys and encodings)."""
+    import locale
+
+    return "|".join(
+        (
+            str(sys.stdout.isatty()),
+            str(sys.stderr.isatty()),
+            locale.getpreferredencoding(False),
+            str(sys.stdout.encoding),
+        )
+    ).encode()
 
 
 _ENV_READS: set[str] = set()
@@ -435,25 +463,13 @@ def _inputs(
     run_env: list[str],
     surfaces: list[str],
 ) -> None:
-    """Every verdict input, read live (QL D3-D6, O3)."""
-    import locale
-
+    """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
     digest.put("version", str(RECORD_VERSION).encode())
     digest.put("build", str(getattr(sys.modules.get("apm_cli"), "__version__", "")).encode())
     digest.put("argv", "\x00".join(argv).encode())
     digest.put("root", os.path.realpath(root).encode("utf-8", "surrogateescape"))
     digest.put("platform", f"{sys.platform}|{os.sep}|{sys.version_info[:2]}".encode())
-    digest.put(
-        "presentation",
-        "|".join(
-            (
-                str(sys.stdout.isatty()),
-                str(sys.stderr.isatty()),
-                locale.getpreferredencoding(False),
-                str(sys.stdout.encoding),
-            )
-        ).encode(),
-    )
+    digest.put("presentation", _ENTRY_PRESENTATION or _presentation())
     for name in ENV_ALLOWLIST:
         value = _env(name)
         digest.put(f"env:{name}", b"\x00unset" if value is None else b"\x01" + value.encode())
@@ -762,6 +778,7 @@ def recording(argv: list[str]) -> Iterator[None]:
         state.clear()
     _SEGMENTS.clear()
     _ENV_READS.clear()
+    entry = (_env_snapshot(), _presentation())
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -778,7 +795,7 @@ def recording(argv: list[str]) -> Iterator[None]:
         sys.stdout, sys.stderr = out.stream, err.stream
         if code == 0 and not _UNKNOWN:
             if _VERIFIED_NOOP and not _FULL_SUCCESS:
-                _write(argv, "".join(out.parts), "".join(err.parts))
+                _write_at_entry(entry, argv, "".join(out.parts), "".join(err.parts))
             elif _FULL_SUCCESS and "services" in _SEGMENTS:
                 start, end = _SEGMENTS["services"]
                 try:
@@ -787,11 +804,23 @@ def recording(argv: list[str]) -> Iterator[None]:
                     _trace(f"no record (no-op form: {type(exc).__name__})")
                     text = None
                 if text is not None:
-                    _write(argv, text, "")
+                    _write_at_entry(entry, argv, text, "")
             else:
                 _trace("no record (no verified no-op or full success)")
         elif _UNKNOWN:
             _trace(f"no record (no-op form unknown: {', '.join(sorted(set(_UNKNOWN)))})")
+
+
+def _write_at_entry(
+    entry: tuple[dict[str, str], bytes], argv: list[str], out: str, err: str
+) -> None:
+    """Write the record keyed by the run's entry state (what a hit will see)."""
+    global _ENTRY_ENV, _ENTRY_PRESENTATION
+    _ENTRY_ENV, _ENTRY_PRESENTATION = entry
+    try:
+        _write(argv, out, err)
+    finally:
+        _ENTRY_ENV, _ENTRY_PRESENTATION = None, None
 
 
 def _noop_form(argv: list[str], services_text: str) -> str | None:

@@ -246,7 +246,7 @@ def test_every_environment_variable_the_cli_reads_is_classified() -> None:
 def test_the_record_module_reads_the_environment_only_through_its_classified_helper() -> None:
     tree = ast.parse(Path(verdict_record.__file__).read_text(encoding="utf-8"))
     for func in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
-        if func.name in {"_env", "_env_prefixed", "_env_log"}:
+        if func.name in {"_env", "_env_prefixed", "_env_log", "_env_snapshot"}:
             continue
         for node in ast.walk(func):
             assert "os.environ" not in ast.unparse(node) or not isinstance(
@@ -411,3 +411,19 @@ def test_a_package_copy_a_hit_cannot_prove_is_never_recorded(project: Path, row:
         handle.write(row)
     _record()
     assert not (_home(project) / "verdicts").exists()
+
+
+def test_the_run_s_own_environment_changes_are_not_keyed(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The CLI sets PYTHONIOENCODING on Windows (cli._configure_encoding); a hit sees the
+    state before the CLI runs, so the record keys the run's entry state."""
+    monkeypatch.delenv("PYTHONIOENCODING", raising=False)
+    with verdict_record.recording(["install"]):
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+        sys.stdout.write(_OUTPUT)
+        verdict_record.note_verified_noop()
+    monkeypatch.delenv("PYTHONIOENCODING")
+    capsys.readouterr()
+    verdict_record.replay(["install"])
+    assert "up to date in " in capsys.readouterr().out
