@@ -571,3 +571,15 @@ def test_a_cleanup_rewrite_of_an_unrecorded_skeleton_records_nothing(tmp_path, a
 
     assert config_file_origin(config) is None
     assert vouches_for_current_bytes(config, before) is False
+
+
+def test_a_cleanup_that_leaves_an_unrecorded_file_bare_records_nothing(tmp_path, apm_home) -> None:
+    """A new legacy record never claims a skeleton: a later install still decides its origin."""
+    config = tmp_path / "project" / ".mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(_WITH_ENTRY, encoding="utf-8")
+    with recorded_config_write(config):  # cleanup removes the last entry
+        config.write_text(_SKELETON, encoding="utf-8")
+
+    assert config_file_origin(config) is None
+    assert config.read_text(encoding="utf-8") == _SKELETON

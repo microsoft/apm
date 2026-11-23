@@ -629,11 +629,13 @@ def test_a_kill_after_a_hook_cleanup_of_an_unrecorded_file_is_restored(
     # Installed before the records existed: nothing vouches for the settings yet.
     shutil.rmtree(Path(chain.env["APM_HOME"]) / "deployment-receipts" / "config-files")
 
-    # Dropping Claude cleans APM's hook out of the shared settings; kill after that write.
+    # Dropping Claude cleans APM's hook out of the shared settings; kill after that
+    # write is done (and recorded), before the sidecar is touched.
     chain.write_manifest([], apm=[], targets=["copilot"], includes="auto")
-    _kill_mid_refusal(chain, "deploy+kill", APM_TEST_DEPLOY_KILL_AFTER="1")
+    _kill_mid_refusal(chain, "deploy+kill", APM_TEST_DEPLOY_KILL_BEFORE=_SIDECAR)
     journal = _journal(_abandoned(chain))
-    assert [line["path"] for line in journal[1:] if "kind" in line] == [_SETTINGS], journal
+    assert _unit(journal, _SETTINGS)["path"] == _SETTINGS, journal
+    assert _SIDECAR not in {line.get("path") for line in journal}, journal
     assert json.loads(settings.read_text(encoding="utf-8")) == _USERS_SETTINGS
     chain.write_manifest([], apm=[], targets=["claude", "copilot"], includes="auto")
 
