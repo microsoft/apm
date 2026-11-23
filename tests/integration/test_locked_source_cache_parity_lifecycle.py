@@ -31,6 +31,7 @@ from tests.integration._install_audit_replay_kit import (
     apm_package,
     tree_digest,
 )
+from tests.lifecycle.known import KnownFailure
 from tests.utils.apm_lifecycle_runner import CommandResult
 
 pytestmark = [
@@ -200,6 +201,31 @@ def test_audit_ci_and_frozen_refuse_alike_when_the_commit_cannot_be_fetched(
     for refused in (frozen, plain):
         assert refused.returncode != 0, _evidence(refused)
         assert _names_failure(refused), _evidence(refused)
+
+
+# The refusal above is safe but names the MCP-declaration check, not the fetch.
+_FROZEN_HIDES_FETCH_FAILURE = KnownFailure(
+    "#4909",
+    "install --frozen hides a failed re-download behind an MCP-declarations error",
+    r"no \[x\] line names the failed fetch",
+)
+
+
+@_FROZEN_HIDES_FETCH_FAILURE.mark()
+def test_frozen_refusal_names_the_failed_fetch_as_its_cause(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    world = _installed(tmp_path, apm_binary_path)
+    _edit_every_copy(world)
+    _drop_commit_content(world)
+
+    frozen = world.apm("install", "--frozen", expect=None)
+
+    errors = [line for line in _text(frozen).splitlines() if line.lstrip().startswith("[x]")]
+    cause = re.compile(r"fetch|does not match its commit|could not", re.IGNORECASE)
+    assert any("test/pkg" in line and cause.search(line) for line in errors), (
+        "no [x] line names the failed fetch\n" + _evidence(frozen)
+    )
 
 
 def test_update_rebuilds_a_modified_cache_copy_with_a_warning(
