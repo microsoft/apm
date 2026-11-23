@@ -1424,3 +1424,44 @@ def test_a_killed_install_into_a_shared_directory_replays_as_before(
     else:
         assert (outcome.restored, outcome.kept) == (1, ())
         assert not shared.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlinks")
+def test_a_shared_directory_swapped_for_a_link_is_journaled_and_never_followed(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """Only a real directory skips the seam: a link takes the recording path."""
+    import json
+
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.md").write_text("not APM's\n", encoding="utf-8")
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    shared = project / ".github" / "prompts"
+
+    def record(path: Path, contents: bool, expected: str | None = None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    write_seam.listen(record, journal.after_write)
+    try:
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+        write_seam.write_text_lf(shared / "p0.prompt.md", "prompt 0\n")
+        shared.rename(tmp_path / "moved")
+        shared.symlink_to(outside, target_is_directory=True)
+        write_seam.mkdir(shared, parents=True, exist_ok=True)
+    finally:
+        write_seam.stop_listening(record)
+    assert journal.store is not None
+    manifest = (journal.store / "journal.jsonl").read_text(encoding="utf-8")
+    lines = [json.loads(line) for line in manifest.splitlines()]
+    whole = [line["state"] for line in lines if line.get("sub") == "" and "sealed" in line]
+    assert whole[-1] == {"link": str(outside)}
+
+    _replay(apm_home, project)
+
+    assert (outside / "keep.md").read_text(encoding="utf-8") == "not APM's\n"
+    assert sorted(p.name for p in outside.iterdir()) == ["keep.md"]
