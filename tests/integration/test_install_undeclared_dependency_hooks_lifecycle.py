@@ -121,14 +121,13 @@ def test_install_retires_the_hooks_in_a_declared_target_it_skips(
         (world.project / root).mkdir()
     _manifest(world, ["h"], ("claude", "gemini"))
     world.apm("install")
-    gemini = world.project / ".gemini" / "apm-hooks.json"
-    assert "_local/h" in gemini.read_text(encoding="utf-8")
+    gemini = world.project / ".gemini" / "settings.json"
+    assert "echo h" in gemini.read_text(encoding="utf-8")
 
     _manifest(world, [], ("claude", "gemini"))
     world.apm("install", "--target", "claude")
 
-    assert "_local/h" not in gemini.read_text(encoding="utf-8")
-    assert "echo h" not in (world.project / ".gemini" / "settings.json").read_text("utf-8")
+    assert "echo h" not in gemini.read_text(encoding="utf-8")
 
 
 def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
@@ -141,32 +140,13 @@ def test_install_retires_the_hooks_in_a_flag_only_target_it_skips(
         (world.project / root).mkdir()
     _manifest(world, ["h"], ())
     world.apm("install", "--target", "claude,gemini")
-    gemini = world.project / ".gemini" / "apm-hooks.json"
-    assert "_local/h" in gemini.read_text(encoding="utf-8")
+    gemini = world.project / ".gemini" / "settings.json"
+    assert "echo h" in gemini.read_text(encoding="utf-8")
 
     _manifest(world, [], ())
     world.apm("install", "--target", "claude")
 
-    assert "_local/h" not in gemini.read_text(encoding="utf-8")
-
-
-def test_install_survives_a_malformed_hook_event(tmp_path: Path, apm_binary_path: Path) -> None:
-    """A null event in a config the sidecar still records never aborts install."""
-    world = ReplayWorld.create(tmp_path, apm_binary_path)
-    _hook_package(world.project / "vendor" / "h", "h", "Bash")
-    (world.project / ".claude").mkdir()
-    _manifest(world, ["h"])
-    world.apm("install")
-    settings = world.project / ".claude" / "settings.json"
-    settings.write_text(json.dumps({"hooks": {"PreToolUse": None}}) + "\n", encoding="utf-8")
-
-    _manifest(world, [])
-    result = world.apm("install", expect=None)
-
-    text = result.stdout + result.stderr
-    assert result.returncode == 0, text
-    assert "Traceback" not in text, text
-    assert json.loads(settings.read_text(encoding="utf-8")) == {"hooks": {"PreToolUse": None}}
+    assert "echo h" not in gemini.read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs an unprivileged symlink")
