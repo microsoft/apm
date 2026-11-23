@@ -634,8 +634,7 @@ class GateMachine(RuleBasedStateMachine):
             # --frozen also refuses a declared direct dependency the lock has no row for
             # (reference/cli/install.md, "Frozen mode"; enforced since #4912).
             unlocked = before.lock is not None and any(
-                not _lock_has(before.lock, str(self.world.packages[kind]))
-                for kind in self.declared
+                not _lock_has(before.lock, str(self.world.packages[kind])) for kind in self.declared
             )
             refused = missing_lock or unlocked or retired or _stale_decision(self, before)
             expected = 1 if mode == "frozen" and refused else 0
