@@ -48,7 +48,8 @@ Steps 2 and 3 verify each line against the spec.
   owners and receipt bindings.
 - INV-2: after re-anchoring, every file the kept dependency deployed has
   exactly one owner (the new key) with an intact receipt binding (active
-  owner plus claim signature), so req-lk-024 still holds.
+  owner plus claim signature) and its hash history carried over, so
+  req-lk-024 and edit detection still hold.
 - INV-3: a later uninstall or prune of the now-transitive `e` deletes only
   files APM proved it wrote. Edited files are kept with a named diagnostic.
 - INV-4: any mismatch (unknown parent, receipt whose binding doesn't match,
@@ -87,19 +88,60 @@ Steps 2 and 3 verify each line against the spec.
 4. Each cell fails before the fix (today: refusal) and passes after.
    W3b ACCEPT at head; QL H8.
 
-## 6. Open questions for steps 2 and 3
+## 6. Step 2 findings (verified against main fd56d1f9 and the spec)
 
-- Q1: Does any replacement `requests[].parent` reference a local key that
-  re-anchoring changes? (Grep the req-rpl-003 writers.)
-- Q2: Can the receipt re-binding reuse the #3772 adopt/rebind path
-  (`adopt_root_receipts` plus the `_migrated` rebind after commit), or does
-  it need a dedicated owner?
-- Q3: Ruling between spec option (a) and (b) in Section 2.
+- Spec check. No OpenAPM v0.1 requirement defines local dependency lock
+  identity: `declaring_parent` and `anchored_local_path` are APM
+  implementation fields, and the local-path anchoring prose lives only in
+  Section 4.8.1, a proposed capability. req-lk-006 (frozen), req-lk-017
+  (frozen re-verify of deployed hashes) and req-lk-024 (deletion evidence)
+  are the binding constraints. Recommendation for Q3: option (b), no
+  amendment. A new requirement under Section 5 is warranted only if
+  conformance tests must observe re-keying.
+- Q1 (replacements). Yes, it can apply. `ReplacementRequest.parent`
+  (`models/dependency/replacement.py:150`, serialized at :160) stores the
+  exact original lock key of each incoming edge, so if the kept local
+  dependency declares an edge into a replaced package, that request names
+  its OLD key. Rule: re-key every request whose parent equals the old key in
+  the same commit. If any parent can't be mapped, fall back to refusal
+  (INV-4).
+- Q2 (reuse the #3772 rebind). Not as-is. `bind_committed_claims`
+  (`core/deployment_ledger.py:628-650`) rebinds only when the committed
+  record equals the session record. Re-keying changes the record's
+  `owners` and `active_owner`, so that equality fails and nothing would
+  rebind. It also calls `_history.forget(key)` on a new binding, which would
+  drop the hash history that edit detection relies on. Re-anchoring needs a
+  dedicated owner-rename step: map old owner to new owner in owners,
+  active_owner and the claim signature (`_claim_signature`, :549), and
+  CARRY the history (same physical bytes, same writer).
+- Identity source of truth. `transitive_local_identity`
+  (`deps/local_identity.py:58`) gives a root-declared directory the root
+  spelling, otherwise `declaring_parent` plus the anchored path. Once
+  uninstall drops the root declaration, the kept node takes the transitive
+  form. When several surviving parents need the node, the declaring parent
+  is whichever the resolver picks.
+- Design recommendation (the strongest guarantee for Done-when 1). Don't
+  hand re-key. Compute the post-uninstall lock with the SAME in-memory
+  resolution `apm install --no-frozen` runs (no fetch: local plus cached
+  sources only; no write), then reconcile: rows, ledger owners via the
+  owner-rename step and receipts, all in one commit. Byte identity with
+  --no-frozen then holds by construction, and resolution behaviour is
+  unchanged (out of scope respected). If the in-memory resolution needs
+  anything unavailable offline, refuse as today.
+
+## 7. Open questions for step 3
+
+- Q3: the ruling between spec option (a) and (b) in Section 2 (recommend b).
+- Q4: does the regent accept the "in-memory resolve, then reconcile" design
+  over hand re-keying? It reuses the resolver and the ledger codec, and adds
+  one owner-rename step with a mutation guard.
+- Q5 (QL): add a fifth Done-when cell where the kept local dependency has an
+  edge into a replaced package, covering Q1.
 
 ## Steps (rule 22: hourly, each ends in a pushed SHA)
 
-- STEP 1 (this commit): outline.
-- STEP 2: verify Section 2 against the spec text and answer Q1/Q2 with code
-  citations.
+- STEP 1 (6f8417a2): outline.
+- STEP 2 (this commit): spec verified; Q1/Q2 answered with code citations;
+  design recommendation.
 - STEP 3: finalize invariants and cells with QL; hand the brief to the
   regent for ruling.
