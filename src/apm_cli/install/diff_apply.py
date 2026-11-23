@@ -400,32 +400,20 @@ def _audit_passes(project_root: Path, fetch: Any, *, content_integrity: bool) ->
 
     result = run_baseline_checks(
         project_root,
-        fail_fast=False,
+        fail_fast=True,
         ci_mode=True,
         policy_provider=lambda: exec_policy_from_discovery(lambda: fetch),
         content_integrity=content_integrity,
+        # The audit's MCP view ignores personal (user-scope) approvals so CI and
+        # laptops agree; install honors them. The fast run's output runs the
+        # install's own MCP phase (fast_output.run_services), which reconciles,
+        # parks, records and reports exactly as the full run does.
+        mcp_config_consistency=False,
     )
-    failed = next(
-        (
-            c
-            for c in result.checks
-            if c.name not in _RENDERED_BY_THE_INSTALL_OWNER
-            and (not c.passed or getattr(c, "warned", False))
-        ),
-        None,
-    )
+    failed = next((c for c in result.checks if not c.passed or getattr(c, "warned", False)), None)
     if failed is not None:
         _AUDIT_FAILURE[:] = [str(getattr(failed, "name", "check"))]
-    return failed is None
-
-
-# Audit checks the fast run hands to the install's own phase instead: the MCP
-# config view of ``apm audit`` deliberately ignores personal (user-scope)
-# approvals so CI and laptops agree, while ``apm install`` honors them. The
-# fast run's output runs the install's MCP phase itself
-# (fast_output.run_services), which reconciles, parks and reports exactly as
-# the full run does.
-_RENDERED_BY_THE_INSTALL_OWNER = frozenset({"config-consistency"})
+    return failed is None and result.passed
 
 
 # The audit check that failed last (named in the decline trace).
