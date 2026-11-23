@@ -12,6 +12,7 @@ from apm_cli.core.remediation import (
     PRUNE_INCOMPLETE,
     PRUNE_NATIVE_GATE_UNCHECKED,
     PRUNE_PARTIAL,
+    PRUNE_REPLACED_PARENT,
 )
 
 from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
@@ -50,28 +51,58 @@ from ._helpers import _scan_installed_packages
 from .uninstall.lockfile_state import lockfile_has_persisted_state
 
 
-def _refuse_broken_lock_graph(lockfile: LockFile | None, removed: set[str], logger) -> None:
-    """Refuse, before anything changes, a prune whose lockfile would not write (#5140).
+def _orphan_decision(lockfile, apm_modules_dir: Path, declared_deps, project_root: Path):
+    """The orphan owner's prune decision, as :func:`prune` asks it, for a read-only pre-pass."""
+    installed = _scan_installed_packages(apm_modules_dir) if apm_modules_dir.exists() else set()
+    return decide_orphan_removal(
+        operation=OrphanOperation.PRUNE,
+        roots=(),
+        candidate_universe=lockfile,
+        installed_paths=InstalledPaths(root=apm_modules_dir, packages=frozenset(installed)),
+        resolved_keys=None,
+        intended=declared_deps,
+        materialized=None,
+        reachability=ReachabilityProbe(
+            project_root=project_root,
+            apm_modules_dir=apm_modules_dir,
+            direct_refs=tuple(declared_deps),
+            dev_refs=(),
+        ),
+        deployment_claims=None,
+    )
 
-    Removing a replaced package's only parent leaves its row pointing at an
-    absent parent: the lockfile owner rejects that graph, so prune must not
-    delete anything first.
+
+def _refuse_broken_lock_graph(apm_package, apm_modules_dir: Path, logger) -> None:
+    """Refuse, before prune changes anything, a prune whose lockfile would not write (#5140).
+
+    Read-only: it runs ahead of bundle-hook and native reconciliation and of
+    any package removal. Removing a replaced package's only parent leaves its
+    row pointing at an absent parent, a graph the lockfile owner rejects. A
+    lockfile or decision that cannot be read here is left to the main pass,
+    which reports it.
     """
     import copy
 
-    if lockfile is None or not removed:
+    project_root = Path.cwd()
+    try:
+        lockfile = LockFile.read(get_lockfile_path(project_root))
+        if lockfile is None:
+            return
+        declared = apm_package.get_all_apm_dependencies()
+        decision = _orphan_decision(lockfile, apm_modules_dir, declared, project_root)
+    except Exception:
+        return
+    removed = set(decision.removed_keys) | set(decision.stale_keys)
+    if not removed:
         return
     remaining = copy.deepcopy(lockfile)
     for key in removed:
         remaining.dependencies.pop(key, None)
     try:
-        remaining.to_yaml()
+        remaining._validate_replacement_evidence()  # the owner's graph rule; #5185 makes it public
     except LockfileFormatError as exc:
         logger.error(f"Cannot prune {', '.join(sorted(removed))}: {exc}. Nothing was changed.")
-        logger.error_detail(
-            "Keep the package that declares the replaced dependency in apm.yml, "
-            "or remove that dependency's replace entry."
-        )
+        logger.error_detail(PRUNE_REPLACED_PARENT.sentence())
         sys.exit(1)
 
 
@@ -152,6 +183,8 @@ def prune(ctx, dry_run):
         except Exception as e:
             logger.error(f"Failed to parse {APM_YML_FILENAME}: {e}")
             sys.exit(1)
+
+        _refuse_broken_lock_graph(apm_package, apm_modules_dir, logger)
 
         # Runs before the lockfile is read: retiring a revoked bundle's hooks
         # rewrites apm.lock.yaml, and prune must not write a stale copy back.
@@ -276,9 +309,6 @@ def prune(ctx, dry_run):
             return
 
         planned_pruned_keys = set(decision.removed_keys)
-        _refuse_broken_lock_graph(
-            lockfile, planned_pruned_keys | set(missing_orphaned_keys), logger
-        )
         if planned_pruned_keys and not dry_run:
             _preflight_prune_survivors(
                 apm_package,
