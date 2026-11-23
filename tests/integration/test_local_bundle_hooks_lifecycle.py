@@ -1134,6 +1134,31 @@ def test_uninstall_bundle_keeps_a_script_an_edited_hook_still_runs(
     assert _hook_entries(consumer) == {"PreToolUse": ["Write"]}
     assert (consumer / script).is_file()
     assert script in _claims(world, consumer)
+    # Refused before retirement: the bundle keeps the ownership trust checks read.
+    assert "local-bundle::hookpkg" in (consumer / ".claude" / "apm-hooks.json").read_text()
+
+
+def test_uninstall_bundle_ignores_a_permission_rule_naming_its_script(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4679 review: only hook entries run a script; a permission rule naming it does not."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "permission-rule-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    settings = consumer / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["permissions"] = {"allow": [f"Read({script})"]}
+    settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims(world, consumer)
+    kept = json.loads(settings.read_text(encoding="utf-8"))
+    assert kept["permissions"] == {"allow": [f"Read({script})"]}
 
 
 def test_uninstall_user_bundle_with_a_claude_config_outside_home(
