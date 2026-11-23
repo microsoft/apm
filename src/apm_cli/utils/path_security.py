@@ -278,6 +278,36 @@ def has_symlink_component(base_dir: Path, path: Path, *, raise_on_error: bool = 
         return True
 
 
+def _collapse_unlinked(path: Path) -> Path | None:
+    """Collapse ``..`` in *path*; ``None`` when a ``..`` steps back over a symlink."""
+    path = path if path.is_absolute() else Path.cwd() / path
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        if part == "..":
+            if current.is_symlink():
+                return None
+            current = current.parent
+        else:
+            current /= part
+    return current
+
+
+def user_config_crosses_link(path: Path, root: Path) -> bool:
+    """Whether a user config *path* is, or is reached through, a symlink.
+
+    Below ``$HOME`` every component counts; outside it, *root* and everything
+    below it. A ``..`` that steps back over a symlink counts too; otherwise the
+    path is checked in its collapsed form, so an equivalent spelling passes.
+    """
+    home = _collapse_unlinked(Path.home())
+    path, root = _collapse_unlinked(path), _collapse_unlinked(root)
+    if home is None or path is None or root is None:
+        return True
+    if path.is_relative_to(home):
+        return has_symlink_component(home, path)
+    return has_symlink_component(root.parent, path)
+
+
 def safe_rmtree(path: Path, base_dir: Path) -> None:
     """Remove *path* only if it resolves within *base_dir*.
 

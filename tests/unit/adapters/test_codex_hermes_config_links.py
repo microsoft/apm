@@ -221,3 +221,42 @@ def test_every_registered_writer_refuses_a_linked_project_config(
     assert link.is_symlink()
     after = {path: path.read_bytes() for path in outside.rglob("*") if path.is_file()}
     assert after == before, cls.__name__
+
+
+@pytest.mark.parametrize(
+    ("cls", "variable", "filename"),
+    [
+        (CodexClientAdapter, "CODEX_HOME", "config.toml"),
+        (HermesClientAdapter, "HERMES_HOME", "config.yaml"),
+    ],
+    ids=["codex", "hermes"],
+)
+@pytest.mark.parametrize("via_link", [False, True], ids=["plain-dotdot", "dotdot-over-a-link"])
+def test_a_dotdot_user_root_is_judged_by_its_real_components(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cls,
+    variable: str,
+    filename: str,
+    via_link: bool,
+) -> None:
+    """``other/../home/.x`` under HOME is written; a ``..`` stepping back over a link is refused."""
+    home = _home(tmp_path, monkeypatch)
+    other = tmp_path / "other"
+    if via_link:
+        elsewhere = tmp_path / "elsewhere" / "deep"
+        elsewhere.mkdir(parents=True)
+        os.symlink(elsewhere, other, target_is_directory=True)
+    else:
+        other.mkdir()
+    root = home / f".{cls.target_name}"
+    root.mkdir()
+    monkeypatch.setenv(variable, f"{other}/../home/.{cls.target_name}")
+    adapter = cls(user_scope=True)
+
+    if via_link:
+        assert _refused(lambda: adapter.update_config(_SRV))
+        assert not (root / filename).exists()
+    else:
+        assert adapter.update_config(_SRV) is True
+        assert "pkg-srv" in (root / filename).read_text(encoding="utf-8")

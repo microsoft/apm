@@ -14,7 +14,7 @@ from ...core.remediation import MCP_ENV_VARS_UNRESOLVED
 from ...models.dependency.mcp import _EXTRA_DENYLIST, TrustedEnvLiteral
 from ...utils.atomic_io import umask_file_mode
 from ...utils.json_config import write_json_config
-from ...utils.path_security import has_symlink_component
+from ...utils.path_security import has_symlink_component, user_config_crosses_link
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
 
@@ -677,9 +677,7 @@ class MCPClientAdapter(ABC):
         """The one MCP config link policy (project, user under $HOME, relocated user root)."""
         if user_root is None and not self.user_scope:
             return self._is_linked_project_config(config_path)
-        if Path(os.path.abspath(config_path)).is_relative_to(os.path.abspath(Path.home())):
-            return has_symlink_component(Path.home(), config_path)
-        return has_symlink_component((user_root or config_path.parent).parent, config_path)
+        return user_config_crosses_link(config_path, user_root or config_path.parent)
 
     def _is_linked_project_config(self, config_path: Path) -> bool:
         """Return whether a project-scope config path is or crosses a symlink.
