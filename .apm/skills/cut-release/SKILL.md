@@ -16,7 +16,8 @@ description: >-
   release PR -- even when the user does not say "skill". Stops
   BEFORE tagging; tagging stays a human gate that triggers the
   release workflow. Refuses to bump to a major (>= 1.0.0) version
-  without explicit operator confirmation.
+  without explicit operator confirmation, and stops without
+  releasing on a fix-only or empty cycle.
 ---
 
 # cut-release -- assess, sanitize, bump, lint, open PR
@@ -87,7 +88,9 @@ at the start of each phase and after every tool return.
 3. Persist the goal to plan.md:
    - Range: `<last-tag>..HEAD`.
    - Acceptance: release PR is open, lint mirror green, no version
-     bumped beyond what the cycle warrants.
+     bumped beyond what the cycle warrants; or, for a fix-only or
+     empty cycle without a CEO-approved hotfix, no release files
+     touched and no PR opened.
 
 ### Phase 1 -- enumerate merged PRs
 
@@ -132,6 +135,13 @@ If the rubric outputs ESCALATE-TO-MAJOR (>= 1.0.0), STOP and
 surface the escalation per `assets/semver-rubric.md` "Major bump"
 section. Do not bump to 1.0.0 without explicit operator
 confirmation.
+
+If the rubric outputs REFUSE, or NO RELEASE without an explicit
+CEO-approved hotfix authorization, STOP here and report it to the
+operator. Leave `changelog.d/`, `CHANGELOG.md`, `pyproject.toml` and
+`uv.lock` untouched and open no PR: the fixes ship in the next
+MINOR. Only with that hotfix authorization does NO RELEASE become a
+PATCH and continue to Phase 3.
 
 Wait for the operator's confirm before continuing.
 
@@ -294,5 +304,7 @@ This skill does NOT:
 - Decide whether a release should happen -- the operator decided
   that by activating this skill.
 - Bump to >= 1.0.0 without explicit operator confirmation.
+- Cut a PATCH release without an explicit CEO-approved hotfix
+  authorization; a fix-only cycle waits for the next MINOR.
 - Review code quality or test coverage (use `autopilot-pr-review-worker`
   before activating this skill if a recent PR needs review).

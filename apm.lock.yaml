@@ -1363,7 +1363,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:dea539ba91115b9c3e2749d1c4bfd63e113543a76742ccfd012115de9fa20ee7
+  content_hash: sha256:c2d149c37904e00e1aa634400353884d1e69e61561ccb29f0c3ba3ed25a9f0e3
 - kind: project-relative
   target: copilot
   value: .agents/skills/cut-release/assets/entry-sanitizer.md
@@ -3483,7 +3483,7 @@ local_deployed_file_hashes:
   .agents/skills/apm-strategy/SKILL.md: sha256:6c7fbc821fef930ab76764c7b33d55bd181f31cdd406cff5ce7cf14d1071c2ef
   .agents/skills/auth/SKILL.md: sha256:64f08ad849c95cf7d949499bd2939d7bfc52a8e773b4e990b632ae5a38de4dac
   .agents/skills/cli-logging-ux/SKILL.md: sha256:b04d5282a9f21b33c75ac98c41c7eab7e562eafea8c89bbb5732d9956958fe7c
-  .agents/skills/cut-release/SKILL.md: sha256:dea539ba91115b9c3e2749d1c4bfd63e113543a76742ccfd012115de9fa20ee7
+  .agents/skills/cut-release/SKILL.md: sha256:c2d149c37904e00e1aa634400353884d1e69e61561ccb29f0c3ba3ed25a9f0e3
   .agents/skills/cut-release/assets/entry-sanitizer.md: sha256:f5bd68ff42a2b408b7a3ebc106a9b6a2bb6057db5e8ef970a5b46aa74880beb2
   .agents/skills/cut-release/assets/pr-body-template.md: sha256:4d7fb7d8908d9938f4587af7bcafb016362a39ba38a8e0891147d5fab1b9016e
   .agents/skills/cut-release/assets/semver-rubric.md: sha256:4335c3738540bdffd820b000ba74092f2a498e2e861b63dba527a4ffc4b90ebd
