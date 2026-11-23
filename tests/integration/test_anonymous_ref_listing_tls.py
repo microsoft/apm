@@ -53,8 +53,8 @@ def _pipe(src: socket.socket, dst: socket.socket) -> None:
 
 
 @contextlib.contextmanager
-def _tls_origin_behind_proxy(certfile: Path, keyfile: Path) -> Iterator[str]:
-    """``http://`` proxy URL whose every CONNECT reaches a TLS server with *certfile*."""
+def _tls_origin_behind_proxy(certfile: Path, keyfile: Path) -> Iterator[tuple[str, int]]:
+    """``(http:// proxy URL, origin port)``: every CONNECT reaches a TLS server with *certfile*."""
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server_context.load_cert_chain(certfile=str(certfile), keyfile=str(keyfile))
     origin = socket.create_server(("127.0.0.1", 0))
@@ -83,7 +83,7 @@ def _tls_origin_behind_proxy(certfile: Path, keyfile: Path) -> Iterator[str]:
     _serve(origin, handshake)
     _serve(proxy, tunnel)
     try:
-        yield f"http://127.0.0.1:{proxy.getsockname()[1]}"
+        yield f"http://127.0.0.1:{proxy.getsockname()[1]}", origin_port
     finally:
         origin.close()
         proxy.close()
@@ -102,7 +102,7 @@ def test_a_self_signed_certificate_is_refused_and_git_runs(tmp_path, monkeypatch
     trusted_ca, _leaf, _key = _mint_certificates(tmp_path / "trusted", ("github.com",))
     rogue_ca, _rogue_leaf, _rogue_key = _mint_certificates(tmp_path / "rogue", ("github.com",))
 
-    with _tls_origin_behind_proxy(rogue_ca, tmp_path / "rogue" / "ca.key") as proxy_url:
+    with _tls_origin_behind_proxy(rogue_ca, tmp_path / "rogue" / "ca.key") as (proxy_url, _port):
         listed = _listing_through(proxy_url, trusted_ca, monkeypatch, caplog)
 
     assert listed is None
@@ -114,8 +114,39 @@ def test_a_certificate_for_another_host_is_refused_and_git_runs(tmp_path, monkey
         tmp_path / "trusted", ("wrong.example.invalid",)
     )
 
-    with _tls_origin_behind_proxy(wrong_leaf, wrong_key) as proxy_url:
+    with _tls_origin_behind_proxy(wrong_leaf, wrong_key) as (proxy_url, _port):
         listed = _listing_through(proxy_url, trusted_ca, monkeypatch, caplog)
 
+    assert listed is None
+    assert "falls back to git: SSLError" in caplog.text
+
+
+def test_a_ca_only_apm_trusts_is_refused_and_git_runs(tmp_path, monkeypatch, caplog):
+    """APM's additive/OS trust accepts the server; git's CA set does not, so neither do we."""
+    import sys
+
+    import urllib3.util.ssl_ as urllib3_ssl
+
+    from apm_cli.core import tls_trust
+
+    apm_ca, leaf, key = _mint_certificates(tmp_path / "apm-only", ("github.com",))
+    git_ca, _git_leaf, _git_key = _mint_certificates(tmp_path / "git", ("github.com",))
+    monkeypatch.setitem(sys.modules, "truststore", None)
+    recorded = (tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION)
+    state = tls_trust._capture_tls_publication_state()
+    try:
+        tls_trust.configure_tls_trust(env={"APM_EXTRA_CA_BUNDLE": str(apm_ca)})
+        with _tls_origin_behind_proxy(leaf, key) as (proxy_url, origin_port):
+            apm_context = urllib3_ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            with socket.create_connection(("127.0.0.1", origin_port), timeout=10) as raw:
+                with apm_context.wrap_socket(raw, server_hostname="github.com") as tls:
+                    accepted_by_apm = tls.getpeercert() is not None
+
+            listed = _listing_through(proxy_url, git_ca, monkeypatch, caplog)
+    finally:
+        tls_trust._restore_tls_publication_state(state)
+        tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION = recorded
+
+    assert accepted_by_apm
     assert listed is None
     assert "falls back to git: SSLError" in caplog.text
