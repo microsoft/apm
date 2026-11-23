@@ -75,3 +75,43 @@ def test_a_local_row_without_a_path_is_unverified_offline(tmp_path: Path) -> Non
     assert exc.value.code == 1
     message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
     assert "apm_modules/ is missing" in message, message
+
+
+def test_every_declaration_of_one_directory_is_previewed_as_kept(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two spellings of one directory are both kept in the preview, as the real run refuses."""
+    from apm_cli.commands.uninstall.cli import _refuse_unverifiable_local_survivors
+    from apm_cli.core.command_logger import CommandLogger
+
+    (tmp_path / "vendor" / "e").mkdir(parents=True)
+    survivor = tmp_path / "vendor" / "d"
+    survivor.mkdir()
+    (survivor / "apm.yml").write_text(
+        "name: d\nversion: 1.0.0\ndependencies:\n  apm:\n    - ../e\n", encoding="utf-8"
+    )
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        "name: proj\nversion: 1.0.0\ndependencies:\n  apm:\n"
+        "    - ./vendor/e\n    - ./vendor/./e\n    - ./vendor/d\n",
+        encoding="utf-8",
+    )
+    lockfile = MagicMock()
+    lockfile.get_dependency.side_effect = [
+        SimpleNamespace(source="local", local_path="./vendor/e"),
+        SimpleNamespace(source="local", local_path="./vendor/./e"),
+    ]
+    lockfile.replacements = None
+
+    kept = _refuse_unverifiable_local_survivors(
+        lockfile,
+        ["./vendor/e", "./vendor/./e"],
+        manifest,
+        CommandLogger("uninstall", dry_run=True),
+        dry_run=True,
+    )
+
+    captured = capsys.readouterr()
+    output = " ".join((captured.out + captured.err).split())
+    assert kept == ["./vendor/e", "./vendor/./e"]
+    assert "Would keep ./vendor/e:" in output and "Would keep ./vendor/./e:" in output, output

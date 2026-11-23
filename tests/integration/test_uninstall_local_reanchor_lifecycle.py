@@ -861,3 +861,27 @@ def test_without_apm_modules_a_replaced_survivor_refuses(
     _without_modules(world)
 
     _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
+def test_a_hook_bearing_reanchor_refuses_and_keeps_its_hooks(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4889: merged hooks rebuild from the materialization the re-key moves; refuse first."""
+    world = _local_world(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    hook = {
+        "hooks": {
+            "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "true"}]}]
+        }
+    }
+    write(vendor / "e/.apm/hooks/hooks.json", json.dumps(hook))
+    _manifest(world, ["./vendor/e"], ["./vendor/d", "./vendor/a"])
+    manifest = load_yaml(world.project / "apm.yml")
+    manifest["executables"] = {"allow": {"*": {"hooks": True}}}
+    dump_yaml(manifest, world.project / "apm.yml")
+    world.apm("install", expect=None)
+    settings = world.project / ".claude" / "settings.json"
+    hooks_before = settings.read_bytes() if settings.exists() else None
+
+    _assert_refused_before_any_write(world, "ships hooks")
+    assert (settings.read_bytes() if settings.exists() else None) == hooks_before
