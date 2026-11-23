@@ -899,14 +899,40 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     return None
 
 
-def has_abandoned_journals(store_parent: Path) -> bool:
-    """Whether a killed install left a journal the next full install must handle."""
+def has_abandoned_journals(
+    store_parent: Path, root: Path | None = None, *, workspace: Path | None = None
+) -> bool:
+    """Whether a killed install left a journal the next full install must handle.
+
+    With *root*, only a journal that install would replay counts: its own, or
+    one whose identity cannot be read (#5064); another workspace's journal
+    waits for that workspace. A store with no manifest always counts.
+    """
+    identity = _identity(root, workspace) if root is not None else None
     with contextlib.suppress(OSError):
         return any(
-            store.is_dir() and not os.path.lexists(store / _RETAINED_MARKER)
+            store.is_dir()
+            and not os.path.lexists(store / _RETAINED_MARKER)
+            and (
+                identity is None
+                or not os.path.lexists(store / _MANIFEST)
+                or _replays_for(store, identity)
+            )
             for store in store_parent.glob(f"{_STORE_PREFIX}*")
         )
     return False
+
+
+def _identity(root: Path, workspace: Path | None) -> tuple[str, str]:
+    """The ``(deploy root, workspace)`` identity an install replays journals for."""
+    root = Path(os.path.abspath(root))
+    return os.path.realpath(root), os.path.realpath(workspace or root)
+
+
+def _replays_for(store: Path, identity: tuple[str, str]) -> bool:
+    """Whether replay for *identity* handles *store*: its own, or an unreadable identity."""
+    named = _store_identity(store)
+    return named is None or named == identity
 
 
 def replay_abandoned_journals(
@@ -935,7 +961,7 @@ def replay_abandoned_journals(
     replayed, after keeping it.
     """
     root = Path(os.path.abspath(root))
-    identity = (os.path.realpath(root), os.path.realpath(workspace or root))
+    identity = _identity(root, workspace)
     bases = _Bases(root, Path(os.path.abspath(receipts)))
     ledger, committed = functools.cache(ledger), functools.cache(committed)
     stores: list[Path] = []
@@ -950,8 +976,7 @@ def replay_abandoned_journals(
             # nothing replay can prove: reclaim it, as every install did before.
             shutil.rmtree(store, ignore_errors=True)
             continue
-        named = _store_identity(store)
-        if named is not None and named != identity:
+        if not _replays_for(store, identity):
             continue
         outcome = _replay_store(store, bases, ledger, committed)
         restored += outcome.restored

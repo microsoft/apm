@@ -839,6 +839,8 @@ def test_an_abandoned_journal_counts_only_where_replay_would_handle_it(
 
     assert has_abandoned_journals(kept.parent, project, workspace=project) is counts
     assert has_abandoned_journals(kept.parent)
+    assert kept.is_dir(), "asking never touches the journal"
+    assert (root / "a.md").read_bytes() == b"killed\n"
 
 
 def test_a_malformed_seal_keeps_the_journal(tmp_path: Path, apm_home: Path) -> None:
