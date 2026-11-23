@@ -184,6 +184,10 @@ RESTORE_EDITED = _entry(
 # A managed file install kept because it may hold local edits (#4360, #4504).
 # Never 'apm install --force': it also deploys despite critical findings (RA-008).
 KEPT_FILE_RESTORE = _entry("kept-file-restore", "apm install", "restore it", before="move it aside")
+# A managed config entry (an LSP server) install kept the same way (#4626).
+KEPT_ENTRY_RESTORE = _entry(
+    "kept-entry-restore", "apm install", "restore it", before="remove the entry"
+)
 # A skill copy a --target-narrowed install kept stale in an inactive target (#4692).
 KEPT_SKILL_REFRESH = _entry("kept-skill-refresh", "apm install --target {targets}", "refresh it")
 # Files an APM before 0.37 rendered, kept as committed by a frozen replay (#4398).
