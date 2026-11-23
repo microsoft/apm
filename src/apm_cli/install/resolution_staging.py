@@ -23,7 +23,7 @@ from apm_cli.utils.staging_guard import STAGING_DIR_NAME
 _STAGING_NAME = re.compile(r"[0-9a-f]{12}|[0-9a-f]{32}")
 
 
-def _publish_no_clobber(staged: Path, destination: Path) -> None:
+def _publish_no_clobber_raw(staged: Path, destination: Path) -> None:
     """Rename *staged* to *destination* only if nothing is there, in one atomic step.
 
     Windows ``rename`` never replaces; macOS has ``renamex_np(RENAME_EXCL)`` and
@@ -49,6 +49,16 @@ def _publish_no_clobber(staged: Path, destination: Path) -> None:
     if result != 0:
         code = ctypes.get_errno()
         raise OSError(code, os.strerror(code), str(destination))
+
+
+def _publish_no_clobber(staged: Path, destination: Path) -> None:
+    from apm_cli.utils import path_fast
+
+    path_fast._bump()
+    try:
+        _publish_no_clobber_raw(staged, destination)
+    finally:
+        path_fast._bump()
 
 
 def _identity(path: Path) -> tuple[int, int] | None:
