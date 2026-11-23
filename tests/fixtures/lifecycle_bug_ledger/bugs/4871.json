@@ -1,0 +1,16 @@
+{
+  "issue": 4871,
+  "fixed_in": "Unreleased",
+  "summary": "A stdio-to-socket LSP upgrade blocked by a kept Copilot edit still deleted the server's managed OpenCode entry, including a local edit; OpenCode now joins the hold at the locked render and keeps its target claim.",
+  "failure_modes": [
+    "ownership"
+  ],
+  "properties": [
+    "ownership.preserve_unowned"
+  ],
+  "regression_tests": [
+    "tests/lifecycle/scenarios/test_ownership_siblings.py::test_a_blocked_socket_upgrade_keeps_opencodes_entry",
+    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryReviewThree::test_a_blocked_upgrade_holds_a_target_the_new_config_cannot_reach",
+    "tests/unit/integration/test_lsp_integrator.py::TestKeptEntryReviewThree::test_an_upgrade_that_is_not_blocked_reaches_no_held_target"
+  ]
+}
