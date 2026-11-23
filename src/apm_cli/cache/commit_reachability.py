@@ -16,8 +16,12 @@ record for one origin never admits the same commit from another.
 from __future__ import annotations
 
 import os
+import re
+import stat
 import subprocess
 from pathlib import Path
+
+_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
 _REACH_REFSPECS = (
     "+refs/heads/*:refs/heads/*",
@@ -35,10 +39,67 @@ def _record(marker: Path, canonical: str) -> None:
 
 
 def _recorded(marker: Path, canonical: str) -> bool:
+    """Read a marker without following links; only a regular file counts."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        return marker.read_text(encoding="utf-8") == canonical
+        fd = os.open(marker, flags)
     except OSError:
         return False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return False
+        with os.fdopen(fd, encoding="utf-8") as handle:
+            fd = -1
+            return handle.read() == canonical
+    except (OSError, UnicodeDecodeError):
+        return False
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+class CommitNotReachableError(RuntimeError):
+    """A pinned commit is not admitted: no origin branch or tag reaches it, or that is unverified.
+
+    Never a cache miss: callers must not fall back to another fetch path.
+    """
+
+
+class _Admission:
+    """A ``GitCache`` stand-in whose checkout only admits the pinned commit."""
+
+    def __init__(self, cache_root: Path) -> None:
+        self._root = cache_root
+
+    def get_checkout(self, url, ref, *, locked_sha=None, env=None, sparse_paths=None) -> Path:
+        from .url_normalize import cache_shard_key
+
+        require_reachable_commit(self._root, url, cache_shard_key(url), ref, env=env)
+        return self._root
+
+    def remember_resolved_ref(self, *_args) -> None:
+        return None
+
+
+def admit_pinned_commit(downloader, dep_ref, sha: str | None) -> None:
+    """Admit a commit-pinned dependency before any cache, bare or clone fetch.
+
+    Runs under the downloader's own persistent-cache credential fallback,
+    so the verdict uses the credentials the fetch would. A non-commit ref
+    (branch or tag) is not checked here.
+
+    Raises:
+        CommitNotReachableError: The commit is not admitted.
+    """
+    if not sha or not _COMMIT_RE.match(sha):
+        return
+    from .paths import get_cache_root
+
+    cache = getattr(downloader, "persistent_git_cache", None)
+    root = Path(getattr(cache, "_cache_root", None) or get_cache_root())
+    downloader._persistent_cache_checkout(
+        _Admission(root), dep_ref, dep_ref.to_github_url(), sha, locked_sha=None
+    )
 
 
 def require_reachable_commit(
@@ -77,9 +138,9 @@ def require_reachable_commit(
             url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
         )
     except (subprocess.SubprocessError, OSError) as exc:
-        raise RuntimeError(unverifiable) from exc
+        raise CommitNotReachableError(unverifiable) from exc
     if listing.returncode != 0:
-        raise RuntimeError(unverifiable)
+        raise CommitNotReachableError(unverifiable)
     records = []
     for line in (listing.stdout or "").splitlines():
         tip, _, name = line.partition("\t")
@@ -89,7 +150,7 @@ def require_reachable_commit(
     if sha in tips or (records and _reached_by_refs(cache_root, url, shard_key, sha, env)):
         _record(marker, canonical)
         return
-    raise RuntimeError(
+    raise CommitNotReachableError(
         f"Commit {sha} of {where} is not reachable from any branch or tag of the origin. "
         "Pin a commit on a branch or tag of the source repository, or the branch or tag itself."
     )
@@ -139,7 +200,7 @@ def _reached_by_refs(
             stdin=subprocess.DEVNULL,
         )
     except (subprocess.SubprocessError, OSError) as exc:
-        raise RuntimeError(
+        raise CommitNotReachableError(
             f"Cannot verify that commit {sha} of {_sanitize_url(url)} is reachable from a "
             "branch or tag: the first install of a pinned commit needs network access once. "
             "Re-run with network access, or pin a branch or tag instead."

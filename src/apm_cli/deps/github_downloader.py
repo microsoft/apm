@@ -1396,6 +1396,9 @@ class GitHubPackageDownloader:
 
         # WS3 (#1116): try persistent cross-run cache first.
         # Build a canonical URL for cache key derivation.
+        from ..cache.commit_reachability import admit_pinned_commit
+
+        admit_pinned_commit(self, dep_ref, ref)  # before any cache, bare or clone fetch
         _persistent_cache = self.persistent_git_cache
         _persistent_checkout: Path | None = None
         _resolved_sha_for_cache: str | None = None
@@ -1881,6 +1884,10 @@ class GitHubPackageDownloader:
 
         # Regular package download (existing logic)
         resolved_ref = self.resolve_git_reference(dep_ref)
+        if resolved_ref.ref_type == GitReferenceType.COMMIT:
+            from ..cache.commit_reachability import admit_pinned_commit
+
+            admit_pinned_commit(self, dep_ref, resolved_ref.resolved_commit or dep_ref.reference)
 
         # Create target directory if it doesn't exist
         target_path.mkdir(parents=True, exist_ok=True)
