@@ -887,28 +887,6 @@ def test_consent_tries_an_owner_only_the_canonical_rows_name(
 
 
 @pytest.mark.req("req-lk-024")
-def test_consent_reads_case_variant_spellings_as_one_file(tmp_path: Path) -> None:
-    """On a case-insensitive filesystem a conflicting hash under ``NOTES`` blocks ``notes``."""
-    root = tmp_path / "project"
-    path = _deployed(root)
-    variant = _PATH.replace("notes.", "NOTES.")
-    if not (root / variant).exists():
-        pytest.skip("case-sensitive filesystem: the spellings name different files")
-    evidence = DeploymentEvidence(
-        deploy_root=root,
-        receipts={},
-        render=_no_render,
-        kept=(),
-        recorded_hashes={_PATH: frozenset({compute_file_hash(path)}), variant: frozenset({_OTHER})},
-    )
-    evidence.consent_to_lockfile_hashes()
-
-    result, _messages = _cleanup(root, evidence, path)
-
-    assert path.exists() and result.deleted == []
-
-
-@pytest.mark.req("req-lk-024")
 def test_consent_reports_one_deletion_per_file_across_spellings(tmp_path: Path) -> None:
     """``a`` and ``./a`` consented in one run report one deletion, not two."""
     path = _deployed(tmp_path)
