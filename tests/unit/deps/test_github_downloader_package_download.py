@@ -28,7 +28,7 @@ def _mock_git_object_links():
     """Mocked clones carry no Git objects; real-git tests cover link materialization."""
     with (
         patch("apm_cli.deps.github_downloader.materialize_tracked_symlinks"),
-        patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+        patch("apm_cli.deps.github_downloader.validate_cached_links"),
     ):
         yield
 
@@ -447,7 +447,7 @@ class TestDownloadSubdirectoryPackageErrors:
             patch("tempfile.mkdtemp", return_value=str(tmp_path)),
             patch("apm_cli.deps.github_downloader._rmtree"),
             patch("apm_cli.utils.path_security.ensure_path_within"),
-            patch("apm_cli.deps.github_downloader.validate_materialized_symlinks"),
+            patch("apm_cli.deps.github_downloader.validate_cached_links"),
             patch("apm_cli.deps.github_downloader.validate_apm_package", return_value=validation),
             patch("apm_cli.deps.package_validator.stamp_plugin_version"),
             patch("apm_cli.utils.file_ops.robust_copytree"),

@@ -140,9 +140,6 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
         ),
         "src/apm_cli/install/helpers/ref_seed.py": ("seed(selected.source_reference, ref, sha)",),
         "src/apm_cli/install/native_plugin_admission.py": ("if lock_dep.is_local_source:",),
-        "src/apm_cli/commands/uninstall/lockfile_state.py": (
-            "binding.retain_parents_or_root(present)",
-        ),
     }
     for path, needles in required.items():
         facts, failures = checked_facts(provider, path, RULE, require_python=True)
@@ -164,8 +161,6 @@ def check_source_replacements(provider: FactsProvider) -> tuple[Violation, ...]:
                 ) or any(call.qualname.rsplit(".", 1)[-1] in forbidden for call in facts.calls)
             elif path == "src/apm_cli/install/phases/resolve.py":
                 duplicated = "unused_rules" in text or "Unused replacement rule" in text
-            elif path == "src/apm_cli/commands/uninstall/lockfile_state.py":
-                duplicated = ".requests = " in text
             else:
                 duplicated = False
             if duplicated:
