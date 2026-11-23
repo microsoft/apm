@@ -105,6 +105,7 @@ _SCOPE_ROOT_CONSUMERS: dict[str, tuple[str, ...]] = {
     ),
     "src/apm_cli/install/commit_gate.py": (
         "project_root=manifest_root(project_root, user_scope=user_scope),",
+        "files_root = manifest_root(get_deploy_root(scope), user_scope=is_user_scope(scope))",
     ),
     "src/apm_cli/install/local_bundle_handler.py": (
         "policy_root=manifest_root(source_root, user_scope=global_),",
