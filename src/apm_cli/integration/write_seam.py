@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -134,12 +135,27 @@ def record_before_mkdir(path: str | os.PathLike[str]) -> None:
 
 
 def mkdir(path: Path, *, parents: bool = False, exist_ok: bool = False, mode: int = 0o777) -> None:
-    """Create the directory *path* through the seam (skipped while planning)."""
+    """Create the directory *path* through the seam (skipped while planning).
+
+    A directory that already exists (not a link) is left as it is and changes
+    nothing, so it is neither journaled nor sealed: sealing it would fingerprint
+    its whole tree, once per caller, though every write below it seals its own
+    entry.
+    """
     if _planning:
+        return
+    if exist_ok and _is_real_dir(path):
         return
     record_before_mkdir(path)
     path.mkdir(mode=mode, parents=parents, exist_ok=exist_ok)
     record_after_write(path)
+
+
+def _is_real_dir(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def write_text_lf(path: Path, data: str) -> None:
