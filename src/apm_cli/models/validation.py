@@ -1039,3 +1039,52 @@ def _validate_apm_package_with_yml(
             )
 
     return result
+
+
+# --- RESEARCH R5: reuse a same-command validation of the same, unwritten tree ---------
+_validate_apm_package_uncached = validate_apm_package
+
+
+def validate_apm_package(
+    package_path, source_path=None, agent_plugin_detection=None, read_only=False, create_config=None
+):
+    import copy
+    import os
+
+    from apm_cli.utils import path_fast
+
+    if agent_plugin_detection is not None:
+        return _validate_apm_package_uncached(
+            package_path, source_path=source_path, agent_plugin_detection=agent_plugin_detection,
+            read_only=read_only, create_config=create_config,
+        )  # fmt: skip
+    writable = (not read_only) if create_config is None else create_config
+    key = (os.path.realpath(package_path), read_only, writable)
+    hit = path_fast.recall_validation(key)
+    if hit is not None:
+        path_fast.STATS["val_hits"] += 1
+        result = copy.copy(hit)
+        result.package = copy.copy(hit.package)
+        result.package.source_path = source_path.resolve() if source_path is not None else None
+        if os.environ.get("APM_R5_CHECK") == "1":
+            fresh = _validate_apm_package_uncached(
+                package_path, source_path=source_path, read_only=read_only,
+                create_config=create_config,
+            )  # fmt: skip
+            assert (fresh.is_valid, fresh.package_type, fresh.errors, fresh.package) == (  # noqa: S101
+                result.is_valid, result.package_type, result.errors, result.package,
+            ), f"R5 validation mismatch for {package_path}"  # fmt: skip
+        return result
+    path_fast.STATS["val_misses"] += 1
+    result = _validate_apm_package_uncached(
+        package_path, source_path=source_path, read_only=read_only, create_config=create_config
+    )
+    if (
+        result.is_valid
+        and result.package is not None
+        and result.package_type == PackageType.SKILL_BUNDLE
+    ):
+        snapshot = copy.copy(result)
+        snapshot.package = copy.copy(result.package)
+        path_fast.remember_validation(key, snapshot)
+    return result

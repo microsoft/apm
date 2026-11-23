@@ -134,13 +134,17 @@ def _bump() -> None:
     STATS["bumps"] += 1
 
 
-def _bumping(original):
+def _bumping(original, paths: int = 1):
     def wrapper(*args, **kwargs):
         _bump()
+        for arg in args[:paths]:
+            _dirty(arg)
         try:
             return original(*args, **kwargs)
         finally:
             _bump()
+            for arg in args[:paths]:
+                _dirty(arg)
 
     wrapper.__wrapped__ = original
     return wrapper
@@ -158,12 +162,14 @@ def install() -> None:
         "symlink", "link", "utime", "chdir", "truncate", "removedirs", "renames",
     ):  # fmt: skip
         if hasattr(os, name):
-            setattr(os, name, _bumping(getattr(os, name)))
+            two = name in ("rename", "replace", "symlink", "link", "renames")
+            setattr(os, name, _bumping(getattr(os, name), 2 if two else 1))
     original_open = builtins.open
 
     def _open(file, mode="r", *args, **kwargs):
         if any(c in mode for c in "wax+"):
             _bump()
+            _dirty(file)
         return original_open(file, mode, *args, **kwargs)
 
     builtins.open = io.open = _open
@@ -172,6 +178,7 @@ def install() -> None:
     def _os_open(path, flags, *args, **kwargs):
         if flags & _WRITE_FLAGS:
             _bump()
+            _dirty(path)
         return original_os_open(path, flags, *args, **kwargs)
 
     os.open = _os_open
@@ -179,6 +186,12 @@ def install() -> None:
 
     def _popen(self, *args, **kwargs):
         _bump()
+        argv = args[0] if args else kwargs.get("args", ())
+        if isinstance(argv, (list, tuple)):
+            for i, token in enumerate(argv[:-1]):
+                if token == "-C":  # noqa: S105
+                    _dirty(argv[i + 1])
+        _dirty(kwargs.get("cwd") or os.getcwd())
         return original_popen(self, *args, **kwargs)
 
     subprocess.Popen.__init__ = _popen
@@ -195,3 +208,62 @@ def install() -> None:
 
 if os.environ.get("APM_PATH_FAST", "1") != "0":
     install()
+
+
+# --- R5: same-command re-proof skips (research) -------------------------------------
+# A stash entry lives under an absolute root; any write, rename, link, unlink, mkdir,
+# chmod or utime at or under (or above) that root drops it, and so does a spawn
+# whose cwd or ``-C`` target is at or under it.
+
+_stash_lock = threading.Lock()
+_verified_bytes: dict[str, dict[str, bytes]] = {}  # copy root -> {posix rel: bytes}
+_validated: dict[tuple, object] = {}  # (root, read_only, writable) -> ValidationResult
+STATS.update({"hash_hits": 0, "hash_misses": 0, "val_hits": 0, "val_misses": 0, "dropped": 0})
+
+
+def _abs(path) -> str:
+    try:
+        return os.path.abspath(os.fspath(path))
+    except TypeError:
+        return ""
+
+
+def _dirty(path) -> None:
+    text = _abs(path)
+    if not text or not (_verified_bytes or _validated):
+        return
+    with _stash_lock:
+        for root in [r for r in _verified_bytes if _related(r, text)]:
+            del _verified_bytes[root]
+            STATS["dropped"] += 1
+        for key in [k for k in _validated if _related(k[0], text)]:
+            del _validated[key]
+            STATS["dropped"] += 1
+
+
+def _related(root: str, text: str) -> bool:
+    return text == root or text.startswith(root + os.sep) or root.startswith(text + os.sep)
+
+
+def stash_verified_copy(dest, files: dict[str, bytes]) -> None:
+    with _stash_lock:
+        _verified_bytes[_abs(dest)] = files
+
+
+def verified_bytes(package_path) -> dict[str, bytes] | None:
+    return _verified_bytes.get(_abs(package_path))
+
+
+def remember_validation(key: tuple, result) -> None:
+    with _stash_lock:
+        _validated[key] = result
+
+
+def recall_validation(key: tuple):
+    return _validated.get(key)
+
+
+if os.environ.get("APM_R5_STATS") == "1":
+    import atexit
+
+    atexit.register(lambda: sys.stderr.write(f"R5STATS {STATS}\n"))

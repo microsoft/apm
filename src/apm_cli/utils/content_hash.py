@@ -1,6 +1,7 @@
 """Deterministic SHA-256 content hashing for package integrity verification."""
 
 import hashlib
+import os
 import stat
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -110,6 +111,35 @@ def compute_package_hash(
     Returns:
         Hash string in format ``"sha256:<hex_digest>"``.
     """
+    from apm_cli.utils import path_fast  # RESEARCH R5
+
+    stashed = path_fast.verified_bytes(package_path)
+    if stashed is not None:
+        hasher = hashlib.sha256()
+        for rel in sorted(stashed):
+            parts = rel.split("/")
+            if any(p in _EXCLUDED_DIRS for p in parts):
+                continue
+            if len(parts) == 1 and rel in _EXCLUDED_ROOT_FILES:
+                continue
+            if exclude and rel in exclude:
+                continue
+            payload = stashed[rel]
+            if framed:
+                hasher.update(_frame_entry(Path(rel), payload))
+            else:
+                hasher.update(rel.encode("utf-8"))
+                hasher.update(payload)
+        digest = f"sha256:{hasher.hexdigest()}"
+        if os.environ.get("APM_R5_CHECK") == "1":
+            legacy, framed_digest = _hash_package_tree(
+                package_path, exclude, legacy=not framed, framed=framed
+            )
+            if digest != (framed_digest if framed else legacy):
+                raise AssertionError(f"R5 stash hash mismatch for {package_path}")
+        path_fast.STATS["hash_hits"] += 1
+        return digest
+    path_fast.STATS["hash_misses"] += 1
     legacy, framed_digest = _hash_package_tree(
         package_path, exclude, legacy=not framed, framed=framed
     )

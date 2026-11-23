@@ -626,14 +626,20 @@ def require_verified_copy(
         if any(_names_git_dir(entry) for entry in (*subdirs, *names)):
             raise CheckoutVerificationError("the copy holds a .git entry")
     copied: set[str] = set()
+    seen: dict[str, bytes] = {}
     for rel, path in _worktree_files(Path(dest)):
         source = _join(prefix, rel)
-        _check_bytes(manifest, source, *_read_regular(source, path))
+        data, info = _read_regular(source, path)
+        _check_bytes(manifest, source, data, info)
         copied.add(source)
+        seen[rel] = data
     under = f"{prefix}/" if prefix else ""
     missing = sorted(rel for rel in manifest.files if rel.startswith(under) and rel not in copied)
     if missing:
         raise CheckoutVerificationError(f"{missing[0]} is missing from the copy")
+    from apm_cli.utils import path_fast  # RESEARCH R5
+
+    path_fast.stash_verified_copy(dest, seen)
 
 
 def read_verified_file(
