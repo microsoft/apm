@@ -519,24 +519,13 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
         try:
-            metadata = yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
+            return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
         except yaml.YAMLError:
             raise
         except (ValueError, RecursionError) as exc:
             raise yaml.YAMLError(
                 f"bounded frontmatter parse failed: {type(exc).__name__}: {exc}"
             ) from exc
-        # python-frontmatter splats the mapping into ``Post(**metadata)``, so a
-        # non-string key (``1: x``, ``true: x``) would escape as a bare
-        # TypeError past every per-file ``yaml.YAMLError`` handler (#4922).
-        if isinstance(metadata, dict):
-            for key in metadata:
-                if not isinstance(key, str):
-                    raise yaml.YAMLError(
-                        f"non-string frontmatter key {key!r} ({type(key).__name__}); "
-                        "frontmatter keys must be strings"
-                    )
-        return metadata
 
 
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
