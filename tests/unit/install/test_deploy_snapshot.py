@@ -1913,3 +1913,25 @@ def test_a_restored_directory_is_never_published_with_staging_permissions(
     assert published == [0o550]
     assert skill.stat().st_mode & 0o7777 == 0o550
     skill.chmod(0o755)  # let pytest clean up
+
+
+@pytest.mark.skipif(not hasattr(os, "listxattr"), reason="Linux extended attributes")
+def test_a_path_whose_extended_attributes_cannot_be_read_is_kept(
+    tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ACL that cannot be checked is not assumed absent: the unit is kept."""
+    import errno
+
+    project = tmp_path / "project"
+    config, ledger = _private_config(project)
+    _killed_journal(apm_home, project, config)
+
+    def unreadable(path, *args, **kwargs):
+        raise OSError(errno.EACCES, "permission denied", str(path))
+
+    monkeypatch.setattr(os, "listxattr", unreadable)
+    outcome = _replay(apm_home, project, lambda: ledger)
+    monkeypatch.undo()
+
+    assert outcome.kept == ((".mcp.json", "it carries a POSIX ACL"),)
+    assert config.read_bytes() == b"killed\n"
