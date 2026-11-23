@@ -105,14 +105,23 @@ def _outcomes(lock: Any, files: list, records: dict[str, dict]) -> list[PackageO
     return out
 
 
-def _within(root: Path, rel: str) -> Path:
-    if (
-        not rel
-        or rel.startswith("/")
-        or "\\" in rel
-        or any(p in ("", ".", "..") for p in rel.split("/"))
-    ):
+def _within(root: Path, rel: str, prefixes: tuple[str, ...] | None = None) -> Path:
+    """The project path of a lock-named file, only inside an active target's deploy root.
+
+    *prefixes* are the active targets' integration prefixes (the deploy-path
+    owner's); the full pipeline writes nothing else, so neither does the fast
+    run. A ``.git`` component is refused in any case.
+    """
+    parts = rel.split("/") if rel else []
+    if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in parts):
         raise Decline(f"unsafe path {rel!r}")
+    if any(p.lower() == ".git" for p in parts):
+        raise Decline(f"unsafe path {rel!r}")
+    if prefixes is not None:
+        from apm_cli.integration.base_integrator import BaseIntegrator
+
+        if not BaseIntegrator.validate_deploy_path(rel, root, allowed_prefixes=prefixes):
+            raise Decline(f"path outside the target roots {rel!r}")
     path = root / rel
     current = root
     for part in rel.split("/")[:-1]:
@@ -145,15 +154,23 @@ def _package_records(lock: Any, targets: Any, deploy: Any) -> dict[str, dict]:
 
 
 def _plan_files(
-    project_root: Path, lock: Any, records: dict[str, dict], deploy: Any, receipts: dict[str, str]
+    project_root: Path,
+    lock: Any,
+    records: dict[str, dict],
+    deploy: Any,
+    receipts: dict[str, str],
+    *,
+    targets: Any,
 ) -> list[tuple[Path, bytes, str, str]]:
     """Missing deployed files with their exact recorded bytes; present ones must be untouched."""
+    from apm_cli.integration.base_integrator import BaseIntegrator
     from apm_cli.utils.content_hash import canonical_digest
 
+    prefixes = BaseIntegrator._get_integration_prefixes(targets=list(targets))
     writes: list[tuple[Path, bytes, str, str]] = []
     for owner, dep in lock.dependencies.items():
         for rel, digest in (getattr(dep, "deployed_file_hashes", None) or {}).items():
-            path = _within(project_root, rel)
+            path = _within(project_root, rel, prefixes)
             if path.is_symlink():
                 raise Decline("symlinked deployed file")
             if path.exists():
@@ -195,6 +212,9 @@ def _plan_packages(project_root: Path, lock: Any) -> list[tuple[Path, Path, str]
         sha = getattr(dep, "resolved_commit", None)
         if not sha:
             raise Decline("unpinned dependency")
+        if not getattr(dep, "content_hash", None):
+            # locked_content_mismatch proves nothing without one: the full run decides.
+            raise Decline("no locked content hash")
         ref = dep.to_dependency_ref()
         if getattr(ref, "is_virtual", False) or getattr(ref, "virtual_path", None):
             raise Decline("virtual package")
@@ -517,7 +537,7 @@ def try_apply(
         receipts = session.receipt_hashes()
         _refuse_orphans(project_root, lock, receipts)
         records = _package_records(lock, targets, deploy)
-        files = _plan_files(project_root, lock, records, deploy, receipts)
+        files = _plan_files(project_root, lock, records, deploy, receipts, targets=targets)
         outcomes = _outcomes(lock, files, records)
         _refuse_lifecycle_scripts(project_root)
         _refuse_unsilent_executables(lock)

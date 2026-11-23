@@ -372,6 +372,37 @@ def test_a_malformed_record_reads_as_none(
     assert store.package_record(*ident) is None
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["  |-- ok", "\x1b]0;title\x07"],
+        ["  |-- bell\a"],
+        ["  |-- caf\u00e9"],
+        ["x" * 1001],
+        ["  |-- line"] * 2001,
+    ],
+    ids=["escape", "control", "non-ascii", "long-line", "too-many-lines"],
+)
+def test_a_record_whose_body_is_not_printable_ascii_reads_as_none(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, body: list[str]
+) -> None:
+    """The body is replayed to the terminal, so only bounded printable ASCII lines are kept."""
+    import json
+
+    from apm_cli.cache.deploy_store import RECORDS_DIR, package_record_key
+
+    store, ident, files = _record_setup(monkeypatch, tmp_path, {"a.md": _TEXT})
+    key = package_record_key(*ident)
+    path = tmp_path / "c" / DEPLOY_BUCKET / RECORDS_DIR / key[:2] / f"{key}.json"
+    record = {"v": 1, "files": files, "ascii_only": True, "body": body}
+    path.write_text(json.dumps(record), encoding="ascii")
+
+    assert store.package_record(*ident) is None
+    record["body"] = ["  |-- 1 prompt integrated -> .github/prompts/"]
+    path.write_text(json.dumps(record), encoding="ascii")
+    assert store.package_record(*ident)["body"] == record["body"]
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks")
 def test_a_linked_record_is_never_followed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from apm_cli.cache.deploy_store import RECORDS_DIR, package_record_key

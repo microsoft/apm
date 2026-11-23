@@ -384,6 +384,25 @@ def package_record_key(
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
+# A record's body is replayed to the terminal: printable ASCII lines only, bounded.
+_MAX_BODY_LINES = 2000
+_MAX_BODY_LINE_CHARS = 1000
+_PRINTABLE_LINE = re.compile(r"[\x20-\x7e]*")
+
+
+def _printable_body(body: object) -> bool:
+    return (
+        isinstance(body, list)
+        and len(body) <= _MAX_BODY_LINES
+        and all(
+            isinstance(line, str)
+            and len(line) <= _MAX_BODY_LINE_CHARS
+            and _PRINTABLE_LINE.fullmatch(line) is not None
+            for line in body
+        )
+    )
+
+
 def _valid_record(obj: object) -> dict | None:
     """Return a normalized record, or ``None`` for any malformed shape."""
     if not isinstance(obj, dict) or obj.get("v") != _RECORD_VERSION:
@@ -396,7 +415,7 @@ def _valid_record(obj: object) -> dict | None:
             return None
         if not all(isinstance(x, str) and _KEY_RE.fullmatch(x) for x in pair):
             return None
-    if body is not None and not (isinstance(body, list) and all(isinstance(x, str) for x in body)):
+    if body is not None and not _printable_body(body):
         return None
     return {
         "v": _RECORD_VERSION,

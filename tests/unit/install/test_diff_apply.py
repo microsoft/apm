@@ -25,6 +25,12 @@ def _digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _targets() -> list:
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    return [KNOWN_TARGETS["copilot"]]
+
+
 def _lock(**deps: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         manifest_targets=["copilot"],
@@ -79,6 +85,42 @@ def test_receipted_output_the_lock_no_longer_claims_declines(tmp_path: Path) -> 
         diff_apply._refuse_orphans(tmp_path, lock, {orphan: _digest(b"x")})
 
 
+_REL = ".github/prompts/a.prompt.md"
+
+
+@pytest.mark.parametrize(
+    "rel", [".git/hooks/pre-commit", ".github/.GIT/config", ".vscode/settings.json", "notes.md"]
+)
+def test_a_lock_path_outside_the_target_roots_declines_before_any_write(
+    tmp_path: Path, rel: str
+) -> None:
+    """The fast run writes only where the full pipeline would: active target roots, no .git."""
+    lock = _lock(**{"o/p": {rel: _digest(b"x")}})
+    records = {"o/p": {"files": {rel: [_digest(b"x")[7:], hashlib.sha256(b"x").hexdigest()]}}}
+    deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
+    with pytest.raises(Decline, match=r"unsafe path|outside the target roots"):
+        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+    assert not any(tmp_path.iterdir())
+
+
+def test_a_lock_path_under_a_target_root_is_planned(tmp_path: Path) -> None:
+    """Control for the cell above: the same row under .github/ is written."""
+    lock = _lock(**{"o/p": {_REL: _digest(b"x")}})
+    records = {"o/p": {"files": {_REL: [_digest(b"x")[7:], hashlib.sha256(b"x").hexdigest()]}}}
+    deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: b"x")
+    plan = diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
+    assert [(path, data) for path, data, _d, _o in plan] == [(tmp_path / _REL, b"x")]
+
+
+def test_a_dependency_without_a_locked_content_hash_declines(tmp_path: Path) -> None:
+    """Without a content hash a package copy cannot be proven: the full run decides."""
+    lock = _lock(**{"o/p": {_REL: _digest(b"x")}})
+    lock.dependencies["o/p"].content_hash = None
+    with pytest.raises(Decline, match="no locked content hash"):
+        diff_apply._plan_packages(tmp_path, lock)
+    assert not any(tmp_path.iterdir())
+
+
 def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     rel = ".github/prompts/a.prompt.md"
     lock = _lock(**{"o/p": {rel: _digest(b"locked\n")}})
@@ -86,10 +128,10 @@ def test_edited_or_unreceipted_deployed_file_declines(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True)
     target.write_bytes(b"edited\n")
     with pytest.raises(Decline, match="edited"):
-        diff_apply._plan_files(tmp_path, lock, {}, None, {})
+        diff_apply._plan_files(tmp_path, lock, {}, None, {}, targets=_targets())
     target.write_bytes(b"locked\n")
     with pytest.raises(Decline, match="without a receipt"):
-        diff_apply._plan_files(tmp_path, lock, {}, None, {})
+        diff_apply._plan_files(tmp_path, lock, {}, None, {}, targets=_targets())
 
 
 def test_partially_applied_package_declines(tmp_path: Path) -> None:
@@ -119,11 +161,11 @@ def test_lock_hashes_without_a_matching_package_record_decline() -> None:
 
 def test_non_ascii_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
     data = "zero\u200bwidth\n".encode()
-    lock = _lock(**{"o/p": {"a.md": _digest(data)}})
-    records = {"o/p": {"files": {"a.md": [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
+    lock = _lock(**{"o/p": {_REL: _digest(data)}})
+    records = {"o/p": {"files": {_REL: [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
     with pytest.raises(Decline, match="non-ASCII"):
-        diff_apply._plan_files(tmp_path, lock, records, deploy, {})
+        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
 
 
 @pytest.mark.parametrize("argv", [["install"], ["install", "--only", "apm"]])
@@ -150,11 +192,15 @@ def test_decide_seam_exits_nonzero_and_writes_nothing(
 
 def test_escape_sequences_in_deployed_bytes_take_the_full_run(tmp_path: Path) -> None:
     data = b'{"command": "echo \\u202e"}\n'
-    lock = _lock(**{"o/p": {"a.json": _digest(data)}})
-    records = {"o/p": {"files": {"a.json": [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}}}
+    lock = _lock(**{"o/p": {".github/hooks/a.json": _digest(data)}})
+    records = {
+        "o/p": {
+            "files": {".github/hooks/a.json": [_digest(data)[7:], hashlib.sha256(data).hexdigest()]}
+        }
+    }
     deploy = SimpleNamespace(get=lambda hexd, raw_sha256=None: data)
     with pytest.raises(Decline, match="non-ASCII"):
-        diff_apply._plan_files(tmp_path, lock, records, deploy, {})
+        diff_apply._plan_files(tmp_path, lock, records, deploy, {}, targets=_targets())
 
 
 def test_a_failure_while_rendering_restores_the_pre_run_tree(
