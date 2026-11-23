@@ -133,6 +133,8 @@ def run(ctx: InstallContext) -> None:
         on_ghost_drop=_log_local_ghost_drop,
         on_cleanup=_surface_local_cleanup,
         prior_ledger=_prior_ledger,
+        # A kept edited local output keeps its prior hash, never the edit's (#4873).
+        cleanup_retained_hashes=getattr(ctx, "package_cleanup_retained", {}).get("."),
         current_run_trusted=not _local_had_errors,
         retained_values=frozenset(_kept),
         include_ledger=True,

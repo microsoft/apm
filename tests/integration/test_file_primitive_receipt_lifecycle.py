@@ -273,6 +273,55 @@ def test_an_edited_receipted_file_is_kept_with_exit_zero(
     assert (project / "apm.lock.yaml").read_bytes() == lock
 
 
+def test_an_edited_local_output_is_kept_with_exit_zero(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """RA-012 for owner '.': the project's own edited output is kept, exit 0 (#4873).
+
+    The edit keeps its prior local lock hash; an unedited local output whose
+    source changed is still refreshed in the same run.
+    """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.base_integrator import kept_edit_message
+
+    isolated = IsolatedApmEnvironment.create(tmp_path / "isolated", base_env=dict(os.environ))
+    env = isolated.subprocess_env()
+    project = isolated.work_root / "consumer"
+    _package(project)
+    (project / ".github").mkdir()
+    dump_yaml({"name": "consumer", "version": "0.1.0", "targets": ["copilot"]}, project / "apm.yml")
+    runner = ApmLifecycleRunner((str(apm_binary_path),), timeout_seconds=180)
+
+    def install():
+        return runner.run(("install", "--no-policy"), cwd=project, env=env)
+
+    first = install()
+    assert first.returncode == 0, first.stdout + first.stderr
+    relative = ".github/instructions/style.instructions.md"
+    edited = project / relative
+    edited.write_bytes(edited.read_bytes() + b"EDIT\n")
+    edited_bytes = edited.read_bytes()
+    prior = LockFile.read(project / "apm.lock.yaml").local_deployed_file_hashes
+    assert relative in prior, prior
+    _write(project / ".apm/agents/helper.agent.md", "---\ndescription: Helper\n---\nHelp v2.\n")
+
+    kept = install()
+
+    output = kept.stdout + kept.stderr
+    assert kept.returncode == 0, output
+    message = kept_edit_message(relative, user_scope=False, proven_edit=True)
+    assert message in " ".join(kept.stdout.split()), output
+    assert edited.read_bytes() == edited_bytes
+    assert (project / ".github/agents/helper.agent.md").read_text().endswith("Help v2.\n")
+    hashes = LockFile.read(project / "apm.lock.yaml").local_deployed_file_hashes
+    assert hashes[relative] == prior[relative], (prior, hashes)
+    lock = (project / "apm.lock.yaml").read_bytes()
+    repeat = install()
+    assert repeat.returncode == 0, repeat.stdout + repeat.stderr
+    assert edited.read_bytes() == edited_bytes
+    assert (project / "apm.lock.yaml").read_bytes() == lock
+
+
 def test_a_differing_file_is_never_receipted_by_adoption(
     tmp_path: Path, apm_binary_path: Path
 ) -> None:

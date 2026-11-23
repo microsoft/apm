@@ -777,12 +777,13 @@ class OverwriteGate:
         )
 
     def keep(self, path: Path, claim: str, *, edit: str | None = None) -> bool:
-        """Record a kept dependency file; its prior lock entry stays (reported at finalize).
+        """Record a kept managed file; its prior lock entry stays (reported at finalize).
 
         *edit* classifies a file a pre-0.37 lock or a receipt proves edited:
-        ``"drift"`` or ``"blocked"`` (#4398, RA-012).
+        ``"drift"`` or ``"blocked"`` (#4398, RA-012). The project's own local
+        outputs (owner ``"."``) take the same path (#4873).
         """
-        if self.session is None or self.owner == ".":
+        if self.session is None:
             return False
         self.session.kept_overwrites.append((self.owner, path))
         if edit is not None:
