@@ -54,7 +54,7 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
     def test_installer_run_command_unix_bash_found(self):
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value="/usr/bin/bash"),
+            patch.object(update_module.git_env, "trusted_executable", return_value="/usr/bin/bash"),
         ):
             cmd = update_module._get_installer_run_command("/tmp/install.sh")
         self.assertEqual(cmd, ["/usr/bin/bash", "/tmp/install.sh"])
@@ -62,7 +62,7 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
     def test_installer_run_command_unix_fallback_to_bin_bash(self):
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value=None),
+            patch.object(update_module.git_env, "trusted_executable", return_value=None),
             patch.object(update_module.os.path, "exists", return_value=True),
         ):
             cmd = update_module._get_installer_run_command("/tmp/install.sh")
@@ -71,7 +71,7 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
     def test_installer_run_command_unix_no_bash_raises(self):
         with (
             patch.object(update_module.sys, "platform", "linux"),
-            patch.object(update_module.shutil, "which", return_value=None),
+            patch.object(update_module.git_env, "trusted_executable", return_value=None),
             patch.object(update_module.os.path, "exists", return_value=False),
         ):
             with self.assertRaises(FileNotFoundError):
@@ -80,7 +80,7 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
     def test_installer_run_command_windows_powershell_not_found(self):
         with (
             patch.object(update_module.sys, "platform", "win32"),
-            patch.object(update_module.shutil, "which", return_value=None),
+            patch.object(update_module.git_env, "trusted_executable", return_value=None),
         ):
             with self.assertRaises(FileNotFoundError):
                 update_module._get_installer_run_command("/tmp/install.ps1")
@@ -91,7 +91,7 @@ class TestUpdatePlatformHelpers(unittest.TestCase):
 
         with (
             patch.object(update_module.sys, "platform", "win32"),
-            patch.object(update_module.shutil, "which", side_effect=_which),
+            patch.object(update_module.git_env, "trusted_executable", side_effect=_which),
         ):
             cmd = update_module._get_installer_run_command("/tmp/install.ps1")
         self.assertEqual(cmd[0], "pwsh.exe")

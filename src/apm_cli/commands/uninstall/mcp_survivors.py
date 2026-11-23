@@ -25,7 +25,7 @@ def surviving_package_keys(
         decide_orphan_removal,
     )
 
-    from .engine import _read_survivor_direct_refs
+    from .local_survivors import read_survivor_direct_refs
 
     for key, why in sorted(denied.items()):
         if logger is not None:
@@ -36,7 +36,7 @@ def surviving_package_keys(
         if apm_package.package_path is None:
             return unchanged
         manifest_root = Path(apm_package.package_path)
-        direct, dev = _read_survivor_direct_refs(manifest_file(manifest_root), ())
+        direct, dev = read_survivor_direct_refs(manifest_file(manifest_root), ())
         declared = {ref.get_unique_key() for ref in (*direct, *dev)}
         undeclared = {
             dep.get_unique_key(): dep.to_dependency_ref()
