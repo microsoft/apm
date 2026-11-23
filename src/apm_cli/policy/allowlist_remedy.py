@@ -187,7 +187,11 @@ def _removal_roots(
     roots: dict[str, None] = {}
     for dep in denied:
         key = dep.get_unique_key()
-        found = (key,) if key in declared else tuple(sorted(index.roots(key) or ()))
+        try:
+            found = (key,) if key in declared else tuple(sorted(index.roots(key) or ()))
+        except RecursionError:
+            # A chain deeper than the interpreter's recursion limit: no advice.
+            return None
         if not found or any(root not in declared for root in found):
             return None
         roots.update(dict.fromkeys(found))
