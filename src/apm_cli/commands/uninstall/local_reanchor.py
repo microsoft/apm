@@ -64,7 +64,7 @@ class LocalReanchorPlan:
     moves: tuple[tuple[Path, Path], ...] = ()
     # Lock key -> install's breadth-first visit rank, for request order (#4999).
     visit_order: dict[str, int] = field(default_factory=dict)
-    # Re-identified key -> the child keys the walk saw it declare (#5091).
+    # Re-identified key -> the child keys it wins as nearest parent (#5091).
     children: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
@@ -100,6 +100,23 @@ def _root_identities(
         declared = _winning_edge_installs_here(walk, key, nearest[0], lockfile, label, modules_dir)
         identities[key] = (via[1], nearest[0], real_dir, declared)
     return identities
+
+
+def _won_children(walk, nodes, renames: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    """Each re-identified key's children whose winning parent it is (#5091).
+
+    The winner is the nearest parent, ties going to the lowest re-anchored
+    key, as install and ``resolved_by`` rank them; a child another parent
+    wins keeps naming that parent.
+    """
+    won: dict[str, list[str]] = {key: [] for key in nodes}
+    for child in sorted(walk.declaring_edges):
+        nearest = _nearest_parents(walk, child)
+        if nearest:
+            winner = min(nearest, key=lambda parent: renames.get(parent, parent))
+            if winner in won:
+                won[winner].append(child)
+    return {key: tuple(children) for key, children in won.items()}
 
 
 def _respelled_descendants(
@@ -262,12 +279,7 @@ def plan_local_reanchor(
         declaring_parents,
         resolved_by,
         moves=moves,
-        children={
-            key: tuple(
-                sorted(child for child, edges in walk.declaring_edges.items() if key in edges)
-            )
-            for key in nodes
-        },
+        children=_won_children(walk, nodes, renames),
         visit_order=dict(getattr(walk, "visit_order", {}) or {}),
     )
 
@@ -583,7 +595,7 @@ def _reidentify_children(
     by lock key, so a respelled parent (``_local/F`` -> ``_local/f``) would
     leave its children naming a parent that no longer exists. That identity
     is not unique (another ``F`` directory has the same one), so only the
-    children the walk saw this parent declare are updated.
+    children this parent wins as nearest parent are updated.
     """
     from ...deps.lockfile import lockfile_parent_identity
 

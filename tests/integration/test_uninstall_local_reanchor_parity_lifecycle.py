@@ -629,7 +629,8 @@ def _respelled_world(
         _skill_package(vendor / "q", "q", ("../F",))
         _skill_package(vendor / "p", "p", ("../q",))
     if other_f:
-        _skill_package(world.project / "other/F", "o", ("../h",))
+        shared = ("../../vendor/g",) if other_f == "shared" else ()
+        _skill_package(world.project / "other/F", "o", ("../h", *shared))
         _skill_package(world.project / "other/h", "h")
     link_f(vendor)
     _skill_package(vendor / "e", "e", ("../F",))
@@ -664,8 +665,15 @@ def _respelled_world(
         (("../g",), False, False),
         (("../g",), True, False),
         (("../g",), True, True),
+        (("../g",), True, "shared"),
     ],
-    ids=["leaf", "with-child", "cross-root-child", "unrelated-same-name-parent"],
+    ids=[
+        "leaf",
+        "with-child",
+        "cross-root-child",
+        "unrelated-same-name-parent",
+        "child-shared-with-a-winning-same-name-parent",
+    ],
 )
 def test_a_descendant_spelled_through_a_symlink_reanchors_to_the_fresh_spelling(
     tmp_path: Path, apm_binary_path: Path, f_deps: tuple[str, ...], prod_chain: bool, other_f
