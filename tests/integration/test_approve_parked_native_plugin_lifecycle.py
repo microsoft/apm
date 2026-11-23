@@ -342,3 +342,65 @@ def test_approve_exits_1_when_it_approves_nothing(
         with_ref.stdout + with_ref.stderr, r"not a ref: (apm approve (?:-g )?\S+)"
     )
     assert by_identity.returncode == 0, _evidence(by_identity)
+
+
+@pytest.mark.parametrize("listed", [False, True], ids=["unlisted", "listed"])
+def test_audit_rechecks_a_deployed_transitive_codex_plugin_against_current_policy(
+    tmp_path: Path, apm_binary_path: Path, listed: bool
+) -> None:
+    """A policy tightened after deployment fails audit --ci for the plugin's MCP server.
+
+    org mcp.trust_transitive admits a transitive Codex plugin's server only through
+    mcp.allow; the listed control proves the same deployment then passes.
+    """
+    world, plugin = _codex_world(tmp_path, apm_binary_path)
+    parent = world.packages / "p-parent"
+    _skill(parent, "p-parent")
+    (parent / "apm.yml").write_text(
+        yaml.safe_dump(
+            {"name": "p-parent", "version": "1.0.0", "dependencies": {"apm": [str(plugin)]}}
+        ),
+        encoding="utf-8",
+    )
+    installed = world.apm("install", "-g", str(parent))
+    assert installed.returncode == 0, _evidence(installed)
+    approved = world.run_hint(installed.stdout, r"Pin: (apm approve -g \S+)")
+    assert approved.returncode == 0, _evidence(approved)
+    deployed = world.apm("install", "-g")
+    assert deployed.returncode == 0, _evidence(deployed)
+    ledger = json.loads((world.apm_home / ".codex-native" / "ownership.json").read_text("utf-8"))
+    assert [r["name"] for r in ledger["plugins"].values()] == ["p-native-codex"], ledger
+    row = _row(world, plugin)
+    assert row["depth"] == 2 and row["exec_status"] == "deployed", row
+    baseline = world.runner.run(("audit", "--ci"), cwd=world.apm_home, env=world.env)
+    assert baseline.returncode == 0, _evidence(baseline)
+
+    mcp = {"deny": ["unrelated"], "trust_transitive": False}
+    if listed:
+        mcp["allow"] = ["p-codex-mcp"]
+    policy = world.cwd / "apm-policy.yml"
+    policy.write_text(
+        yaml.safe_dump({"name": "org", "version": "1.0", "enforcement": "block", "mcp": mcp}),
+        encoding="utf-8",
+    )
+    before = ArtifactSnapshot.capture(world.apm_home)
+    audit = world.runner.run(
+        ("audit", "--ci", "--policy", str(policy)), cwd=world.apm_home, env=world.env
+    )
+    assert_unchanged(before, ArtifactSnapshot.capture(world.apm_home))
+    text = audit.stdout + audit.stderr
+    assert audit.returncode == (0 if listed else 1), _evidence(audit)
+    assert ("mcp-trust-transitive" in text and "p-codex-mcp" in text) is not listed, _evidence(
+        audit
+    )
+    if listed:
+        # Without the ownership journal APM cannot tell what is deployed: fail closed.
+        (world.apm_home / ".codex-native" / "ownership.json").unlink()
+        blind = world.runner.run(
+            ("audit", "--ci", "--policy", str(policy)), cwd=world.apm_home, env=world.env
+        )
+        blind_text = blind.stdout + blind.stderr
+        assert blind.returncode == 1, _evidence(blind)
+        assert "mcp-trust-transitive" in blind_text, _evidence(blind)
+        assert "cannot be checked" in blind_text, _evidence(blind)
+    _assert_codex_stayed_offline(world)

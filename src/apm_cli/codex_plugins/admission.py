@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from apm_cli.codex_plugins.client import CodexNativeClient, CodexNativeError
-from apm_cli.codex_plugins.manifest import CodexCompatibilityPlugin
+from apm_cli.codex_plugins.manifest import (
+    CodexCompatibilityPlugin,
+    load_codex_compatibility_manifest,
+)
 from apm_cli.core.scope import InstallScope
 from apm_cli.install.native_plugin_admission import (
     plugin_root_exec_types,
@@ -206,3 +209,64 @@ def plan_native_codex_plugin(
         parked=parked,
         parked_reported=parked and parked_reported,
     )
+
+
+def locked_transitive_codex_refusals(lockfile: Any, modules_dir: Path, policy: Any) -> list[str]:
+    """Subjects of each deployed transitive Codex plugin org ``mcp.trust_transitive`` withholds.
+
+    The audit counterpart of :func:`_meet_trust_transitive`, for a policy applied
+    after deployment: a server ``mcp.allow`` does not list, and a manifest APM
+    cannot read. The Codex ownership journal names what is deployed and the root
+    Codex loads; without a readable journal every transitive package that
+    selects the Codex format fails closed.
+    """
+    from apm_cli.codex_plugins.registrar import deployed_codex_roots, ledger_path_for
+    from apm_cli.security.trust import unlisted_transitive_servers, withholds_transitive
+
+    if not withholds_transitive(policy):
+        return []
+    try:
+        deployed = deployed_codex_roots(modules_dir)
+    except (OSError, ValueError):
+        deployed = None
+    blind = f"Codex ownership journal {ledger_path_for(modules_dir)} is missing or unreadable"
+    refused: list[str] = []
+    for key, dep in (getattr(lockfile, "dependencies", None) or {}).items():
+        if key == "." or (dep.depth or 1) <= 1:
+            continue
+        if deployed is None:
+            source = dep.to_dependency_ref().get_install_path(modules_dir)
+            if dep.native_plugin is None and _selects_codex_format(source):
+                refused.append(f"{key}: MCP cannot be checked ({blind})")
+            continue
+        if key not in deployed:
+            continue
+        root = deployed[key]
+        try:
+            if root is None:
+                raise CodexNativeError("its deployed Codex root is not recorded")
+            names = load_codex_compatibility_manifest(root).mcp_server_names
+        except (OSError, ValueError) as exc:
+            refused.append(f"{key}: MCP cannot be checked ({exc})")
+            continue
+        refused.extend(unlisted_transitive_servers(names, policy))
+    return refused
+
+
+def _selects_codex_format(root: Path) -> bool:
+    """Whether canonical format selection picks *root*'s Codex manifest.
+
+    A root whose selection cannot be read counts when it carries one.
+    """
+    from apm_cli.codex_plugins.manifest import (
+        CODEX_COMPAT_MANIFEST,
+        is_codex_compatibility_manifest,
+    )
+    from apm_cli.models.validation import detect_package_type
+
+    if not (root / CODEX_COMPAT_MANIFEST).is_file():
+        return False
+    try:
+        return is_codex_compatibility_manifest(root, detect_package_type(root)[1])
+    except (OSError, ValueError):
+        return True

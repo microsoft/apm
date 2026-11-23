@@ -1,0 +1,18 @@
+{
+  "issue": 4896,
+  "fixed_in": "Unreleased",
+  "summary": "apm uninstall derived surviving MCP servers from every lock row, so a direct package removed from apm.yml by hand (or a row uninstall kept only to track a file it could not remove) kept a server it shared with the uninstalled package configured; survivors now come from apm.yml declarations plus retained_lock_keys.",
+  "failure_modes": [
+    "cleanup",
+    "ownership"
+  ],
+  "properties": [
+    "outcome.status_matches_state"
+  ],
+  "regression_tests": [
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_a_hand_removed_package_keeps_no_shared_server_alive",
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_a_user_added_server_survives_the_stale_row_cleanup",
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_an_unreadable_survivor_manifest_keeps_the_shared_server",
+    "tests/unit/test_uninstall_undeclared_row_mcp.py::test_an_undeclared_package_a_survivor_still_needs_keeps_its_server"
+  ]
+}
