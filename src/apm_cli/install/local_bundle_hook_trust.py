@@ -547,7 +547,8 @@ def _per_file_configs_running(
 
     Without its approval record a per-file hook file cannot be attributed to
     a bundle (Kiro folds the package slug into a longer file stem), so a hook
-    file that still runs the bundle's scripts keeps them and refuses retirement.
+    file that still runs the bundle's scripts, or cannot be read, keeps them
+    and refuses retirement.
     """
     from apm_cli.integration.hook_ownership import read_hook_object
 
@@ -565,6 +566,7 @@ def _per_file_configs_running(
             try:
                 document = read_hook_object(path)
             except (OSError, ValueError, TypeError):
+                found.add(value)  # an unreadable hook file may still run the scripts
                 continue
             if any(tail in text for text in _hook_commands(document) for tail in tails):
                 found.add(value)
