@@ -338,6 +338,9 @@ class InstallService:
                 # A changed local-catalog selection refuses before any script (#4639).
                 self._verify_frozen_local_catalogs(request)
             runner.fire("pre-install", event)
+            from apm_cli.cache.deploy_store import discard_staged
+
+            discard_staged()
             if request.frozen:
                 # req-lk-006: the lockfile is never written in frozen mode.
                 # Suppress at the chokepoint, then decide from what was
@@ -364,6 +367,10 @@ class InstallService:
             self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
+            from apm_cli.cache.deploy_store import commit_staged
+
+            # The install committed: only now may its deployed bytes enter the store.
+            commit_staged()
             post_event = self._build_event("post-install", request)
             if request.post_install_after_services:
                 result.post_install = lambda: runner.fire("post-install", post_event)

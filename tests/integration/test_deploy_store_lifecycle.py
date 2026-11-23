@@ -78,3 +78,27 @@ def test_every_deployed_file_hash_has_a_verified_store_entry(
         _install(apm_binary_path, fresh, world.env)
 
         assert canonical_digest(entry.read_bytes()) == victim, "a full install heals the entry"
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and ".git" not in path.parts
+    }
+
+
+def test_an_empty_or_deleted_store_changes_nothing(apm_binary_path: Path, tmp_path: Path) -> None:
+    tree = build_tree(TREE_RECIPES["tree-10"], tmp_path / "fixture")
+    with serve_offline(tree, tmp_path / "world") as world:
+        with_store = tmp_path / "with-store"
+        shutil.copytree(tree.project, with_store)
+        _install(apm_binary_path, with_store, world.env)
+        assert any((world.cache_dir / _BUCKET).rglob("*"))
+
+        shutil.rmtree(world.cache_dir / _BUCKET)
+        without_store = tmp_path / "without-store"
+        shutil.copytree(tree.project, without_store)
+        _install(apm_binary_path, without_store, world.env)
+
+        assert _tree(without_store) == _tree(with_store)

@@ -19,7 +19,7 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from apm_cli.cache.deploy_store import DeployStore
+from apm_cli.cache.deploy_store import stage as stage_deployed_bytes
 from apm_cli.core.scope import is_user_scope
 from apm_cli.install.package_resolution import effective_dependency_selection, is_implicit_local
 from apm_cli.install.phases.lockfile_cache_pins import (
@@ -56,8 +56,6 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     from apm_cli.utils.path_security import PathTraversalError
 
     out: dict = {}
-    # Every recorded hash also stores its bytes, so a lockfile hash can rebuild the file.
-    store = DeployStore.open_default() if rel_paths else None
     cowork_root: Path | None = None
     cowork_resolved = False
     for _rel in rel_paths or ():
@@ -83,8 +81,8 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
                 continue
             digest = canonical_digest(data)
             out[_rel] = f"sha256:{digest}"
-            if store is not None:
-                store.put(digest, data)
+            # Stored by the deploy store only once the install commits.
+            stage_deployed_bytes(_full, digest)
     return out
 
 
