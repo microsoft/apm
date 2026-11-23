@@ -95,12 +95,17 @@ def _repository_path(url: str) -> str:
 
 
 def _list_key(key: str) -> tuple[str, str] | None:
-    """``(list, url scope)`` for ``credential[.<url>].helper`` / ``http[.<url>].extraheader``."""
+    """``(list, url scope)`` for ``credential[.<url>].helper`` / ``http[.<url>].extraheader``.
+
+    Git lowercases only the section and variable names; the URL scope keeps
+    its case (urlmatch compares paths case-sensitively), so it is kept as written.
+    """
+    lowered = key.lower()
     for prefix, suffix in (("credential.", ".helper"), ("http.", ".extraheader")):
         name = prefix + suffix[1:]
-        if key == name:
+        if lowered == name:
             return name, ""
-        if key.startswith(prefix) and key.endswith(suffix):
+        if lowered.startswith(prefix) and lowered.endswith(suffix):
             return name, key[len(prefix) : -len(suffix)]
     return None
 
@@ -118,7 +123,7 @@ def _classify(entries) -> dict[str, str] | None:
     lists: dict[tuple[str, str], list[str]] = {}
     for entry in entries:
         key = entry.key.lower()
-        list_key = _list_key(key)
+        list_key = _list_key(entry.key)
         if list_key is not None:
             live = lists.get(list_key, [])
             lists[list_key] = [*live, entry.value] if entry.value else []

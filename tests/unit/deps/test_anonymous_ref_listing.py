@@ -299,8 +299,15 @@ def test_incomplete_or_overlong_framing_falls_back(data):
             ),
             True,
         ),
+        (
+            (
+                ("http.https://github.com/Owner/.extraheader", "X-A: 1"),
+                ("http.https://github.com/owner/.extraheader", ""),
+            ),
+            False,
+        ),
     ],
-    ids=["other-scope-reset", "less-specific-reset", "same-scope-reset"],
+    ids=["other-scope-reset", "less-specific-reset", "same-scope-reset", "case-differing-scope"],
 )
 def test_helper_and_header_resets_apply_within_one_url_scope(pairs, eligible):
     assert (arl._classify(_entries(*pairs)) is not None) is eligible
@@ -334,6 +341,13 @@ def test_a_trickling_body_falls_back_at_the_deadline(monkeypatch):
 
 def test_an_encoded_body_falls_back():
     response = type("Response", (), {"headers": {"Content-Encoding": "gzip"}, "raw": None})()
+
+    with pytest.raises(arl._Fallback):
+        arl._read_body(response, deadline=1e9)
+
+
+def test_a_body_without_single_reads_falls_back():
+    response = type("Response", (), {"headers": {}, "raw": object()})()
 
     with pytest.raises(arl._Fallback):
         arl._read_body(response, deadline=1e9)
