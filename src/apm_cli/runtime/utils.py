@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -19,7 +18,7 @@ def find_runtime_binary(name: str) -> str | None:
 
     Priority:
       1. ~/.apm/runtimes/<name>  (APM-managed, executable)
-      2. shutil.which(name)      (system PATH fallback)
+      2. trusted_executable(name) (system PATH outside the project)
 
     On Windows the APM-managed binary may carry a ``.exe`` suffix, so both
     ``name`` and ``name.exe`` are checked under ``~/.apm/runtimes/``.
@@ -63,4 +62,14 @@ def find_runtime_binary(name: str) -> str | None:
     if _safe_executable(apm_path):
         return str(apm_path)
 
-    return shutil.which(name)
+    from apm_cli.utils.git_env import trusted_executable
+
+    return trusted_executable(name)
+
+
+def require_runtime_binary(name: str) -> str:
+    """Return :func:`find_runtime_binary` for *name*, raising when it is not installed."""
+    path = find_runtime_binary(name)
+    if path is None:
+        raise FileNotFoundError(f"{name} executable not found on PATH")
+    return path

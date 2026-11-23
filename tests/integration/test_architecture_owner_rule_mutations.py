@@ -3029,6 +3029,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="Prune stops reconciling deployment provenance through the state owner.",
     ),
     MutationCase(
+        guard_id="install-deployment-reanchor-receipt-history",
+        rule_id="install-deployment-reanchor-receipt-history",
+        path="src/apm_cli/core/deployment_reanchor.py",
+        old="            self._dirty = True\n        self.flush()\n",
+        new="            self._history.forget(key)\n            self._dirty = True\n        self.flush()\n",
+        intent="A re-anchored owner's receipts lose their hash history (#4889).",
+    ),
+    MutationCase(
         guard_id="install-deployment-receipt-collection",
         rule_id="install-deployment-receipt-collection",
         path="src/apm_cli/install/pipeline.py",
@@ -3872,6 +3880,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The update auth preflight probes source hosts without asking the egress-route owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/utils/git_env.py",
+        old="        return _resolve_trusted_executable(name)\n",
+        new="        return shutil.which(name)\n",
+        intent="The helper owner searches PATH, working directory included, itself.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -4500,6 +4516,84 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
         new="",
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="self._az_command = trusted_executable(az_command)",
+        new="self._az_command = shutil.which(az_command)",
+        intent="The az bearer lookup locates az with shutil.which outside the helper owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/install/audit_replay.py",
+        old='(get_git_executable(), "-C", str(project_root)',
+        new='("git", "-C", str(project_root)',
+        intent="The audit tracked-files probe launches a bare git program name.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            '        argv = ["git", *inert_git_args(), *args]\n'
+            "        return subprocess.run(\n            argv,"
+        ),
+        intent="The lock evidence probe launches a bare git name held in a local argv.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new=(
+            "        from subprocess import run as launch\n\n"
+            '        return launch(\n            ["git", *inert_git_args(), *args],'
+        ),
+        intent="The lock evidence probe launches a bare git name through an aliased import.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/codex_plugins/client.py",
+        old='                [executable, "--version"],',
+        new='                [executable, "--version"],\n                executable="codex",',
+        intent="The codex version probe overrides its resolved path with a literal executable.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="            self._az_command = trusted_executable(az_command)",
+        new="            from shutil import which as find\n\n            self._az_command = find(az_command)",
+        intent="The az bearer lookup calls shutil.which through a from-import alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="            self._az_command = trusted_executable(az_command)",
+        new="            import shutil as sh\n\n            self._az_command = sh.which(az_command)",
+        intent="The az bearer lookup calls shutil.which through a module alias.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/install/audit_replay.py",
+        old='        completed = subprocess.run(\n            (get_git_executable(), "-C"',
+        new='        completed = subprocess.run(\n            args=("git", "-C"',
+        intent="The audit tracked-files probe passes a bare git name as the args keyword.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/legacy_lock_evidence.py",
+        old="        return subprocess.run(\n            [get_git_executable(), *inert_git_args(), *args],",
+        new='        argv: list[str] = ["git", *inert_git_args(), *args]\n        return subprocess.run(\n            argv,',
+        intent="The lock evidence probe holds a bare git name in an annotated local argv.",
     ),
     MutationCase(
         guard_id="install-deployment-gate-retirement",

@@ -42,7 +42,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
-from apm_cli.utils.content_hash import compute_file_hash
+from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -356,7 +356,8 @@ def _state(path: Path) -> dict[str, Any]:
     if path.is_symlink():
         return {"link": os.readlink(path)}
     if path.is_file():
-        return {"file": compute_file_hash(path), "mode": _mode(path)}
+        # Byte-exact, unlike the ledger: a line-ending-only edit is a user's edit.
+        return {"file": compute_exact_file_hash(path), "mode": _mode(path)}
     return dict(_OTHER) if os.path.lexists(path) else dict(_ABSENT)
 
 
@@ -365,7 +366,7 @@ def _entry(path: Path) -> str:
     if path.is_symlink():
         return f"link:{os.readlink(path)}"
     if path.is_file():
-        return f"{compute_file_hash(path)}:{_mode(path)}"
+        return f"{compute_exact_file_hash(path)}:{_mode(path)}"
     if path.is_dir():
         return f"dir:{_mode(path)}"
     return "absent" if not os.path.lexists(path) else "other"
@@ -475,7 +476,15 @@ def _parse(lines: list[Any]) -> tuple[list[Any], dict[int, dict[str, Any]], str 
             continue
         pending = "pending" in line
         index, sub = line.get("pending" if pending else "sealed"), line.get("sub")
-        state = _pending(line) if pending else line.get("state")
+        state = line.get("state")
+        if pending:
+            # A write APM began keeps the last seal: a kill before it starts leaves APM's bytes.
+            last = (
+                events.get(index, {}).get(sub)
+                if type(index) is int and isinstance(sub, str)
+                else None
+            )
+            state = ("pending", _pending(line)[1], last[2] if isinstance(last, tuple) else last)
         if (
             type(index) is not int
             or not 0 <= index < len(units)
@@ -511,12 +520,12 @@ def _valid_state(state: Any, *, entry: bool) -> bool:
     return False
 
 
-def _pending(line: dict[str, Any]) -> tuple[str, str | None]:
-    """A write APM began: ``("pending", <expected content hash or None>)``."""
+def _pending(line: dict[str, Any]) -> tuple[str, str | None, Any]:
+    """A write APM began: ``("pending", <expected hash or None>, <last seal or None>)``."""
     expected = line.get("expected")
     if expected is not None and not isinstance(expected, str):
         raise ValueError("journal manifest holds a malformed expected hash")
-    return ("pending", expected)
+    return ("pending", expected, None)
 
 
 _MARKS = frozenset({"pending", "sealed", "commit"})
@@ -804,19 +813,18 @@ def _decide(units: list[_Replay]) -> tuple[list[_Replay], list[tuple[str, str]]]
 def _holds_apm_state(unit: _Replay) -> bool:
     """Whether the path holds only what APM put there (see :func:`_decide`)."""
     current = _state(unit.path)
-    if current in (_ABSENT, unit.prior):
-        return True
     whole = unit.events.get("")
+    sealed = whole[2] if isinstance(whole, tuple) else whole
+    if current in (_ABSENT, unit.prior, sealed):
+        return True
     if isinstance(whole, tuple):
         if not _matches_expected(current, whole[1]):
             return False
         if "dir" not in current or whole[1] is None:
             return True
-    elif whole == current:
-        return True
     if "dir" not in current:
         return False
-    return _dir_holds_apm_state(unit, current, whole)
+    return _dir_holds_apm_state(unit, current, sealed)
 
 
 def _matches_expected(current: dict[str, Any], expected: str | None) -> bool:
@@ -839,8 +847,9 @@ def _dir_holds_apm_state(unit: _Replay, current: Mapping[str, Any], whole: Any) 
     accounted, unknown = set(), set()
     for rel, fingerprint in entries.items():
         event = unit.events.get(rel)
-        if fingerprint in (prior.get(rel), sealed.get(rel), event) or (
-            isinstance(event, tuple) and _entry_matches_expected(fingerprint, event[1])
+        pending = isinstance(event, tuple)
+        if fingerprint in (prior.get(rel), sealed.get(rel), event[2] if pending else event) or (
+            pending and _entry_matches_expected(fingerprint, event[1])
         ):
             accounted.add(rel)
         elif rel not in prior and rel not in sealed and event is None:
@@ -927,7 +936,8 @@ def _validated(
 
 def _store_identity(store: Path) -> tuple[str, str] | None:
     """``(deploy root, workspace)`` an abandoned store names, or ``None`` if unreadable."""
-    with contextlib.suppress(OSError, ValueError, UnicodeDecodeError):
+    # RecursionError: a deeply nested header is unreadable; replay keeps and names it.
+    with contextlib.suppress(OSError, ValueError, UnicodeDecodeError, RecursionError):
         with open(store / _MANIFEST, encoding="utf-8") as handle:
             header = json.loads(handle.readline())
         if isinstance(header, dict):

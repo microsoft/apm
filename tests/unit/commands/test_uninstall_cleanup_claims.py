@@ -51,7 +51,8 @@ def test_shrink_retired_path_a_local_bundle_holds_is_never_a_deletion_candidate(
         local_deployed_file_hashes={shared: "sha256:shared"},
     )
     monkeypatch.setattr(
-        uninstall_cli, "shrink_path_split", lambda _lock, _shrunk: ({shared}, set())
+        "apm_cli.commands.uninstall.selection_shrink.shrink_path_split",
+        lambda _lock, _shrunk: ({shared}, set()),
     )
     judged: list[list[str]] = []
 
@@ -72,4 +73,5 @@ def test_shrink_retired_path_a_local_bundle_holds_is_never_a_deletion_candidate(
         shrunk={"shrinking": object()},
     )
 
-    assert judged == [[]]
+    # No deletion candidate is left, so no evidence is even asked for.
+    assert judged == []

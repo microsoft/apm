@@ -9,6 +9,8 @@
     "J|J04|3|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J04|3|O8a (O8a, required)",
     "J|J12|1|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J12|1|O8a (O8a, required)",
     "J|J13|4|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J13|4|O8b (O8b, required)",
-    "J|J14|5|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J14|5|O8a (O8a, required)"
+    "J|J14|5|O8": "#4571: oracle O8 split into O8a (remediation hint) and O8b (diagnostic advice); this step is witnessed as J|J14|5|O8a (O8a, required)",
+    "T1|OP=approve-deny|PRIM=bin|GATE=denied-dependency": "#3703: user scope discovers no org policy, and bin/ deploys only at user scope (U-BIN), so no approve runs under an org dependency deny there; the user-scope bin spine no longer credits that ungoverned step. Returns as an obligation when #3703 lands",
+    "T1|OP=uninstall|PRIM=bin|GATE=denied-dependency": "#3703: user scope discovers no org policy, and bin/ deploys only at user scope (U-BIN), so no uninstall runs under an org dependency deny there; the user-scope bin spine no longer credits that ungoverned step. Returns as an obligation when #3703 lands"
   }
 }

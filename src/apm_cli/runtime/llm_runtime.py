@@ -6,6 +6,7 @@ from typing import Any
 
 from ..core.tls_trust import build_child_tls_env
 from .base import RuntimeAdapter, _stream_subprocess_output
+from .utils import require_runtime_binary
 
 
 class LLMRuntime(RuntimeAdapter):
@@ -22,7 +23,7 @@ class LLMRuntime(RuntimeAdapter):
         # Verify llm CLI is available
         try:
             result = subprocess.run(  # noqa: F841
-                ["llm", "--version"],
+                [require_runtime_binary("llm"), "--version"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -44,7 +45,7 @@ class LLMRuntime(RuntimeAdapter):
         """
         try:
             # Build command
-            cmd = ["llm"]
+            cmd = [require_runtime_binary("llm")]
 
             # Add model flag if specified
             if self.model_name:
@@ -76,7 +77,7 @@ class LLMRuntime(RuntimeAdapter):
         """
         try:
             result = subprocess.run(
-                ["llm", "models", "list"],
+                [require_runtime_binary("llm"), "models", "list"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -129,7 +130,7 @@ class LLMRuntime(RuntimeAdapter):
         """
         try:
             subprocess.run(
-                ["llm", "--version"],
+                [require_runtime_binary("llm"), "--version"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

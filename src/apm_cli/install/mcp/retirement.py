@@ -16,6 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from apm_cli.install.mcp.ownership import declarations_share_native_key
+
 Retirement = tuple[str | None, builtins.set, str | None]
 
 
@@ -121,16 +123,10 @@ def record_refused_retirement(
     for runtime, names, _exclude in planned:
         if runtime is not None and runtime in old_target_servers:
             pending.setdefault(runtime, set()).update(names & retained[runtime])
-    # A claim with no recorded declaration can never be retired, so a missing
-    # baseline never displaces the new declaration this run wrote.
     keep_baseline = {
         name
         for name in set().union(*pending.values(), set())
-        if (name in old_configs or name not in new_configs)
-        and (
-            _refused_baseline_is_ours(name, managed_target_servers, old_target_servers)
-            or old_configs.get(name) == new_configs.get(name)
-        )
+        if _baseline_can_stand(name, pending, managed_target_servers, old_target_servers, configs)
     }
     for runtime, names in pending.items():
         # The lockfile holds one declaration per server: the refused baseline
@@ -202,6 +198,32 @@ def _concrete_retirements(
 def removed_names(removed: dict[str | None, builtins.set]) -> builtins.set:
     """Every server name a retirement removed from at least one runtime."""
     return set().union(*removed.values()) if removed else set()
+
+
+def _baseline_can_stand(
+    name: str,
+    pending: dict[str, builtins.set],
+    managed_target_servers: dict[str, builtins.set],
+    old_target_servers: dict[str, builtins.set],
+    configs: tuple[dict, dict],
+) -> bool:
+    """Whether the refused (old) declaration of *name* may stay its recorded baseline.
+
+    A claim with no recorded declaration can never be retired, and a baseline
+    that keys *name* to another native entry than the new declaration would
+    retire the wrong key (#4899): either way the new declaration stands.
+    """
+    new_configs, old_configs = configs
+    if name in new_configs:
+        if name not in old_configs:
+            return False
+        runtimes = {r for r, names in managed_target_servers.items() if name in names}
+        runtimes |= {r for r, names in pending.items() if name in names}
+        if not declarations_share_native_key(runtimes, name, old_configs[name], new_configs[name]):
+            return False
+    return _refused_baseline_is_ours(
+        name, managed_target_servers, old_target_servers
+    ) or old_configs.get(name) == new_configs.get(name)
 
 
 def _refused_baseline_is_ours(
