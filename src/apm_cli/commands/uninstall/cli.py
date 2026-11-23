@@ -2,9 +2,12 @@
 
 import builtins
 import contextlib
+import os
+import stat
 import sys
 import traceback
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import click
@@ -22,6 +25,7 @@ from apm_cli.core.remediation import (
 from ...codex_plugins.client import CodexNativeError
 from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...deps.lockfile import lockfile_parent_identity
 from ...deps.lockfile_generator import require_current_cli
 from ...deps.lockfile_write_authority import (
     LockfileWriter,
@@ -98,11 +102,15 @@ def _manifest_declarations_to_drop(declarations: list, packages_to_remove: list)
 
 
 class _StillNeededRepair(NamedTuple):
-    """Orphan-owner repair for still-needed rows: parents, subtree depth and dev status."""
+    """Orphan-owner repair: parent, depth and dev status for every affected row.
+
+    ``roots`` are the still-needed rows whose own declaration goes.
+    """
 
     parents: dict
     depths: dict
     dev: dict
+    roots: frozenset = frozenset()
 
 
 _NO_STILL_NEEDED_REPAIR = _StillNeededRepair({}, {}, {})
@@ -130,12 +138,53 @@ def _split_still_needed_packages(
         for package in packages_to_remove
         if _removed_lock_key(package, lockfile) in decision.rescued_roots
     ]
+    _refuse_still_needed_local(still_needed, decision.rescued_parents, lockfile, logger)
     removed = [package for package in packages_to_remove if package not in still_needed]
-    parents = {
-        key: repair for key, repair in decision.repairs.items() if key in decision.rescued_roots
-    }
-    repair = _StillNeededRepair(parents, dict(decision.rescued_depths), dict(decision.rescued_dev))
+    repair = _StillNeededRepair(
+        dict(decision.rescued_parents),
+        dict(decision.rescued_depths),
+        dict(decision.rescued_dev),
+        frozenset(decision.rescued_roots),
+    )
     return removed, still_needed, repair
+
+
+def _locked_parent_label(lockfile, parent_identity: str | None) -> str:
+    """Name a lock parent the way the user declared it (``./vendor/d``)."""
+    for dep in lockfile.get_package_dependencies():
+        if lockfile_parent_identity(dep, lockfile.replacements) == parent_identity:
+            if dep.source == "local" and dep.local_path:
+                # Portable: an absolute or home path prints as _local/<name>.
+                return _dependency_public_label(dep.local_path)
+            return dep.repo_url
+    return parent_identity or "another dependency"
+
+
+def _refuse_still_needed_local(still_needed: list, parents, lockfile, logger) -> None:
+    """Refuse before any write when a still-needed package is a local one (#4882).
+
+    Keeping a local package under its new parent changes its lock identity
+    (the anchored key), which uninstall cannot re-key yet, so it would leave
+    a lockfile ``apm install --frozen`` rejects. Remote packages keep the
+    declaration-only removal (#4749).
+    """
+    local = []
+    for package in still_needed:
+        key = _removed_lock_key(package, lockfile)
+        row = lockfile.get_dependency(key)
+        if row is not None and row.source == "local":
+            parent = _locked_parent_label(lockfile, parents.get(key, (None,))[0])
+            local.append((_dependency_public_label(package), parent))
+    if not local:
+        return
+    for label, parent in local:
+        logger.error(
+            f"{label} stays: {parent} still needs it; apm.yml and apm.lock.yaml were not changed."
+        )
+    logger.progress(
+        "Uninstall the package that still needs it first, or keep the local declaration in apm.yml."
+    )
+    sys.exit(1)
 
 
 def _split_removals(
@@ -153,21 +202,25 @@ def _split_removals(
 
 
 def _reparent_still_needed(lockfile, repair: _StillNeededRepair) -> bool:
-    """Re-parent each still-needed row, then re-derive its subtree's depth and dev status."""
+    """Give every affected row the parent, depth and dev status install records."""
     updated = False
     # Dev status comes only from ``repair.dev``: a partial walk proves
     # production paths, never their absence.
-    for key, (parent, local_path, _dev_only) in repair.parents.items():
+    for key, (parent, local_path) in repair.parents.items():
         kept = lockfile.get_dependency(key)
         if kept is None:
             continue
-        kept.resolved_by = parent
-        if local_path is not None:
+        if kept.resolved_by != parent:
+            kept.resolved_by = parent
+            updated = True
+        if local_path is not None and kept.local_path != local_path:
             kept.local_path = local_path
-        if kept.replacement is not None:
-            # The removed declaration's own request goes; surviving parents' stay.
-            kept.replacement.drop_root_requests()
-        updated = True
+            updated = True
+    for key in repair.roots:
+        kept = lockfile.get_dependency(key)
+        # The removed declaration's own request goes; surviving parents' stay.
+        if kept is not None and kept.replacement is not None:
+            updated |= kept.replacement.drop_root_requests()
     for field_name, values in (("depth", repair.depths), ("is_dev", repair.dev)):
         for key, value in values.items():
             kept = lockfile.get_dependency(key)
@@ -518,6 +571,9 @@ def _sync_integrations_for_manifest(
                     fix="resolve the org policy issue above"
                 ).sentence()
             )
+        elif isinstance(sync_err, PathTraversalError):
+            logger.warning(str(sync_err))
+            logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         else:
             logger.warning(INTEGRATIONS_UNSYNCED.sentence())
         logger.verbose_detail(f"Integration cleanup failed: {type(sync_err).__name__}: {sync_err}")
@@ -574,6 +630,74 @@ def _with_orphans(removed_keys: builtins.set, orphans: Any) -> builtins.set:
     """Add the removed packages' orphans to *removed_keys* in place and return it."""
     removed_keys.update(orphans)
     return removed_keys
+
+
+def _pop_lock_rows(lockfile, keys, removed_rows: dict) -> bool:
+    """Pop each locked *keys* row into *removed_rows*; return whether any was."""
+    popped = False
+    for key in keys:
+        if key in lockfile.dependencies:
+            removed_rows[key] = lockfile.dependencies.pop(key)
+            popped = True
+    return popped
+
+
+def _absence_proven(deploy_root: Path, relative: str) -> bool:
+    """Return whether *relative* is provably gone under *deploy_root* (#4851).
+
+    Absence counts only through real directories: a symlinked or
+    non-directory parent, or one that cannot be inspected, leaves the file's
+    fate unknown, so its claim stays.
+    """
+    current = deploy_root
+    parts = Path(relative).parts
+    try:
+        for part in parts[:-1]:
+            current = current / part
+            mode = os.lstat(current).st_mode
+            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+                return False
+        os.lstat(current / parts[-1])
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _retain_failed_claims(
+    lockfile, removed_rows: dict, sync: tuple, removed_hashes: dict, roots: tuple, logger
+) -> bool:
+    """Restore claims sync could not remove (#4851); return whether the lock may persist.
+
+    *sync* is ``(integration_cleanup, integration_cleanup_error)``. A sync that
+    aborted (a path-safety refusal, for one) reports no per-path result, so
+    every removed path keeps its claim unless its absence is proven safely.
+    *roots* is ``(deploy_root, project_root)``.
+    """
+    integration_cleanup, sync_error = sync
+    deploy_root, project_root = roots
+    failed = list(integration_cleanup.failed_paths)
+    if sync_error is not None:
+        failed.extend(
+            path
+            for row in removed_rows.values()
+            for path in row.deployed_files
+            if not _absence_proven(Path(deploy_root), path)
+        )
+    if not removed_rows or not failed:
+        return True
+    from .lockfile_state import retain_failed_claims
+
+    try:
+        retain_failed_claims(lockfile, removed_rows, failed, removed_hashes, Path(project_root))
+    except Exception as state_err:
+        logger.warning(
+            f"Lockfile state could not be reconciled. {LOCKFILE_STATE_UNRECONCILED.sentence()}"
+        )
+        logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
+        return False
+    return True
 
 
 def _gate_denied_package_keys(
@@ -1144,6 +1268,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
         if not dry_run:
             _refuse_unwritable_lockfile(lockfile, lockfile_path, removed_keys)
+        # A still-needed local dependency refuses before scripts run (#4882);
+        # the split repeats after them, since scripts may edit apm.yml.
+        _split_removals(
+            packages_to_remove,
+            lockfile,
+            (modules_dir, apm_yml_path),
+            logger,
+            user_scope=scope is InstallScope.USER,
+        )
 
         # Fire scripts only after every requested identifier has selected one
         # dependency, so failed validation is an atomic no-op.
@@ -1428,16 +1561,15 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         # Step 9: Mutate dependency state in memory. Persistence happens once
         # after survivor ownership, hashes, ledger, and MCP state agree.
         lockfile_updated = False
+        # Rows removed here, so a file sync cannot remove keeps its claim (#4851).
+        removed_rows = {}
         if lockfile:
             for pkg in packages_to_remove:
                 key = _removed_lock_key(pkg, lockfile)
                 if key in lockfile.dependencies:
-                    del lockfile.dependencies[key]
+                    removed_rows[key] = lockfile.dependencies.pop(key)
                     lockfile_updated = True
-            for orphan_key in actual_orphans:
-                if orphan_key in lockfile.dependencies:
-                    del lockfile.dependencies[orphan_key]
-                    lockfile_updated = True
+            lockfile_updated |= _pop_lock_rows(lockfile, actual_orphans, removed_rows)
             lockfile_updated |= _reparent_still_needed(lockfile, still_needed_repairs)
 
         # Step 10: Sync integrations
@@ -1568,6 +1700,14 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger=logger,
         )
         lockfile_updated = lsp_lock_updated or lockfile_updated
+        lockfile_ready = lockfile_ready and _retain_failed_claims(
+            lockfile,
+            removed_rows,
+            (integration_cleanup, integration_cleanup_error),
+            all_deployed_file_hashes,
+            (deploy_root, manifest_path.parent),
+            logger,
+        )
 
         # Persist survivors, then rebuild APM-owned native plugin registrations
         # from that locked state: only APM's own rows disappear, user bytes never do.

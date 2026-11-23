@@ -59,3 +59,29 @@ def test_contained_link_installs_audits_and_tracks_target_edits(
     world.apm("uninstall", "../lp")
     assert world.deployed() == set()
     assert (package / _LINKED).is_symlink()
+
+
+def test_local_dependency_context_link_audits_clean_and_tracks_edits(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Replay renders a scratch-copied dependency's context link as install did (#4832)."""
+    world = World.create(tmp_path, apm_binary_path)
+    package = write_package(world.isolated.work_root / "lp", "lp")
+    write(package / ".apm/context/notes.context.md", "---\ndescription: Notes\n---\nNotes.\n")
+    write(
+        package / ".apm/agents/research.agent.md",
+        "---\nname: research\ndescription: Research\n---\n"
+        "Read [the notes](../context/notes.context.md) first.\n",
+    )
+    world.manifest(["../lp"])
+
+    world.apm("install", NO_POLICY)
+    deployed = world.project / ".github/agents/research.agent.md"
+    text = deployed.read_text(encoding="ascii")
+    assert "(../../apm_modules/_local/lp/.apm/context/notes.context.md)" in text, text
+
+    world.apm("audit", "--ci", NO_POLICY)
+
+    write(deployed, text + "Hand edit.\n")
+    audit = world.apm("audit", "--ci", NO_POLICY, expect=1)
+    assert "research.agent.md" in audit.stdout

@@ -8,7 +8,7 @@ pinned recipe only with a note in the benchmark history; add a new one instead.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,9 @@ class TreeRecipe:
     targets: tuple[str, ...] = ("copilot",)
     owner: str = "perf-org"
     tag: str = "v1.0.0"
+    # Git host shapes the packages are referenced through (``generator.HOST_SPECS``);
+    # each package keeps one host for every parent, so its identity never forks.
+    hosts: tuple[str, ...] = ("github",)
 
 
 @dataclass(frozen=True)
@@ -74,12 +77,24 @@ class MonorepoRecipe:
     targets: tuple[str, ...] = ("copilot",)
 
 
+# Enterprise shapes: the same trees referenced across GitHub, GHE Cloud, GitLab
+# and Azure DevOps (``-multi``), and with a stdio MCP server in every package
+# (``-mcp``). Same seeds, so only the variant's axis differs from the base tree.
+_MULTI_HOSTS = ("github", "ghe", "gitlab", "ado")
+_MCP_HEAVY = PrimitiveMix(mcp_every=1)
+_BASE_TREES = (
+    TreeRecipe("tree-10", packages=10, depth=5, seed=10),
+    TreeRecipe("tree-50", packages=50, depth=6, seed=50),
+    TreeRecipe("tree-200", packages=200, depth=8, seed=200),
+)
+
 TREE_RECIPES: dict[str, TreeRecipe] = {
     recipe.name: recipe
+    for base in _BASE_TREES
     for recipe in (
-        TreeRecipe("tree-10", packages=10, depth=5, seed=10),
-        TreeRecipe("tree-50", packages=50, depth=6, seed=50),
-        TreeRecipe("tree-200", packages=200, depth=8, seed=200),
+        base,
+        replace(base, name=f"{base.name}-multi", hosts=_MULTI_HOSTS),
+        replace(base, name=f"{base.name}-mcp", primitives=_MCP_HEAVY),
     )
 }
 

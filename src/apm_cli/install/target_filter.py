@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.remediation import HOOK_RECONCILE_INCOMPLETE
 from apm_cli.models.apm_package import canonical_package_targets
@@ -96,6 +97,29 @@ def warn_target_reconcile_failure(
     )
 
 
+def announced_reconcile(hook_integrator: Any, logger: Any, package_name: str, scope: Any) -> Any:
+    """The hook integrator's package-target reconcile, naming each emptied hook file it deletes.
+
+    Returns ``None`` when the integrator has no such reconcile (#4852).
+    """
+    from apm_cli.core.scope import InstallScope
+
+    reconcile = getattr(hook_integrator, "reconcile_package_target_restriction", None)
+    if not callable(reconcile):
+        return None
+    user_scope = scope is InstallScope.USER
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        stats = reconcile(*args, **kwargs)
+        deleted = stats.get("deleted_paths") if isinstance(stats, dict) else None
+        if logger is not None and deleted:
+            prefix = "~/" if user_scope else ""
+            logger.hook_config_cleanup(package_name, [prefix + path for path in deleted])
+        return stats
+
+    return run
+
+
 # A package declaring this target ships portable, cross-client skills.
 CROSS_CLIENT_SKILLS_TARGET = "agent-skills"
 
@@ -114,6 +138,24 @@ def package_allows_target(target: TargetProfile, package_allowed: frozenset[str]
         CROSS_CLIENT_SKILLS_TARGET in package_allowed
         and target.capability.accepts_agent_skills_packages
     )
+
+
+def recorded_package_targets(package: object) -> list[str]:
+    """Return the package's own ``targets:`` restriction as the lockfile records it (#4850).
+
+    Empty when the package admits every target (no ``targets:`` or ``all``),
+    the same restriction :func:`resolve_effective_package_targets` applies.
+    """
+    declared = canonical_package_targets(package)
+    return sorted(declared) if declared and "all" not in declared else []
+
+
+def recorded_targets_exclude(target: TargetProfile, recorded: Iterable[str]) -> bool:
+    """Return whether a recorded package restriction keeps *target* out (#4850)."""
+    allowed = frozenset(recorded)
+    if not allowed or "all" in allowed:
+        return False
+    return not package_allows_target(target, allowed)
 
 
 def _no_target_hint(declared: list[str], requested: str) -> str:
