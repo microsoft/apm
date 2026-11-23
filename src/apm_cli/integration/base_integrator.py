@@ -1292,6 +1292,9 @@ class BaseIntegrator:
             for root in scan_roots:
                 primitives = discover_primitives(root)
                 self.link_resolver.register_contexts(primitives)
+            # Context and memory links render in live deployment coordinates
+            # for every package, the $HOME user root included (#4832).
+            self.link_resolver.deployment_frame = getattr(package_info, "deployment_frame", None)
 
             # Generalized in-package asset link rewriting (#1147) needs the
             # authoritative source-package root. Use install_path directly:

@@ -51,6 +51,7 @@ from apm_cli.install.source_helpers import (
     materialized_manifest_snapshot,
     record_carried_package_hash,
     record_package_digests,
+    record_package_targets,
     update_accepts_new_content,
 )
 from apm_cli.install.source_helpers import (
@@ -280,6 +281,7 @@ class LocalDependencySource(DependencySource):
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
         _record_declared_license(ctx, dep_key, install_path)
+        record_package_targets(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -599,6 +601,7 @@ class CachedDependencySource(DependencySource):
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
         _record_declared_license(ctx, dep_key, install_path)
+        record_package_targets(ctx, dep_key, install_path)
         warn_unrecognized_plugin_schema(ctx.diagnostics, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
@@ -890,6 +893,7 @@ class FreshDependencySource(DependencySource):
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
             _record_declared_license(ctx, dep_key, install_path)
+            record_package_targets(ctx, dep_key, install_path)
             warn_unrecognized_plugin_schema(diagnostics, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
