@@ -473,3 +473,53 @@ def test_content_types_judge_a_local_source_not_its_stale_copy(lifecycle_world) 
     assert "content_types" in _text(result) and "hook" in _text(result), _text(result)
     assert not _hook_deployed(lifecycle_world), _text(result)
     assert not (lifecycle_world.project / ".agents/skills/t-third").exists(), _text(result)
+
+
+# -- mcp.self_defined: warn reports at install (#5070) -------------------------------
+
+_INLINE_MCP = ("install", "--mcp", "p-inline", "--", "apm-lifecycle-inert-server", "--stdio")
+
+
+def _self_defined_policy(world, level: str) -> None:
+    # A transport rule keeps the policy non-empty: warn alone is the default.
+    mcp = {"self_defined": level, "transport": {"allow": ["stdio"]}}
+    _serve_policy(
+        world,
+        f"policy-self-defined-{level}",
+        {"name": "sd", "version": "1.0", "enforcement": "block", "mcp": mcp},
+    )
+
+
+def _self_defined_warnings(result) -> list[tuple[str, str]]:
+    """(header, row) for each summary row naming the inline server."""
+    lines = [line.strip() for line in (result.stdout + result.stderr).splitlines()]
+    return [
+        (lines[i - 1] if i else "", line)
+        for i, line in enumerate(lines)
+        if "p-inline" in line and "self-defined server" in line
+    ]
+
+
+_WARNED = [("[!] 1 policy warning", "+- [p-inline] self-defined server")]
+
+
+@pytest.mark.parametrize("level", ["warn", "allow"])
+def test_install_mcp_reports_a_self_defined_server_only_under_warn(lifecycle_world, level) -> None:
+    """--mcp writes the inline server; only mcp.self_defined: warn names it in a [!] line."""
+    _self_defined_policy(lifecycle_world, level)
+    result = driver.run(lifecycle_world, list(_INLINE_MCP))
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+    expected = _WARNED if level == "warn" else []
+    assert _self_defined_warnings(result) == expected, _text(result)
+
+
+def test_install_reports_a_declared_self_defined_server_under_warn(lifecycle_world) -> None:
+    """A plain install of an apm.yml declaring an inline server names it under warn."""
+    _self_defined_policy(lifecycle_world, "allow")
+    assert driver.run(lifecycle_world, list(_INLINE_MCP)).returncode == 0
+    _self_defined_policy(lifecycle_world, "warn")
+    result = driver.run(lifecycle_world, ["install"])
+    assert result.returncode == 0, _text(result)
+    assert _configured(lifecycle_world, "p-inline"), _text(result)
+    assert _self_defined_warnings(result) == _WARNED, _text(result)
