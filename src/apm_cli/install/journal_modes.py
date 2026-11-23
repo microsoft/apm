@@ -10,6 +10,7 @@ permission bits for every staged entry; otherwise the unit is kept and reported.
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -94,6 +95,11 @@ def never_wider(path: Path, copy: Path, kind: str, mode: int | dict[str, int]) -
 
 
 _ACL_XATTRS = frozenset({"system.posix_acl_access", "system.posix_acl_default"})
+_NO_XATTRS = frozenset(
+    getattr(errno, name)
+    for name in ("ENOTSUP", "EOPNOTSUPP", "ENODATA", "ENOENT")
+    if hasattr(errno, name)
+)
 
 
 def carries_acl(*paths: Path) -> bool:
@@ -107,8 +113,10 @@ def carries_acl(*paths: Path) -> bool:
         for path in [root, *(_entries(root) if root.is_dir() and not root.is_symlink() else ())]:
             try:
                 names = os.listxattr(path, follow_symlinks=False)
-            except OSError:
-                continue  # no extended attributes here (or unsupported): no ACL
+            except OSError as exc:
+                if exc.errno in _NO_XATTRS:
+                    continue  # unsupported, none, or nothing there: no ACL
+                return True  # cannot be checked: never assumed absent
             if _ACL_XATTRS.intersection(names):
                 return True
     return False
