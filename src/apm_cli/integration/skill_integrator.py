@@ -45,7 +45,11 @@ from apm_cli.integration.skill_support import (
 )
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.integration.write_seam import write_text_lf
-from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
+from apm_cli.models.dependency.subsets import (
+    has_skill_selection,
+    skill_subset_filter_tokens,
+    skill_subset_selects_all,
+)
 
 __all__ = [
     "SkillIntegrationResult",
@@ -367,6 +371,9 @@ class SkillIntegrator(BaseIntegrator):
         # Only successful writes establish same-run ownership, keyed by the
         # actual destination rather than a basename shared by several targets.
         self._native_skill_session_owners: dict[Path, str | None] = {}
+        # Harnesses a native plugin route serves for the package being integrated.
+        self._skill_native_harnesses: frozenset[str] = frozenset()
+        self._pending_native_harnesses: frozenset[str] = frozenset()
         self._ownership_snapshots: (
             dict[Path, tuple[Mapping[str, str], Mapping[str, str]]] | None
         ) = None
@@ -814,8 +821,15 @@ class SkillIntegrator(BaseIntegrator):
     def _skill_filter_misses_available(
         name_filter: set[str] | None,
         available_names: frozenset[str],
+        *,
+        selects_all: bool = False,
     ) -> bool:
-        """Return whether a requested subset has no deployable source match."""
+        """Return whether a requested subset has no deployable source match.
+
+        ``skills: ["*"]`` (*selects_all*) misses only when nothing is available.
+        """
+        if selects_all:
+            return not available_names
         return name_filter is not None and name_filter.isdisjoint(available_names)
 
     @staticmethod
@@ -1094,7 +1108,9 @@ class SkillIntegrator(BaseIntegrator):
         if any(skills is None for skills in selected):
             return name_filter
         paired = skill_subset_filter_tokens({name for skills in selected for name in skills})
-        paired = frozenset(paired or ())
+        if paired is None:
+            return name_filter  # a paired skills: ["*"] selects every skill
+        paired = frozenset(paired)
         return paired if name_filter is None else frozenset(name_filter) & paired
 
     def _promote_sub_skills_standalone(
@@ -1126,7 +1142,7 @@ class SkillIntegrator(BaseIntegrator):
             if source_plan is not None
             else skill_subset_filter_tokens(skill_subset)
         )
-        if not sub_skills_dir.is_dir() and name_filter is None:
+        if not sub_skills_dir.is_dir() and not has_skill_selection(skill_subset):
             return 0, []
 
         if targets is None:
@@ -1200,7 +1216,9 @@ class SkillIntegrator(BaseIntegrator):
                 count = n
             all_deployed.extend(deployed)
 
-        if self._skill_filter_misses_available(name_filter, available_names):
+        if self._skill_filter_misses_available(
+            name_filter, available_names, selects_all=skill_subset_selects_all(skill_subset)
+        ):
             self._skill_can_complete = False
             self._error_no_skill_filter_match(
                 available_names,
@@ -1555,7 +1573,9 @@ class SkillIntegrator(BaseIntegrator):
                     any_created = True
             all_deployed.extend(deployed)
 
-        if self._skill_filter_misses_available(_name_filter, available_names):
+        if self._skill_filter_misses_available(
+            _name_filter, available_names, selects_all=skill_subset_selects_all(skill_subset)
+        ):
             self._skill_can_complete = False
             self._error_no_skill_filter_match(
                 available_names,
@@ -1579,6 +1599,15 @@ class SkillIntegrator(BaseIntegrator):
             deployed_files=tuple(self._skill_files),
             complete=self._skill_materialization_complete(project_root),
         )
+
+    def serve_natively(self, harnesses: frozenset[str]) -> None:
+        """Name the harnesses a native plugin route serves for the next package (#5036).
+
+        Their skill roots are not "outside this install": the native route
+        owns them, so no kept-copy line is reported there. The next
+        :meth:`integrate_package_skill` call consumes it.
+        """
+        self._pending_native_harnesses = frozenset(harnesses)
 
     def integrate_package_skill(
         self,
@@ -1607,6 +1636,9 @@ class SkillIntegrator(BaseIntegrator):
         never become a package's ownership proof.
         """
         enforce_agent_plugin_deployment_boundary(package_info)
+        # Consume the package's native harnesses so they never reach another package.
+        self._skill_native_harnesses = self._pending_native_harnesses
+        self._pending_native_harnesses = frozenset()
         from apm_cli.core.scope import InstallScope, get_apm_dir
 
         lockfile_root = (
@@ -1745,7 +1777,7 @@ class SkillIntegrator(BaseIntegrator):
         root_skills_dir = package_path / "skills"
         _source_paths = selection.children
         _is_plugin = package_info.package_type == _PackageType.MARKETPLACE_PLUGIN
-        if _is_plugin and not _source_paths and not skill_subset_filter_tokens(skill_subset):
+        if _is_plugin and not _source_paths and not has_skill_selection(skill_subset):
             self._note_plugin_declaration_deploys_no_skills(
                 package_path,
                 package_path.name,
@@ -2008,7 +2040,7 @@ class SkillIntegrator(BaseIntegrator):
             # other, and special bits never survive from the source package.
             # Runs for both fresh copies and idempotent re-installs so files
             # previously deployed by older APM versions are hardened in-place.
-            dest_file.chmod(stat.S_IRWXU)
+            write_seam.chmod(dest_file, stat.S_IRWXU)
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")

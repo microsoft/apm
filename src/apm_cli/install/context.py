@@ -207,6 +207,8 @@ class InstallContext:
     orphan_cleanup_retained: dict[str, dict[str, str | None]] = field(default_factory=dict)
     # Declared members integration left on disk unwritten; cleanup retains them.
     kept_deployed_values: frozenset[str] = frozenset()
+    # Loose values a parked native replacement leaves installed (#5036).
+    parked_native_kept_values: frozenset[str] = frozenset()
     package_types: dict[str, str] = field(default_factory=dict)
     # A package's own ``targets:`` restriction, recorded for pack (#4850).
     package_targets: dict[str, list[str]] = field(default_factory=dict)

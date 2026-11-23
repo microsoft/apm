@@ -12,6 +12,7 @@ from apm_cli.integration.copilot_cowork_paths import (
     COWORK_LOCKFILE_PREFIX,  # noqa: F401
     COWORK_URI_SCHEME,  # noqa: F401
     CoworkResolutionError,
+    cowork_locator,
     from_lockfile_path,
     is_cowork_path,
     resolve_copilot_cowork_skills_dir,
@@ -442,3 +443,36 @@ class TestIsCoworkPath:
 
     def test_empty_string_returns_false(self) -> None:
         assert is_cowork_path("") is False
+
+
+class TestCoworkLocator:
+    """cowork_locator returns the entry the lockfile names, never a link's referent."""
+
+    def test_an_entry_seen_as_a_file_then_a_link_returns_the_named_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The kind check sees a regular file; by resolution it is an inward link (#5022)."""
+        cowork = (tmp_path / "cowork-skills").resolve()
+        (cowork / "alpha").mkdir(parents=True)
+        referent = cowork / "untracked.md"
+        referent.write_text("notes\n", encoding="utf-8")
+        entry = cowork / "alpha" / "notes.md"
+        try:
+            entry.symlink_to(referent)
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are unavailable")
+        real_is_symlink = Path.is_symlink
+        seen: list[Path] = []
+
+        def first_look_sees_a_file(path: Path) -> bool:
+            if path == entry and not seen:
+                seen.append(path)
+                return False
+            return real_is_symlink(path)
+
+        monkeypatch.setattr(Path, "is_symlink", first_look_sees_a_file)
+
+        found = cowork_locator("cowork://skills/alpha/notes.md", cowork)
+
+        assert found == entry and real_is_symlink(found)
+        assert referent.read_text(encoding="utf-8") == "notes\n"

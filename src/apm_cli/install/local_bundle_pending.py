@@ -32,6 +32,16 @@ def _record_path(scope_dir: Path) -> Path:
     return Path(scope_dir) / _RECORD
 
 
+def pending_record_blocker(scope_dir: Path) -> str | None:
+    """Return why the scope's pending record cannot be safely written, else ``None``."""
+    from ..utils.path_security import has_symlink_component
+
+    path = _record_path(scope_dir)
+    if has_symlink_component(Path(scope_dir), path):
+        return f"{_RECORD.as_posix()} (linked path)"
+    return None
+
+
 def _read(scope_dir: Path) -> dict[str, dict]:
     path = _record_path(scope_dir)
     try:
@@ -55,6 +65,10 @@ def record_bundle_executables(
     else:
         return
     path = _record_path(scope_dir)
+    if blocker := pending_record_blocker(scope_dir):
+        from ..utils.path_security import PathTraversalError
+
+        raise PathTraversalError(f"Refusing to write the local bundle record through {blocker}")
     if not bundles:
         path.unlink(missing_ok=True)
         return
@@ -94,6 +108,19 @@ def _recorded(scope_dir: Path) -> list[PendingBundle]:
             continue
         found.append(PendingBundle(str(slug), key, tuple(str(t) for t in types)))
     return found
+
+
+def recorded_bundle_slugs(scope_dir: Path) -> list[str]:
+    """Return the slugs of the installed bundles that ship executables."""
+    return [bundle.slug for bundle in _recorded(scope_dir)]
+
+
+def drop_bundle_exec_type(scope_dir: Path, slug: str, exec_type: str) -> None:
+    """Forget *exec_type* for one installed bundle once its uninstall removed it (#3700)."""
+    for bundle in _recorded(scope_dir):
+        if bundle.slug == slug and exec_type in bundle.exec_types:
+            remaining = [t for t in bundle.exec_types if t != exec_type]
+            record_bundle_executables(scope_dir, slug, bundle.approval_key, remaining)
 
 
 def pending_bundles(
