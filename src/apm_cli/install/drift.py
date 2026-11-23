@@ -529,6 +529,15 @@ def _route_manifest(root: Path) -> Any:
     return load_route_manifest(manifest_file(root))
 
 
+def _dependency_package_info(lock_dep: Any, install_path: Path, deployment_modules_dir: Path):
+    """A locked dependency's PackageInfo, deploying from its live install path."""
+    package_info = _build_package_info(lock_dep, install_path)
+    package_info.deployment_package_root = lock_dep.to_dependency_ref().get_install_path(
+        deployment_modules_dir
+    )
+    return package_info
+
+
 def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
     """Execute the scratch replay and return the populated scratch dir.
 
@@ -713,9 +722,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         # (#4832: a user-root context link from ~/.apm).
                         package_info.deployment_package_root = self_source_root
                     else:
-                        package_info = _build_package_info(lock_dep, install_path)
-                        package_info.deployment_package_root = (
-                            lock_dep.to_dependency_ref().get_install_path(deployment_modules_dir)
+                        package_info = _dependency_package_info(
+                            lock_dep, install_path, deployment_modules_dir
                         )
                     package_info.deployment_frame = deployment_frame
                     package_info.route_manifest = route_manifest

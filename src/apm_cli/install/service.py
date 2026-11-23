@@ -640,8 +640,7 @@ class InstallService:
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
             )
-        # Retirements frozen cannot record refuse first: a withdrawn bundle LSP
-        # server (RA-041) or a native plugin moved loose (#4995).
+        # Refuse retirements frozen cannot record (RA-041 bundle LSP, #4995 route).
         from apm_cli.install.frozen_retirement import refuse_frozen_retirements
 
         refuse_frozen_retirements(request, lockfile, lockfile_path.parent)
