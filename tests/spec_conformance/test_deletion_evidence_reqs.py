@@ -2,7 +2,7 @@
 
 req-lk-024.
 
-Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.76
+Amendment 0.1.69 (issue #3701), adopted 2026-11-20, and the proposed 0.1.77
 consent exception (issue #4295). The oracles drive
 the cleanup owner directly: a forged lockfile row whose hash matches a user
 file keeps the file and names it; a local deployment receipt or byte
@@ -124,7 +124,7 @@ def _consent_evidence(
 
 @pytest.mark.req("req-lk-024")
 def test_spec_states_the_per_invocation_consent_exception() -> None:
-    """Proposed amendment 0.1.76 (issue #4295)."""
+    """Proposed amendment 0.1.77 (issue #4295)."""
     assert_spec_contains("One consent exception applies, only to an uninstall the user explicitly")
     assert_spec_contains("MUST NOT infer consent from another option,")
     assert_spec_contains(
