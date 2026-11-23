@@ -351,15 +351,17 @@ class CommandIntegrator(BaseIntegrator):
             package=pkg_name,
         )
 
-    def _warn_adopted_withheld_keys(
+    def _warn_retained_withheld_keys(
         self, source: Path, target_name: str, diagnostics: Any, pkg_name: str
     ) -> None:
-        """Repeat the withheld-keys warning when an existing command is adopted.
+        """Repeat the withheld-keys warning when an existing command is kept.
 
-        Adoption skips ``integrate_command()``, so without this the deployed
-        hook-free command would be kept silently.
+        Adopted and receipted-unchanged commands skip ``integrate_command()``,
+        so without this a source that only gained ``hooks:`` would keep the
+        hook-free command silently.  Planning passes write nothing and stay
+        quiet; the real pass warns.
         """
-        if target_name != "claude" or diagnostics is None:
+        if target_name != "claude" or diagnostics is None or self._overwrite_plan is not None:
             return
         command_name, _post, _warnings, dropped_keys = self._transform_prompt_to_command(
             source, target_name
@@ -684,6 +686,7 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            tracked_before = len(target_paths)
             skip, adopted = self._check_adopt_or_skip(
                 target_path,
                 prompt_file,
@@ -699,12 +702,12 @@ class CommandIntegrator(BaseIntegrator):
             if skip:
                 if adopted:
                     files_adopted += 1
-                    if mapping.format_id != "gemini_command":
-                        self._warn_adopted_withheld_keys(
-                            prompt_file, target.name, diagnostics, pkg_name
-                        )
                 else:
                     files_skipped += 1
+                if len(target_paths) > tracked_before:
+                    self._warn_retained_withheld_keys(
+                        prompt_file, target.name, diagnostics, pkg_name
+                    )
                 continue
 
             prior_bytes = target_path.read_bytes() if target_path.is_file() else None

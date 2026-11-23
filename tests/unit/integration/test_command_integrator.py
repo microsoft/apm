@@ -1896,6 +1896,42 @@ class TestClaudeNativeCommandFrontmatter:
         warnings = [w.message for w in diag.by_category().get("warning", [])]
         assert any("hooks withheld" in w for w in warnings), warnings
 
+    def test_claude_receipted_unchanged_warns_when_source_gains_hooks(
+        self, temp_project, monkeypatch
+    ):
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        pkg_info = _make_package(temp_project, {"p.prompt.md": "---\ndescription: d\n---\nRun.\n"})
+        claude = KNOWN_TARGETS["claude"]
+        CommandIntegrator().integrate_commands_for_target(claude, pkg_info, temp_project)
+        deployed = temp_project / ".claude" / "commands" / "p.md"
+        before = deployed.read_bytes()
+
+        # Only hooks: change, so the render is byte-identical to the receipt.
+        source = temp_project / "apm_modules" / "test-pkg" / ".apm" / "prompts" / "p.prompt.md"
+        source.write_text(
+            "---\ndescription: d\nhooks:\n  Stop:\n    - hooks:\n"
+            "        - type: command\n          command: ./done.sh\n---\nRun.\n",
+            encoding="utf-8",
+        )
+        integrator = CommandIntegrator()
+        monkeypatch.setattr(integrator, "receipted_unchanged", lambda _path: True)
+        diag = DiagnosticCollector()
+        result = integrator.integrate_commands_for_target(
+            claude,
+            pkg_info,
+            temp_project,
+            managed_files={".claude/commands/p.md"},
+            diagnostics=diag,
+        )
+
+        assert result.files_integrated == 0, result
+        assert result.files_adopted == 0, result
+        assert deployed.read_bytes() == before
+        warnings = [w.message for w in diag.by_category().get("warning", [])]
+        assert any("hooks withheld" in w for w in warnings), warnings
+
     def test_claude_still_drops_name_and_paths(self, temp_project):
         warnings = self._install(
             temp_project,
