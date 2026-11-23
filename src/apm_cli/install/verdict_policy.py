@@ -9,6 +9,7 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from apm_cli.install.verdict_record import (
     _GOVERNED_DIRS,
@@ -117,3 +118,29 @@ def _expiry(issued: float) -> float:
             if path.name.endswith(".meta.json"):
                 expiry = min(expiry, _policy_fresh_until(path))
     return expiry
+
+
+def _discovery_unproven(root: Path, identity: Any) -> bool:
+    """Whether discovery would fetch for this project, so a record cannot stand in.
+
+    Discovery tries the candidates in order and fetches each one with no fresh
+    cached entry for this project (it caches no absence), so only a fresh entry
+    for the first candidate proves it returns without a fetch. GitLab ancestry
+    and Azure DevOps have no such proof: no record. *identity* is the remote's
+    org, host and port (None without one).
+    """
+    if identity is None:
+        return False
+    from apm_cli.policy import discovery
+    from apm_cli.policy._cached_candidates import candidate_refs
+    from apm_cli.policy.project_config import read_project_policy_hash_pin
+    from apm_cli.utils.github_host import is_azure_devops_hostname, is_gitlab_hostname
+
+    org, host, _port = identity
+    if is_azure_devops_hostname(host) or is_gitlab_hostname(host):
+        return True
+    refs = candidate_refs(org, host, discovery._policy_repo_candidates(host))
+    pin = read_project_policy_hash_pin(root)
+    expected = pin.normalized if pin is not None else None
+    entry = discovery._read_cache_entry(refs[0], root, expected_hash=expected)
+    return entry is None or entry.stale

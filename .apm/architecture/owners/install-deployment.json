@@ -142,6 +142,7 @@
         "src/apm_cli/install/noop_diff.py",
         "src/apm_cli/install/pipeline_entry.py",
         "src/apm_cli/install/verdict_git.py",
+        "src/apm_cli/install/verdict_inputs.py",
         "src/apm_cli/install/verdict_key.py",
         "src/apm_cli/install/verdict_key_windows.py",
         "src/apm_cli/install/verdict_policy.py",

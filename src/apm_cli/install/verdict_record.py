@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-RECORD_VERSION = 1
+RECORD_VERSION = 2
 RECORDS_DIR = "verdicts"
 KEY_FILE = "verdict.key"
 # Argv the record serves; anything else runs the CLI as usual.
@@ -51,6 +51,7 @@ ENV_ALLOWLIST = (
     "APM_COPILOT_APP_DB",
     "APM_COPILOT_COWORK_SKILLS_DIR",
     "APM_DEBUG",
+    "APM_E2E_TESTS",
     "APM_GITLAB_HOSTS",
     "APM_GITLAB_POLICY_REPO",
     "APM_GIT_CREDENTIAL_TIMEOUT",
@@ -99,6 +100,7 @@ ENV_ALLOWLIST = (
     "PROXY_REGISTRY_URL",
     "PYTHONIOENCODING",
     "SOURCE_DATE_EPOCH",
+    "SSL_CERT_DIR",
     "TERM",
     "USER",
     "USERPROFILE",
@@ -111,7 +113,6 @@ ENV_ALLOWLIST = (
 # Read by the CLI, but never part of a verdict or its output: test seams and the
 # fast-path trace switch (its line goes to stderr and is not recorded).
 ENV_NOT_VERDICT = (
-    "APM_E2E_TESTS",
     "APM_INSTALL_FAST_PATH",
     "APM_TEST_FAIL_LOCK_REPLACE",
     "APM_TEST_LOCK_COMMIT",
@@ -150,6 +151,7 @@ _NO_HIT_ENV = (
     "ARTIFACTORY_BASE_URL",
     "ARTIFACTORY_ONLY",
     "APM_NO_CACHE",
+    "SSL_CERT_DIR",  # a CA directory: its files are not keyed
 )
 
 # Project target roots: every file in them (listing and bytes) is a verdict input,
@@ -294,6 +296,7 @@ _PROVEN_LOCK: list[bytes | None] = []
 # apm.yml and the lock as the run found them: an edit while the run was proving
 # its verdict (an editor saving apm.yml) means its verdict is not the record's (W3d R4).
 _ENTRY_FILES: list[bytes | None] = []
+_ENTRY_TIME: list[float] = []
 
 
 def _entry_bytes(name: str) -> bytes | None:
@@ -480,6 +483,7 @@ def _inputs(
     surfaces: list[str],
     git_system: str,
     deployed: frozenset[str],
+    notice: str,
 ) -> None:
     """Every verdict input, read live (QL D3-D6, O3); a writer reads the run's entry state."""
     if os.path.lexists(os.path.join(root, ".apm")):
@@ -516,9 +520,14 @@ def _inputs(
     user = Path(os.path.expanduser("~"))
     for rel in _USER_SURFACES:
         digest.file(f"user:{rel}", user / rel)
+    from apm_cli.install.locking import _LIFECYCLE_LOCK_NAME
+
+    # The key is the MAC's secret; the lifecycle lock file is held while the record
+    # is read or written (Windows locks its bytes) and is no verdict state.
+    unkeyed = (KEY_FILE, _LIFECYCLE_LOCK_NAME)
     for rel, files, _dirs in _tree(str(_apm_home()), skip=(RECORDS_DIR, "cache")):
         for entry in files:
-            if entry.name != KEY_FILE:
+            if entry.name not in unkeyed:
                 digest.file(f"home:{rel}/{entry.name}" if rel else f"home:{entry.name}", entry.path)
     cache = _cache_root()
     if cache is not None:
@@ -527,15 +536,9 @@ def _inputs(
                 name = f"{rel}/{entry.name}" if rel else entry.name
                 digest.put(f"policy-mtime:{name}", b"%d" % entry.stat().st_mtime_ns)
                 digest.file(f"policy:{name}", entry.path)
-    from apm_cli.core.lifecycle_scripts import _get_policy_scripts_dir
+    from apm_cli.install import verdict_inputs
 
-    for rel, files, dirs in _tree(str(_get_policy_scripts_dir())):
-        # An admin script added after the record misses; user and project scripts
-        # live in apm.yml files keyed above.
-        listing = [entry.name for entry in files] + ["/", *dirs]
-        digest.put(
-            f"lifecycle-listing:{rel}", "\x00".join(listing).encode("utf-8", "surrogateescape")
-        )
+    verdict_inputs.key_startup(digest, root, notice)
     for name in _GOVERNED_DIRS:
         base = os.path.join(root, name)
         digest.put(f"target:{name}", b"%d" % os.path.isdir(base))
@@ -561,20 +564,12 @@ _FRAMED_LOCKFILE_VERSION = "4"
 _CLOCK_SKEW = 300
 
 
-def _policy_absence_unproven(root: Path) -> bool:
-    """Discovery re-checks an org without a cached policy on every run (it caches no
-    absence), so a record cannot stand in for that check."""
-    from apm_cli.install import verdict_policy
-
-    if verdict_policy._policy_metas():
-        return False
-    from apm_cli.policy._remote import (
-        _extract_org_host_port_from_git_remote,
-        reuse_remote_reads,
-    )
+def _policy_identity(root: Path) -> Any:
+    """The org, host and port policy discovery derives from the project's remote."""
+    from apm_cli.policy._remote import _extract_org_host_port_from_git_remote, reuse_remote_reads
 
     with reuse_remote_reads():  # this run already read the remote
-        return _extract_org_host_port_from_git_remote(root) is not None
+        return _extract_org_host_port_from_git_remote(root)
 
 
 def _names(value: Any) -> bool:
@@ -642,6 +637,10 @@ def _deployed_intact(root: Path, lock: dict) -> bool:
         records = [_Row(item) for item in dep.get("carried_licenses") or ()]
         if not verify_locked_package(package, str(expected), records, framed=framed):
             return False  # the package bytes and its carried licence copies (W3d R3)
+        from apm_cli.install.cache_pin import marker_is_current
+
+        if not marker_is_current(package, str(dep.get("resolved_commit") or "")):
+            return False  # hashing skips .apm-pin; the full run's marker sync repairs it
         for _rel, files, _dirs in _tree(str(package)):
             if any(entry.is_symlink() for entry in files):
                 return False  # hashing skips links; sources_scan_clean refuses them
@@ -683,12 +682,12 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
     record = json.loads(raw.decode("utf-8"))
     lock_text = _read_nofollow(root / "apm.lock.yaml")
     run_env, surfaces = record.get("run_env"), record.get("surfaces")
-    git_system = record.get("git_system")
+    git_system, notice = record.get("git_system"), record.get("notice")
     if (
         lock_text is None
         or record.get("v") != RECORD_VERSION
         or int(record.get("exit", 1)) != 0
-        or not (_names(run_env) and _names(surfaces) and isinstance(git_system, str))
+        or not (_names(run_env) and _names(surfaces) and _names([git_system, notice]))
     ):
         raise _Miss("")
     lock_tag = hmac.new(key, lock_text, hashlib.sha256).hexdigest()[:16]
@@ -700,7 +699,8 @@ def _verified_stdout(argv: list[str], root: Path) -> tuple[dict, str]:
     if not isinstance(lock, dict):
         raise _Miss("lock")
     digest = _Digest(key)
-    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, _deployed_rels(lock))
+    rels = _deployed_rels(lock)
+    _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, rels, notice)
     _body(digest, record)
     now = time.time()
     issued, expires = float(record.get("issued_at", 0)), float(record.get("expires_at", 0))
@@ -801,6 +801,7 @@ def recording(argv: list[str]) -> Iterator[None]:
     _ENV_READS.clear()
     entry = (_env_snapshot(), _presentation())
     _ENTRY_FILES[:] = [_entry_bytes("apm.yml"), _entry_bytes("apm.lock.yaml")]
+    _ENTRY_TIME[:] = [time.time()]
     out, err = _Tee(sys.stdout), _Tee(sys.stderr)
     sys.stdout, sys.stderr = out, err  # type: ignore[assignment]
     _ACTIVE.append(out)
@@ -937,9 +938,12 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
         if stamps != 1 or _CLOCK_RE.search(stdout_text) or _CLOCK_RE.search(stderr_text):
             _trace("no record (clock-dependent output)")
             return  # O1: only the elapsed seconds may depend on the clock
-        if _policy_absence_unproven(root):
-            _trace("no record (no cached policy for a discoverable org)")
+        if verdict_policy._discovery_unproven(root, _policy_identity(root)):
+            _trace("no record (discovery would fetch a policy candidate)")
             return
+        from apm_cli.install import verdict_inputs
+
+        notice, due = verdict_inputs.notice_schedule(_ENTRY_TIME[0] if _ENTRY_TIME else 0.0)
         key = _key(create=True)
         if key is None:
             _trace("no record (no private key)")
@@ -949,12 +953,12 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             for name in _ENV_READS
             if isinstance(name, str) and name not in ENV_ALLOWLIST and name not in ENV_NOT_VERDICT
         )
-        surfaces = _owner_surfaces(root)
+        surfaces = sorted({*_owner_surfaces(root), *verdict_inputs.tls_surfaces(_ENTRY_ENV)})
         from apm_cli.install import verdict_git, verdict_policy
 
         git_system = verdict_git._git_system()
         digest = _Digest(key)
-        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed)
+        _inputs(digest, root, argv, lock_text, run_env, surfaces, git_system, deployed, notice)
         stderr_kept = "".join(
             line
             for line in stderr_text.splitlines(keepends=True)
@@ -967,10 +971,11 @@ def _write(argv: list[str], stdout_text: str, stderr_text: str, deployed: frozen
             "stderr": stderr_kept,
             "exit": 0,
             "issued_at": issued,
-            "expires_at": verdict_policy._expiry(issued),
+            "expires_at": min(verdict_policy._expiry(issued), due or float("inf")),
             "run_env": run_env,
             "surfaces": surfaces,
             "git_system": git_system,
+            "notice": notice,
         }
         _body(digest, record)
         record["mac"] = digest.hexdigest()

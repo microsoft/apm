@@ -24,6 +24,7 @@ pytestmark = [pytest.mark.component, pytest.mark.promise("P-INV-I2")]
 
 _REL = ".github/prompts/a.prompt.md"
 _BODY = b"# prompt\n"
+_COMMIT = "a" * 40
 _OUTPUT = "[>] Installing dependencies from apm.yml...\n[i] No changes -- install state already up to date in 0.9s.\n"
 
 
@@ -48,8 +49,12 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     digest = "sha256:" + hashlib.sha256(_BODY).hexdigest()
     package_hash = compute_package_hash(root / "apm_modules" / "o" / "p", framed=True)
+    from apm_cli.install.cache_pin import write_marker
+
+    write_marker(root / "apm_modules" / "o" / "p", _COMMIT)
     (root / "apm.lock.yaml").write_text(
         "lockfile_version: '4'\ndependencies:\n- repo_url: o/p\n"
+        f"  resolved_commit: {_COMMIT}\n"
         f"  content_hash: {package_hash}\n  content_hash_framed: true\n"
         f"  deployed_file_hashes:\n    {_REL}: {digest}\n",
         encoding="utf-8",
@@ -66,10 +71,24 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "APM_INSTALL_FAST_PATH",
         "APM_VERBOSE",
         "APM_POLICY_DISABLE",
+        "APM_E2E_TESTS",
     ):
         monkeypatch.delenv(name, raising=False)
+    _update_checked(-60)  # the daily update check ran a minute ago
     monkeypatch.chdir(root)
     return root
+
+
+def _update_checked(offset: float) -> Path:
+    """Set when the update notice's daily check last ran, *offset* seconds from now."""
+    import time
+
+    from apm_cli.utils.version_checker import get_update_cache_path
+
+    checked = get_update_cache_path()
+    checked.touch()
+    os.utime(checked, (time.time() + offset, time.time() + offset))
+    return checked
 
 
 def _record(text: str = _OUTPUT, *, verified: bool = True, argv: list[str] | None = None) -> None:
@@ -711,3 +730,158 @@ def test_disabling_policy_after_the_record_misses(
     capsys.readouterr()
     verdict_record.replay(["install"])
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("change", ["edited", "removed"])
+def test_a_ca_bundle_changed_after_the_record_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys, change: str
+) -> None:
+    """TLS startup loads the selected bundle and replay runs before it: its bytes are keyed."""
+    bundle = project.parent / "extra-ca.pem"
+    bundle.write_text("-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n", "ascii")
+    monkeypatch.setenv("APM_EXTRA_CA_BUNDLE", str(bundle))
+    _record()
+    capsys.readouterr()
+    assert verdict_record.replay(["install"]) is True
+    if change == "edited":
+        bundle.write_text("-----BEGIN CERTIFICATE-----\nB\n-----END CERTIFICATE-----\n", "ascii")
+    else:
+        bundle.unlink()
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_the_cli_is_imported_inside_the_record() -> None:
+    """TLS startup reads its settings at import: the record's entry state and env log precede it."""
+    from apm_cli import entrypoint
+
+    tree = ast.parse(Path(entrypoint.__file__).read_text(encoding="utf-8"))
+    (block,) = [node for node in ast.walk(tree) if isinstance(node, ast.With)]
+    inside = [node.module for node in ast.walk(block) if isinstance(node, ast.ImportFrom)]
+    outside = [
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "apm_cli.cli"
+    ]
+    assert inside == ["apm_cli.cli"] and outside == ["apm_cli.cli"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the POSIX policy directory is /etc/apm/policy.d")
+def test_a_policy_script_edited_after_the_record_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """An admin policy script's bytes are a verdict input, not only its name."""
+    program_data = project.parent / "programdata"
+    (program_data / "APM" / "policy.d").mkdir(parents=True)
+    (program_data / "APM" / "policy.d" / "audit.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("PROGRAMDATA", str(program_data))
+    _record()
+    assert (_home(project) / "verdicts").exists()
+    (program_data / "APM" / "policy.d" / "audit.json").write_text(
+        '{"post-install": [{"run": "echo audit"}]}', encoding="utf-8"
+    )
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.parametrize(
+    ("cached", "records"),
+    [
+        ("another checkout", False),
+        ("a lower-priority candidate", False),
+        ("the first candidate", True),
+    ],
+)
+def test_only_a_fresh_first_candidate_cached_for_this_project_records(
+    project: Path, cached: str, records: bool
+) -> None:
+    """Discovery fetches every candidate it has no fresh entry for, for this project."""
+    import subprocess
+
+    from apm_cli.policy import discovery
+    from apm_cli.policy.parser import load_policy
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "add", "origin", "https://github.com/acme/app.git"],
+        check=True,
+    )
+    policy, _warnings = load_policy("enforcement: warn\ncache:\n  ttl: 3600\n")
+    ref, owner = "acme/.github-private", project
+    if cached == "another checkout":
+        owner = project.parent / "other"
+    elif cached == "a lower-priority candidate":
+        ref = "acme/.github"
+    discovery._write_cache(ref, policy, owner)
+    _record()
+
+    assert (_home(project) / "verdicts").exists() is records
+
+
+def test_a_recreated_checkout_misses(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Deployment receipts bind the root's identity: a byte-identical new checkout misses."""
+    _record()
+    copy = project.parent / "copy"
+    shutil.copytree(project, copy, symlinks=True)
+    monkeypatch.chdir(project.parent)
+    shutil.rmtree(project)
+    copy.rename(project)
+    monkeypatch.chdir(project)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("marker", ["deleted", "foreign"])
+def test_a_package_copy_whose_pin_marker_is_not_current_misses(
+    project: Path, capsys, marker: str
+) -> None:
+    """The content hash skips .apm-pin; the full run's marker sync repairs it, so a hit cannot."""
+    from apm_cli.install.cache_pin import MARKER_FILENAME, write_marker
+
+    _record()
+    package = project / "apm_modules" / "o" / "p"
+    if marker == "deleted":
+        (package / MARKER_FILENAME).unlink()
+    else:
+        write_marker(package, "b" * 40)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is False
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(("later", "hits"), [(1800, True), (7200, False)])
+def test_a_record_expires_when_the_daily_update_check_falls_due(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys, later: int, hits: bool
+) -> None:
+    """A due update check may print a notice: the record never replays past it."""
+    import time
+
+    _update_checked(-23 * 3600)
+    _record()
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + later)
+    capsys.readouterr()
+
+    assert verdict_record.replay(["install"]) is hits
+    assert ("up to date in " in capsys.readouterr().out) is hits
+
+
+def test_a_run_that_checked_for_updates_is_never_recorded(project: Path) -> None:
+    """That run may print a notice the next ordinary run would not."""
+    from apm_cli.utils.version_checker import save_version_check_timestamp
+
+    with verdict_record.recording(["install"]):
+        sys.stdout.write(_OUTPUT)
+        save_version_check_timestamp()
+        verdict_record.note_verified_noop()
+    assert not (_home(project) / "verdicts").exists()
