@@ -796,6 +796,9 @@ def _handle_mcp_install(  # noqa: PLR0913
         target_decision=target_decision,
         registry=(resolved_registry_url, registry_source),
     )
+    from ..install.commit_gate import judge_mcp_install_files
+
+    judge_mcp_install_files(scope, no_policy=no_policy, logger=logger, dry_run=logger.dry_run)
     if logger.dry_run:
         _validate_mcp_dry_run_entry(
             mcp_name,
@@ -1248,6 +1251,15 @@ def install(  # noqa: PLR0913
             legacy_skill_paths = should_use_legacy_skill_paths()
 
         create_user_config = not dry_run
+        from apm_cli.install.commit_gate import refuse_denied_install_entry
+
+        # Before any entry (local bundle, --mcp, dependency pipeline) writes.
+        refuse_denied_install_entry(
+            _InstallScope.USER if global_ else _InstallScope.PROJECT,
+            no_policy=no_policy,
+            dry_run=dry_run,
+            logger=logger,
+        )
 
         if len(packages) == 1 and not mcp_name and (_probe := Path(packages[0])).exists():
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
@@ -1889,7 +1901,8 @@ def _install_apm_packages(ctx, outcome):
         logger=logger,
         dry_run=bool(getattr(ctx, "dry_run", False)),
     )
-    migrate_lockfile_if_needed(ctx.apm_dir)
+    if migrate_lockfile_if_needed(ctx.apm_dir) and ctx.transaction is not None:
+        ctx.transaction.undo_lockfile_migration_on_rollback(ctx.apm_dir)
 
     # Preserve MCP fields across APM lockfile regeneration, even with --only=apm.
     old_mcp_servers: builtins.set = builtins.set()

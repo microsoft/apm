@@ -15,9 +15,13 @@ Reads ``.git/HEAD`` directly rather than spawning ``git rev-parse``:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
+from .cached_repo import is_ref_name
+
 _log = logging.getLogger(__name__)
+_OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def _read_head_sha(checkout_dir: Path) -> str | None:
@@ -50,9 +54,15 @@ def _read_head_sha(checkout_dir: Path) -> str | None:
         head_content = head_path.read_text(encoding="utf-8").strip()
         if head_content.startswith("ref:"):
             ref_target = head_content.split(":", 1)[1].strip()
+            if not is_ref_name(ref_target):
+                return None
             ref_path = git_dir / ref_target
+            refs_root = (git_dir / "refs").resolve()
+            if refs_root not in ref_path.resolve().parents:
+                return None
             if ref_path.is_file():
-                return ref_path.read_text(encoding="utf-8").strip().lower()
+                value = ref_path.read_text(encoding="utf-8").strip().lower()
+                return value if _OID.fullmatch(value) else None
             packed = git_dir / "packed-refs"
             if packed.is_file():
                 for raw in packed.read_text(encoding="utf-8").splitlines():
