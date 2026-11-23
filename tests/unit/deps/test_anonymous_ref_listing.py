@@ -202,3 +202,40 @@ def test_default_ca_is_the_platform_openssl_store(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(arl.ssl, "get_default_verify_paths", lambda: paths)
 
     assert arl._verify({}, {}) == str(store)
+
+
+def _entries(*pairs: tuple[str, str]):
+    from apm_cli.utils.git_env import GitConfigEntry
+
+    return [GitConfigEntry("command", key, value) for key, value in pairs]
+
+
+def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
+    entries = _entries(
+        ("protocol.file.allow", "always"),
+        ("protocol.version", "2"),
+        ("credential.helper", "osxkeychain"),
+        ("credential.helper", ""),
+        ("http.extraheader", ""),
+        ("http.sslbackend", "openssl"),
+        ("http.sslcainfo", "/ca.pem"),
+    )
+
+    assert arl._classify(entries) == {"http.sslbackend": "openssl", "http.sslcainfo": "/ca.pem"}
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [
+        ("url.https://mirror/.insteadof", "https://github.com/"),
+        ("http.proxy", "http://p:1"),
+        ("http.sslverify", "false"),
+        ("protocol.https.allow", "never"),
+        ("protocol.allow", "never"),
+        ("core.gitproxy", "cmd"),
+        ("credential.helper", "store"),
+        ("http.extraheader", "X-Token: 1"),
+    ],
+)
+def test_config_that_changes_gits_request_falls_back(pair):
+    assert arl._classify(_entries(("credential.helper", ""), pair)) is None

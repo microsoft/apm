@@ -58,7 +58,7 @@ _FALLBACK_ENV = (
 
 _session_lock = threading.Lock()
 _session = None
-_config_cache: dict[tuple, dict[str, str] | None] = {}
+_config_cache: dict[tuple, tuple[dict[str, str], dict[str, str]] | None] = {}
 
 
 class _Fallback(Exception):
@@ -89,45 +89,47 @@ def _repository_path(url: str) -> str:
     return f"/{owner}/{repo}"
 
 
-def _effective_config(env: Mapping[str, str]) -> dict[str, str]:
-    """The git config visible to *env* (lower-cased keys), read once per env."""
-    from apm_cli.utils.git_env import (
-        GitUrlRewriteProbeError,
-        _read_effective_git_config,
-        git_subprocess_env,
-    )
+def _classify(entries) -> dict[str, str] | None:
+    """CA/backend values when *entries* cannot change git's anonymous request, else ``None``."""
+    values: dict[str, str] = {}
+    lists: dict[str, list[str]] = {key: [] for key in _INJECTED_EMPTY}
+    for entry in entries:
+        key = entry.key.lower()
+        if key in lists:
+            # Multi-valued in git: an empty value resets the list.
+            lists[key] = [*lists[key], entry.value] if entry.value else []
+        elif key in (_CA_KEY, _BACKEND_KEY):
+            values[key] = entry.value
+        elif key.startswith(("url.", "http.", "credential.", "protocol.https.")) or key in (
+            "protocol.allow",
+            "core.gitproxy",
+            "core.askpass",
+        ):
+            return None
+    return None if any(lists.values()) else values
 
-    fingerprint = tuple(
-        sorted(
-            (k, v)
-            for k, v in env.items()
-            if k.startswith("GIT_") or k in ("HOME", "XDG_CONFIG_HOME", "PREFIX")
-        )
-    )
+
+def _effective_config(env: Mapping[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    """``(config, child_env)`` git's ls-remote would run with for *env*, read once per env.
+
+    The child env comes from the same builder as ``git_remote_refs``. Any
+    ``url.*`` rule falls back, so the probe URL cannot change the verdict.
+    """
+    from apm_cli.utils.git_env import _read_effective_git_config, git_network_env
+
+    fingerprint = tuple(sorted(env.items()))
     if fingerprint not in _config_cache:
         try:
-            snapshot = _read_effective_git_config(git_subprocess_env(dict(env)))
-        except (GitUrlRewriteProbeError, OSError, ValueError):
-            _config_cache[fingerprint] = None
-        else:
-            values: dict[str, str] = {}
-            unproven = False
-            for entry in snapshot.entries:
-                key = entry.key.lower()
-                if key in _INJECTED_EMPTY:
-                    unproven = unproven or bool(entry.value)
-                elif key in (_CA_KEY, _BACKEND_KEY):
-                    values[key] = entry.value
-                elif key.startswith(("url.", "http.", "credential.", "protocol.")) or key in (
-                    "core.gitproxy",
-                    "core.askpass",
-                ):
-                    unproven = True
-            _config_cache[fingerprint] = None if unproven else values
-    config = _config_cache[fingerprint]
-    if config is None:
+            child_env = git_network_env(f"https://{_GITHUB_HOST}/apm/probe", dict(env))
+            config = _classify(_read_effective_git_config(child_env).entries)
+        except Exception:
+            # A probe failure is git's to report: the caller runs git as today.
+            config, child_env = None, {}
+        _config_cache[fingerprint] = None if config is None else (config, child_env)
+    cached = _config_cache[fingerprint]
+    if cached is None:
         raise _Fallback("git config changes how git would fetch this URL")
-    return config
+    return cached
 
 
 def _bypasses_proxy(no_proxy: str) -> bool:
@@ -311,9 +313,12 @@ def list_refs_anonymously(url: str, *, include_heads: bool, env: Mapping[str, st
         allow = env.get("GIT_ALLOW_PROTOCOL")
         if allow is not None and "https" not in allow.split(":"):
             raise _Fallback("https is not an allowed git protocol")
-        config = _effective_config(env)
-        proxy = _proxy(env)
-        verify = _verify(env, config)
+        config, child_env = _effective_config(env)
+        for name in _FALLBACK_ENV:
+            if child_env.get(name):
+                raise _Fallback(f"{name} is set for git")
+        proxy = _proxy(child_env)
+        verify = _verify(child_env, config)
         prefixes = ("refs/tags/", "refs/heads/") if include_heads else ("refs/tags/",)
         import requests
 
