@@ -214,7 +214,7 @@ KNOWN_CELLS: tuple[KnownCell, ...] = (
     # approve records the grant in apm.yml, then exits 1 because the org deny still
     # blocks the package: a failed command changed durable state (I7).
     KnownCell(
-        "G|approve|org-deny|project",
+        "gate-cell-approve-org-deny",
         "I7",
         "#4923",
         _approve_under_org_deny,
