@@ -70,6 +70,7 @@ jobs:
         run: |
           npm install -g --no-fund --no-audit "${PACKAGE}@${VERSION}"
           "$HARNESS" --version
+          command -v tmux || { sudo apt-get update -q && sudo apt-get install -y -q tmux; }
 
       - name: Probe every cell
         env:
@@ -79,7 +80,8 @@ jobs:
           python3 scripts/real_harness/probe.py run --harness "$HARNESS" --out "$RUNNER_TEMP/rh"
           if [ "$HARNESS" = claude ]; then
             python3 scripts/real_harness/probe.py run --harness claude --out "$RUNNER_TEMP/rh" \
-              --env headless-rerun --env headless-abspath --scope project
+              --env headless-rerun --env headless-abspath --env headless-untrusted \
+              --env headless-native --scope project
           fi
 
       - name: Summary

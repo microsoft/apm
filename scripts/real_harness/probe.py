@@ -45,7 +45,17 @@ DUMMY_KEY = "sk-ant-api03-" + "x" * 80 + "RHPROBE0000000000000"
 ENVS = ("normal", "worktree", "headless")
 # Diagnostic variants: a second headless session in the same project, and the
 # project marketplace path rewritten to an absolute path.
-DIAG_ENVS = ("headless-rerun", "headless-abspath")
+# Claude-only diagnostics at project scope: a second session in the same HOME, the
+# marketplace path made absolute, no folder trust, and the native oracle (Claude's
+# own `plugin marketplace add` + `plugin install --scope project`, then the user
+# plugin state wiped to simulate a fresh clone).
+DIAG_ENVS = (
+    "headless-rerun",
+    "headless-abspath",
+    "headless-untrusted",
+    "headless-native",
+)
+_AUTH_BLOCKERS = ("could not be validated", "rate limit exceeded", "No authentication")
 TOOL_PROMPT = (
     "Call the MCP tool rh_probe_tool exactly once, then reply with the exact text it returned."
 )
@@ -270,7 +280,7 @@ class Cell:
         return source
 
     def seed_harness(self) -> None:
-        trusted = [str(self.project), str(self.worktree)]
+        trusted = [] if self.env.endswith("untrusted") else [str(self.project), str(self.worktree)]
         if self.harness == "claude":
             _json(
                 self.home / ".claude.json",
@@ -346,6 +356,35 @@ class Cell:
         match = re.search(r"name: (apm-[pu]-[0-9a-f]+)", lock)
         return match.group(1) if match else ""
 
+    def native_oracle(self, cwd: Path) -> None:
+        """Re-declare the deployed plugin with Claude's own commands, then forget user state."""
+        settings = self.project / ".claude" / "settings.json"
+        settings.unlink()
+        name = self.marketplace()
+        for label, argv in (
+            ("native-mkt-help", ["claude", "plugin", "marketplace", "add", "--help"]),
+            ("native-install-help", ["claude", "plugin", "install", "--help"]),
+            (
+                "native-mkt-add",
+                [
+                    "claude",
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    "./.agents/plugins",
+                    "--scope",
+                    "project",
+                ],
+            ),
+            (
+                "native-install",
+                ["claude", "plugin", "install", f"{PLUGIN}@{name}", "--scope", "project"],
+            ),
+        ):
+            self.run(label, argv, cwd, timeout=120)
+        self.evidence["native_settings"] = _read(settings)
+        shutil.rmtree(self.home / ".claude" / "plugins", ignore_errors=True)
+
     def absolutize_project_marketplace(self) -> None:
         settings = self.project / ".claude" / "settings.json"
         data = json.loads(_read(settings))
@@ -384,23 +423,28 @@ class Cell:
         self.evidence["lists"] = out
 
     def interactive(self, cwd: Path) -> None:
-        """Start the TUI under a pty; Claude gets no input, Copilot gets one prompt."""
-        typescript = self.logs / "interactive.typescript"
+        """Start the TUI in a detached tmux pane (a real terminal emulator).
+
+        Claude gets no input. Copilot starts its session (and sessionStart hooks)
+        on the first prompt, so it gets one prompt asking for the plugin tool.
+        """
         if self.harness == "copilot" and not os.environ.get("COPILOT_GITHUB_TOKEN"):
             self.evidence["blocked"] = "no COPILOT_GITHUB_TOKEN for a Copilot session"
+        tmux = ["tmux", "-L", self.id]
+        env = self.session_env()
+        start = [*tmux, "new-session", "-d", "-x", "200", "-y", "50", self.harness]
+        self.run("tmux-start", start, cwd, extra_env=env, timeout=30)
+        time.sleep(15)
         limit = SESSION_SECONDS
-        feed = f"sleep {limit + 15}"
         if self.harness == "copilot":
             limit = SESSION_SECONDS * 2
-            # Copilot starts the session (and its hooks) on the first prompt.
-            feed = f"{{ sleep 15; printf '%s\\r' '{TOOL_PROMPT}'; sleep {limit}; }}"
-        wrapped = [
-            "bash",
-            "-c",
-            f"{feed} | timeout -s INT {limit} script -qfec '{self.harness}' '{typescript}'",
-        ]
-        self.run("interactive", wrapped, cwd, extra_env=self.session_env(), timeout=limit + 60)
-        self.evidence["screen_tail"] = _tail(_ANSI.sub("", _read(typescript)), 3000)
+            self.run("tmux-prompt", [*tmux, "send-keys", "-l", TOOL_PROMPT], cwd, timeout=30)
+            time.sleep(1)
+            self.run("tmux-enter", [*tmux, "send-keys", "Enter"], cwd, timeout=30)
+        time.sleep(limit)
+        pane = self.run("tmux-capture", [*tmux, "capture-pane", "-p", "-S", "-300"], cwd)
+        self.run("tmux-kill", [*tmux, "kill-server"], cwd, timeout=30)
+        self.evidence["screen_tail"] = _tail(pane.stdout, 3000)
 
     def headless(self, cwd: Path) -> None:
         if self.harness == "claude":
@@ -416,6 +460,8 @@ class Cell:
             ]
             if self.env == "headless-abspath" and self.scope == "project":
                 self.absolutize_project_marketplace()
+            if self.env == "headless-native" and self.scope == "project":
+                self.native_oracle(cwd)
             proc = self.run("headless", argv, cwd, timeout=SESSION_SECONDS + 30)
             if self.env == "headless-rerun":
                 self.evidence["first_session_hook"] = _read(self.hook_marker)
@@ -484,6 +530,12 @@ class Cell:
             runtime.append(sig["skill_listed"])
         if all(runtime):
             return "LOADS", ", ".join(k for k, v in sig.items() if v)
+        output = self.evidence.get("headless_tail", "") + self.evidence.get("screen_tail", "")
+        auth = next((m for m in _AUTH_BLOCKERS if m in output), None)
+        if auth and not all(runtime):
+            return "BLOCKED", f"harness auth failed ({auth}); partial: " + ", ".join(
+                k for k, v in sig.items() if v
+            )
         if self.evidence.get("blocked") and not any(runtime):
             return "BLOCKED", self.evidence["blocked"]
         missing = "missing: " + ", ".join(k for k, v in sig.items() if not v)
