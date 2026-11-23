@@ -139,10 +139,9 @@ def test_the_survivor_read_drives_the_offline_reach_check(tmp_path: Path) -> Non
     lockfile.replacements = None
     logger = MagicMock()
 
-    kept = _refuse_unverifiable_local_survivors(
-        lockfile, ["./vendor/e"], manifest, logger, dry_run=True
-    )
+    with pytest.raises(SystemExit) as exc:
+        _refuse_unverifiable_local_survivors(lockfile, ["./vendor/e"], manifest, logger)
 
-    assert kept == ["./vendor/e"]
-    message = " ".join(str(call.args[0]) for call in logger.warning.call_args_list)
-    assert "Would keep" in message, message
+    assert exc.value.code == 1
+    message = " ".join(str(call.args[0]) for call in logger.error.call_args_list)
+    assert "apm_modules/ is missing" in message, message
