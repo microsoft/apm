@@ -1956,6 +1956,8 @@ def _cleanup_stale_mcp(
     from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.security.trust import McpAdmission
 
+    from .mcp_survivors import surviving_package_keys
+
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
     deploy_root = Path(project_root) if project_root is not None else Path.cwd()
     # A survivor the current gates no longer allow loses its servers, as on
@@ -1965,17 +1967,14 @@ def _cleanup_stale_mcp(
         lockfile, apm_modules_path, apm_package, deploy_root, user_scope=user_scope
     )
     denied = retirements.denied_packages if retirements is not None else {}
-    for key, why in sorted(denied.items()):
-        if logger is not None:
-            logger.warning(f"{key} is no longer allowed ({why}); removing its MCP servers")
     view = CurrentMcpConfigView.derive(
         apm_package,
         lockfile,
         apm_modules_path,
         admission=McpAdmission.for_project(deploy_root, user_scope=user_scope),
         logger=logger,
-        active_package_keys=(
-            frozenset(key for key in lockfile.dependencies if key not in denied) if denied else None
+        active_package_keys=surviving_package_keys(
+            lockfile, apm_package, apm_modules_path, denied, logger
         ),
     )
     # Uninstall never admits a server: only previously managed servers survive.
