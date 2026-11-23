@@ -53,6 +53,7 @@ def render(
     started: float,
     bodies: Mapping[str, PackageBody] | None = None,
     installed: int = 0,
+    frozen: bool = False,
 ) -> Any:
     """Print the install output for an already applied (or empty) diff.
 
@@ -78,8 +79,8 @@ def render(
             logger.tree_item("  |-- (files unchanged)")
         else:
             body(logger)
-    services = run_services(project_root, manifest, lock, logger, policy_fetch)
-    render_post_install_summary(
+    services = run_services(project_root, manifest, lock, logger, policy_fetch, frozen=frozen)
+    result = render_post_install_summary(
         logger=logger,
         apm_count=installed,
         mcp_count=services.mcp_count,
@@ -88,6 +89,11 @@ def render(
         force=False,
         elapsed_seconds=time.perf_counter() - started,
     )
+    if frozen and lock.dependencies:
+        from apm_cli.install.outcome import frozen_verified_line
+
+        # --frozen verified the lockfile and deployed hashes (req-lk-017).
+        logger.info(frozen_verified_line(result), symbol="info")
     return services
 
 
@@ -149,7 +155,13 @@ def run_policy_gate(project_root: Path, manifest: Any, lock: Any, logger: Any) -
 
 
 def run_services(
-    project_root: Path, manifest: Any, lock: Any, logger: Any, policy_fetch: Any = None
+    project_root: Path,
+    manifest: Any,
+    lock: Any,
+    logger: Any,
+    policy_fetch: Any = None,
+    *,
+    frozen: bool = False,
 ) -> Any:
     """The install's MCP/LSP reconciliation phase itself, as a plain install runs it."""
     from types import SimpleNamespace
@@ -209,7 +221,7 @@ def run_services(
         explicit_target=None,
         target_decision=None,
         active_package_keys=frozenset(k for k in lock.dependencies if k != "."),
-        frozen_disposition=FrozenDisposition(replay=False),
+        frozen_disposition=FrozenDisposition(replay=frozen),
     )
 
 

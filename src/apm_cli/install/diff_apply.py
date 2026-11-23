@@ -389,7 +389,11 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         _trace(f"full run (error: {type(exc).__name__})")
         return False
     count = len(files) + len(extras)
-    _trace(f"applied a verified diff ({count} files)")
+    _trace(
+        f"applied a verified diff ({count} files)"
+        if count or packages
+        else "no-op (desired state already deployed)"
+    )
     from apm_cli.utils.console import _rich_success
 
     if not (count or packages):
@@ -399,7 +403,9 @@ def try_apply(options: dict[str, Any], argv: list[str] | None, project_root: Pat
         from apm_cli.models.apm_package import APMPackage
 
         manifest = APMPackage.from_apm_yml(manifest_file(project_root))
-        fast_output.render(project_root, lock, manifest, started=started)
+        fast_output.render(
+            project_root, lock, manifest, started=started, frozen=bool(options.get("frozen"))
+        )
         return True
 
     _rich_success(
