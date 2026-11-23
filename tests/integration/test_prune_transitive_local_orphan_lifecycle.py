@@ -569,3 +569,37 @@ def test_prune_keeps_everything_when_a_survivor_dir_became_a_plain_file(
     assert "_local/f" in rows, sorted(rows)
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
     assert "could not be read" in pruned, pruned
+
+
+def test_reachability_admits_a_shared_file_against_the_edge_that_declares_it(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """Production a declares ../../ai/rule.instructions.md, also a dev root: the walk completes."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    _skill_package(vendor / "a", "a", ("../f", "../../ai/rule.instructions.md"))
+    _write(
+        world.project / "ai" / "rule.instructions.md",
+        "---\napplyTo: '**'\ndescription: A rule\n---\n# rule\n",
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/a"]},
+            "devDependencies": {"apm": ["./vendor/d", "./ai/rule.instructions.md"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+
+    # Uninstall walks production roots before dev roots, so a's edge to the
+    # file is read before the file's own dev declaration.
+    world.apm("uninstall", "./vendor/d")
+
+    _assert_orphan_pruned(world)
