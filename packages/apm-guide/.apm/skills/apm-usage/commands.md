@@ -101,10 +101,14 @@ On Linux and macOS a receipt survives a reboot or remount that changes only the
 root's device number; a recreated root is still rejected.
 Switching targets that share a skill path refreshes valid same-writer evidence
 through a guarded copy, not by adopting existing files.
-The same evidence guards instructions, agents, prompts, commands and rules: a
-managed file that differs from the render is replaced only with a local receipt or
-bytes equal to the locked render, never on a lockfile hash. Otherwise install keeps
-it, names it and exits 1; move it aside and rerun `apm install`, or use `--force`.
+The same evidence guards instructions, agents, prompts, commands, rules, hook
+files, copied hook scripts and canvas extension files: a managed file that
+differs from the render is replaced only with a local receipt or bytes equal to
+the locked render, never on a lockfile hash. Otherwise install keeps it, names it
+and exits 1 (exit 0 when the package brings nothing new for it); move it aside
+and rerun `apm install`, or use `--force`. A canvas with a kept file is left
+whole. An APM-managed LSP server entry is judged per server against the entry
+rendered from the locked config; remove an edited entry and rerun to restore it.
 Uninstall records actual surviving-skill rebuilds and binds those receipts only
 after final lock persistence, so the surviving package can update normally.
 Branch switches and cold-cache replay can update unchanged files,
