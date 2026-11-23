@@ -11,21 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Highlights
 
-- `apm install` keeps and names edited hook files, hook scripts, canvas extension files, LSP server entries and local `.apm/` outputs instead of overwriting them. (#4678, #4892)
-- `apm audit` and `apm approve` stop with a named cause on an unresolved required org policy or a key another trust layer denies. (#4920, #4934)
-- Upgrade notes: kept edits can now fail `apm install`, and plain `apm audit` can fail when a required org policy cannot be resolved. (#4678, #4920)
+- Upgrade notes: plain `apm audit` now stops with a named cause when a required org policy cannot be resolved. (#4920)
 
 ### Breaking changes and upgrade notes
 
-- `apm install` keeps edited hook files, hook scripts, canvas extensions and LSP entries, exiting 1 when one blocks new content; move it aside and rerun. (closes #4626, #4678)
 - Plain `apm audit` exits 1 on drift, naming the cause, when a required org policy cannot be resolved; restore access to the org policy. (#4920)
-
-### Fixed
-
-- A plain `apm install` keeps an edited output of the project's own `.apm/` primitives and exits 0, as it already does for dependency outputs. (closes #4873, #4892)
-- `apm install --frozen` names the locked package it could not re-download, and why, instead of a misleading MCP-declarations error. (#4912)
-- `apm uninstall` refuses, before changing anything, to remove a local dependency another installed package still needs, and names that package. (#4890)
-- `apm approve` refuses a local bundle key another trust layer still denies before writing, leaving `apm.yml` and the user store unchanged. (#4934)
 
 ## [0.38.1] - 2026-11-23
 
@@ -33,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` now enforces org policy `manifest.content_types.allow` on the primitive kinds each package ships. (#4838)
 - `apm install -g` fixes for user-root primitives, shared skill directories, context links, dropped Claude targets and `CLAUDE_CONFIG_DIR` hooks. (#4684, #4868, #4880, #4751, #4795)
-- Upgrade notes: content-type policy, native plugin `.gitattributes`, merged hook entries and kept MCP entries can now fail installs or `apm audit --ci`. (#4838, #4842, #4798, #4818)
+- Upgrade notes: content-type policy, native plugin `.gitattributes`, merged hook entries, kept MCP entries and kept edited hooks can now fail installs or `apm audit --ci`. (#4838, #4842, #4798, #4818, #4678)
 
 ### Breaking changes and upgrade notes
 
@@ -41,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` refuses native plugins when `.agents/plugins/.gitattributes` lets git convert their bytes; end that file with `* -text` or delete it. (#4842)
 - `apm audit --ci` fails, and `apm install` warns, on merged hook entries matching a denied or unapproved package's hook with no valid ownership evidence; remove entries you did not add. (#4798)
 - Without a lockfile, `apm install` retires undeclared local bundle MCP entries it can prove unchanged, and `apm audit --ci` fails on kept ones; remove or redeclare them. (closes #4801, #4818)
+- `apm install` keeps edited hook files, hook scripts, canvas extensions and LSP entries, exiting 1 when one blocks new content; move it aside and rerun. (closes #4626, #4678)
 
 ### Changed
 
@@ -54,9 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The first `apm install -g` after upgrading updates an edited user-root skill when switching between targets sharing `~/.agents/skills` (Copilot, Codex). (closes #4813, #4868)
 - `apm audit --ci` no longer reports drift after a clean `apm install -g` of a user-root agent that links to a context file. (closes #4832, #4880)
 - `apm install --mcp` refuses a name that collides with your own `.mcp.json` entry before writing, leaving `apm.yml` and `.github/` unchanged. (#4803)
+- A plain `apm install` keeps an edited output of the project's own `.apm/` primitives and exits 0, as it already does for dependency outputs. (closes #4873, #4892)
+- `apm install --frozen` names the locked package it could not re-download, and why, instead of a misleading MCP-declarations error. (#4912)
 - `apm uninstall` names the executable kinds it retires from a no-longer-allowed survivor, such as LSP servers or canvas extensions, instead of always saying hooks. (closes #4567, #4662)
 - When `apm uninstall` keeps a dependency another package needs, every lock entry it reaches, including virtual subdirectory packages, matches what `apm install` records. (#4811, #4848, #4870)
+- `apm uninstall` refuses, before changing anything, to remove a local dependency another installed package still needs, and names that package. (#4890)
 - `apm install <bundle>`, `apm install --mcp` and `apm mcp install` also warn about kept MCP entries, and kept-entry warnings are accurate. (#4908)
+- `apm approve` refuses a local bundle key another trust layer still denies before writing, leaving `apm.yml` and the user store unchanged. (#4934)
 - `apm prune --dry-run` lists native plugins a real prune would retire, and `apm prune` exits 1 when it cannot check their approvals and policy. (#4845)
 - `apm pack` in a Claude project refuses, naming `apm install`, when a shipped dependency's installed copy is missing, unless that package excludes Claude in `targets:`. (closes #4850, #4824, #4858)
 - The policy docs no longer say user-scope org policy ships in 0.38; `apm install -g` still skips org policy until 0.39. (#4806)
