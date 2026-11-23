@@ -179,7 +179,7 @@ CHANGES: dict[str, Change] = {
 # -- the state oracle ------------------------------------------------------------
 
 # Caches (git objects, policy, deploy store) are not deployed state.
-HOME_CACHES = (".cache", "Library/Caches", ".apm/logs")
+HOME_CACHES = (".cache", "Library/Caches", ".apm/cache", ".apm/logs")
 # Per-checkout identity: a random installation id and receipts keyed by the project path.
 IDENTITY = (".apm-local", ".apm/deployment-receipts")
 _IDENTITY_KEY = re.compile(r"install(ation)?_?id|receipt|generated_at")
@@ -218,8 +218,51 @@ def _yaml(path: Path) -> object:
     return yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def comparable(world: World, exempt: tuple[str, ...] = ()) -> dict[str, object]:
-    """Deployed state comparable across two worlds: identity fields and paths normalized."""
+_IDENTITY_LINE = re.compile(r"^\s*(install(ation)?_?id|generated_at)\s*:.*$\n?", re.MULTILINE)
+# A receipt's checkout binding; its records, destinations, bindings and history stay compared.
+_RECEIPT_BINDING = ("root", "root_identity", "installation", "root_birth_time")
+
+
+def _text(path: Path, marker: str) -> str | None:
+    """Raw file text (bytes order, comments, formatting), only identity lines and paths normalized."""
+    if not path.is_file():
+        return None
+    # Decode bytes: read_text would translate CRLF and hide a line-ending change.
+    return _IDENTITY_LINE.sub("", path.read_bytes().decode("utf-8").replace(marker, "<ROOT>"))
+
+
+def receipts(world: World, *, history: bool = True) -> list[object]:
+    """Every deployment receipt of *world*, checkout binding removed, file names (path keys) dropped."""
+    marker = str(world.root)
+    docs = []
+    for folder in {
+        world.home / ".apm" / "deployment-receipts",
+        world.apm_home / "deployment-receipts",
+    }:
+        for path in sorted(folder.rglob("*.json")) if folder.is_dir() else ():  # incl. mcp/
+            data = json.loads(path.read_text(encoding="utf-8"))
+            for key in _RECEIPT_BINDING:
+                data.pop(key, None)
+            if not history:
+                data.pop("history", None)
+            # The checkout-keyed file name is identity; its directory (mcp/ or top) is not:
+            # each receipt reader looks only in its own directory.
+            data["directory"] = path.parent.relative_to(folder).as_posix()
+            data["mode"] = oct(path.lstat().st_mode & 0o7777)
+            docs.append(without_identity(data, marker))
+    return sorted(docs, key=lambda doc: json.dumps(doc, sort_keys=True))
+
+
+def comparable(
+    world: World, exempt: tuple[str, ...] = (), *, receipt_history: bool = False
+) -> dict[str, object]:
+    """Deployed state comparable across two worlds: identity fields and paths normalized.
+
+    The manifest and lockfile are compared both parsed (readable diffs) and as raw
+    text (formatting, comments, key order); receipts by their substantive records.
+    Receipt ``history`` (hashes of earlier contents, #4428) depends on the world's past,
+    so only same-history comparisons (``receipt_history=True``) include it.
+    """
     project_skip = (".git", "apm.lock.yaml", "apm.yml", *IDENTITY, *exempt)
     marker = str(world.root)
     return {
@@ -227,7 +270,13 @@ def comparable(world: World, exempt: tuple[str, ...] = ()) -> dict[str, object]:
         "home": digest(world.home, HOME_CACHES + IDENTITY, world),
         "manifest": without_identity(_yaml(world.project / "apm.yml"), marker),
         "lock": without_identity(_yaml(world.project / "apm.lock.yaml"), marker),
+        "manifest_text": _text(world.project / "apm.yml", marker),
+        "lock_text": _text(world.project / "apm.lock.yaml", marker),
+        "receipts": receipts(world, history=receipt_history),
     }
+
+
+_MISSING = object()  # an absent key differs from an explicit null (lockfile.py: apm_version)
 
 
 def structural(a: object, b: object, labels: tuple[str, str], path: str = "") -> list[str]:
@@ -235,7 +284,7 @@ def structural(a: object, b: object, labels: tuple[str, str], path: str = "") ->
     if isinstance(a, dict) and isinstance(b, dict):
         out: list[str] = []
         for key in sorted(a.keys() | b.keys(), key=str):
-            out += structural(a.get(key), b.get(key), labels, f"{path}.{key}")
+            out += structural(a.get(key, _MISSING), b.get(key, _MISSING), labels, f"{path}.{key}")
         return out
     if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
         return [
@@ -243,7 +292,10 @@ def structural(a: object, b: object, labels: tuple[str, str], path: str = "") ->
             for i, (x, y) in enumerate(zip(a, b, strict=True))
             for d in structural(x, y, labels, f"{path}[{i}]")
         ]
-    return [] if a == b else [f"{path}: {labels[0]}={a!r} {labels[1]}={b!r}"]
+    if a is not _MISSING and b is not _MISSING and a == b:
+        return []
+    shown = ["<absent>" if v is _MISSING else repr(v) for v in (a, b)]
+    return [f"{path}: {labels[0]}={shown[0]} {labels[1]}={shown[1]}"]
 
 
 def _shown(world: World, root_id: str, rel: str) -> str:
@@ -263,7 +315,13 @@ def diff(
     lines = []
     for key in sorted(left.keys() | right.keys()):
         a, b = left.get(key), right.get(key)
-        if key in ("project", "home"):
+        if key in ("manifest_text", "lock_text"):
+            if a != b:
+                lines.append(f"{key}: raw bytes differ (formatting, comments or key order)")
+        elif key == "receipts":
+            if a != b:
+                lines += [f"receipts{d}" for d in structural({"r": a}, {"r": b}, labels)]
+        elif key in ("project", "home"):
             for path in sorted(a.keys() | b.keys()):
                 if a.get(path) != b.get(path):
                     lines.append(
