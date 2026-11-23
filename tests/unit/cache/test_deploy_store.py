@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.cache.deploy_store import DEPLOY_BUCKET, DeployStore
+from apm_cli.cache.deploy_store import (
+    DEPLOY_BUCKET,
+    MAX_DEPLOY_ENTRY_BYTES,
+    DeployStore,
+)
 from apm_cli.utils.content_hash import canonical_digest, compute_file_hash
 
 pytestmark = [pytest.mark.unit, pytest.mark.promise("P-LAW-source.ref_cache_coherent")]
@@ -19,8 +23,7 @@ _TEXT = b"---\ndescription: demo\n---\nDo the thing.\n"
 
 
 def _store(tmp_path: Path) -> tuple[DeployStore, Path]:
-    root = tmp_path / "cache" / DEPLOY_BUCKET
-    return DeployStore(root), root
+    return DeployStore(tmp_path / "cache"), tmp_path / "cache" / DEPLOY_BUCKET
 
 
 def test_the_key_is_the_lockfile_hash_of_the_deployed_file(tmp_path: Path) -> None:
@@ -113,7 +116,6 @@ def test_no_store_without_a_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     key = canonical_digest(_TEXT)
     assert store is not None and store.put(key, _TEXT)
     assert (tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key).read_bytes() == _TEXT
-    assert os.path.isdir(tmp_path / "c")
 
 
 def test_an_exact_byte_reader_never_gets_the_other_line_ending_image(tmp_path: Path) -> None:
@@ -140,3 +142,81 @@ def test_the_store_follows_the_cache_root_no_cache_parsing(
 
     assert store is not None and store.put(key, _TEXT)
     assert (tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key).read_bytes() == _TEXT
+
+
+def test_deployed_bytes_wait_for_the_install_to_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from apm_cli.cache.deploy_store import commit_staged, discard_staged, stage
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "c"))
+    deployed = tmp_path / "AGENTS.md"
+    deployed.write_bytes(_TEXT)
+    key = canonical_digest(_TEXT)
+    entry = tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key
+
+    stage(deployed, key)
+    assert commit_staged() == 0, "outside a command run nothing is staged"
+    with invocation_scope():
+        stage(deployed, key)
+        assert not entry.exists(), "hashing alone stores nothing"
+        discard_staged()
+        assert commit_staged() == 0
+        stage(deployed, key)
+        assert commit_staged() == 1
+    assert entry.read_bytes() == _TEXT
+
+
+def test_bytes_that_changed_after_hashing_are_not_stored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from apm_cli.cache.deploy_store import commit_staged, stage
+    from apm_cli.core.invocation_memo import invocation_scope
+
+    monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "c"))
+    deployed = tmp_path / "AGENTS.md"
+    deployed.write_bytes(_TEXT)
+    key = canonical_digest(_TEXT)
+    with invocation_scope():
+        stage(deployed, key)
+        deployed.write_bytes(_TEXT + b"changed after hashing\n")
+        assert commit_staged() == 0
+    assert not (tmp_path / "c" / DEPLOY_BUCKET / key[:2] / key).exists()
+
+
+def test_the_store_evicts_least_recently_used_entries_above_its_bound(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    blobs = [f"entry {n}\n".encode() * 100 for n in range(5)]
+    keys = [canonical_digest(blob) for blob in blobs]
+    for age, (key, blob) in enumerate(zip(keys, blobs, strict=True)):
+        store.put(key, blob)
+        os.utime(root / key[:2] / key, (1000 + age, 1000 + age))
+    store.get(keys[0])  # a verified read refreshes recency
+    limit = sum(len(blob) for blob in blobs[:3])
+
+    assert store.enforce_size_cap(limit) == 3
+    kept = {path.name for path in root.rglob("*") if path.is_file()}
+    assert kept == {keys[0], keys[4]}
+
+
+def test_an_entry_above_the_entry_bound_is_never_stored(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    big = b"x" * (MAX_DEPLOY_ENTRY_BYTES + 1)
+    key = canonical_digest(big)
+    source = tmp_path / "big.bin"
+    source.write_bytes(big)
+
+    assert not store.put(key, big)
+    assert not store.put_file(key, source)
+    assert not (root / key[:2] / key).exists()
+
+
+def test_cache_clean_empties_the_store(tmp_path: Path) -> None:
+    store, root = _store(tmp_path)
+    key = canonical_digest(_TEXT)
+    store.put(key, _TEXT)
+
+    assert store.clean_all() == []
+    assert list(root.iterdir()) == []
+    assert DeployStore(tmp_path / "never-used").clean_all() == []

@@ -58,7 +58,7 @@ def info() -> None:
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 def clean(force: bool, yes: bool) -> None:
-    """Remove all cache content (git repos, checkouts, HTTP responses)."""
+    """Remove all cache content (git repos, checkouts, HTTP responses, deployed bytes)."""
     from ..cache.paths import get_cache_root
     from ..core.command_logger import CommandLogger
 
@@ -77,11 +77,12 @@ def clean(force: bool, yes: bool) -> None:
 
     logger.start("Cleaning cache...", symbol="gear")
 
+    from ..cache.deploy_store import DeployStore
     from ..cache.git_cache import GitCache
     from ..cache.http_cache import HttpCache
 
     failures: list[str] = []
-    for cache_type in (GitCache, HttpCache):
+    for cache_type in (GitCache, HttpCache, DeployStore):
         try:
             failures.extend(cache_type(root).clean_all())
         except OSError as exc:

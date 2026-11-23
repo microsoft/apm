@@ -562,7 +562,7 @@ drift check without starting Codex or changing native state.
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
 | `apm cache info` | Show the cache root and counts of Git repositories, Git checkouts, and HTTP entries, plus total size | -- |
-| `apm cache clean` | Remove every entry from the git and HTTP caches. If a deletion fails, it still removes every other entry, reports the affected paths, and exits nonzero; successful removals are not rolled back. Close locking processes or fix permissions, then retry. | `--force`/`-f`, `--yes`/`-y` skip the confirmation prompt only -- they do not suppress deletion failures or make the command succeed |
+| `apm cache clean` | Remove every entry from the git cache, the HTTP cache and the deploy store. If a deletion fails, it still removes every other entry, reports the affected paths, and exits nonzero; successful removals are not rolled back. Close locking processes or fix permissions, then retry. | `--force`/`-f`, `--yes`/`-y` skip the confirmation prompt only -- they do not suppress deletion failures or make the command succeed |
 | `apm cache prune` | Remove Git checkout SHA groups not accessed within `--days`; full and sparse variants share recency and are evicted together, and `0` makes every group eligible. Partial failures exit `1`; fix permissions or release locks and rerun | `--days N` (default `30`; negative values are rejected before the cache is touched) |
 
 ## Compilation
