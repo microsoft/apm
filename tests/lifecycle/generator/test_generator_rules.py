@@ -48,7 +48,16 @@ from tests.lifecycle.generator.rules import (
     refusal_cell,
 )
 from tests.lifecycle.generator.space import Entry, build_space, raw_cells
-from tests.lifecycle.generator.witnesses import BIN_WITNESSES, credits, credits_bin, machine_cells
+from tests.lifecycle.generator.witnesses import (
+    BIN_WITNESSES,
+    SOURCE_SPINE,
+    SOURCE_SPINE_UNOBSERVED,
+    credits,
+    credits_bin,
+    credits_dimension,
+    deployable_prims,
+    machine_cells,
+)
 from tests.lifecycle.obligations import Obligation, promise_ids, uncovered
 from tests.utils.apm_lifecycle_runner import CommandResult
 from tests.utils.artifact_snapshot import ArtifactSnapshotSet
@@ -880,20 +889,66 @@ def test_only_a_changed_target_set_routes_an_offline_pair_to_target_history() ->
     assert len(unchanged) == 2 and set(unchanged.values()) == {"T-6e"}, unchanged
 
 
-# -- bin cells need a witness that deploys bin/ at the cell's scope (#4981) ------
+# -- a witness credits only the primitives it exercises (#4981, generalized) -----
 
 
-def test_bin_cells_are_credited_only_by_a_witness_that_deploys_bin() -> None:
-    """A row acting on p-exec at project scope never deploys its loose bin/, so its
-    receipt proves nothing about a bin cell; only a bin-deploying witness credits one."""
+def test_cells_are_credited_only_by_a_witness_that_exercises_their_primitive() -> None:
+    """A receipt proves a primitive only when its witness deploys it (or its gate decides
+    it) at the cell's scope: a row acting on p-exec at project scope never deploys its
+    loose bin/, and the source spine never observed a registry or local bundle
+    executable at a non-install step (dimension audit, run 45258714621)."""
     data = json.loads(_OBLIGATIONS.read_text(encoding="utf-8"))
     wrong = sorted(
         key
         for key, entry in data["obligations"].items()
-        if "witness" in entry and not credits_bin(entry["witness"], parse_cell(key)[1])
+        if "witness" in entry and not credits_dimension(entry["witness"], parse_cell(key)[1])
     )
-    assert wrong == [], f"{len(wrong)} bin cells credited without a deployed bin/: {wrong[:5]}"
+    assert wrong == [], (
+        f"{len(wrong)} cells credited by a witness that never exercises them: {wrong[:5]}"
+    )
     root = Path(__file__).parents[3]
     for node in BIN_WITNESSES:
         path, name = node.split("::")
         assert f"def {name.split('[')[0]}(" in (root / path).read_text(encoding="utf-8"), node
+    for op, src, prim in SOURCE_SPINE_UNOBSERVED:
+        key = f"T3|OP={op}|SRC={src}|PRIM={prim}"
+        assert data["obligations"][key]["status"] == "baseline", data["obligations"][key]
+
+
+def test_credits_dimension_refuses_what_the_witness_cannot_exercise() -> None:
+    project_bin = {"OP": "install", "PRIM": "bin", "SCOPE": "project"}
+    assert not credits_dimension("tests/x.py::test_row", project_bin)
+    assert credits_bin("tests/x.py::test_row", {"PRIM": "skill"})
+    assert not credits_dimension(SOURCE_SPINE, {"OP": "lock", "SRC": "pkg-registry", "PRIM": "lsp"})
+    assert credits_dimension(SOURCE_SPINE, {"OP": "install", "SRC": "pkg-registry", "PRIM": "lsp"})
+    assert credits_dimension("tests/x.py::test_row", {"OP": "audit", "SRC": "git", "PRIM": "hook"})
+    assert "other-file" in deployable_prims("project")
+    assert "other-file" not in deployable_prims("user")
+    assert not credits_dimension("tests/x.py::test_row", {"PRIM": "other-file", "SCOPE": "user"})
+
+
+def test_an_admitted_primitive_must_be_deployed_after_a_resolving_step(tmp_path: Path) -> None:
+    """Runtime half of the witness rule: a gate-matrix install whose gate admits the
+    primitive credits it only when that primitive is deployed afterwards."""
+    from tests.lifecycle.oracles import Observation, dimension_problems
+
+    def observed(*deployed: str) -> Observation:
+        return Observation(
+            state=None,
+            artifacts=None,
+            deployed=frozenset(deployed),
+            deploy_root=tmp_path,
+            lock=None,
+        )
+
+    ok = CommandResult(("apm", "install"), 0, "", "", tmp_path)
+    cell = "G1|install|hook|allowed|project"
+    assert dimension_problems(cell, observed("p-exec/hook/copilot"), ok) == []
+    assert dimension_problems(cell, observed("p-exec/mcp/copilot"), ok) == [
+        f"{cell}: the admitted hook is not deployed after install; nothing exercised it"
+    ]
+    # A withheld primitive, a refusal and a non-resolving step are the gate's decision.
+    assert dimension_problems("G1|install|hook|unapproved-exec|project", observed(), ok) == []
+    refused = CommandResult(("apm", "install"), 1, "", "", tmp_path)
+    assert dimension_problems(cell, observed(), refused) == []
+    assert dimension_problems("G1|audit|hook|allowed|project", observed(), ok) == []
