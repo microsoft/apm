@@ -22,6 +22,7 @@ from apm_cli.install.package_resolution import EffectiveDependencySelection
 from apm_cli.models.apm_package import APMPackage
 from apm_cli.utils.content_hash import canonical_digest
 from apm_cli.version import get_version
+from tests.lifecycle.known import KnownFailure
 
 pytestmark = [
     pytest.mark.component,
@@ -430,3 +431,76 @@ def test_a_source_a_text_read_would_change_replays_live(tmp_path: Path, skill: b
     world = _world(tmp_path, skill=skill)
 
     _assert_live(world)
+
+
+# -- intact() reads served scratch files without following them (#5103) -----------
+
+_SERVED = b"served bytes\n"
+_NOT_A_FILE = KnownFailure(
+    "#5103",
+    "intact() follows a link (or blocks on a FIFO) at a served scratch destination",
+    r"a served destination that is no regular file counts as intact",
+)
+
+
+def _records(scratch: Path):
+    """One served destination, ``rule.md``, holding ``_SERVED``."""
+    from apm_cli.install.drift_records import ReplayRecords
+
+    records = ReplayRecords(
+        enabled=False,
+        lock=None,
+        targets=(),
+        integrators=(),
+        scratch_root=scratch,
+        policy_fetch=None,
+    )
+    # The digest serve() records for a destination it wrote.
+    records._served["rule.md"] = hashlib.sha256(_SERVED).hexdigest()
+    return records
+
+
+def _intact_within(records, path: Path, seconds: float = 5.0) -> bool | None:
+    """``intact()``'s verdict, or ``None`` when it is still blocked after *seconds*."""
+    import threading
+
+    verdict: list[bool] = []
+    worker = threading.Thread(target=lambda: verdict.append(records.intact()), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive() and stat.S_ISFIFO(os.lstat(path).st_mode):
+        # Release a reader blocked on the FIFO so the thread can end.
+        os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        return None
+    return verdict[0] if verdict else None
+
+
+def test_a_served_regular_file_with_its_bytes_is_intact(tmp_path: Path) -> None:
+    """Control: the destination serve() wrote, unchanged, is intact."""
+    (tmp_path / "rule.md").write_bytes(_SERVED)
+
+    assert (tmp_path / "rule.md").exists()
+    assert _intact_within(_records(tmp_path), tmp_path / "rule.md") is True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks and FIFOs")
+@pytest.mark.parametrize("kind", ["symlink", "fifo"])
+@_NOT_A_FILE.mark()
+def test_a_served_destination_that_is_no_regular_file_is_not_intact(
+    tmp_path: Path, kind: str
+) -> None:
+    """A link to the served bytes, or a FIFO, replays everything live, without blocking."""
+    destination = tmp_path / "rule.md"
+    if kind == "symlink":
+        target = tmp_path / "elsewhere.md"
+        target.write_bytes(_SERVED)
+        destination.symlink_to(target)
+    else:
+        os.mkfifo(destination)
+
+    verdict = _intact_within(_records(tmp_path), destination)
+
+    assert destination.exists(), destination
+    assert verdict is False, (
+        f"a served destination that is no regular file counts as intact ({kind}): {verdict}"
+    )
