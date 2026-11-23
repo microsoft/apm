@@ -126,7 +126,7 @@ def kept_file_message(
 
 
 def dependency_not_allowed_advice(
-    packages: Sequence[str], denied: int, policy_source: str | None
+    packages: Sequence[str], denied: int, policy_source: str | None, withheld: str | None = None
 ) -> tuple[Remediation | None, str]:
     """Render the next step for *denied* dependencies outside the org allow list (#4570).
 
@@ -134,12 +134,14 @@ def dependency_not_allowed_advice(
     dependency (a transitive one goes with the entry that brings it in).
     Returns the bound :data:`DEPENDENCY_NOT_ALLOWED` remediation, or ``None``
     when no entry is known, and the sentence ``apm audit --ci`` prints.
+    *withheld* names why an uninstall is not suggested, when one is known (#5008).
     """
     them = "it" if denied == 1 else "them"
     source = f" (policy source: {policy_source})" if policy_source else ""
     ask = f"ask your org admin to allow {them}{source}"
     if not packages:
-        return None, _sentence(ask)
+        reason = f"; an uninstall is not suggested because {withheld}" if withheld else ""
+        return None, _sentence(ask + reason)
     subject = "the dependency" if denied == 1 else f"the {denied} dependencies"
     remedy = DEPENDENCY_NOT_ALLOWED.bind(packages=" ".join(packages), subject=subject)
     return remedy, _sentence(f"{remedy.clause()}, or {ask}")

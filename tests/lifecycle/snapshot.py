@@ -137,3 +137,44 @@ def _executables_block(data: object) -> object:
 
 def _read_surface(path: Path) -> bytes | None:
     return path.read_bytes() if path.is_file() and not path.is_symlink() else None
+
+
+# -- no-write oracle: identity stamps -------------------------------------------------
+#
+# A byte digest cannot see a byte-identical rewrite. A stamp (inode, mtime_ns,
+# ctime_ns) can: an in-place rewrite moves mtime, an atomic replace moves the inode,
+# and a rewrite that restores mtime (shutil.copy2, os.utime) still moves the POSIX
+# change time, which no caller can set. Scope the
+# capture to the files a command must not touch, so legitimate writes elsewhere
+# (logs, caches) stay out of the verdict.
+
+
+@dataclass(frozen=True)
+class FileStamp:
+    """Identity of one file's last write."""
+
+    inode: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+def capture_stamps(root: Path, patterns: tuple[str, ...]) -> dict[str, FileStamp]:
+    """Stamp of every regular file under *root* matching any glob in *patterns*."""
+    stamps: dict[str, FileStamp] = {}
+    for pattern in patterns:
+        for path in root.glob(pattern):
+            if path.is_file() and not path.is_symlink():
+                stat = path.lstat()
+                stamps[portable_relpath(path, root)] = FileStamp(
+                    stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns
+                )
+    return dict(sorted(stamps.items()))
+
+
+def touched(before: dict[str, FileStamp], after: dict[str, FileStamp]) -> list[str]:
+    """Paths created, removed, rewritten or replaced between two captures."""
+    return sorted(
+        f"{path}: {'created' if path not in before else 'removed' if path not in after else 'rewritten'}"
+        for path in before.keys() | after.keys()
+        if before.get(path) != after.get(path)
+    )
