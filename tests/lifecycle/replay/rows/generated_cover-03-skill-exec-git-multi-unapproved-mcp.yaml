@@ -101,6 +101,7 @@ when:
   - pair|OP=pack|GATE=allowed
 - run: apm prune --dry-run
   cells:
+  - T1|OP=prune|PRIM=bin|GATE=allowed
   - T1|OP=prune|PRIM=hook|GATE=allowed
   - T1|OP=prune|PRIM=mcp|GATE=allowed
   - pair|OP=prune|GATE=allowed

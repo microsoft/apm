@@ -375,12 +375,6 @@ def _units(state: _State, step: Step, plan: Plan, kinds) -> list[dict[str, str]]
     for name in names:
         source = "git" if plan.git and name in GIT_SOURCES else "local-path"
         for kind in kinds[name]:
-            # A row's loose packages never deploy bin/ at project scope, so pruning one
-            # proves nothing about a bin gate level (a whole-plugin prune row must, #4894);
-            # its OP x SRC x PRIM absence witness stands.
-            if step.op == "prune" and kind == "bin":
-                units.append({"SRC": source, "PRIM": kind})
-                continue
             gate = (
                 "none" if kind in PLAIN_PRIMS else _GATE_STATES[state.gate.get(name, "unapproved")]
             )
