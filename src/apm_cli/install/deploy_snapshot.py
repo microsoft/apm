@@ -924,39 +924,27 @@ def _store_identity(store: Path) -> tuple[str, str] | None:
     return None
 
 
-def has_abandoned_journals(
-    store_parent: Path, root: Path | None = None, *, workspace: Path | None = None
-) -> bool:
-    """Whether a killed install left a journal the next full install must handle.
-
-    With *root*, only a journal that install would replay counts: its own, or
-    one whose identity cannot be read (#5064); another workspace's journal
-    waits for that workspace. A store with no manifest always counts.
-    """
-    identity = _identity(root, workspace) if root is not None else None
+def has_abandoned_journals(store_parent: Path, root: Any = None, workspace: Any = None) -> bool:
+    """Whether a killed install left a journal the next full install of *root* must handle."""
+    ours = None if root is None else _identity(root, workspace)  # else any workspace's (#5064)
     with contextlib.suppress(OSError):
         return any(
             store.is_dir()
             and not os.path.lexists(store / _RETAINED_MARKER)
-            and (
-                identity is None
-                or not os.path.lexists(store / _MANIFEST)
-                or _replays_for(store, identity)
-            )
+            and (ours is None or _replays_for(store, ours))
             for store in store_parent.glob(f"{_STORE_PREFIX}*")
         )
     return False
 
 
 def _identity(root: Path, workspace: Path | None) -> tuple[str, str]:
-    """The ``(deploy root, workspace)`` identity an install replays journals for."""
     root = Path(os.path.abspath(root))
     return os.path.realpath(root), os.path.realpath(workspace or root)
 
 
 def _replays_for(store: Path, identity: tuple[str, str]) -> bool:
-    """Whether replay for *identity* handles *store*: its own, or an unreadable identity."""
-    named = _store_identity(store)
+    """Replay for *identity* handles *store*: no manifest, an unreadable identity, or its own."""
+    named = _store_identity(store) if os.path.lexists(store / _MANIFEST) else None
     return named is None or named == identity
 
 

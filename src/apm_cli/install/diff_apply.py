@@ -692,11 +692,8 @@ def try_apply(
         from apm_cli.core.scope import get_apm_home, get_workspace_deploy_root
         from apm_cli.install.deploy_snapshot import has_abandoned_journals
 
-        # The identity replay uses (install/transaction.py), so both pick the same journals.
-        deploy_root = get_workspace_deploy_root(project_root)
-        if has_abandoned_journals(
-            get_apm_home() / "install-snapshots", deploy_root, workspace=project_root
-        ):
+        root = get_workspace_deploy_root(project_root)  # replay's identity (install/transaction.py)
+        if has_abandoned_journals(get_apm_home() / "install-snapshots", root, project_root):
             # The full run replays this workspace's journal first, under the lifecycle lock (#4863).
             raise Decline("interrupted install journal")
         import click
