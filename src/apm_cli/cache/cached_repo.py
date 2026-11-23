@@ -27,7 +27,7 @@ _log = logging.getLogger(__name__)
 
 _BOOL = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0", ""})
 _REFSPEC = re.compile(r"\+?refs/[A-Za-z0-9_./*-]+:refs/[A-Za-z0-9_./*-]+")
-_BRANCH_MERGE = re.compile(r"refs/heads/[A-Za-z0-9_./-]+")
+_BRANCH_MERGE = re.compile(r"refs/heads/[^\x00-\x20\x7f~^:?*\[\\]+")
 _APM_VALUE = re.compile(r"[a-z0-9-]+")
 _SECTION = re.compile(r'\[([A-Za-z0-9-]+)(?:\s+"([^"\\\n]*)")?\]')
 _KEY = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*(?:=(.*))?")
@@ -224,7 +224,10 @@ def cached_repo_is_trusted(
             repo, bare=bare, origin_ok=origin_ok, alternates_root=alternates_root
         )
     except UntrustedCachedRepoError as error:
-        _log.warning("[!] Discarding cached git repository %s: %s", repo.name, error)
+        from ..utils.git_env import redact_git_diagnostic
+
+        reason = redact_git_diagnostic(str(error))
+        _log.warning("[!] Discarding cached git repository %s: %s", repo.name, reason)
         return False
     return True
 

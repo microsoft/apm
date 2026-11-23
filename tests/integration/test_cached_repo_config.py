@@ -17,6 +17,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -356,3 +357,40 @@ def test_a_local_helper_is_refused_alongside_a_user_global_helper(
 
     assert not marker.exists(), "a helper from the cached repository ran"
     assert not bare.exists() or "credential" not in (bare / "config").read_text(encoding="utf-8")
+
+
+def test_an_untrusted_checkout_is_evicted_only_under_its_shard_lock(tmp_path: Path) -> None:
+    origin, first, _second = _origin(tmp_path)
+    cache = GitCache(tmp_path / "cache")
+    checkout = cache.get_checkout(str(origin), None, locked_sha=first)
+    with (checkout / ".git" / "config").open("a", encoding="utf-8") as config:
+        config.write("[core]\n\tfsmonitor = true\n")
+    seen: list[bool] = []
+    real_create = GitCache._create_checkout
+
+    def create(self, *args, **kwargs):
+        seen.append(checkout.exists())  # the unlocked hit path left it for the locked re-probe
+        return real_create(self, *args, **kwargs)
+
+    with patch.object(GitCache, "_create_checkout", create):
+        rebuilt = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+
+    assert seen == [True]
+    assert "fsmonitor" not in (rebuilt / ".git" / "config").read_text(encoding="utf-8")
+
+
+def test_a_refused_config_never_prints_a_credential(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from apm_cli.cache.cached_repo import cached_repo_is_trusted
+
+    origin, first, _second = _origin(tmp_path)
+    checkout = GitCache(tmp_path / "cache").get_checkout(str(origin), None, locked_sha=first)
+    with (checkout / ".git" / "config").open("a", encoding="utf-8") as config:
+        config.write('[http "https://user:s3cret-token@example.com/"]\n\tproxy = http://x\n')
+
+    with caplog.at_level("WARNING"):
+        assert not cached_repo_is_trusted(checkout, bare=False, origin_ok=lambda _url: True)
+
+    assert "s3cret-token" not in caplog.text
+    assert "Discarding cached git repository" in caplog.text

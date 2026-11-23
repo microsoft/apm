@@ -96,6 +96,7 @@ class TestGitCacheInit:
         assert cache._checkouts_root == checkouts_root
 
 
+@trust_cached_repos()
 class TestGetCheckout:
     def test_cache_hit_returns_existing_checkout(self, cache: GitCache) -> None:
         url = "https://github.com/owner/repo.git"

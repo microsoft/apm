@@ -63,7 +63,6 @@ _REQUIRED: dict[str, tuple[str, ...]] = {
     ),
     _GIT_CACHE: (
         "if bare_dir.is_dir() and not self._bare_trusted(bare_dir):",
-        "and self._checkout_trusted_or_evicted(checkout_dir)",
         "and self._checkout_trusted_or_evicted(final_dir)",
         "and self._checkout_trusted(checkout_dir)",
         "self._checkout_trusted(final_dir)",
@@ -176,6 +175,39 @@ def _check_site(path: str, source: str, helper: str, fence_env: bool) -> list[Vi
     return findings
 
 
+# Entry points into a cached bare that must open with the owner's trust gate.
+_GATED = ("_bare_has_sha", "_fetch_into_bare_locked")
+_GATE = "self._bare_trusted"
+
+
+def _opens_with_gate(function: ast.AST) -> bool:
+    body = [
+        node
+        for node in getattr(function, "body", [])
+        if not isinstance(node, (ast.Import, ast.ImportFrom))
+        and not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant))
+    ]
+    if not body or not isinstance(body[0], ast.If):
+        return False
+    test = body[0].test
+    return (
+        isinstance(test, ast.UnaryOp)
+        and isinstance(test.op, ast.Not)
+        and _calls(test.operand, _GATE)
+        and isinstance(body[0].body[0], (ast.Return, ast.Raise))
+    )
+
+
+def _check_gates(path: str, source: str) -> list[Violation]:
+    tree = ast.parse(source, filename=path)
+    functions = {f.name: f for f in _functions(tree)}
+    return [
+        violation(_RULE_ID, path, f"{name} must open with `if not {_GATE}(...)`")
+        for name in _GATED
+        if name not in functions or not _opens_with_gate(functions[name])
+    ]
+
+
 def _check_cached_repo_git(provider: FactsProvider) -> tuple[Violation, ...]:
     """Git runs in persisted repositories are inert and gated by the owner's trust check."""
     inventory = frozenset(provider.inventory)
@@ -186,6 +218,8 @@ def _check_cached_repo_git(provider: FactsProvider) -> tuple[Violation, ...]:
             findings.extend(failures)
             continue
         findings.extend(_check_site(path, source_text(facts), helper, fence_env))
+        if path == _GIT_CACHE:
+            findings.extend(_check_gates(path, source_text(facts)))
     for path, literals in _REQUIRED.items():
         findings.extend(
             _require_subs(

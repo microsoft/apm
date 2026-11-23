@@ -379,7 +379,8 @@ class GitCache:
         if (
             not self._refresh
             and checkout_dir.is_dir()
-            and self._checkout_trusted_or_evicted(checkout_dir)
+            # Non-destructive: eviction waits for the shard lock in _create_checkout.
+            and self._checkout_trusted(checkout_dir)
         ):
             sha_ok = verify_checkout_sha(checkout_dir, sha)
             if sha_ok and _checkout_has_materialization_pins(checkout_dir):

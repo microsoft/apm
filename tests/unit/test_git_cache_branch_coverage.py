@@ -515,6 +515,7 @@ class TestSanitizeUrl:
 # ---------------------------------------------------------------------------
 
 
+@trust_cached_repos()
 class TestGetCheckoutIntegrityFailure:
     def test_evicts_on_integrity_failure(self, tmp_path):
         """When checkout exists but integrity check fails, evict and refetch."""
