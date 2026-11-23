@@ -459,7 +459,7 @@ def _move_reanchored_dirs(repair, modules_dir, logger) -> tuple:
     plan = repair.reanchor
     if not plan or not plan.moves:
         return ()
-    from .local_reanchor import move_materializations
+    from .local_reanchor import _roll_back_and_exit, move_materializations
 
     try:
         return move_materializations(plan.moves, modules_dir)
