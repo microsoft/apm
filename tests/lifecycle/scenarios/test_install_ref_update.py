@@ -50,22 +50,26 @@ def _text(result) -> str:
 
 
 @pytest.mark.parametrize(
-    ("spec", "expected"),
+    ("args", "expected"),
     [
-        pytest.param(f"{_SLUG}#v2.0.0", [{**_OBJECT, "ref": "v2.0.0"}], id="ref-update-keeps"),
-        pytest.param(_SLUG, [_OBJECT], id="bare-positional-unchanged"),
+        pytest.param([f"{_SLUG}#v2.0.0"], [{**_OBJECT, "ref": "v2.0.0"}], id="ref-update-keeps"),
+        pytest.param([_SLUG], [_OBJECT], id="bare-positional-unchanged"),
+        pytest.param(
+            [f"{_SLUG}#v2.0.0", "--skill", "*"], [f"{_SLUG}#v2.0.0"], id="skill-reset-with-ref"
+        ),
     ],
 )
 def test_install_with_a_ref_changes_only_the_ref_of_an_object_entry(
-    lifecycle_world, spec: str, expected: list
+    lifecycle_world, args: list, expected: list
 ) -> None:
-    """``#v2.0.0`` keeps skills/targets/alias; a bare positional leaves the entry as is."""
+    """``#v2.0.0`` keeps skills/targets/alias; a bare positional leaves the entry as is;
+    ``--skill '*'`` with a ref still resets the entry."""
     world = lifecycle_world
     world.services.publish_revision(_SLUG, {"CHANGELOG.md": "v2\n"}, tag="v2.0.0")
     _declare_object_entry(world)
     assert driver.run(world, ["install"]).returncode == 0
 
-    result = driver.run(world, ["install", spec])
+    result = driver.run(world, ["install", *args])
 
     assert result.returncode == 0, _text(result)
     assert _declared(world) == expected, _text(result)

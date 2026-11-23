@@ -430,6 +430,7 @@ def update_existing_dependency_entry_if_needed(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> bool:
     """Apply explicit reference, selection or HTTPS-upgrade intent."""
     requested_entry = apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry())
@@ -474,6 +475,7 @@ def update_existing_dependency_entry_if_needed(
             dependency_reference_cls=dependency_reference_cls,
             default_registry=default_registry,
             logger=logger,
+            ref_only=ref_only and not https_upgrade,
         )
     return False
 
@@ -489,6 +491,7 @@ def try_update_existing_dependency_entry(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> tuple[bool, str | None]:
     """Like update_existing_dependency_entry_if_needed, but returns
     (updated, error) instead of raising, so callers can report a refused
@@ -504,25 +507,25 @@ def try_update_existing_dependency_entry(
             dependency_reference_cls=dependency_reference_cls,
             default_registry=default_registry,
             logger=logger,
+            ref_only=ref_only,
         )
     except ValueError as e:
         return False, str(e)
     return updated, None
 
 
-def _positional_ref_update(existing: Any, requested: Any, requested_ref: Any) -> dict | None:
-    """The existing object entry with only its ref changed, for ``install <pkg>#<ref>`` (#5154).
+def _ref_only_update(existing: Any, existing_ref: Any, requested_ref: Any) -> dict | None:
+    """The existing ``git:`` object entry with only its ref changed (#5154).
 
-    A positional request carries identity and ref only, so it must not drop
-    the object's other fields (skills, targets, alias, ...). ``None`` when
-    the request is not a positional ref on a ``git:`` object entry: a bare
-    positional still resets the entry, and an object request still replaces it.
+    ``install <pkg>#<ref>`` with no other selection intent carries identity
+    and ref only, so the object's other fields (skills, targets, alias, path)
+    stay. A ``ref:`` field overrides an inline ``git: ...#ref``. ``None``
+    when *existing* is not a ``git:`` object entry.
     """
-    if not (isinstance(existing, dict) and isinstance(requested, str) and requested_ref.reference):
+    if not isinstance(existing, dict) or not isinstance(existing.get("git"), str):
         return None
-    git = existing.get("git")
-    if not isinstance(git, str) or "#" in git:
-        return None
+    if existing_ref.reference == requested_ref.reference:
+        return existing
     return {**existing, "ref": requested_ref.reference}
 
 
@@ -535,8 +538,13 @@ def merge_structured_entry_into_current_deps(
     dependency_reference_cls: Any,
     default_registry: str | None = None,
     logger: Any = None,
+    ref_only: bool = False,
 ) -> bool:
-    """Replace by identity only when effective manifest intent changes."""
+    """Replace by identity only when effective manifest intent changes.
+
+    *ref_only* marks ``install <pkg>#<ref>`` with no other selection intent:
+    an existing ``git:`` object entry then changes only its ref (#5154).
+    """
     for idx, dep_entry in enumerate(current_deps):
         try:
             if isinstance(dep_entry, builtins.str):
@@ -583,12 +591,10 @@ def merge_structured_entry_into_current_deps(
                 and (not requires_explicit_path or has_explicit_path)
             ):
                 return False
-            if (
-                ref_update := _positional_ref_update(dep_entry, structured_entry, requested_ref)
-            ) is not None:
-                if ref_update == dep_entry:
+            if ref_only and (update := _ref_only_update(dep_entry, existing_ref, requested_ref)):
+                if update is dep_entry:
                     return False
-                structured_entry = ref_update
+                structured_entry = update
             current_deps[idx] = structured_entry
             if logger:
                 logger.verbose_detail(
