@@ -661,7 +661,9 @@ def test_an_edited_hook_outlives_a_closed_gate_announced_and_detected(
         keep={"project": (_HOOK,)},
         says=[rf"Kept user-edited file {re.escape(_HOOK)}"],
     )
-    mcp = json.loads((lifecycle_world.project / ".mcp.json").read_text(encoding="utf-8"))
+    # APM's last entry left the .mcp.json it created: the file goes (#4852).
+    config = lifecycle_world.project / ".mcp.json"
+    mcp = json.loads(config.read_text(encoding="utf-8")) if config.exists() else {}
     assert "p-exec-mcp" not in mcp.get("mcpServers", {}), mcp
     audit = scenario.run("audit --ci", read_only=True, exit=1)
     assert re.search(rf"orphaned.*{re.escape(_HOOK)}", " ".join(audit.output.split())), audit.output

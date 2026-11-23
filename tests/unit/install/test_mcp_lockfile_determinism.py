@@ -764,7 +764,7 @@ def test_empty_mcp_target_servers_is_omitted_without_mcp_servers(tmp_path: Path)
 
     lockfile.write(lock_path)
 
-    assert "mcp_target_servers" not in load_yaml(lock_path)
+    assert "mcp_target_servers" not in lock_path.read_text(encoding="utf-8")
     restored = LockFile.read(lock_path)
     assert restored is not None
     assert restored.is_semantically_equivalent(lockfile)
@@ -777,6 +777,7 @@ def test_constructed_target_servers_equal_their_read_back(tmp_path: Path) -> Non
 
     lockfile.write(lock_path)
 
+    assert "mcp_target_servers:" in lock_path.read_text(encoding="utf-8")
     restored = LockFile.read(lock_path)
     assert restored is not None
     assert restored._mcp_target_servers_present is True

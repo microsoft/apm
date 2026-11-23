@@ -370,12 +370,9 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
 }
 
 
-def _write_or_drop_hook_json(json_path: Path, data: dict, defaults: dict[str, Any]) -> None:
-    """Write cleaned hook JSON, or delete it when only the target's defaults remain (#4852)."""
-    if all(defaults.get(key, ...) == value for key, value in data.items()):
-        write_seam.unlink(json_path)  # a fresh deploy with no hooks writes no file
-    else:
-        write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
+def _only_target_defaults(data: dict, defaults: dict[str, Any]) -> bool:
+    """Whether cleaned hook JSON holds only the target's injected defaults (#4852)."""
+    return all(defaults.get(key, ...) == value for key, value in data.items())
 
 
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
@@ -1841,7 +1838,10 @@ class HookIntegrator(BaseIntegrator):
                 )
                 return
             if native_modified:
-                _write_or_drop_hook_json(json_path, data, defaults or {})
+                if _only_target_defaults(data, defaults or {}):
+                    write_seam.unlink(json_path)  # a fresh deploy writes no file
+                else:
+                    write_seam.atomic_write_text(json_path, json.dumps(data, indent=2) + "\n")
                 stats["files_removed"] += 1
             if native_modified or sidecar_had_source:
                 if sidecar_out:
@@ -2078,8 +2078,13 @@ class HookIntegrator(BaseIntegrator):
             if not data[container]:
                 del data[container]
 
-            if modified:
-                _write_or_drop_hook_json(json_path, data, defaults or {})
+            if modified and _only_target_defaults(data, defaults or {}):
+                write_seam.unlink(json_path)  # a fresh deploy writes no file
+                stats["files_removed"] += 1
+            elif modified:
+                with write_seam.open_for_write(json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
                 stats["files_removed"] += 1
             if kept:
                 write_seam.atomic_write_text(sidecar_path, json.dumps(kept, indent=2) + "\n")
