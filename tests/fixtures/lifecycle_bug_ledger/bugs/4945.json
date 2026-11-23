@@ -1,0 +1,17 @@
+{
+  "issue": 4945,
+  "fixed_in": "Unreleased",
+  "summary": "With apm install -g and an absolute CLAUDE_CONFIG_DIR outside HOME, retiring the last hook left an empty {} settings.json APM had created, because hook cleanup checked symlinks from HOME; both cleanup paths now take the Claude root from hook_containment_root; a Claude root that is itself a symlink is only rewritten, never deleted from.",
+  "failure_modes": [
+    "cleanup"
+  ],
+  "properties": [
+    "ownership.preserve_unowned",
+    "routing.authorized_targets_only"
+  ],
+  "regression_tests": [
+    "tests/integration/test_claude_config_dir_hook_containment_lifecycle.py::test_retiring_the_last_hook_deletes_only_the_settings_file_apm_created",
+    "tests/integration/test_claude_config_dir_hook_containment_lifecycle.py::test_uninstall_never_deletes_through_a_profile_swapped_for_a_symlink",
+    "tests/unit/integration/test_hook_containment_root.py::test_retiring_hooks_under_an_outside_home_claude_root_deletes_an_emptied_file"
+  ]
+}

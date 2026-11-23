@@ -56,6 +56,33 @@ class _PreparedInstruction:
     body: str
 
 
+def _scannable_frontmatter(value):
+    """Return *value* as JSON-native data, for one sorted JSON scan.
+
+    YAML admits non-string keys (``{1: numeric, note: text}``), sets and
+    other types JSON cannot sort or serialize. Keys become text, keeping keys
+    that render alike as separate entries, and set members become a list, so
+    no decoded value reaches the scan only as a ``repr`` escape.
+    """
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        entries: dict[str, object] = {}
+        for key, item in value.items():
+            name = (
+                key
+                if isinstance(key, str)
+                else json.dumps(_scannable_frontmatter(key), ensure_ascii=False)
+            )
+            while name in entries:
+                name += "'"
+            entries[name] = _scannable_frontmatter(item)
+        return entries
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_scannable_frontmatter(item) for item in value]
+    return str(value)
+
+
 class InstructionIntegrator(BaseIntegrator):
     """Handles integration of APM package instructions.
 
@@ -163,17 +190,48 @@ class InstructionIntegrator(BaseIntegrator):
         package_name: str = "",
     ) -> _PreparedInstruction:
         """Read and validate one instruction without writing target files."""
-        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
-
         content = source.read_text(encoding="utf-8")
         try:
             metadata, body = self._parse_frontmatter(content)
         except yaml.YAMLError as exc:
             self._raise_frontmatter_error(source, exc)
-        decoded_metadata = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
+        if self.decoded_frontmatter_blocked(
+            metadata,
+            str(source),
+            source.name,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
+        ):
+            raise yaml.YAMLError(
+                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
+            )
+        return _PreparedInstruction(content=content, body=body)
+
+    @staticmethod
+    def decoded_frontmatter_blocked(
+        metadata: dict,
+        label: str,
+        file_name: str,
+        *,
+        force: bool = False,
+        diagnostics=None,
+        package_name: str = "",
+    ) -> bool:
+        """Scan decoded frontmatter values for critical hidden characters.
+
+        YAML escapes such as ``"\\u202e"`` decode to characters a byte scan of
+        the file never sees. Reports findings to *diagnostics* and returns
+        whether the instruction must be rejected (``force`` allows it).
+        """
+        from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+
+        decoded_metadata = json.dumps(
+            _scannable_frontmatter(metadata), ensure_ascii=False, sort_keys=True, default=str
+        )
         verdict = SecurityGate.scan_text(
             decoded_metadata,
-            f"{source}#decoded-frontmatter",
+            f"{label}#decoded-frontmatter",
             policy=BLOCK_POLICY,
             force=force,
         )
@@ -186,14 +244,10 @@ class InstructionIntegrator(BaseIntegrator):
                 force_action="Allowed by preflight",
                 force_detail=(
                     "Decoded frontmatter contains critical hidden characters; "
-                    f"edit the escaped value in {source.name}"
+                    f"edit the escaped value in {file_name}"
                 ),
             )
-        if verdict.should_block:
-            raise yaml.YAMLError(
-                f"Rejected decoded frontmatter in {source.name}: critical hidden Unicode characters"
-            )
-        return _PreparedInstruction(content=content, body=body)
+        return verdict.should_block
 
     def _render_instruction(
         self,
@@ -215,14 +269,40 @@ class InstructionIntegrator(BaseIntegrator):
         is copied verbatim (identity transform).
         """
         content = prepared.content if prepared is not None else source.read_text(encoding="utf-8")
-        if fmt in RULE_FORMATS:
-            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
-            try:
-                content = converter(content)
-            except yaml.YAMLError as exc:
-                self._raise_frontmatter_error(source, exc)
+        try:
+            content = self.convert_rule_content(content, fmt)
+        except yaml.YAMLError as exc:
+            self._raise_frontmatter_error(source, exc)
         content, links_resolved = self.resolve_links(content, source, target)
         return content, links_resolved
+
+    # Scoping keys the rule converters emit; ``applyTo`` marks APM instructions.
+    _NATIVE_RULE_SCOPE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"paths", "globs", "alwaysApply", "trigger", "inclusion", "fileMatchPattern"}
+    )
+
+    @classmethod
+    def is_native_rule(cls, content: str) -> bool:
+        """Return whether *content* is already a target rule, not an APM instruction.
+
+        A native rule scopes itself with a target key (Claude ``paths:``,
+        Cursor ``globs:``) and has no ``applyTo``; converting it again would
+        drop that scoping. Raises :class:`yaml.YAMLError` on malformed
+        frontmatter.
+        """
+        metadata, _body = cls._parse_frontmatter(content)
+        return "applyTo" not in metadata and bool(cls._NATIVE_RULE_SCOPE_KEYS & set(metadata))
+
+    @classmethod
+    def convert_rule_content(cls, content: str, fmt: str) -> str:
+        """Convert APM instruction *content* to rule format *fmt*.
+
+        Formats outside :data:`targets.RULE_FORMATS` are returned unchanged.
+        Raises :class:`yaml.YAMLError` on malformed frontmatter.
+        """
+        if fmt not in RULE_FORMATS:
+            return content
+        return getattr(cls, cls._FORMAT_CONVERTERS[fmt])(content)
 
     @staticmethod
     def _plan_key(

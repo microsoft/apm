@@ -59,3 +59,62 @@ def test_remote_uninstall_summary_counts_each_package_once(
     for package in args:
         assert f"Removed {package} from apm_modules/" in output
         assert f"Removed {package} from dependencies.apm in apm.yml" in output
+
+
+@pytest.mark.parametrize(
+    ("logged", "reintegrated"),
+    ((1, 0), (0, 1)),
+    ids=["cleanup-failure", "survivor-failure"],
+)
+def test_reported_package_failure_makes_uninstall_incomplete(
+    logged: int, reintegrated: int
+) -> None:
+    """A package failure is never followed by a success line or exit 0 (#4703)."""
+    from unittest.mock import MagicMock
+
+    from apm_cli.commands.uninstall.cli import _report_uninstall_outcome
+    from apm_cli.commands.uninstall.engine import IntegrationCleanupOutcome
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    logger = MagicMock()
+    logger.diagnostics = DiagnosticCollector()
+    for _ in range(logged):
+        # Two errors for one package are one failed package, as the summary says.
+        logger.diagnostics.error("Materialization has no ownership metadata", package="pkg")
+        logger.diagnostics.error("Could not remove a tracked file", package="pkg")
+    cleanup = IntegrationCleanupOutcome({}, {}, [], 0, package_failures=reintegrated)
+
+    incomplete = _report_uninstall_outcome(
+        logger, "removed 1 package", cleanup, None, None, None, False
+    )
+
+    assert incomplete is True
+    logger.success.assert_not_called()
+    logger.error.assert_called_once_with("Uninstall incomplete: 1 package failed (see above).")
+
+
+def test_critical_security_block_counts_as_survivor_failure() -> None:
+    """A survivor blocked for critical hidden characters makes uninstall incomplete (#4703)."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    diagnostics = DiagnosticCollector()
+    diagnostics.security("Hidden characters", package="survivor", severity="critical")
+    diagnostics.security("Hidden characters", package="survivor", severity="critical")
+    diagnostics.security("Suspicious text", package="other", severity="warning")
+
+    assert diagnostics.error_count == 0
+    assert diagnostics.failed_package_count == 1
+
+
+def test_failed_package_count_matches_the_error_summary() -> None:
+    """Attributed packages count once; an unattributed error counts on its own (#4703)."""
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    diagnostics = DiagnosticCollector()
+    diagnostics.error("first", package="pkg")
+    diagnostics.error("second", package="pkg")
+    diagnostics.security("Hidden characters", package="pkg", severity="critical")
+    diagnostics.security("Hidden characters", package="blocked", severity="critical")
+    diagnostics.error("no package attached")
+
+    assert diagnostics.failed_package_count == 3
