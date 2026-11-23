@@ -672,6 +672,19 @@ def test_without_apm_modules_an_unreadable_survivor_source_refuses(
     _assert_refused_before_any_write(world, "apm_modules/ is missing")
 
 
+def test_without_apm_modules_a_survivor_replaced_by_a_plain_file_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4989: a survivor directory replaced by a file install rejects proves nothing."""
+    world = _local_world(tmp_path, apm_binary_path)
+    shutil.rmtree(world.project / "apm_modules")
+    survivor = world.project / "vendor" / "d"
+    shutil.rmtree(survivor)
+    survivor.write_text("not a package\n", encoding="utf-8")
+
+    _assert_refused_before_any_write(world, "apm_modules/ is missing")
+
+
 @pytest.mark.windows_compat
 def test_without_apm_modules_a_case_variant_survivor_edge_refuses(
     tmp_path: Path, apm_binary_path: Path
