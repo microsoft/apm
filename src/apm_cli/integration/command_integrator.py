@@ -76,6 +76,15 @@ def _is_valid_input_name(name: str) -> bool:
     return bool(_INPUT_NAME_RE.match(name))
 
 
+def _key_label(key: Any) -> str:
+    """Name a frontmatter key in a diagnostic without letting the rendering fail."""
+    try:
+        text = repr(key)
+    except ValueError:  # e.g. an int beyond Python's digit limit
+        return f"<{type(key).__name__}>"
+    return text if len(text) <= 40 else f"<{type(key).__name__}>"
+
+
 def _load_command_source(source: Path) -> frontmatter.Post:
     """Load a prompt for command transform; a non-string key fails this file only (#4922).
 
@@ -91,7 +100,7 @@ def _load_command_source(source: Path) -> frontmatter.Post:
         block = re.search(r"---[ \t]*\r?\n(.*?)\r?\n---", text, re.DOTALL)
         data = load_yaml_str(block.group(1)) if block else None
         keys = [
-            repr(key)
+            _key_label(key)
             for key in (data if isinstance(data, dict) else {})
             if not isinstance(key, str)
         ]
