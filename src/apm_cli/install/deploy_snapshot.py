@@ -40,7 +40,7 @@ import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Literal
+from typing import IO, Any, Literal
 
 from apm_cli.utils.content_hash import compute_exact_file_hash, compute_file_hash
 from apm_cli.utils.file_ops import robust_rmtree
@@ -117,6 +117,8 @@ class DeployJournal:
         self._units: list[_Unit] = []
         self._recorded: dict[Path, int] = {}
         self._lock = threading.Lock()
+        # One append handle per store; every line is flushed before the write it opens.
+        self._manifest: IO[str] | None = None
 
     @property
     def units(self) -> tuple[_Unit, ...]:
@@ -144,8 +146,18 @@ class DeployJournal:
     def _append_line(self, line: dict[str, Any]) -> None:
         if self.store is None:
             raise RuntimeError("no store to write the journal manifest to")
-        with open(self.store / _MANIFEST, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(line, sort_keys=True) + "\n")
+        handle = self._manifest
+        if handle is None:
+            manifest = self.store / _MANIFEST
+            handle = self._manifest = open(manifest, "a", encoding="utf-8")  # noqa: SIM115
+        handle.write(json.dumps(line, sort_keys=True) + "\n")
+        handle.flush()
+
+    def _close_manifest(self) -> None:
+        handle, self._manifest = self._manifest, None
+        if handle is not None:
+            with contextlib.suppress(OSError):
+                handle.close()
 
     def _relative(self, path: Path) -> tuple[str, str]:
         """``(base, path)``: *path* as POSIX under APM home or the deploy root.
@@ -288,6 +300,7 @@ class DeployJournal:
         """Rename the store so no later install reaps the copies a user still needs."""
         if self.store is None:
             raise RuntimeError("no store to retain")
+        self._close_manifest()
         # The marker keeps the copies from the reaper even if the rename fails.
         (self.store / _RETAINED_MARKER).write_text(
             "Pre-install copies kept after a failed restore.\n", encoding="ascii"
@@ -322,6 +335,7 @@ class DeployJournal:
 
     def discard(self) -> None:
         """Delete the stored copies and the empty store parent."""
+        self._close_manifest()
         store, self.store = self.store, None
         if store is None:
             return
