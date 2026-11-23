@@ -703,12 +703,14 @@ class LockfileBuilder:
         # deployment records together in _maybe_merge_partial.
         if self.ctx.only_packages:
             return
-        if self.ctx.existing_lockfile and not self.ctx.update_refs:
+        if self.ctx.existing_lockfile:
             retained_orphans = getattr(self.ctx, "orphan_cleanup_retained", {})
             decision = self._orphan_decision()
             for dep_key, dep in self.ctx.existing_lockfile.dependencies.items():
                 if dep_key not in lockfile.dependencies:
-                    if dep_key in decision.rescued_keys:
+                    # A ref refresh re-resolves every declared package, but a row
+                    # kept for a cleanup retry stays either way (#5057).
+                    if not self.ctx.update_refs and dep_key in decision.rescued_keys:
                         # Preserve: package still in manifest but failed to download.
                         lockfile.dependencies[dep_key] = dep
                     elif dep_key in decision.retained_keys and dep_key in retained_orphans:

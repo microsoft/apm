@@ -446,16 +446,16 @@ def _orphan_decision(
 def _orphan_hook_targets(ctx: InstallContext) -> list:
     """Hook targets an undeclared dependency may have merged into (#5057).
 
-    The active targets plus every declared one: a run narrowed by
-    ``--target`` still retires the entries in a declared runtime it skips.
+    The active targets plus every hook-capable target of this scope: a run
+    narrowed by ``--target``, with or without ``targets:`` in apm.yml, still
+    retires the entries in a runtime it skips. Retirement touches only
+    entries carrying the dependency's own marker.
     """
-    from apm_cli.install.phases.targets import declared_target_profiles
+    from apm_cli.install.local_bundle_hook_trust import bundle_hook_cleanup_targets
 
-    found: dict[str, Any] = {}
-    for target in [*(ctx.targets or ()), *(declared_target_profiles(ctx) or ())]:
-        if target.supports("hooks"):
-            found.setdefault(target.name, target)
-    return list(found.values())
+    return bundle_hook_cleanup_targets(
+        ctx.targets or (), user_scope=is_user_scope(getattr(ctx, "scope", None))
+    )
 
 
 def _unsafe_hook_config(target, project_root: Path) -> str | None:
@@ -480,7 +480,6 @@ def _edited_hook_configs(target, project_root: Path, marker: str) -> list[str]:
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
     from apm_cli.integration.hook_ownership import (
         read_hook_object,
-        reinject_apm_source_from_sidecar,
     )
 
     config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -494,6 +493,16 @@ def _edited_hook_configs(target, project_root: Path, marker: str) -> list[str]:
         return []
     if not isinstance(hooks, dict) or not isinstance(sidecar, dict):
         return []
+    try:
+        return _unmatched_records(hooks, sidecar, marker, json_path, project_root)
+    except (TypeError, AttributeError):
+        # A malformed config: retirement reports it through its own failure path.
+        return []
+
+
+def _unmatched_records(hooks, sidecar, marker, json_path: Path, project_root: Path) -> list[str]:
+    from apm_cli.integration.hook_ownership import reinject_apm_source_from_sidecar
+
     recorded = sum(
         1
         for entries in sidecar.values()
