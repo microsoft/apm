@@ -501,6 +501,7 @@ def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
         {"kind": "file", "copy": ["0"], "hash": "sha256:0"},
         {"path": "x\\a.md"},
         {"ancestors": ["other"]},
+        {"expected": []},
     ],
     ids=[
         "dot-slash",
@@ -511,6 +512,7 @@ def test_a_directory_restores_only_when_the_ledger_records_all_its_files(
         "copy-list",
         "backslash",
         "unrelated-ancestor",
+        "expected-list",
     ],
 )
 def test_a_malformed_unit_keeps_the_journal(tmp_path: Path, apm_home: Path, mutation: dict) -> None:
@@ -555,6 +557,61 @@ def test_a_symlinked_receipts_directory_is_refused(tmp_path: Path, apm_home: Pat
         ("deployment-receipts/r.json", "journal path escapes the deploy root")
     ]
     assert (outside / "r.json").read_bytes() == b"killed\n"
+
+
+def test_a_user_edit_to_a_json_config_killed_before_its_seal_is_kept(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    """A JSON write names the bytes it will leave: other bytes there are a user's (#4863)."""
+    from apm_cli.install.deploy_snapshot import DeployJournal
+    from apm_cli.integration import write_seam
+
+    project = tmp_path / "project"
+    config = project / ".cursor" / "mcp.json"
+    config.parent.mkdir(parents=True)
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+
+    def record(path: Path, contents: bool, expected: str | None) -> None:
+        journal.record(path, contents=contents, expected=expected)
+
+    # Killed after the write and before its post-write seal: no after-listener.
+    write_seam.listen(record)
+    try:
+        write_seam.write_json_config(
+            config, {"mcpServers": {"apm": {}}}, default_trailing_newline=True
+        )
+    finally:
+        write_seam.stop_listening(record)
+    config.write_text('{"mine": true}\n', encoding="utf-8")
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.kept == ((".cursor/mcp.json", "it changed after the interrupted install"),)
+    assert config.read_text(encoding="utf-8") == '{"mine": true}\n'
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
+def test_a_directory_mode_changed_after_the_kill_keeps_the_directory(
+    tmp_path: Path, apm_home: Path
+) -> None:
+    from apm_cli.install.deploy_snapshot import DeployJournal
+
+    project = tmp_path / "project"
+    project.mkdir()
+    created = project / ".kiro" / "agents"
+    journal = DeployJournal(apm_home / "install-snapshots", root=project)
+    journal.record(created, contents=False, expected="dir")
+    created.mkdir(parents=True)
+    journal.after_write(created)
+    journal.record(created / "a.md", expected=None)
+    (created / "a.md").write_bytes(b"apm\n")
+    journal.after_write(created / "a.md")
+    created.chmod(0o700)
+
+    outcome = _replay(apm_home, project)
+
+    assert outcome.kept == ((".kiro/agents", "it changed after the interrupted install"),)
+    assert (created / "a.md").read_bytes() == b"apm\n"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
@@ -747,9 +804,9 @@ def test_a_rolled_back_install_restores_an_mcp_config_it_wrote(
     transaction = _transaction(project)
     transaction.journal_deploy_writes()
 
-    journal_config_write(config)
+    journal_config_write(config, '{"mcpServers": {"mine": {}, "apm-srv": {}}}\n')
     config.write_bytes(b'{"mcpServers": {"mine": {}, "apm-srv": {}}}\n')
-    journal_config_write(created)
+    journal_config_write(created, "{}\n")
     created.parent.mkdir(parents=True)
     created.write_bytes(b"{}\n")
     transaction.rollback()

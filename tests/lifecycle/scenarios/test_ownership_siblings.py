@@ -497,7 +497,7 @@ def _pair(deployed: str, **factors: str) -> dict[str, str]:
 
 
 _EDITED_OPS = {
-    "install": _pair("edited", OP="install", **_UNIT),
+    "install": _pair("edited", OP="install", LOCK="consistent", **_UNIT),
     "dry-run": _pair("edited", DRYRUN="on"),
     "update-flag": _pair("edited", UPDATE="on"),
     "select": _pair("edited", SELECT="on"),
@@ -564,7 +564,7 @@ def test_force_replaces_an_edited_deployed_skill(lifecycle_world) -> None:
 
 _USER_SKILL_AT_PATH = "---\nname: p-skill\ndescription: The user's own p-skill.\n---\n\nMine.\n"
 _UNOWNED_OPS = {
-    "dry-run": _pair("unowned", DRYRUN="on", **_UNIT),
+    "dry-run": _pair("unowned", DRYRUN="on", LOCK="consistent", **_UNIT),
     "install": _pair("unowned", OP="install"),
     "frozen": _pair("unowned", FROZEN="on"),
     "update-flag": _pair("unowned", UPDATE="on"),

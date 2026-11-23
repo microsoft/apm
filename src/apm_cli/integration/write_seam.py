@@ -151,25 +151,27 @@ def write_text_lf(path: Path, data: str) -> None:
 
 def atomic_write_text(path: Path, data: str, **kwargs: Any) -> None:
     """:func:`apm_cli.utils.atomic_io.atomic_write_text` through the seam."""
-    utf8 = kwargs.get("encoding", "utf-8").lower().replace("_", "-") == "utf-8"
-    record_before_write(path, expected=_text_hash(data) if utf8 else None)
+    record_before_write(path, expected=_text_hash(data, kwargs.get("encoding", "utf-8")))
     atomic_io.atomic_write_text(path, data, **kwargs)
     record_after_write(path)
 
 
 def write_text(path: Path, data: str, *, encoding: str = "utf-8") -> None:
     """``Path.write_text`` through the seam."""
-    utf8 = encoding.lower().replace("_", "-") == "utf-8"
-    record_before_write(path, follow=True, expected=_text_hash(data) if utf8 else None)
+    record_before_write(path, follow=True, expected=_text_hash(data, encoding))
     path.write_text(data, encoding=encoding)
     record_after_write(path, follow=True)
 
 
 def write_json_config(path: Path, data: Any, **kwargs: Any) -> bool:
     """:func:`apm_cli.utils.json_config.write_json_config` through the seam."""
+    from apm_cli.utils.json_config import json_config_text
     from apm_cli.utils.json_config import write_json_config as _write
 
-    record_before_write(path)
+    text = json_config_text(
+        path, data, default_trailing_newline=kwargs.get("default_trailing_newline", True)
+    )
+    record_before_write(path, expected=_text_hash(text))
     written = _write(path, data, **kwargs)
     record_after_write(path)
     return written
@@ -227,21 +229,23 @@ def rmtree(path: Path, **kwargs: Any) -> None:
     record_after_write(path)
 
 
-def _text_hash(data: str) -> str:
-    """The content hash a text write of *data* leaves (line endings normalized)."""
+def _text_hash(data: str, encoding: str = "utf-8") -> str:
+    """The content hash a text write of *data* in *encoding* leaves."""
     from apm_cli.utils.content_hash import content_hash_of_bytes
 
-    return content_hash_of_bytes(data.encode("utf-8"))
+    return content_hash_of_bytes(data.encode(encoding))
 
 
-def _file_hash(source: Path) -> str | None:
-    """The content hash a copy of regular file *source* leaves, or ``None``."""
+def _file_hash(source: Path) -> str:
+    """What a copy or move of *source* leaves: its content hash, a directory, or nothing."""
     from apm_cli.utils.content_hash import compute_file_hash
 
+    if os.path.isdir(source) and not os.path.islink(source):
+        return _DIR
     try:
-        return compute_file_hash(source) if os.path.isfile(source) else None
+        return compute_file_hash(source) if os.path.isfile(source) else _ABSENT
     except OSError:
-        return None
+        return _ABSENT
 
 
 class _SealOnClose:

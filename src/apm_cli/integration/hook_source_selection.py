@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.hook_contract import walk_hook_commands
-from apm_cli.integration.hook_bundle import _hook_source_root
+from apm_cli.integration.hook_bundle import _hook_source_root, hook_bundle_deploys_json
 from apm_cli.integration.hook_command_paths import (
     iter_plugin_root_paths,
     iter_relative_script_paths,
@@ -257,7 +257,7 @@ def select_hook_sources(
                 iter_bundle_files(
                     source_root,
                     descriptor_files=all_descriptors,
-                    exclude_json_files=target_name == "copilot",
+                    exclude_json_files=not hook_bundle_deploys_json(target_name),
                 )
             )
         bundles_by_target[target_name] = frozenset(bundle_files)
