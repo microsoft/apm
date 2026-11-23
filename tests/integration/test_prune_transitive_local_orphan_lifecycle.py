@@ -452,3 +452,41 @@ def test_prune_reparents_a_legacy_local_row_with_its_path(
     assert _row_named(world, "f")[1]["local_path"] == "../../f"
     assert (world.project / _F_SKILL / "SKILL.md").is_file()
     world.apm("install", "--frozen")
+
+
+_REPLACE_SCHEMA = (
+    "https://microsoft.github.io/apm/specs/schemas/manifest-source-replacements-v1.schema.json"
+)
+
+
+def test_prune_keeps_a_local_child_of_a_retained_replaced_package(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """d -> test/r (replaced by local vendor/r) -> ../e: dropping d keeps r, so e stays too."""
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    world.publish("r", lambda root, name: _skill_package(root, name))
+    _skill_package(vendor / "e", "e")
+    _skill_package(vendor / "r", "r", ("../e",))
+    _skill_package(vendor / "d", "d", ("test/r",))
+    manifest = {
+        "$schema": _REPLACE_SCHEMA,
+        "name": "proj",
+        "version": "1.0.0",
+        "targets": ["claude"],
+        "dependencies": {"apm": []},
+        "devDependencies": {"apm": ["./vendor/d"]},
+        "replace": [{"for": {"git": "https://github.com/test/r"}, "with": {"path": "./vendor/r"}}],
+    }
+    dump_yaml(manifest, world.project / "apm.yml")
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    assert "_local/e" in _rows(world)
+    manifest["devDependencies"] = {"apm": []}
+    dump_yaml(manifest, world.project / "apm.yml")
+
+    world.apm("prune")
+
+    rows = _rows(world)
+    assert "_local/e" in rows, sorted(rows)
+    assert (world.project / _E_SKILL / "SKILL.md").is_file()
