@@ -104,6 +104,16 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _DOT_NAMED_HOOK_ROOTS = frozenset({"cursor", "codex", "windsurf", "kiro"})
+# Copilot (rewritten as "vscode") copies a package's hook scripts to
+# hooks/scripts/<package>/; every other hook target copies them to hooks/<package>/.
+_SCRIPTS_SUBDIR_HOOK_TARGETS = frozenset({"vscode", "copilot"})
+
+
+def hook_scripts_parent(target: str, root_dir: str) -> str:
+    """Return the directory holding each package's copied hook scripts for *target*."""
+    if target in _SCRIPTS_SUBDIR_HOOK_TARGETS:
+        return f"{root_dir}/hooks/scripts/"
+    return f"{root_dir}/hooks/"
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -610,11 +620,11 @@ class HookIntegrator(BaseIntegrator):
         command = normalize_quoted_plugin_root(command)
         edits: list[tuple[int, int, str]] = []
 
-        if target == "vscode":
-            scripts_base = f"{root_dir or '.github'}/hooks/scripts/{package_name}"
+        if target in _SCRIPTS_SUBDIR_HOOK_TARGETS:
+            default_root = ".github"
         else:
             default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
-            scripts_base = f"{root_dir or default_root}/hooks/{package_name}"
+        scripts_base = hook_scripts_parent(target, root_dir or default_root) + package_name
 
         def scoped(target_rel: str, quote: str) -> str:
             return self._project_scoped_command_path(

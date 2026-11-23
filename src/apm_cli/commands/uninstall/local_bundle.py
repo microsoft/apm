@@ -83,7 +83,15 @@ def _owned(bundle_scope: _BundleScope) -> dict[str, tuple[str, ...]]:
 def _installed_slugs(bundle_scope: _BundleScope) -> set[str]:
     from ...install.local_bundle_pending import recorded_bundle_slugs
 
-    return set(_deployed(bundle_scope)) | set(recorded_bundle_slugs(bundle_scope.lock_dir))
+    return set(_owned(bundle_scope)) | set(recorded_bundle_slugs(bundle_scope.lock_dir))
+
+
+def _identities(bundle_scope: _BundleScope) -> dict[str, set[str | None]]:
+    from ...install.local_bundle_hook_trust import bundle_hook_identities, local_bundle_paths
+
+    return bundle_hook_identities(
+        bundle_scope.root, bundle_scope.targets, local_bundle_paths(bundle_scope.lock_dir)
+    )
 
 
 def _by_name_remedy(scope: Any):
@@ -102,24 +110,27 @@ def _path_slug(package: str, bundle_scope: _BundleScope, *, scope: Any, logger: 
         logger.error(f"'{Path(package).name}' could not be read as a local bundle.")
         sys.exit(1)
     package_id, key = identity
-    deployed = _deployed(bundle_scope)
-    matches = sorted(slug for slug, state in deployed.items() if key in state.keys)
-    if not matches:
-        # Installed while the executables gate admitted everything: no content
-        # identity was recorded, so an alias cannot be told apart by path.
-        keyless = sorted(slug for slug, state in deployed.items() if state.keys == {None})
-        if keyless and keyless != [package_id]:
-            logger.error(
-                f"'{Path(package).name}' cannot be matched to an installed local bundle: "
-                f"{', '.join(keyless)} recorded no content identity (installed while the "
-                "executables gate admitted every bundle); no changes were made. "
-                f"{_by_name_remedy(scope).sentence()}"
-            )
-            sys.exit(1)
-    if len(matches) > 1:
+    identities = _identities(bundle_scope)
+    matches = sorted(slug for slug, keys in identities.items() if key in keys)
+    # Installed while the executables gate admitted everything: no content
+    # identity was recorded, so any such copy could be this bundle under an alias.
+    keyless = sorted(
+        slug for slug, keys in identities.items() if not keys - {None} and slug not in matches
+    )
+    name = Path(package).name
+    if not matches and keyless and keyless != [package_id]:
         logger.error(
-            f"'{Path(package).name}' matches {len(matches)} installed local bundles "
-            f"({', '.join(matches)}); no changes were made. {_by_name_remedy(scope).sentence()}"
+            f"'{name}' cannot be matched to an installed local bundle: "
+            f"{', '.join(keyless)} recorded no content identity (installed while the "
+            "executables gate admitted every bundle); no changes were made. "
+            f"{_by_name_remedy(scope).sentence()}"
+        )
+        sys.exit(1)
+    if len(matches) > 1 or (matches and keyless):
+        candidates = sorted({*matches, *keyless})
+        logger.error(
+            f"'{name}' matches {len(candidates)} installed local bundles "
+            f"({', '.join(candidates)}); no changes were made. {_by_name_remedy(scope).sentence()}"
         )
         sys.exit(1)
     return matches[0] if matches else package_id

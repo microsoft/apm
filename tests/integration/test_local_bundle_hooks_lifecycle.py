@@ -1212,3 +1212,96 @@ def test_uninstall_bundle_ignores_a_matcher_naming_its_script(
     assert not (consumer / script).exists()
     assert script not in _claims(world, consumer)
     assert _hook_entries(consumer) == {"Stop": ["hooks/hookpkg/hooks/scripts/x.sh"]}
+
+
+def test_uninstall_bundle_by_name_reaches_a_gate_off_partial_retirement(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a gate-off bundle whose native entries are gone is still selected by name."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, _key = _packed_bundle(world, tmp_path)
+    consumer = world.consumer("gate-off-partial-consumer", targets=("claude",))
+    world.apm(consumer, "install", str(bundle))
+    write(consumer / ".claude" / "settings.json", "{}\n")
+    script = ".claude/hooks/hookpkg/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", "hookpkg"))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not (consumer / script).exists()
+    assert script not in _claims(world, consumer)
+
+
+def test_uninstall_bundle_path_finds_a_partially_retired_alias(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: an alias whose native entries are gone is matched by the key its sidecar keeps."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "partial-alias-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    write(consumer / ".claude" / "settings.json", "{}\n")
+    script = ".claude/hooks/team-hooks/hooks/scripts/x.sh"
+    assert script in _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'team-hooks'" in text, text
+    sidecar = consumer / ".claude" / "apm-hooks.json"
+    assert not sidecar.exists() or "local-bundle::team-hooks" not in sidecar.read_text()
+    assert script not in _claims(world, consumer)
+
+
+def test_uninstall_bundle_removes_kiro_scripts_and_claims(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: Kiro copies scripts to .kiro/hooks/<slug>/; uninstall removes them and their claims."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "kiro-consumer", key)
+    (consumer / ".kiro").mkdir()
+    world.apm(consumer, "install", str(bundle), "--target", "claude,kiro")
+    kiro_scripts = [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/hookpkg/")]
+    assert kiro_scripts, _claims(world, consumer)
+
+    text = output(world.apm(consumer, "uninstall", str(bundle)))
+    assert "Removed hooks from local bundle 'hookpkg'" in text, text
+    assert not [c for c in _claims(world, consumer) if c.startswith(".kiro/hooks/")]
+    assert not (consumer / ".kiro" / "hooks" / "hookpkg").exists()
+
+
+def test_uninstall_bundle_refuses_a_malformed_per_file_sidecar_before_writing(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a per-file sidecar whose bundle records are malformed is refused up front."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "malformed-sidecar-consumer", key)
+    world.apm(consumer, "install", str(bundle))
+    write(consumer / ".github" / "apm-hooks.json", json.dumps({"local-bundle-hooks": {}}))
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert ".github/apm-hooks.json (unreadable)" in refused, refused
+    assert "Traceback" not in refused, refused
+    assert tree_bytes(consumer) == before
+
+
+def test_uninstall_bundle_path_refuses_a_keyed_and_a_keyless_copy(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """#4898: a keyed alias plus a gate-off default copy of one bundle is ambiguous by path."""
+    world = MarketplacePackWorld.create(tmp_path, apm_binary_path)
+    _producer, bundle, key = _packed_bundle(world, tmp_path)
+    consumer = _approved_consumer(world, "mixed-identity-consumer", key)
+    world.apm(consumer, "install", str(bundle), "--as", "team-hooks")
+    manifest = load_yaml(consumer / "apm.yml")
+    manifest.pop("executables")
+    dump_yaml(manifest, consumer / "apm.yml")
+    world.apm(consumer, "install", str(bundle))
+    assert _hook_entries(consumer) == {"PreToolUse": ["Bash", "Bash"]}
+    before = tree_bytes(consumer)
+
+    refused = output(world.apm(consumer, "uninstall", str(bundle), expect=1))
+    assert "hookpkg, team-hooks" in refused, refused
+    assert "Run 'apm uninstall <installed-name>'" in refused, refused
+    assert tree_bytes(consumer) == before

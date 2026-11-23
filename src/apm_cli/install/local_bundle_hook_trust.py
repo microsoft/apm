@@ -247,7 +247,7 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
     any change instead of reported as done (#3700).
     """
     from apm_cli.integration.hook_integrator import _APM_HOOKS_SIDECAR, _MERGE_HOOK_TARGETS
-    from apm_cli.integration.hook_ownership import read_hook_object
+    from apm_cli.integration.hook_ownership import per_file_bundle_hook_keys, read_hook_object
     from apm_cli.utils.path_security import has_symlink_component
 
     blockers: list[str] = []
@@ -269,6 +269,9 @@ def bundle_hook_cleanup_blockers(project_root: Path, targets: Any) -> list[str]:
                 continue
             try:
                 read_hook_object(path)
+                if config is None:
+                    # A per-file sidecar's bundle records are read again on removal.
+                    per_file_bundle_hook_keys(path)
             except (OSError, ValueError, TypeError):
                 blockers.append(f"{label} (unreadable)")
     return blockers
@@ -435,19 +438,15 @@ def _bundle_script_rows(
 
 
 def _script_bases(targets: Any) -> tuple[str, ...]:
-    """Each hook target's script directory parent: merged ``hooks/``, per-file ``hooks/scripts/``.
+    """Each hook target's script directory parent, as the hook integrator lays it out.
 
-    The hook integrator copies a merged target's scripts to ``hooks/<slug>/``
-    and a per-file target's to ``hooks/scripts/<slug>/``; only the layout a
-    target actually uses is matched, so a slug named ``scripts`` never covers
-    another bundle's per-file scripts.
+    Only the layout a target actually uses is matched, so a slug named
+    ``scripts`` never covers another bundle's Copilot scripts.
     """
-    from apm_cli.integration.hook_integrator import _MERGE_HOOK_TARGETS
+    from apm_cli.integration.hook_integrator import hook_scripts_parent
 
     return tuple(
-        _hooks_dir_prefix(
-            target.root_dir, *(() if target.name in _MERGE_HOOK_TARGETS else ("scripts",))
-        )
+        Path(hook_scripts_parent(target.name, target.root_dir)).as_posix() + "/"
         for target in targets or ()
         if callable(getattr(target, "supports", None)) and target.supports("hooks")
     )
@@ -462,15 +461,9 @@ def bundle_hook_leftovers(
     its native entries are gone; uninstall must still reach them. A bundle whose
     hooks were only parked has neither, so it is not reported.
     """
-    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
-
     found: dict[str, set[str]] = {}
-    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
-        for entries in (sidecar or {}).values():
-            for entry in entries if isinstance(entries, list) else ():
-                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
-                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
-                    found.setdefault(parsed[0], set())
+    for slug, _key in _sidecar_identities(project_root, targets):
+        found.setdefault(slug, set())
     bases = _script_bases(targets)
     for value in lock_paths:
         rel = _relative_value(value, Path(project_root))
@@ -480,6 +473,40 @@ def bundle_hook_leftovers(
             )
             if slug and sep:
                 found.setdefault(slug, set()).add(value)
+    return found
+
+
+def _sidecar_identities(project_root: Path, targets: Any) -> set[tuple[str, str | None]]:
+    """Return ``(slug, approval_key)`` for every bundle marker the merged sidecars keep."""
+    from apm_cli.integration.hook_ownership import parse_local_bundle_hook_source
+
+    found: set[tuple[str, str | None]] = set()
+    for _data, sidecar, _container in _merged_hook_documents(project_root, targets):
+        for entries in (sidecar or {}).values():
+            for entry in entries if isinstance(entries, list) else ():
+                marker = entry.get("_apm_source") if isinstance(entry, dict) else None
+                if (parsed := parse_local_bundle_hook_source(marker)) is not None:
+                    found.add(parsed)
+    return found
+
+
+def bundle_hook_identities(
+    project_root: Path, targets: Any, lock_paths: Collection[str]
+) -> dict[str, set[str | None]]:
+    """Return each slug with hook ownership left and the approval keys it records.
+
+    Covers deployed hooks and partial-retirement leftovers: a sidecar marker
+    keeps its key after the native entry is gone. ``None`` (or no key at all)
+    means no content identity was recorded.
+    """
+    found = {
+        slug: set(state.keys)
+        for slug, state in deployed_bundle_hook_keys(project_root, targets, lock_paths).items()
+    }
+    for slug, key in _sidecar_identities(project_root, targets):
+        found.setdefault(slug, set()).add(key)
+    for slug in bundle_hook_leftovers(project_root, targets, lock_paths):
+        found.setdefault(slug, set())
     return found
 
 
