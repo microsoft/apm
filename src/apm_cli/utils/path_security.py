@@ -19,7 +19,6 @@ Design
 
 from __future__ import annotations
 
-import os
 import urllib.parse as _up
 from pathlib import Path
 from stat import S_ISLNK
@@ -215,60 +214,6 @@ def ensure_path_within(path: Path, base_dir: Path) -> Path:
 def resolve_for_containment(path: Path) -> Path:
     """Resolve *path* once (symlinks followed) for a containment check made now."""
     return _strip_extended_prefix(path.resolve())
-
-
-class CheckRoot:
-    """A trusted root resolved live for ONE containment check; keep it for one call only.
-
-    Threat model: the project root and its ancestors are trusted within one
-    check; everything below the root is observed live.
-
-    ``resolve(path)`` returns ``resolve_for_containment(path)`` but, for a
-    path below the root, lstats only the components under the root instead
-    of re-walking the root prefix ``realpath`` just resolved. The root is
-    resolved once, at construction, and its identity (device, inode) is
-    re-verified after every suffix walk, so a root or ancestor swapped for a
-    link mid-check falls back to the full resolve. Any symlink, ``..`` or
-    ``.``, missing component, path outside the root, relative path or
-    non-POSIX platform also takes the full resolve.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.resolved = resolve_for_containment(root)
-        self._identity = self._stat_identity()
-
-    def _stat_identity(self) -> tuple[int, int] | None:
-        try:
-            st = os.stat(self.resolved)
-        except OSError:
-            return None
-        return st.st_dev, st.st_ino
-
-    def resolve(self, path: Path) -> Path:
-        if os.name != "posix" or self._identity is None or not path.is_absolute():
-            return resolve_for_containment(path)
-        try:
-            suffix = path.relative_to(self.root).parts
-        except ValueError:
-            return resolve_for_containment(path)
-        current = str(self.resolved)
-        for part in suffix:
-            if part in ("..", "."):
-                return resolve_for_containment(path)
-            current = os.path.join(current, part)
-            try:
-                if S_ISLNK(os.lstat(current).st_mode):
-                    return resolve_for_containment(path)
-            except OSError:
-                return resolve_for_containment(path)
-        if self._stat_identity() != self._identity:
-            return resolve_for_containment(path)
-        return Path(current)
-
-    def within(self, candidate: Path, base: Path) -> bool:
-        """Whether resolved *candidate* lies under *base*, resolved now through this check."""
-        return resolved_relative_within(candidate, self.resolve(base)) is not None
 
 
 def resolved_relative_within(resolved: Path, resolved_base: Path) -> str | None:
