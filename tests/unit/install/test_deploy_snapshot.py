@@ -324,12 +324,12 @@ def _staging_install(project: Path, deployed: Path, key: str):
     return transaction, result
 
 
-@pytest.mark.parametrize("outcome", ["rolled-back", "committed"])
+@pytest.mark.parametrize("outcome", ["rolled-back", "committed", "committed-after-a-script"])
 def test_deploy_store_evidence_waits_for_the_install_transaction(
     tmp_path: Path, apm_home: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
     from apm_cli.cache.deploy_store import DEPLOY_BUCKET, commit_staged
-    from apm_cli.core.invocation_memo import invocation_scope
+    from apm_cli.core.invocation_memo import forget_invocation_memos, invocation_scope
     from apm_cli.utils.content_hash import canonical_digest
 
     monkeypatch.setenv("APM_CACHE_DIR", str(tmp_path / "cache"))
@@ -347,6 +347,9 @@ def test_deploy_store_evidence_waits_for_the_install_transaction(
             transaction.fail(RuntimeError("service reconciliation failed"))
             assert commit_staged() == 0, "a rolled-back attempt left evidence to publish"
         else:
+            if outcome == "committed-after-a-script":
+                # A deferred post-install command script drops every invocation memo.
+                forget_invocation_memos()
             transaction.complete(result)
 
-    assert entry.exists() is (outcome == "committed")
+    assert entry.exists() is (outcome != "rolled-back")

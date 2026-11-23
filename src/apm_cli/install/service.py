@@ -367,7 +367,10 @@ class InstallService:
             self._enforce_frozen_no_rewrite(request, withheld, result.active_package_keys)
 
         if install_worked:
-            # Deployed bytes enter the store when the install transaction commits.
+            # Deployed bytes enter the store when the install transaction commits;
+            # it holds them now, before a post-install script resets the memos.
+            if request.transaction is not None:
+                request.transaction.hold_deploy_evidence()
             post_event = self._build_event("post-install", request)
             if request.post_install_after_services:
                 result.post_install = lambda: runner.fire("post-install", post_event)

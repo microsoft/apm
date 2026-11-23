@@ -19,6 +19,7 @@ from apm_cli.marketplace.version_pins import open_ref_pin_stage
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
+    from apm_cli.cache.deploy_store import StagedEvidence
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
     from apm_cli.install.deploy_snapshot import DeployJournal
 
@@ -128,24 +129,6 @@ def _maybe_rollback_manifest(
             )
 
 
-def _publish_deploy_evidence() -> None:
-    """Store the deployed bytes and package records this committed attempt staged.
-
-    The store is a best-effort cache: failing to fill it never fails an install.
-    """
-    from apm_cli.cache.deploy_store import commit_staged
-
-    with contextlib.suppress(Exception):
-        commit_staged()
-
-
-def _discard_deploy_evidence() -> None:
-    """Forget what an attempt that did not commit staged for the deploy store."""
-    from apm_cli.cache.deploy_store import discard_staged
-
-    discard_staged()
-
-
 class InstallTransaction:
     """Own install completion meaning and rollback-scoped filesystem state.
 
@@ -200,6 +183,7 @@ class InstallTransaction:
         self.committed = False
         self._completed = False
         self._rolled_back = False
+        self._deploy_evidence: StagedEvidence = ([], [])
 
     @property
     def resolution(self) -> ResolutionStagingSession:
@@ -235,7 +219,7 @@ class InstallTransaction:
                     self._completed = True
                     cleanup_issues.extend(self._resolution.remove_abandoned_roots())
                     self._report_resolution_cleanup_issues(cleanup_issues)
-                    _publish_deploy_evidence()
+                    self._publish_deploy_evidence()
                 if (
                     self._validation is not None
                     and self._validation.has_failures
@@ -250,6 +234,37 @@ class InstallTransaction:
             finally:
                 if self.committed:
                     self._release_workspace_lock()
+
+    def hold_deploy_evidence(self) -> None:
+        """Take what the pipeline staged for the deploy store into this attempt.
+
+        Called when the pipeline returns, before any post-install script runs:
+        a script resets the invocation memos the evidence was staged in.
+        """
+        from apm_cli.cache.deploy_store import take_staged
+
+        files, records = take_staged()
+        with self._lock:
+            self._deploy_evidence[0].extend(files)
+            self._deploy_evidence[1].extend(records)
+
+    def _publish_deploy_evidence(self) -> None:
+        """Store the deployed bytes and package records this committed attempt staged.
+
+        The store is a best-effort cache: failing to fill it never fails an install.
+        """
+        from apm_cli.cache.deploy_store import commit_staged
+
+        taken, self._deploy_evidence = self._deploy_evidence, ([], [])
+        with contextlib.suppress(Exception):
+            commit_staged(taken)
+
+    def _discard_deploy_evidence(self) -> None:
+        """Forget what an attempt that did not commit staged for the deploy store."""
+        from apm_cli.cache.deploy_store import discard_staged
+
+        self._deploy_evidence = ([], [])
+        discard_staged()
 
     def _report_resolution_cleanup_issues(self, issues: list[tuple[Path, str]]) -> None:
         """Report cleanup paths that require safe manual recovery."""
@@ -271,7 +286,7 @@ class InstallTransaction:
                     # A preview whose staging already rolled back changed nothing.
                     return result
                 try:
-                    _discard_deploy_evidence()
+                    self._discard_deploy_evidence()
                     self._settle_deploy_journal()
                     self._ref_pins.discard()
                     cleanup_issues = self._resolution.rollback() or []
@@ -421,7 +436,7 @@ class InstallTransaction:
             if self.committed or self._rolled_back:
                 return
             try:
-                _discard_deploy_evidence()
+                self._discard_deploy_evidence()
                 self._ref_pins.discard()
                 try:
                     self._undo_deploys()

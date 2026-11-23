@@ -471,18 +471,33 @@ def discard_staged() -> None:
             staged.clear()
 
 
-def commit_staged() -> int:
-    """Store every staged file now that the install committed; return how many are present.
+StagedEvidence = tuple[list[tuple[str, tuple[str, str | None, bool]]], list[tuple[str, dict]]]
 
-    Each file is re-read and must still hash to its staged key, so bytes that
-    changed after hashing are never stored under the old digest. A record is
-    written only when every blob it names is present.
+
+def take_staged() -> StagedEvidence:
+    """Remove and return the files and records staged so far this command run.
+
+    An install transaction takes them when its pipeline returns, so a later
+    reset of the invocation memos (a lifecycle script) cannot lose them.
     """
     staged = invocation_memo(_STAGED)
     records = invocation_memo(_STAGED_RECORDS)
-    items = list(staged.items()) if staged else []
-    pending = list(records.items()) if records else []
+    taken = (list(staged.items()) if staged else [], list(records.items()) if records else [])
     discard_staged()
+    return taken
+
+
+def commit_staged(taken: StagedEvidence | None = None) -> int:
+    """Store every staged file now that the install committed; return how many are present.
+
+    *taken* is evidence an install transaction took earlier; anything still
+    staged is stored with it. Each file is re-read and must still hash to its
+    staged key, so bytes that changed after hashing are never stored under the
+    old digest. A record is written only when every blob it names is present.
+    """
+    items, pending = take_staged()
+    if taken is not None:
+        items, pending = taken[0] + items, taken[1] + pending
     if not items:
         return 0
     store = DeployStore.open_default()
