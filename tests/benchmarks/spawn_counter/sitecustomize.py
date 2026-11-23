@@ -16,8 +16,18 @@ _LOG = os.environ.get("APM_PERF_SPAWN_LOG")
 if _LOG:
     _counts = {}
 
+    def _program(command_line):
+        """The first program of a command line; Windows quotes a path with spaces."""
+        text = command_line.lstrip()
+        if text.startswith('"'):
+            return text[1:].split('"', 1)[0]
+        return (text.split() or [""])[0]
+
     def _target(event, args):
-        """``(target, is_command_line)``: a shell-style string is split, a path is not."""
+        """``(target, is_command_line)``: a command line is parsed, a path is not.
+
+        On Windows ``subprocess.Popen`` audits the joined command line.
+        """
         if event == "subprocess.Popen":
             executable, argv = args[0], args[1]
             if executable is None:
@@ -41,7 +51,7 @@ if _LOG:
             target = target.decode(errors="replace")
         target = str(target) if target else ""
         if command_line:
-            target = (target.split() or [""])[0]
+            target = _program(target)
         name = os.path.basename(target) or "?"
         # ``git.exe`` on Windows counts as ``git``, so counts compare across OSes.
         if os.name == "nt" and name.lower().endswith(".exe"):

@@ -363,9 +363,7 @@ def _job_wait_with_deadline(proc: subprocess.Popen, job: int, timeout_s: float) 
             None,
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        cpu = _job_cpu_seconds(info.TotalUserTime, info.TotalKernelTime)
-        print(f"[i] DEBUG job processes={info.TotalProcesses} cpu={cpu}", flush=True)  # TEMP
-        return cpu
+        return _job_cpu_seconds(info.TotalUserTime, info.TotalKernelTime)
     finally:
         _close_job(job)
 
