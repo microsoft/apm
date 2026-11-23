@@ -493,18 +493,20 @@ def test_trust_context_excludes_apm_additive_and_injected_roots(tmp_path, monkey
     first = bundle[: bundle.index("-----END CERTIFICATE-----") + len("-----END CERTIFICATE-----")]
     git_ca = tmp_path / "git-ca.pem"
     git_ca.write_text(first + "\n", encoding="ascii")
-    monkeypatch.setattr(tls_trust, "_LAST_TLS_STATUS", tls_trust._LAST_TLS_STATUS)
-    monkeypatch.setattr(tls_trust, "_LAST_TLS_SELECTION", tls_trust._LAST_TLS_SELECTION)
     monkeypatch.setitem(sys.modules, "truststore", None)
+    recorded = (tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION)
     state = tls_trust._capture_tls_publication_state()
     try:
         tls_trust.configure_tls_trust(env={"APM_EXTRA_CA_BUNDLE": certifi.where()})
-        injected = arl.ssl.SSLContext(arl.ssl.PROTOCOL_TLS_CLIENT)
-        injected.load_verify_locations(cafile=str(git_ca))
+        injected = arl.ssl.SSLContext
 
         context = arl._git_trust_context(str(git_ca))
     finally:
         tls_trust._restore_tls_publication_state(state)
+        tls_trust._LAST_TLS_STATUS, tls_trust._LAST_TLS_SELECTION = recorded
 
-    assert len(injected.get_ca_certs()) > 1
+    # APM's OS-store or additive trust is active process-wide ...
+    assert injected is not tls_trust._STDLIB_SSL_CONTEXT
+    # ... yet the git-only context is a plain stdlib context with exactly git's CA.
+    assert type(context) is tls_trust._STDLIB_SSL_CONTEXT
     assert len(context.get_ca_certs()) == 1
