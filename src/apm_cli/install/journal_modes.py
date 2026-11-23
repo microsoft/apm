@@ -206,8 +206,12 @@ _MANIFEST = "journal.jsonl"
 
 
 def private_dir(path: Path) -> None:
-    """Create *path* (and its parents) without group or other write, narrowing it if needed."""
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    """Create *path* (and its parents) without group or other write, narrowing it if needed.
+
+    APM_HOME, its parent, is created private too when APM creates it.
+    """
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, exist_ok=True)
     if os.name != "nt":
         st = os.stat(path)
         if st.st_mode & 0o022 and st.st_uid == os.geteuid():
@@ -216,7 +220,8 @@ def private_dir(path: Path) -> None:
 
 def append_private(path: Path, text: str) -> None:
     """Append *text* to the journal file *path*, which is only ever this user's to write."""
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
     try:
         if os.name != "nt" and os.fstat(fd).st_mode & 0o077:
             os.fchmod(fd, 0o600)  # set explicitly, never left to the umask
@@ -228,18 +233,20 @@ def append_private(path: Path, text: str) -> None:
 def require_private_store(store: Path) -> None:
     """Raise ``ValueError`` unless the store chain is private to this user.
 
-    The install-snapshots directory, the store and its journal must each be a real
-    directory or regular file (never a link), and on POSIX owned by this user with
-    no group or other write.
+    APM_HOME, the install-snapshots directory, the store and its journal must each be
+    a real directory or regular file (never a link), and on POSIX owned by this user
+    with no group or other write. APM_HOME may be group writable (a user-private
+    group's umask), never other writable.
     """
-    for path in (store.parent, store, store / _MANIFEST):
+    chain = ((store.parent.parent, 0o002), (store.parent, 0o022), (store, 0o022))
+    for path, forbidden in (*chain, (store / _MANIFEST, 0o022)):
         try:
             st = os.lstat(path)
         except FileNotFoundError:
             continue
         if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
             raise ValueError(NOT_PRIVATE)
-        if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & 0o022):
+        if os.name != "nt" and (st.st_uid != os.geteuid() or st.st_mode & forbidden):
             raise ValueError(NOT_PRIVATE)
 
 
