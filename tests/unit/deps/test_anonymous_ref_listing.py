@@ -8,7 +8,10 @@ import pytest
 
 from apm_cli.deps import anonymous_ref_listing as arl
 
-pytestmark = [pytest.mark.unit]
+pytestmark = [
+    pytest.mark.component,
+    pytest.mark.promise("P-OWN-git-transport-selection", "P-OWN-ls-remote-tag-commits"),
+]
 
 _A = "a" * 40
 _B = "b" * 40
@@ -217,6 +220,8 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
         ("credential.helper", "osxkeychain"),
         ("credential.helper", ""),
         ("http.extraheader", ""),
+        ("http.https://github.com/owner/repo.extraheader", ""),
+        ("credential.https://github.com.helper", ""),
         ("http.sslbackend", "openssl"),
         ("http.sslcainfo", "/ca.pem"),
     )
@@ -235,6 +240,8 @@ def test_config_that_cannot_touch_an_https_fetch_stays_eligible():
         ("core.gitproxy", "cmd"),
         ("credential.helper", "store"),
         ("http.extraheader", "X-Token: 1"),
+        ("http.https://github.com/.extraheader", "X-Token: 1"),
+        ("credential.https://github.com.helper", "store"),
     ],
 )
 def test_config_that_changes_gits_request_falls_back(pair):
@@ -250,3 +257,19 @@ def test_https_not_allowed_in_gits_child_env_falls_back(allowed, monkeypatch):
     listed = arl.list_refs_anonymously("https://github.com/owner/repo", include_heads=False, env={})
 
     assert listed is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        _advertisement(f"{_A} refs/tags/v1")[:-4],
+        _pkt("# service=git-upload-pack\n") + b"0000",
+        _pkt("# service=git-upload-pack\n") + b"0000" + b"0000",
+        _advertisement(f"{_A} refs/tags/v1") + _pkt(f"{_B} refs/tags/v2\n"),
+        _pkt("# service=git-upload-pack\n") + _pkt(f"{_A} refs/tags/v1\0caps\n") + b"0000",
+    ],
+    ids=["no-terminal-flush", "header-only", "no-refs", "data-after-end", "no-separator"],
+)
+def test_incomplete_or_overlong_framing_falls_back(data):
+    with pytest.raises(arl._Fallback):
+        arl.parse_advertisement(data, ("refs/tags/",))
