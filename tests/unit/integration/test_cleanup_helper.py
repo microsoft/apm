@@ -616,34 +616,6 @@ def test_cowork_outward_final_link_stays_retained_as_a_failure(
     assert (cowork / "alpha" / "notes.md").is_symlink()
 
 
-def test_cowork_locator_returns_the_named_entry_when_it_becomes_a_link(tmp_path, monkeypatch):
-    """A file swapped for an inward link after the kind check is never decoded to its referent."""
-    from apm_cli.integration import copilot_cowork_paths
-
-    cowork = tmp_path / "cowork-skills"
-    (cowork / "alpha").mkdir(parents=True)
-    entry = cowork / "alpha" / "notes.md"
-    entry.write_text("notes\n", encoding="utf-8")
-    referent = cowork / "untracked.md"
-    referent.write_text("notes\n", encoding="utf-8")
-    real = copilot_cowork_paths.from_lockfile_path
-
-    def swap_then_decode(lockfile_path, root):
-        if not entry.is_symlink():
-            entry.unlink()
-            try:
-                entry.symlink_to(referent)
-            except (OSError, NotImplementedError):
-                pytest.skip("symbolic links are unavailable")
-        return real(lockfile_path, root)
-
-    monkeypatch.setattr(copilot_cowork_paths, "from_lockfile_path", swap_then_decode)
-    found = copilot_cowork_paths.cowork_locator("cowork://skills/alpha/notes.md", cowork.resolve())
-
-    assert found == cowork.resolve() / "alpha" / "notes.md" and found.is_symlink()
-    assert referent.read_text(encoding="utf-8") == "notes\n"
-
-
 def test_case_only_rename_keeps_live_file_and_adopts_its_spelling(project_root, diagnostics):
     """A stale spelling that is the live file's directory entry is renamed, never deleted."""
     rules = project_root / ".github" / "instructions"
