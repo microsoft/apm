@@ -3538,50 +3538,38 @@ def _assert_h4_step(step: WorkflowNode) -> None:
     assert "continue-on-error" not in step
     assert step["env"] == {
         "PR_BODY": "${{ github.event.pull_request.body }}",
-        "BASE_REF": "${{ github.event.pull_request.base.ref }}",
-        "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+        "PR_COMMITS_API": (
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits"
+        ),
+        "GH_TOKEN": "${{ github.token }}",
     }
     assert "${{" not in step["run"], "the PR body must never be inlined in run"
-    assert shell_commands(step) == [
-        ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"],
-        [
-            "git",
-            "fetch",
-            "--no-tags",
-            "--quiet",
-            "--filter=tree:0",
-            "--unshallow",
-            "origin",
-            "$HEAD_SHA",
-            "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF",
-        ],
-        [
-            "git",
-            "log",
-            "--format=%B",
-            "origin/$BASE_REF..$HEAD_SHA",
-            ">",
-            "$RUNNER_TEMP/pr-commits.txt",
-        ],
-        [
-            "uv",
-            "run",
-            "--frozen",
-            "--extra",
-            "dev",
-            "python",
-            "-m",
-            "tests.quality.known_cell_closing",
-            "$RUNNER_TEMP/pr-body.md",
-            "$RUNNER_TEMP/pr-commits.txt",
-        ],
+    commands = shell_commands(step)
+    assert commands[0] == ["printf", "%s", "$PR_BODY", ">", "$RUNNER_TEMP/pr-body.md"]
+    # Fail closed: an API error stops the step instead of checking the body alone.
+    api = ["gh", "api", "$PR_COMMITS_API", "--paginate", "--jq", ".[].commit.message"]
+    assert commands[1][: len(api) + 3] == [*api, ">", "$RUNNER_TEMP/pr-commits.txt", "||"]
+    assert commands[1][-2:] == ["1;", "}"]
+    assert commands[2] == [
+        "uv",
+        "run",
+        "--frozen",
+        "--extra",
+        "dev",
+        "python",
+        "-m",
+        "tests.quality.known_cell_closing",
+        "$RUNNER_TEMP/pr-body.md",
+        "$RUNNER_TEMP/pr-commits.txt",
     ]
+    assert len(commands) == 3
 
 
 def _assert_lint_chain_single_owner(ci: WorkflowNode, train: WorkflowNode) -> None:
     """ci.yml's Lint job and the train guard run the one lint-chain action."""
     lint = workflow_job(ci, "lint")
     assert lint["name"] == "Lint"
+    assert lint["permissions"] == {"contents": "read", "pull-requests": "read"}
     lint_steps = _run_steps(lint)
     assert [str(step.get("uses", "")).partition("@")[0] for step in lint_steps] == [
         "actions/checkout",
