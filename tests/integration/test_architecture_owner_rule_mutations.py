@@ -3680,6 +3680,14 @@ MUTATIONS: tuple[MutationCase, ...] = (
         intent="The update auth preflight probes source hosts without asking the egress-route owner.",
     ),
     MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/utils/git_env.py",
+        old="        return _resolve_trusted_executable(name)\n",
+        new="        return shutil.which(name)\n",
+        intent="The helper owner searches PATH, working directory included, itself.",
+    ),
+    MutationCase(
         guard_id="transport-platform-git-cache-identity",
         rule_id="transport-platform-git-cache-identity",
         path="src/apm_cli/deps/shared_clone_cache.py",
@@ -4308,6 +4316,22 @@ USER_ROOT_ROUTING_MUTATIONS: tuple[MutationCase, ...] = (
         old="    found.update(dict.fromkeys(agent_plugin_exec_types(root)))\n",
         new="",
         intent="The trust owner drops an Agent Plugin's root mcp.json types (#4042).",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/core/azure_cli.py",
+        old="self._az_command = trusted_executable(az_command)",
+        new="self._az_command = shutil.which(az_command)",
+        intent="The az bearer lookup locates az with shutil.which outside the helper owner.",
+    ),
+    MutationCase(
+        guard_id="transport-platform-external-executable-owner",
+        rule_id="transport-platform-external-executable-owner",
+        path="src/apm_cli/install/audit_replay.py",
+        old='(get_git_executable(), "-C", str(project_root)',
+        new='("git", "-C", str(project_root)',
+        intent="The audit tracked-files probe launches a bare git program name.",
     ),
 )
 

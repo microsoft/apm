@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import threading
 import time
@@ -100,7 +99,9 @@ class AzureCliBearerProvider:
         if os.path.isabs(az_command):
             self._az_command: str | None = az_command
         else:
-            self._az_command = shutil.which(az_command)
+            from apm_cli.utils.git_env import trusted_executable
+
+            self._az_command = trusted_executable(az_command)
         # Cache stores (token, expires_at_epoch_seconds). expires_at is None
         # if the response did not include an expiresOn field (very old az
         # versions); in that case the token is treated as never-expiring

@@ -850,6 +850,7 @@ transport-platform-credential-origin-scope
 transport-platform-credential-report-owner
 transport-platform-credential-value-rendering
 transport-platform-egress-route-policy
+transport-platform-external-executable-owner
 transport-platform-git-cache-identity
 transport-platform-git-child-environment
 transport-platform-git-semver-preflight

@@ -331,6 +331,21 @@ def _resolve_trusted_executable(name: str) -> str:
     raise FileNotFoundError(f"{name} executable not found on trusted PATH directories")
 
 
+def trusted_executable(name: str) -> str | None:
+    """Return the absolute path of helper *name*, or ``None`` if it is not installed.
+
+    The single owner for locating a helper program APM launches or probes
+    (git, az, npm, codex, PowerShell, ...). It searches only PATH directories
+    outside the current project, never the working directory, so a program
+    shipped inside a checkout cannot stand in for the real tool. Launch the
+    returned path; never pass a bare helper name to ``subprocess``.
+    """
+    try:
+        return _resolve_trusted_executable(name)
+    except FileNotFoundError:
+        return None
+
+
 def get_git_executable() -> str:
     """Return the path to the git executable (cached after a successful lookup).
 

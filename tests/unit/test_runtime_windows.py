@@ -93,7 +93,7 @@ class TestRuntimeManagerExecution:
             patch("sys.platform", "win32"),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch(
-                "shutil.which",
+                "apm_cli.utils.git_env.trusted_executable",
                 return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
             ),
             patch.object(manager, "get_token_helper_script", return_value=""),
@@ -112,7 +112,7 @@ class TestRuntimeManagerExecution:
             patch("sys.platform", "win32"),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch(
-                "shutil.which",
+                "apm_cli.utils.git_env.trusted_executable",
                 return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
             ),
             patch.object(manager, "get_token_helper_script", return_value=""),
@@ -130,7 +130,7 @@ class TestRuntimeManagerExecution:
             patch("sys.platform", "win32"),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch(
-                "shutil.which",
+                "apm_cli.utils.git_env.trusted_executable",
                 return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
             ),
             patch.object(manager, "get_token_helper_script", return_value=""),
@@ -148,6 +148,7 @@ class TestRuntimeManagerExecution:
         manager = _make_manager("linux")
         with (
             patch("sys.platform", "linux"),
+            patch("apm_cli.utils.git_env.trusted_executable", side_effect=lambda name: name),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value="#!/bin/bash\n# token helper"),
@@ -162,6 +163,7 @@ class TestRuntimeManagerExecution:
         manager = _make_manager("linux")
         with (
             patch("sys.platform", "linux"),
+            patch("apm_cli.utils.git_env.trusted_executable", side_effect=lambda name: name),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_text", return_value="#!/bin/bash"),
@@ -178,7 +180,7 @@ class TestRuntimeManagerExecution:
             patch("sys.platform", "win32"),
             patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
             patch(
-                "shutil.which",
+                "apm_cli.utils.git_env.trusted_executable",
                 return_value=r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
             ),
             patch.object(manager, "get_token_helper_script", return_value=""),

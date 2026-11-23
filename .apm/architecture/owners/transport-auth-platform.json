@@ -107,9 +107,10 @@
     {
       "id": "git-child-repository-isolation",
       "decision": "Git child-process repository location and URL rewrite safety",
-      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, and the dependency core.symlinks and line-ending pins)",
+      "owner": "utils/git_env.py (network execution config, URL rewrite validation, Git auth-channel scrubbing, the dependency core.symlinks and line-ending pins, and trusted_executable: every helper program APM launches or probes resolves on PATH outside the project, never the working directory)",
       "selectors": ["src/apm_cli/utils/git_env.py"],
       "guards": [
+        "transport-platform-external-executable-owner",
         "transport-platform-git-child-environment",
         "transport-platform-git-clone-hooks-disabled",
         "transport-platform-git-clone-templates-disabled",

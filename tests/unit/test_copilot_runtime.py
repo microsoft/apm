@@ -22,13 +22,13 @@ class TestCopilotRuntime:
             runtime = CopilotRuntime()
             assert runtime.get_runtime_name() == "copilot"
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_is_available_true(self, mock_which):
         """Test is_available when copilot binary exists."""
         mock_which.return_value = "/usr/local/bin/copilot"
         assert CopilotRuntime.is_available() is True
 
-    @patch("shutil.which")
+    @patch("apm_cli.utils.git_env.trusted_executable")
     def test_is_available_false(self, mock_which):
         """Test is_available when copilot binary doesn't exist."""
         mock_which.return_value = None
@@ -83,6 +83,10 @@ class TestCopilotRuntime:
         """Test basic prompt execution."""
         with (
             patch.object(CopilotRuntime, "is_available", return_value=True),
+            patch(
+                "apm_cli.runtime.copilot_runtime.require_runtime_binary",
+                side_effect=lambda name: name,
+            ),
             patch("subprocess.Popen") as mock_popen,
         ):
             # Mock process

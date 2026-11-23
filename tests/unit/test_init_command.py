@@ -936,20 +936,19 @@ class TestToggleInputParser:
 
 
 def _agentrc_on_path(path):
-    """Answer ``shutil.which`` for ``agentrc`` only, delegating every other tool.
+    """Answer the helper owner for ``agentrc`` only, delegating every other tool.
 
-    ``apm_cli.commands.init.shutil`` is the global module, so a blanket
-    ``which`` patch also feeds git resolution, whose process-wide cache would
-    then poison every later test on the worker.
+    A blanket patch would also feed git resolution, whose process-wide cache
+    would then poison every later test on the worker.
     """
-    import shutil as _shutil
+    from apm_cli.utils import git_env
 
-    real_which = _shutil.which
+    real_lookup = git_env.trusted_executable
 
-    def _which(cmd, *args, **kwargs):
-        return path if cmd == "agentrc" else real_which(cmd, *args, **kwargs)
+    def _lookup(name):
+        return path if name == "agentrc" else real_lookup(name)
 
-    return patch("shutil.which", side_effect=_which)
+    return patch("apm_cli.utils.git_env.trusted_executable", side_effect=_lookup)
 
 
 def test_agentrc_probe_never_poisons_the_git_executable_cache(tmp_path, monkeypatch):
