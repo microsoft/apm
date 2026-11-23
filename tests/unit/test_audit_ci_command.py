@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+import apm_cli.install.audit_replay  # noqa: F401 -- bind run_replay before tests patch drift
 from apm_cli.agent_plugins import AgentPluginDeploymentBoundaryError
 from apm_cli.commands.audit import audit
 from apm_cli.models.apm_package import clear_apm_yml_cache
@@ -213,7 +214,7 @@ class TestCIOutputFormats:
         )
         with (
             patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),
-            patch("apm_cli.install.audit_replay.run_replay", side_effect=error),
+            patch("apm_cli.install.drift.run_replay", side_effect=error),
         ):
             result = runner.invoke(
                 audit,
@@ -241,7 +242,7 @@ class TestCIOutputFormats:
         error = PolicyViolationError("no enforceable org policy (fetch_failure_default=block)")
         with (
             patch("apm_cli.commands.audit.Path.cwd", return_value=tmp_path),
-            patch("apm_cli.install.audit_replay.run_replay", side_effect=error),
+            patch("apm_cli.install.drift.run_replay", side_effect=error),
         ):
             result = runner.invoke(audit, ["--ci", "--no-policy", "-f", "json"])
 
