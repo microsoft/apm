@@ -733,7 +733,7 @@ def retained_lock_keys(
                 parent_index=parent_index,
                 resolved_cache=resolved_cache,
             )
-        except LocalResolutionError as exc:
+        except (LocalResolutionError, OSError, RuntimeError) as exc:
             # Only this entry's own match is unknown; the walk stays usable.
             candidates.discard(key)
             retained.add(key)
