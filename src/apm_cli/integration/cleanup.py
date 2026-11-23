@@ -96,6 +96,7 @@ class DeploymentEvidence:
         receipts: Mapping[str, str],
         render: Callable[[str | None], Path | None] | None,
         owners: Mapping[str, tuple[str, ...]] | None = None,
+        default_owners: Mapping[str, tuple[str, ...]] | None = None,
         user_scope: bool = False,
         kept: Iterable[str],
         recorded_hashes: Mapping[str, frozenset[str]] | None = None,
@@ -104,6 +105,7 @@ class DeploymentEvidence:
         owned_receipts: Callable[[str], Mapping[str, str]] | None = None,
     ) -> None:
         self._deploy_root = deploy_root
+        self._roots = tuple(dict.fromkeys((deploy_root, deploy_root.resolve())))
         self._locked = locked
         self._legacy_claude_rules: dict[Path, dict[str, str]] = {}
         self._owned_receipts = owned_receipts
@@ -113,22 +115,25 @@ class DeploymentEvidence:
         self.retain(kept)
         self._receipts = dict(receipts)
         self._render = render
+        # The no-flag render lookup stays the first claimed owner up the tree;
+        # only consent eligibility pools every owner (#4295).
+        self._default_owners = dict((owners if default_owners is None else default_owners) or {})
         # One spelling per path, as claims are looked up; spellings of one
         # path pool their owners so none is dropped (#4295).
         self._owners: dict[str, tuple[str, ...]] = {}
         for path, keys in (owners or {}).items():
-            key = _claim_key(path)
+            key = self._key(path)
             self._owners[key] = tuple(dict.fromkeys((*self._owners.get(key, ()), *keys)))
         self._renders: dict[str | None, Path | None] = {}
         self._rendered_now: dict[str, str] = {}
         self._recorded_hashes: dict[str, frozenset[str]] = {}
         for path, values in (recorded_hashes or {}).items():
-            key = _claim_key(path)
+            key = self._key(path)
             self._recorded_hashes[key] = self._recorded_hashes.get(key, frozenset()) | values
         self._receipts_readable = receipts_readable
         self._lockfile_consent = False
         self._consented: dict[str, None] = {}
-        self._spellings: dict[str, list[str]] | None = None
+        self._spellings: SpellingAliasIndex | None = None
         self._consent_refused: dict[str, None] = {}
         self._reported: set[str] = set()
 
@@ -190,6 +195,7 @@ class DeploymentEvidence:
         for key, dependency in locked.dependencies.items():
             for path in dependency.deployed_files:
                 owners.setdefault(path.rstrip("/"), []).append(key)
+        default_owners = {path: tuple(keys) for path, keys in owners.items()}
         # Canonical deployment rows name owners the legacy lists may omit.
         for record in DeploymentLedgerCodec.from_lockfile(locked).records.values():
             for key in record.owners:
@@ -204,6 +210,7 @@ class DeploymentEvidence:
             receipts=receipts,
             render=render,
             owners={path: tuple(keys) for path, keys in owners.items()},
+            default_owners=default_owners,
             user_scope=user_scope,
             kept=kept,
             recorded_hashes=_recorded_owner_hashes(locked),
@@ -301,7 +308,7 @@ class DeploymentEvidence:
                 continue
             unproven.append(claim)
         for claim in unproven:
-            self._rendered_roots(claim)
+            self._rendered_roots(claim, pooled=True)
 
     def refusals(self, claims: Iterable[str]) -> list[tuple[str, str]]:
         """Return ``(claim, verdict)`` for each claimed file deletion would keep.
@@ -364,27 +371,31 @@ class DeploymentEvidence:
             self._renders[owner] = self._render(owner) if self._render is not None else None
         return self._renders[owner]
 
+    def _key(self, path: str) -> str:
+        """The consent lookup key for *path*: one spelling, root-relative (#4295).
+
+        A user-scope lock may spell a file relative to the deploy root or as
+        an absolute path under it; both name one file and share one key.
+        """
+        key = _claim_key(path)
+        if "://" in key or not Path(key).is_absolute():
+            return key
+        for root in self._roots:
+            try:
+                return _claim_key(Path(key).relative_to(root).as_posix())
+            except ValueError:
+                continue
+        return key
+
     def _equivalent_keys(self, key: str) -> tuple[str, ...]:
         """*key* and every recorded key naming the same file on this filesystem (#4295).
 
         Case- or normalization-insensitive filesystems make ``A.md`` and
         ``a.md`` one file; case-sensitive ones never alias.
         """
-        from apm_cli.utils.paths import _same_entry, _spelling_key
-
         if self._spellings is None:
-            self._spellings = {}
-            for known in {*self._recorded_hashes, *self._owners}:
-                if "://" not in known:
-                    self._spellings.setdefault(_spelling_key(known), []).append(known)
-        if "://" in key:
-            return (key,)
-        aliases = (
-            known
-            for known in self._spellings.get(_spelling_key(key), ())
-            if known != key and _same_entry(self._deploy_root / key, self._deploy_root / known)
-        )
-        return (key, *aliases)
+            self._spellings = SpellingAliasIndex({*self._recorded_hashes, *self._owners})
+        return (key, *self._spellings.aliases(key, self._deploy_root))
 
     def _owners_of(self, claim: str) -> tuple[str, ...]:
         """Return the locked owners of *claim* and of every claimed enclosing directory.
@@ -393,21 +404,35 @@ class DeploymentEvidence:
         that can show the file is checked before consent falls back (#4295).
         """
         owners: dict[str, None] = {}
-        path = _claim_key(claim)
+        path = self._key(claim)
         while path:
             for key in self._equivalent_keys(path):
                 owners.update(dict.fromkeys(self._owners.get(key, ())))
             path = path.rpartition("/")[0]
         return tuple(owners)
 
-    def _rendered_roots(self, claim: str) -> list[Path]:
-        """Return the render trees that can show *claim*: the whole lock, else its owners."""
+    def _default_owners_of(self, claim: str) -> tuple[str, ...]:
+        """Return the locked owners of *claim* or of its claimed skill directory."""
+        path = claim.rstrip("/")
+        while path:
+            if path in self._default_owners:
+                return self._default_owners[path]
+            path = path.rpartition("/")[0]
+        return ()
+
+    def _rendered_roots(self, claim: str, *, pooled: bool = False) -> list[Path]:
+        """Return the render trees that can show *claim*: the whole lock, else its owners.
+
+        The deletion verdict reads the first claimed owner up the tree;
+        *pooled* (consent eligibility) reads every owner of every spelling.
+        """
         if self._render is None:
             return []
         whole = self._render_root(None)
         if whole is not None:
             return [whole]
-        roots = (self._render_root(owner) for owner in self._owners_of(claim))
+        owners = self._owners_of(claim) if pooled else self._default_owners_of(claim)
+        roots = (self._render_root(owner) for owner in owners)
         return [root for root in roots if root is not None]
 
     def _receipt_match(self, physical: Path) -> bool | None:
@@ -489,7 +514,7 @@ class DeploymentEvidence:
 
         recorded = {
             _hash_envelope(value)
-            for key in self._equivalent_keys(_claim_key(claim))
+            for key in self._equivalent_keys(self._key(claim))
             for value in self._recorded_hashes.get(key, frozenset())
         }
         if not self._receipts_readable or len(recorded) != 1:
@@ -497,7 +522,9 @@ class DeploymentEvidence:
         try:
             if physical.is_symlink() or not physical.is_file():
                 return False
-            if self._receipt_match(physical) is not None or self._rendered_roots(claim):
+            if self._receipt_match(physical) is not None or self._rendered_roots(
+                claim, pooled=True
+            ):
                 return False
             return compute_file_hash(physical) in recorded
         except OSError:
