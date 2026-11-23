@@ -1455,17 +1455,16 @@ class TestCursorIntegration:
         assert not (temp_project / ".cursor" / "hooks").exists()
 
     def test_sync_removes_empty_hooks_key_cursor(self, temp_project):
-        """Test that empty hooks key is removed from hooks.json after cleanup."""
+        """A hooks.json left with only Cursor's version skeleton is deleted (#4852)."""
         hooks_path = temp_project / ".cursor" / "hooks.json"
         hooks_path.write_text(
-            json.dumps({"hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
+            json.dumps({"version": 1, "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]}})
         )
 
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(hooks_path.read_text())
-        assert "hooks" not in updated
+        assert not hooks_path.exists()
 
     def test_cursor_version_emitted_on_fresh_install(self, temp_project):
         """Fresh .cursor/hooks.json must contain top-level "version": 1."""
@@ -1690,7 +1689,7 @@ class TestSyncIntegration:
         assert stats["errors"] == 0
 
     def test_sync_removes_empty_hooks_key(self, temp_project):
-        """Test that empty hooks key is removed from settings.json after cleanup."""
+        """Empty hooks key goes; a settings.json left empty is deleted (#4852)."""
         claude_dir = temp_project / ".claude"
         claude_dir.mkdir()
         settings_path = claude_dir / "settings.json"
@@ -1700,8 +1699,22 @@ class TestSyncIntegration:
         integrator = HookIntegrator()
         integrator.sync_integration(None, temp_project)
 
-        updated = json.loads(settings_path.read_text())
-        assert "hooks" not in updated  # Completely removed when empty
+        assert not settings_path.exists()
+
+    def test_sync_keeps_settings_with_user_keys(self, temp_project):
+        """A settings.json that also holds the user's keys stays, without APM's hooks."""
+        claude_dir = temp_project / ".claude"
+        claude_dir.mkdir()
+        settings_path = claude_dir / "settings.json"
+        settings = {
+            "permissions": {"allow": ["Bash(ls)"]},
+            "hooks": {"Stop": [{"_apm_source": "test", "hooks": []}]},
+        }
+        settings_path.write_text(json.dumps(settings))
+
+        HookIntegrator().sync_integration(None, temp_project)
+
+        assert json.loads(settings_path.read_text()) == {"permissions": {"allow": ["Bash(ls)"]}}
 
 
 # ─── Script path rewriting tests ─────────────────────────────────────────────

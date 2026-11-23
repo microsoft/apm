@@ -743,7 +743,7 @@ def test_unchanged_lsp_dependencies_do_not_rewrite_lockfile(tmp_path: Path) -> N
 def test_explicit_empty_mcp_target_servers_survives_round_trip(tmp_path: Path) -> None:
     """An explicit empty ownership map must not become legacy-absent."""
     lock_path = tmp_path / "apm.lock.yaml"
-    lockfile = LockFile()
+    lockfile = LockFile(mcp_servers=["managed"])
     lockfile._mcp_target_servers_present = True
 
     lockfile.write(lock_path)
@@ -754,6 +754,20 @@ def test_explicit_empty_mcp_target_servers_survives_round_trip(tmp_path: Path) -
     assert restored is not None
     assert restored._mcp_target_servers_present is True
     assert restored.mcp_target_servers == {}
+
+
+def test_empty_mcp_target_servers_is_omitted_without_mcp_servers(tmp_path: Path) -> None:
+    """With no MCP server left there is nothing to own: the lock omits the field (#4852)."""
+    lock_path = tmp_path / "apm.lock.yaml"
+    lockfile = LockFile()
+    lockfile._mcp_target_servers_present = True
+
+    lockfile.write(lock_path)
+
+    assert "mcp_target_servers" not in load_yaml(lock_path)
+    restored = LockFile.read(lock_path)
+    assert restored is not None
+    assert restored.is_semantically_equivalent(lockfile)
 
 
 def test_canonical_update_persists_explicit_empty_ownership(tmp_path: Path) -> None:

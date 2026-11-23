@@ -1560,7 +1560,7 @@ class LockFile:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
             if self.mcp_omissions:
                 data["mcp_omissions"] = dict(sorted(self.mcp_omissions.items()))
-            if self.mcp_target_servers or self._mcp_target_servers_present:
+            if self.mcp_target_servers or (self._mcp_target_servers_present and self.mcp_servers):
                 data["mcp_target_servers"] = {
                     target: sorted(servers)
                     for target, servers in sorted(self.mcp_target_servers.items())
@@ -1990,8 +1990,8 @@ class LockFile:
             return False
         if (
             self.mcp_target_servers != other.mcp_target_servers
-            or (bool(self.mcp_target_servers) or self._mcp_target_servers_present)
-            != (bool(other.mcp_target_servers) or other._mcp_target_servers_present)
+            or (self._mcp_target_servers_present and bool(self.mcp_servers))
+            != (other._mcp_target_servers_present and bool(other.mcp_servers))
             or dict(self.deployment_ledger.records) != dict(other.deployment_ledger.records)
         ):
             return False

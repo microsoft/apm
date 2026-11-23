@@ -15,19 +15,23 @@ match. Two changes have no fresh equivalent (a user's edit, a symlinked
 destination): there the edited path keeps the user's bytes or the outside tree
 is untouched, and everything else still equals the fresh deploy.
 
+Retiring APM's last entry from a config file deletes it only when nothing else
+is in it (#4852); a config file that also holds the user's own entries or keys
+stays, with only APM's entries removed.
+
 The change table and the state oracle live in tests/lifecycle/scenarios/_deploy_diff.py,
 shared with the engine parity suite (one lane C oracle).
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
 from tests.lifecycle import driver
-from tests.lifecycle.known import KnownFailure
 from tests.lifecycle.scenarios._deploy_diff import (
     CHANGES,
     HOME_CACHES,
@@ -76,28 +80,8 @@ _PRE_PLACE = {
     "symlinked-destination": _same_symlink,
 }
 
-# Retiring the last APM entry leaves the APM-created config file as an empty
-# skeleton (and an empty mcp_target_servers lock field); a fresh deploy has neither.
-_EMPTY_CONFIG_LEFT = KnownFailure(
-    "#4852",
-    "retiring the last APM entry leaves an empty APM-created config file",
-    r"(\.mcp\.json|\.claude/settings\.json): incremental=.*fresh='<absent>'",
-)
-_KNOWN = {
-    "approval-revoked": _EMPTY_CONFIG_LEFT,
-    "policy-denies-executables": _EMPTY_CONFIG_LEFT,
-    "target-removed": _EMPTY_CONFIG_LEFT,
-}
 
-
-def _cases() -> list:
-    return [
-        pytest.param(name, marks=_KNOWN[name].mark()) if name in _KNOWN else name
-        for name in sorted(CHANGES)
-    ]
-
-
-@pytest.mark.parametrize("change", _cases())
+@pytest.mark.parametrize("change", sorted(CHANGES))
 def test_install_after_a_change_equals_a_fresh_deploy(
     lifecycle_template: World, tmp_path: Path, change: str
 ) -> None:
@@ -189,3 +173,58 @@ def _assert_user_state_preserved(change: str, incremental, fresh, evidence: str)
         assert incremental[1].returncode == fresh[1].returncode, (
             "the twins disagree on a symlinked destination" + evidence
         )
+
+
+# (change, config file, the user's own content placed there before the first install,
+# the APM entry the change retires). The user content keeps the file alive (#4852).
+_USER_CONFIGS = {
+    "mcp-user-server": (
+        "approval-revoked",
+        ".mcp.json",
+        {"mcpServers": {"my-server": {"command": "my-server", "args": []}}},
+        ("mcpServers", "p-exec-mcp"),
+    ),
+    "mcp-user-key": (
+        "policy-denies-executables",
+        ".mcp.json",
+        {"mcpServers": {}, "x-user-note": "mine"},
+        ("mcpServers", "p-exec-mcp"),
+    ),
+    "claude-settings-user-key": (
+        "target-removed",
+        ".claude/settings.json",
+        {"permissions": {"allow": ["Bash(ls)"]}},
+        ("hooks", None),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_USER_CONFIGS))
+def test_retiring_apm_entries_keeps_a_config_file_with_user_content(
+    lifecycle_template: World, tmp_path: Path, case: str
+) -> None:
+    change, relative, user_content, (container, entry) = _USER_CONFIGS[case]
+    spec = CHANGES[change]
+    world = clone(lifecycle_template, tmp_path / "world")
+    world.services.reset()
+    config = world.project / relative
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(json.dumps(user_content, indent=2) + "\n", encoding="utf-8")
+
+    converge(world, spec.start)
+    deployed = json.loads(config.read_text(encoding="utf-8"))
+    assert deployed.get(container), f"{relative}: APM's entry was never deployed: {deployed}"
+    spec.apply(world)
+    result = _install(world)
+    output = f"{result.stdout}{result.stderr}"
+    assert result.returncode == 0, output
+
+    assert config.is_file(), f"{relative} with the user's content was deleted\n{output}"
+    after = json.loads(config.read_text(encoding="utf-8"))
+    if entry is None:
+        assert container not in after, f"APM's {container} stayed in {relative}: {after}"
+    else:
+        assert entry not in after.get(container, {}), f"{entry} stayed in {relative}: {after}"
+    for key, value in user_content.items():
+        if key != container or value:
+            assert after.get(key) == value, f"{relative} lost the user's {key!r}: {after}"
