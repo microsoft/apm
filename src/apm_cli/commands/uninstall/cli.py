@@ -64,8 +64,9 @@ from .engine import (
 )
 from .selection_shrink import (
     _shrink_surviving_selections,
-    shrink_path_split,
     shrink_retired_paths,
+    uninstall_evidence_refusals,
+    uninstall_unvalidated_paths,
 )
 
 
@@ -506,25 +507,14 @@ def _refuse_unvalidated_paths(
     Each path this uninstall removes goes through the deploy-path gate the
     cleanup uses; rows another profile keeps on disk are not removed.
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
     from ...core.scope import InstallScope
-    from ...integration.base_integrator import BaseIntegrator
 
-    if lockfile is None or not dependency_keys:
-        return
-    paths = DeploymentLedgerCodec.cleanup_snapshot(lockfile, dependency_keys).paths
-    rejected = sorted(
-        path
-        for path in paths
-        # URI rows (cowork://, copilot-app-db://) have their own owners.
-        if "://" not in path
-        and path not in kept_paths
-        and not BaseIntegrator.validate_deploy_path(
-            path,
-            deploy_root,
-            user_scope=scope is InstallScope.USER,
-            allow_final_symlink=True,
-        )
+    rejected = uninstall_unvalidated_paths(
+        lockfile,
+        dependency_keys,
+        deploy_root,
+        user_scope=scope is InstallScope.USER,
+        kept_paths=kept_paths,
     )
     if not rejected:
         return
@@ -627,15 +617,19 @@ def _enter_manifest_host_scope(stack: contextlib.ExitStack, data: dict, logger) 
 
 
 def _prepare_dependency_sections(data: dict) -> tuple[bool, list, list, list]:
-    """Ensure dependency sections exist and return their mutable list views."""
-    if "dependencies" not in data:
+    """Ensure dependency sections exist and return their mutable list views.
+
+    A null section (``devDependencies:`` with no value) counts as absent,
+    as the audit's manifest projection reads it (#4570).
+    """
+    if data.get("dependencies") is None:
         data["dependencies"] = {}
-    if "apm" not in data["dependencies"]:
+    if data["dependencies"].get("apm") is None:
         data["dependencies"]["apm"] = []
-    had_dev_section = "devDependencies" in data
+    had_dev_section = data.get("devDependencies") is not None
     if not had_dev_section:
         data["devDependencies"] = {}
-    if "apm" not in data["devDependencies"]:
+    if data["devDependencies"].get("apm") is None:
         data["devDependencies"]["apm"] = []
     prod_deps = data["dependencies"]["apm"] or []
     dev_deps = data["devDependencies"]["apm"] or []
@@ -843,39 +837,13 @@ def _refuse_uninstall_without_evidence(
     With *trust_lockfile* (consent already given to *evidence*) nothing is
     refused: the files still lacking evidence are returned and kept (#4295).
     """
-    from ...core.deployment_ledger import DeploymentLedgerCodec
-    from ...integration.base_integrator import BaseIntegrator
     from ...integration.cleanup import refusal_reason, uninstall_evidence_remedies
 
     if not lockfile or (not cleanup_keys and not shrunk):
         return frozenset()
-    # Hash-tracked skill members count too: directory cleanup deletes them.
-    selected, selected_hashes = _collect_deployed_cleanup_state(lockfile, cleanup_keys)
-    survivors, survivor_hashes = _collect_deployed_cleanup_state(
-        lockfile,
-        DeploymentLedgerCodec.valid_owner_keys(lockfile, excluded_dependency_keys=cleanup_keys),
+    refused = uninstall_evidence_refusals(
+        evidence, lockfile, cleanup_keys, shrunk=shrunk, preserved=preserved_values
     )
-    candidates = (selected | builtins.set(selected_hashes)) - survivors
-    candidates -= builtins.set(survivor_hashes)
-    if shrunk:
-        others, other_hashes = _collect_deployed_cleanup_state(
-            lockfile,
-            DeploymentLedgerCodec.valid_owner_keys(
-                lockfile, excluded_dependency_keys=cleanup_keys | builtins.set(shrunk)
-            ),
-        )
-        retired, retained = shrink_path_split(lockfile, shrunk)
-        retired = BaseIntegrator.normalize_managed_files(retired) or builtins.set()
-        # A path another shrinking survivor keeps deploying is not deleted.
-        retained = BaseIntegrator.normalize_managed_files(retained) or builtins.set()
-        candidates |= retired - others - builtins.set(other_hashes) - retained
-    # Neither survivor snapshot covers project-local claims; a local bundle keeps them (#4703).
-    candidates -= (
-        BaseIntegrator.normalize_managed_files(builtins.set(lockfile.local_deployed_files))
-        or builtins.set()
-    )
-    candidates -= builtins.set(preserved_values or ())
-    refused = evidence.refusals(sorted(candidates))
     if not refused or trust_lockfile:
         return frozenset(claim for claim, _ in refused)
     _cleanup_staged_local_refreshes(staged_refreshes, modules_dir)
