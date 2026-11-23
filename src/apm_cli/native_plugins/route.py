@@ -8,7 +8,10 @@ before native plugins existed.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+_BOOL_TAG = "tag:yaml.org,2002:bool"
 
 
 def _declared_native(dep: Any, manifest: Any) -> bool | None:
@@ -59,3 +62,56 @@ def frozen_route_change_reasons(lockfile: Any, manifest: Any) -> list[str]:
                 "it loose (native: false)"
             )
     return reasons
+
+
+def _misspelled(text: str, node: Any) -> str | None:
+    """The raw spelling of a YAML 1.1 boolean that is not plain ``true``/``false``."""
+    if getattr(node, "tag", None) != _BOOL_TAG or node.value in ("true", "false"):
+        return None
+    # An explicit ``!!bool`` tag is a boolean whatever its spelling.
+    return None if text[node.start_mark.index :].startswith("!") else node.value
+
+
+def _mapping_items(node: Any) -> list:
+    import yaml
+
+    return node.value if isinstance(node, yaml.MappingNode) else []
+
+
+def route_boolean_spelling_errors(text: str) -> list[str]:
+    """Name each ``native_plugins`` / dependency ``native`` value spelled ``no``, ``Off``...
+
+    YAML 1.1 loads ``yes``/``no``/``on``/``off`` (any case) and ``True``/``FALSE``
+    as booleans; for these fields only plain ``true``/``false`` or an explicit
+    ``!!bool`` count (req-mf-030).
+    """
+    import yaml
+
+    from apm_cli.utils.yaml_io import compose_yaml
+
+    errors: list[str] = []
+    for key, value in _mapping_items(compose_yaml(text)):
+        if key.value == "native_plugins" and (raw := _misspelled(text, value)):
+            errors.append(f"'native_plugins' must be true or false, got {raw!r}")
+        if key.value not in ("dependencies", "devDependencies"):
+            continue
+        for block, entries in _mapping_items(value):
+            if block.value != "apm" or not isinstance(entries, yaml.SequenceNode):
+                continue
+            for entry in entries.value:
+                errors += [
+                    f"'native' field must be true or false, got {raw!r}"
+                    for field, flag in _mapping_items(entry)
+                    if field.value == "native" and (raw := _misspelled(text, flag))
+                ]
+    return errors
+
+
+def refuse_route_boolean_spellings(manifest_path: Path) -> None:
+    """Raise ``ValueError`` naming the field when a route value is not plain true/false."""
+    try:
+        text = Path(manifest_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    if errors := route_boolean_spelling_errors(text):
+        raise ValueError(f"Invalid {Path(manifest_path).name}: " + "; ".join(errors))

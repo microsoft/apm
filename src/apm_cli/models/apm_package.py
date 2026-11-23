@@ -966,7 +966,9 @@ class APMPackage:
 
         if not isinstance(data, dict):
             raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
+        from apm_cli.native_plugins.route import refuse_route_boolean_spellings
 
+        refuse_route_boolean_spellings(apm_yml_path)
         result = cls.from_mapping(
             data,
             package_path=apm_yml_path.parent,

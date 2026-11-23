@@ -190,6 +190,28 @@ def _stale_exec_decisions(
     return stale
 
 
+def refuse_frozen_retirements(
+    request: InstallRequest, committed: LockFile, lockfile_dir: Path
+) -> None:
+    """Refuse ``--frozen`` before any write when install would retire what the lock records."""
+    refuse_native_route_change(request, committed)
+    refuse_withdrawn_bundle_lsp(request, committed, lockfile_dir)
+
+
+def refuse_native_route_change(request: InstallRequest, committed: LockFile) -> None:
+    """Refuse ``--frozen`` when apm.yml moves a locked native plugin loose (#4995)."""
+    from apm_cli.install.errors import FrozenInstallError
+    from apm_cli.native_plugins.route import frozen_route_change_reasons
+
+    if reasons := frozen_route_change_reasons(committed, request.apm_package):
+        error = FrozenInstallError(
+            "--frozen: apm.yml changes a dependency's native plugin route.",
+            reasons=reasons,
+            tip=f"Tip: {remediation.FROZEN_NATIVE_ROUTE_CHANGED.sentence()}",
+        )
+        raise error
+
+
 def refuse_withdrawn_bundle_lsp(
     request: InstallRequest, committed: LockFile, lockfile_dir: Path
 ) -> None:

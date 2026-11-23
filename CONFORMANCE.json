@@ -1338,6 +1338,7 @@
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_frozen_refuses_a_route_change_until_a_normal_install",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_an_explicit_bool_tag_is_accepted_on_load",
         "tests/spec_conformance/test_native_route_reqs.py::test_an_opted_out_plugin_is_never_planned_natively",
         "tests/spec_conformance/test_native_route_reqs.py::test_conflicting_root_declarations_resolve_false_in_any_order[f-first]",
         "tests/spec_conformance/test_native_route_reqs.py::test_conflicting_root_declarations_resolve_false_in_any_order[f-last]",
@@ -1348,14 +1349,17 @@
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-off]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]"
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dev-native-True]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native-Off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]"
       ],
       "conformance_class": "consumer",
       "id": "req-mf-030",
       "keyword": "MUST",
       "section": "4.2.6",
       "status": "active",
-      "test_count": 19,
+      "test_count": 23,
       "tests": [
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_an_invalid_value_is_refused_at_parse_time[native]",
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_an_invalid_value_is_refused_at_parse_time[native_plugins]",
@@ -1363,6 +1367,7 @@
         "tests/integration/test_native_plugin_opt_out_lifecycle.py::test_frozen_refuses_a_route_change_until_a_normal_install",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[auto]",
         "tests/spec_conformance/test_native_route_reqs.py::test_a_transitive_dependency_follows_the_root_default[off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_an_explicit_bool_tag_is_accepted_on_load",
         "tests/spec_conformance/test_native_route_reqs.py::test_an_opted_out_plugin_is_never_planned_natively",
         "tests/spec_conformance/test_native_route_reqs.py::test_conflicting_root_declarations_resolve_false_in_any_order[f-first]",
         "tests/spec_conformance/test_native_route_reqs.py::test_conflicting_root_declarations_resolve_false_in_any_order[f-last]",
@@ -1375,7 +1380,10 @@
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-off]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[override-on]",
         "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-false]",
-        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]"
+        "tests/spec_conformance/test_native_route_reqs.py::test_the_root_declaration_and_default_decide_the_route[own-true]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[dev-native-True]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native-Off]",
+        "tests/spec_conformance/test_native_route_reqs.py::test_yaml_1_1_boolean_spellings_are_rejected_on_load[native_plugins-no]"
       ]
     },
     {

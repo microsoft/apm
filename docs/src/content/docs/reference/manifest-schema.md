@@ -519,7 +519,7 @@ dependencies:
       native: true              # this one stays a native plugin
 ```
 
-Transitive plugin dependencies follow this default; a `native` key on a dependency binds only that entry. At user scope APM reads it from `~/.apm/apm.yml`. Any value other than `true` or `false` is rejected. Normative contract: [req-mf-030](../../specs/openapm-v01/#req-mf-030).
+Transitive plugin dependencies follow this default; a `native` key on a dependency binds only that entry. At user scope APM reads it from `~/.apm/apm.yml`. Write exactly `true` or `false`: any other value, including `True`, `no` or `off`, is rejected. When the same dependency is declared twice with different `native` values, `false` wins. An Agent Plugin has no loose route, so `native: false` skips it with a warning. Normative contract: [req-mf-030](../../specs/openapm-v01/#req-mf-030).
 
 ---
 

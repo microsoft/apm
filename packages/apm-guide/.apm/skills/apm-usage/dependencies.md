@@ -303,7 +303,7 @@ dependencies mentioned in prose are collected. Use a directory package with
 dependency without its own key) installs a Claude-format plugin loose on every
 harness instead of as a native plugin under `.agents/plugins/`: every primitive
 deploys, including skills a later version adds. `native: true` overrides the
-project default. Only booleans are accepted. Transitive plugins follow the
+project default. Only plain `true` or `false` is accepted (`no`, `off`, `True` are rejected); duplicate declarations resolve `false` first. Transitive plugins follow the
 project default. Switching routes moves an installed plugin on the next
 `apm install`; `--frozen` refuses that move.
 

@@ -368,6 +368,18 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     return _bounded_load(text)
 
 
+def compose_yaml(text: str) -> Any:
+    """Return *text*'s composed node graph (no object construction), or ``None``.
+
+    ``None`` when the text is not parseable YAML. Lets a caller read a value's
+    raw spelling and explicit tag, which a loader resolves away.
+    """
+    try:
+        return yaml.compose(text, Loader=_BoundedSafeLoader)
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return None
+
+
 def top_level_scalar_values(text: str, key: str) -> list[str | None] | None:
     """Return every top-level *key* occurrence's scalar text, in document order.
 

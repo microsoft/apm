@@ -102,7 +102,7 @@ def test_spec_states_the_folded_route_clauses() -> None:
     assert_spec_contains(
         "except where [req-tg-011](#req-tg-011) makes the dependency opaque",
         "under [req-tg-013](#req-tg-013) MUST NOT register such a dependency there either",
-        "Under a frozen install ([req-lk-006](#req-lk-006)), when the lockfile records a",
+        "or a restore that does not rewrite the lockfile, when the lockfile records a",
         "per [req-na-004](#req-na-004) from the previous and the next lockfile",
     )
 
@@ -142,5 +142,37 @@ def test_conflicting_root_declarations_resolve_false_in_any_order(
 ) -> None:
     entries = "".join(f"    - path: ./pkg\n      native: {value}\n" for value in order)
     manifest = _manifest(tmp_path, "dependencies:\n  apm:\n" + entries)
+
+    assert effective_native_route(DependencyReference.parse("./pkg"), manifest) is False
+
+
+@pytest.mark.req("req-mf-030")
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("native_plugins: no\n", "'native_plugins' must be true or false, got 'no'"),
+        (
+            "dependencies:\n  apm:\n    - path: ./pkg\n      native: Off\n",
+            "'native' field must be true or false, got 'Off'",
+        ),
+        (
+            "devDependencies:\n  apm:\n    - path: ./pkg\n      native: True\n",
+            "'native' field must be true or false, got 'True'",
+        ),
+    ],
+    ids=["native_plugins-no", "native-Off", "dev-native-True"],
+)
+def test_yaml_1_1_boolean_spellings_are_rejected_on_load(
+    tmp_path: Path, body: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _manifest(tmp_path, body)
+
+
+@pytest.mark.req("req-mf-030")
+def test_an_explicit_bool_tag_is_accepted_on_load(tmp_path: Path) -> None:
+    manifest = _manifest(
+        tmp_path, "dependencies:\n  apm:\n    - path: ./pkg\n      native: !!bool false\n"
+    )
 
     assert effective_native_route(DependencyReference.parse("./pkg"), manifest) is False

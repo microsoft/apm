@@ -197,7 +197,8 @@ version adds deploys on the next `apm install` without a manifest change.
 The next install moves an installed plugin: it removes the plugin from
 `.agents/plugins/` and the `extraKnownMarketplaces`/`enabledPlugins` entries
 APM wrote, keeps entries you wrote, and deploys loose. `apm install --frozen`
-refuses that move until a normal install records it.
+refuses that move until a normal install records it. Write exactly `true` or
+`false`; `no`, `off` or `True` are rejected.
 [Manifest reference](../../reference/manifest-schema/#316-native_plugins).
 
 ## Known gaps

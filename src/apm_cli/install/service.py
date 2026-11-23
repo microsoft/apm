@@ -639,19 +639,12 @@ class InstallService:
                 "--frozen: apm.lock.yaml is out of sync with apm.yml.",
                 reasons=reasons,
             )
-        # A deny of a local bundle refuses before its LSP server is retired (RA-041).
-        from apm_cli.install.frozen_retirement import refuse_withdrawn_bundle_lsp
+        # Retirements frozen cannot record refuse first: a withdrawn bundle LSP
+        # server (RA-041) or a native plugin moved loose (#4995).
+        from apm_cli.install.frozen_retirement import refuse_frozen_retirements
 
-        refuse_withdrawn_bundle_lsp(request, lockfile, lockfile_path.parent)
+        refuse_frozen_retirements(request, lockfile, lockfile_path.parent)
         InstallService._refuse_frozen_dropped_targets(request, lockfile, lockfile_path)
-        from apm_cli.native_plugins.route import frozen_route_change_reasons
-
-        if route_reasons := frozen_route_change_reasons(lockfile, request.apm_package):
-            raise FrozenInstallError(
-                "--frozen: apm.yml changes a dependency's native plugin route.",
-                reasons=route_reasons,
-                tip=f"Tip: {remediation.FROZEN_NATIVE_ROUTE_CHANGED.sentence()}",
-            )
         InstallService._verify_frozen_local_content(request, lockfile, manifest_deps)
 
     @staticmethod
