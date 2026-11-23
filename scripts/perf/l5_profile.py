@@ -44,6 +44,16 @@ with journeys.open_world(fixture, work / "worlds" / "tree-10") as world:
         buf = io.StringIO()
         pstats.Stats(str(prof), stream=buf).sort_stats(key).print_stats(70)
         print(f"== PROFILE by {key}\n" + buf.getvalue()[-16000:])
+    buf = io.StringIO()
+    st = pstats.Stats(str(prof), stream=buf)
+    st.sort_stats("cumulative").print_callers(
+        r"(lockfile\.py:\d+\(read\)|parse_lockfile_text|from_apm_yml|mcp_config_view\.py:\d+\(select\)|_check_config_consistency|load_yaml_str|deepcopy\)|_check_[a-z_]+\)|exec_trust_context_for_project|resolve_audit_scope)"
+    )
+    print("== CALLERS (hit)\n" + buf.getvalue()[-40000:])
+    buf = io.StringIO()
+    st = pstats.Stats(str(prof), stream=buf)
+    st.sort_stats("cumulative").print_stats(r"apm_cli/.*", 120)
+    print("== HIT apm_cli cumulative\n" + buf.getvalue()[-30000:])
     fprof = work / "full.prof"
     subprocess.run([python, "-m", "cProfile", "-o", str(fprof), str(apm), "install"], cwd=root, env=dict(env, APM_INSTALL_FAST_PATH="0"), capture_output=True)
     buf = io.StringIO()
