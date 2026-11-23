@@ -182,7 +182,13 @@ def serve_offline(
     services = WorldServices(repositories).start(directory / "services")
     try:
         services.proxy.rtt_ms = rtt_ms
-        world = OfflineWorld(services.child_environment(env), services, isolated)
+        child = services.child_environment(env)
+        if any(fixture.recipe.user_gitconfig for fixture in fixtures):
+            # A developer has no REQUESTS_CA_BUNDLE: APM installs OS trust
+            # (truststore) and adds the corporate (here: mirror) CA on top.
+            child.pop("REQUESTS_CA_BUNDLE", None)
+            child["APM_EXTRA_CA_BUNDLE"] = child["GIT_SSL_CAINFO"]
+        world = OfflineWorld(child, services, isolated)
         yield world
     finally:
         services.close()

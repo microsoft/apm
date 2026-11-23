@@ -59,7 +59,8 @@ class TreeRecipe:
     pin: str = "tag"
     # Serve the world with a developer-style global gitconfig (credential
     # helpers, credential.interactive, scoped useHttpPath, an SSH rewrite for
-    # another host): the config real users carry, which a fast path must handle.
+    # another host) and no REQUESTS_CA_BUNDLE, so APM installs its OS/additive
+    # TLS trust as for a real user: the setup a fast path must handle.
     user_gitconfig: bool = False
 
 
