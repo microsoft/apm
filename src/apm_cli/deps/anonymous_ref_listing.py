@@ -164,11 +164,18 @@ def _effective_config(env: Mapping[str, str]) -> tuple[dict[str, str], dict[str,
 
 
 def _bypasses_proxy(no_proxy: str) -> bool:
-    """libcurl's NO_PROXY match for github.com."""
-    for entry in no_proxy.split(","):
-        entry = entry.strip().lower()
-        if entry == "*":
-            return True
+    """libcurl's NO_PROXY match for github.com.
+
+    ``*`` bypasses only as the whole value. A ``*`` inside a list, whitespace
+    within an entry, or a trailing dot falls back rather than guessing how
+    a given libcurl reads it.
+    """
+    if no_proxy.strip() == "*":
+        return True
+    for raw in no_proxy.split(","):
+        entry = raw.strip().lower()
+        if "*" in entry or any(c.isspace() for c in entry) or entry.endswith("."):
+            raise _Fallback("no_proxy entry libcurl versions read differently")
         entry = entry.lstrip(".")
         if entry and (entry == _GITHUB_HOST or _GITHUB_HOST.endswith("." + entry)):
             return True

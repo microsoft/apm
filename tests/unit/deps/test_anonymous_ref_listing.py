@@ -188,6 +188,9 @@ def test_proxy_follows_libcurl_precedence_and_no_proxy():
         arl._proxy({"HTTPS_PROXY": "socks5://q:2"})
     with pytest.raises(arl._Fallback):
         arl._proxy({"HTTPS_PROXY": "https://q:2"})
+    for listed in ("localhost,*", "localhost github.com", "github.com."):
+        with pytest.raises(arl._Fallback):
+            arl._proxy({"HTTPS_PROXY": "http://q:2", "NO_PROXY": listed})
     with pytest.raises(arl._Fallback):
         arl._proxy({"https_proxy": "http://p:1", "HTTPS_PROXY": "http://q:2"})
     with pytest.raises(arl._Fallback):
