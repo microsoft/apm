@@ -14,7 +14,7 @@
     {
       "id": "audit-primitive-discovery",
       "decision": "Registry-derived deployed primitive discovery and applicable prompt coverage",
-      "owner": "security/primitive_discovery.py (primitive_surfaces), security/file_scanner.py (scan_project_result) through target skills_deploy_path and native hook contracts",
+      "owner": "security/primitive_discovery.py (primitive_surfaces), security/file_scanner.py (scan_project_result) through target skills_deploy_path and native hook contracts; hook-bundle module metadata is recognized only through integration/hook_bundle.py (is_deployed_hook_module_metadata) with module types from integration/hook_native_formats.py (NODE_MODULE_TYPES)",
       "selectors": [
         "src/apm_cli/security/primitive_discovery.py",
         "src/apm_cli/security/file_scanner.py"
@@ -84,10 +84,10 @@
     },
     {
       "id": "mcp-package-launcher",
-      "decision": "MCP package launcher selection, argv shape (container and non-container), and config-key derivation; MCP JSON config parse-for-update (never rewrite an unparsable file) and atomic write",
-      "owner": "adapters/client/base.py (MCPClientAdapter, including determine_config_key)",
+      "decision": "MCP package launcher selection, argv shape (container and non-container), and config-key derivation; MCP JSON config parse-for-update (never rewrite an unparsable file) and atomic write; the one MCP config symlink policy every config writer checks (a linked project config, a user config crossing a link below $HOME, or a relocated user root that is a link is skipped and never replaced by a regular file)",
+      "owner": "adapters/client/base.py (MCPClientAdapter, including determine_config_key, _is_linked_config and _is_linked_project_config)",
       "selectors": ["src/apm_cli/adapters/client/base.py"],
-      "guards": ["hooks-integrations-mcp-config-key-derivation", "hooks-integrations-mcp-package-launcher", "hooks-integrations-mcp-json-config-write"]
+      "guards": ["hooks-integrations-mcp-config-key-derivation", "hooks-integrations-mcp-package-launcher", "hooks-integrations-mcp-json-config-write", "hooks-integrations-mcp-config-link-policy"]
     },
     {
       "id": "mcp-passthrough-denylist",

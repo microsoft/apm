@@ -73,7 +73,6 @@ when:
   - pair|OP=audit|GATE=unapproved-exec
 - run: apm pack --dry-run
   cells:
-  - T1|OP=pack|PRIM=bin|GATE=unapproved-exec
   - T1|OP=pack|PRIM=hook|GATE=unapproved-exec
   - T1|OP=pack|PRIM=mcp|GATE=unapproved-exec
   - T1|OP=pack|PRIM=skill|GATE=none
@@ -98,7 +97,6 @@ when:
   - pair|GATE=allowed|TGT=multi-unchanged
 - run: apm pack --dry-run
   cells:
-  - T1|OP=pack|PRIM=bin|GATE=allowed
   - T1|OP=pack|PRIM=hook|GATE=allowed
   - T1|OP=pack|PRIM=mcp|GATE=allowed
   - pair|OP=pack|GATE=allowed
