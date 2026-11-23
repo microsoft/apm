@@ -100,3 +100,27 @@ def test_a_user_added_server_survives_the_stale_row_cleanup(
     assert uninstall.exit_code == 0, uninstall.output
     servers = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"]
     assert servers == {"user-srv": {"type": "stdio", "command": "mine", "args": []}}
+
+
+def test_an_unreadable_survivor_manifest_keeps_the_shared_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _package(tmp_path / "a", "pkga")
+    _package(tmp_path / "b", "pkgb")
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "apm.yml").write_text("name: pkgc\nversion: 1.0.0\n", encoding="ascii")
+    project = tmp_path / "app"
+    project.mkdir()
+    _manifest(project, "../a", "../b", "../c")
+    monkeypatch.chdir(project)
+    install = CliRunner().invoke(cli, ["install", "--target", "copilot"])
+    assert install.exit_code == 0, install.output
+    for manifest in [tmp_path / "c" / "apm.yml", *(project / "apm_modules").rglob("apm.yml")]:
+        if "pkgc" in manifest.read_text(encoding="utf-8"):
+            manifest.write_text("name: [unclosed\n", encoding="ascii")
+    _manifest(project, "../b", "../c")
+    clear_apm_yml_cache()
+
+    uninstall = CliRunner().invoke(cli, ["uninstall", "../b"])
+
+    assert "shared-srv" in _servers(project), uninstall.output

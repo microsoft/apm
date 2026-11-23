@@ -15,7 +15,8 @@ def surviving_package_keys(
     of the uninstall orphan owner as a removal root: unless a surviving
     package still reaches it, it and its unreachable descendants keep no
     shared server alive. A package the gates deny never stays. When the
-    evidence cannot be read, every row the gates allow stays, as before.
+    evidence cannot be read or the walk is incomplete, every row the gates
+    allow stays, as before.
     """
     from apm_cli.core.scope import manifest_file
     from apm_cli.install.orphans import (
@@ -58,6 +59,9 @@ def surviving_package_keys(
             deployment_claims=None,
         )
     except Exception:
+        return unchanged
+    if decision.reachability is None or not decision.reachability.complete:
+        # A survivor whose manifest cannot be read may still need the row.
         return unchanged
     gone = (set(undeclared) - decision.rescued_roots) | set(decision.removed_keys)
     return frozenset(key for key in allowed if key not in gone)
