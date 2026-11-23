@@ -443,7 +443,7 @@ def _script_bases(targets: Any) -> tuple[str, ...]:
     Only the layout a target actually uses is matched, so a slug named
     ``scripts`` never covers another bundle's Copilot scripts.
     """
-    from apm_cli.integration.hook_integrator import hook_scripts_parent
+    from apm_cli.integration.hook_command_paths import hook_scripts_parent
 
     return tuple(
         Path(hook_scripts_parent(target.name, target.root_dir)).as_posix() + "/"

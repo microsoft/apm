@@ -43,6 +43,8 @@ from apm_cli.integration.hook_bundle import (
     iter_deployable_hook_bundle_files,
 )
 from apm_cli.integration.hook_command_paths import (
+    SCRIPTS_SUBDIR_HOOK_TARGETS,
+    hook_scripts_parent,
     iter_plugin_root_paths,
     iter_relative_script_paths,
     normalize_quoted_plugin_root,
@@ -104,16 +106,6 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 _DOT_NAMED_HOOK_ROOTS = frozenset({"cursor", "codex", "windsurf", "kiro"})
-# Copilot (rewritten as "vscode") copies a package's hook scripts to
-# hooks/scripts/<package>/; every other hook target copies them to hooks/<package>/.
-_SCRIPTS_SUBDIR_HOOK_TARGETS = frozenset({"vscode", "copilot"})
-
-
-def hook_scripts_parent(target: str, root_dir: str) -> str:
-    """Return the directory holding each package's copied hook scripts for *target*."""
-    if target in _SCRIPTS_SUBDIR_HOOK_TARGETS:
-        return f"{root_dir}/hooks/scripts/"
-    return f"{root_dir}/hooks/"
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -620,7 +612,7 @@ class HookIntegrator(BaseIntegrator):
         command = normalize_quoted_plugin_root(command)
         edits: list[tuple[int, int, str]] = []
 
-        if target in _SCRIPTS_SUBDIR_HOOK_TARGETS:
+        if target in SCRIPTS_SUBDIR_HOOK_TARGETS:
             default_root = ".github"
         else:
             default_root = f".{target}" if target in _DOT_NAMED_HOOK_ROOTS else ".claude"
