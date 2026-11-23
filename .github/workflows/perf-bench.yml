@@ -28,7 +28,7 @@ on:
         description: Comma list of journeys.
         default: install-noop,install-locked-warm,install-warm,install-frozen-warm
       rtt:
-        description: Injected RTT in ms.
+        description: Injected RTT in ms (comma list of up to 4, e.g. 0,30,100).
         default: '30'
       pairs:
         description: Interleaved base/new pairs per runner.
@@ -97,7 +97,7 @@ jobs:
         [[ "$NEW" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::bad NEW '$NEW'"; exit 1; }
         [[ "$FIXTURES" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad FIXTURES"; exit 1; }
         [[ "$JOURNEYS" =~ ^[a-z0-9,-]+$ ]] || { echo "::error::bad JOURNEYS"; exit 1; }
-        [[ "$RTT" =~ ^[0-9]{1,4}$ ]] || { echo "::error::bad RTT"; exit 1; }
+        [[ "$RTT" =~ ^[0-9]{1,4}(,[0-9]{1,4}){0,3}$ ]] || { echo "::error::bad RTT (comma list of up to 4)"; exit 1; }
         [[ "$PAIRS" =~ ^[1-9]$ ]] || { echo "::error::PAIRS must be 1-9"; exit 1; }
         [[ "$PROFILE" =~ ^[01]$ ]] || { echo "::error::PROFILE must be 0 or 1"; exit 1; }
         case "$OS" in
