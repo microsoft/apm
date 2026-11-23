@@ -876,9 +876,18 @@ class TestReplayFrameTranslation:
         assert not scratch_root.exists()
         assert context.read_text(encoding="utf-8") == "Notes.\n"
 
-    def test_replay_projects_a_scratch_dependency_context_link_to_its_live_package(self, tmp_path):
-        """A dependency read from scratch replays the context link install wrote."""
+    @pytest.mark.parametrize("symlinked_root", [False, True], ids=["plain", "symlinked"])
+    def test_replay_projects_a_scratch_dependency_context_link_to_its_live_package(
+        self, tmp_path, symlinked_root
+    ):
+        """A dependency read from scratch or live replays the context link install wrote."""
         live_root = tmp_path / "project"
+        if symlinked_root:
+            (tmp_path / "physical").mkdir()
+            try:
+                live_root.symlink_to(tmp_path / "physical", target_is_directory=True)
+            except OSError:
+                pytest.skip("symlinks unavailable")
         scratch_root = tmp_path / "scratch"
         relative_package = Path("apm_modules") / "_local" / "lp"
         content = "Read [the notes](../context/notes.context.md) first."
@@ -899,8 +908,11 @@ class TestReplayFrameTranslation:
             return resolver.resolve_links_for_installation(content, source_file, target_file)
 
         installed = render(live_root, live_root, None)
-        assert "(../../apm_modules/_local/lp/.apm/context/notes.context.md)" in installed
-        assert render(scratch_root, scratch_root, (scratch_root, live_root)) == installed
+        if not symlinked_root:
+            assert "(../../apm_modules/_local/lp/.apm/context/notes.context.md)" in installed
+        frame = (scratch_root, live_root)
+        assert render(scratch_root, scratch_root, frame) == installed
+        assert render(live_root, scratch_root, frame) == installed
 
     def test_dependency_replay_keeps_link_when_live_frame_has_no_relpath(
         self, tmp_path, monkeypatch
