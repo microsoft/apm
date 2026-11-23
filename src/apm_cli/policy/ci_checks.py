@@ -839,6 +839,35 @@ def _check_native_mcp_ownership(
     )
 
 
+def _native_mcp_plugin_roots(
+    project_root: Path,
+    manifest: APMPackage,
+    lock: LockFile,
+    *,
+    prepared_replay: PreparedCiAuditReplay | None,
+    no_policy: bool,
+) -> Mapping[str, str]:
+    """Each declared MCP server's package root, where its native entry points.
+
+    A scratch replay reads declarations from its own tree; a root inside it is
+    rebound to the live ``apm_modules/`` copy install rendered the entry at.
+    """
+    from ..constants import APM_MODULES_DIR
+
+    modules_root = prepared_replay.modules_root if prepared_replay is not None else None
+    view, _ = audit_mcp_view(manifest, lock, modules_root=modules_root, no_policy=no_policy)
+    roots = dict(view.plugin_roots)
+    if modules_root is None:
+        return roots
+    scratch = modules_root.resolve()
+    live = (project_root / APM_MODULES_DIR).resolve()
+    for name, root in roots.items():
+        bound = Path(root)
+        if bound.is_relative_to(scratch):
+            roots[name] = str(live.joinpath(*bound.parts[len(scratch.parts) :]))
+    return roots
+
+
 def _edited_native_mcp_entries(
     project_root: Path,
     lock: LockFile,
@@ -1878,15 +1907,12 @@ def run_baseline_checks(
                 # The scratch replay failed: config-consistency reports it.
                 plugin_roots=None
                 if prepared_replay_error is not None
-                else lambda: (
-                    audit_mcp_view(
-                        manifest,
-                        lock,
-                        modules_root=(
-                            prepared_replay.modules_root if prepared_replay is not None else None
-                        ),
-                        no_policy=no_policy,
-                    )[0].plugin_roots
+                else lambda: _native_mcp_plugin_roots(
+                    project_root,
+                    manifest,
+                    lock,
+                    prepared_replay=prepared_replay,
+                    no_policy=no_policy,
                 ),
             )
         )

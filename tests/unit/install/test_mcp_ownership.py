@@ -833,3 +833,75 @@ def test_a_frozen_rewrite_after_a_project_move_is_not_a_hand_edit(
 
     assert [name for name, _, _ in edited] == (["srv"] if reported else [])
     assert path.read_bytes() == before
+
+
+def test_a_replay_backed_audit_binds_the_live_package_root(tmp_path) -> None:
+    """A cold-cache audit reads declarations from its scratch replay, but compares the
+    native entry --frozen wrote at the live (moved) package root, so it is not an edit."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.install.audit_replay import PreparedCiAuditReplay
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.policy.ci_checks import _edited_native_mcp_entries, _native_mcp_plugin_roots
+
+    stored = {
+        "name": "root-srv",
+        "registry": False,
+        "transport": "stdio",
+        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
+    }
+    project = tmp_path / "project"
+    (project / ".codex").mkdir(parents=True)
+    (project / "apm.yml").write_text(
+        "name: proj\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: [acme/srv]\n",
+        encoding="utf-8",
+    )
+    scratch = tmp_path / "scratch" / "apm_modules"
+    (scratch / "acme" / "srv").mkdir(parents=True)
+    (scratch / "acme" / "srv" / "apm.yml").write_text(
+        json.dumps({"name": "srv", "version": "1.0.0", "dependencies": {"mcp": [stored]}}),
+        encoding="utf-8",
+    )
+    lock = LockFile.from_yaml(
+        "lockfile_version: '1'\ndependencies:\n  - repo_url: acme/srv\n    host: github.com\n"
+        "    resolved_commit: 0123456789abcdef0123456789abcdef01234567\n    depth: 1\n"
+    )
+    lock.mcp_servers = ["root-srv"]
+    lock.mcp_configs = {"root-srv": stored}
+    live = (project / "apm_modules" / "acme" / "srv").resolve()
+    client = CodexClientAdapter(project_root=project)
+    recorded = {"command": f"{tmp_path.as_posix()}/old/apm_modules/acme/srv/bin/srv", "args": []}
+    hashes = {"codex": {"root-srv": mcp_native_hash(client.managed_server_config(recorded))}}
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lock, {"codex": ["root-srv"]}, native_hashes=hashes
+    )
+    replay = PreparedCiAuditReplay(
+        scratch_root=scratch.parent,
+        modules_root=scratch,
+        lockfile_path=project / "apm.lock.yaml",
+        tracked_files=None,
+        targets=(),
+    )
+    manifest = APMPackage.from_apm_yml(project / "apm.yml")
+
+    config = Path(client.get_config_path())
+
+    def audit(command: str) -> tuple:
+        client.update_config({"root-srv": {"command": command, "args": []}})
+        before = config.read_bytes()
+        found = _edited_native_mcp_entries(
+            project,
+            lock,
+            [SimpleNamespace(name="codex")],
+            user_scope=False,
+            plugin_roots=lambda: _native_mcp_plugin_roots(
+                project, manifest, lock, prepared_replay=replay, no_policy=True
+            ),
+        )
+        assert config.read_bytes() == before, "audit never writes the native config"
+        return found
+
+    assert audit(f"{live.as_posix()}/bin/srv") == ()
+    (check,) = audit("/usr/bin/personal")
+    assert check.name == "native-mcp-drift" and not check.passed
+    assert "'root-srv'" in check.details[0]
