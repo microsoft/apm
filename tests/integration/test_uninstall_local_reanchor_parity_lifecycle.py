@@ -283,3 +283,44 @@ def test_a_retained_descendant_whose_excluded_files_changed_refuses(
     output = " ".join((refused.stdout + refused.stderr).split())
     assert "differs from its apm_modules copy" in output, output
     assert (tree_digest(world.project), _modules(world.project)) == before
+
+
+def test_a_reanchor_whose_deployed_links_point_into_the_moving_copy_refuses(
+    tmp_path: Path, apm_binary_path: Path
+) -> None:
+    """e's skill links docs/ref.md, rendered into apm_modules/_local/e: moving it dangles."""
+    from tests.integration._install_audit_replay_kit import tree_digest
+
+    world = ReplayWorld.create(tmp_path, apm_binary_path)
+    vendor = world.project / "vendor"
+    _skill_package(vendor / "f", "f")
+    _skill_package(vendor / "e", "e", ("../f",))
+    _skill_package(vendor / "d", "d", ("../e",))
+    (vendor / "e/docs").mkdir()
+    (vendor / "e/docs/ref.md").write_text("# Ref\n", encoding="utf-8")
+    skill = vendor / "e/.apm/skills/e-skill/SKILL.md"
+    skill.write_text(
+        skill.read_text(encoding="utf-8") + "See [ref](../../../docs/ref.md).\n",
+        encoding="utf-8",
+    )
+    dump_yaml(
+        {
+            "name": "proj",
+            "version": "1.0.0",
+            "targets": ["claude"],
+            "dependencies": {"apm": ["./vendor/e"]},
+            "devDependencies": {"apm": ["./vendor/d"]},
+        },
+        world.project / "apm.yml",
+    )
+    (world.project / ".claude").mkdir()
+    world.apm("install")
+    deployed = (world.project / ".claude/skills/e-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "apm_modules/_local/e/docs/ref.md" in deployed, deployed
+    before = (tree_digest(world.project), _modules(world.project))
+
+    refused = world.apm("uninstall", "./vendor/e", expect=1)
+
+    output = " ".join((refused.stdout + refused.stderr).split())
+    assert "links into its apm_modules copy" in output, output
+    assert (tree_digest(world.project), _modules(world.project)) == before

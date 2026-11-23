@@ -721,6 +721,38 @@ def _unrelocatable(lockfile, plan, project_root: Path) -> str | None:
     for record in DeploymentLedgerCodec.from_lockfile(lockfile).records.values():
         if len(record.owners) > 1 and any(owner in plan.renames for owner in record.owners):
             return f"it shares {DeploymentLedgerCodec.legacy_value(record.locator)} with another package"
+    if linked := _links_into_moving_copy(lockfile, plan, Path(project_root)):
+        return f"{linked} links into its apm_modules copy"
+    return None
+
+
+def _links_into_moving_copy(lockfile, plan, project_root: Path) -> str | None:
+    """A deployed file of a re-anchored package that names a copy the re-anchor moves (#4999).
+
+    Rendered in-package asset links point into the apm_modules copy, so moving
+    it would leave them dangling until the next install rewrites them.
+    """
+    from ...utils.paths import portable_relpath
+
+    needles = set()
+    for current, _target in getattr(plan, "moves", ()):
+        relpath = portable_relpath(current, project_root)
+        needles.update(f"{relpath}{sep}".encode() for sep in ("/", "\\"))
+        needles.add(f"{relpath.replace('/', chr(92))}\\".encode())
+    if not needles:
+        return None
+    for key in plan.renames:
+        row = lockfile.get_dependency(key)
+        for deployed in sorted(getattr(row, "deployed_files", None) or ()):
+            path = project_root / deployed
+            files = sorted(path.rglob("*")) if path.is_dir() else (path,)
+            for file in files:
+                try:
+                    if not file.is_file() or not any(n in file.read_bytes() for n in needles):
+                        continue
+                except OSError:
+                    pass  # an unreadable file cannot be cleared, so it refuses too
+                return portable_relpath(file, project_root)
     return None
 
 
